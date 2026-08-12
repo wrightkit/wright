@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "overpy",
+  "version": "9.7.9",
+  "gitHead": "66a4bf640175a853174f7aa72afb853abee9c1d9",
+  "repository": "https://github.com/Zezombye/overpy",
+  "registryTarball": "https://registry.npmjs.org/overpy/-/overpy-9.7.9.tgz",
+  "integrity": "sha512-X18KeAw7qsbNwFESVEiIDidvbVpmcYhHBCGVqO5DPvaOXMs30ZxrODVfHaWHpiskNQ2GXdJ16jblPcFho07wZw==",
+  "license": "GPL-3.0-only",
+  "language": "en-US"
+}

@@ -1,0 +1,26 @@
+{
+  "compile": {
+    "diagnostics": [],
+    "exitCode": 0,
+    "status": "success",
+    "stdout": "",
+    "workshop": "rule (\"setup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n",
+    "workshopSha256": "50321e56ca932c14a004d71d1b2cca21159a9107ec2e21fb89fa12ca54646f34"
+  },
+  "fixture": "synthetic/basic-rule",
+  "input": {
+    "sha256": "3f39a0286864f70ce5b5369cbaf663037b1def9984c4e4a0da3da2bb5553dcc4",
+    "source": "source.opy"
+  },
+  "oracle": {
+    "gitHead": "66a4bf640175a853174f7aa72afb853abee9c1d9",
+    "integrity": "sha512-X18KeAw7qsbNwFESVEiIDidvbVpmcYhHBCGVqO5DPvaOXMs30ZxrODVfHaWHpiskNQ2GXdJ16jblPcFho07wZw==",
+    "language": "en-US",
+    "license": "GPL-3.0-only",
+    "name": "overpy",
+    "registryTarball": "https://registry.npmjs.org/overpy/-/overpy-9.7.9.tgz",
+    "repository": "https://github.com/Zezombye/overpy",
+    "version": "9.7.9"
+  },
+  "schemaVersion": 1
+}

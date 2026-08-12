@@ -99,9 +99,11 @@ reported rather than counted as successes.
 
 ## Fixture and corpus rules
 
-Compatibility fixtures are executable evidence. Each fixture should make its
-scope visible and should avoid relying on unrecorded local state. A future
-fixture manifest should include at least:
+Compatibility fixtures are executable evidence. The repository layout,
+metadata schema, pinned oracle, and runner commands are defined in
+[`compatibility/README.md`](compatibility/README.md). Each fixture should make
+its scope visible and should avoid relying on unrecorded local state. Its
+manifest includes at least:
 
 ```text
 fixture id
@@ -113,6 +115,10 @@ compatibility level
 normalizer/scenario version, when applicable
 expected result
 ```
+
+Run `python3 compatibility/run_oracle.py` to verify normalized snapshots. Use
+`--update` only for an intentional oracle update that is reviewed with its
+fixture and provenance changes.
 
 Fixtures containing third-party code, generated output, or user data require a
 redistribution and provenance review before being committed. When a fixture
