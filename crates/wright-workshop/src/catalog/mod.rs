@@ -292,6 +292,11 @@ impl Catalog {
         self.enum_by_domain.get(domain).map(|i| &self.enums[*i])
     }
 
+    /// Every enum domain, in catalog order.
+    pub fn enum_domains(&self) -> impl Iterator<Item = &EnumDomain> {
+        self.enums.iter()
+    }
+
     /// Resolve a localized enum member spelling to `(domain, canonical member)`.
     pub fn resolve_enum_member(
         &self,

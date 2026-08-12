@@ -16,6 +16,7 @@
 //! APIs never need locale-specific strings to identify a builtin.
 
 pub mod catalog;
+pub mod detect;
 mod error;
 pub mod lexer;
 pub mod parser;
