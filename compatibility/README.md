@@ -35,9 +35,22 @@ compatibility/fixtures/<category>/<name>/
 
 * `id`, unique across the corpus;
 * `category`, used for aggregate reports;
+* optional `features`, naming the syntax or semantic areas covered;
 * `source`, relative to the fixture directory;
 * `expectedStatus`, either `success` or `failure`; and
 * `provenance` with `kind`, `origin`, `license`, and `redistributable`.
+
+Imported fixtures should also record an immutable `sourceCommit`, a direct
+`sourceUrl`, a `licenseUrl`, and whether the source was modified. The corpus
+currently contains original synthetic cases and the GPL-3.0-only
+`real-world/overpy-cake` example imported unchanged from the pinned OverPy
+repository. Fixtures from a project without an explicit redistribution license
+remain out of the corpus until that status is resolved.
+
+The synthetic cases cover declarations/rules, events/conditions,
+expressions/arrays/strings/vectors, control flow, preprocessing/includes, and a
+failure diagnostic. The real-world example exercises a larger macro, array,
+loop, vector, and Workshop-effect program.
 
 `oracle.json` captures the pinned oracle identity, source hash, compile status,
 exit code, normalized diagnostics, normalized Workshop text, and normalized

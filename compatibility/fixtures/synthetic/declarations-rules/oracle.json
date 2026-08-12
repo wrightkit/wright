@@ -1,0 +1,26 @@
+{
+  "compile": {
+    "diagnostics": [],
+    "exitCode": 0,
+    "status": "success",
+    "stdout": "",
+    "workshop": "variables {\n    global:\n        0: score\n    player:\n        0: hasStarted\n}\n\nsubroutines {\n    0: showStatus\n}\n\nrule (\"Subroutine showStatus\") {\n    event {\n        Subroutine;\n        showStatus;\n    }\n    actions {\n        Create HUD Text(All Players(All Teams), Custom String(\"Score: {0}\", Global.score), Custom String(\"\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003{0}\", Custom String(\"\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\u2003\")), Null, Left, -9999, Color(Orange), Null, Null, Visible To and String, Default Visibility);\n    }\n}\n\nrule (\"player starts\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    conditions {\n        Has Spawned(Event Player) == True;\n    }\n    actions {\n        Set Player Variable(Event Player, hasStarted, True);\n        Call Subroutine(showStatus);\n    }\n}\n",
+    "workshopSha256": "072e2c6bc649bb2fab7c68a7dfab20266f63d484327cb702e3645bd0809c03bd"
+  },
+  "fixture": "synthetic/declarations-rules",
+  "input": {
+    "sha256": "055b7b34908b35f1549c88bdcc8d3a8aea0edf767c722a1f0ad2b04d8d1dea48",
+    "source": "source.opy"
+  },
+  "oracle": {
+    "gitHead": "66a4bf640175a853174f7aa72afb853abee9c1d9",
+    "integrity": "sha512-X18KeAw7qsbNwFESVEiIDidvbVpmcYhHBCGVqO5DPvaOXMs30ZxrODVfHaWHpiskNQ2GXdJ16jblPcFho07wZw==",
+    "language": "en-US",
+    "license": "GPL-3.0-only",
+    "name": "overpy",
+    "registryTarball": "https://registry.npmjs.org/overpy/-/overpy-9.7.9.tgz",
+    "repository": "https://github.com/Zezombye/overpy",
+    "version": "9.7.9"
+  },
+  "schemaVersion": 1
+}

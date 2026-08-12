@@ -1,0 +1,31 @@
+{
+  "compile": {
+    "diagnostics": [
+      {
+        "severity": "error",
+        "text": "Error: Expected a ':' at the end of the line\n    | line 1, col 1, at source.opy"
+      }
+    ],
+    "exitCode": 1,
+    "status": "failure",
+    "stdout": "",
+    "workshop": "",
+    "workshopSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "fixture": "synthetic/diagnostics",
+  "input": {
+    "sha256": "3b482dfd7f5b28e89fecb86ffb629f864ea27f280a3638523763e8401a9d3158",
+    "source": "source.opy"
+  },
+  "oracle": {
+    "gitHead": "66a4bf640175a853174f7aa72afb853abee9c1d9",
+    "integrity": "sha512-X18KeAw7qsbNwFESVEiIDidvbVpmcYhHBCGVqO5DPvaOXMs30ZxrODVfHaWHpiskNQ2GXdJ16jblPcFho07wZw==",
+    "language": "en-US",
+    "license": "GPL-3.0-only",
+    "name": "overpy",
+    "registryTarball": "https://registry.npmjs.org/overpy/-/overpy-9.7.9.tgz",
+    "repository": "https://github.com/Zezombye/overpy",
+    "version": "9.7.9"
+  },
+  "schemaVersion": 1
+}

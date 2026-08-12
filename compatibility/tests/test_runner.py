@@ -32,25 +32,22 @@ class RunnerTests(unittest.TestCase):
             ],
         )
 
-    def test_repository_fixture_metadata_is_valid(self):
+    def test_repository_fixture_metadata_and_snapshots_are_valid(self):
         fixtures = run_oracle.discover_fixtures(
             COMPATIBILITY_DIR / "fixtures"
         )
-        self.assertEqual(
-            [fixture["id"] for _, fixture in fixtures],
-            ["synthetic/basic-rule"],
-        )
+        self.assertEqual(len(fixtures), 7)
+        for fixture_path, fixture in fixtures:
+            snapshot = fixture_path.parent / "oracle.json"
+            self.assertTrue(snapshot.is_file(), fixture["id"])
+            snapshot_data = json.loads(snapshot.read_text(encoding="utf-8"))
+            self.assertEqual(snapshot_data["fixture"], fixture["id"])
 
-    def test_snapshot_is_valid_json_when_present(self):
-        snapshot = (
-            COMPATIBILITY_DIR
-            / "fixtures"
-            / "synthetic"
-            / "basic-rule"
-            / "oracle.json"
+        real_world = next(
+            fixture for _, fixture in fixtures if fixture["id"] == "real-world/overpy-cake"
         )
-        if snapshot.exists():
-            self.assertIsInstance(json.loads(snapshot.read_text(encoding="utf-8")), dict)
+        self.assertTrue(real_world["provenance"]["redistributable"])
+        self.assertEqual(real_world["provenance"]["modifications"], "none")
 
 
 if __name__ == "__main__":
