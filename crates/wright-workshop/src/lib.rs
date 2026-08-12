@@ -17,6 +17,7 @@
 
 pub mod catalog;
 pub mod detect;
+pub mod emitter;
 mod error;
 pub mod lexer;
 pub mod parser;

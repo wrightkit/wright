@@ -10,3 +10,6 @@ description = "Wright's native Workshop language model: canonical catalog, lexer
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 wright-ir = { path = "../wright-ir" }
+
+[dev-dependencies]
+regex = "1"
