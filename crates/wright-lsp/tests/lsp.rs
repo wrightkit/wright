@@ -285,7 +285,10 @@ fn lsp_handles_malformed_input_without_crashing() {
         .read_notification("textDocument/publishDiagnostics")
         .expect("diagnostics published");
     assert!(
-        !published["params"]["diagnostics"].as_array().unwrap().is_empty(),
+        !published["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
         "malformed input reports diagnostics, not a crash"
     );
     client.request(2, "shutdown", serde_json::json!(null));

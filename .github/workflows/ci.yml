@@ -38,6 +38,42 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features
 
+  v1-gates:
+    name: v1 release gates (N-level, scenarios, benchmarks)
+    runs-on: ubuntu-latest
+    needs: rust-quality
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          rustflags: ""
+
+      - name: Build wright (debug)
+        run: cargo build -p wright-cli -p wright-bench
+
+      - name: Run N-level gate
+        run: python3 scripts/v1-gates.py
+
+      - name: Run E-level scenarios
+        run: python3 scripts/run-scenarios.py
+
+      - name: Run benchmarks
+        run: cargo run -p wright-bench
+
+      - name: Upload gate reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: v1-gate-reports
+          path: |
+            target/v1-gates-report.json
+            target/scenarios-report.json
+            target/wright-bench-report.json
+
   compatibility-oracle:
     name: OverPy compatibility oracle
     runs-on: ubuntu-latest
