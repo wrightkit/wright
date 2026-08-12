@@ -16,5 +16,5 @@
 //! APIs never need locale-specific strings to identify a builtin.
 
 pub mod catalog;
-
 mod error;
+pub mod validate;
