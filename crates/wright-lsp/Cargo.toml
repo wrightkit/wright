@@ -1,0 +1,16 @@
+[package]
+name = "wright-lsp"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The Wright LSP server: a thin protocol adapter over the editor-neutral language services."
+
+[[bin]]
+name = "wright-lsp"
+path = "src/main.rs"
+
+[dependencies]
+lsp-types = "0.97"
+serde_json = "1"
+wright-language = { path = "../wright-language" }

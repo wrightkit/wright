@@ -1,0 +1,17 @@
+[package]
+name = "wright-language"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wright's editor-neutral language services: documents, diagnostics, hover, definition, references, completion, rename, semantic tokens."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wright-analyzer = { path = "../wright-analyzer" }
+wright-core = { path = "../wright-core" }
+wright-driver = { path = "../wright-driver" }
+wright-ir = { path = "../wright-ir" }
+wright-opy = { path = "../wright-opy" }
+wright-workshop = { path = "../wright-workshop" }
