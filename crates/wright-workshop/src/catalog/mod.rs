@@ -323,6 +323,22 @@ impl Catalog {
             .spelling(locale)
     }
 
+    /// Every `(domain, canonical member)` match for a bare (domain-less)
+    /// localized member spelling. Returns all matches so callers can report
+    /// ambiguity; a well-formed catalog has at most one meaningful match for
+    /// a given spelling.
+    pub fn bare_member_matches(&self, locale: &Locale, spelling: &str) -> Vec<(String, String)> {
+        let mut matches = Vec::new();
+        for domain in &self.enums {
+            for member in &domain.members {
+                if member.spelling(locale) == Some(spelling) {
+                    matches.push((domain.domain.clone(), member.member.clone()));
+                }
+            }
+        }
+        matches
+    }
+
     fn insert_entry(&mut self, kind: Kind, item: EntryFile) -> Result<()> {
         let index = self.entries.len();
         let mut aliases = HashMap::new();

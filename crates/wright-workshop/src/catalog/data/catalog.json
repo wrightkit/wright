@@ -140,6 +140,12 @@
             "en-US": "Visible To and String"
           },
           "id": "VISIBILITY_AND_STRING"
+        },
+        {
+          "aliases": {
+            "en-US": "Visible To"
+          },
+          "id": "VISIBILITY"
         }
       ]
     },
@@ -225,6 +231,54 @@
         "en-US": ">="
       },
       "id": ">="
+    },
+    {
+      "aliases": {
+        "en-US": "Add"
+      },
+      "id": "add"
+    },
+    {
+      "aliases": {
+        "en-US": "Subtract"
+      },
+      "id": "subtract"
+    },
+    {
+      "aliases": {
+        "en-US": "Multiply"
+      },
+      "id": "multiply"
+    },
+    {
+      "aliases": {
+        "en-US": "Divide"
+      },
+      "id": "divide"
+    },
+    {
+      "aliases": {
+        "en-US": "Modulo"
+      },
+      "id": "modulo"
+    },
+    {
+      "aliases": {
+        "en-US": "Raise To Power"
+      },
+      "id": "raiseToPower"
+    },
+    {
+      "aliases": {
+        "en-US": "Append To Array"
+      },
+      "id": "appendToArray"
+    },
+    {
+      "aliases": {
+        "en-US": "Remove From Array"
+      },
+      "id": "removeFromArray"
     }
   ],
   "provenance": {
@@ -476,6 +530,34 @@
         "en-US": "Has Spawned"
       },
       "id": "hasSpawned"
+    },
+    {
+      "aliases": {
+        "en-US": "Empty Array"
+      },
+      "id": "emptyArray"
+    },
+    {
+      "aliases": {
+        "en-US": "If-Then-Else"
+      },
+      "id": "ifThenElse"
+    },
+    {
+      "aliases": {
+        "en-US": "Current Array Element"
+      },
+      "id": "currentArrayElement"
+    },
+    {
+      "aliases": {
+        "en-US": "Append To Array"
+      },
+      "id": "appendToArray",
+      "params": [
+        "array",
+        "value"
+      ]
     }
   ]
 }

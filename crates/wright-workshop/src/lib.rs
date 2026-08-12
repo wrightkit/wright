@@ -17,4 +17,8 @@
 
 pub mod catalog;
 mod error;
+pub mod lexer;
+pub mod parser;
 pub mod validate;
+
+pub use error::WorkshopError;
