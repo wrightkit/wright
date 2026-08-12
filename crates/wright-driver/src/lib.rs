@@ -14,9 +14,11 @@
 
 pub mod config;
 pub mod diag;
+pub mod edit;
 pub mod input;
 pub mod opy;
 pub mod result;
+pub mod service;
 pub mod session;
 
 pub use config::{InputSpec, OutputFormat, SessionConfig, SourceKind};
@@ -27,9 +29,13 @@ pub use result::{
     RESULT_CONTRACT,
 };
 pub use session::{CompilerSession, Loaded};
+pub use wright_transform::Profile;
 
 /// The driver crate name reported in result metadata.
 pub const DRIVER_NAME: &str = "wright-driver";
+
+/// The stable embedding-API contract name (M9 #56).
+pub const EMBEDDING_CONTRACT: &str = "wright-embedding/v1";
 
 /// A deterministic SHA-256 identity for an input or artifact.
 pub fn input_identity(text: &str) -> String {

@@ -1,0 +1,15 @@
+[package]
+name = "wright-consumer"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "An external consumer fixture proving Wright's public embedding/tool contracts (M9 #61)."
+
+[[bin]]
+name = "wright-consumer"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+wright-driver = { path = "../wright-driver" }
