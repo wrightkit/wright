@@ -682,29 +682,3 @@ fn unsupported_node(kind: &str, object: &serde_json::Map<String, Value>) -> HirE
         span,
     }
 }
-
-impl Expr {
-    fn kind_name(&self) -> &'static str {
-        match self {
-            Expr::Number { .. } => "number",
-            Expr::String { .. } => "string",
-            Expr::Bool { .. } => "bool",
-            Expr::Null { .. } => "null",
-            Expr::Array { .. } => "array",
-            Expr::Vector { .. } => "vector",
-            Expr::Enum { .. } => "enum",
-            Expr::GlobalVar { .. } => "globalVar",
-            Expr::PlayerVar { .. } => "playerVar",
-            Expr::EventPlayer { .. } => "eventPlayer",
-            Expr::Constant { .. } => "constant",
-            Expr::Call { .. } => "call",
-            Expr::ReceiverCall { .. } => "receiverCall",
-            Expr::MacroCall { .. } => "macroCall",
-            Expr::MacroParam { .. } => "macroParam",
-            Expr::Binary { .. } => "binary",
-            Expr::Unary { .. } => "unary",
-            Expr::Index { .. } => "index",
-            Expr::Format { .. } => "format",
-        }
-    }
-}

@@ -377,4 +377,29 @@ impl Expr {
             | Expr::Format { span, .. } => span.as_ref(),
         }
     }
+
+    /// The protocol `kind` of this expression.
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Expr::Number { .. } => "number",
+            Expr::String { .. } => "string",
+            Expr::Bool { .. } => "bool",
+            Expr::Null { .. } => "null",
+            Expr::Array { .. } => "array",
+            Expr::Vector { .. } => "vector",
+            Expr::Enum { .. } => "enum",
+            Expr::GlobalVar { .. } => "globalVar",
+            Expr::PlayerVar { .. } => "playerVar",
+            Expr::EventPlayer { .. } => "eventPlayer",
+            Expr::Constant { .. } => "constant",
+            Expr::Call { .. } => "call",
+            Expr::ReceiverCall { .. } => "receiverCall",
+            Expr::MacroCall { .. } => "macroCall",
+            Expr::MacroParam { .. } => "macroParam",
+            Expr::Binary { .. } => "binary",
+            Expr::Unary { .. } => "unary",
+            Expr::Index { .. } => "index",
+            Expr::Format { .. } => "format",
+        }
+    }
 }

@@ -9,6 +9,7 @@
 //! then unknown-node-kind rejection, then deserialization, then invariant
 //! validation. Every failure is a structured [`HirError`].
 
+pub mod convert;
 pub mod dump;
 pub mod error;
 pub mod types;
