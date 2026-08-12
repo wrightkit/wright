@@ -102,6 +102,9 @@ pub struct SessionConfig {
     pub output: Option<PathBuf>,
     /// The requested result presentation format.
     pub format: OutputFormat,
+    /// The WIR transformation policy (`off` by default; `compat`/`aggressive`
+    /// opt into evidence-backed passes).
+    pub profile: wright_transform::Profile,
 }
 
 impl Default for SessionConfig {
@@ -113,6 +116,7 @@ impl Default for SessionConfig {
             root: None,
             output: None,
             format: OutputFormat::Text,
+            profile: wright_transform::Profile::Off,
         }
     }
 }

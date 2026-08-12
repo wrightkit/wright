@@ -96,7 +96,23 @@ impl<'a> Emitter<'a> {
             self.line(1, "conditions {")?;
             for condition in &rule.conditions {
                 let mut text = String::new();
-                self.value(*condition, &mut text)?;
+                // Reference normalization: comparison conditions render
+                // infix; other conditions render as `value == True`.
+                if let Some(wir::Value::Call { name, args }) =
+                    self.program.values.get(*condition).map(|node| &node.value)
+                {
+                    if is_comparison_operator(name) && args.len() == 2 {
+                        self.value(args[0], &mut text)?;
+                        write!(text, " {name} ").unwrap();
+                        self.value(args[1], &mut text)?;
+                    } else {
+                        self.value(*condition, &mut text)?;
+                        text.push_str(" == True");
+                    }
+                } else {
+                    self.value(*condition, &mut text)?;
+                    text.push_str(" == True");
+                }
                 self.line(2, &format!("{text};"))?;
             }
             self.line(1, "}")?;
@@ -253,24 +269,44 @@ impl<'a> Emitter<'a> {
                 }
                 self.line(level, "End;")?;
             }
-            wir::Action::Debug { .. } | wir::Action::Print { .. } => {
-                return Err(WorkshopError::Unsupported {
-                    message:
-                        "Debug/Print actions have no Workshop spelling; emit the underlying effect"
-                            .to_string(),
-                    span: None,
-                });
+            wir::Action::Debug { value, .. } => {
+                // `debug(value)` displays the value as HUD text. The
+                // reference formats values with type-aware machinery; Wright
+                // emits a semantically equivalent but presentation-simpler
+                // Create HUD Text (documented intentional difference).
+                self.emit_hud_text(*value, level, true)?;
+            }
+            wir::Action::Print { message, .. } => {
+                self.emit_hud_text(*message, level, false)?;
             }
             wir::Action::Call { name, args, .. } => {
-                let spelling = self
-                    .catalog
-                    .spelling(Kind::Action, &self.locale, name)
-                    .ok_or_else(|| WorkshopError::Unknown {
-                        kind: "action",
-                        spelling: name.clone(),
-                        locale: self.locale.clone(),
-                        span: None,
-                    })?;
+                // Native `.opy` action names map to canonical catalog ids at
+                // emission (presentation concern).
+                let canonical = match name.as_str() {
+                    "createBeam" => Some("createBeamEffect"),
+                    _ => None,
+                };
+                let spelling = if let Some(canonical) = canonical {
+                    self.catalog
+                        .spelling(Kind::Action, &self.locale, canonical)
+                        .ok_or_else(|| WorkshopError::Unknown {
+                            kind: "action",
+                            spelling: canonical.to_string(),
+                            locale: self.locale.clone(),
+                            span: None,
+                        })?
+                        .to_string()
+                } else {
+                    self.catalog
+                        .spelling(Kind::Action, &self.locale, name)
+                        .ok_or_else(|| WorkshopError::Unknown {
+                            kind: "action",
+                            spelling: name.clone(),
+                            locale: self.locale.clone(),
+                            span: None,
+                        })?
+                        .to_string()
+                };
                 if args.is_empty() {
                     self.line(level, &format!("{spelling};"))?;
                 } else {
@@ -280,6 +316,30 @@ impl<'a> Emitter<'a> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Emit a `debug`/`print` action as a `Create HUD Text` effect.
+    ///
+    /// `debug` renders the value into the HUD body; `print` renders the
+    /// message directly (a `format` value already carries the text).
+    fn emit_hud_text(&mut self, value: wir::ValueId, level: usize, is_debug: bool) -> Result<()> {
+        let mut body = String::new();
+        if is_debug {
+            // Display the value in the HUD body: Custom String("{0}", value).
+            body.push_str("Custom String(\"{0}\", ");
+            self.value(value, &mut body)?;
+            body.push(')');
+        } else {
+            self.value(value, &mut body)?;
+        }
+        // Create HUD Text(All Players(All Teams), header, body, icon, ...).
+        self.line(
+            level,
+            &format!(
+                "Create HUD Text(All Players(All Teams), Null, {body}, Null, Null, Left, -9999, Color(White), Null, Null, Visible To and String, Null, Null);"
+            ),
+        )?;
         Ok(())
     }
 
@@ -301,15 +361,22 @@ impl<'a> Emitter<'a> {
             });
         };
         match &node.value {
-            wir::Value::Number(value) => write!(out, "{value}").unwrap(),
+            wir::Value::Number(value) => {
+                out.push_str(&format_number(*value));
+            }
             wir::Value::String(value) => write!(out, "\"{}\"", escape_string(value)).unwrap(),
             wir::Value::Bool(true) => out.push_str("True"),
             wir::Value::Bool(false) => out.push_str("False"),
             wir::Value::Null => out.push_str("Null"),
             wir::Value::Array(elements) => {
-                out.push_str("Array(");
-                self.args(elements, out)?;
-                out.push(')');
+                if elements.is_empty() {
+                    // The canonical empty-array constant (reference emission).
+                    out.push_str("Empty Array");
+                } else {
+                    out.push_str("Array(");
+                    self.args(elements, out)?;
+                    out.push(')');
+                }
             }
             wir::Value::Vector { x, y, z } => {
                 out.push_str("Vector(");
@@ -321,12 +388,20 @@ impl<'a> Emitter<'a> {
                 out.push(')');
             }
             wir::Value::Enum { value_type, value } => {
+                // The `.opy`-layer `EffectReeval` domain is the same Workshop
+                // reevaluation domain as `HudReeval` (member ids align); map
+                // it at emission to avoid catalog domain collisions.
+                let catalog_domain = if value_type == "EffectReeval" {
+                    "HudReeval"
+                } else {
+                    value_type
+                };
                 let spelling = self
                     .catalog
-                    .enum_spelling(value_type, &self.locale, value)
+                    .enum_spelling(catalog_domain, &self.locale, value)
                     .ok_or_else(|| WorkshopError::Unknown {
                         kind: "enum member",
-                        spelling: format!("{value_type}.{value}"),
+                        spelling: format!("{catalog_domain}.{value}"),
                         locale: self.locale.clone(),
                         span: None,
                     })?;
@@ -364,20 +439,63 @@ impl<'a> Emitter<'a> {
                     out.push(')');
                     return Ok(());
                 }
-                let spelling = self
-                    .catalog
-                    .spelling(Kind::Value, &self.locale, name)
-                    .ok_or_else(|| WorkshopError::Unknown {
-                        kind: "value",
-                        spelling: name.clone(),
-                        locale: self.locale.clone(),
-                        span: None,
-                    })?;
+                // Unary minus renders as Multiply(-1, x); the reference folds
+                // literal negation, handled by the compat constant-fold pass.
+                if name == "-" && args.len() == 1 {
+                    out.push_str("Multiply(-1, ");
+                    self.value(args[0], out)?;
+                    out.push(')');
+                    return Ok(());
+                }
+                // `getAllPlayers()` is OverPy's All Players(All Teams).
+                if name == "getAllPlayers" && args.is_empty() {
+                    out.push_str("All Players(All Teams)");
+                    return Ok(());
+                }
+                // Binary arithmetic operators and native `.opy` source names
+                // map to canonical catalog ids at emission (presentation
+                // concern; the compat pass folds constants to match the
+                // reference exactly).
+                let canonical = match name.as_str() {
+                    "+" => Some("add"),
+                    "-" => Some("subtract"),
+                    "*" => Some("multiply"),
+                    "/" => Some("divide"),
+                    "len" => Some("countOf"),
+                    "abs" => Some("absoluteValue"),
+                    "sqrt" => Some("squareRoot"),
+                    "createBeam" => Some("createBeamEffect"),
+                    "random.uniform" => Some("randomReal"),
+                    "random.choice" => Some("randomValueInArray"),
+                    "format" => Some("customString"),
+                    _ => None,
+                };
+                let spelling = if let Some(canonical) = canonical {
+                    self.catalog
+                        .spelling(Kind::Value, &self.locale, canonical)
+                        .ok_or_else(|| WorkshopError::Unknown {
+                            kind: "value",
+                            spelling: canonical.to_string(),
+                            locale: self.locale.clone(),
+                            span: None,
+                        })?
+                        .to_string()
+                } else {
+                    self.catalog
+                        .spelling(Kind::Value, &self.locale, name)
+                        .ok_or_else(|| WorkshopError::Unknown {
+                            kind: "value",
+                            spelling: name.clone(),
+                            locale: self.locale.clone(),
+                            span: None,
+                        })?
+                        .to_string()
+                };
                 if args.is_empty() {
                     // Constants (e.g. Empty Array) emit as bare spellings.
-                    out.push_str(spelling);
+                    out.push_str(&spelling);
                 } else {
-                    out.push_str(spelling);
+                    out.push_str(&spelling);
                     out.push('(');
                     self.args(args, out)?;
                     out.push(')');
@@ -436,10 +554,99 @@ impl<'a> Emitter<'a> {
     }
 }
 
+/// Format a float like the reference frontend: integers print without a
+/// decimal point, and non-integers print the shortest round-trip
+/// representation truncated to 16 significant digits (OverPy behavior;
+/// evidence: the pinned oracle snapshots).
+fn format_number(value: f64) -> String {
+    if !value.is_finite() {
+        return format!("{value}");
+    }
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        return format!("{}", value as i64);
+    }
+    truncate_significant(&format!("{value}"), 16)
+}
+
+/// Keep at most `max_digits` significant digits of a decimal string,
+/// truncating (not rounding) and expanding any exponent form.
+fn truncate_significant(text: &str, max_digits: usize) -> String {
+    let (mantissa, exponent) = match text.find('e').or_else(|| text.find('E')) {
+        Some(index) => {
+            let exponent: i32 = text[index + 1..].parse().unwrap_or(0);
+            (&text[..index], exponent)
+        }
+        None => (text, 0),
+    };
+    let (sign, mantissa) = mantissa
+        .strip_prefix('-')
+        .map_or(("", mantissa), |rest| ("-", rest));
+    let digits: Vec<char> = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
+    let before_dot = mantissa.find('.').unwrap_or(mantissa.len());
+    let point = before_dot as i32 + exponent;
+    let first_nonzero = digits
+        .iter()
+        .position(|c| *c != '0')
+        .unwrap_or(digits.len());
+    let mut digits = digits;
+    if digits.len() - first_nonzero > max_digits {
+        digits.truncate(first_nonzero + max_digits);
+    }
+    let mut out = String::from(sign);
+    if point <= 0 {
+        out.push_str("0.");
+        for _ in 0..(-point) {
+            out.push('0');
+        }
+        for c in &digits {
+            out.push(*c);
+        }
+    } else if point as usize >= digits.len() {
+        for c in &digits {
+            out.push(*c);
+        }
+        for _ in 0..(point as usize - digits.len()) {
+            out.push('0');
+        }
+    } else {
+        for (index, c) in digits.iter().enumerate() {
+            if index == point as usize {
+                out.push('.');
+            }
+            out.push(*c);
+        }
+    }
+    out
+}
+
 fn is_comparison_operator(name: &str) -> bool {
     matches!(name, "==" | "!=" | "<" | "<=" | ">" | ">=")
 }
 
 fn escape_string(value: &str) -> String {
     value.replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_number;
+
+    #[test]
+    fn integers_print_without_decimals() {
+        assert_eq!(format_number(0.0), "0");
+        assert_eq!(format_number(100.0), "100");
+        assert_eq!(format_number(-3.0), "-3");
+    }
+
+    #[test]
+    fn floats_match_reference_precision() {
+        assert_eq!(format_number(1.8106601717798212), "1.810660171779821");
+        assert_eq!(format_number(-1.2803300858899105), "-1.280330085889910");
+        assert_eq!(format_number(0.016), "0.016");
+        assert_eq!(format_number(0.125), "0.125");
+        assert_eq!(format_number(1.5), "1.5");
+    }
 }

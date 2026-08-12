@@ -70,7 +70,7 @@ impl CompilerSession {
             return Ok(loaded.clone());
         }
         let mut resolved = input::resolve(&self.config)?;
-        let program = match resolved.kind {
+        let mut program = match resolved.kind {
             SourceKind::Workshop => {
                 let (program, locale) = self.load_workshop(&resolved)?;
                 resolved.origin.locale = Some(locale);
@@ -100,6 +100,16 @@ impl CompilerSession {
                 ));
             }
         };
+        // Apply the selected transformation profile (validated before/after).
+        if self.config.profile != wright_transform::Profile::Off {
+            wright_transform::run(&mut program, self.config.profile).map_err(|error| {
+                Diagnostic::error(
+                    "transform-error",
+                    Stage::Internal,
+                    format!("WIR transformation failed: {error}"),
+                )
+            })?;
+        }
         let loaded = Loaded {
             program: Arc::new(program),
             origin: resolved.origin.clone(),

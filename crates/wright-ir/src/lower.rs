@@ -72,13 +72,18 @@ impl<'a> Lowerer<'a> {
 
         // Variable, player, and subroutine tables in HIR order.
         for id in range_ids::<hir::GlobalVar>(self.hir.globals.len()) {
-            let (name, span, initializer) = {
+            let (name, span, initializer, source_index) = {
                 let global = self
                     .hir
                     .globals
                     .get(id)
                     .ok_or_else(|| dangling("global variable", id))?;
-                (global.name.clone(), global.span, global.initializer)
+                (
+                    global.name.clone(),
+                    global.span,
+                    global.initializer,
+                    global.index,
+                )
             };
             let initializer = match initializer {
                 Some(initializer) => Some(self.lower_value(initializer)?),
@@ -86,20 +91,25 @@ impl<'a> Lowerer<'a> {
             };
             let wir_id = self.target.global_variables.push(wir::WorkshopVariable {
                 name,
-                index: id.index() as u32,
+                index: source_index.unwrap_or(id.index() as u32),
                 span,
                 initializer,
             });
             self.globals.insert(id, wir_id);
         }
         for id in range_ids::<hir::PlayerVar>(self.hir.players.len()) {
-            let (name, span, initializer) = {
+            let (name, span, initializer, source_index) = {
                 let player = self
                     .hir
                     .players
                     .get(id)
                     .ok_or_else(|| dangling("player variable", id))?;
-                (player.name.clone(), player.span, player.initializer)
+                (
+                    player.name.clone(),
+                    player.span,
+                    player.initializer,
+                    player.index,
+                )
             };
             let initializer = match initializer {
                 Some(initializer) => Some(self.lower_value(initializer)?),
@@ -107,7 +117,7 @@ impl<'a> Lowerer<'a> {
             };
             let wir_id = self.target.player_variables.push(wir::WorkshopVariable {
                 name,
-                index: id.index() as u32,
+                index: source_index.unwrap_or(id.index() as u32),
                 span,
                 initializer,
             });
@@ -136,11 +146,8 @@ impl<'a> Lowerer<'a> {
         }
 
         // Rules.
-        let rule_ids = range_ids::<hir::Rule>(self.hir.rules.len());
-        for id in rule_ids {
-            self.lower_rule(id)?;
-        }
-        // Subroutine definition bodies become rules with the Subroutine event.
+        // Subroutine definition bodies become rules with the Subroutine
+        // event, emitted before normal rules (reference ordering).
         for id in range_ids::<hir::Subroutine>(self.hir.subroutines.len()) {
             let (name, body_span, statements) = {
                 let subroutine = self
@@ -162,6 +169,10 @@ impl<'a> Lowerer<'a> {
                 conditions: Vec::new(),
                 actions,
             });
+        }
+        let rule_ids = range_ids::<hir::Rule>(self.hir.rules.len());
+        for id in rule_ids {
+            self.lower_rule(id)?;
         }
 
         Ok(self.target)

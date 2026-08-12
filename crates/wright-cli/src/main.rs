@@ -42,6 +42,7 @@ OPTIONS:
     --kind <KIND>       Input frontend: auto|opy|workshop|protocol
     --locale <LOCALE>   Workshop client locale override (e.g. en-US)
     --root <DIR>        Include root for .opy input (default: input directory)
+    --profile <PROFILE> WIR transformation policy: off|compat|aggressive (default: off)
     -o, --output <PATH> Write compiled output to PATH (compile only)
     -f, --format <FMT>  Output format: text|json (default: text)
     -h, --help          Show this help
@@ -154,6 +155,12 @@ fn run() -> Result<u8, String> {
             "--root" => {
                 let value = take_value(&mut args, &arg)?;
                 config.root = Some(PathBuf::from(value));
+            }
+            "--profile" => {
+                let value = take_value(&mut args, &arg)?;
+                config.profile = wright_transform::Profile::parse(&value).ok_or_else(|| {
+                    format!("wright: unknown profile '{value}' (expected off|compat|aggressive)")
+                })?;
             }
             "-o" | "--output" => {
                 if command != Command::Compile {

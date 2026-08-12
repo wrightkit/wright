@@ -286,7 +286,7 @@
     "generatorVersion": "0.1.0",
     "license": "AGPL-3.0-or-later",
     "reviewed": true,
-    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix"
+    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt()"
   },
   "schemaVersion": 1,
   "structural": [
@@ -556,6 +556,15 @@
       "id": "appendToArray",
       "params": [
         "array",
+        "value"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Square Root"
+      },
+      "id": "squareRoot",
+      "params": [
         "value"
       ]
     }

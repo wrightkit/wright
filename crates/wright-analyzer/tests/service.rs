@@ -74,12 +74,12 @@ fn rule_lookup_and_symbol_queries_return_stable_ids() {
     );
     let rules = responses[0]["result"].as_array().unwrap();
     assert_eq!(rules.len(), 2);
-    assert_eq!(rules[0]["name"], "player starts");
-    assert_eq!(rules[1]["name"], "Subroutine showStatus");
+    // Reference ordering: subroutine definition rules come first.
+    assert_eq!(rules[0]["name"], "Subroutine showStatus");
+    assert_eq!(rules[1]["name"], "player starts");
 
     let rule = &responses[1]["result"];
-    assert_eq!(rule["name"], "Subroutine showStatus");
-    assert_eq!(rule["event"], "subroutine:showStatus");
+    assert_eq!(rule["name"], "player starts");
     assert!(rule["span"].is_object(), "rule lookup must include a span");
 
     let symbols = responses[2]["result"].as_array().unwrap();
@@ -93,7 +93,9 @@ fn rule_lookup_and_symbol_queries_return_stable_ids() {
 
     let symbol = &responses[3]["result"];
     assert_eq!(symbol["kind"], "rule");
-    assert_eq!(symbol["name"], "player starts");
+    // Reference ordering: the subroutine definition rule precedes normal
+    // rules, so its symbol precedes "player starts".
+    assert_eq!(symbol["name"], "Subroutine showStatus");
 }
 
 #[test]

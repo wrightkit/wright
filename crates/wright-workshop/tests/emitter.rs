@@ -89,7 +89,7 @@ fn emitted_text_is_recognizably_workshop() {
 }
 
 #[test]
-fn emitted_condition_uses_canonical_compare_form() {
+fn emitted_condition_matches_reference_infix_form() {
     let program = parser::parse(
         &corpus_text("synthetic/declarations-rules"),
         &catalog(),
@@ -98,14 +98,16 @@ fn emitted_condition_uses_canonical_compare_form() {
     .unwrap();
     let emitted = emitter::emit(&program, &catalog(), &en()).unwrap();
     assert!(
-        emitted.contains("Compare(Has Spawned(Event Player), ==, True)"),
-        "conditions emit in canonical Compare form:\n{emitted}"
+        emitted.contains("Has Spawned(Event Player) == True"),
+        "non-comparison conditions emit in reference infix form:\n{emitted}"
     );
 }
 
 #[test]
-fn unsupported_actions_fail_explicitly() {
-    // A Debug action (Wright-only) cannot be emitted as Workshop text.
+fn debug_actions_emit_hud_text() {
+    // Since M8, Debug/Print emit a semantically equivalent Create HUD Text
+    // effect (documented intentional difference from the reference's
+    // type-aware formatting).
     let mut program = wir::Program::default();
     let file = program
         .files
@@ -126,11 +128,14 @@ fn unsupported_actions_fail_explicitly() {
         actions: vec![debug],
     });
     let _ = file;
-    let error = emitter::emit(&program, &catalog(), &en()).expect_err("Debug must not emit");
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("Debug emits");
     assert!(
-        matches!(error, wright_workshop::WorkshopError::Unsupported { .. }),
-        "{error}"
+        emitted.contains("Create HUD Text(All Players(All Teams), Null, Custom String(\"{0}\", 1)"),
+        "debug emits the value as HUD text:\n{emitted}"
     );
+    // The emitted text reparses to a createHudText action call.
+    let reparsed = wright_workshop::parser::parse(&emitted, &catalog(), &en()).unwrap();
+    assert_eq!(reparsed.rules.len(), 1);
 }
 
 #[test]

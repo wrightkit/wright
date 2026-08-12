@@ -1,0 +1,11 @@
+[package]
+name = "wright-transform"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wright's WIR transformation pipeline: optimization profiles and evidence-backed compat passes."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+wright-ir = { path = "../wright-ir" }
