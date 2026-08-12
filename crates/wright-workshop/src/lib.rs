@@ -21,6 +21,7 @@ pub mod emitter;
 mod error;
 pub mod lexer;
 pub mod parser;
+pub mod roundtrip;
 pub mod validate;
 
 pub use error::WorkshopError;
