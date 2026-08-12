@@ -89,7 +89,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("wright-serve: unknown transport '{other}'");
             eprintln!("{}", usage());
-            return ExitCode::from(2);
+            ExitCode::from(2)
         }
     }
 }

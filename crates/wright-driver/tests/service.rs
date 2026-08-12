@@ -106,7 +106,7 @@ fn target_metadata_reports_catalog_surface() {
     let metadata = handle_ok(&service, &ToolRequest::TargetMetadata);
     assert!(metadata["actions"].as_u64().unwrap() > 0);
     assert!(metadata["values"].as_u64().unwrap() > 0);
-    assert!(metadata["enumDomains"].as_array().unwrap().len() > 0);
+    assert!(!metadata["enumDomains"].as_array().unwrap().is_empty());
     assert!(
         metadata["locales"]
             .as_array()
