@@ -1,0 +1,9 @@
+program wright/opy-hir 1.0.0
+generator @wright/overpy-adapter 0.1.0 (frontend overpy@9.7.10)
+files:
+  0 source.opy
+declarations:
+rules:
+  rule "setup" @0:1:1-1:6
+    event global @0:2:5-2:19
+    expr disableInspector() @0:3:5-3:24
