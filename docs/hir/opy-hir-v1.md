@@ -115,7 +115,10 @@ half-open interval in a file:
 
 Spans are for diagnostics and identity, not for byte-accurate reconstruction.
 The adapter is responsible for producing them; the consumer validates them
-(§8).
+(§8). A span whose end would precede its start (for example a node expanded
+from a preprocessor macro that mixes call-site and definition-site positions)
+must be normalized to a degenerate interval anchored at the start, so every
+emitted span is structurally valid.
 
 ## 4. Declarations
 

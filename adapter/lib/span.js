@@ -40,8 +40,16 @@ export class SpanBuilder {
     const startCol = Number.isInteger(member.startCol) ? member.startCol : 1;
     // The frontend reports inclusive end columns; the protocol uses an
     // exclusive end. Fall back to one-past-start when no end is available.
-    const endLine = Number.isInteger(member.endLine) ? member.endLine : startLine;
-    const endCol = Number.isInteger(member.endCol) ? member.endCol + 1 : startCol + 1;
+    let endLine = Number.isInteger(member.endLine) ? member.endLine : startLine;
+    let endCol = Number.isInteger(member.endCol) ? member.endCol + 1 : startCol + 1;
+    // Preprocessor-expanded nodes can mix a call-site start with a
+    // definition-site end. Normalize to a degenerate span anchored at the
+    // start so the payload never carries an interval whose end precedes its
+    // start.
+    if (endLine < startLine || (endLine === startLine && endCol < startCol)) {
+      endLine = startLine;
+      endCol = startCol + 1;
+    }
     return {
       file: this.fileId(member.name),
       start: { line: startLine, col: startCol },
