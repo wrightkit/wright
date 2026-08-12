@@ -27,3 +27,4 @@ contracts in [`ARCHITECTURE.md`](../../ARCHITECTURE.md) and
 * [ADR-0002: Compatibility strategy](0002-compatibility-strategy.md)
 * [ADR-0003: IR boundary](0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](0004-overpy-licensing-boundary.md)
+* [ADR-0005: Opy HIR v1 frontend protocol](0005-opy-hir-v1.md)

@@ -168,8 +168,10 @@ These questions are intentionally left for the milestone that has enough
 implementation evidence to answer them:
 
 1. Which OverPy versions and extensions form the supported v1 input set?
-2. What exact HIR and Workshop IR schema/versioning policy is needed once the
-   first lowering path exists?
+2. The HIR schema and versioning policy for the v0.1 bridge is defined by
+   [ADR-0005](docs/adr/0005-opy-hir-v1.md) and
+   [`docs/hir/opy-hir-v1.md`](docs/hir/opy-hir-v1.md); the Workshop IR schema
+   and versioning remain open until the first lowering path exists.
 3. Which diagnostic codes and machine-readable fields are stable enough for
    clients?
 4. Which Workshop output targets and runtime versions are covered by semantic
@@ -186,3 +188,4 @@ Decisions that answer or materially revise these questions belong in an ADR.
 * [ADR-0002: Compatibility strategy](docs/adr/0002-compatibility-strategy.md)
 * [ADR-0003: IR boundary](docs/adr/0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](docs/adr/0004-overpy-licensing-boundary.md)
+* [ADR-0005: Opy HIR v1 frontend protocol](docs/adr/0005-opy-hir-v1.md)
