@@ -170,8 +170,11 @@ implementation evidence to answer them:
 1. Which OverPy versions and extensions form the supported v1 input set?
 2. The HIR schema and versioning policy for the v0.1 bridge is defined by
    [ADR-0005](docs/adr/0005-opy-hir-v1.md) and
-   [`docs/hir/opy-hir-v1.md`](docs/hir/opy-hir-v1.md); the Workshop IR schema
-   and versioning remain open until the first lowering path exists.
+   [`docs/hir/opy-hir-v1.md`](docs/hir/opy-hir-v1.md); the internal IR data
+   model and the first lowering boundary are defined by
+   [ADR-0006](docs/adr/0006-rust-ir-core.md). Workshop IR text emission and
+   its schema/versioning as an output artifact remain open until an emitter
+   milestone exists.
 3. Which diagnostic codes and machine-readable fields are stable enough for
    clients?
 4. Which Workshop output targets and runtime versions are covered by semantic
@@ -189,3 +192,4 @@ Decisions that answer or materially revise these questions belong in an ADR.
 * [ADR-0003: IR boundary](docs/adr/0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](docs/adr/0004-overpy-licensing-boundary.md)
 * [ADR-0005: Opy HIR v1 frontend protocol](docs/adr/0005-opy-hir-v1.md)
+* [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](docs/adr/0006-rust-ir-core.md)
