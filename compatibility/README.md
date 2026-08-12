@@ -6,7 +6,7 @@ dependency of `wright-core`.
 
 ## Pinned oracle
 
-`oracle/package.json` pins the OverPy npm package to `9.7.9`, while
+`oracle/package.json` pins the OverPy npm package to `9.7.10`, while
 `oracle/pnpm-lock.yaml` pins the resolved package integrity. The adjacent
 `oracle-metadata.json` records the package's npm `gitHead`, repository, registry
 tarball, license assumption, and Workshop language. A change to any of these is
