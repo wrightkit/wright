@@ -31,3 +31,6 @@ Cargo.lock
 # Compatibility oracle dependencies
 compatibility/oracle/node_modules/
 compatibility/**/__pycache__/
+
+# Adapter dependencies
+adapter/node_modules/

@@ -1,0 +1,21 @@
+{
+  "name": "@wright/overpy-adapter",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Wright compatibility adapter: translates pinned OverPy frontend output into Opy HIR v1.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "bin": {
+    "wright-adapter": "./bin/wright-adapter.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "update-fixtures": "UPDATE_FIXTURES=1 node --test"
+  },
+  "dependencies": {
+    "overpy": "9.7.10"
+  }
+}

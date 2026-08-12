@@ -39,7 +39,7 @@ Every payload is a JSON object with the following top-level fields.
 | `generator` | object | yes | Producer identity for provenance. |
 | `files` | array | yes | Source-file registry referenced by spans. |
 | `defines` | array | no | Preprocessor constant/function macros seen by the frontend. |
-| `declarations` | array | yes | Symbols declared at program scope, in source order. |
+| `declarations` | array | yes | Symbols declared at program scope, grouped by kind, each group in declaration order. |
 | `rules` | array | yes | Rule and subroutine-definition bodies, in source order. |
 
 ### 2.1 `protocol`
@@ -150,7 +150,9 @@ A subroutine declaration (`subroutine name`), independent of any `def`.
 
 ### 4.3 `subroutineDef`
 
-A subroutine definition (`def name():`) with its statement body.
+A subroutine definition (`def name():`) with its statement body. A definition
+is a program body, so it appears in `rules` (§5) rather than in
+`declarations`; this section defines its node shape.
 
 ```jsonc
 {
@@ -193,8 +195,8 @@ can expand or lower it without re-parsing source.
 
 ## 5. Rules
 
-A rule is an object with the fields below. Rules appear in `rules` in source
-order.
+A rule is an object with the fields below. Each entry in `rules` is either a
+rule object or a `subroutineDef` node (§4.3). Rules appear in source order.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -284,6 +286,7 @@ Example `for` with `if`:
 | `call` | `name`, `args`, `span` | Function call. `name` is the function name; member calls use `receiver` (below). |
 | `receiverCall` | `receiver`, `name`, `args`, `span` | Member/extension call: `receiver.name(args)`. |
 | `macroCall` | `name`, `args`, `span` | A source-level macro invocation kept explicit. |
+| `macroParam` | `name`, `span` | A reference to a macro parameter inside a macro definition body. |
 | `binary` | `op`, `left`, `right`, `span` | Binary operation. `op` is one of `+ - * / % ** == != < <= > >= and or`. |
 | `unary` | `op`, `operand`, `span` | Unary operation. `op` is `-` or `not`. |
 | `index` | `array`, `index`, `span` | Indexing `array[index]`. |
@@ -349,9 +352,10 @@ A consumer must validate, in order:
 4. **Identifiers**: `declarations` names are non-empty strings; within a
    declaration kind, names are unique; rule names are strings (may be empty);
    `defines` names are unique.
-5. **References**: `globalVar`, `playerVar`, `constant`, and
-   `callSubroutine` references resolve to a matching declaration; loop
-   variables in `for` resolve to a global variable.
+5. **References**: `globalVar`, `playerVar`, and `constant` references resolve
+   to a matching declaration; `callSubroutine` references resolve to a
+   `subroutine` declaration or a `subroutineDef` in `rules`; loop variables in
+   `for` resolve to a global variable.
 6. **Unsupported nodes**: unknown node kinds produce the §7.3 error.
 
 Validation failures are structured: they carry a stable code, a message, and

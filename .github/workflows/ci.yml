@@ -67,6 +67,33 @@ jobs:
       - name: Run compatibility oracle
         run: python3 compatibility/run_oracle.py
 
+  adapter:
+    name: OverPy-to-HIR adapter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: adapter/pnpm-lock.yaml
+
+      - name: Install adapter dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: adapter
+
+      - name: Run adapter tests
+        run: pnpm test
+        working-directory: adapter
+
   compatibility-differential:
     name: Wright differential compatibility
     if: ${{ vars.WRIGHT_COMPAT_COMMAND != '' }}

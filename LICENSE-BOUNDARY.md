@@ -25,7 +25,7 @@ checkout has no OverPy-dependent source component.
 | Component | May invoke or inspect OverPy? | Boundary and distribution rule |
 | --- | --- | --- |
 | Wright Rust core, including HIR, Workshop IR, lowering, diagnostics, and backends | No | Independently implemented code. It must not link to OverPy, copy its source, import its internal AST/types, or compile against its generated artifacts. |
-| Frontend adapter/bridge | Only through an explicitly documented input or process boundary | It may translate a reviewed interchange result or observed frontend behavior into Wright-owned types. It must not make OverPy internal types a Wright API. |
+| Frontend adapter/bridge (`adapter/`) | Only through an explicitly documented input or process boundary | It may translate a reviewed interchange result or observed frontend behavior into Wright-owned types. It must not make OverPy internal types a Wright API. Ownership, license, and invocation are recorded in its [`README`](adapter/README.md). |
 | Compatibility harness/oracle tool | Yes, for isolated evaluation | It may invoke a separately installed/pinned OverPy tool and compare documented or generated results. It must remain separable from the core build and runtime distribution. |
 | Compatibility fixtures and generated reference artifacts | Only after provenance review | Store identifiers, hashes, generators, or reviewable artifacts only when their license and redistribution status are recorded. Do not add copied OverPy source or unclear third-party content. |
 | CI and development scripts | Yes, when isolated | They may install or invoke a pinned external oracle for a compatibility check, but must not silently turn it into a core dependency or bundled release component. |

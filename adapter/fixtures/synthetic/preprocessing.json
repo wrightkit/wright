@@ -1,0 +1,202 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.0.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "source.opy"
+    },
+    {
+      "id": 1,
+      "path": "shared.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "macro",
+      "name": "double",
+      "args": [
+        "value"
+      ],
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 1,
+          "col": 1
+        },
+        "end": {
+          "line": 1,
+          "col": 2
+        }
+      },
+      "body": [
+        {
+          "kind": "expr",
+          "expr": {
+            "kind": "binary",
+            "op": "+",
+            "left": {
+              "kind": "macroParam",
+              "name": "value",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 1,
+                  "col": 1
+                },
+                "end": {
+                  "line": 1,
+                  "col": 2
+                }
+              }
+            },
+            "right": {
+              "kind": "macroParam",
+              "name": "value",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 1,
+                  "col": 1
+                },
+                "end": {
+                  "line": 1,
+                  "col": 2
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 1,
+                "col": 1
+              },
+              "end": {
+                "line": 1,
+                "col": 2
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 1,
+              "col": 1
+            },
+            "end": {
+              "line": 1,
+              "col": 2
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "name": "preprocessing",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 3,
+          "col": 1
+        },
+        "end": {
+          "line": 3,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 4,
+            "col": 5
+          },
+          "end": {
+            "line": 4,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "expr",
+          "expr": {
+            "kind": "call",
+            "name": "debug",
+            "args": [
+              {
+                "kind": "macroCall",
+                "name": "double",
+                "args": [
+                  {
+                    "kind": "number",
+                    "value": 1,
+                    "text": "1",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 5,
+                        "col": 18
+                      },
+                      "end": {
+                        "line": 5,
+                        "col": 33
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 5,
+                    "col": 11
+                  },
+                  "end": {
+                    "line": 5,
+                    "col": 34
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 5,
+                "col": 5
+              },
+              "end": {
+                "line": 5,
+                "col": 35
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 5,
+              "col": 5
+            },
+            "end": {
+              "line": 5,
+              "col": 35
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
