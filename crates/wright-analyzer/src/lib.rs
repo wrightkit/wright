@@ -14,4 +14,5 @@
 
 pub mod analysis;
 pub mod cfg;
+pub mod service;
 pub mod symbols;
