@@ -90,6 +90,18 @@ impl<T> std::fmt::Display for Id<T> {
     }
 }
 
+/// Any typed ID: exposes the arena index, usable in generic contexts.
+pub trait IdLike {
+    /// The arena index this ID refers to.
+    fn index(self) -> usize;
+}
+
+impl<T> IdLike for Id<T> {
+    fn index(self) -> usize {
+        Id::index(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Id;

@@ -59,3 +59,11 @@ impl std::fmt::Display for IrError {
 }
 
 impl std::error::Error for IrError {}
+
+/// Shorthand for an unsupported-construct error.
+pub(crate) fn unsupported(message: impl Into<String>, span: Option<Span>) -> IrError {
+    IrError::Unsupported {
+        message: message.into(),
+        span,
+    }
+}

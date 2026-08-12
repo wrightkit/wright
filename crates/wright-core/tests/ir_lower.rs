@@ -1,0 +1,192 @@
+//! HIR → Workshop IR lowering tests against the compatibility corpus: every
+//! v0.1 bridge fixture lowers into valid Workshop IR, dumps deterministically,
+//! and unsupported constructs fail with their source location.
+
+use std::path::{Path, PathBuf};
+
+use wright_core::hir;
+use wright_ir::error::IrError;
+use wright_ir::lower;
+
+fn fixture_path(fixture_id: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../adapter/fixtures")
+        .join(format!("{fixture_id}.json"))
+}
+
+fn read_fixture(fixture_id: &str) -> String {
+    std::fs::read_to_string(fixture_path(fixture_id))
+        .unwrap_or_else(|error| panic!("cannot read adapter fixture {fixture_id}: {error}"))
+}
+
+fn lower_fixture(fixture_id: &str) -> wright_ir::wir::Program {
+    let protocol = hir::parse_str(&read_fixture(fixture_id))
+        .unwrap_or_else(|error| panic!("{fixture_id} must parse: {error}"));
+    let model = protocol
+        .to_ir()
+        .unwrap_or_else(|error| panic!("{fixture_id} must convert: {error}"));
+    lower::lower(&model).unwrap_or_else(|error| panic!("{fixture_id} must lower: {error}"))
+}
+
+const ADAPTER_FIXTURES: &[&str] = &[
+    "synthetic/basic-rule",
+    "synthetic/control-flow",
+    "synthetic/declarations-rules",
+    "synthetic/expressions-values",
+    "synthetic/preprocessing",
+    "real-world/overpy-cake",
+];
+
+#[test]
+fn every_fixture_lowers_to_valid_workshop_ir() {
+    for fixture_id in ADAPTER_FIXTURES {
+        let program = lower_fixture(fixture_id);
+        program
+            .validate()
+            .unwrap_or_else(|error| panic!("{fixture_id} WIR must validate: {error}"));
+        assert!(!program.rules.is_empty(), "{fixture_id} must produce rules");
+    }
+}
+
+#[test]
+fn every_fixture_dumps_deterministically() {
+    for fixture_id in ADAPTER_FIXTURES {
+        let program = lower_fixture(fixture_id);
+        let first = program.dump();
+        let second = program.dump();
+        assert_eq!(first, second, "{fixture_id} WIR dump must be deterministic");
+        assert!(!first.is_empty(), "{fixture_id} WIR dump must not be empty");
+    }
+}
+
+#[test]
+fn compound_assignment_lowers_to_modify_action() {
+    // `index += 1` in control-flow desugars to `index = index + 1` and must
+    // lower to a ModifyGlobalVariable(Add, 1) action, not a Set.
+    let program = lower_fixture("synthetic/control-flow");
+    let dump = program.dump();
+    assert!(
+        dump.contains("modifyGlobalVariable index Add 1"),
+        "compound assignment must lower to a modify action:\n{dump}"
+    );
+}
+
+#[test]
+fn append_lowers_to_modify_with_append_to_array() {
+    let program = lower_fixture("synthetic/expressions-values");
+    let dump = program.dump();
+    assert!(
+        dump.contains("modifyGlobalVariable points AppendToArray"),
+        "append must lower to a modify action:\n{dump}"
+    );
+}
+
+#[test]
+fn subroutine_def_lowers_to_subroutine_event_rule() {
+    let program = lower_fixture("synthetic/declarations-rules");
+    let dump = program.dump();
+    assert!(
+        dump.contains("event Subroutine showStatus (id 0)"),
+        "def body must become a Subroutine-event rule:\n{dump}"
+    );
+    assert!(dump.contains("callSubroutine showStatus (id 0)"));
+}
+
+#[test]
+fn debug_and_print_lower_to_typed_actions() {
+    let program = lower_fixture("synthetic/expressions-values");
+    let dump = program.dump();
+    assert!(
+        dump.contains("print format(\"points: {}\", points)"),
+        "{dump}"
+    );
+    assert!(dump.contains("debug location"), "{dump}");
+}
+
+#[test]
+fn macro_call_expands_in_value_position() {
+    // `debug(double(Phase.FINISHED))` — `double(value): value + value` must
+    // expand to `$double(1)` → `+(1, 1)` in the debug action.
+    let program = lower_fixture("synthetic/preprocessing");
+    let dump = program.dump();
+    assert!(
+        dump.contains("debug +(1, 1)"),
+        "macro call must expand during lowering:\n{dump}"
+    );
+}
+
+#[test]
+fn lower_dump_matches_golden_for_control_flow() {
+    let program = lower_fixture("synthetic/control-flow");
+    let golden = std::fs::read_to_string(golden_path("synthetic/control-flow.wir.dump"))
+        .unwrap_or_else(|error| panic!("missing golden WIR dump: {error}"));
+    assert_eq!(program.dump(), golden);
+}
+
+fn golden_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(name)
+}
+
+#[test]
+fn unsupported_event_fails_with_span() {
+    let payload = r#"{
+        "protocol": { "name": "wright/opy-hir", "version": "1.0.0" },
+        "generator": { "name": "g", "version": "0", "frontend": "f" },
+        "files": [ { "id": 0, "path": "source.opy" } ],
+        "declarations": [],
+        "rules": [ {
+            "name": "r",
+            "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } },
+            "event": { "name": "onFlag", "args": [], "span": { "file": 0, "start": { "line": 2, "col": 5 }, "end": { "line": 2, "col": 20 } } },
+            "conditions": [],
+            "actions": []
+        } ]
+    }"#;
+    let protocol = hir::parse_str(payload).unwrap();
+    let model = protocol.to_ir().unwrap();
+    let error = lower::lower(&model).unwrap_err();
+    assert_eq!(error.code(), "unsupported");
+    match error {
+        IrError::Unsupported { message, span } => {
+            assert!(message.contains("onFlag"));
+            let span = span.expect("unsupported event must carry its span");
+            assert_eq!(span.start.line, 2);
+        }
+        other => panic!("expected unsupported, got {other}"),
+    }
+}
+
+#[test]
+fn unsupported_for_iterable_fails_with_span() {
+    let payload = r#"{
+        "protocol": { "name": "wright/opy-hir", "version": "1.0.0" },
+        "generator": { "name": "g", "version": "0", "frontend": "f" },
+        "files": [ { "id": 0, "path": "source.opy" } ],
+        "declarations": [
+            { "kind": "globalVariable", "name": "i", "index": null, "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } }, "initializer": null }
+        ],
+        "rules": [ {
+            "name": "r",
+            "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } },
+            "event": { "name": "global", "args": [], "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } } },
+            "conditions": [],
+            "actions": [
+                { "kind": "for", "variable": { "kind": "globalVar", "name": "i", "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 10 } } }, "iterable": { "kind": "array", "elements": [], "span": { "file": 0, "start": { "line": 3, "col": 14 }, "end": { "line": 3, "col": 16 } } }, "body": [], "span": { "file": 0, "start": { "line": 3, "col": 5 }, "end": { "line": 3, "col": 17 } } }
+            ]
+        } ]
+    }"#;
+    let protocol = hir::parse_str(payload).unwrap();
+    let model = protocol.to_ir().unwrap();
+    let error = lower::lower(&model).unwrap_err();
+    assert_eq!(error.code(), "unsupported");
+    match error {
+        IrError::Unsupported { message, span } => {
+            assert!(message.contains("range"), "{message}");
+            let span = span.expect("unsupported iterable must carry its span");
+            assert_eq!(span.start.line, 3);
+        }
+        other => panic!("expected unsupported, got {other}"),
+    }
+}

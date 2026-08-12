@@ -1,0 +1,23 @@
+program (Workshop IR)
+files:
+  0 source.opy
+global variables:
+  index (index 0) @0:1:1-1:17
+player variables:
+subroutines:
+rules:
+  rule "control flow" (id 0) @0:3:1-3:6
+    event Global
+    forGlobalVariable index in 0, 3, 1 @0:5:5-5:9
+      if @0:6:9-6:12
+        condition ==(index, 0)
+          debug index @0:7:13-7:26
+        elif condition ==(index, 1)
+          debug index @0:9:13-9:26
+        else
+          debug index @0:11:13-11:26
+  rule "bounded while" (id 1) @0:13:1-13:6
+    event Global
+    while <(index, 3) @0:15:5-15:11
+      modifyGlobalVariable index Add 1 @0:16:9-16:20
+      call wait(0.016, Wait.IGNORE_CONDITION) @0:17:9-17:16
