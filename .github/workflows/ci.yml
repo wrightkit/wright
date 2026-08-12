@@ -66,3 +66,27 @@ jobs:
 
       - name: Run compatibility oracle
         run: python3 compatibility/run_oracle.py
+
+  compatibility-differential:
+    name: Wright differential compatibility
+    if: ${{ vars.WRIGHT_COMPAT_COMMAND != '' }}
+    runs-on: ubuntu-latest
+    needs: compatibility-oracle
+    env:
+      WRIGHT_COMPAT_COMMAND: ${{ vars.WRIGHT_COMPAT_COMMAND }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Run Wright differential comparison
+        run: |
+          python3 compatibility/diff.py \
+            --wright-command "$WRIGHT_COMPAT_COMMAND" \
+            --report compatibility/report.json
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: compatibility-report
+          path: compatibility/report.json

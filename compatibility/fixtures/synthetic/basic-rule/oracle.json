@@ -5,6 +5,7 @@
     "status": "success",
     "stdout": "",
     "workshop": "rule (\"setup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n",
+    "workshopExact": "rule (\"setup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n",
     "workshopSha256": "50321e56ca932c14a004d71d1b2cca21159a9107ec2e21fb89fa12ca54646f34"
   },
   "fixture": "synthetic/basic-rule",

@@ -208,9 +208,10 @@ def run_fixture(
                 "pnpm install --dir compatibility/oracle"
             ) from error
 
-        workshop = ""
+        workshop_exact = ""
         if output_path.is_file():
-            workshop = normalize_text(output_path.read_text(encoding="utf-8"))
+            workshop_exact = output_path.read_text(encoding="utf-8")
+        workshop = normalize_text(workshop_exact)
 
     status = "success" if completed.returncode == 0 else "failure"
     return {
@@ -226,6 +227,7 @@ def run_fixture(
             "exitCode": completed.returncode,
             "diagnostics": normalize_diagnostics(completed.stderr),
             "stdout": normalize_text(completed.stdout),
+            "workshopExact": workshop_exact,
             "workshop": workshop,
             "workshopSha256": sha256_text(workshop),
         },

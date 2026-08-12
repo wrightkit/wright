@@ -63,6 +63,7 @@ newline presentation only; it does not remove Workshop operations or values.
 python3 -m unittest discover -s compatibility/tests
 python3 compatibility/run_oracle.py --update
 python3 compatibility/run_oracle.py
+python3 compatibility/diff.py --wright-results /path/to/wright-results --report compatibility/report.json
 ```
 
 Use `--update` only when intentionally accepting a change from the pinned
@@ -73,3 +74,40 @@ wrong, or normalized output/diagnostics differ.
 CI installs the lockfile and runs the tests and normal oracle command. The
 compatibility job is allowed to fail independently of the Rust core job so a
 missing external oracle cannot be mistaken for a core build failure.
+
+## Differential result contract
+
+`diff.py` compares each `oracle.json` with a Wright result at
+`<results-root>/<fixture-id>/wright.json`, or invokes a producer command once
+per fixture:
+
+```sh
+python3 compatibility/diff.py \
+  --wright-command 'wright compat --fixture {fixture_id} --input {source} --output {result}' \
+  --report compatibility/report.json
+```
+
+The producer must write a result with the same schema as the oracle's
+`compile` record and the fixture id. It may additionally provide a top-level
+`semantic` JSON value when a runtime-sensitive scenario has been executed.
+The command template is tokenized without a shell; `{fixture_id}`, `{source}`,
+and `{result}` are the only substitutions.
+
+The report separates these stages:
+
+* `compile-status` and `diagnostics`;
+* `exact-output`, using the unnormalized Workshop text;
+* `normalized-output`, using the versioned snapshot normalization; and
+* `semantic`, when both producers provide semantic evidence.
+
+An exact-output difference with a normalized-output match is reported as a
+presentation difference. A normalized-output or semantic regression exits 1.
+Missing Wright results or unavailable semantic evidence are `inconclusive` and
+exit 2 by default, so a CI job cannot silently pass without a Wright producer.
+Use `--allow-inconclusive` only for local contract checks.
+
+The optional `compatibility-differential` GitHub Actions job is enabled when
+the repository variable `WRIGHT_COMPAT_COMMAND` contains the producer command
+template. It waits for the oracle job, fails on a regression, and uploads the
+machine-readable report for debugging. Until Wright exposes this producer, the
+job remains skipped; the core and oracle jobs do not claim Wright parity.

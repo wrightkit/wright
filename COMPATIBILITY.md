@@ -120,6 +120,11 @@ Run `python3 compatibility/run_oracle.py` to verify normalized snapshots. Use
 `--update` only for an intentional oracle update that is reviewed with its
 fixture and provenance changes.
 
+Run `python3 compatibility/diff.py --wright-command '...'` to compare a Wright
+producer against the oracle. Its machine-readable report separates compile,
+diagnostic, exact-output, normalized-output, and optional semantic stages;
+missing producer output is inconclusive rather than a pass.
+
 Fixtures containing third-party code, generated output, or user data require a
 redistribution and provenance review before being committed. When a fixture
 cannot be redistributed, the repository may record a generator, hash, or local
