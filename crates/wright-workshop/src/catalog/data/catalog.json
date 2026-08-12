@@ -1,123 +1,481 @@
 {
-  "schemaVersion": 1,
-  "locales": ["en-US"],
-  "target": {
-    "game": "Overwatch 2",
-    "format": "vanilla Workshop text",
-    "surface": "docs/workshop/support-matrix.md (M5 P0 set)"
-  },
-  "provenance": {
-    "generator": "wright-catalog-gen",
-    "generatorVersion": "0.1.0",
-    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix",
-    "license": "AGPL-3.0-or-later",
-    "reviewed": true
-  },
-  "structural": [
-    { "id": "if", "aliases": { "en-US": "If" } },
-    { "id": "elseIf", "aliases": { "en-US": "Else If" } },
-    { "id": "else", "aliases": { "en-US": "Else" } },
-    { "id": "end", "aliases": { "en-US": "End" } },
-    { "id": "forGlobalVariable", "aliases": { "en-US": "For Global Variable" } },
-    { "id": "while", "aliases": { "en-US": "While" } },
-    { "id": "setGlobalVariable", "aliases": { "en-US": "Set Global Variable" } },
-    { "id": "modifyGlobalVariable", "aliases": { "en-US": "Modify Global Variable" } },
-    { "id": "setPlayerVariable", "aliases": { "en-US": "Set Player Variable" } },
-    { "id": "modifyPlayerVariable", "aliases": { "en-US": "Modify Player Variable" } },
-    { "id": "callSubroutine", "aliases": { "en-US": "Call Subroutine" } }
-  ],
   "actions": [
-    { "id": "disableInspector", "aliases": { "en-US": "Disable Inspector Recording" } },
-    { "id": "wait", "aliases": { "en-US": "Wait" }, "params": ["duration", "ignoreCondition"] },
-    { "id": "createBeamEffect", "aliases": { "en-US": "Create Beam Effect" } },
-    { "id": "createHudText", "aliases": { "en-US": "Create HUD Text" } },
-    { "id": "playEffect", "aliases": { "en-US": "Play Effect" } }
-  ],
-  "values": [
-    { "id": "add", "aliases": { "en-US": "Add" }, "params": ["a", "b"] },
-    { "id": "subtract", "aliases": { "en-US": "Subtract" }, "params": ["a", "b"] },
-    { "id": "multiply", "aliases": { "en-US": "Multiply" }, "params": ["a", "b"] },
-    { "id": "divide", "aliases": { "en-US": "Divide" }, "params": ["a", "b"] },
-    { "id": "compare", "aliases": { "en-US": "Compare" }, "params": ["a", "operator", "b"] },
-    { "id": "and", "aliases": { "en-US": "And" } },
-    { "id": "or", "aliases": { "en-US": "Or" } },
-    { "id": "not", "aliases": { "en-US": "Not" } },
-    { "id": "countOf", "aliases": { "en-US": "Count Of" } },
-    { "id": "absoluteValue", "aliases": { "en-US": "Absolute Value" } },
-    { "id": "array", "aliases": { "en-US": "Array" } },
-    { "id": "vector", "aliases": { "en-US": "Vector" }, "params": ["x", "y", "z"] },
-    { "id": "customString", "aliases": { "en-US": "Custom String" } },
-    { "id": "valueInArray", "aliases": { "en-US": "Value In Array" }, "params": ["array", "index"] },
-    { "id": "mappedArray", "aliases": { "en-US": "Mapped Array" } },
-    { "id": "firstOf", "aliases": { "en-US": "First Of" } },
-    { "id": "stringReplace", "aliases": { "en-US": "String Replace" } },
-    { "id": "stringSlice", "aliases": { "en-US": "String Slice" } },
-    { "id": "stringSplit", "aliases": { "en-US": "String Split" } },
-    { "id": "allPlayers", "aliases": { "en-US": "All Players" } },
-    { "id": "randomReal", "aliases": { "en-US": "Random Real" } },
-    { "id": "randomValueInArray", "aliases": { "en-US": "Random Value In Array" } },
-    { "id": "hasSpawned", "aliases": { "en-US": "Has Spawned" } }
-  ],
-  "events": [
-    { "id": "global", "aliases": { "en-US": "Ongoing - Global" } },
-    { "id": "eachPlayer", "aliases": { "en-US": "Ongoing - Each Player" } },
-    { "id": "subroutine", "aliases": { "en-US": "Subroutine" } }
-  ],
-  "operators": [
-    { "id": "==", "aliases": { "en-US": "==" } },
-    { "id": "!=", "aliases": { "en-US": "!=" } },
-    { "id": "<", "aliases": { "en-US": "<" } },
-    { "id": "<=", "aliases": { "en-US": "<=" } },
-    { "id": ">", "aliases": { "en-US": ">" } },
-    { "id": ">=", "aliases": { "en-US": ">=" } }
+    {
+      "aliases": {
+        "en-US": "Disable Inspector Recording"
+      },
+      "id": "disableInspector"
+    },
+    {
+      "aliases": {
+        "en-US": "Wait"
+      },
+      "id": "wait",
+      "params": [
+        "duration",
+        "ignoreCondition"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Create Beam Effect"
+      },
+      "id": "createBeamEffect"
+    },
+    {
+      "aliases": {
+        "en-US": "Create HUD Text"
+      },
+      "id": "createHudText"
+    },
+    {
+      "aliases": {
+        "en-US": "Play Effect"
+      },
+      "id": "playEffect"
+    }
   ],
   "enums": [
     {
       "domain": "Color",
       "members": [
-        { "id": "YELLOW", "aliases": { "en-US": "Yellow" } },
-        { "id": "WHITE", "aliases": { "en-US": "White" } },
-        { "id": "RED", "aliases": { "en-US": "Red" } },
-        { "id": "ORANGE", "aliases": { "en-US": "Orange" } }
+        {
+          "aliases": {
+            "en-US": "Yellow"
+          },
+          "id": "YELLOW"
+        },
+        {
+          "aliases": {
+            "en-US": "White"
+          },
+          "id": "WHITE"
+        },
+        {
+          "aliases": {
+            "en-US": "Red"
+          },
+          "id": "RED"
+        },
+        {
+          "aliases": {
+            "en-US": "Orange"
+          },
+          "id": "ORANGE"
+        }
       ]
     },
     {
       "domain": "Beam",
       "members": [
-        { "id": "GRAPPLE", "aliases": { "en-US": "Grapple Beam" } },
-        { "id": "GOOD", "aliases": { "en-US": "Good Beam" } }
+        {
+          "aliases": {
+            "en-US": "Grapple Beam"
+          },
+          "id": "GRAPPLE"
+        },
+        {
+          "aliases": {
+            "en-US": "Good Beam"
+          },
+          "id": "GOOD"
+        }
       ]
     },
     {
       "domain": "DynamicEffect",
-      "members": [{ "id": "BAD_EXPLOSION", "aliases": { "en-US": "Bad Explosion" } }]
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Bad Explosion"
+          },
+          "id": "BAD_EXPLOSION"
+        }
+      ]
     },
     {
       "domain": "Wait",
-      "members": [{ "id": "IGNORE_CONDITION", "aliases": { "en-US": "Ignore Condition" } }]
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Ignore Condition"
+          },
+          "id": "IGNORE_CONDITION"
+        }
+      ]
     },
     {
       "domain": "Vector",
-      "members": [{ "id": "UP", "aliases": { "en-US": "Up" } }]
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Up"
+          },
+          "id": "UP"
+        }
+      ]
     },
     {
       "domain": "HudPosition",
-      "members": [{ "id": "LEFT", "aliases": { "en-US": "Left" } }]
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Left"
+          },
+          "id": "LEFT"
+        }
+      ]
     },
     {
       "domain": "HudReeval",
       "members": [
-        { "id": "VISIBILITY_SORT_ORDER_STRING_AND_COLOR", "aliases": { "en-US": "Visible To Sort Order String and Color" } },
-        { "id": "VISIBILITY_AND_STRING", "aliases": { "en-US": "Visible To and String" } }
+        {
+          "aliases": {
+            "en-US": "Visible To Sort Order String and Color"
+          },
+          "id": "VISIBILITY_SORT_ORDER_STRING_AND_COLOR"
+        },
+        {
+          "aliases": {
+            "en-US": "Visible To and String"
+          },
+          "id": "VISIBILITY_AND_STRING"
+        }
       ]
     },
     {
       "domain": "SpecVisibility",
-      "members": [{ "id": "DEFAULT", "aliases": { "en-US": "Default Visibility" } }]
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Default Visibility"
+          },
+          "id": "DEFAULT"
+        }
+      ]
     },
     {
       "domain": "Team",
-      "members": [{ "id": "ALL", "aliases": { "en-US": "All Teams" } }]
+      "members": [
+        {
+          "aliases": {
+            "en-US": "All Teams"
+          },
+          "id": "ALL"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "aliases": {
+        "en-US": "Ongoing - Global"
+      },
+      "id": "global"
+    },
+    {
+      "aliases": {
+        "en-US": "Ongoing - Each Player"
+      },
+      "id": "eachPlayer"
+    },
+    {
+      "aliases": {
+        "en-US": "Subroutine"
+      },
+      "id": "subroutine"
+    }
+  ],
+  "locales": [
+    "en-US"
+  ],
+  "operators": [
+    {
+      "aliases": {
+        "en-US": "=="
+      },
+      "id": "=="
+    },
+    {
+      "aliases": {
+        "en-US": "!="
+      },
+      "id": "!="
+    },
+    {
+      "aliases": {
+        "en-US": "<"
+      },
+      "id": "<"
+    },
+    {
+      "aliases": {
+        "en-US": "<="
+      },
+      "id": "<="
+    },
+    {
+      "aliases": {
+        "en-US": ">"
+      },
+      "id": ">"
+    },
+    {
+      "aliases": {
+        "en-US": ">="
+      },
+      "id": ">="
+    }
+  ],
+  "provenance": {
+    "generator": "wright-catalog-gen",
+    "generatorVersion": "0.1.0",
+    "license": "AGPL-3.0-or-later",
+    "reviewed": true,
+    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix"
+  },
+  "schemaVersion": 1,
+  "structural": [
+    {
+      "aliases": {
+        "en-US": "If"
+      },
+      "id": "if"
+    },
+    {
+      "aliases": {
+        "en-US": "Else If"
+      },
+      "id": "elseIf"
+    },
+    {
+      "aliases": {
+        "en-US": "Else"
+      },
+      "id": "else"
+    },
+    {
+      "aliases": {
+        "en-US": "End"
+      },
+      "id": "end"
+    },
+    {
+      "aliases": {
+        "en-US": "For Global Variable"
+      },
+      "id": "forGlobalVariable"
+    },
+    {
+      "aliases": {
+        "en-US": "While"
+      },
+      "id": "while"
+    },
+    {
+      "aliases": {
+        "en-US": "Set Global Variable"
+      },
+      "id": "setGlobalVariable"
+    },
+    {
+      "aliases": {
+        "en-US": "Modify Global Variable"
+      },
+      "id": "modifyGlobalVariable"
+    },
+    {
+      "aliases": {
+        "en-US": "Set Player Variable"
+      },
+      "id": "setPlayerVariable"
+    },
+    {
+      "aliases": {
+        "en-US": "Modify Player Variable"
+      },
+      "id": "modifyPlayerVariable"
+    },
+    {
+      "aliases": {
+        "en-US": "Call Subroutine"
+      },
+      "id": "callSubroutine"
+    }
+  ],
+  "target": {
+    "format": "vanilla Workshop text",
+    "game": "Overwatch 2",
+    "surface": "docs/workshop/support-matrix.md (M5 P0 set)"
+  },
+  "values": [
+    {
+      "aliases": {
+        "en-US": "Add"
+      },
+      "id": "add",
+      "params": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Subtract"
+      },
+      "id": "subtract",
+      "params": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Multiply"
+      },
+      "id": "multiply",
+      "params": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Divide"
+      },
+      "id": "divide",
+      "params": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Compare"
+      },
+      "id": "compare",
+      "params": [
+        "a",
+        "operator",
+        "b"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "And"
+      },
+      "id": "and"
+    },
+    {
+      "aliases": {
+        "en-US": "Or"
+      },
+      "id": "or"
+    },
+    {
+      "aliases": {
+        "en-US": "Not"
+      },
+      "id": "not"
+    },
+    {
+      "aliases": {
+        "en-US": "Count Of"
+      },
+      "id": "countOf"
+    },
+    {
+      "aliases": {
+        "en-US": "Absolute Value"
+      },
+      "id": "absoluteValue"
+    },
+    {
+      "aliases": {
+        "en-US": "Array"
+      },
+      "id": "array"
+    },
+    {
+      "aliases": {
+        "en-US": "Vector"
+      },
+      "id": "vector",
+      "params": [
+        "x",
+        "y",
+        "z"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Custom String"
+      },
+      "id": "customString"
+    },
+    {
+      "aliases": {
+        "en-US": "Value In Array"
+      },
+      "id": "valueInArray",
+      "params": [
+        "array",
+        "index"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Mapped Array"
+      },
+      "id": "mappedArray"
+    },
+    {
+      "aliases": {
+        "en-US": "First Of"
+      },
+      "id": "firstOf"
+    },
+    {
+      "aliases": {
+        "en-US": "String Replace"
+      },
+      "id": "stringReplace"
+    },
+    {
+      "aliases": {
+        "en-US": "String Slice"
+      },
+      "id": "stringSlice"
+    },
+    {
+      "aliases": {
+        "en-US": "String Split"
+      },
+      "id": "stringSplit"
+    },
+    {
+      "aliases": {
+        "en-US": "All Players"
+      },
+      "id": "allPlayers"
+    },
+    {
+      "aliases": {
+        "en-US": "Random Real"
+      },
+      "id": "randomReal"
+    },
+    {
+      "aliases": {
+        "en-US": "Random Value In Array"
+      },
+      "id": "randomValueInArray"
+    },
+    {
+      "aliases": {
+        "en-US": "Has Spawned"
+      },
+      "id": "hasSpawned"
     }
   ]
 }

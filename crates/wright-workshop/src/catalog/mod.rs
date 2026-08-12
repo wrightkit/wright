@@ -277,6 +277,16 @@ impl Catalog {
         self.entries.iter().filter(move |entry| entry.kind == kind)
     }
 
+    /// The total number of builtin entries.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// The number of enum domains.
+    pub fn enum_domains_count(&self) -> usize {
+        self.enums.len()
+    }
+
     /// The enum domain with the given name.
     pub fn enum_domain(&self, domain: &str) -> Option<&EnumDomain> {
         self.enum_by_domain.get(domain).map(|i| &self.enums[*i])
@@ -415,4 +425,20 @@ impl Catalog {
         });
         Ok(())
     }
+}
+
+/// Canonicalize catalog data: parse, validate, and re-serialize deterministically
+/// (object keys sorted, stable formatting). Re-running on the same input
+/// produces byte-identical output, so the data pipeline is reproducible.
+pub fn canonicalize(json: &str) -> Result<String> {
+    // Validate the semantic content first.
+    Catalog::load(json)?;
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| CatalogError::malformed(format!("catalog data: {error}")))?;
+    serde_json::to_string_pretty(&value)
+        .map(|mut out| {
+            out.push('\n');
+            out
+        })
+        .map_err(|error| CatalogError::malformed(format!("cannot serialize catalog: {error}")))
 }
