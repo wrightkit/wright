@@ -1,0 +1,16 @@
+[package]
+name = "wright-driver"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wright's reusable compiler/session driver shared by the CLI, tool APIs, and language services."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+wright-analyzer = { path = "../wright-analyzer" }
+wright-core = { path = "../wright-core" }
+wright-ir = { path = "../wright-ir" }
+wright-workshop = { path = "../wright-workshop" }

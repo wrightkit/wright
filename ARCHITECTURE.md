@@ -97,6 +97,18 @@ The initial bootstrap does not include a parser, lowering implementation, or
 backend. Adding one requires a focused contract and tests at the corresponding
 boundary.
 
+### Compiler driver and CLI (M6)
+
+The compiler/session driver (`wright-driver`) is the single orchestration path
+shared by the CLI, library consumers, and later tool/LSP adapters: input
+discovery → frontend selection → validation → lowering → analysis → emission.
+Frontends are selected behind one contract (the temporary `.opy` bridge, the
+native Workshop frontend, or Opy HIR v1 protocol JSON), so the M7 native
+`.opy` frontend replaces the bridge without changing callers. The `wright`
+CLI (`wright-cli`) is a thin argv/presentation layer; human text and
+machine-readable JSON (`wright-result/v1`) are two renderings of the same
+typed result envelope. The normative contract is `docs/cli.md`.
+
 ### Compatibility harness and oracle
 
 Compatibility tooling is an evaluation boundary around the core. It records

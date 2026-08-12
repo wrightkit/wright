@@ -1,0 +1,336 @@
+//! Black-box CLI end-to-end tests (#41): the actual `wright` executable is
+//! exercised across commands, inputs, output modes, exit codes, diagnostics,
+//! and stdout/stderr separation — the automation contract of the M6 CLI.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+/// The path of the `wright` binary under test.
+fn wright() -> &'static str {
+    env!("CARGO_BIN_EXE_wright")
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+}
+
+fn corpus_workshop(fixture_id: &str) -> String {
+    let oracle = std::fs::read_to_string(
+        workspace_root()
+            .join("compatibility/fixtures")
+            .join(fixture_id)
+            .join("oracle.json"),
+    )
+    .unwrap();
+    serde_json::from_str::<serde_json::Value>(&oracle).unwrap()["compile"]["workshop"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn temp_file(name: &str, content: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wright-cli-test-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, content).unwrap();
+    path
+}
+
+fn run(args: &[&str]) -> std::process::Output {
+    Command::new(wright())
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .expect("wright runs")
+}
+
+fn run_with_stdin(args: &[&str], stdin: &str) -> std::process::Output {
+    let mut child = Command::new(wright())
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright runs");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn parse_json(output: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(output).expect("stdout is one JSON envelope")
+}
+
+#[test]
+fn compile_over_workshop_file_emits_correct_text() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&["compile", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty(), "stderr clean on success");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Disable Inspector Recording"), "{stdout}");
+    assert!(stdout.contains("Ongoing - Global"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn compile_writes_output_file_and_reports_envelope() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let out_path = temp_file("emitted.txt", "");
+    let output = run(&[
+        "compile",
+        path.to_str().unwrap(),
+        "-o",
+        out_path.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["exit"], 0);
+    assert_eq!(envelope["command"], "compile");
+    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
+    assert_eq!(
+        envelope["result"]["output"]["written_to"].as_str().unwrap(),
+        out_path.to_str().unwrap()
+    );
+    let stored = std::fs::read_to_string(&out_path).unwrap();
+    assert!(stored.contains("Disable Inspector Recording"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn check_over_clean_input_exits_zero() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&["check", path.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("check: ok"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn check_over_malformed_input_exits_one_with_structured_diagnostics() {
+    // Enough locale evidence to pass detection, then a syntax error.
+    let path = temp_file(
+        "broken.txt",
+        "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
+    );
+    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty(), "JSON mode: no stderr");
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["exit"], 1);
+    let diagnostic = &envelope["diagnostics"][0];
+    assert!(diagnostic["code"].is_string());
+    assert_eq!(diagnostic["severity"], "error");
+    assert!(diagnostic["span"].is_object(), "diagnostics carry spans");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn check_reports_analysis_findings_as_diagnostics() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(output.status.code(), Some(0), "warnings do not fail check");
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "min-wait-loop")
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn analyze_over_workshop_input_reports_findings_with_spans() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let output = run(&["analyze", path.to_str().unwrap(), "-f", "json"]);
+    assert!(output.status.success());
+    let envelope = parse_json(&output.stdout);
+    let findings = envelope["result"]["findings"].as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["code"] == "min-wait-loop"),
+        "findings: {findings:?}"
+    );
+    for finding in findings {
+        assert!(finding["span"].is_object(), "findings carry spans");
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn inspect_over_workshop_input_lists_rules_and_symbols() {
+    let path = temp_file("decl.txt", &corpus_workshop("synthetic/declarations-rules"));
+    let output = run(&["inspect", path.to_str().unwrap(), "-f", "json"]);
+    assert!(output.status.success());
+    let envelope = parse_json(&output.stdout);
+    assert!(!envelope["result"]["rules"].as_array().unwrap().is_empty());
+    assert!(!envelope["result"]["symbols"].as_array().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn stdin_workshop_and_protocol_piping_work() {
+    // Workshop text on stdin.
+    let output = run_with_stdin(&["check", "-"], &corpus_workshop("synthetic/basic-rule"));
+    assert_eq!(output.status.code(), Some(0));
+
+    // Protocol JSON on stdin (auto-detected by leading `{`).
+    let protocol = std::fs::read_to_string(
+        workspace_root().join("adapter/fixtures/synthetic/basic-rule.json"),
+    )
+    .unwrap();
+    let output = run_with_stdin(&["check", "-"], &protocol);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdin protocol: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdin_opy_is_unsupported_with_exit_three() {
+    let output = run_with_stdin(
+        &["check", "-", "--kind", "opy", "-f", "json"],
+        "rule \"x\":\n",
+    );
+    assert_eq!(output.status.code(), Some(3));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["diagnostics"][0]["code"], "stdin-opy-unsupported");
+}
+
+#[test]
+fn unknown_extension_is_ambiguous_and_fails_explicitly() {
+    let path = temp_file("mystery.data", "whatever");
+    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["diagnostics"][0]["code"], "input-kind-unknown");
+    assert!(
+        envelope["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--kind"),
+        "ambiguous input guidance is actionable"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn unknown_flag_is_a_usage_error_exit_two() {
+    let output = run(&["check", "--frobnicate"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty(), "usage errors write stderr only");
+    assert!(!output.stderr.is_empty());
+}
+
+#[test]
+fn json_output_is_deterministic_across_runs() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let first = run(&["analyze", path.to_str().unwrap(), "-f", "json"]);
+    let second = run(&["analyze", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(
+        first.stdout, second.stdout,
+        "JSON output must be byte-deterministic"
+    );
+    assert!(!first.stdout.is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn stdout_stderr_separation_holds_in_both_modes() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    // Text mode: result on stdout, no stderr on success.
+    let output = run(&["check", path.to_str().unwrap()]);
+    assert!(output.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("check: ok"));
+    // JSON mode: envelope on stdout only.
+    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
+    assert!(output.stderr.is_empty());
+    parse_json(&output.stdout);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn explicit_locale_override_is_accepted() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&["check", path.to_str().unwrap(), "--locale", "en-US"]);
+    assert_eq!(output.status.code(), Some(0));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn version_and_help_are_documented_contract_surfaces() {
+    let output = run(&["version"]);
+    assert!(output.status.success());
+    let banner = String::from_utf8_lossy(&output.stdout);
+    assert!(banner.starts_with("wright "), "{banner}");
+
+    let output = run(&["--help"]);
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    for command in ["compile", "check", "analyze", "inspect"] {
+        assert!(help.contains(command), "help documents {command}");
+    }
+    assert!(help.contains("EXIT CODES"));
+}
+
+#[test]
+fn opy_file_compiles_through_the_adapter_bridge() {
+    if Command::new("node").arg("--version").output().is_err() {
+        eprintln!("skipping: node unavailable");
+        return;
+    }
+    let source = std::fs::read_to_string(
+        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
+    )
+    .unwrap();
+    let path = temp_file("basic-rule.opy", &source);
+    let output = run(&["compile", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], true);
+    let oracle = std::fs::read_to_string(
+        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/oracle.json"),
+    )
+    .unwrap();
+    let oracle_value: serde_json::Value = serde_json::from_str(&oracle).unwrap();
+    let expected = oracle_value["compile"]["workshop"].as_str().unwrap();
+    assert_eq!(
+        envelope["result"]["output"]["text"]
+            .as_str()
+            .unwrap()
+            .trim(),
+        expected.trim(),
+        "driver .opy output matches the oracle Workshop text"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

@@ -4,10 +4,11 @@ Wright is a Rust-based compiler and tooling project for the Overwatch Workshop /
 
 ## Status
 
-Wright is in the early project-bootstrap stage. The repository now contains a
-minimal `wright-core` Rust workspace, but does not yet publish a stable
-compiler binary, CLI, or release workflow. Those contracts will be introduced
-incrementally and documented when they become available.
+Wright is under active development. The repository contains a `wright` CLI and
+reusable `wright-driver` (compiler/session) crate over the Rust IR core, the
+native Workshop frontend/emitter, and the semantic analyzer. The native
+`.opy` frontend and further milestones are in progress; see the GitHub issues
+and roadmap for the current contract.
 
 ## Project direction
 
@@ -17,7 +18,7 @@ Wright is intended to provide a clear, testable foundation for working with Work
 * measurable compatibility with supported reference behavior;
 * explicit diagnostics for invalid or unsupported input;
 * deterministic output and inspectable implementation boundaries.
-
+20→
 ## Development
 
 Read [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md) before
@@ -33,8 +34,18 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets --all-features
 ```
 
-The bootstrap workspace intentionally does not yet contain a parser, backend,
-CLI, or OverPy integration.
+## CLI
+
+```sh
+wright compile input.opy           # emit Workshop text
+wright check program.txt          # parse, validate, analyze
+wright analyze program.txt        # semantic findings
+wright inspect program.txt        # structural model
+echo 'rule ...' | wright check -  # stdin workflows
+```
+
+See [`docs/cli.md`](docs/cli.md) for the exit-code, stdout/stderr, and
+`wright-result/v1` machine-readable contracts.
 
 ## License
 
