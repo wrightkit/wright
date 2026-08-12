@@ -12,5 +12,6 @@
 //! `wright-tool` binary wires the pipeline in `wright-core` (protocol →
 //! internal HIR → Workshop IR) into these services.
 
+pub mod analysis;
 pub mod cfg;
 pub mod symbols;
