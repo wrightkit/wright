@@ -1,44 +1,42 @@
-//! Temporary `.opy` frontend bridge (M6).
+//! The `.opy` frontend integration for the driver.
 //!
-//! Until the native `.opy` frontend lands in M7, `.opy` sources are converted
-//! through the pinned OverPy adapter (`adapter/bin/wright-adapter.js`) into
-//! an Opy HIR v1 payload, which the core then ingests natively. This module
-//! owns that subprocess boundary: locating the adapter, invoking Node,
-//! mapping failures to structured diagnostics, and returning the protocol
-//! JSON. The M7 native frontend replaces this module behind the same driver
-//! contract, so no caller changes.
+//! Since M7, the default `.opy` path is the native Rust frontend
+//! (`wright_opy`): no Node, no OverPy, stdin supported. The pinned OverPy
+//! adapter bridge remains available as an explicit compatibility fallback
+//! when `WRIGHT_ADAPTER_PATH` is set (migration/debugging only) — it is never
+//! selected silently.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::diag::{Diagnostic, Stage};
 use crate::input::ResolvedInput;
 
-/// The environment variable pointing at the adapter script (or its directory).
+/// The environment variable that selects the adapter fallback.
 pub const ADAPTER_ENV: &str = "WRIGHT_ADAPTER_PATH";
 
-/// Run the adapter over one resolved `.opy` input and return the Opy HIR v1
-/// protocol JSON.
+/// Whether the explicit adapter fallback is requested.
+pub fn adapter_fallback_requested() -> bool {
+    std::env::var_os(ADAPTER_ENV).is_some()
+}
+
+/// Run the pinned OverPy adapter over one resolved `.opy` input and return
+/// the Opy HIR v1 protocol JSON. Used only when `WRIGHT_ADAPTER_PATH` is set.
 pub fn run_adapter(input: &ResolvedInput) -> Result<String, Diagnostic> {
     let adapter = locate_adapter().ok_or_else(|| {
         Diagnostic::error(
             "adapter-unavailable",
             Stage::Frontend,
-            format!(
-                "the `.opy` frontend bridge (OverPy adapter) was not found; \
-                 set {ADAPTER_ENV} to the adapter script path or a directory \
-                 containing `bin/wright-adapter.js` (the native `.opy` frontend \
-                 replaces this bridge in M7)"
-            ),
+            "WRIGHT_ADAPTER_PATH is set but the adapter script was not found; \
+             point it at `bin/wright-adapter.js` or a directory containing it",
         )
     })?;
 
     let Some(path) = &input.path else {
         return Err(Diagnostic::error(
-            "stdin-opy-unsupported",
+            "adapter-stdin-unsupported",
             Stage::Frontend,
-            "`.opy` input on stdin is not supported by the adapter bridge; \
-             pass a file path (the native `.opy` frontend replaces the bridge in M7)",
+            "the adapter fallback cannot read `.opy` from stdin; use a file path",
         ));
     };
 
@@ -80,8 +78,7 @@ pub fn run_adapter(input: &ResolvedInput) -> Result<String, Diagnostic> {
                 "adapter-internal",
                 Stage::Frontend,
                 format!(
-                    "cannot run the `.opy` adapter bridge (`node {}`): {error}; \
-                     Node.js is required until the native frontend lands in M7",
+                    "cannot run the `.opy` adapter bridge (`node {}`): {error}",
                     path.display()
                 ),
             ));
@@ -121,41 +118,24 @@ pub fn run_adapter(input: &ResolvedInput) -> Result<String, Diagnostic> {
     Ok(json)
 }
 
-/// Locate the adapter script: `WRIGHT_ADAPTER_PATH` first (file path or
-/// directory containing `bin/wright-adapter.js`), then cwd-relative
-/// (walking up toward a repository root) and executable-relative candidates.
+/// Locate the adapter script when the fallback is requested: the env var is a
+/// file path or a directory containing `bin/wright-adapter.js`.
 fn locate_adapter() -> Option<PathBuf> {
-    if let Ok(value) = std::env::var(ADAPTER_ENV) {
-        let candidate = PathBuf::from(&value);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        if candidate.is_dir() {
-            let nested = candidate.join("bin/wright-adapter.js");
-            if nested.is_file() {
-                return Some(nested);
-            }
+    let value = std::env::var(ADAPTER_ENV).ok()?;
+    let candidate = PathBuf::from(&value);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    if candidate.is_dir() {
+        let nested = candidate.join("bin/wright-adapter.js");
+        if nested.is_file() {
+            return Some(nested);
         }
     }
+    None
+}
 
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    // Walk up from the cwd looking for a repository root with the adapter.
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut dir = Some(cwd.as_path());
-        for _ in 0..6 {
-            if let Some(current) = dir {
-                candidates.push(current.join("adapter/bin/wright-adapter.js"));
-                dir = current.parent();
-            }
-        }
-    }
-    candidates.push(PathBuf::from("adapter/bin/wright-adapter.js"));
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            // target/debug/wright -> ../../adapter/bin/wright-adapter.js
-            candidates.push(dir.join("../../adapter/bin/wright-adapter.js"));
-            candidates.push(dir.join("../adapter/bin/wright-adapter.js"));
-        }
-    }
-    candidates.into_iter().find(|candidate| candidate.is_file())
+/// The include root for a resolved input (used by the native frontend).
+pub fn include_root(input: &ResolvedInput) -> &Path {
+    &input.root
 }

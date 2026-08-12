@@ -13,4 +13,5 @@ sha2 = "0.10"
 wright-analyzer = { path = "../wright-analyzer" }
 wright-core = { path = "../wright-core" }
 wright-ir = { path = "../wright-ir" }
+wright-opy = { path = "../wright-opy" }
 wright-workshop = { path = "../wright-workshop" }

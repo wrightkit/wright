@@ -3,7 +3,6 @@
 //! CLI and library consumers share this single orchestration path.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use wright_driver::CompilerSession;
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
@@ -160,13 +159,7 @@ fn protocol_input_runs_all_workflows() {
 }
 
 #[test]
-fn opy_input_compiles_through_the_adapter_bridge() {
-    // The adapter bridge requires Node and the pinned OverPy package; skip
-    // when unavailable rather than failing the suite.
-    if Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipping: node unavailable");
-        return;
-    }
+fn opy_input_compiles_through_the_native_frontend() {
     let source = corpus_source_opy("synthetic/basic-rule");
     let path = temp_file("basic-rule.opy", &source);
     let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
@@ -181,7 +174,7 @@ fn opy_input_compiles_through_the_adapter_bridge() {
     assert_eq!(
         output.text.trim(),
         expected.trim(),
-        "the driver .opy path must reproduce the oracle Workshop text"
+        "the native .opy path must reproduce the oracle Workshop text"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -211,7 +204,10 @@ fn explicit_locale_override_wins() {
 }
 
 #[test]
-fn stdin_opy_is_unsupported_with_guidance() {
+fn stdin_opy_is_a_supported_kind() {
+    // `.opy` on stdin is no longer rejected: the native frontend owns it.
+    // (The driver reads the process stdin at load time; an empty stdin fails
+    // with `stdin-empty`, proving the kind check no longer blocks `.opy`.)
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Stdin,
         kind: SourceKind::Opy,
@@ -219,9 +215,13 @@ fn stdin_opy_is_unsupported_with_guidance() {
     })
     .unwrap();
     let envelope = session.check();
-    assert!(!envelope.ok);
-    assert_eq!(envelope.exit, exit::UNSUPPORTED);
-    assert_eq!(envelope.diagnostics[0].code, "stdin-opy-unsupported");
+    assert!(
+        !envelope
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "stdin-opy-unsupported"),
+        "stdin .opy is supported by the native frontend"
+    );
 }
 
 #[test]

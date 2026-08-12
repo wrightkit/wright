@@ -56,7 +56,8 @@ pub struct Envelope<T: Serialize> {
 /// Derive the exit code from the diagnostics of a failed run.
 ///
 /// * `4` — internal/environment failures (stage `internal`);
-/// * `3` — recognized but unsupported input/operation (only stdin `.opy`);
+/// * `3` — recognized but unsupported input/operation (adapter-fallback
+///   stdin, when the explicit fallback is requested);
 /// * `1` — everything else that blocks the workflow (source errors).
 pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
     let mut has_source_error = false;
@@ -67,7 +68,7 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if diagnostic.stage == crate::diag::Stage::Internal {
             return exit::INTERNAL;
         }
-        if diagnostic.code == "stdin-opy-unsupported" {
+        if diagnostic.code == "adapter-stdin-unsupported" {
             return exit::UNSUPPORTED;
         }
         has_source_error = true;

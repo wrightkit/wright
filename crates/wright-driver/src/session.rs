@@ -81,8 +81,16 @@ impl CompilerSession {
                 self.load_protocol(&json, &resolved)?
             }
             SourceKind::Opy => {
-                let json = opy::run_adapter(&resolved)?;
-                self.load_protocol(&json, &resolved)?
+                if opy::adapter_fallback_requested() {
+                    let json = opy::run_adapter(&resolved)?;
+                    self.load_protocol(&json, &resolved)?
+                } else {
+                    // Default: the native Rust `.opy` frontend (no Node/OverPy).
+                    let program =
+                        wright_opy::compile(&resolved.text, &resolved.display, &resolved.root)
+                            .map_err(|error| opy_diag(error, &resolved))?;
+                    self.load_hir(program, &resolved)?
+                }
             }
             SourceKind::Auto => {
                 return Err(Diagnostic::error(
@@ -144,6 +152,15 @@ impl CompilerSession {
     ) -> Result<wir::Program, Diagnostic> {
         let protocol =
             wright_core::hir::parse_str(json).map_err(|error| hir_diag(error, resolved))?;
+        self.load_hir(protocol, resolved)
+    }
+
+    /// Ingest an already-parsed Opy HIR program: convert, lower, validate.
+    fn load_hir(
+        &mut self,
+        protocol: wright_core::hir::Program,
+        resolved: &ResolvedInput,
+    ) -> Result<wir::Program, Diagnostic> {
         let model = protocol
             .to_ir()
             .map_err(|error| ir_diag("convert-error", Stage::Lowering, error, resolved))?;
@@ -452,6 +469,30 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
         stage,
         severity: crate::diag::Severity::Error,
         message: error.to_string(),
+        span,
+        source: Some(resolved.origin.clone()),
+    }
+}
+
+/// Map a native frontend error to a driver diagnostic.
+fn opy_diag(error: wright_opy::FrontendError, resolved: &ResolvedInput) -> Diagnostic {
+    let span = error.span.map(|span| SourceSpan {
+        file: span.file as usize,
+        path: resolved.display.clone(),
+        start: Position {
+            line: span.start.line,
+            col: span.start.col,
+        },
+        end: Position {
+            line: span.end.line,
+            col: span.end.col,
+        },
+    });
+    Diagnostic {
+        code: error.code,
+        stage: Stage::Frontend,
+        severity: crate::diag::Severity::Error,
+        message: error.message,
         span,
         source: Some(resolved.origin.clone()),
     }

@@ -212,14 +212,26 @@ fn stdin_workshop_and_protocol_piping_work() {
 }
 
 #[test]
-fn stdin_opy_is_unsupported_with_exit_three() {
-    let output = run_with_stdin(
-        &["check", "-", "--kind", "opy", "-f", "json"],
-        "rule \"x\":\n",
+fn stdin_opy_compiles_natively() {
+    let source = std::fs::read_to_string(
+        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
+    )
+    .unwrap();
+    let output = run_with_stdin(&["compile", "-", "--kind", "opy", "-f", "json"], &source);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "native .opy stdin: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.status.code(), Some(3));
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["diagnostics"][0]["code"], "stdin-opy-unsupported");
+    assert_eq!(envelope["ok"], true);
+    assert!(
+        envelope["result"]["output"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Disable Inspector Recording")
+    );
 }
 
 #[test]
@@ -299,11 +311,7 @@ fn version_and_help_are_documented_contract_surfaces() {
 }
 
 #[test]
-fn opy_file_compiles_through_the_adapter_bridge() {
-    if Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipping: node unavailable");
-        return;
-    }
+fn opy_file_compiles_through_the_native_frontend() {
     let source = std::fs::read_to_string(
         workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
     )
@@ -330,7 +338,20 @@ fn opy_file_compiles_through_the_adapter_bridge() {
             .unwrap()
             .trim(),
         expected.trim(),
-        "driver .opy output matches the oracle Workshop text"
+        "native .opy output matches the oracle Workshop text"
     );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn opy_corpus_frontend_errors_are_structured() {
+    // Malformed `.opy` fails with a structured frontend diagnostic, not a
+    // panic, and does not fall back to the adapter silently.
+    let path = temp_file("broken.opy", "rule \"missing colon\"\n    @Event global\n");
+    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["diagnostics"][0]["code"], "parse-error");
+    assert_eq!(envelope["diagnostics"][0]["stage"], "frontend");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

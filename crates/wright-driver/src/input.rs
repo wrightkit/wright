@@ -103,14 +103,8 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let kind = match config.kind {
         SourceKind::Auto => kind_from_stdin(&text)?,
-        SourceKind::Opy => {
-            return Err(Diagnostic::error(
-                "stdin-opy-unsupported",
-                Stage::Discovery,
-                "`.opy` input on stdin is not supported by the adapter bridge; \
-                 pass a file path (the native `.opy` frontend replaces the bridge in M7)",
-            ));
-        }
+        // The native frontend (M7) reads `.opy` from stdin; the include root
+        // defaults to the working directory.
         other => other,
     };
     let root = config

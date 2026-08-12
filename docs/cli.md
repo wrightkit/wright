@@ -54,7 +54,7 @@ writes compiled output to a file.
 | 0 | success | clean check, compiled artifact produced |
 | 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input |
 | 2 | usage error | unknown command/flag, missing option value |
-| 3 | recognized but unsupported | `.opy` on stdin (adapter bridge needs a file) |
+| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native) |
 | 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output |
 
 Exit codes are deterministic for identical inputs and configuration and are
@@ -111,14 +111,14 @@ For identical inputs and configuration, JSON output is byte-deterministic
 SHA-256 of the input bytes (`result.output.input_identity`); emitted artifacts
 carry their own SHA-256 (`result.output.sha256`).
 
-## The `.opy` frontend bridge
+## The `.opy` frontend
 
-Until the native `.opy` frontend (M7), `.opy` inputs are converted through the
-pinned OverPy adapter (`adapter/bin/wright-adapter.js`) via Node. The driver
-locates the adapter from `WRIGHT_ADAPTER_PATH`, the repository root, or the
-executable's location; a missing bridge is an environment failure (exit 4,
-code `adapter-unavailable`) with actionable guidance. The M7 native frontend
-replaces the bridge behind the same driver contract.
+Since M7, `.opy` inputs are compiled by the native Rust frontend
+(`wright-opy`): no Node, no OverPy, and stdin `.opy` is supported (the
+include root defaults to the working directory for stdin, `--root` for
+files). The pinned OverPy adapter remains available only as an explicit
+compatibility fallback by setting `WRIGHT_ADAPTER_PATH`; it is never selected
+silently. The frontend surface is declared in `docs/opy/support-matrix.md`.
 
 ## Library reuse
 

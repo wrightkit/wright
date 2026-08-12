@@ -42,12 +42,14 @@ outputs. It must not make the Rust core depend on OverPy implementation types.
 
 ### Frontend
 
-The v1 frontend is the existing OverPy `.opy` parser. It owns source-language
-parsing, frontend syntax rules, and frontend-specific parse structures. Those
-structures are external to Wright's public core boundary.
-
-A future native Rust frontend is an explicitly separate milestone. Nothing in
-this baseline requires or implies one.
+The v1 frontend is Wright's native Rust `.opy` frontend
+(`wright-opy`, milestone M7): lexer → preprocessing (includes/defines) →
+CST/parser → semantic resolution → Opy HIR. It owns source-language parsing,
+frontend syntax rules, and frontend-specific parse structures, and never
+depends on OverPy or Node at runtime. The supported surface is declared in
+[`docs/opy/support-matrix.md`](docs/opy/support-matrix.md) and verified at the
+HIR boundary by the differential suite. The pinned OverPy adapter remains the
+compatibility oracle and an explicit fallback.
 
 ### Adapter and bridge
 

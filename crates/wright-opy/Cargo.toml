@@ -1,0 +1,12 @@
+[package]
+name = "wright-opy"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wright's native .opy frontend: lexer, CST/parser, preprocessing, semantic resolution, and HIR lowering."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wright-core = { path = "../wright-core" }
