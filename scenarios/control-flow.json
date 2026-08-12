@@ -1,0 +1,13 @@
+{
+  "id": "control-flow",
+  "title": "Control flow: if/elif/else chains",
+  "category": "control-flow",
+  "target": { "game": "overwatch", "runtime": "workshop", "reference": "overpy@9.7.10" },
+  "source": "control-flow.opy",
+  "semantics": ["control-flow"],
+  "expects": [
+    { "description": "if/elif/else lowers to an If action with branch conditions", "check": "branchingIf" },
+    { "description": "comparison conditions preserve their operators", "check": "comparisons" },
+    { "description": "the program compiles standalone without Node/OverPy", "check": "compiles" }
+  ]
+}

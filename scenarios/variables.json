@@ -1,0 +1,13 @@
+{
+  "id": "variables",
+  "title": "Variable semantics: global assignment, augmented assignment, initializers",
+  "category": "variables",
+  "target": { "game": "overwatch", "runtime": "workshop", "reference": "overpy@9.7.10" },
+  "source": "variables.opy",
+  "semantics": ["variables"],
+  "expects": [
+    { "description": "globalvar with an array initializer synthesizes the Initialize rule", "check": "initializeRule" },
+    { "description": "augmented assignment lowers to Modify Global Variable", "check": "modifyAction" },
+    { "description": "the program compiles standalone without Node/OverPy", "check": "compiles" }
+  ]
+}

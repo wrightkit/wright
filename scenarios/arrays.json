@@ -1,0 +1,14 @@
+{
+  "id": "arrays",
+  "title": "Array semantics: literals, append, index, len",
+  "category": "arrays",
+  "target": { "game": "overwatch", "runtime": "workshop", "reference": "overpy@9.7.10" },
+  "source": "arrays.opy",
+  "semantics": ["arrays"],
+  "expects": [
+    { "description": "array literal lowers to an Array value", "check": "arrayLiteral" },
+    { "description": "append lowers to Modify Global Variable Append To Array", "check": "appendAction" },
+    { "description": "indexing x[0] folds to First Of under the compat profile", "check": "firstOfFold" },
+    { "description": "the program compiles standalone without Node/OverPy", "check": "compiles" }
+  ]
+}

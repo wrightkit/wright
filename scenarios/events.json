@@ -1,0 +1,14 @@
+{
+  "id": "events",
+  "title": "Event semantics: global and eachPlayer events",
+  "category": "events",
+  "target": { "game": "overwatch", "runtime": "workshop", "reference": "overpy@9.7.10" },
+  "source": "events.opy",
+  "semantics": ["events", "state"],
+  "expects": [
+    { "description": "@Event global lowers to Ongoing - Global", "check": "globalEvent" },
+    { "description": "@Event eachPlayer lowers to Ongoing - Each Player with All/All defaults", "check": "eachPlayerEvent" },
+    { "description": "player state assignment lowers to Set Player Variable", "check": "playerState" },
+    { "description": "the program compiles standalone without Node/OverPy", "check": "compiles" }
+  ]
+}

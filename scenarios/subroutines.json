@@ -1,0 +1,13 @@
+{
+  "id": "subroutines",
+  "title": "Subroutine semantics: def, declaration, and call",
+  "category": "subroutines",
+  "target": { "game": "overwatch", "runtime": "workshop", "reference": "overpy@9.7.10" },
+  "source": "subroutines.opy",
+  "semantics": ["subroutines"],
+  "expects": [
+    { "description": "def body lowers to a Subroutine-event rule named Subroutine <name>", "check": "subroutineRule" },
+    { "description": "a bare call of the subroutine lowers to Call Subroutine", "check": "callSubroutine" },
+    { "description": "the program compiles standalone without Node/OverPy", "check": "compiles" }
+  ]
+}

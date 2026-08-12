@@ -1,0 +1,13 @@
+{
+  "id": "loops",
+  "title": "Loop semantics: bounded for, while with wait, hot loop finding",
+  "category": "loops",
+  "target": { "game": "overwatch", "runtime": "workshop", "reference": "overpy@9.7.10" },
+  "source": "loops.opy",
+  "semantics": ["loops", "waits", "control-flow"],
+  "expects": [
+    { "description": "for x in range(3) lowers to a bounded For Global Variable", "check": "boundedFor" },
+    { "description": "a while loop that waits at the minimum rate is flagged min-wait-loop", "check": "finding min-wait-loop", "evidence": "analysis findings" },
+    { "description": "the program compiles standalone without Node/OverPy", "check": "compiles" }
+  ]
+}

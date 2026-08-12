@@ -1,0 +1,13 @@
+{
+  "id": "waits",
+  "title": "Wait semantics: default duration and explicit duration",
+  "category": "waits",
+  "target": { "game": "overwatch", "runtime": "workshop", "reference": "overpy@9.7.10" },
+  "source": "waits.opy",
+  "semantics": ["waits"],
+  "expects": [
+    { "description": "wait() with no arguments fills the reference defaults (0.016, Ignore Condition)", "check": "explicitWaitDefault", "evidence": "compiled action args" },
+    { "description": "wait(0.5) keeps the explicit duration", "check": "explicitDuration" },
+    { "description": "the program compiles standalone without Node/OverPy", "check": "compiles" }
+  ]
+}
