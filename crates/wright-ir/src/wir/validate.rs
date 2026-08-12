@@ -156,10 +156,12 @@ fn check_action(program: &Program, id: super::ActionId) -> Result<(), IrError> {
 }
 
 fn check_value(program: &Program, id: super::ValueId) -> Result<(), IrError> {
-    let value = program
+    let node = program
         .values
         .get(id)
         .ok_or_else(|| dangling("value", id.index()))?;
+    check_span(node.span, program)?;
+    let value = &node.value;
     match value {
         Value::Array(elements) => {
             for element in elements {

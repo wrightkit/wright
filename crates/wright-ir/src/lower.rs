@@ -35,7 +35,7 @@ use crate::hir::{
     self, BinaryOp, Expr, ExprId, GlobalVarId, MacroId, PlayerVarId, Stmt, StmtId, SubroutineId,
 };
 use crate::source::{SourceFile, Span};
-use crate::wir::{self, Action, ModifyOp, Value, ValueId};
+use crate::wir::{self, Action, ModifyOp, Value, ValueId, ValueNode};
 
 /// Lower an internal Opy HIR program into a Workshop IR program.
 pub fn lower(program: &hir::Program) -> Result<wir::Program, IrError> {
@@ -530,8 +530,14 @@ impl<'a> Lowerer<'a> {
                 *span,
             ));
         }
-        let zero = self.target.values.push(Value::Number(0.0));
-        let one = self.target.values.push(Value::Number(1.0));
+        let zero = self
+            .target
+            .values
+            .push(ValueNode::new(Value::Number(0.0), None));
+        let one = self
+            .target
+            .values
+            .push(ValueNode::new(Value::Number(1.0), None));
         match args.as_slice() {
             [stop] => Ok((zero, self.lower_value(*stop)?, one)),
             [start, stop] => Ok((self.lower_value(*start)?, self.lower_value(*stop)?, one)),
@@ -564,35 +570,53 @@ impl<'a> Lowerer<'a> {
             .exprs
             .get(id)
             .ok_or_else(|| dangling("expression", id))?;
+        let span = expression.span();
         let value = match expression {
-            Expr::Number { value, .. } => Value::Number(*value),
-            Expr::String { value, .. } => Value::String(value.clone()),
-            Expr::Bool { value, .. } => Value::Bool(*value),
-            Expr::Null { .. } => Value::Null,
-            Expr::Array { elements, .. } => Value::Array(self.lower_values_with(elements, params)?),
-            Expr::Vector { x, y, z, .. } => Value::Vector {
-                x: self.lower_value_with(*x, params)?,
-                y: self.lower_value_with(*y, params)?,
-                z: self.lower_value_with(*z, params)?,
-            },
+            Expr::Number { value, .. } => ValueNode::new(Value::Number(*value), span),
+            Expr::String { value, .. } => ValueNode::new(Value::String(value.clone()), span),
+            Expr::Bool { value, .. } => ValueNode::new(Value::Bool(*value), span),
+            Expr::Null { .. } => ValueNode::new(Value::Null, span),
+            Expr::Array { elements, .. } => ValueNode::new(
+                Value::Array(self.lower_values_with(elements, params)?),
+                span,
+            ),
+            Expr::Vector { x, y, z, .. } => ValueNode::new(
+                Value::Vector {
+                    x: self.lower_value_with(*x, params)?,
+                    y: self.lower_value_with(*y, params)?,
+                    z: self.lower_value_with(*z, params)?,
+                },
+                span,
+            ),
             Expr::Enum {
                 value_type, value, ..
-            } => Value::Enum {
-                value_type: value_type.clone(),
-                value: value.clone(),
-            },
-            Expr::GlobalVar { variable, .. } => Value::GlobalVariable(self.global(*variable)?),
+            } => ValueNode::new(
+                Value::Enum {
+                    value_type: value_type.clone(),
+                    value: value.clone(),
+                },
+                span,
+            ),
+            Expr::GlobalVar { variable, .. } => {
+                ValueNode::new(Value::GlobalVariable(self.global(*variable)?), span)
+            }
             Expr::PlayerVar {
                 player, variable, ..
-            } => Value::PlayerVariable {
-                player: self.lower_value_with(*player, params)?,
-                variable: self.player(*variable)?,
-            },
-            Expr::EventPlayer { .. } => Value::EventPlayer,
-            Expr::Call { name, args, .. } => Value::Call {
-                name: name.clone(),
-                args: self.lower_values_with(args, params)?,
-            },
+            } => ValueNode::new(
+                Value::PlayerVariable {
+                    player: self.lower_value_with(*player, params)?,
+                    variable: self.player(*variable)?,
+                },
+                span,
+            ),
+            Expr::EventPlayer { .. } => ValueNode::new(Value::EventPlayer, span),
+            Expr::Call { name, args, .. } => ValueNode::new(
+                Value::Call {
+                    name: name.clone(),
+                    args: self.lower_values_with(args, params)?,
+                },
+                span,
+            ),
             Expr::ReceiverCall {
                 receiver,
                 name,
@@ -601,10 +625,13 @@ impl<'a> Lowerer<'a> {
             } => {
                 let mut lowered = vec![self.lower_value_with(*receiver, params)?];
                 lowered.extend(self.lower_values_with(args, params)?);
-                Value::Call {
-                    name: name.clone(),
-                    args: lowered,
-                }
+                ValueNode::new(
+                    Value::Call {
+                        name: name.clone(),
+                        args: lowered,
+                    },
+                    span,
+                )
             }
             Expr::MacroCall { macro_, args, .. } => {
                 return self.expand_macro_call(*macro_, args, params);
@@ -620,31 +647,47 @@ impl<'a> Lowerer<'a> {
             },
             Expr::Binary {
                 op, left, right, ..
-            } => Value::Call {
-                name: op.as_str().to_string(),
-                args: vec![
-                    self.lower_value_with(*left, params)?,
-                    self.lower_value_with(*right, params)?,
-                ],
-            },
-            Expr::Unary { op, operand, .. } => Value::Call {
-                name: op.as_str().to_string(),
-                args: vec![self.lower_value_with(*operand, params)?],
-            },
-            Expr::Index { array, index, .. } => Value::Call {
-                name: "valueInArray".to_string(),
-                args: vec![
-                    self.lower_value_with(*array, params)?,
-                    self.lower_value_with(*index, params)?,
-                ],
-            },
-            Expr::Format { text, args, .. } => {
-                let mut lowered = vec![self.target.values.push(Value::String(text.clone()))];
-                lowered.extend(self.lower_values_with(args, params)?);
+            } => ValueNode::new(
                 Value::Call {
-                    name: "format".to_string(),
-                    args: lowered,
-                }
+                    name: op.as_str().to_string(),
+                    args: vec![
+                        self.lower_value_with(*left, params)?,
+                        self.lower_value_with(*right, params)?,
+                    ],
+                },
+                span,
+            ),
+            Expr::Unary { op, operand, .. } => ValueNode::new(
+                Value::Call {
+                    name: op.as_str().to_string(),
+                    args: vec![self.lower_value_with(*operand, params)?],
+                },
+                span,
+            ),
+            Expr::Index { array, index, .. } => ValueNode::new(
+                Value::Call {
+                    name: "valueInArray".to_string(),
+                    args: vec![
+                        self.lower_value_with(*array, params)?,
+                        self.lower_value_with(*index, params)?,
+                    ],
+                },
+                span,
+            ),
+            Expr::Format { text, args, .. } => {
+                let mut lowered = vec![
+                    self.target
+                        .values
+                        .push(ValueNode::new(Value::String(text.clone()), span)),
+                ];
+                lowered.extend(self.lower_values_with(args, params)?);
+                ValueNode::new(
+                    Value::Call {
+                        name: "format".to_string(),
+                        args: lowered,
+                    },
+                    span,
+                )
             }
             Expr::Constant { .. } => {
                 return Err(unsupported(

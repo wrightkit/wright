@@ -1,0 +1,13 @@
+[package]
+name = "wright-analyzer"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wright's semantic analysis and agent tooling layer over the IR."
+
+[dependencies]
+wright-ir = { path = "../wright-ir" }
+
+[dev-dependencies]
+wright-core = { path = "../wright-core" }

@@ -265,10 +265,11 @@ fn variable_name(name: Option<&super::WorkshopVariable>, id: usize) -> String {
 }
 
 fn render_value(program: &Program, id: super::ValueId, out: &mut String) {
-    let Some(value) = program.values.get(id) else {
+    let Some(node) = program.values.get(id) else {
         out.push_str(&format!("<dangling value {id}>"));
         return;
     };
+    let value = &node.value;
     match value {
         Value::Number(value) => out.push_str(&format_number(*value)),
         Value::String(value) => out.push_str(&format!("{:?}", value)),

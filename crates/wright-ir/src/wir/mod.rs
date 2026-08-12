@@ -28,8 +28,8 @@ pub type SubroutineId = Id<WorkshopSubroutine>;
 pub type RuleId = Id<Rule>;
 /// A typed ID referencing an [`Action`] in the action arena.
 pub type ActionId = Id<Action>;
-/// A typed ID referencing a [`Value`] in the value arena.
-pub type ValueId = Id<Value>;
+/// A typed ID referencing a [`ValueNode`] in the value arena.
+pub type ValueId = Id<ValueNode>;
 
 /// The Workshop IR program: tables and arenas produced by lowering.
 #[derive(Debug, Clone)]
@@ -41,7 +41,7 @@ pub struct Program {
     pub player_variables: Arena<WorkshopVariable>,
     pub subroutines: Arena<WorkshopSubroutine>,
     pub rules: Arena<Rule>,
-    pub values: Arena<Value>,
+    pub values: Arena<ValueNode>,
     pub actions: Arena<Action>,
 }
 
@@ -115,6 +115,13 @@ pub enum Event {
     Subroutine(SubroutineId),
 }
 
+/// A workshop value (expression) node with its source span.
+#[derive(Debug, Clone)]
+pub struct ValueNode {
+    pub value: Value,
+    pub span: Option<Span>,
+}
+
 /// A workshop value (expression).
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -144,6 +151,13 @@ pub enum Value {
         name: String,
         args: Vec<ValueId>,
     },
+}
+
+impl ValueNode {
+    /// Build a value node with a source span.
+    pub fn new(value: Value, span: Option<Span>) -> Self {
+        ValueNode { value, span }
+    }
 }
 
 /// A workshop action.
