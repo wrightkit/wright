@@ -69,22 +69,77 @@ pub struct ErrorInfo {
 pub const SERVICE_NAME: &str = "wright-tool";
 pub const SERVICE_VERSION: &str = "0.1.0";
 
+/// The origin of a compiled program, carried in tool responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Origin {
+    /// `workshop` (native localized Workshop text) or `protocol`
+    /// (`wright/opy-hir` bridge JSON).
+    pub kind: String,
+    /// The Workshop client locale, for Workshop-origin programs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+}
+
 /// The read-only semantic service over one compiled program.
 pub struct SemanticService<'a> {
     program: &'a wir::Program,
     index: SemanticIndex,
     findings: Vec<Finding>,
+    origin: Origin,
 }
 
 impl<'a> SemanticService<'a> {
-    /// Build the service over a compiled program.
+    /// Build the service over a compiled program of unknown origin.
     pub fn new(program: &'a wir::Program) -> Result<SemanticService<'a>, IrError> {
+        Self::with_origin(
+            program,
+            Origin {
+                kind: "unknown".to_string(),
+                locale: None,
+            },
+        )
+    }
+
+    /// Build the service over a program compiled from localized Workshop
+    /// text in the given locale.
+    pub fn from_workshop(
+        program: &'a wir::Program,
+        locale: &str,
+    ) -> Result<SemanticService<'a>, IrError> {
+        Self::with_origin(
+            program,
+            Origin {
+                kind: "workshop".to_string(),
+                locale: Some(wright_workshop::catalog::Locale::new(locale).to_string()),
+            },
+        )
+    }
+
+    /// Build the service over a program compiled from a bridge protocol
+    /// payload.
+    pub fn from_protocol(program: &'a wir::Program) -> Result<SemanticService<'a>, IrError> {
+        Self::with_origin(
+            program,
+            Origin {
+                kind: "protocol".to_string(),
+                locale: None,
+            },
+        )
+    }
+
+    /// Build the service over a compiled program with explicit origin
+    /// metadata.
+    pub fn with_origin(
+        program: &'a wir::Program,
+        origin: Origin,
+    ) -> Result<SemanticService<'a>, IrError> {
         let index = SemanticIndex::build(program)?;
         let findings = analysis::analyze(program);
         Ok(SemanticService {
             program,
             index,
             findings,
+            origin,
         })
     }
 
@@ -112,6 +167,7 @@ impl<'a> SemanticService<'a> {
             },
             Request::Program => Response::Ok {
                 result: json!({
+                    "origin": self.origin,
                     "files": self.program.files.len(),
                     "globalVariables": self.program.global_variables.len(),
                     "playerVariables": self.program.player_variables.len(),

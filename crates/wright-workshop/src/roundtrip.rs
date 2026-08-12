@@ -14,7 +14,6 @@ use wright_ir::wir;
 
 use crate::catalog::{Catalog, Locale};
 use crate::emitter;
-use crate::error::WorkshopError;
 use crate::parser;
 
 /// A recorded round-trip result with the evidence needed for a compatibility
