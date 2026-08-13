@@ -1,4 +1,4 @@
-program wright/opy-hir 1.0.0
+program wright/opy-hir 1.1.0
 generator @wright/overpy-adapter 0.1.0 (frontend overpy@9.7.10)
 files:
   0 source.opy

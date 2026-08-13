@@ -12,7 +12,8 @@ use std::collections::{HashMap, HashSet};
 
 use wright_core::hir::types::{
     Declaration, Define, Event, Expr as HirExpr, Generator, IfBranch, Position,
-    Program as HirProgram, Protocol, Rule, RuleEntry, SourceFile, Span as HirSpan, Stmt as HirStmt,
+    Program as HirProgram, Protocol, Rule, RuleEntry, Settings as HirSettings,
+    SettingsNode as HirSettingsNode, SourceFile, Span as HirSpan, Stmt as HirStmt,
 };
 
 use crate::cst::{self, Decl, Expr, RuleEntry as CstRuleEntry, Stmt};
@@ -20,7 +21,7 @@ use crate::diag::{FrontendError, FrontendResult, Span};
 
 /// The protocol envelope this frontend produces.
 const PROTOCOL_NAME: &str = "wright/opy-hir";
-const PROTOCOL_VERSION: &str = "1.0.0";
+const PROTOCOL_VERSION: &str = "1.1.0";
 
 /// Corpus-evidenced `.opy` enum names that map to Workshop enum domains.
 ///
@@ -202,7 +203,64 @@ pub fn lower(
         defines,
         declarations,
         rules,
+        settings: program.settings.as_ref().map(lower_settings),
     })
+}
+
+/// Map a parsed CST settings block onto the protocol settings tree (#86).
+fn lower_settings(settings: &cst::Settings) -> HirSettings {
+    HirSettings {
+        span: Some(settings.span.into()),
+        children: settings
+            .children
+            .iter()
+            .map(lower_settings_node)
+            .collect(),
+    }
+}
+
+fn lower_settings_node(node: &cst::SettingsNode) -> HirSettingsNode {
+    match node {
+        cst::SettingsNode::Group {
+            name,
+            children,
+            span,
+        } => HirSettingsNode::Group {
+            name: name.clone(),
+            children: children.iter().map(lower_settings_node).collect(),
+            span: Some((*span).into()),
+        },
+        cst::SettingsNode::Number { name, value, span } => HirSettingsNode::Number {
+            name: name.clone(),
+            value: *value,
+            span: Some((*span).into()),
+        },
+        cst::SettingsNode::Bool { name, value, span } => HirSettingsNode::Bool {
+            name: name.clone(),
+            value: *value,
+            span: Some((*span).into()),
+        },
+        cst::SettingsNode::String { name, value, span } => HirSettingsNode::String {
+            name: name.clone(),
+            value: value.clone(),
+            span: Some((*span).into()),
+        },
+        cst::SettingsNode::List {
+            name,
+            elements,
+            span,
+        } => HirSettingsNode::List {
+            name: name.clone(),
+            elements: elements
+                .iter()
+                .map(|element| wright_core::hir::types::SettingsListElement {
+                    value: element.value.clone(),
+                    span: Some(element.span.into()),
+                })
+                .collect(),
+            span: Some((*span).into()),
+        },
+    }
 }
 
 impl Lowerer {

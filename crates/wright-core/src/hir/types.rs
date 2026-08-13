@@ -71,6 +71,77 @@ pub struct Program {
     pub declarations: Vec<Declaration>,
     #[serde(default)]
     pub rules: Vec<RuleEntry>,
+    /// The typed custom-game-settings block, when the source had one (#86).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Settings>,
+}
+
+/// A custom-game-settings block (`settings { ... }`, #86).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Settings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<Span>,
+    #[serde(default)]
+    pub children: Vec<SettingsNode>,
+}
+
+/// One member of a settings group.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SettingsNode {
+    Group {
+        name: String,
+        #[serde(default)]
+        children: Vec<SettingsNode>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        span: Option<Span>,
+    },
+    Number {
+        name: String,
+        value: f64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        span: Option<Span>,
+    },
+    Bool {
+        name: String,
+        value: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        span: Option<Span>,
+    },
+    String {
+        name: String,
+        value: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        span: Option<Span>,
+    },
+    List {
+        name: String,
+        #[serde(default)]
+        elements: Vec<SettingsListElement>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        span: Option<Span>,
+    },
+}
+
+impl SettingsNode {
+    /// The source span of this node, if any.
+    pub fn span(&self) -> Option<&Span> {
+        match self {
+            SettingsNode::Group { span, .. }
+            | SettingsNode::Number { span, .. }
+            | SettingsNode::Bool { span, .. }
+            | SettingsNode::String { span, .. }
+            | SettingsNode::List { span, .. } => span.as_ref(),
+        }
+    }
+}
+
+/// One element of a settings list (corpus lists are all strings).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingsListElement {
+    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<Span>,
 }
 
 /// A program-scope symbol declaration.

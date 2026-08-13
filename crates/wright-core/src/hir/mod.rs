@@ -17,8 +17,8 @@ mod validate;
 
 pub use error::HirError;
 pub use types::{
-    Declaration, Event, Expr, Generator, Position, Program, Protocol, Rule, RuleEntry, SourceFile,
-    Span, Stmt,
+    Declaration, Event, Expr, Generator, Position, Program, Protocol, Rule, RuleEntry, Settings,
+    SettingsListElement, SettingsNode, SourceFile, Span, Stmt,
 };
 
 use serde_json::Value;

@@ -261,7 +261,77 @@ impl<'a> Builder<'a> {
             }
         }
 
+        // Phase E: the settings carrier (spans map through the registry).
+        if let Some(settings) = &self.protocol.settings {
+            let mut converted = Vec::with_capacity(settings.children.len());
+            for child in &settings.children {
+                converted.push(self.convert_settings_node(child)?);
+            }
+            self.target.settings = Some(wright_ir::settings::Settings {
+                span: self.span(settings.span)?,
+                children: converted,
+            });
+        }
+
         Ok(self.target)
+    }
+
+    fn convert_settings_node(
+        &self,
+        node: &types::SettingsNode,
+    ) -> Result<wright_ir::settings::SettingsNode, IrError> {
+        Ok(match node {
+            types::SettingsNode::Group {
+                name,
+                children,
+                span,
+            } => wright_ir::settings::SettingsNode::Group {
+                name: name.clone(),
+                children: children
+                    .iter()
+                    .map(|child| self.convert_settings_node(child))
+                    .collect::<Result<_, _>>()?,
+                span: self.span(*span)?,
+            },
+            types::SettingsNode::Number { name, value, span } => {
+                wright_ir::settings::SettingsNode::Number {
+                    name: name.clone(),
+                    value: *value,
+                    span: self.span(*span)?,
+                }
+            }
+            types::SettingsNode::Bool { name, value, span } => {
+                wright_ir::settings::SettingsNode::Bool {
+                    name: name.clone(),
+                    value: *value,
+                    span: self.span(*span)?,
+                }
+            }
+            types::SettingsNode::String { name, value, span } => {
+                wright_ir::settings::SettingsNode::String {
+                    name: name.clone(),
+                    value: value.clone(),
+                    span: self.span(*span)?,
+                }
+            }
+            types::SettingsNode::List {
+                name,
+                elements,
+                span,
+            } => wright_ir::settings::SettingsNode::List {
+                name: name.clone(),
+                elements: elements
+                    .iter()
+                    .map(|element| {
+                        Ok(wright_ir::settings::SettingsListElement {
+                            value: element.value.clone(),
+                            span: self.span(element.span)?,
+                        })
+                    })
+                    .collect::<Result<_, IrError>>()?,
+                span: self.span(*span)?,
+            },
+        })
     }
 
     fn convert_stmts(

@@ -4,7 +4,9 @@
 //! issue reports. It is not part of the wire contract: the same validated
 //! payload always produces the same dump, in payload order.
 
-use super::types::{Declaration, Event, Expr, Program, Rule, RuleEntry, Span, Stmt};
+use super::types::{
+    Declaration, Event, Expr, Program, Rule, RuleEntry, SettingsNode, Span, Stmt,
+};
 
 /// Render a validated program as a deterministic text dump.
 pub fn dump(program: &Program) -> String {
@@ -42,6 +44,13 @@ pub fn dump(program: &Program) -> String {
     out.push_str("declarations:\n");
     for declaration in &program.declarations {
         dump_declaration(declaration, &mut out, 1);
+    }
+
+    if let Some(settings) = &program.settings {
+        out.push_str("settings:\n");
+        for node in &settings.children {
+            dump_settings_node(node, &mut out, 1);
+        }
     }
 
     out.push_str("rules:\n");
@@ -269,6 +278,73 @@ fn dump_stmt(statement: &Stmt, out: &mut String, level: usize) {
                 indent(level),
                 span_suffix(span.as_ref())
             ));
+        }
+    }
+}
+
+fn dump_settings_node(node: &SettingsNode, out: &mut String, level: usize) {
+    match node {
+        SettingsNode::Group {
+            name,
+            children,
+            span,
+        } => {
+            out.push_str(&format!(
+                "{}group {}{}\n",
+                indent(level),
+                name,
+                span_suffix(span.as_ref())
+            ));
+            for child in children {
+                dump_settings_node(child, out, level + 1);
+            }
+        }
+        SettingsNode::Number { name, value, span } => {
+            out.push_str(&format!(
+                "{}number {} {}{}\n",
+                indent(level),
+                name,
+                format_number(*value),
+                span_suffix(span.as_ref())
+            ));
+        }
+        SettingsNode::Bool { name, value, span } => {
+            out.push_str(&format!(
+                "{}bool {} {}{}\n",
+                indent(level),
+                name,
+                value,
+                span_suffix(span.as_ref())
+            ));
+        }
+        SettingsNode::String { name, value, span } => {
+            out.push_str(&format!(
+                "{}string {} {:?}{}\n",
+                indent(level),
+                name,
+                value,
+                span_suffix(span.as_ref())
+            ));
+        }
+        SettingsNode::List {
+            name,
+            elements,
+            span,
+        } => {
+            out.push_str(&format!(
+                "{}list {}{}\n",
+                indent(level),
+                name,
+                span_suffix(span.as_ref())
+            ));
+            for element in elements {
+                out.push_str(&format!(
+                    "{}  element {}{}\n",
+                    indent(level),
+                    element.value,
+                    span_suffix(element.span.as_ref())
+                ));
+            }
         }
     }
 }

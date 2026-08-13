@@ -252,3 +252,112 @@ fn invalid_rule_payload(rule_json: &str) -> String {
         }}"#
     )
 }
+
+const SPAN: &str = r#"{ "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } }"#;
+
+/// A minimal valid settings block (every leaf uses evidenced table keys).
+const VALID_SETTINGS: &str = r#"{
+    "protocol": { "name": "wright/opy-hir", "version": "1.1.0" },
+    "generator": { "name": "g", "version": "0", "frontend": "f" },
+    "files": [ { "id": 0, "path": "source.opy" } ],
+    "declarations": [],
+    "rules": [],
+    "settings": {
+        "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 9, "col": 2 } },
+        "children": [
+            {
+                "kind": "group", "name": "gamemodes",
+                "children": [
+                    {
+                        "kind": "group", "name": "skirmish",
+                        "children": [
+                            { "kind": "list", "name": "enabledMaps", "elements": [ { "value": "workshopIsland", "span": __SPAN__ } ], "span": __SPAN__ },
+                            { "kind": "string", "name": "roleLimit", "value": "2OfEachRolePerTeam", "span": __SPAN__ }
+                        ],
+                        "span": __SPAN__
+                    },
+                    {
+                        "kind": "group", "name": "general",
+                        "children": [
+                            { "kind": "string", "name": "heroLimit", "value": "off", "span": __SPAN__ },
+                            { "kind": "number", "name": "respawnTime%", "value": 30, "span": __SPAN__ },
+                            { "kind": "bool", "name": "enableRandomHeroes", "value": true, "span": __SPAN__ }
+                        ],
+                        "span": __SPAN__
+                    }
+                ],
+                "span": __SPAN__
+            },
+            {
+                "kind": "group", "name": "heroes",
+                "children": [
+                    {
+                        "kind": "group", "name": "allTeams",
+                        "children": [
+                            { "kind": "list", "name": "enabledHeroes", "elements": [ { "value": "mei", "span": __SPAN__ } ], "span": __SPAN__ }
+                        ],
+                        "span": __SPAN__
+                    }
+                ],
+                "span": __SPAN__
+            }
+        ]
+    }
+}"#;
+
+#[test]
+fn valid_settings_payload_validates_and_dumps() {
+    let program = hir::parse_str(&VALID_SETTINGS.replace("__SPAN__", SPAN)).unwrap();
+    program
+        .validate()
+        .unwrap_or_else(|error| panic!("valid settings must validate: {error}"));
+    let dump = program.dump();
+    assert!(dump.contains("settings:\n"), "dump has a settings section");
+    assert!(dump.contains("group gamemodes"));
+    assert!(dump.contains("list enabledMaps"));
+    assert!(dump.contains("element workshopIsland"));
+}
+
+#[test]
+fn settings_unknown_key_is_rejected_with_span() {
+    let payload = VALID_SETTINGS
+        .replace("__SPAN__", SPAN)
+        .replace("\"name\": \"respawnTime%\"", "\"name\": \"scoreToWin\"");
+    let error = hir::parse_str(&payload).unwrap_err();
+    assert_eq!(error.code(), "settings-unknown-key");
+    match &error {
+        HirError::Invalid { span, .. } => assert!(span.is_some(), "error carries a span"),
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+}
+
+#[test]
+fn settings_unknown_value_is_rejected_with_span() {
+    let payload = VALID_SETTINGS
+        .replace("__SPAN__", SPAN)
+        .replace("\"value\": \"off\"", "\"value\": \"bogus\"");
+    let error = hir::parse_str(&payload).unwrap_err();
+    assert_eq!(error.code(), "settings-unknown-value");
+    match &error {
+        HirError::Invalid { span, .. } => assert!(span.is_some(), "error carries a span"),
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+}
+
+#[test]
+fn settings_unknown_list_element_is_rejected() {
+    let payload = VALID_SETTINGS
+        .replace("__SPAN__", SPAN)
+        .replace("\"value\": \"workshopIsland\"", "\"value\": \"noSuchMap\"");
+    let error = hir::parse_str(&payload).unwrap_err();
+    assert_eq!(error.code(), "settings-unknown-value");
+}
+
+#[test]
+fn settings_unknown_node_kind_is_rejected() {
+    let payload = VALID_SETTINGS
+        .replace("__SPAN__", SPAN)
+        .replace("\"kind\": \"bool\"", "\"kind\": \"enum\"");
+    let error = hir::parse_str(&payload).unwrap_err();
+    assert_eq!(error.code(), "unsupported-node");
+}
