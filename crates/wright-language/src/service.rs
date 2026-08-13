@@ -48,6 +48,15 @@ pub struct SemanticToken {
     pub token_type: String,
 }
 
+/// A source-aware location: a source/document identity plus a range.
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceLocation {
+    /// The source identity: the document URI for the main file, or the
+    /// resolved path for an included file.
+    pub source: String,
+    pub range: Range,
+}
+
 /// The result of a rename request.
 #[derive(Debug, Clone, Serialize)]
 pub struct RenameResult {
@@ -178,16 +187,38 @@ impl LanguageService {
         })
     }
 
-    /// The declaration range of the symbol referenced at a position.
-    pub fn definition(&self, uri: &str, position: Position) -> Option<Range> {
+    /// The definition location of the symbol referenced at a position.
+    ///
+    /// Prefers the symbol's definition site (a `def` body for subroutines),
+    /// falling back to its declaration. Returns a source-aware location:
+    /// cross-file declarations carry their own source identity (the included
+    /// file), not the requesting document.
+    pub fn definition(&self, uri: &str, position: Position) -> Option<SourceLocation> {
         let document = self.store.document(uri)?;
         let analysis = self.analyze(document);
         let symbol = self.symbol_at(&analysis, document, position)?;
-        symbol.span.map(|span| document.from_span(&span))
+        let span = analysis
+            .index
+            .as_ref()
+            .and_then(|index| {
+                index
+                    .references(symbol.id)
+                    .iter()
+                    .find(|reference| {
+                        reference.kind == wright_analyzer::symbols::ReferenceKind::Definition
+                    })
+                    .and_then(|reference| reference.span)
+            })
+            .or(symbol.span)?;
+        Some(self.source_location(&analysis.program, document, span))
     }
 
-    /// Every reference range of the symbol at a position.
-    pub fn references(&self, uri: &str, position: Position) -> Vec<Range> {
+    /// Every reference location of the symbol at a position.
+    ///
+    /// Each location is source-aware and preserves the compiler's `span.file`
+    /// provenance so references into included files point at the correct
+    /// source identity.
+    pub fn references(&self, uri: &str, position: Position) -> Vec<SourceLocation> {
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
         };
@@ -202,10 +233,54 @@ impl LanguageService {
                 index
                     .references(symbol.id)
                     .iter()
-                    .filter_map(|reference| reference.span.map(|span| document.from_span(&span)))
+                    .filter_map(|reference| reference.span)
+                    .map(|span| self.source_location(&analysis.program, document, span))
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Map a compiler span to its source identity and 0-based range.
+    fn source_location(
+        &self,
+        program: &wir::Program,
+        document: &Document,
+        span: wright_ir::source::Span,
+    ) -> SourceLocation {
+        let source = self.source_identity(program, document, span.file.index());
+        SourceLocation {
+            source,
+            range: span_to_range(span),
+        }
+    }
+
+    /// The editor-neutral source identity for a compiler file index: the
+    /// requesting document URI for the main file, or a resolved path for an
+    /// included file (relative include paths resolve against the workspace
+    /// root).
+    fn source_identity(
+        &self,
+        program: &wir::Program,
+        document: &Document,
+        file_index: usize,
+    ) -> String {
+        if file_index == 0 {
+            return document.uri.clone();
+        }
+        match program
+            .files
+            .get(wright_ir::ids::Id::from_index(file_index))
+        {
+            Some(file) => {
+                let path = std::path::PathBuf::from(&file.path);
+                if path.is_absolute() {
+                    path.to_string_lossy().into_owned()
+                } else {
+                    self.root.join(path).to_string_lossy().into_owned()
+                }
+            }
+            None => format!("<file {file_index}>"),
+        }
     }
 
     /// Completion items: declared symbols, builtin names, and keywords.
@@ -345,6 +420,20 @@ fn span_contains(span: wright_ir::source::Span, line: u32, col: u32) -> bool {
                 span.end.line,
                 span.end.col.saturating_sub(1).max(span.start.col),
             )
+}
+
+/// Convert a 1-based compiler span to a 0-based editor range.
+fn span_to_range(span: wright_ir::source::Span) -> Range {
+    Range {
+        start: Position {
+            line: span.start.line.saturating_sub(1),
+            character: span.start.col.saturating_sub(1),
+        },
+        end: Position {
+            line: span.end.line.saturating_sub(1),
+            character: span.end.col.saturating_sub(1),
+        },
+    }
 }
 
 fn empty_range() -> Range {

@@ -101,7 +101,11 @@ fn hover_and_definition_resolve_symbols() {
             },
         )
         .unwrap();
-    assert_eq!(definition.start.line, 0, "definition is on line 1");
+    assert_eq!(definition.range.start.line, 0, "definition is on line 1");
+    assert_eq!(
+        definition.source, uri,
+        "same-file definition keeps the source identity"
+    );
 }
 
 #[test]

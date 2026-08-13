@@ -113,8 +113,15 @@ pub fn validate_edit(
         }
     };
     // The session reads stdin; drive it through a temporary source file so
-    // includes resolve relative to the project root.
-    let temp_dir = std::env::temp_dir().join(format!("wright-edit-{}", std::process::id()));
+    // includes resolve relative to the project root. The path is unique per
+    // validation to keep concurrent edits isolated.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static EDIT_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "wright-edit-{}-{}",
+        std::process::id(),
+        EDIT_COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
     let _ = std::fs::create_dir_all(&temp_dir);
     let path = temp_dir.join("edit.opy");
     let _ = std::fs::write(&path, &edited);

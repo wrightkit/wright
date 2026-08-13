@@ -122,14 +122,10 @@ fn run() -> Result<(), String> {
                             .to_string(),
                         position,
                     )
-                    .map(|range| {
+                    .map(|location| {
                         GotoDefinitionResponse::Scalar(Location {
-                            uri: params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            range: convert_range(range),
+                            uri: source_to_uri(&location.source),
+                            range: convert_range(location.range),
                         })
                     });
                 write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
@@ -142,9 +138,9 @@ fn run() -> Result<(), String> {
                 let result: Vec<Location> = service
                     .references(&uri.to_string(), position)
                     .into_iter()
-                    .map(|range| Location {
-                        uri: uri.clone(),
-                        range: convert_range(range),
+                    .map(|location| Location {
+                        uri: source_to_uri(&location.source),
+                        range: convert_range(location.range),
                     })
                     .collect();
                 write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
@@ -389,6 +385,26 @@ fn convert_position(position: LspPosition) -> Position {
         line: position.line,
         character: position.character,
     }
+}
+
+/// Map an editor-neutral source identity to an LSP URI.
+fn source_to_uri(source: &str) -> Uri {
+    if source.starts_with("file://") {
+        return Uri::from_str(source).unwrap_or_else(|_| fallback_uri());
+    }
+    // Resolved filesystem paths become file:// URIs (the workspace root
+    // produces absolute paths in the language service).
+    let path = source.trim_start_matches("file://");
+    let normalized = if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{}", path.replace('\\', "/"))
+    };
+    Uri::from_str(&normalized).unwrap_or_else(|_| fallback_uri())
+}
+
+fn fallback_uri() -> Uri {
+    Uri::from_str("file:///unknown").expect("static URI parses")
 }
 
 fn convert_range(range: Range) -> LspRange {
