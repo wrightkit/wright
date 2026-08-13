@@ -38,6 +38,10 @@ const PARITY_CASES: &[(&str, &str)] = &[
         "adapter/fixtures/synthetic/preprocessing.json",
     ),
     (
+        "synthetic/settings",
+        "adapter/fixtures/synthetic/settings.json",
+    ),
+    (
         "real-world/overpy-cake",
         "adapter/fixtures/real-world/overpy-cake.json",
     ),
