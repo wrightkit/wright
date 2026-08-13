@@ -386,6 +386,175 @@ fn stale_didchange_does_not_overwrite_newer_state() {
 }
 
 #[test]
+fn lsp_cross_file_definition_and_references() {
+    let fixtures = workspace_root().join("crates/wright-language/tests/fixtures/multifile");
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    client.notify("textDocument/didOpen", serde_json::json!({
+        "textDocument": { "uri": uri_for("main.opy"), "languageId": "opy", "version": 1, "text": main },
+    }));
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("diagnostics");
+
+    // The showStatus() call is on line 5 (0-based line 4).
+    let definition = client.request(
+        2,
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("main.opy") },
+            "position": { "line": 4, "character": 5 },
+        }),
+    );
+    let target = definition["result"]["uri"].as_str().unwrap();
+    assert!(
+        target.contains("shared.opy"),
+        "definition target URI is shared.opy, not the requesting document: {target}"
+    );
+
+    let references = client.request(
+        3,
+        "textDocument/references",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("main.opy") },
+            "position": { "line": 4, "character": 5 },
+            "context": { "includeDeclaration": true },
+        }),
+    );
+    let uris: Vec<&str> = references["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|location| location["uri"].as_str())
+        .collect();
+    assert!(
+        uris.iter().any(|uri| uri.contains("shared.opy")),
+        "references include shared.opy: {uris:?}"
+    );
+    assert!(
+        uris.iter().any(|uri| uri.contains("main.opy")),
+        "references include main.opy: {uris:?}"
+    );
+
+    client.request(4, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_workspace_root_comes_from_initialize_not_cwd() {
+    // Spawn with the repo root as cwd; pass the multi-file fixture dir as
+    // rootUri. Include resolution must use rootUri (not the cwd), so
+    // `#!include "shared.opy"` resolves even though shared.opy is not at the
+    // repo root.
+    let fixtures = workspace_root().join("crates/wright-language/tests/fixtures/multifile");
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let mut client = LspClient::spawn(&workspace_root());
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", fixtures.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    client.notify("textDocument/didOpen", serde_json::json!({
+        "textDocument": { "uri": uri_for("main.opy"), "languageId": "opy", "version": 1, "text": main },
+    }));
+    let published = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("diagnostics");
+    assert!(
+        published["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|diagnostic| diagnostic["severity"] != 1),
+        "rootUri resolves the include; no error diagnostics: {}",
+        published["params"]["diagnostics"]
+    );
+
+    let definition = client.request(
+        2,
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("main.opy") },
+            "position": { "line": 4, "character": 5 },
+        }),
+    );
+    assert!(
+        definition["result"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("shared.opy"),
+        "cross-file definition resolves under rootUri: {}",
+        definition
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_open_unsaved_overlay_participates_in_includes() {
+    let fixtures = workspace_root().join("crates/wright-language/tests/fixtures/overlay");
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let shared_good = "subroutine showStatus\n\ndef showStatus():\n    print(\"overlay\")\n";
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", fixtures.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // shared.opy does not exist on disk; the open unsaved overlay provides it.
+    client.notify("textDocument/didOpen", serde_json::json!({
+        "textDocument": { "uri": uri_for("main.opy"), "languageId": "opy", "version": 1, "text": main },
+    }));
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+    client.notify("textDocument/didOpen", serde_json::json!({
+        "textDocument": { "uri": format!("file://{}", fixtures.join("shared.opy").display()), "languageId": "opy", "version": 1, "text": shared_good },
+    }));
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    let definition = client.request(
+        2,
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("main.opy") },
+            "position": { "line": 4, "character": 5 },
+        }),
+    );
+    assert!(
+        definition["result"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("shared.opy"),
+        "overlay include resolves: {}",
+        definition
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
 fn lsp_handles_malformed_input_without_crashing() {
     let root = workspace_root();
     let mut client = LspClient::spawn(&root);

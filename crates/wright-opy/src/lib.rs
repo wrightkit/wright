@@ -23,7 +23,7 @@ use std::path::Path;
 pub use diag::{FrontendError, FrontendResult};
 pub use lower::lower;
 pub use parser::parse;
-pub use preprocess::preprocess;
+pub use preprocess::{preprocess, preprocess_with_overlay};
 
 /// The frontend's supported protocol identity for generated HIR.
 pub const FRONTEND_NAME: &str = "wright/opy-native";
@@ -39,7 +39,19 @@ pub fn compile(
     main_path: &str,
     root: &Path,
 ) -> FrontendResult<wright_core::hir::Program> {
-    let (preprocessed, files) = preprocess(source, main_path, root)?;
+    compile_with_overlay(source, main_path, root, &std::collections::BTreeMap::new())
+}
+
+/// Compile with open-document overlays: includes resolve to overlay text
+/// (keyed by the include string or the resolved canonical path) before the
+/// filesystem, so unsaved editor buffers participate in include resolution.
+pub fn compile_with_overlay(
+    source: &str,
+    main_path: &str,
+    root: &Path,
+    overlay: &std::collections::BTreeMap<String, String>,
+) -> FrontendResult<wright_core::hir::Program> {
+    let (preprocessed, files) = preprocess_with_overlay(source, main_path, root, overlay)?;
     let parsed = parse(&preprocessed.tokens);
     if let Some(error) = parsed.errors.first() {
         return Err(error.clone());

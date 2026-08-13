@@ -134,6 +134,38 @@ impl DocumentStore {
     pub fn uris(&self) -> impl Iterator<Item = &str> {
         self.documents.keys().map(String::as_str)
     }
+
+    /// Build an overlay map for include resolution: open documents keyed by
+    /// their include-relative path and their absolute filesystem path, so
+    /// unsaved editor buffers participate in include resolution rather than
+    /// being silently ignored.
+    pub fn overlay(&self, root: &PathBuf) -> BTreeMap<String, String> {
+        let mut overlay = BTreeMap::new();
+        for document in self.documents.values() {
+            // Only overlay file-backed documents (skip synthetic/in-memory
+            // URIs without a filesystem path).
+            let Some(path) = uri_to_path(&document.uri) else {
+                continue;
+            };
+            overlay.insert(path.to_string_lossy().into_owned(), document.text.clone());
+            if let Ok(relative) = path.strip_prefix(root) {
+                overlay.insert(
+                    relative.to_string_lossy().into_owned(),
+                    document.text.clone(),
+                );
+            }
+            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                overlay.insert(name.to_string(), document.text.clone());
+            }
+        }
+        overlay
+    }
+}
+
+/// Convert a `file://` URI to a filesystem path, when applicable.
+fn uri_to_path(uri: &str) -> Option<PathBuf> {
+    let path = uri.strip_prefix("file://")?;
+    Some(PathBuf::from(path))
 }
 
 #[cfg(test)]

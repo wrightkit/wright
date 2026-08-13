@@ -97,9 +97,17 @@ impl LanguageService {
     }
 
     /// Analyze one document: preprocess → parse → lower → semantic index.
+    /// Open-document overlays (unsaved editor buffers) participate in include
+    /// resolution before the filesystem.
     pub fn analyze(&self, document: &Document) -> Analysis {
         let mut parse_errors = Vec::new();
-        let hir = match wright_opy::compile(&document.text, &document.uri, &self.root) {
+        let overlay = self.store.overlay(&self.root);
+        let hir = match wright_opy::compile_with_overlay(
+            &document.text,
+            &document.uri,
+            &self.root,
+            &overlay,
+        ) {
             Ok(hir) => hir,
             Err(error) => {
                 parse_errors.push(error);

@@ -14,8 +14,8 @@ use lsp_types::{
     CompletionItem as LspCompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover as LspHover, HoverContents, InitializeResult, Location,
-    MarkupContent, MarkupKind, Position as LspPosition, PositionEncodingKind,
+    GotoDefinitionResponse, Hover as LspHover, HoverContents, InitializeParams, InitializeResult,
+    Location, MarkupContent, MarkupKind, Position as LspPosition, PositionEncodingKind,
     PublishDiagnosticsParams, Range as LspRange, ReferenceParams, RenameParams, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensParams,
     SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentPositionParams,
@@ -40,9 +40,10 @@ fn run() -> Result<(), String> {
     let mut reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    // The language service uses the process working directory as the root.
-    let root = std::env::current_dir().map_err(|error| error.to_string())?;
-    let mut service = LanguageService::new(root);
+    // The workspace root defaults to the cwd until `initialize` supplies
+    // rootUri/workspaceFolders.
+    let mut root = std::env::current_dir().map_err(|error| error.to_string())?;
+    let mut service = LanguageService::new(root.clone());
 
     loop {
         let message = read_message(&mut reader)?;
@@ -57,6 +58,14 @@ fn run() -> Result<(), String> {
 
         match method.as_str() {
             "initialize" => {
+                if let Some(params) = params {
+                    if let Ok(initialize) = serde_json::from_value::<InitializeParams>(params) {
+                        if let Some(resolved) = initialize_root(&initialize) {
+                            root = resolved;
+                            service = LanguageService::new(root.clone());
+                        }
+                    }
+                }
                 let result = initialize_result();
                 write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
             }
@@ -72,7 +81,7 @@ fn run() -> Result<(), String> {
                 let document = Document::with_version(
                     uri.clone(),
                     params.text_document.text,
-                    std::env::current_dir().map_err(|e| e.to_string())?,
+                    root.clone(),
                     params.text_document.version,
                 );
                 service.store.open(document);
@@ -385,6 +394,32 @@ fn convert_position(position: LspPosition) -> Position {
         line: position.line,
         character: position.character,
     }
+}
+
+/// Resolve the workspace root from LSP initialize parameters: `rootUri`
+/// first, then the first `workspaceFolders` URI. An empty/invalid URI leaves
+/// the current cwd root in place.
+#[allow(deprecated)]
+fn initialize_root(params: &InitializeParams) -> Option<std::path::PathBuf> {
+    if let Some(uri) = &params.root_uri {
+        if let Some(path) = uri_to_path(uri.as_str()) {
+            return Some(path);
+        }
+    }
+    params
+        .workspace_folders
+        .as_ref()
+        .and_then(|folders| folders.first())
+        .and_then(|folder| uri_to_path(folder.uri.as_str()))
+}
+
+/// Convert an LSP `file://` URI to a filesystem path; an empty path is None.
+fn uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
+    let path = uri.strip_prefix("file://")?;
+    if path.is_empty() || path == "/" {
+        return None;
+    }
+    Some(std::path::PathBuf::from(path))
 }
 
 /// Map an editor-neutral source identity to an LSP URI.

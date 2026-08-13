@@ -10,6 +10,7 @@
 //! graphs (cycles, missing files) and recursive defines fail deterministically
 //! with structured diagnostics that name the offending file/line.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::diag::{FrontendError, FrontendResult, Span};
@@ -45,6 +46,19 @@ pub fn preprocess(
     main_path: &str,
     root: &Path,
 ) -> FrontendResult<(Preprocessed, Vec<FileRecord>)> {
+    preprocess_with_overlay(main_text, main_path, root, &BTreeMap::new())
+}
+
+/// Preprocess with open-document overlays: includes resolve to overlay text
+/// (keyed by the include string or the resolved canonical path) before the
+/// filesystem. Overlays model unsaved editor buffers without changing the
+/// compiler's source-loading contract.
+pub fn preprocess_with_overlay(
+    main_text: &str,
+    main_path: &str,
+    root: &Path,
+    overlay: &BTreeMap<String, String>,
+) -> FrontendResult<(Preprocessed, Vec<FileRecord>)> {
     let mut pre = Preprocessor {
         files: vec![FileRecord {
             id: 0,
@@ -52,6 +66,7 @@ pub fn preprocess(
         }],
         next_file_id: 1,
         root: root.to_path_buf(),
+        overlay: overlay.clone(),
         include_stack: Vec::new(),
         macros: Vec::new(),
         defines: Vec::new(),
@@ -75,6 +90,7 @@ struct Preprocessor {
     files: Vec<FileRecord>,
     next_file_id: u32,
     root: PathBuf,
+    overlay: BTreeMap<String, String>,
     include_stack: Vec<PathBuf>,
     macros: Vec<MacroDef>,
     defines: Vec<DefineRecord>,
@@ -147,33 +163,56 @@ impl Preprocessor {
         // The include base is the root; the main file is the only file in the
         // registry (reference convention), so path resolution is root-based.
         let candidate = self.root.join(include);
-        let canonical = std::fs::canonicalize(&candidate).map_err(|_| {
-            FrontendError::at(
-                "include-not-found",
-                format!(
-                    "cannot find included file '{include}' under root '{}'",
-                    self.root.display()
-                ),
-                span,
-            )
-        })?;
-        if self.include_stack.contains(&canonical) {
+        let canonical = std::fs::canonicalize(&candidate).ok();
+        // An open-document overlay (an unsaved editor buffer) takes
+        // precedence over the filesystem. Overlays are keyed by the include
+        // string and by the resolved canonical path, so both spellings work.
+        let overlay_text = self
+            .overlay
+            .get(include)
+            .or_else(|| {
+                canonical
+                    .as_ref()
+                    .and_then(|path| self.overlay.get(&path.to_string_lossy().into_owned()))
+            })
+            .cloned();
+
+        // The include-cycle identity: the canonical path when the file exists,
+        // otherwise the candidate path (overlays may not have a disk backing).
+        let identity = canonical.clone().unwrap_or_else(|| candidate.clone());
+        if self.include_stack.contains(&identity) {
             return Err(FrontendError::at(
                 "include-cycle",
                 format!(
                     "include cycle detected: '{}' is already being included",
-                    canonical.display()
+                    identity.display()
                 ),
                 span,
             ));
         }
-        let text = std::fs::read_to_string(&canonical).map_err(|error| {
-            FrontendError::at(
-                "include-not-found",
-                format!("cannot read included file '{include}': {error}"),
-                span,
-            )
-        })?;
+
+        let text = match overlay_text {
+            Some(text) => text,
+            None => {
+                let canonical = canonical.ok_or_else(|| {
+                    FrontendError::at(
+                        "include-not-found",
+                        format!(
+                            "cannot find included file '{include}' under root '{}'",
+                            self.root.display()
+                        ),
+                        span,
+                    )
+                })?;
+                std::fs::read_to_string(&canonical).map_err(|error| {
+                    FrontendError::at(
+                        "include-not-found",
+                        format!("cannot read included file '{include}': {error}"),
+                        span,
+                    )
+                })?
+            }
+        };
         // Each include registers a file in the registry (reference behavior).
         let file_id = self.next_file_id;
         self.next_file_id += 1;
@@ -181,7 +220,7 @@ impl Preprocessor {
             id: file_id,
             path: include.to_string(),
         });
-        self.include_stack.push(canonical);
+        self.include_stack.push(identity);
         let mut included = lex(LexInput {
             file_id,
             text: &text,
