@@ -255,10 +255,17 @@ impl LanguageService {
         document: &Document,
         span: wright_ir::source::Span,
     ) -> SourceLocation {
-        let source = self.source_identity(program, document, span.file.index());
+        let file_index = span.file.index();
+        let source = self.source_identity(program, document, file_index);
+        let source_text = if file_index == 0 {
+            document.text.clone()
+        } else {
+            let path = std::path::PathBuf::from(&source);
+            self.store.text_for_path(&path).unwrap_or_default()
+        };
         SourceLocation {
             source,
-            range: span_to_range(span),
+            range: crate::document::span_to_range(&span, &source_text),
         }
     }
 
@@ -292,34 +299,78 @@ impl LanguageService {
     }
 
     /// Completion items: declared symbols, builtin names, and keywords.
-    pub fn completion(&self, uri: &str, _position: Position) -> Vec<CompletionItem> {
+    pub fn completion(&self, uri: &str, position: Position) -> Vec<CompletionItem> {
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
         };
         let analysis = self.analyze(document);
+
+        // Position/context: the identifier being typed and whether the
+        // position follows a member-access dot.
+        let prefix = word_prefix(&document.text, position);
+        let member = member_receiver(&document.text, position);
+
+        if let Some(receiver) = member {
+            // Member context: enum members when the receiver is a known enum
+            // domain, otherwise the corpus-evidenced receiver methods.
+            let catalog = wright_workshop::catalog::Catalog::builtin().ok();
+            if let Some(domain) = catalog.and_then(|catalog| {
+                catalog
+                    .enum_domains()
+                    .find(|domain| domain.domain == receiver)
+                    .cloned()
+            }) {
+                return domain
+                    .members
+                    .iter()
+                    .filter(|member| member.member.starts_with(&prefix))
+                    .map(|member| CompletionItem {
+                        label: member.member.clone(),
+                        kind: "enumMember".to_string(),
+                        detail: Some(domain.domain.clone()),
+                    })
+                    .collect();
+            }
+            return RECEIVER_MEMBERS
+                .iter()
+                .filter(|member| member.starts_with(&prefix))
+                .map(|member| CompletionItem {
+                    label: member.to_string(),
+                    kind: "method".to_string(),
+                    detail: Some("receiver member".to_string()),
+                })
+                .collect();
+        }
+
         let mut items = Vec::new();
         if let Some(index) = &analysis.index {
             for symbol in index.symbols() {
-                items.push(CompletionItem {
-                    label: symbol.name.clone(),
-                    kind: symbol_kind_name(symbol.kind).to_string(),
-                    detail: None,
-                });
+                if symbol.name.starts_with(&prefix) {
+                    items.push(CompletionItem {
+                        label: symbol.name.clone(),
+                        kind: symbol_kind_name(symbol.kind).to_string(),
+                        detail: None,
+                    });
+                }
             }
         }
         for builtin in BUILTIN_NAMES {
-            items.push(CompletionItem {
-                label: builtin.to_string(),
-                kind: "function".to_string(),
-                detail: Some("builtin".to_string()),
-            });
+            if builtin.starts_with(&prefix) {
+                items.push(CompletionItem {
+                    label: builtin.to_string(),
+                    kind: "function".to_string(),
+                    detail: Some("builtin".to_string()),
+                });
+            }
         }
         for keyword in KEYWORDS {
-            items.push(CompletionItem {
-                label: keyword.to_string(),
-                kind: "keyword".to_string(),
-                detail: None,
-            });
+            if keyword.starts_with(&prefix) {
+                items.push(CompletionItem {
+                    label: keyword.to_string(),
+                    kind: "keyword".to_string(),
+                    detail: None,
+                });
+            }
         }
         items
     }
@@ -361,12 +412,8 @@ impl LanguageService {
             return Vec::new();
         };
         let analysis = self.analyze(document);
-        let mut declared: Vec<String> = analysis
-            .index
-            .as_ref()
-            .map(|index| index.symbols().map(|symbol| symbol.name.clone()).collect())
-            .unwrap_or_default();
-        // Token classification needs the raw lexer stream.
+        // Token classification needs the raw lexer stream plus the semantic
+        // index for symbol identity (never name-string membership alone).
         let tokens = match wright_opy::lexer::lex(wright_opy::lexer::LexInput {
             file_id: 0,
             text: &document.text,
@@ -379,14 +426,21 @@ impl LanguageService {
             if token.kind == wright_opy::lexer::TokenKind::Eof {
                 continue;
             }
-            let token_type = classify_token(token, &mut declared);
+            let token_type = classify_token(token, analysis.index.as_ref());
             if token_type.is_empty() {
                 continue;
             }
             result.push(SemanticToken {
                 line: token.span.start.line.saturating_sub(1),
-                character: token.span.start.col.saturating_sub(1),
-                length: token.text.chars().count().max(1) as u32,
+                character: crate::document::char_offset_to_utf16(
+                    document
+                        .text
+                        .lines()
+                        .nth(token.span.start.line.saturating_sub(1) as usize)
+                        .unwrap_or_default(),
+                    token.span.start.col.saturating_sub(1) as usize,
+                ) as u32,
+                length: crate::document::utf16_len(&token.text).max(1) as u32,
                 token_type,
             });
         }
@@ -428,20 +482,6 @@ fn span_contains(span: wright_ir::source::Span, line: u32, col: u32) -> bool {
                 span.end.line,
                 span.end.col.saturating_sub(1).max(span.start.col),
             )
-}
-
-/// Convert a 1-based compiler span to a 0-based editor range.
-fn span_to_range(span: wright_ir::source::Span) -> Range {
-    Range {
-        start: Position {
-            line: span.start.line.saturating_sub(1),
-            character: span.start.col.saturating_sub(1),
-        },
-        end: Position {
-            line: span.end.line.saturating_sub(1),
-            character: span.end.col.saturating_sub(1),
-        },
-    }
 }
 
 fn empty_range() -> Range {
@@ -533,15 +573,69 @@ const KEYWORDS: &[&str] = &[
     "None",
 ];
 
-/// Classify one token by parser/semantic identity.
-fn classify_token(token: &wright_opy::lexer::Token, declared: &mut [String]) -> String {
+/// Corpus-evidenced receiver members offered in member-access completion.
+const RECEIVER_MEMBERS: &[&str] = &["append", "format", "uniform", "choice", "hasSpawned"];
+
+/// The identifier being typed immediately before a position.
+fn word_prefix(text: &str, position: Position) -> String {
+    let line = text.lines().nth(position.line as usize).unwrap_or_default();
+    let char_end = crate::document::utf16_offset_to_char(line, position.character as usize);
+    line[..char_end]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+/// The receiver immediately before a member-access dot, when the position
+/// follows `<receiver>.` (possibly with a partial member typed after the dot).
+fn member_receiver(text: &str, position: Position) -> Option<String> {
+    let line = text.lines().nth(position.line as usize)?;
+    let char_end = crate::document::utf16_offset_to_char(line, position.character as usize);
+    let before = &line[..char_end];
+    let trimmed = before.trim_end().strip_suffix('.')?;
+    let name = trimmed
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect::<Vec<_>>();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.into_iter().rev().collect())
+    }
+}
+
+/// Classify one token by parser/semantic identity: keywords by parser
+/// identity, symbol references by semantic index spans and symbol kinds,
+/// builtin functions by the corpus catalog, and everything else as an
+/// identifier.
+fn classify_token(token: &wright_opy::lexer::Token, index: Option<&SemanticIndex>) -> String {
     use wright_opy::lexer::TokenKind;
     match token.kind {
         TokenKind::Ident => {
             if KEYWORDS.contains(&token.text.as_str()) {
-                "keyword".to_string()
-            } else if declared.iter().any(|name| name == &token.text) {
-                "variable".to_string()
+                return "keyword".to_string();
+            }
+            if let Some(index) = index {
+                if let Some(kind) =
+                    symbol_kind_at(index, token.span.start.line, token.span.start.col)
+                {
+                    return match kind {
+                        wright_analyzer::symbols::SymbolKind::GlobalVariable
+                        | wright_analyzer::symbols::SymbolKind::PlayerVariable => {
+                            "variable".to_string()
+                        }
+                        wright_analyzer::symbols::SymbolKind::Subroutine => "function".to_string(),
+                        wright_analyzer::symbols::SymbolKind::Rule => "class".to_string(),
+                    };
+                }
+            }
+            if BUILTIN_NAMES.contains(&token.text.as_str()) {
+                "function".to_string()
             } else {
                 "identifier".to_string()
             }
@@ -553,4 +647,30 @@ fn classify_token(token: &wright_opy::lexer::Token, declared: &mut [String]) -> 
         TokenKind::Newline | TokenKind::Indent(_) => String::new(),
         _ => "operator".to_string(),
     }
+}
+
+/// The semantic kind of the symbol whose declaration or reference span
+/// contains a 1-based line/column, when one exists.
+fn symbol_kind_at(
+    index: &SemanticIndex,
+    line: u32,
+    col: u32,
+) -> Option<wright_analyzer::symbols::SymbolKind> {
+    for symbol in index.symbols() {
+        if symbol
+            .span
+            .is_some_and(|span| span_contains(span, line, col))
+        {
+            return Some(symbol.kind);
+        }
+        for reference in index.references(symbol.id) {
+            if reference
+                .span
+                .is_some_and(|span| span_contains(span, line, col))
+            {
+                return Some(symbol.kind);
+            }
+        }
+    }
+    None
 }

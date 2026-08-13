@@ -61,24 +61,20 @@ impl Document {
     }
 
     /// The 1-based line/column of a 0-based editor position (clamped).
+    ///
+    /// The editor `character` is a UTF-16 code-unit offset (the LSP
+    /// convention); the compiler column is a Unicode scalar-value column.
     pub fn to_line_col(&self, position: Position) -> (u32, u32) {
         let line = (position.line as usize).min(self.text.lines().count().max(1) - 1);
         let line_text = self.text.lines().nth(line).unwrap_or_default();
-        let character = (position.character as usize).min(line_text.chars().count());
+        let character = utf16_offset_to_char(line_text, position.character as usize);
         (line as u32 + 1, character as u32 + 1)
     }
 
-    /// Convert a 1-based compiler span into a 0-based editor range.
+    /// Convert a 1-based compiler span into a 0-based editor range, where
+    /// the editor character is a UTF-16 code-unit offset.
     pub fn from_span(&self, span: &wright_ir::source::Span) -> Range {
-        let start = Position {
-            line: span.start.line.saturating_sub(1),
-            character: span.start.col.saturating_sub(1),
-        };
-        let end = Position {
-            line: span.end.line.saturating_sub(1),
-            character: span.end.col.saturating_sub(1),
-        };
-        Range { start, end }
+        span_to_range(span, &self.text)
     }
 }
 
@@ -135,6 +131,19 @@ impl DocumentStore {
         self.documents.keys().map(String::as_str)
     }
 
+    /// The text of a filesystem path, preferring an open unsaved document
+    /// overlay and falling back to the filesystem.
+    pub fn text_for_path(&self, path: &PathBuf) -> Option<String> {
+        for document in self.documents.values() {
+            if let Some(document_path) = uri_to_path(&document.uri) {
+                if document_path == *path {
+                    return Some(document.text.clone());
+                }
+            }
+        }
+        std::fs::read_to_string(path).ok()
+    }
+
     /// Build an overlay map for include resolution: open documents keyed by
     /// their include-relative path and their absolute filesystem path, so
     /// unsaved editor buffers participate in include resolution rather than
@@ -166,6 +175,57 @@ impl DocumentStore {
 fn uri_to_path(uri: &str) -> Option<PathBuf> {
     let path = uri.strip_prefix("file://")?;
     Some(PathBuf::from(path))
+}
+
+/// The UTF-16 code-unit length of a string (non-BMP chars count 2).
+pub fn utf16_len(s: &str) -> usize {
+    s.chars().map(|c| c.len_utf16()).sum()
+}
+
+/// Convert a 0-based UTF-16 code-unit offset to a 0-based character offset
+/// (clamped to the line's character count).
+pub fn utf16_offset_to_char(line: &str, utf16_offset: usize) -> usize {
+    let mut chars = 0usize;
+    let mut utf16 = 0usize;
+    for c in line.chars() {
+        if utf16 >= utf16_offset {
+            break;
+        }
+        utf16 += c.len_utf16();
+        chars += 1;
+    }
+    chars
+}
+
+/// Convert a 0-based character offset to a 0-based UTF-16 code-unit offset
+/// (clamped to the line's UTF-16 length).
+pub fn char_offset_to_utf16(line: &str, char_offset: usize) -> usize {
+    line.chars().take(char_offset).map(|c| c.len_utf16()).sum()
+}
+
+/// Convert a 1-based compiler span to a 0-based editor range with UTF-16
+/// character offsets, using the source text to resolve each line's length.
+pub fn span_to_range(span: &wright_ir::source::Span, source_text: &str) -> Range {
+    let start_line = source_text
+        .lines()
+        .nth(span.start.line.saturating_sub(1) as usize)
+        .unwrap_or_default();
+    let end_line = source_text
+        .lines()
+        .nth(span.end.line.saturating_sub(1) as usize)
+        .unwrap_or_default();
+    Range {
+        start: Position {
+            line: span.start.line.saturating_sub(1),
+            character: char_offset_to_utf16(start_line, span.start.col.saturating_sub(1) as usize)
+                as u32,
+        },
+        end: Position {
+            line: span.end.line.saturating_sub(1),
+            character: char_offset_to_utf16(end_line, span.end.col.saturating_sub(1) as usize)
+                as u32,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -209,5 +269,26 @@ mod tests {
         assert!(store.change("file:///a.opy", "newer", 6));
         assert_eq!(store.document("file:///a.opy").unwrap().text, "newer");
         assert_eq!(store.document("file:///a.opy").unwrap().version, 6);
+    }
+
+    #[test]
+    fn utf16_offsets_account_for_non_bmp_characters() {
+        // 🎯 is U+1F3AF: one Rust char, two UTF-16 code units.
+        let line = "🎯 score";
+        assert_eq!(line.chars().count(), 7);
+        assert_eq!(utf16_len(line), 8);
+        assert_eq!(utf16_offset_to_char(line, 0), 0);
+        assert_eq!(
+            utf16_offset_to_char(line, 1),
+            1,
+            "an offset inside a surrogate pair rounds up to the next char boundary"
+        );
+        assert_eq!(utf16_offset_to_char(line, 2), 1);
+        assert_eq!(char_offset_to_utf16(line, 0), 0);
+        assert_eq!(
+            char_offset_to_utf16(line, 1),
+            2,
+            "one char becomes two UTF-16 units"
+        );
     }
 }

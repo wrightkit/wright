@@ -373,10 +373,7 @@ fn publish_diagnostics(
     let params = PublishDiagnosticsParams {
         uri: url,
         diagnostics,
-        version: service
-            .store
-            .document(uri)
-            .map(|document| document.version as i32),
+        version: service.store.document(uri).map(|document| document.version),
     };
     let notification = serde_json::json!({
         "jsonrpc": "2.0",

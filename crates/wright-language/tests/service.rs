@@ -109,6 +109,150 @@ fn hover_and_definition_resolve_symbols() {
 }
 
 #[test]
+fn utf16_positions_resolve_symbols_after_non_bmp_text() {
+    // 🎯 is U+1F3AF: one char column in the compiler, two UTF-16 code units
+    // in the editor. `score` starts at char column 16 (0-based 15) and
+    // UTF-16 column 17 (0-based 16).
+    let source =
+        "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", score)\n";
+    let document = Document::new("file:///u.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+
+    let hover = service
+        .hover(
+            &uri,
+            Position {
+                line: 4,
+                character: 16,
+            },
+        )
+        .expect("hover resolves at the UTF-16 offset");
+    assert!(hover.contents.contains("score"), "{hover:?}");
+    assert!(
+        service
+            .hover(
+                &uri,
+                Position {
+                    line: 4,
+                    character: 15
+                }
+            )
+            .is_none(),
+        "the character offset (inside the surrogate pair) resolves no symbol"
+    );
+}
+
+#[test]
+fn completion_uses_position_and_context() {
+    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    points.append(points)\n";
+    let document = Document::new("file:///c.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+
+    // After `points.` (line 4, the append receiver), completion offers the
+    // receiver member `append`.
+    let member_line = "    points.append(points)";
+    let dot_char = member_line.find('.').unwrap() + 1;
+    let items = service.completion(
+        &uri,
+        Position {
+            line: 4,
+            character: dot_char as u32,
+        },
+    );
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"append"), "member completion: {labels:?}");
+    assert!(
+        labels.iter().all(|label| RECEIVER_MEMBERS.contains(label)),
+        "member context is member-only: {labels:?}"
+    );
+
+    // At a declaration/statement position, completion offers symbols,
+    // builtins, and keywords filtered by the typed prefix `po`.
+    let items = service.completion(
+        &uri,
+        Position {
+            line: 4,
+            character: 2,
+        },
+    );
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"points"), "declared symbol: {labels:?}");
+    assert!(labels.contains(&"globalvar"), "keyword: {labels:?}");
+
+    // Enum member context: `Beam.` offers the catalog enum members.
+    let enum_source = "rule \"r\":\n    @Event global\n    debug(Beam.GOOD)\n";
+    let document = Document::new("file:///e.opy", enum_source, workspace_root());
+    let (service, uri) = service_with(document);
+    let beam_char = "    debug(Beam.".len();
+    let items = service.completion(
+        &uri,
+        Position {
+            line: 2,
+            character: beam_char as u32,
+        },
+    );
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    assert!(
+        labels.contains(&"GOOD"),
+        "enum member completion: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"GRAPPLE"),
+        "enum member completion: {labels:?}"
+    );
+}
+
+const RECEIVER_MEMBERS: &[&str] = &["append", "format", "uniform", "choice", "hasSpawned"];
+
+#[test]
+fn semantic_tokens_follow_semantic_identity_not_name_membership() {
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score = score + 1\n";
+    let document = Document::new("file:///t.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let tokens = service.semantic_tokens(&uri);
+
+    // `score` is a declared global variable: classified as variable, not by
+    // string membership.
+    let score_tokens: Vec<_> = tokens
+        .iter()
+        .filter(|token| document_text_at(source, token.line).contains("score"))
+        .collect();
+    let _ = score_tokens;
+    // Every `score` token is a variable; `rule` is a keyword.
+    let variables = tokens
+        .iter()
+        .filter(|token| {
+            let line = source.lines().nth(token.line as usize).unwrap_or_default();
+            let start = token.character as usize;
+            line[start..].starts_with("score")
+        })
+        .count();
+    assert!(variables >= 3, "declaration + two references: {variables}");
+    let score_types: Vec<&str> = tokens
+        .iter()
+        .filter(|token| {
+            let line = source.lines().nth(token.line as usize).unwrap_or_default();
+            line.get(token.character as usize..)
+                .unwrap_or_default()
+                .starts_with("score")
+        })
+        .map(|token| token.token_type.as_str())
+        .collect();
+    assert!(
+        score_types.iter().all(|kind| *kind == "variable"),
+        "declared identifiers classify by semantic kind: {score_types:?}"
+    );
+}
+
+fn document_text_at(source: &str, line: u32) -> String {
+    source
+        .lines()
+        .nth(line as usize)
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
 fn references_find_declaration_and_uses() {
     let (service, uri) = service_with(doc(CORPUS));
     // `score` is read in the def body on line 6 at col 30.
