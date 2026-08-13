@@ -149,16 +149,14 @@ fn rename_from_root_updates_declaration_and_references_across_files() {
     service.store.open(document);
 
     // The showStatus() call is on line 5 (0-based line 4), col 5.
-    let result = service
-        .rename(
-            &uri,
-            Position {
-                line: 4,
-                character: 5,
-            },
-            "refresh",
-        )
-        .expect("rename resolves at the call site");
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 4,
+            character: 5,
+        },
+        "refresh",
+    );
     assert!(
         result.ok,
         "cross-file rename validates: {:?}",
@@ -200,6 +198,11 @@ fn rename_from_root_updates_declaration_and_references_across_files() {
         "old name gone from the include: {}",
         shared_edit.new_text
     );
+    assert!(
+        shared_edit.new_text.contains("print(\"status\")"),
+        "the definition body survives untouched: {}",
+        shared_edit.new_text
+    );
 
     // Applying all edits yields sources that compile together.
     let main_text = main_edit.new_text.clone();
@@ -212,6 +215,81 @@ fn rename_from_root_updates_declaration_and_references_across_files() {
         compiled.is_ok(),
         "edited project compiles: {:?}",
         compiled.err()
+    );
+}
+
+#[test]
+fn cross_file_rename_edits_only_semantic_occurrences_in_the_affected_source() {
+    // Test E (#73): an affected source contains both a true semantic
+    // reference and unrelated textual occurrences of the same spelling
+    // (a comment and a string literal). Only the semantic occurrence is
+    // edited — choosing the correct affected source is not sufficient.
+    let root = fixtures();
+    let mut service = LanguageService::new(root.clone());
+    let main_uri = "file:///project/main.opy".to_string();
+    let shared_uri = format!("file://{}", root.join("shared.opy").display());
+    service.store.open(Document::new(
+        main_uri.clone(),
+        "#!include \"shared.opy\"\n\nrule \"main rule\":\n    @Event global\n    showStatus()\n",
+        root.clone(),
+    ));
+    service.store.open(Document::new(
+        shared_uri.clone(),
+        "subroutine showStatus\n\n# showStatus is documented here\n\ndef showStatus():\n    print(\"showStatus running\")\n",
+        root.clone(),
+    ));
+
+    let result = service.rename(
+        &main_uri,
+        Position {
+            line: 4,
+            character: 5,
+        },
+        "refresh",
+    );
+    assert!(
+        result.ok,
+        "cross-file rename validates: {:?}",
+        result.diagnostics
+    );
+    let main_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("main.opy"))
+        .expect("root edit");
+    assert!(
+        main_edit.new_text.contains("refresh()"),
+        "call site renamed: {}",
+        main_edit.new_text
+    );
+    let shared_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("shared.opy"))
+        .expect("include edit");
+    assert!(
+        shared_edit.new_text.contains("subroutine refresh"),
+        "declaration renamed: {}",
+        shared_edit.new_text
+    );
+    assert!(
+        shared_edit.new_text.contains("def refresh():"),
+        "definition renamed: {}",
+        shared_edit.new_text
+    );
+    assert!(
+        shared_edit
+            .new_text
+            .contains("# showStatus is documented here"),
+        "comment text in the affected source is untouched: {}",
+        shared_edit.new_text
+    );
+    assert!(
+        shared_edit
+            .new_text
+            .contains("print(\"showStatus running\")"),
+        "string literal in the affected source is untouched: {}",
+        shared_edit.new_text
     );
 }
 
@@ -234,16 +312,14 @@ fn rename_from_include_declaration_updates_the_root() {
 
     // `subroutine showStatus` on line 1 of shared.opy; the name starts at
     // character 11.
-    let result = service
-        .rename(
-            &shared_uri,
-            Position {
-                line: 0,
-                character: 11,
-            },
-            "refresh",
-        )
-        .expect("rename resolves at the declaration site");
+    let result = service.rename(
+        &shared_uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "refresh",
+    );
     assert!(
         result.ok,
         "rename from the declaration validates: {:?}",
@@ -284,16 +360,14 @@ fn rename_resolves_the_symbol_in_the_requesting_file_when_positions_collide() {
         .store
         .open(Document::new(uri.clone(), main, root.clone()));
 
-    let result = service
-        .rename(
-            &uri,
-            Position {
-                line: 6,
-                character: 5,
-            },
-            "total",
-        )
-        .expect("rename resolves");
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 6,
+            character: 5,
+        },
+        "total",
+    );
     assert!(result.ok, "rename validates: {:?}", result.diagnostics);
     let main_edit = result
         .edits

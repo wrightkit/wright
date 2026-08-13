@@ -492,22 +492,46 @@ impl LanguageService {
     ///
     /// Resolves the symbol through the semantic index of every open root
     /// whose project includes the requesting document, unions the
-    /// declaration/definition/reference targets, produces a source-aware edit
-    /// per affected source, and validates the edited project through the
-    /// compiler pipeline before returning. Collisions, unresolvable identity,
-    /// and failed validation produce an explicit refusal (`ok = false`)
-    /// rather than a partial edit. Returns `None` when no symbol resolves at
-    /// the position; the caller must surface that as a structured refusal
-    /// rather than an empty edit.
-    pub fn rename(&self, uri: &str, position: Position, new_name: &str) -> Option<RenameResult> {
-        let requesting = self.store.document(uri)?;
+    /// declaration/definition/reference *spans* of that symbol, produces one
+    /// source-aware full-document edit per affected source whose replacement
+    /// text is built from those exact semantic spans (never a whole-word scan
+    /// of the raw source), and validates the edited project through the
+    /// compiler pipeline before returning. Every refusal — an unresolvable
+    /// symbol, an unestablished source identity, a target collision, an
+    /// affected source that changed relative to the validated state, or
+    /// failed edited-project validation — is explicit (`ok = false` with
+    /// diagnostics); a silent or partial rename is never returned.
+    pub fn rename(&self, uri: &str, position: Position, new_name: &str) -> RenameResult {
+        if new_name.is_empty() {
+            return RenameResult {
+                document_version: 0,
+                ok: false,
+                edits: Vec::new(),
+                diagnostics: vec![
+                    "rename-invalid-name: the new name must not be empty".to_string(),
+                ],
+            };
+        }
+        let Some(requesting) = self.store.document(uri) else {
+            return RenameResult {
+                document_version: 0,
+                ok: false,
+                edits: Vec::new(),
+                diagnostics: vec![format!(
+                    "rename-unresolved: no open document for '{uri}'; the source identity cannot be established"
+                )],
+            };
+        };
         let (line, col) = requesting.to_line_col(position);
         let requesting_canonical = self.canonical_source(&requesting.uri);
         let mut from: Option<String> = None;
-        let mut affected: BTreeSet<String> = BTreeSet::new();
         let mut collision: Option<String> = None;
+        // Canonical source identity -> the symbol's 1-based semantic spans
+        // (declaration, definition, and every reference), deduplicated across
+        // the root analyses that reach the requesting file.
+        let mut targets: BTreeMap<String, BTreeSet<TargetSpan>> = BTreeMap::new();
 
-        // Union the symbol's references across every open root whose project
+        // Union the symbol's spans across every open root whose project
         // includes the requesting document, so a rename from a declaration in
         // an included file also reaches the roots that reference it. The
         // position is matched only against spans in the requesting document's
@@ -532,65 +556,120 @@ impl LanguageService {
                 break;
             }
             if let Some(index) = &analysis.index {
-                for reference in index.references(symbol.id) {
-                    if let Some(span) = reference.span {
-                        let source =
-                            self.source_identity(&analysis.files, root_document, span.file.index());
-                        affected.insert(self.canonical_source(&source));
-                    }
+                let mut spans = Vec::new();
+                if let Some(span) = symbol.span {
+                    spans.push(span);
+                }
+                spans.extend(
+                    index
+                        .references(symbol.id)
+                        .iter()
+                        .filter_map(|reference| reference.span),
+                );
+                for span in spans {
+                    let source =
+                        self.source_identity(&analysis.files, root_document, span.file.index());
+                    targets
+                        .entry(self.canonical_source(&source))
+                        .or_default()
+                        .insert(TargetSpan::from_span(span));
                 }
             }
         }
 
-        let from = from?;
+        let Some(from) = from else {
+            return RenameResult {
+                document_version: requesting.version,
+                ok: false,
+                edits: Vec::new(),
+                diagnostics: vec![
+                    "rename-unresolved: no symbol is resolvable at the requested position"
+                        .to_string(),
+                ],
+            };
+        };
         if let Some(problem) = collision {
-            return Some(RenameResult {
+            return RenameResult {
                 document_version: requesting.version,
                 ok: false,
                 edits: Vec::new(),
                 diagnostics: vec![problem],
-            });
+            };
         }
 
-        // Produce one full-document edit per affected source, against the
-        // current source text (open overlays take precedence over disk).
+        // Produce one full-document edit per affected source from the symbol's
+        // semantic spans: each span is carved down to its word-bounded
+        // identifier occurrence(s) and the replacements are applied line by
+        // line so earlier offsets never shift. Open overlays take precedence
+        // over disk, and the edit carries the identity/version preconditions
+        // of the exact text it was computed from.
         let mut edits = Vec::new();
-        for source in &affected {
+        for (source, spans) in &targets {
             let text = self.source_text(source, requesting);
-            let identity = wright_driver::input_identity(&text);
-            let edit =
-                wright_driver::edit::rename_occurrences(&text, &from, new_name, &identity).ok()?;
-            let source_version = self.source_version(source, requesting);
+            let Some(new_text) = renamed_text(&text, &from, new_name, spans) else {
+                return RenameResult {
+                    document_version: requesting.version,
+                    ok: false,
+                    edits: Vec::new(),
+                    diagnostics: vec![format!(
+                        "rename-incomplete-coverage: '{from}' has a semantic occurrence in {source} that cannot be targeted precisely; refusing the rename rather than editing unrelated text"
+                    )],
+                };
+            };
             edits.push(RenameEdit {
                 source: source.clone(),
                 range: full_document_range(&text),
-                new_text: edit.new_text,
-                source_identity: identity,
-                source_version,
+                new_text,
+                source_identity: wright_driver::input_identity(&text),
+                source_version: self.source_version(source, requesting),
             });
+        }
+
+        // Stale-state guard: the rename must not return edits for a source
+        // that changed relative to the validated state. Re-fetch the current
+        // effective text of every affected source and verify the identity the
+        // edits were computed against still holds.
+        for edit in &edits {
+            if wright_driver::input_identity(&self.source_text(&edit.source, requesting))
+                != edit.source_identity
+            {
+                return RenameResult {
+                    document_version: requesting.version,
+                    ok: false,
+                    edits: Vec::new(),
+                    diagnostics: vec![format!(
+                        "rename-stale-source: {} changed relative to the validated state; re-fetch the source and retry",
+                        edit.source
+                    )],
+                };
+            }
         }
 
         // Validate the edited project state before returning.
         if let Some(problems) = self.validate_renamed_project(uri, &edits) {
-            return Some(RenameResult {
+            return RenameResult {
                 document_version: requesting.version,
                 ok: false,
                 edits: Vec::new(),
                 diagnostics: problems,
-            });
+            };
         }
 
-        Some(RenameResult {
+        RenameResult {
             document_version: requesting.version,
             ok: true,
             edits,
             diagnostics: Vec::new(),
-        })
+        }
     }
 
-    /// A refusal reason when renaming `symbol` to `new_name` would collide
-    /// with another declared symbol or with the symbol's own spelling in a
-    /// different namespace, else `None`.
+    /// A refusal reason when renaming `symbol` to `new_name` would introduce
+    /// a target-name collision with another declared symbol, else `None`.
+    ///
+    /// A same-spelled symbol in a different namespace is *not* a collision:
+    /// the semantic index distinguishes the two identities by typed symbol ID,
+    /// so span-targeted rename edits only the selected symbol's occurrences
+    /// (test C). Only a genuine target-name conflict refuses the rename.
     fn collision_problem(
         &self,
         analysis: &Analysis,
@@ -603,13 +682,6 @@ impl LanguageService {
         for other in index.symbols() {
             if other.id == symbol.id {
                 continue;
-            }
-            if other.name == symbol.name {
-                return Some(format!(
-                    "rename-collision: the name '{}' is also declared as {}; rename cannot distinguish the targets",
-                    other.name,
-                    symbol_kind_name(other.kind)
-                ));
             }
             if other.name == new_name {
                 return Some(format!(
@@ -882,6 +954,138 @@ fn full_document_range(text: &str) -> Range {
             character: last_line_len,
         },
     }
+}
+
+/// One 1-based source span of the renamed symbol (a declaration, definition,
+/// or reference site), deduplicated across the root analyses that reach the
+/// requesting file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TargetSpan {
+    start_line: u32,
+    start_col: u32,
+    end_line: u32,
+    end_col: u32,
+}
+
+impl TargetSpan {
+    fn from_span(span: wright_ir::source::Span) -> TargetSpan {
+        TargetSpan {
+            start_line: span.start.line,
+            start_col: span.start.col,
+            end_line: span.end.line,
+            end_col: span.end.col,
+        }
+    }
+}
+
+/// Build the renamed source text by editing exactly the symbol's semantic
+/// spans: every word-bounded occurrence of `from` inside a target span is
+/// replaced with `to`. A target span that contains no occurrence of `from` (a
+/// coverage gap, or a source that changed relative to the analysis) returns
+/// `None` so the caller refuses instead of emitting a partial edit.
+///
+/// Semantic identity determines both *which* sources are affected and *which*
+/// exact occurrences inside them are edited. A string literal, a comment, or
+/// an unrelated same-spelled identifier is never inside a target span and so
+/// is never edited; a longer identifier merely containing the spelling is
+/// excluded by the word boundary.
+fn renamed_text(text: &str, from: &str, to: &str, spans: &BTreeSet<TargetSpan>) -> Option<String> {
+    // Carve each semantic span down to its identifier occurrence(s) and group
+    // the resulting 0-based character ranges by line. All occurrences inside
+    // one span belong to the same semantic reference (the span *is* that
+    // reference), so a statement-level span such as `score = score + 1` —
+    // whose right-hand read is consumed by the modify lowering — correctly
+    // yields both occurrences.
+    let mut per_line: BTreeMap<u32, Vec<(usize, usize)>> = BTreeMap::new();
+    for span in spans {
+        let occurrences = occurrences_in_span(text, *span, from);
+        if occurrences.is_empty() {
+            return None;
+        }
+        for (line, start_col, _, end_col) in occurrences {
+            per_line
+                .entry(line - 1)
+                .or_default()
+                .push((start_col as usize - 1, end_col as usize - 1));
+        }
+    }
+
+    // Apply the replacements line by line in ascending order with a running
+    // cursor; the ranges are disjoint, so earlier offsets are consumed in
+    // order and never shift.
+    let mut out = Vec::with_capacity(text.split('\n').count());
+    for (line_number, line) in text.split('\n').enumerate() {
+        let mut ranges = per_line.remove(&(line_number as u32)).unwrap_or_default();
+        ranges.sort_unstable();
+        let chars: Vec<char> = line.chars().collect();
+        let mut rebuilt = String::with_capacity(line.len());
+        let mut cursor = 0usize;
+        for (start, end) in ranges {
+            rebuilt.extend(chars[cursor..start].iter());
+            rebuilt.push_str(to);
+            cursor = end;
+        }
+        rebuilt.extend(chars[cursor..].iter());
+        out.push(rebuilt);
+    }
+    Some(out.join("\n"))
+}
+
+/// The word-bounded occurrences of `name` within a 1-based half-open span,
+/// each as `(line, start_col, line, end_col)` with an exclusive end column.
+///
+/// The search is confined to the span's character range (never the whole
+/// line), so a comment or string literal after the semantic occurrence on the
+/// same line is untouched, and the word boundary excludes longer identifiers
+/// merely containing the spelling (`score` inside `scoreboard`).
+fn occurrences_in_span(text: &str, span: TargetSpan, name: &str) -> Vec<(u32, u32, u32, u32)> {
+    let name_chars: Vec<char> = name.chars().collect();
+    if name_chars.is_empty() {
+        return Vec::new();
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut out = Vec::new();
+    for line_number in span.start_line..=span.end_line {
+        let Some(line) = lines.get((line_number - 1) as usize) else {
+            break;
+        };
+        let chars: Vec<char> = line.chars().collect();
+        let start = if line_number == span.start_line {
+            span.start_col.saturating_sub(1) as usize
+        } else {
+            0
+        };
+        let end = if line_number == span.end_line {
+            span.end_col.saturating_sub(1) as usize
+        } else {
+            chars.len()
+        }
+        .min(chars.len());
+        let mut cursor = start;
+        while cursor + name_chars.len() <= end {
+            if chars[cursor..cursor + name_chars.len()] == name_chars[..] {
+                let before = cursor == 0 || !is_identifier_char(chars[cursor - 1]);
+                let after_index = cursor + name_chars.len();
+                let after = after_index >= chars.len() || !is_identifier_char(chars[after_index]);
+                if before && after {
+                    out.push((
+                        line_number,
+                        cursor as u32 + 1,
+                        line_number,
+                        after_index as u32 + 1,
+                    ));
+                    cursor = after_index;
+                    continue;
+                }
+            }
+            cursor += 1;
+        }
+    }
+    out
+}
+
+fn is_identifier_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
 }
 
 fn severity_name(severity: analysis::Severity) -> &'static str {

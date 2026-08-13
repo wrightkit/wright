@@ -257,10 +257,11 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
 /// Rename every whole-word occurrence of `from` to `to`, returning a
 /// full-document [`SourceEdit`] carrying the source identity precondition.
 ///
-/// Unlike [`rename_symbol`], this does not require a declaration in `source`,
-/// so a project-wide rename can apply it to sources that only reference a
-/// symbol declared elsewhere. Semantic identity and collision safety are the
-/// caller's responsibility.
+/// Unlike [`rename_symbol`], this does not require a declaration in `source`.
+/// This is the M9 textual contract: it is name- and boundary-driven, so the
+/// caller must guarantee semantic identity (the project-wide rename in
+/// `wright-language` targets exact semantic spans instead, so it never routes
+/// through this whole-word scan).
 pub fn rename_occurrences(
     source: &str,
     from: &str,

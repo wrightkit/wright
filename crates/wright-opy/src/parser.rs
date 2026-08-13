@@ -446,6 +446,10 @@ impl Parser<'_> {
 
     fn parse_def(&mut self, rules: &mut Vec<RuleEntry>) -> bool {
         let start = self.advance();
+        // The name token follows the `def` keyword; its end bounds the
+        // subroutine-definition span so the semantic index can point at the
+        // definition identifier itself (rename targets, not the keyword).
+        let name_token = self.peek().clone();
         let name = match self.expect_ident("a subroutine name after `def`") {
             Ok(name) => name,
             Err(()) => return false,
@@ -472,11 +476,12 @@ impl Parser<'_> {
             None => return false,
         };
         let body = self.parse_block(body_indent);
-        rules.push(RuleEntry::SubroutineDef {
-            name,
-            span: start.span,
-            body,
-        });
+        let span = if name_token.kind == TokenKind::Ident {
+            Span::new(start.span.file, start.span.start, name_token.span.end)
+        } else {
+            start.span
+        };
+        rules.push(RuleEntry::SubroutineDef { name, span, body });
         true
     }
 

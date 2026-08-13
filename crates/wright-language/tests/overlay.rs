@@ -15,7 +15,7 @@ fn main_text() -> String {
     std::fs::read_to_string(overlay_root().join("main.opy")).unwrap()
 }
 
-const SHARED_GOOD: &str = "subroutine showStatus\n\ndef showStatus():\n    print(\"overlay\")\n";
+const SHARED_GOOD: &str = "subroutine showStatus\n\n# showStatus is an unsaved overlay\n\ndef showStatus():\n    print(\"overlay\")\n";
 const SHARED_BROKEN: &str = "this is not valid opy\n";
 const SHARED_HOT: &str = "rule \"hot\":\n    @Event global\n    while true:\n        wait()\n";
 
@@ -64,16 +64,14 @@ fn rename_uses_open_overlay_content_over_filesystem() {
         .open(Document::new(shared_uri.clone(), SHARED_GOOD, root.clone()));
 
     // shared.opy is not on disk; only the open unsaved overlay provides it.
-    let result = service
-        .rename(
-            &main_uri,
-            Position {
-                line: 4,
-                character: 5,
-            },
-            "refresh",
-        )
-        .expect("rename resolves");
+    let result = service.rename(
+        &main_uri,
+        Position {
+            line: 4,
+            character: 5,
+        },
+        "refresh",
+    );
     assert!(
         result.ok,
         "overlay rename validates: {:?}",
@@ -98,6 +96,28 @@ fn rename_uses_open_overlay_content_over_filesystem() {
         shared_edit.new_text.contains("def refresh()"),
         "overlay definition renamed: {}",
         shared_edit.new_text
+    );
+    assert!(
+        shared_edit
+            .new_text
+            .contains("# showStatus is an unsaved overlay"),
+        "overlay comment text survives unchanged: {}",
+        shared_edit.new_text
+    );
+    // Only the comment retains the old spelling; every semantic occurrence is
+    // renamed.
+    assert_eq!(
+        shared_edit.new_text.matches("showStatus").count(),
+        1,
+        "only the comment occurrence of the old spelling remains: {}",
+        shared_edit.new_text
+    );
+    // The overlay is the source of truth: shared.opy does not exist on disk
+    // in this fixture, so the renamed overlay text proves filesystem content
+    // was never substituted for an open document.
+    assert!(
+        !overlay_root().join("shared.opy").exists(),
+        "the fixture has no filesystem shared.opy"
     );
 }
 

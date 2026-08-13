@@ -140,11 +140,20 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-/// Apply a full-document WorkspaceEdit range to the original source.
+/// Apply a full-document WorkspaceEdit (version-aware `documentChanges`
+/// form) range to the original source.
 fn apply_lsp_edit(source: &str, result: &serde_json::Value, uri: &str) -> String {
-    let edit = &result["changes"][uri][0];
-    let range = &edit["range"];
+    let document_changes = result["documentChanges"]
+        .as_array()
+        .expect("rename uses the version-aware documentChanges form");
+    let edit = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(uri))
+        .and_then(|entry| entry["edits"].as_array())
+        .and_then(|edits| edits.first())
+        .expect("document edit for the uri");
     let new_text = edit["newText"].as_str().unwrap();
+    let range = &edit["range"];
     let start_line = range["start"]["line"].as_u64().unwrap() as usize;
     let start_char = range["start"]["character"].as_u64().unwrap() as usize;
     let end_line = range["end"]["line"].as_u64().unwrap() as usize;
@@ -280,12 +289,27 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
             "newName": "total",
         }),
     );
-    let new_text = rename["result"]["changes"][uri_for("main.opy")][0]["newText"]
-        .as_str()
-        .unwrap();
+    // The rename is delivered through the version-aware `documentChanges`
+    // form, never the unversioned `changes` shape (#73).
+    let document_changes = rename["result"]["documentChanges"]
+        .as_array()
+        .expect("version-aware documentChanges");
+    assert!(
+        rename["result"]["changes"].is_null(),
+        "the unversioned changes shape is not used for rename"
+    );
+    let main_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&uri_for("main.opy")))
+        .expect("main.opy document edit");
+    assert_eq!(
+        main_entry["textDocument"]["version"], 1,
+        "the open document is identified at its current version"
+    );
+    let new_text = main_entry["edits"][0]["newText"].as_str().unwrap();
     assert!(new_text.contains("globalvar total"), "renamed: {new_text}");
     assert!(!new_text.contains("globalvar score"));
-    let range = &rename["result"]["changes"][uri_for("main.opy")][0]["range"];
+    let range = &main_entry["edits"][0]["range"];
     assert!(
         !(range["start"]["line"] == 0
             && range["start"]["character"] == 0
@@ -1062,17 +1086,34 @@ fn lsp_rename_returns_multi_document_workspace_edit() {
             "newName": "refresh",
         }),
     );
-    let changes = rename["result"]["changes"]
-        .as_object()
-        .expect("changes map");
-    let main_edit = changes
-        .get(&main_uri)
-        .and_then(|edits| edits.as_array().and_then(|edits| edits.first()))
+    // Test G (#73): the response must carry each open document at its own
+    // current version through the standard versioned document-edit form, and
+    // must never use the unversioned `changes` shape.
+    let document_changes = rename["result"]["documentChanges"]
+        .as_array()
+        .expect("version-aware documentChanges");
+    assert!(
+        rename["result"]["changes"].is_null(),
+        "the unversioned changes shape is not used for rename"
+    );
+    let main_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&main_uri))
         .expect("root edit in the workspace edit");
-    let shared_edit = changes
-        .get(&shared_uri)
-        .and_then(|edits| edits.as_array().and_then(|edits| edits.first()))
+    let shared_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&shared_uri))
         .expect("include edit in the workspace edit");
+    assert_eq!(
+        main_entry["textDocument"]["version"], 1,
+        "main.opy is identified at its current version"
+    );
+    assert_eq!(
+        shared_entry["textDocument"]["version"], 1,
+        "shared.opy is identified at its current version"
+    );
+    let main_edit = main_entry["edits"][0].clone();
+    let shared_edit = shared_entry["edits"][0].clone();
     assert!(
         main_edit["newText"].as_str().unwrap().contains("refresh()"),
         "root call site renamed: {main_edit}"
@@ -1097,6 +1138,407 @@ fn lsp_rename_returns_multi_document_workspace_edit() {
             .unwrap()
             .contains("showStatus"),
         "old name gone from the include"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_rename_filesystem_backed_sources_carry_the_unversioned_form() {
+    // Test G (#73): an affected source that is not open (filesystem-backed)
+    // is delivered through the versioned document-edit form with the
+    // unversioned `null` version LSP allows, while the open root keeps its
+    // current version.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/multifile"),
+    )
+    .unwrap();
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let main_uri = uri_for("main.opy");
+    let shared_uri = format!("file://{}", fixtures.join("shared.opy").display());
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    // Only main.opy is open; shared.opy is served from the filesystem.
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "opy", "version": 2, "text": main },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("main open diagnostics");
+
+    let rename = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 4, "character": 5 },
+            "newName": "refresh",
+        }),
+    );
+    let document_changes = rename["result"]["documentChanges"]
+        .as_array()
+        .expect("version-aware documentChanges");
+    let main_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&main_uri))
+        .expect("main.opy edit");
+    let shared_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&shared_uri))
+        .expect("shared.opy edit from the filesystem");
+    assert_eq!(
+        main_entry["textDocument"]["version"], 2,
+        "the open root keeps its current version"
+    );
+    assert!(
+        shared_entry["textDocument"]["version"].is_null(),
+        "a filesystem-backed source carries the unversioned form: {shared_entry}"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_rename_carries_each_open_documents_own_version() {
+    // Test G (#73): a multi-document rename where the open documents sit at
+    // different versions must identify each document at its own version.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/multifile"),
+    )
+    .unwrap();
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let shared = std::fs::read_to_string(fixtures.join("shared.opy")).unwrap();
+    let main_uri = uri_for("main.opy");
+    let shared_uri = format!("file://{}", fixtures.join("shared.opy").display());
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "opy", "version": 4, "text": main },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("main open diagnostics");
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "languageId": "opy", "version": 9, "text": shared },
+        }),
+    );
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    let rename = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 4, "character": 5 },
+            "newName": "refresh",
+        }),
+    );
+    let document_changes = rename["result"]["documentChanges"]
+        .as_array()
+        .expect("version-aware documentChanges");
+    let by_uri = |uri: &str| {
+        document_changes
+            .iter()
+            .find(|entry| entry["textDocument"]["uri"].as_str() == Some(uri))
+            .unwrap_or_else(|| panic!("no document edit for {uri}"))
+    };
+    assert_eq!(
+        by_uri(&main_uri)["textDocument"]["version"],
+        4,
+        "main.opy is identified at version 4"
+    );
+    assert_eq!(
+        by_uri(&shared_uri)["textDocument"]["version"],
+        9,
+        "shared.opy is identified at version 9"
+    );
+    // Both edits are still delivered through the versioned form only.
+    assert!(
+        rename["result"]["changes"].is_null(),
+        "the unversioned changes shape is not used"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_rename_tags_the_edit_with_the_documents_version() {
+    // Test H (#73): a rename result is bound to the document version it was
+    // computed for. After the client moves to a newer version, a fresh rename
+    // carries the new version, so the earlier edit cannot be silently treated
+    // as applicable to the newer buffer state.
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    let clean = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    let newer = "globalvar total = 0\n\nrule \"r\":\n    @Event global\n    total += 1\n";
+    let uri = uri_for("stale.opy");
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "languageId": "opy", "version": 5, "text": clean },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("open diagnostics");
+
+    let rename_at_version_5 = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 3 },
+            "newName": "points",
+        }),
+    );
+    let entry = rename_at_version_5["result"]["documentChanges"][0].clone();
+    assert_eq!(
+        entry["textDocument"]["version"], 5,
+        "the edit is identified at version 5"
+    );
+    assert!(
+        entry["edits"][0]["newText"]
+            .as_str()
+            .unwrap()
+            .contains("globalvar points"),
+        "version-5 rename edits the version-5 buffer"
+    );
+
+    // The client buffer moves to version 6 with different content.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "version": 6 },
+            "contentChanges": [{ "text": newer }],
+        }),
+    );
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    let rename_at_version_6 = client.request(
+        3,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 3 },
+            "newName": "score",
+        }),
+    );
+    let entry = rename_at_version_6["result"]["documentChanges"][0].clone();
+    assert_eq!(
+        entry["textDocument"]["version"], 6,
+        "a fresh rename is recomputed against the version-6 buffer"
+    );
+    assert_eq!(
+        rename_at_version_5["result"]["documentChanges"][0]["textDocument"]["version"], 5,
+        "the earlier rename keeps its version-5 precondition"
+    );
+    // The version-5 edit cannot be treated as applicable to the version-6
+    // buffer: the versions differ and the new texts disagree.
+    let v5_text = rename_at_version_5["result"]["documentChanges"][0]["edits"][0]["newText"]
+        .as_str()
+        .unwrap();
+    let v6_text = rename_at_version_6["result"]["documentChanges"][0]["edits"][0]["newText"]
+        .as_str()
+        .unwrap();
+    assert_ne!(
+        v5_text, v6_text,
+        "different buffer states yield different edits"
+    );
+
+    client.request(4, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_rename_refuses_unresolvable_and_stale_identity() {
+    // Test H (#73): an unopened document (source identity cannot be
+    // established) and a position with no resolvable symbol must produce an
+    // explicit LSP error response — never a partial or empty rename.
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // Rename on a URI that was never opened: explicit error.
+    let missing = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("never-opened.opy") },
+            "position": { "line": 0, "character": 3 },
+            "newName": "total",
+        }),
+    );
+    assert!(
+        missing["error"].is_object(),
+        "an unopened document refuses rename explicitly: {missing}"
+    );
+    assert!(
+        missing["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("rename refused"),
+        "the error names the refusal: {missing}"
+    );
+
+    // Rename at a position with no symbol: explicit error.
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    let uri = uri_for("empty-pos.opy");
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "languageId": "opy", "version": 1, "text": source },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("open diagnostics");
+    let unresolved = client.request(
+        3,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 4, "character": 3 },
+            "newName": "total",
+        }),
+    );
+    assert!(
+        unresolved["error"].is_object(),
+        "an unresolvable position refuses rename explicitly: {unresolved}"
+    );
+
+    client.request(4, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_rename_leaves_strings_and_comments_untouched_in_an_affected_source() {
+    // Test E + protocol (#73): an affected source contains both a true
+    // semantic reference and unrelated textual occurrences of the same
+    // spelling; only the semantic reference is edited.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/multifile"),
+    )
+    .unwrap();
+    let main_uri = uri_for("main.opy");
+    let shared_uri = format!("file://{}", fixtures.join("shared.opy").display());
+    let main =
+        "#!include \"shared.opy\"\n\nrule \"main rule\":\n    @Event global\n    showStatus()\n";
+    let shared = "subroutine showStatus\n\n# showStatus is documented here\n\ndef showStatus():\n    print(\"showStatus running\")\n";
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "opy", "version": 1, "text": main },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("main open diagnostics");
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "languageId": "opy", "version": 2, "text": shared },
+        }),
+    );
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    let rename = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 4, "character": 5 },
+            "newName": "refresh",
+        }),
+    );
+    let document_changes = rename["result"]["documentChanges"]
+        .as_array()
+        .expect("version-aware documentChanges");
+    let shared_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&shared_uri))
+        .expect("shared.opy document edit");
+    let shared_text = shared_entry["edits"][0]["newText"].as_str().unwrap();
+    assert!(
+        shared_text.contains("subroutine refresh"),
+        "declaration renamed: {shared_text}"
+    );
+    assert!(
+        shared_text.contains("def refresh():"),
+        "definition renamed: {shared_text}"
+    );
+    assert!(
+        shared_text.contains("# showStatus is documented here"),
+        "comment text is untouched: {shared_text}"
+    );
+    assert!(
+        shared_text.contains("print(\"showStatus running\")"),
+        "string literal is untouched: {shared_text}"
+    );
+    assert!(
+        !shared_text.contains("showStatus()"),
+        "no semantic reference to showStatus remains: {shared_text}"
     );
 
     client.request(3, "shutdown", serde_json::json!(null));

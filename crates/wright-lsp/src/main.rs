@@ -9,7 +9,7 @@
 //! disappears from a later root analysis. No duplicate semantic logic exists
 //! here.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -18,14 +18,14 @@ use lsp_types::notification::{Notification, PublishDiagnostics};
 use lsp_types::{
     CompletionItem as LspCompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentChanges, GotoDefinitionParams,
     GotoDefinitionResponse, Hover as LspHover, HoverContents, InitializeParams, InitializeResult,
-    Location, MarkupContent, MarkupKind, Position as LspPosition, PositionEncodingKind,
-    PublishDiagnosticsParams, Range as LspRange, ReferenceParams, RenameParams, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensParams,
-    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentPositionParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Uri,
-    WorkDoneProgressOptions, WorkspaceEdit,
+    Location, MarkupContent, MarkupKind, OptionalVersionedTextDocumentIdentifier,
+    Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams, Range as LspRange,
+    ReferenceParams, RenameParams, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
+    SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    TextDocumentEdit, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextEdit, Uri, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use serde_json::Value;
 
@@ -220,42 +220,49 @@ fn run() -> Result<(), String> {
                     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())?;
                 let position = convert_position(params.text_document_position.position);
                 let uri = params.text_document_position.text_document.uri;
-                match service.rename(&uri.to_string(), position, &params.new_name) {
-                    Some(rename) if rename.ok => {
-                        // `lsp_types` dictates `HashMap<Uri, ...>` for
-                        // workspace changes; `Uri` has interior mutability.
-                        #[allow(clippy::mutable_key_type)]
-                        let changes: HashMap<Uri, Vec<TextEdit>> = rename
+                let rename = service.rename(&uri.to_string(), position, &params.new_name);
+                if rename.ok {
+                    // Version-aware document edits (#73): each open document
+                    // is identified at its current version through the
+                    // standard `documentChanges`/`TextDocumentEdit` form, so
+                    // the client refuses to apply the rename to a newer
+                    // buffer state; filesystem-backed sources carry the
+                    // unversioned `null` form LSP allows. The unversioned
+                    // `changes`-only shape is never used for rename, and no
+                    // Wright-specific extension is introduced.
+                    let document_changes = DocumentChanges::Edits(
+                        rename
                             .edits
                             .into_iter()
-                            .map(|edit| {
-                                (
-                                    source_to_uri(&edit.source),
-                                    vec![TextEdit {
-                                        range: convert_range(edit.range),
-                                        new_text: edit.new_text,
-                                    }],
-                                )
+                            .map(|edit| TextDocumentEdit {
+                                text_document: OptionalVersionedTextDocumentIdentifier {
+                                    uri: source_to_uri(&edit.source),
+                                    version: source_version(&service, &edit.source),
+                                },
+                                edits: vec![lsp_types::OneOf::Left(TextEdit {
+                                    range: convert_range(edit.range),
+                                    new_text: edit.new_text,
+                                })],
                             })
-                            .collect();
-                        let workspace_edit = WorkspaceEdit {
-                            changes: Some(changes),
-                            ..Default::default()
-                        };
-                        write_response(
-                            &mut writer,
-                            id,
-                            serde_json::to_value(workspace_edit).unwrap(),
-                        )?;
-                    }
-                    _ => {
-                        write_error(
-                            &mut writer,
-                            id,
-                            -32602,
-                            "rename refused: no symbol resolvable at the position, a collision was detected, or validation failed",
-                        )?;
-                    }
+                            .collect(),
+                    );
+                    let workspace_edit = WorkspaceEdit {
+                        document_changes: Some(document_changes),
+                        ..Default::default()
+                    };
+                    write_response(
+                        &mut writer,
+                        id,
+                        serde_json::to_value(workspace_edit).unwrap(),
+                    )?;
+                } else {
+                    let detail = rename.diagnostics.join("; ");
+                    write_error(
+                        &mut writer,
+                        id,
+                        -32602,
+                        &format!("rename refused: {detail}"),
+                    )?;
                 }
             }
             "textDocument/semanticTokens/full" => {

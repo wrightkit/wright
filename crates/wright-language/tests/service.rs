@@ -223,16 +223,14 @@ fn rename_full_document_range_ends_at_utf16_length_on_non_bmp_lines() {
     let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n    print(\"🎯\")\n";
     let document = Document::new("file:///rnb.opy", source, workspace_root());
     let (service, uri) = service_with(document);
-    let result = service
-        .rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 11,
-            },
-            "total",
-        )
-        .expect("rename resolves");
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
     assert!(result.ok, "rename validates: {:?}", result.diagnostics);
     let edit = &result.edits[0];
     let lines: Vec<&str> = source.split('\n').collect();
@@ -393,16 +391,14 @@ fn completion_offers_symbols_builtins_and_keywords() {
 #[test]
 fn rename_uses_the_safe_edit_contract() {
     let (service, uri) = service_with(doc(CORPUS));
-    let result = service
-        .rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 3,
-            },
-            "total",
-        )
-        .unwrap();
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 3,
+        },
+        "total",
+    );
     assert!(result.ok, "rename validates");
     assert_eq!(
         result.edits.len(),
@@ -445,16 +441,14 @@ fn rename_edit_applies_to_produce_the_validated_result() {
     let source = corpus_text(CORPUS);
     let document = doc(CORPUS);
     let (service, uri) = service_with(document.clone());
-    let result = service
-        .rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 3,
-            },
-            "total",
-        )
-        .unwrap();
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 3,
+        },
+        "total",
+    );
     assert!(result.ok);
     assert_eq!(result.edits.len(), 1);
     let range = result.edits[0].range;
@@ -516,16 +510,14 @@ fn rename_refuses_target_collision() {
     let source = "globalvar score = 0\nglobalvar total = 1\n\nrule \"r\":\n    @Event global\n    score += 1\n";
     let document = Document::new("file:///collide.opy", source, workspace_root());
     let (service, uri) = service_with(document);
-    let result = service
-        .rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 11,
-            },
-            "total",
-        )
-        .expect("the variable resolves at the position");
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
     assert!(
         !result.ok,
         "a target-name collision refuses the rename explicitly"
@@ -538,37 +530,288 @@ fn rename_refuses_target_collision() {
         "the refusal names the collision: {:?}",
         result.diagnostics
     );
+    assert!(
+        result.edits.is_empty(),
+        "a refused rename never returns partial edits"
+    );
 }
 
 #[test]
-fn rename_refuses_cross_namespace_name_collision() {
-    // The same spelling exists in two namespaces (a variable and a
-    // subroutine); a whole-word rename cannot distinguish the targets.
-    let source =
-        "globalvar score = 0\nsubroutine score\n\nrule \"r\":\n    @Event global\n    score += 1\n";
-    let document = Document::new("file:///ns.opy", source, workspace_root());
+fn rename_does_not_touch_longer_identifiers_containing_the_spelling() {
+    // Blocker 1 (#73): `scoreboard` merely contains the spelling `score`; the
+    // word-boundary carve inside the semantic span must leave it untouched.
+    let source = "globalvar score = 0\nglobalvar scoreboard = 1\n\nrule \"r\":\n    @Event global\n    score += scoreboard\n";
+    let document = Document::new("file:///long.opy", source, workspace_root());
     let (service, uri) = service_with(document);
-    let result = service
-        .rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 11,
-            },
-            "total",
-        )
-        .expect("the variable resolves at the position");
-    assert!(
-        !result.ok,
-        "a cross-namespace name collision refuses the rename explicitly"
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
     );
+    assert!(result.ok, "rename validates: {:?}", result.diagnostics);
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("globalvar scoreboard = 1"),
+        "the longer identifier declaration is untouched: {new_text}"
+    );
+    assert!(
+        new_text.contains("total += scoreboard"),
+        "the longer identifier reference is untouched: {new_text}"
+    );
+}
+
+#[test]
+fn rename_leaves_string_literals_with_the_same_spelling_untouched() {
+    // Test A (#73): `"score"` inside a string literal is not a semantic
+    // reference to the variable; the declaration and semantic references are
+    // renamed while the string stays byte-for-byte unchanged.
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"score\")\n    score += 1\n";
+    let document = Document::new("file:///str.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "string-literal rename validates: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("globalvar total = 0"),
+        "declaration renamed: {new_text}"
+    );
+    assert!(
+        new_text.contains("total += 1"),
+        "semantic reference renamed: {new_text}"
+    );
+    assert!(
+        new_text.contains("debug(\"score\")"),
+        "the same-spelled string literal is untouched: {new_text}"
+    );
+}
+
+#[test]
+fn rename_leaves_comments_with_the_same_spelling_untouched() {
+    // Test B (#73): comments are lexer-skipped and never semantic references;
+    // `# score` and `/* score */` text stays unchanged.
+    let source = "globalvar score = 0\n# score in a line comment\n/* score in a block comment */\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    let document = Document::new("file:///cmt.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "comment rename validates: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("globalvar total = 0"),
+        "declaration renamed: {new_text}"
+    );
+    assert!(
+        new_text.contains("# score in a line comment"),
+        "line comment text is untouched: {new_text}"
+    );
+    assert!(
+        new_text.contains("/* score in a block comment */"),
+        "block comment text is untouched: {new_text}"
+    );
+}
+
+#[test]
+fn rename_refuses_explicitly_when_no_symbol_resolves() {
+    // Test H (#73): a position that resolves no symbol is an explicit
+    // refusal, never a silent empty edit.
+    let source = "rule \"r\":\n    @Event global\n    debug(1)\n";
+    let document = Document::new("file:///none.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 2,
+            character: 3,
+        },
+        "total",
+    );
+    assert!(!result.ok, "no symbol resolves");
     assert!(
         result
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.contains("rename-collision")),
-        "the refusal names the collision: {:?}",
+            .any(|diagnostic| diagnostic.contains("rename-unresolved")),
+        "the refusal names the unresolved symbol: {:?}",
         result.diagnostics
+    );
+    assert!(
+        result.edits.is_empty(),
+        "an unresolved rename never returns edits"
+    );
+}
+
+#[test]
+fn rename_refuses_explicitly_when_the_source_identity_is_unestablished() {
+    // Test H (#73): a rename on a document the store does not hold cannot
+    // establish the source identity and refuses explicitly.
+    let service = LanguageService::new(workspace_root());
+    let result = service.rename(
+        "file:///never-opened.opy",
+        Position {
+            line: 0,
+            character: 0,
+        },
+        "total",
+    );
+    assert!(!result.ok);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("rename-unresolved")),
+        "the refusal names the unestablished identity: {:?}",
+        result.diagnostics
+    );
+    assert!(result.edits.is_empty());
+}
+
+#[test]
+fn rename_refuses_an_empty_new_name() {
+    let (service, uri) = service_with(doc(CORPUS));
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 3,
+        },
+        "",
+    );
+    assert!(!result.ok);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("rename-invalid-name")),
+        "the refusal names the invalid name: {:?}",
+        result.diagnostics
+    );
+    assert!(result.edits.is_empty());
+}
+
+#[test]
+fn rename_results_are_bound_to_the_source_state_they_were_computed_for() {
+    // Test H (#73): a rename result carries the identity/version precondition
+    // of the exact source state it was computed for. After the source moves
+    // to a newer version, a fresh rename yields a fresh precondition, so the
+    // earlier result can never be silently treated as applicable to the newer
+    // buffer state.
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    let newer = "globalvar total = 0\n\nrule \"r\":\n    @Event global\n    total += 1\n";
+    let document = Document::new("file:///state.opy", source, workspace_root());
+    let root = document.root.clone();
+    let mut service = LanguageService::new(root);
+    let uri = document.uri.clone();
+    service.store.open(document);
+
+    let at_version_0 = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "points",
+    );
+    assert!(at_version_0.ok, "{:?}", at_version_0.diagnostics);
+    let identity_0 = at_version_0.edits[0].source_identity.clone();
+    assert_eq!(at_version_0.edits[0].source_version, 0);
+    assert_eq!(at_version_0.document_version, 0);
+
+    // The host moves the buffer to version 1 with different content.
+    assert!(service.store.change(&uri, newer, 1));
+    let at_version_1 = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "score",
+    );
+    assert!(at_version_1.ok, "{:?}", at_version_1.diagnostics);
+    assert_eq!(at_version_1.edits[0].source_version, 1);
+    assert_eq!(at_version_1.document_version, 1);
+    assert_ne!(
+        at_version_1.edits[0].source_identity, identity_0,
+        "a newer buffer state produces a different identity precondition"
+    );
+    // The version-0 result targets version-0 text; applying it to the
+    // version-1 buffer would fail the identity precondition.
+    assert_ne!(
+        at_version_1.edits[0].source_identity,
+        wright_driver::input_identity(source),
+        "the version-1 result does not carry the stale version-0 identity"
+    );
+}
+
+#[test]
+fn rename_same_spelled_distinct_identity_only_edits_the_selected_symbol() {
+    // Test C (#73): the same surface spelling exists in two namespaces (a
+    // global variable and a subroutine). The semantic index distinguishes the
+    // identities by typed symbol ID, so span-targeted rename must edit only
+    // the selected symbol's occurrences — never the sibling `score`.
+    let source = "globalvar score = 0\nsubroutine score\n\ndef score():\n    print(\"score\")\n\nrule \"r\":\n    @Event global\n    score += 1\n    score()\n";
+    let document = Document::new("file:///ns.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "span-targeted rename distinguishes the identities: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("globalvar total = 0"),
+        "variable declaration renamed: {new_text}"
+    );
+    assert!(
+        new_text.contains("total += 1"),
+        "variable reference renamed: {new_text}"
+    );
+    assert!(
+        new_text.contains("subroutine score"),
+        "the sibling subroutine declaration is untouched: {new_text}"
+    );
+    assert!(
+        new_text.contains("def score():"),
+        "the sibling subroutine definition is untouched: {new_text}"
+    );
+    assert!(
+        new_text.contains("score()"),
+        "the sibling subroutine call is untouched: {new_text}"
+    );
+    assert!(
+        new_text.contains("print(\"score\")"),
+        "the string literal in the sibling body is untouched: {new_text}"
     );
 }
 
