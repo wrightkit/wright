@@ -413,7 +413,7 @@ def write_fixture_json(
     metadata_path = fixture_dir / "fixture.json"
     if metadata_path.is_file():
         existing = json.loads(metadata_path.read_text())
-        for key in ("features", "expectedStatus", "runtimeSeconds"):
+        for key in ("features", "expectedStatus", "runtimeSeconds", "provenanceNote"):
             if key in existing:
                 metadata[key] = existing[key]
         for path in existing.get("files", {}):
@@ -559,6 +559,12 @@ def main() -> int:
             verify_fixture(target, fixture, Repo(fixture["repo"], fixture["commit"]))
         return 0
 
+    old_notes: dict[str, str] = {}
+    if MANIFEST_PATH.is_file():
+        for record in json.loads(MANIFEST_PATH.read_text()).get("fixtures", []):
+            if "note" in record:
+                old_notes[record["id"]] = record["note"]
+
     manifest: dict[str, Any] = {
         "schemaVersion": 1,
         "procedure": (
@@ -573,6 +579,8 @@ def main() -> int:
         repo = Repo(fixture["repo"], fixture["commit"])
         print(f"acquiring {fixture['id']} from {fixture['repo']}@{fixture['commit'][:12]}")
         record = acquire_fixture(target, fixture, repo)
+        if fixture["id"] in old_notes:
+            record["note"] = old_notes[fixture["id"]]
         manifest["fixtures"].append(record)
         print(f"  {len(record['files'])} files, license {record['license']} verified")
         for file_record in record["files"]:
@@ -580,7 +588,10 @@ def main() -> int:
 
     zombies = Repo("WallerTrevor/zombies", "9394dd3026e4240f800dd82d477c743567aa7141")
     print("recording deferred fixture real-world/zombies (metadata only)")
-    manifest["fixtures"].append(record_deferred(zombies, DEFERRED[0]))
+    deferred = record_deferred(zombies, DEFERRED[0])
+    if deferred["id"] in old_notes:
+        deferred["note"] = old_notes[deferred["id"]]
+    manifest["fixtures"].append(deferred)
 
     write_json(MANIFEST_PATH, manifest)
     print(f"manifest written to {MANIFEST_PATH}")
