@@ -57,6 +57,18 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
     path
 }
 
+fn temp_dir() -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wright-driver-test-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 fn workshop_session(text: &str) -> CompilerSession {
     let path = temp_file("program.txt", text);
     CompilerSession::new(SessionConfig::from_path(path)).unwrap()
@@ -245,4 +257,87 @@ fn compiled_output_is_deterministic() {
     assert_eq!(a.text, b.text);
     assert_eq!(a.sha256, b.sha256);
     assert_eq!(a.input_identity, b.input_identity);
+}
+
+#[test]
+fn opy_lex_error_in_included_file_names_the_included_file() {
+    // A lex error inside an included file must be reported under that file's
+    // path (and position), not the root file's path (#83).
+    let dir = temp_dir();
+    std::fs::write(
+        dir.join("shared.opy"),
+        "rule \"shared\":\n\\\n    disableInspector()\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("main.opy"),
+        "#!include \"shared.opy\"\nrule \"main\":\n    disableInspector()\n",
+    )
+    .unwrap();
+    let mut session = CompilerSession::new(SessionConfig::from_path(dir.join("main.opy"))).unwrap();
+    let envelope = session.compile();
+    assert!(!envelope.ok, "the included lex error must fail the compile");
+    let diagnostic = envelope
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "lex-error")
+        .expect("a lex-error diagnostic is reported");
+    let span = diagnostic.span.as_ref().expect("lex errors carry spans");
+    assert_eq!(
+        span.path, "shared.opy",
+        "the diagnostic must name the included file"
+    );
+    assert_eq!(span.start.line, 2);
+    assert_eq!(span.start.col, 1);
+    let shared = std::fs::read_to_string(dir.join("shared.opy")).unwrap();
+    let line = shared
+        .lines()
+        .nth(span.start.line as usize - 1)
+        .unwrap_or("");
+    assert!(
+        (span.start.col as usize) <= line.len() + 1,
+        "the reported position ({}:{}) must exist in shared.opy",
+        span.start.line,
+        span.start.col
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn opy_include_diagnostics_resolve_through_the_registry() {
+    // Include directives keep resolving their span path through the registry
+    // after the identity fix (#83): the main file keeps its display path,
+    // while a directive inside an included file names that file.
+    let dir = temp_dir();
+    let main_path = dir.join("main.opy");
+    std::fs::write(&main_path, "#!include \"missing.opy\"\n").unwrap();
+    let mut session = CompilerSession::new(SessionConfig::from_path(main_path.clone())).unwrap();
+    let envelope = session.check();
+    assert!(!envelope.ok);
+    let not_found = envelope
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "include-not-found")
+        .expect("include-not-found is reported");
+    assert_eq!(
+        not_found.span.as_ref().unwrap().path,
+        main_path.display().to_string(),
+        "include-not-found from the main file keeps the main path"
+    );
+
+    std::fs::write(&main_path, "#!include \"main.opy\"\n").unwrap();
+    let mut session = CompilerSession::new(SessionConfig::from_path(main_path.clone())).unwrap();
+    let envelope = session.check();
+    assert!(!envelope.ok);
+    let cycle = envelope
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "include-cycle")
+        .expect("include-cycle is reported");
+    assert_eq!(
+        cycle.span.as_ref().unwrap().path,
+        "main.opy",
+        "the cycle-closing directive lives in the included copy of main.opy"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

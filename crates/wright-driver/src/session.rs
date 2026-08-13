@@ -86,9 +86,23 @@ impl CompilerSession {
                     self.load_protocol(&json, &resolved)?
                 } else {
                     // Default: the native Rust `.opy` frontend (no Node/OverPy).
-                    let program =
-                        wright_opy::compile(&resolved.text, &resolved.display, &resolved.root)
-                            .map_err(|error| opy_diag(error, &resolved))?;
+                    // Use the outcome form so the file registry survives errors
+                    // and diagnostics can name included files (#83).
+                    let outcome = wright_opy::compile_with_overlay_outcome(
+                        &resolved.text,
+                        &resolved.display,
+                        &resolved.root,
+                        &std::collections::BTreeMap::new(),
+                    );
+                    let program = match outcome.hir {
+                        Some(hir) => hir,
+                        None => {
+                            let error = outcome
+                                .error
+                                .expect("a failed compile outcome always carries an error");
+                            return Err(opy_diag(error, &outcome.files, &resolved));
+                        }
+                    };
                     self.load_hir(program, &resolved)?
                 }
             }
@@ -485,10 +499,21 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
 }
 
 /// Map a native frontend error to a driver diagnostic.
-fn opy_diag(error: wright_opy::FrontendError, resolved: &ResolvedInput) -> Diagnostic {
+///
+/// Span paths resolve through the frontend file registry so a failure inside
+/// an included file names that file; file 0 (the main file) carries the
+/// resolved display path by construction (#83).
+fn opy_diag(
+    error: wright_opy::FrontendError,
+    files: &[wright_opy::preprocess::FileRecord],
+    resolved: &ResolvedInput,
+) -> Diagnostic {
     let span = error.span.map(|span| SourceSpan {
         file: span.file as usize,
-        path: resolved.display.clone(),
+        path: files
+            .get(span.file as usize)
+            .map(|file| file.path.clone())
+            .unwrap_or_else(|| resolved.display.clone()),
         start: Position {
             line: span.start.line,
             col: span.start.col,
