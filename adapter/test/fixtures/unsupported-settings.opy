@@ -1,3 +1,0 @@
-settings {
-    mode: skirmish
-}
