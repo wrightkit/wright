@@ -87,6 +87,33 @@ fn references_span_both_files() {
 }
 
 #[test]
+fn filesystem_include_semantic_diagnostics_keep_source_identity() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/semantic-include");
+    let main = std::fs::read_to_string(root.join("main.opy")).unwrap();
+    let uri = format!("file://{}", root.join("main.opy").display());
+    let mut service = LanguageService::new(root.clone());
+    service
+        .store
+        .open(Document::new(uri.clone(), main, root.clone()));
+
+    let diagnostics = service.diagnostics(&uri);
+    let finding = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "min-wait-loop")
+        .expect("hot loop in shared.opy produces a semantic finding");
+    assert!(
+        finding.source.ends_with("shared.opy"),
+        "semantic finding keeps the include source identity: {}",
+        finding.source
+    );
+    assert_eq!(
+        finding.range.start.line, 2,
+        "range is source-local to shared.opy (the while line): {:?}",
+        finding.range
+    );
+}
+
+#[test]
 fn filesystem_include_diagnostics_keep_source_identity() {
     let root = broken_include_fixtures();
     let main = std::fs::read_to_string(root.join("main.opy")).unwrap();

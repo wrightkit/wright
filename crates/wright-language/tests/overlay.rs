@@ -17,6 +17,7 @@ fn main_text() -> String {
 
 const SHARED_GOOD: &str = "subroutine showStatus\n\ndef showStatus():\n    print(\"overlay\")\n";
 const SHARED_BROKEN: &str = "this is not valid opy\n";
+const SHARED_HOT: &str = "rule \"hot\":\n    @Event global\n    while true:\n        wait()\n";
 
 #[test]
 fn open_unsaved_include_participates_in_resolution() {
@@ -82,6 +83,36 @@ fn include_change_invalidates_and_restores_dependent_results() {
     assert!(
         !restored.iter().any(|d| d.severity == "error"),
         "restored include clears dependent diagnostics: {restored:?}"
+    );
+}
+
+#[test]
+fn overlay_include_semantic_diagnostics_keep_source_identity() {
+    let root = overlay_root();
+    let mut service = LanguageService::new(root.clone());
+    let main_uri = "file:///main.opy".to_string();
+    let shared_uri = format!("file://{}", root.join("shared.opy").display());
+    service
+        .store
+        .open(Document::new(main_uri.clone(), main_text(), root.clone()));
+    service
+        .store
+        .open(Document::new(shared_uri.clone(), SHARED_HOT, root.clone()));
+
+    let diagnostics = service.diagnostics(&main_uri);
+    let finding = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "min-wait-loop")
+        .expect("hot loop in the overlay produces a semantic finding");
+    assert!(
+        finding.source.ends_with("shared.opy"),
+        "semantic finding keeps the overlay source identity: {}",
+        finding.source
+    );
+    assert_eq!(
+        finding.range.start.line, 2,
+        "range is source-local to shared.opy (the while line): {:?}",
+        finding.range
     );
 }
 
