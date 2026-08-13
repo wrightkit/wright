@@ -555,6 +555,101 @@ fn lsp_open_unsaved_overlay_participates_in_includes() {
 }
 
 #[test]
+fn lsp_utf16_positions_account_for_non_bmp_characters() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    // `score` starts at char column 16 but UTF-16 column 17.
+    let source =
+        "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", score)\n";
+    client.notify("textDocument/didOpen", serde_json::json!({
+        "textDocument": { "uri": uri_for("u.opy"), "languageId": "opy", "version": 1, "text": source },
+    }));
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    let hover = client.request(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("u.opy") },
+            "position": { "line": 4, "character": 16 },
+        }),
+    );
+    assert!(
+        serde_json::to_string(&hover["result"])
+            .unwrap()
+            .contains("score"),
+        "UTF-16 offset resolves the symbol: {}",
+        hover
+    );
+    let miss = client.request(
+        3,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("u.opy") },
+            "position": { "line": 4, "character": 15 },
+        }),
+    );
+    assert!(
+        miss["result"].is_null(),
+        "the character offset resolves no symbol: {miss}"
+    );
+
+    client.request(4, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_round_trips_are_bounded() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    let source = corpus_source("synthetic/control-flow");
+    client.notify("textDocument/didOpen", serde_json::json!({
+        "textDocument": { "uri": uri_for("flow.opy"), "languageId": "opy", "version": 1, "text": source },
+    }));
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    let start = std::time::Instant::now();
+    for index in 0..20 {
+        client.request(
+            2 + index,
+            "textDocument/hover",
+            serde_json::json!({
+                "textDocument": { "uri": uri_for("flow.opy") },
+                "position": { "line": 6, "character": 15 },
+            }),
+        );
+    }
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs_f64() < 10.0,
+        "20 LSP round-trips must be bounded: {elapsed:?}"
+    );
+
+    client.request(99, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
 fn lsp_handles_malformed_input_without_crashing() {
     let root = workspace_root();
     let mut client = LspClient::spawn(&root);
