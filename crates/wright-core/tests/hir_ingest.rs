@@ -272,7 +272,14 @@ const VALID_SETTINGS: &str = r#"{
                     {
                         "kind": "group", "name": "skirmish",
                         "children": [
-                            { "kind": "list", "name": "enabledMaps", "elements": [ { "value": "workshopIsland", "span": __SPAN__ } ], "span": __SPAN__ },
+                            { "kind": "list", "name": "enabledMaps", "elements": [ { "value": "workshopIsland", "span": __SPAN__ } ], "span": __SPAN__ }
+                        ],
+                        "span": __SPAN__
+                    },
+                    {
+                        "kind": "group", "name": "assault",
+                        "children": [
+                            { "kind": "list", "name": "enabledMaps", "elements": [], "span": __SPAN__ },
                             { "kind": "string", "name": "roleLimit", "value": "2OfEachRolePerTeam", "span": __SPAN__ }
                         ],
                         "span": __SPAN__
@@ -361,4 +368,38 @@ fn settings_unknown_node_kind_is_rejected() {
         .replace("\"kind\": \"bool\"", "\"kind\": \"enum\"");
     let error = hir::parse_str(&payload).unwrap_err();
     assert_eq!(error.code(), "unsupported-node");
+}
+
+#[test]
+fn settings_mode_subset_violations_are_rejected() {
+    // gamemodes.assault.heroLimit is outside the per-key subsets (heroLimit
+    // is evidenced under general only, #86).
+    let payload = VALID_SETTINGS
+        .replace("__SPAN__", SPAN)
+        .replace("\"name\": \"skirmish\"", "\"name\": \"assault\"")
+        .replace("\"name\": \"roleLimit\"", "\"name\": \"heroLimit\"");
+    let error = hir::parse_str(&payload).unwrap_err();
+    assert_eq!(error.code(), "settings-unknown-key");
+    assert!(
+        matches!(&error, HirError::Invalid { span: Some(_), .. }),
+        "the violation carries the key span"
+    );
+    // gamemodes.general.roleLimit is outside the per-key subsets (roleLimit
+    // is evidenced under assault/control/escort/hybrid only, #86).
+    let payload = VALID_SETTINGS
+        .replace("__SPAN__", SPAN)
+        .replace("\"name\": \"heroLimit\"", "\"name\": \"roleLimit\"");
+    let error = hir::parse_str(&payload).unwrap_err();
+    assert_eq!(error.code(), "settings-unknown-key");
+}
+
+#[test]
+fn settings_role_limit_off_is_not_evidenced() {
+    // roleLimit "off" exists only in the not-acquired skirmish_elim source;
+    // the strict table rejects it (settings-unknown-value).
+    let payload = VALID_SETTINGS
+        .replace("__SPAN__", SPAN)
+        .replace("\"value\": \"2OfEachRolePerTeam\"", "\"value\": \"off\"");
+    let error = hir::parse_str(&payload).unwrap_err();
+    assert_eq!(error.code(), "settings-unknown-value");
 }

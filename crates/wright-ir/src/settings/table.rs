@@ -31,11 +31,9 @@ pub enum KeyKind {
 /// One segment of an exact settings path.
 #[derive(Debug, Clone, Copy)]
 pub enum PathPart<'a> {
-    /// A literal key.
+    /// A literal key (mode names under `gamemodes` are literal keys too:
+    /// per-key subsets are exact-path entries, #86).
     Part(&'a str),
-    /// Any game-mode slot (assault, control, escort, hybrid, skirmish, ffa,
-    /// general), rendered through [`mode_name`].
-    Mode,
     /// Any team slot (allTeams), rendered through [`team_name`].
     Team,
     /// Any hero-config slot, rendered through [`hero_name`].
@@ -46,7 +44,6 @@ impl<'b> PartialEq<PathPart<'b>> for PathPart<'_> {
     fn eq(&self, other: &PathPart<'b>) -> bool {
         match (self, other) {
             (PathPart::Part(left), PathPart::Part(right)) => left == right,
-            (PathPart::Mode, PathPart::Mode) => true,
             (PathPart::Team, PathPart::Team) => true,
             (PathPart::Hero, PathPart::Hero) => true,
             _ => false,
@@ -76,15 +73,15 @@ macro_rules! entry {
 
 /// The fixture-evidenced settings surface.
 ///
-/// Slot sets (evidenced): modes {assault, control, escort, hybrid, skirmish,
-/// ffa} (per-key subsets), teams {allTeams}, heroes {mei} config groups +
+/// Slot sets (evidenced): teams {allTeams}, heroes {mei} config groups +
 /// the 10 ListHero names. `enabled: true` is not evidenced; it renders with
 /// no prefix. Keys outside this table (e.g. team1Slots, scoreToWin,
 /// gamemodeStartTrigger, spawnHealthPacks, healthPackRespawnTime%,
 /// abilityCooldown%, healingReceived%, primaryFireKb%, enableSpawningWithUlt,
 /// resetPlayersAfterGoalScored, scoreLeadToWin, gameLengthInSec,
-/// heroes.<team>.general, roleLimit under general) are `settings-unknown-key`
-/// at validation (only evidenced in oracle-failing programs; corpus-bounded).
+/// heroes.<team>.general, roleLimit under general, heroLimit under a named
+/// mode) are `settings-unknown-key` at validation (only evidenced in
+/// oracle-failing programs; corpus-bounded).
 pub static ENTRIES: &[TableEntry] = &[
     // main
     entry!(
@@ -103,11 +100,16 @@ pub static ENTRIES: &[TableEntry] = &[
         "Max FFA Players",
         KeyKind::Number
     ),
-    // gamemodes.<mode>
+    // gamemodes.<mode> — per-key subsets (exact-path entries, #86):
+    // enabledMaps under modes {assault, control, escort, hybrid, skirmish,
+    // ffa}; enabled/roleLimit/enableCompetitiveRules under {assault, control,
+    // escort, hybrid}; heroLimit/respawnTime%/enableHeroSwitching/
+    // enableRandomHeroes under general only (general is a literal group name,
+    // not a mode slot).
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("assault"),
             PathPart::Part("enabled")
         ],
         "enabled",
@@ -116,7 +118,34 @@ pub static ENTRIES: &[TableEntry] = &[
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("control"),
+            PathPart::Part("enabled")
+        ],
+        "enabled",
+        KeyKind::Bool
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("escort"),
+            PathPart::Part("enabled")
+        ],
+        "enabled",
+        KeyKind::Bool
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("hybrid"),
+            PathPart::Part("enabled")
+        ],
+        "enabled",
+        KeyKind::Bool
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("assault"),
             PathPart::Part("enabledMaps")
         ],
         "enabled maps",
@@ -125,7 +154,52 @@ pub static ENTRIES: &[TableEntry] = &[
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("control"),
+            PathPart::Part("enabledMaps")
+        ],
+        "enabled maps",
+        KeyKind::ListMap
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("escort"),
+            PathPart::Part("enabledMaps")
+        ],
+        "enabled maps",
+        KeyKind::ListMap
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("hybrid"),
+            PathPart::Part("enabledMaps")
+        ],
+        "enabled maps",
+        KeyKind::ListMap
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("skirmish"),
+            PathPart::Part("enabledMaps")
+        ],
+        "enabled maps",
+        KeyKind::ListMap
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("ffa"),
+            PathPart::Part("enabledMaps")
+        ],
+        "enabled maps",
+        KeyKind::ListMap
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("assault"),
             PathPart::Part("roleLimit")
         ],
         "Limit Roles",
@@ -134,17 +208,71 @@ pub static ENTRIES: &[TableEntry] = &[
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("control"),
+            PathPart::Part("roleLimit")
+        ],
+        "Limit Roles",
+        KeyKind::Enum("roleLimit")
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("escort"),
+            PathPart::Part("roleLimit")
+        ],
+        "Limit Roles",
+        KeyKind::Enum("roleLimit")
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("hybrid"),
+            PathPart::Part("roleLimit")
+        ],
+        "Limit Roles",
+        KeyKind::Enum("roleLimit")
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("assault"),
             PathPart::Part("enableCompetitiveRules")
         ],
         "Competitive Rules",
         KeyKind::Bool
     ),
-    // gamemodes.general (the Mode slot matches `general` via the mode map)
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("control"),
+            PathPart::Part("enableCompetitiveRules")
+        ],
+        "Competitive Rules",
+        KeyKind::Bool
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("escort"),
+            PathPart::Part("enableCompetitiveRules")
+        ],
+        "Competitive Rules",
+        KeyKind::Bool
+    ),
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("hybrid"),
+            PathPart::Part("enableCompetitiveRules")
+        ],
+        "Competitive Rules",
+        KeyKind::Bool
+    ),
+    // gamemodes.general
+    entry!(
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Part("general"),
             PathPart::Part("heroLimit")
         ],
         "Hero Limit",
@@ -153,7 +281,7 @@ pub static ENTRIES: &[TableEntry] = &[
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("general"),
             PathPart::Part("respawnTime%")
         ],
         "Respawn Time Scalar",
@@ -162,7 +290,7 @@ pub static ENTRIES: &[TableEntry] = &[
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("general"),
             PathPart::Part("enableHeroSwitching")
         ],
         "Allow Hero Switching",
@@ -171,7 +299,7 @@ pub static ENTRIES: &[TableEntry] = &[
     entry!(
         [
             PathPart::Part("gamemodes"),
-            PathPart::Mode,
+            PathPart::Part("general"),
             PathPart::Part("enableRandomHeroes")
         ],
         "Respawn As Random Hero",
@@ -379,18 +507,16 @@ pub struct EnumMember {
     pub name: &'static str,
 }
 
-/// Enum member names per domain. `roleLimit` "off" is evidenced in the
-/// acquired skirmish_elim snapshot (data-only, lands with the candidates).
+/// Enum member names per domain. `roleLimit` has exactly one evidenced
+/// member ("2OfEachRolePerTeam", pixelart + broken-weapons); "off" appears
+/// only in the not-acquired skirmish_elim source and is rejected
+/// (settings-unknown-value) until a snapshot evidences it. `heroLimit` "off"
+/// is evidenced (santa, clientToServer, parabola, crosshair, inputhud).
 pub static ENUM_MEMBERS: &[EnumMember] = &[
     EnumMember {
         domain: "roleLimit",
         member: "2OfEachRolePerTeam",
         name: "2 Of Each Role Per Team",
-    },
-    EnumMember {
-        domain: "roleLimit",
-        member: "off",
-        name: "Off",
     },
     EnumMember {
         domain: "heroLimit",
@@ -443,7 +569,6 @@ pub fn path_string(path: &[PathPart<'_>]) -> String {
     path.iter()
         .map(|part| match part {
             PathPart::Part(name) => (*name).to_string(),
-            PathPart::Mode => "<mode>".to_string(),
             PathPart::Team => "<team>".to_string(),
             PathPart::Hero => "<hero>".to_string(),
         })

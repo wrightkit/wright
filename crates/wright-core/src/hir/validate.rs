@@ -340,11 +340,13 @@ fn validate_group(program: &Program, node: &SettingsNode, slot: Slot) -> Result<
                     *span,
                 ));
             }
+            // Mode names are literal path parts: the per-key subsets of the
+            // emission table are exact-path entries (#86).
             for child in children {
                 validate_member(
                     program,
                     child,
-                    &[PathPart::Part("gamemodes"), PathPart::Mode],
+                    &[PathPart::Part("gamemodes"), PathPart::Part(name)],
                 )?;
             }
             Ok(())
@@ -409,7 +411,7 @@ fn validate_member(
     let Some(entry) = table::lookup(&full) else {
         return Err(invalid(
             "settings-unknown-key",
-            format!("unknown settings key '{}'", display_path(&full, name)),
+            format!("unknown settings key '{}'", table::path_string(&full)),
             span,
         ));
     };
@@ -485,16 +487,6 @@ fn check_key(name: &str, span: Option<Span>) -> Result<(), HirError> {
         ));
     }
     Ok(())
-}
-
-/// A human-readable path rendering for unknown-key diagnostics.
-fn display_path(path: &[PathPart], leaf: &str) -> String {
-    let mut rendered = table::path_string(path);
-    if !rendered.is_empty() {
-        rendered.push('.');
-    }
-    rendered.push_str(leaf);
-    rendered
 }
 
 fn validate_rule(rule: &Rule, program: &Program, tables: &NameTables<'_>) -> Result<(), HirError> {

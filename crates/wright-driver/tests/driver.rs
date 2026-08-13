@@ -383,6 +383,58 @@ fn opy_unknown_settings_key_fails_check_and_compile_identically() {
 }
 
 #[test]
+fn opy_inputhud_settings_section_matches_the_oracle() {
+    // inputhud's rules do not compile natively (later expression surface),
+    // so the settings section is exercised with the source's real settings
+    // block (byte-identical) and a minimal rule body through the full
+    // production path. The description's decoded `\n` must round-trip to the
+    // oracle's literal two-character spelling (#86).
+    let root = workspace_root().join("compatibility/fixtures/real-world/overpy-inputhud");
+    let source = std::fs::read_to_string(root.join("inputhud.opy")).unwrap();
+    let block_start = source.find("settings {").expect("settings block");
+    let block_end = source[block_start..]
+        .find("\n}\n")
+        .map(|index| block_start + index + 3)
+        .expect("settings block close");
+    let settings_only = format!(
+        "{}\nrule \"r\":\n    pass\n",
+        &source[block_start..block_end]
+    );
+    let dir = temp_dir();
+    let main = dir.join("inputhud-settings.opy");
+    std::fs::write(&main, &settings_only).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(main),
+        root: Some(root.clone()),
+        profile: wright_transform::Profile::Compat,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let envelope = session.compile();
+    assert!(
+        envelope.ok,
+        "settings-only inputhud must compile: {:?}",
+        envelope.diagnostics
+    );
+    let text = envelope.result.output.expect("output").text;
+    assert!(
+        text.contains("Description: \"Keyboard/Controller detector by Zezombye.\\n\\n"),
+        "decoded newlines must render as the literal two-character \\n"
+    );
+    let oracle = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(root.join("oracle.json")).unwrap(),
+    )
+    .unwrap();
+    let oracle_text = oracle["compile"]["workshop"].as_str().unwrap();
+    assert_eq!(
+        collapse_whitespace(&settings_section(&text)),
+        collapse_whitespace(&settings_section(oracle_text)),
+        "the emitted inputhud settings section must match the oracle region"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
     // End-to-end: the pixelart fixture compiles with the compat profile and
     // its emitted settings section equals the oracle region

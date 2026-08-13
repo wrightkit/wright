@@ -134,7 +134,11 @@ impl Emitter<'_> {
                 if matches!(member, SettingsNode::Bool { name: n, .. } if n == "enabled") {
                     continue;
                 }
-                self.settings_member(member, 3, &[PathPart::Part("gamemodes"), PathPart::Mode])?;
+                self.settings_member(
+                    member,
+                    3,
+                    &[PathPart::Part("gamemodes"), PathPart::Part(name)],
+                )?;
             }
             self.line(2, "}")?;
         }
@@ -198,7 +202,11 @@ impl Emitter<'_> {
             (SettingsNode::String { value, .. }, KeyKind::String) => {
                 self.line(
                     level,
-                    &format!("{}: \"{}\"", entry.workshop_name, escape_string(value)),
+                    &format!(
+                        "{}: \"{}\"",
+                        entry.workshop_name,
+                        escape_settings_string(value)
+                    ),
                 )?;
             }
             (SettingsNode::String { value, .. }, KeyKind::Enum(domain)) => {
@@ -825,6 +833,26 @@ fn is_comparison_operator(name: &str) -> bool {
 
 fn escape_string(value: &str) -> String {
     value.replace('"', "\\\"")
+}
+
+/// Escape a settings string value the way the pinned oracle does: every
+/// decode the JSONC parser performed is re-escaped, so decoded values
+/// round-trip to the oracle's spelling. Evidence: the inputhud description
+/// (`\n` in the source block) is emitted by the oracle as the literal
+/// two-character sequence `\n` in the Workshop settings section.
+fn escape_settings_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

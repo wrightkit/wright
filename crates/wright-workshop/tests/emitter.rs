@@ -460,3 +460,24 @@ fn string_values_are_escaped() {
         "strings are escaped: {emitted}"
     );
 }
+
+#[test]
+fn settings_strings_re_escape_decoded_escapes() {
+    // A decoded `\n` (and other JSONC escapes) must round-trip to the
+    // oracle's literal two-character spelling, not a raw byte (evidence: the
+    // inputhud description, #86).
+    let program = program_with_settings(settings(vec![group(
+        "main",
+        vec![string("description", "line one\nline two\t\"quoted\"\\end")],
+    )]));
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    let section = settings_section(&emitted);
+    assert!(
+        section.contains("Description: \"line one\\nline two\\t\\\"quoted\\\"\\\\end\""),
+        "decoded escapes re-escape to the oracle spelling: {section}"
+    );
+    assert!(
+        !section.contains('\u{000A}') || !section.contains("Description: \"line one\n"),
+        "no raw newline byte inside the settings string: {section}"
+    );
+}
