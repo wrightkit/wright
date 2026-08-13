@@ -4,9 +4,12 @@
 //! all semantic logic lives in the editor-neutral service crate; this
 //! binary only maps LSP DTOs to and from it, handles the stdio
 //! Content-Length framing, and manages document lifecycle with correct
-//! version identity. No duplicate semantic logic exists here.
+//! version identity and per-root publication ownership (#72), so diagnostics
+//! previously published for a source are retired when that source
+//! disappears from a later root analysis. No duplicate semantic logic exists
+//! here.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -29,6 +32,16 @@ use serde_json::Value;
 use wright_language::document::{Document, Position, Range};
 use wright_language::{LanguageService, SemanticToken as WtToken};
 
+/// Per-root publication ownership: the set of source URIs each open root
+/// document last published diagnostics for.
+///
+/// Map keys are the store document URIs (the requesting/root documents);
+/// values are canonical publication URI strings — the same form
+/// [`publish_to`] sends on the wire — so the retirement diff and the
+/// cross-root ownership guard compare like-for-like (a source reached as an
+/// include path and as an open document URI collapse to one identity).
+type PublicationOwnership = BTreeMap<String, BTreeSet<String>>;
+
 fn main() {
     if let Err(message) = run() {
         eprintln!("wright-lsp: {message}");
@@ -46,6 +59,7 @@ fn run() -> Result<(), String> {
     // rootUri/workspaceFolders.
     let mut root = std::env::current_dir().map_err(|error| error.to_string())?;
     let mut service = LanguageService::new(root.clone());
+    let mut ownership: PublicationOwnership = BTreeMap::new();
 
     loop {
         let message = read_message(&mut reader)?;
@@ -65,6 +79,10 @@ fn run() -> Result<(), String> {
                         if let Some(resolved) = initialize_root(&initialize) {
                             root = resolved;
                             service = LanguageService::new(root.clone());
+                            // The project root changed: previous publications
+                            // belong to the old service state, so ownership is
+                            // reset alongside it.
+                            ownership.clear();
                         }
                     }
                 }
@@ -87,7 +105,7 @@ fn run() -> Result<(), String> {
                     params.text_document.version,
                 );
                 service.store.open(document);
-                publish_affected_diagnostics(&mut writer, &service, &uri)?;
+                publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didChange" => {
                 let params: DidChangeTextDocumentParams =
@@ -98,15 +116,28 @@ fn run() -> Result<(), String> {
                         .store
                         .change(&uri, &change.text, params.text_document.version);
                 }
-                publish_affected_diagnostics(&mut writer, &service, &uri)?;
+                publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didClose" => {
                 let params: DidCloseTextDocumentParams =
                     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())?;
                 let uri = params.text_document.uri.to_string();
+                // Retire the diagnostics this root published that no other
+                // open root still owns, then refresh the roots that depend
+                // on the closed document.
+                let owned = ownership.remove(&uri).unwrap_or_default();
                 service.store.close(&uri);
-                publish_empty_diagnostics(&mut writer, &uri)?;
-                publish_affected_diagnostics(&mut writer, &service, &uri)?;
+                for source in owned {
+                    if !other_roots_own(&ownership, &source) {
+                        publish_to(
+                            &mut writer,
+                            &source,
+                            source_version(&service, &source),
+                            Vec::new(),
+                        )?;
+                    }
+                }
+                publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didSave" => {
                 // Full-sync documents treat the in-memory overlay as the
@@ -365,38 +396,51 @@ fn write_error(
         .map_err(|error| error.to_string())
 }
 
-/// Publish diagnostics for every document affected by a change to `uri`.
+/// Publish diagnostics for every document affected by a change to `uri`,
+/// routing each affected root through the stateful publication-ownership
+/// refresh.
 fn publish_affected_diagnostics(
     writer: &mut impl Write,
     service: &LanguageService,
+    ownership: &mut PublicationOwnership,
     changed_uri: &str,
 ) -> Result<(), String> {
     for affected_uri in service.dependent_documents(changed_uri) {
-        publish_diagnostics(writer, service, &affected_uri)?;
+        refresh_root(writer, service, ownership, &affected_uri)?;
     }
     Ok(())
 }
 
-/// Publish the diagnostics of one document, grouping them by their source
-/// identity so included-file diagnostics are published under the included
-/// file's URI rather than the requesting document's URI.
-fn publish_diagnostics(
+/// Refresh one root document's diagnostics with publication ownership.
+///
+/// Groups the root's current diagnostics by source identity, publishes each
+/// group normally (the requesting/root URI is always published, possibly
+/// empty, so its stale markers are cleared), then retires sources this root
+/// previously published that are no longer present — unless another recorded
+/// root currently owns them — with an empty publication. The root's new
+/// ownership set is recorded last.
+fn refresh_root(
     writer: &mut impl Write,
     service: &LanguageService,
-    uri: &str,
+    ownership: &mut PublicationOwnership,
+    root_uri: &str,
 ) -> Result<(), String> {
-    let diagnostics = service.diagnostics(uri);
+    let diagnostics = service.diagnostics(root_uri);
     let mut by_source: BTreeMap<String, Vec<LspDiagnostic>> = BTreeMap::new();
     for diagnostic in diagnostics {
-        let source = diagnostic.source.clone();
         by_source
-            .entry(source)
+            .entry(publication_uri(&diagnostic.source))
             .or_default()
             .push(convert_diagnostic(diagnostic));
     }
     // Always publish (possibly empty) for the requested document so stale
     // markers are cleared.
-    by_source.entry(uri.to_string()).or_default();
+    by_source.entry(publication_uri(root_uri)).or_default();
+
+    // The refreshed root is removed from the map before the ownership guard
+    // runs, so only *other* roots' current ownership protects a source.
+    let previous = ownership.remove(root_uri).unwrap_or_default();
+    let current: BTreeSet<String> = by_source.keys().cloned().collect();
 
     for (source, diagnostics) in by_source {
         publish_to(
@@ -406,13 +450,32 @@ fn publish_diagnostics(
             diagnostics,
         )?;
     }
+    for retired in previous.difference(&current) {
+        if !other_roots_own(ownership, retired) {
+            publish_to(
+                writer,
+                retired,
+                source_version(service, retired),
+                Vec::new(),
+            )?;
+        }
+    }
+
+    ownership.insert(root_uri.to_string(), current);
     Ok(())
 }
 
-/// Publish empty diagnostics for a document, retiring previously published
-/// markers (used on `didClose`).
-fn publish_empty_diagnostics(writer: &mut impl Write, uri: &str) -> Result<(), String> {
-    publish_to(writer, uri, None, Vec::new())
+/// Whether any recorded root currently owns `source` (the refreshed/closed
+/// root is removed from the map before this is consulted).
+fn other_roots_own(ownership: &PublicationOwnership, source: &str) -> bool {
+    ownership.values().any(|owned| owned.contains(source))
+}
+
+/// The canonical URI string under which a source identity is published and
+/// tracked, matching the form [`publish_to`] sends on the wire. Both
+/// directions (URI and resolved path) collapse to the same identity.
+fn publication_uri(source: &str) -> String {
+    wright_language::document::source_to_uri(source).unwrap_or_else(|| fallback_uri().to_string())
 }
 
 /// Convert one editor-neutral source-aware diagnostic into an LSP diagnostic.
@@ -439,7 +502,7 @@ fn publish_to(
     diagnostics: Vec<LspDiagnostic>,
 ) -> Result<(), String> {
     let params = PublishDiagnosticsParams {
-        uri: source_to_uri(source),
+        uri: Uri::from_str(&publication_uri(source)).unwrap_or_else(|_| fallback_uri()),
         diagnostics,
         version,
     };
@@ -459,7 +522,10 @@ fn source_version(service: &LanguageService, source: &str) -> Option<i32> {
     if let Some(document) = service.store.document(source) {
         return Some(document.version);
     }
-    let path = PathBuf::from(source);
+    // The source may be a canonical publication URI or a resolved filesystem
+    // path; decode URIs before matching open documents by path.
+    let path =
+        wright_language::document::uri_to_path(source).unwrap_or_else(|| PathBuf::from(source));
     service
         .store
         .uri_for_path(&path)

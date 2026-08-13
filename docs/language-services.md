@@ -99,7 +99,10 @@ suppression is the authoritative M10 contract.
 (capability negotiation: hover/definition/references/completion/rename/full
 semantic tokens), didOpen/didChange/didSave/didClose (didSave is an explicit
 no-op for full-sync documents; didClose retires diagnostics), publishDiagnostics
-(versioned and grouped by source identity, with didClose cleanup),
+(versioned and grouped by source identity, with didClose cleanup), per-root
+publication ownership (#72): a source that disappears from a root analysis is
+retired with an empty publishDiagnostics unless another open root still owns
+it, so no diagnostic stays stale solely because its source left the analysis,
 dependency-refresh of affected documents on include/overlay changes, hover,
 definition, references, completion, rename (multi-document workspace edit),
 semanticTokens/full, shutdown/exit. The end-to-end

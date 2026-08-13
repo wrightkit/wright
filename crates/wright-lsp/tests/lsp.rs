@@ -107,6 +107,33 @@ impl LspClient {
         }
         notifications
     }
+
+    /// Send a request and collect every notification the server emits before
+    /// answering it, in order. The server processes each message in sequence,
+    /// so the notifications produced by the preceding `notify` calls are all
+    /// flushed before the response to this request is written — giving the
+    /// exact, deterministic notification sequence of the prior step.
+    fn request_collecting_notifications(
+        &mut self,
+        id: u64,
+        method: &str,
+        params: serde_json::Value,
+    ) -> (serde_json::Value, Vec<serde_json::Value>) {
+        self.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        }));
+        let mut notifications = Vec::new();
+        loop {
+            let message = self.read_message();
+            if message.get("id").is_some() {
+                return (message, notifications);
+            }
+            notifications.push(message);
+        }
+    }
 }
 
 fn workspace_root() -> PathBuf {
@@ -1073,5 +1100,448 @@ fn lsp_rename_returns_multi_document_workspace_edit() {
     );
 
     client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+/// The canonical `file://` publication URI for a source identity, matching
+/// the form the server sends on the wire.
+fn canonical_uri(source: &str) -> String {
+    wright_language::document::source_to_uri(source).expect("source has a file URI")
+}
+
+#[test]
+fn lsp_included_diagnostics_retire_when_the_source_disappears() {
+    // Scenario A (#72): main.opy includes bad.opy, which produces an error.
+    // Editing main.opy so bad.opy is no longer included must retire
+    // bad.opy's published diagnostics with an empty publishDiagnostics.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/broken-include"),
+    )
+    .unwrap();
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let main_uri = uri_for("main.opy");
+    let bad_uri = canonical_uri(&fixtures.join("bad.opy").to_string_lossy());
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", fixtures.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // Opening the root publishes the included file's error under bad.opy.
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "opy", "version": 1, "text": main },
+        }),
+    );
+    let opened = client.read_notifications("textDocument/publishDiagnostics", 2);
+    assert!(
+        opened.iter().any(|notification| {
+            notification["params"]["uri"].as_str().unwrap() == bad_uri
+                && !notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        }),
+        "included-file error is published under bad.opy: {opened:?}"
+    );
+
+    // Edit the root so bad.opy is no longer included; the disappeared
+    // source's diagnostics must be explicitly retired with an empty array.
+    let without_include = "rule \"main\":\n    @Event global\n    debug(1)\n";
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "version": 2 },
+            "contentChanges": [{ "text": without_include }],
+        }),
+    );
+    let (_response, after_change) = client.request_collecting_notifications(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 0, "character": 0 },
+        }),
+    );
+    assert!(
+        after_change.iter().any(|notification| {
+            notification["params"]["uri"].as_str().unwrap() == bad_uri
+                && notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        }),
+        "a disappeared include is retired with empty diagnostics: {after_change:?}"
+    );
+    assert!(
+        after_change
+            .iter()
+            .any(|notification| notification["params"]["uri"].as_str().unwrap() == main_uri),
+        "the requesting root is always published: {after_change:?}"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_invalid_overlay_clears_diagnostics_when_made_valid() {
+    // Scenario B (#72): an open unsaved overlay that is invalid publishes its
+    // error through the including root; making the overlay valid must
+    // explicitly clear the old shared.opy diagnostics without reopening the
+    // root.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/overlay"),
+    )
+    .unwrap();
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let main_uri = uri_for("main.opy");
+    let shared_uri = format!("file://{}", fixtures.join("shared.opy").display());
+    let shared_broken = "this is not valid opy\n";
+    let shared_good = "subroutine showStatus\n\ndef showStatus():\n    print(\"overlay\")\n";
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", fixtures.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // Open the root first (shared.opy is not on disk), then the invalid
+    // unsaved overlay; the including root reports the overlay's error.
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "opy", "version": 1, "text": main },
+        }),
+    );
+    let _ = client
+        .read_notifications("textDocument/publishDiagnostics", 1)
+        .into_iter()
+        .collect::<Vec<_>>();
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "languageId": "opy", "version": 1, "text": shared_broken },
+        }),
+    );
+    let opened = client.read_notifications("textDocument/publishDiagnostics", 3);
+    assert!(
+        opened.iter().any(|notification| {
+            notification["params"]["uri"]
+                .as_str()
+                .unwrap()
+                .contains("shared.opy")
+                && notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|diagnostic| diagnostic["severity"] == 1)
+        }),
+        "invalid overlay publishes an error for shared.opy: {opened:?}"
+    );
+
+    // Make the overlay valid without reopening the root: the old shared.opy
+    // diagnostics are explicitly cleared with an empty publication carrying
+    // the overlay's current version.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "version": 2 },
+            "contentChanges": [{ "text": shared_good }],
+        }),
+    );
+    let (_response, cleared) = client.request_collecting_notifications(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 0, "character": 0 },
+        }),
+    );
+    assert!(
+        cleared.iter().any(|notification| {
+            notification["params"]["uri"]
+                .as_str()
+                .unwrap()
+                .contains("shared.opy")
+                && notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+                && notification["params"]["version"] == 2
+        }),
+        "a valid overlay explicitly clears shared.opy diagnostics: {cleared:?}"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_two_roots_keep_shared_diagnostics_until_the_last_owner_drops_them() {
+    // Scenario C (#72): two open roots both include shared.opy and both
+    // justify its diagnostic. Removing the include from only one root must
+    // not emit an empty publication for shared.opy while the other root still
+    // owns it; only the last owning root's refresh retires it.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/two-root"),
+    )
+    .unwrap();
+    let root_a = std::fs::read_to_string(fixtures.join("root-a.opy")).unwrap();
+    let root_b = std::fs::read_to_string(fixtures.join("root-b.opy")).unwrap();
+    let a_uri = uri_for("root-a.opy");
+    let b_uri = uri_for("root-b.opy");
+    let shared_uri = canonical_uri(&fixtures.join("shared.opy").to_string_lossy());
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", fixtures.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // Open both roots; each publishes shared.opy's error.
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": a_uri, "languageId": "opy", "version": 1, "text": root_a },
+        }),
+    );
+    let a_opened = client.read_notifications("textDocument/publishDiagnostics", 2);
+    assert!(
+        a_opened.iter().any(|notification| {
+            notification["params"]["uri"].as_str().unwrap() == shared_uri
+                && !notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        }),
+        "root-a justifies shared.opy's diagnostic: {a_opened:?}"
+    );
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": b_uri, "languageId": "opy", "version": 1, "text": root_b },
+        }),
+    );
+    let b_opened = client.read_notifications("textDocument/publishDiagnostics", 2);
+    assert!(
+        b_opened.iter().any(|notification| {
+            notification["params"]["uri"].as_str().unwrap() == shared_uri
+                && !notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        }),
+        "root-b justifies shared.opy's diagnostic: {b_opened:?}"
+    );
+
+    // Drop the include from root-a only: shared.opy must NOT be cleared.
+    let a_without_include = "rule \"a\":\n    @Event global\n    debug(1)\n";
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": a_uri, "version": 2 },
+            "contentChanges": [{ "text": a_without_include }],
+        }),
+    );
+    let (_response, after_a) = client.request_collecting_notifications(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": a_uri },
+            "position": { "line": 0, "character": 0 },
+        }),
+    );
+    assert_eq!(after_a.len(), 1, "only root-a is refreshed: {after_a:?}");
+    assert!(
+        after_a[0]["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("root-a.opy"),
+        "root-a is published: {after_a:?}"
+    );
+    assert!(
+        after_a[0]["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "root-a's own diagnostics are empty: {after_a:?}"
+    );
+    assert!(
+        !after_a
+            .iter()
+            .any(|notification| notification["params"]["uri"].as_str().unwrap() == shared_uri),
+        "shared.opy is not cleared while root-b still owns it: {after_a:?}"
+    );
+
+    // Drop the include from root-b too: the last owner's refresh retires
+    // shared.opy with an empty publication.
+    let b_without_include = "rule \"b\":\n    @Event global\n    debug(1)\n";
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": b_uri, "version": 2 },
+            "contentChanges": [{ "text": b_without_include }],
+        }),
+    );
+    let (_response, after_b) = client.request_collecting_notifications(
+        3,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": b_uri },
+            "position": { "line": 0, "character": 0 },
+        }),
+    );
+    assert_eq!(
+        after_b.len(),
+        2,
+        "root-b plus retired shared.opy: {after_b:?}"
+    );
+    assert!(
+        after_b.iter().any(|notification| {
+            notification["params"]["uri"].as_str().unwrap() == shared_uri
+                && notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        }),
+        "shared.opy is retired after the last owner drops it: {after_b:?}"
+    );
+
+    client.request(4, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_didclose_retires_only_sole_owned_diagnostics() {
+    // Scenario D (#72): closing one root retires the diagnostics it owned
+    // alone (its own URI plus include sources no other root owns), while a
+    // shared source still owned by another open root stays published;
+    // closing the final owning root retires the shared source.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/two-root"),
+    )
+    .unwrap();
+    let root_a = std::fs::read_to_string(fixtures.join("root-a.opy")).unwrap();
+    let root_b = std::fs::read_to_string(fixtures.join("root-b.opy")).unwrap();
+    let a_uri = uri_for("root-a.opy");
+    let b_uri = uri_for("root-b.opy");
+    let shared_uri = canonical_uri(&fixtures.join("shared.opy").to_string_lossy());
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", fixtures.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": a_uri, "languageId": "opy", "version": 1, "text": root_a },
+        }),
+    );
+    let _ = client.read_notifications("textDocument/publishDiagnostics", 2);
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": b_uri, "languageId": "opy", "version": 1, "text": root_b },
+        }),
+    );
+    let _ = client.read_notifications("textDocument/publishDiagnostics", 2);
+
+    // Close root-a while root-b still owns shared.opy: only root-a's own
+    // diagnostics are retired; shared.opy stays published.
+    client.notify(
+        "textDocument/didClose",
+        serde_json::json!({
+            "textDocument": { "uri": a_uri },
+        }),
+    );
+    let (_response, after_a) = client.request_collecting_notifications(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": b_uri },
+            "position": { "line": 0, "character": 0 },
+        }),
+    );
+    assert_eq!(after_a.len(), 1, "only root-a is retired: {after_a:?}");
+    assert!(
+        after_a[0]["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("root-a.opy")
+            && after_a[0]["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .is_empty(),
+        "closing root-a retires its own diagnostics: {after_a:?}"
+    );
+    assert!(
+        !after_a
+            .iter()
+            .any(|notification| notification["params"]["uri"].as_str().unwrap() == shared_uri),
+        "shared.opy survives root-a's close: {after_a:?}"
+    );
+
+    // Close the final owner: shared.opy is retired with an empty publication.
+    client.notify(
+        "textDocument/didClose",
+        serde_json::json!({
+            "textDocument": { "uri": b_uri },
+        }),
+    );
+    let (_response, after_b) =
+        client.request_collecting_notifications(3, "shutdown", serde_json::json!(null));
+    assert!(
+        after_b.iter().any(|notification| {
+            notification["params"]["uri"].as_str().unwrap() == shared_uri
+                && notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        }),
+        "closing the final owner retires shared.opy: {after_b:?}"
+    );
+    assert!(
+        after_b.iter().any(|notification| {
+            notification["params"]["uri"]
+                .as_str()
+                .unwrap()
+                .contains("root-b.opy")
+                && notification["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+        }),
+        "closing the final owner retires root-b's own diagnostics: {after_b:?}"
+    );
+
     client.notify("exit", serde_json::json!(null));
 }
