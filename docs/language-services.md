@@ -44,14 +44,34 @@ analyzer contracts.
 
 Reanalysis is a deterministic full recomputation over the changed document.
 The committed language-service perf harness (`wright-language/tests/perf.rs`)
-measures the heaviest corpus fixture: analyze ≈2.3 ms, diagnostics ≈1.3 ms,
-hover ≈1.0 ms, peak RSS ≈6 MB (`target/language-service-perf.json`). Because
-each workflow is bounded far below interactive latency, **true cancellation
-is explicitly deferred**; the synchronous-recomputation path cannot be
-interrupted mid-flight, but it also cannot surface obsolete results as
-current: results are version-tagged, stale/out-of-order client versions are
-rejected, and every query re-reads the current document state. This decision
-is the measured option B of the M10 contract, not an unexamined shortcut.
+measures the heaviest corpus fixture: analyze ≈1.0 ms, diagnostics ≈0.9 ms,
+hover ≈0.9 ms, peak RSS ≈7 MB (`target/language-service-perf.json`,
+re-measured after #72–#74). Each workflow is bounded far below interactive
+latency.
+
+## Responsiveness contract (#75)
+
+The M10 responsiveness requirement is **stale/current-state correctness, not
+in-flight request cancellation**. Synchronous deterministic full recomputation
+is the implemented contract: results are version-tagged, stale/out-of-order
+client versions are rejected and cannot overwrite newer state, obsolete
+results are never surfaced as current, and every query re-reads the current
+document state. True in-flight request cancellation is **explicitly deferred**
+and is not an M10 requirement; it must not be re-introduced speculatively.
+
+Re-evaluation trigger (measured, testable): re-open the true-cancellation or
+incremental-analysis decision when any of the following holds on the current
+machine baseline:
+
+- the committed perf harness mean for `analyze` or `diagnostics` exceeds the
+  harness regression bound (200 ms per workflow); or
+- peak RSS on the perf workload exceeds 1 GB; or
+- a representative project-scale measurement (a multi-file corpus of at least
+  20 source files, or the declared representative project) shows any single
+  interactive request exceeding 100 ms.
+
+Until a trigger fires, bounded full recomputation with stale-result
+suppression is the authoritative M10 contract.
 
 ## Services (#65/#66)
 
