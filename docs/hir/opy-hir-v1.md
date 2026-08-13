@@ -113,6 +113,16 @@ half-open interval in a file:
   span of the source text that caused it to exist, or is omitted when no
   source text exists.
 
+Declaration, rule, and `subroutineDef` nodes additionally carry an optional
+`name_span` field (wire spelling `name_span`): the exact source span of the
+identifier token — the declared or defined identifier, or the rule name inside
+its string literal — when the frontend can record it. It is optional and
+omitted when absent; it is never emitted as `null`, and it has the same shape
+and validation as any other span (§8). The native frontend records it; the
+reference adapter does not carry exact identifier spans, so the differential
+suite's normalization treats `name_span` as frontend-internal provenance and
+removes it (alongside `span`) before comparison.
+
 Spans are for diagnostics and identity, not for byte-accurate reconstruction.
 The adapter is responsible for producing them; the consumer validates them
 (§8). A span whose end would precede its start (for example a node expanded
@@ -142,6 +152,7 @@ discriminated by `kind`. All kinds carry `name` and `span` unless noted.
 * `initializer` is an expression or `null`. It is present only when the source
   provided a non-trivial initializer; the frontend's implicit defaults are
   not emitted.
+* `name_span` is the exact span of the declared identifier token (see §3).
 
 ### 4.2 `subroutine`
 
@@ -150,6 +161,8 @@ A subroutine declaration (`subroutine name`), independent of any `def`.
 ```jsonc
 { "kind": "subroutine", "name": "showStatus", "index": null, "span": { ... } }
 ```
+
+* `name_span` is the exact span of the declared identifier token (see §3).
 
 ### 4.3 `subroutineDef`
 
@@ -165,6 +178,8 @@ is a program body, so it appears in `rules` (§5) rather than in
   "body": [ /* statements */ ]
 }
 ```
+
+* `name_span` is the exact span of the identifier in `def name():` (see §3).
 
 ### 4.4 `constant`
 
@@ -205,6 +220,7 @@ rule object or a `subroutineDef` node (§4.3). Rules appear in source order.
 | --- | --- | --- | --- |
 | `name` | string | yes | The rule name as written (empty is allowed for delimiter rules). |
 | `span` | span | yes | The `rule` line. |
+| `name_span` | span | no | The exact span of the rule name inside its string literal, when the frontend records it. |
 | `disabled` | boolean | yes | `true` when the rule is disabled by annotation. |
 | `event` | event | yes | The rule's event. |
 | `conditions` | array | yes | `@Condition` expressions, in source order. |

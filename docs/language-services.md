@@ -12,7 +12,7 @@ document/workspace model (Document, DocumentStore)
        ├─ diagnostics (parse errors + semantic findings)
        ├─ hover / definition / references
        ├─ completion (symbols + builtins + keywords)
-       ├─ rename (M9 safe-edit contract, pipeline-validated)
+       ├─ rename (identifier-exact, pipeline-validated)
        └─ semantic tokens (native lexer classification)
             ↓
   wright-lsp (thin protocol adapter, Content-Length stdio framing)
@@ -82,13 +82,18 @@ suppression is the authoritative M10 contract.
 * **Hover** — symbol name/kind and usage summary (reads/writes/calls/rules).
 * **Definition / References** — via the M4 semantic index over source spans.
 * **Completion** — declared symbols, corpus-evidenced builtins, keywords.
-* **Rename** — project-wide semantic rename: resolves the symbol through the
-  semantic index, unions declaration/definition/reference targets across every
-  open root whose project includes the requesting document, and returns
-  source-aware edits for all affected sources (open overlays take precedence
-  over filesystem content). Collisions, unresolvable identity, and failed
-  validation refuse explicitly. Reuses `wright_driver::edit`
-  (`rename_occurrences`/`SourceEdit`) as the shared edit contract.
+* **Rename** — project-wide identifier-exact rename: resolves the symbol
+  through the semantic index, unions its exact declaration/definition/reference
+  identifier spans across every open root whose project includes the
+  requesting document, and returns source-aware full-document edits for all
+  affected sources (open overlays take precedence over filesystem content).
+  Collisions, unresolvable identity, a missing exact identifier span, stale
+  source identity, and failed validation refuse explicitly. Edits are
+  Wright-owned (`RenameEdit`/`TargetSpan` in `wright-language`) and carry the
+  SHA-256 source identity computed through `wright_driver::input_identity`;
+  the M9 whole-word `wright_driver::edit` (`rename_occurrences`/`SourceEdit`)
+  contract remains the `wright-consumer` rename and is not the project rename
+  engine.
 * **Semantic tokens** — classified by the native lexer/parser identity
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.
