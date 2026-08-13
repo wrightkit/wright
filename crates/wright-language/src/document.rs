@@ -9,7 +9,7 @@
 //! computed for, so stale results are detectable and replaceable (#64).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A 0-based line/character position (editor convention).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -183,10 +183,25 @@ impl DocumentStore {
     }
 }
 
-/// Convert a `file://` URI to a filesystem path, when applicable.
-pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    let path = uri.strip_prefix("file://")?;
-    Some(PathBuf::from(path))
+/// Convert a standard `file://` URI to a filesystem path, when applicable.
+///
+/// Handles percent-encoding, spaces, Unicode filenames, and platform-specific
+/// path behavior through the standard URL parser, so an open document's URI
+/// identity maps to the same filesystem path the include resolver produces.
+pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
+    let url = url::Url::parse(uri).ok()?;
+    if url.scheme() != "file" {
+        return None;
+    }
+    url.to_file_path().ok()
+}
+
+/// Convert a filesystem path to a standard `file://` URI string, when
+/// applicable. The reverse of [`uri_to_path`].
+pub fn path_to_uri(path: &Path) -> Option<String> {
+    url::Url::from_file_path(path)
+        .ok()
+        .map(|url| url.to_string())
 }
 
 /// The UTF-16 code-unit length of a string (non-BMP chars count 2).
@@ -301,6 +316,78 @@ mod tests {
             char_offset_to_utf16(line, 1),
             2,
             "one char becomes two UTF-16 units"
+        );
+    }
+
+    #[test]
+    fn uri_to_path_decodes_percent_encoding_spaces_and_unicode() {
+        // Spaces and percent-encoded segments resolve to real paths.
+        assert_eq!(
+            uri_to_path("file:///tmp/my%20dir/main.opy"),
+            Some(PathBuf::from("/tmp/my dir/main.opy"))
+        );
+        // Unicode filenames decode from percent-encoded URIs.
+        assert_eq!(
+            uri_to_path("file:///tmp/%E6%96%87%E4%BB%B6.opy"),
+            Some(PathBuf::from("/tmp/文件.opy"))
+        );
+        // Non-file schemes are not filesystem paths.
+        assert_eq!(uri_to_path("untitled:scratch"), None);
+        assert_eq!(uri_to_path("https://example.com/a.opy"), None);
+    }
+
+    #[test]
+    fn span_to_range_uses_utf16_units_on_non_bmp_lines() {
+        // 🎯 is one Rust char but two UTF-16 units, so `score` (1-based
+        // column 16) starts at UTF-16 offset 16 and ends at 21.
+        let source = "    debug(\"🎯\", score)\n";
+        let span = wright_ir::source::Span::new(
+            wright_ir::ids::Id::from_index(0),
+            wright_ir::source::Position::new(1, 16),
+            wright_ir::source::Position::new(1, 21),
+        );
+        let range = span_to_range(&span, source);
+        assert_eq!(range.start.line, 0);
+        assert_eq!(
+            range.start.character, 16,
+            "score starts at UTF-16 offset 16"
+        );
+        assert_eq!(range.end.character, 21, "score ends at UTF-16 offset 21");
+    }
+
+    #[test]
+    fn path_to_uri_round_trips_spaces_and_unicode() {
+        let encoded = path_to_uri(Path::new("/tmp/my dir/文件.opy")).unwrap();
+        assert!(encoded.starts_with("file:///tmp/my%20dir/"), "{encoded}");
+        assert!(encoded.contains("%E6%96%87%E4%BB%B6"), "{encoded}");
+        assert_eq!(
+            uri_to_path(&encoded),
+            Some(PathBuf::from("/tmp/my dir/文件.opy")),
+            "path -> URI -> path round-trips"
+        );
+    }
+
+    #[test]
+    fn windows_drive_paths_use_standard_file_uris() {
+        // A drive-style file URI always decodes through the standard parser;
+        // on non-Windows the authority-style path is preserved literally.
+        let decoded = uri_to_path("file:///C:/work/main.opy").expect("file URI decodes");
+        assert!(
+            decoded.to_string_lossy().ends_with("C:/work/main.opy")
+                || decoded.to_string_lossy().ends_with("C:\\work\\main.opy"),
+            "{decoded:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_round_trip_through_file_uris() {
+        let encoded = path_to_uri(Path::new(r"C:\work\main.opy")).unwrap();
+        assert_eq!(encoded, "file:///C:/work/main.opy", "{encoded}");
+        assert_eq!(
+            uri_to_path(&encoded),
+            Some(PathBuf::from(r"C:\work\main.opy")),
+            "path -> URI -> path round-trips"
         );
     }
 }

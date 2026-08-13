@@ -866,10 +866,12 @@ fn empty_range() -> Range {
 
 /// A 0-based range covering the entire source text, including any trailing
 /// newline (so a full-document replacement can delete the final line break).
+/// The end character is a UTF-16 code-unit offset, matching the editor
+/// convention used everywhere else at the LSP boundary.
 fn full_document_range(text: &str) -> Range {
     let lines: Vec<&str> = text.split('\n').collect();
     let line_count = lines.len().max(1) as u32;
-    let last_line_len = lines.last().unwrap_or(&"").chars().count() as u32;
+    let last_line_len = crate::document::utf16_len(lines.last().unwrap_or(&"")) as u32;
     Range {
         start: Position {
             line: 0,
@@ -944,10 +946,15 @@ const KEYWORDS: &[&str] = &[
 const RECEIVER_MEMBERS: &[&str] = &["append", "format", "uniform", "choice", "hasSpawned"];
 
 /// The identifier being typed immediately before a position.
+///
+/// The UTF-16 editor offset is converted to a character offset first, and the
+/// line is then sliced by characters (never by byte offsets), so non-ASCII
+/// text before the cursor cannot shift the slice.
 fn word_prefix(text: &str, position: Position) -> String {
     let line = text.lines().nth(position.line as usize).unwrap_or_default();
     let char_end = crate::document::utf16_offset_to_char(line, position.character as usize);
-    line[..char_end]
+    let before: String = line.chars().take(char_end).collect();
+    before
         .chars()
         .rev()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
@@ -962,7 +969,7 @@ fn word_prefix(text: &str, position: Position) -> String {
 fn member_receiver(text: &str, position: Position) -> Option<String> {
     let line = text.lines().nth(position.line as usize)?;
     let char_end = crate::document::utf16_offset_to_char(line, position.character as usize);
-    let before = &line[..char_end];
+    let before: String = line.chars().take(char_end).collect();
     let trimmed = before.trim_end().strip_suffix('.')?;
     let name = trimmed
         .chars()

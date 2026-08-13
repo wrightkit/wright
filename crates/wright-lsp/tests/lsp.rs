@@ -566,6 +566,116 @@ fn lsp_open_unsaved_overlay_participates_in_includes() {
 }
 
 #[test]
+fn lsp_didsave_is_explicit_and_harmless() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("saved.opy"), "languageId": "opy", "version": 1, "text": source },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("open diagnostics");
+
+    // didSave is an explicit lifecycle point (a no-op for full-sync
+    // documents); the server must stay responsive afterwards.
+    client.notify(
+        "textDocument/didSave",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("saved.opy") },
+        }),
+    );
+    let hover = client.request(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("saved.opy") },
+            "position": { "line": 0, "character": 3 },
+        }),
+    );
+    assert!(
+        serde_json::to_string(&hover["result"])
+            .unwrap()
+            .contains("score"),
+        "hover works after didSave: {hover}"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_file_uris_with_spaces_and_unicode_round_trip() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": "file:///tmp/wright%20dir",
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // A percent-encoded, spaced, Unicode document URI. No includes, so the
+    // backing file need not exist on disk.
+    let uri = "file:///tmp/wright%20dir/%E6%96%87%E4%BB%B6.opy";
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "languageId": "opy", "version": 1, "text": source },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("open diagnostics");
+
+    let definition = client.request(
+        2,
+        "textDocument/definition",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 3 },
+        }),
+    );
+    let returned = definition["result"]["uri"]
+        .as_str()
+        .expect("definition uri");
+    assert_eq!(
+        wright_language::document::uri_to_path(returned),
+        Some(std::path::PathBuf::from("/tmp/wright dir/文件.opy")),
+        "the returned URI decodes to the intended path: {returned}"
+    );
+
+    // The definition URI itself is a valid, non-hand-built file URI.
+    let decoded = wright_language::document::uri_to_path(uri).expect("open URI decodes");
+    assert_eq!(
+        decoded,
+        std::path::PathBuf::from("/tmp/wright dir/文件.opy"),
+        "the open URI decodes to the intended path"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
 fn lsp_utf16_positions_account_for_non_bmp_characters() {
     let root = workspace_root();
     let mut client = LspClient::spawn(&root);

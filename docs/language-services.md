@@ -28,7 +28,15 @@ analyzer contracts.
   project root (include base).
 * `DocumentStore` — open/change/close lifecycle with version bumping.
 * Positions/ranges are 0-based editor conventions; the service converts to
-  the compiler's 1-based spans at the boundary.
+  the compiler's 1-based spans at the boundary. UTF-16 ↔ character conversion
+  is centralized in `wright_language::document` (`utf16_offset_to_char`,
+  `char_offset_to_utf16`, `span_to_range`, `full_document_range`) and is the
+  only path that consumes or emits editor positions; no UTF-16 offset is ever
+  used as a byte index.
+* File URI ↔ filesystem path conversion is centralized in
+  `wright_language::document` (`uri_to_path`, `path_to_uri`) using the
+  standard URL parser, covering percent-encoding, spaces, Unicode filenames,
+  and platform drive paths.
 * Every result carries `document_version`; stale results are detectable and
   replaceable (#64).
 
@@ -69,10 +77,11 @@ is the measured option B of the M10 contract, not an unexamined shortcut.
 
 `wright-lsp` (stdio, Content-Length framing) implements: initialize
 (capability negotiation: hover/definition/references/completion/rename/full
-semantic tokens), didOpen/didChange/didClose, publishDiagnostics (versioned
-and grouped by source identity, with didClose cleanup), dependency-refresh of
-affected documents on include/overlay changes, hover, definition, references,
-completion, rename (workspace edit with the validated preview),
+semantic tokens), didOpen/didChange/didSave/didClose (didSave is an explicit
+no-op for full-sync documents; didClose retires diagnostics), publishDiagnostics
+(versioned and grouped by source identity, with didClose cleanup),
+dependency-refresh of affected documents on include/overlay changes, hover,
+definition, references, completion, rename (multi-document workspace edit),
 semanticTokens/full, shutdown/exit. The end-to-end
 harness (`wright-lsp/tests/lsp.rs`) drives the real binary and verifies
 capability negotiation, lifecycle, navigation, completion, rename, semantic

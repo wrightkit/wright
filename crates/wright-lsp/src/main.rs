@@ -108,6 +108,13 @@ fn run() -> Result<(), String> {
                 publish_empty_diagnostics(&mut writer, &uri)?;
                 publish_affected_diagnostics(&mut writer, &service, &uri)?;
             }
+            "textDocument/didSave" => {
+                // Full-sync documents treat the in-memory overlay as the
+                // source of truth, so saving to disk does not change the
+                // analyzed text; this lifecycle point is intentionally a
+                // no-op (an explicit handler, not a silent default).
+                let _ = params;
+            }
             "textDocument/hover" => {
                 let params: TextDocumentPositionParams =
                     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())?;
@@ -484,29 +491,30 @@ fn initialize_root(params: &InitializeParams) -> Option<std::path::PathBuf> {
         .and_then(|folder| uri_to_path(folder.uri.as_str()))
 }
 
-/// Convert an LSP `file://` URI to a filesystem path; an empty path is None.
+/// Resolve a workspace-root `file://` URI to a filesystem path. The
+/// filesystem root itself (`file:///`) and empty paths are treated as absent
+/// so the process cwd stays the fallback root.
 fn uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
-    let path = uri.strip_prefix("file://")?;
-    if path.is_empty() || path == "/" {
+    let path = wright_language::document::uri_to_path(uri)?;
+    if path.as_os_str().is_empty() || path == std::path::Path::new("/") {
         return None;
     }
-    Some(std::path::PathBuf::from(path))
+    Some(path)
 }
 
-/// Map an editor-neutral source identity to an LSP URI.
+/// Map an editor-neutral source identity (a file URI or a resolved
+/// filesystem path) to a valid LSP URI through the standard file-URI
+/// encoding, so percent-encoded/spaced/Unicode paths round-trip correctly.
 fn source_to_uri(source: &str) -> Uri {
     if source.starts_with("file://") {
-        return Uri::from_str(source).unwrap_or_else(|_| fallback_uri());
+        if let Ok(uri) = Uri::from_str(source) {
+            return uri;
+        }
     }
-    // Resolved filesystem paths become file:// URIs (the workspace root
-    // produces absolute paths in the language service).
-    let path = source.trim_start_matches("file://");
-    let normalized = if path.starts_with('/') {
-        format!("file://{path}")
-    } else {
-        format!("file:///{}", path.replace('\\', "/"))
-    };
-    Uri::from_str(&normalized).unwrap_or_else(|_| fallback_uri())
+    match wright_language::document::path_to_uri(std::path::Path::new(source)) {
+        Some(uri) => Uri::from_str(&uri).unwrap_or_else(|_| fallback_uri()),
+        None => fallback_uri(),
+    }
 }
 
 fn fallback_uri() -> Uri {

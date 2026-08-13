@@ -143,6 +143,113 @@ fn utf16_positions_resolve_symbols_after_non_bmp_text() {
 }
 
 #[test]
+fn completion_and_member_context_use_utf16_offsets_after_non_bmp_text() {
+    // Non-BMP text before the cursor must not shift UTF-16 offsets onto
+    // byte/char boundaries used for slicing.
+    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", points.append(points))\n";
+    let document = Document::new("file:///u16.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let line = "    debug(\"🎯\", points.append(points))";
+
+    // The editor cursor is a UTF-16 offset; compute it from the character
+    // position, not the byte position (the 🎯 shifts the two apart).
+    let utf16_at = |byte_index: usize| -> u32 {
+        let char_count = line[..byte_index].chars().count();
+        wright_language::document::char_offset_to_utf16(line, char_count) as u32
+    };
+
+    // Member context: cursor right after the dot in `points.append`.
+    let dot_byte = line.find(".append").unwrap();
+    let items = service.completion(
+        &uri,
+        Position {
+            line: 4,
+            character: utf16_at(dot_byte + 1),
+        },
+    );
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    assert!(
+        labels.contains(&"append"),
+        "member completion after non-BMP text: {labels:?}"
+    );
+
+    // Declared-symbol completion with the cursor after the `po` prefix of the
+    // argument `points` (a valid document, so the semantic index exists).
+    let typed_byte = line.find("po").unwrap() + "po".len();
+    let items = service.completion(
+        &uri,
+        Position {
+            line: 4,
+            character: utf16_at(typed_byte),
+        },
+    );
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    assert!(
+        labels.contains(&"points"),
+        "declared symbol completion after non-BMP text: {labels:?}"
+    );
+}
+
+#[test]
+fn semantic_tokens_emit_utf16_offsets_after_non_bmp_text() {
+    let source =
+        "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", score)\n";
+    let document = Document::new("file:///st.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let tokens = service.semantic_tokens(&uri);
+
+    // The reference on line 4 (0-based) starts at UTF-16 offset 16 (the 🎯
+    // before it counts as two units) and is 5 UTF-16 units long.
+    let line_tokens: Vec<_> = tokens
+        .iter()
+        .filter(|token| token.line == 4 && token.token_type == "variable")
+        .collect();
+    assert_eq!(line_tokens.len(), 1, "one variable reference on line 4");
+    let score_token = line_tokens[0];
+    assert_eq!(
+        score_token.character, 16,
+        "score reference starts at the UTF-16 offset: {score_token:?}"
+    );
+    assert_eq!(
+        score_token.length, 5,
+        "score reference length is its UTF-16 length: {score_token:?}"
+    );
+}
+
+#[test]
+fn rename_full_document_range_ends_at_utf16_length_on_non_bmp_lines() {
+    // The final line ends inside a string containing a non-BMP character, so
+    // the full-document range's end character must count it as two units.
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n    print(\"🎯\")\n";
+    let document = Document::new("file:///rnb.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service
+        .rename(
+            &uri,
+            Position {
+                line: 0,
+                character: 11,
+            },
+            "total",
+        )
+        .expect("rename resolves");
+    assert!(result.ok, "rename validates: {:?}", result.diagnostics);
+    let edit = &result.edits[0];
+    let lines: Vec<&str> = source.split('\n').collect();
+    assert_eq!(
+        edit.range.end.line as usize,
+        lines.len() - 1,
+        "range ends on the final line"
+    );
+    let last_line = lines.last().unwrap_or(&"");
+    assert_eq!(
+        edit.range.end.character as usize,
+        wright_language::document::utf16_len(last_line),
+        "end character is the UTF-16 length of the final line (the 🎯 counts twice)"
+    );
+}
+
+#[test]
 fn completion_uses_position_and_context() {
     let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    points.append(points)\n";
     let document = Document::new("file:///c.opy", source, workspace_root());
