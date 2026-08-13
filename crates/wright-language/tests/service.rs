@@ -297,24 +297,39 @@ fn rename_uses_the_safe_edit_contract() {
         )
         .unwrap();
     assert!(result.ok, "rename validates");
-    let preview = result.preview.expect("previewed source");
-    assert!(preview.contains("globalvar total = 0"), "{preview}");
+    assert_eq!(
+        result.edits.len(),
+        1,
+        "single-file rename produces one edit"
+    );
+    let edit = &result.edits[0];
+    assert!(edit.new_text.contains("globalvar total = 0"), "{:?}", edit);
     assert!(
-        !preview.contains("globalvar score"),
-        "old name gone: {preview}"
+        !edit.new_text.contains("globalvar score"),
+        "old name gone: {:?}",
+        edit
     );
     // The edit range must be a real, applicable full-document range, not a
     // degenerate (0,0)..(0,0) placeholder.
-    let range = result.range.expect("rename carries a range");
-    assert_eq!(range.start.line, 0);
-    assert_eq!(range.start.character, 0);
-    assert!(range.end.line > 0, "range covers the document: {range:?}");
+    assert_eq!(edit.range.start.line, 0);
+    assert_eq!(edit.range.start.character, 0);
+    assert!(
+        edit.range.end.line > 0,
+        "range covers the document: {:?}",
+        edit.range
+    );
     // The last line may be empty (trailing newline), so character may be 0;
     // the line must still be the final line of the buffer.
     let expected_last_line = corpus_text(CORPUS).split('\n').count() as u32 - 1;
     assert_eq!(
-        range.end.line, expected_last_line,
+        edit.range.end.line, expected_last_line,
         "range ends on the last line"
+    );
+    // The edit carries the identity precondition of the source it targets.
+    assert_eq!(
+        edit.source_identity,
+        wright_driver::input_identity(&corpus_text(CORPUS)),
+        "edit identity matches the source it applies to"
     );
 }
 
@@ -334,14 +349,15 @@ fn rename_edit_applies_to_produce_the_validated_result() {
         )
         .unwrap();
     assert!(result.ok);
-    let range = result.range.expect("range");
-    let preview = result.preview.clone().expect("preview");
+    assert_eq!(result.edits.len(), 1);
+    let range = result.edits[0].range;
+    let new_text = result.edits[0].new_text.clone();
 
-    // Applying a full-document range with the preview text must reproduce the
-    // validated preview exactly (this is what an LSP client does).
-    let applied = apply_full_document(&source, &range, &preview);
+    // Applying a full-document range with the new text must reproduce the
+    // validated result exactly (this is what an LSP client does).
+    let applied = apply_full_document(&source, &range, &new_text);
     assert_eq!(
-        applied, preview,
+        applied, new_text,
         "applying the edit yields the validated result"
     );
 }
@@ -386,6 +402,67 @@ fn semantic_tokens_classify_by_identity() {
         .filter(|token| token.line == 0)
         .collect::<Vec<_>>();
     assert!(!score_tokens.is_empty());
+}
+
+#[test]
+fn rename_refuses_target_collision() {
+    let source = "globalvar score = 0\nglobalvar total = 1\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    let document = Document::new("file:///collide.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service
+        .rename(
+            &uri,
+            Position {
+                line: 0,
+                character: 11,
+            },
+            "total",
+        )
+        .expect("the variable resolves at the position");
+    assert!(
+        !result.ok,
+        "a target-name collision refuses the rename explicitly"
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("rename-collision")),
+        "the refusal names the collision: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rename_refuses_cross_namespace_name_collision() {
+    // The same spelling exists in two namespaces (a variable and a
+    // subroutine); a whole-word rename cannot distinguish the targets.
+    let source =
+        "globalvar score = 0\nsubroutine score\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    let document = Document::new("file:///ns.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service
+        .rename(
+            &uri,
+            Position {
+                line: 0,
+                character: 11,
+            },
+            "total",
+        )
+        .expect("the variable resolves at the position");
+    assert!(
+        !result.ok,
+        "a cross-namespace name collision refuses the rename explicitly"
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("rename-collision")),
+        "the refusal names the collision: {:?}",
+        result.diagnostics
+    );
 }
 
 #[test]

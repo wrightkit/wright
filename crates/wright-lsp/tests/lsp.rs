@@ -873,3 +873,95 @@ fn lsp_include_change_refreshes_dependent_diagnostics() {
     client.request(2, "shutdown", serde_json::json!(null));
     client.notify("exit", serde_json::json!(null));
 }
+
+#[test]
+fn lsp_rename_returns_multi_document_workspace_edit() {
+    // Canonicalize so the server-side (cwd-resolved) include path matches the
+    // client-constructed shared URI string.
+    let fixtures = std::fs::canonicalize(
+        workspace_root().join("crates/wright-language/tests/fixtures/multifile"),
+    )
+    .unwrap();
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let shared = std::fs::read_to_string(fixtures.join("shared.opy")).unwrap();
+    let main_uri = uri_for("main.opy");
+    let shared_uri = format!("file://{}", fixtures.join("shared.opy").display());
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "opy", "version": 1, "text": main },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("main open diagnostics");
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "languageId": "opy", "version": 1, "text": shared },
+        }),
+    );
+
+    // Rename showStatus (call site on line 5, col 5) to refresh.
+    // read_response skips any pending publishDiagnostics notifications.
+    let rename = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 4, "character": 5 },
+            "newName": "refresh",
+        }),
+    );
+    let changes = rename["result"]["changes"]
+        .as_object()
+        .expect("changes map");
+    let main_edit = changes
+        .get(&main_uri)
+        .and_then(|edits| edits.as_array().and_then(|edits| edits.first()))
+        .expect("root edit in the workspace edit");
+    let shared_edit = changes
+        .get(&shared_uri)
+        .and_then(|edits| edits.as_array().and_then(|edits| edits.first()))
+        .expect("include edit in the workspace edit");
+    assert!(
+        main_edit["newText"].as_str().unwrap().contains("refresh()"),
+        "root call site renamed: {main_edit}"
+    );
+    assert!(
+        !main_edit["newText"]
+            .as_str()
+            .unwrap()
+            .contains("showStatus"),
+        "old name gone from the root"
+    );
+    assert!(
+        shared_edit["newText"]
+            .as_str()
+            .unwrap()
+            .contains("subroutine refresh"),
+        "include declaration renamed: {shared_edit}"
+    );
+    assert!(
+        !shared_edit["newText"]
+            .as_str()
+            .unwrap()
+            .contains("showStatus"),
+        "old name gone from the include"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}

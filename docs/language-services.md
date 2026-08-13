@@ -54,8 +54,13 @@ is the measured option B of the M10 contract, not an unexamined shortcut.
 * **Hover** — symbol name/kind and usage summary (reads/writes/calls/rules).
 * **Definition / References** — via the M4 semantic index over source spans.
 * **Completion** — declared symbols, corpus-evidenced builtins, keywords.
-* **Rename** — reuses `wright_driver::edit` (safe source-edit contract) with
-  pipeline validation and preview.
+* **Rename** — project-wide semantic rename: resolves the symbol through the
+  semantic index, unions declaration/definition/reference targets across every
+  open root whose project includes the requesting document, and returns
+  source-aware edits for all affected sources (open overlays take precedence
+  over filesystem content). Collisions, unresolvable identity, and failed
+  validation refuse explicitly. Reuses `wright_driver::edit`
+  (`rename_occurrences`/`SourceEdit`) as the shared edit contract.
 * **Semantic tokens** — classified by the native lexer/parser identity
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.

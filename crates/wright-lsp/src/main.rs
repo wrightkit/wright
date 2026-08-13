@@ -6,7 +6,7 @@
 //! Content-Length framing, and manages document lifecycle with correct
 //! version identity. No duplicate semantic logic exists here.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -184,33 +184,38 @@ fn run() -> Result<(), String> {
                 let uri = params.text_document_position.text_document.uri;
                 match service.rename(&uri.to_string(), position, &params.new_name) {
                     Some(rename) if rename.ok => {
-                        let range = rename
-                            .range
-                            .map(convert_range)
-                            .expect("rename result always carries a full-document range");
-                        let preview = rename.preview.unwrap_or_default();
-                        let edit = WorkspaceEdit {
-                            changes: Some(
-                                [(
-                                    uri.clone(),
+                        // `lsp_types` dictates `HashMap<Uri, ...>` for
+                        // workspace changes; `Uri` has interior mutability.
+                        #[allow(clippy::mutable_key_type)]
+                        let changes: HashMap<Uri, Vec<TextEdit>> = rename
+                            .edits
+                            .into_iter()
+                            .map(|edit| {
+                                (
+                                    source_to_uri(&edit.source),
                                     vec![TextEdit {
-                                        range,
-                                        new_text: preview,
+                                        range: convert_range(edit.range),
+                                        new_text: edit.new_text,
                                     }],
-                                )]
-                                .into_iter()
-                                .collect(),
-                            ),
+                                )
+                            })
+                            .collect();
+                        let workspace_edit = WorkspaceEdit {
+                            changes: Some(changes),
                             ..Default::default()
                         };
-                        write_response(&mut writer, id, serde_json::to_value(edit).unwrap())?;
+                        write_response(
+                            &mut writer,
+                            id,
+                            serde_json::to_value(workspace_edit).unwrap(),
+                        )?;
                     }
                     _ => {
                         write_error(
                             &mut writer,
                             id,
                             -32602,
-                            "rename refused: no symbol resolvable at the position or the edit failed validation",
+                            "rename refused: no symbol resolvable at the position, a collision was detected, or validation failed",
                         )?;
                     }
                 }

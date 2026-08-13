@@ -51,6 +51,57 @@ fn open_unsaved_include_participates_in_resolution() {
 }
 
 #[test]
+fn rename_uses_open_overlay_content_over_filesystem() {
+    let root = overlay_root();
+    let mut service = LanguageService::new(root.clone());
+    let main_uri = "file:///main.opy".to_string();
+    let shared_uri = format!("file://{}", root.join("shared.opy").display());
+    service
+        .store
+        .open(Document::new(main_uri.clone(), main_text(), root.clone()));
+    service
+        .store
+        .open(Document::new(shared_uri.clone(), SHARED_GOOD, root.clone()));
+
+    // shared.opy is not on disk; only the open unsaved overlay provides it.
+    let result = service
+        .rename(
+            &main_uri,
+            Position {
+                line: 4,
+                character: 5,
+            },
+            "refresh",
+        )
+        .expect("rename resolves");
+    assert!(
+        result.ok,
+        "overlay rename validates: {:?}",
+        result.diagnostics
+    );
+    let shared_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("shared.opy"))
+        .expect("shared edit from the overlay");
+    assert!(
+        shared_edit.new_text.contains("subroutine refresh"),
+        "overlay declaration renamed: {}",
+        shared_edit.new_text
+    );
+    assert!(
+        shared_edit.new_text.contains("print(\"overlay\")"),
+        "overlay body survives the rename: {}",
+        shared_edit.new_text
+    );
+    assert!(
+        shared_edit.new_text.contains("def refresh()"),
+        "overlay definition renamed: {}",
+        shared_edit.new_text
+    );
+}
+
+#[test]
 fn include_change_invalidates_and_restores_dependent_results() {
     let root = overlay_root();
     let mut service = LanguageService::new(root.clone());

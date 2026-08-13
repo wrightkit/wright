@@ -251,10 +251,33 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
         ));
     }
 
-    // Rename every whole-word occurrence of `from`.
+    rename_occurrences(source, &request.from, &request.to, &request.source_identity)
+}
+
+/// Rename every whole-word occurrence of `from` to `to`, returning a
+/// full-document [`SourceEdit`] carrying the source identity precondition.
+///
+/// Unlike [`rename_symbol`], this does not require a declaration in `source`,
+/// so a project-wide rename can apply it to sources that only reference a
+/// symbol declared elsewhere. Semantic identity and collision safety are the
+/// caller's responsibility.
+pub fn rename_occurrences(
+    source: &str,
+    from: &str,
+    to: &str,
+    source_identity: &str,
+) -> Result<SourceEdit, Diagnostic> {
+    if from.is_empty() || to.is_empty() {
+        return Err(Diagnostic::error(
+            "edit-invalid-name",
+            Stage::Discovery,
+            "rename requires non-empty `from` and `to` names",
+        ));
+    }
+
     let mut out = String::new();
     for line in source.split('\n') {
-        out.push_str(&rename_in_line(line, &request.from, &request.to));
+        out.push_str(&rename_in_line(line, from, to));
         out.push('\n');
     }
     if out.ends_with('\n') {
@@ -266,7 +289,7 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
 
     Ok(SourceEdit {
         edit_kind: "rename".to_string(),
-        source_identity: request.source_identity.clone(),
+        source_identity: source_identity.to_string(),
         range: EditRange {
             start_line: 1,
             start_col: 1,
@@ -419,6 +442,35 @@ mod tests {
         let validation = validate_edit(SOURCE, &edit, &config);
         assert!(!validation.ok);
         assert_eq!(validation.diagnostics[0].code, "edit-stale-source");
+    }
+
+    #[test]
+    fn rename_occurrences_works_without_a_declaration() {
+        // A source that only references the symbol (declared elsewhere) is
+        // still editable: rename_occurrences does not require a declaration.
+        let source = "rule \"r\":\n    @Event global\n    showStatus()\n";
+        let edit = rename_occurrences(
+            source,
+            "showStatus",
+            "refresh",
+            &crate::input_identity(source),
+        )
+        .unwrap();
+        assert!(
+            edit.new_text.contains("refresh()"),
+            "reference renamed: {}",
+            edit.new_text
+        );
+        assert!(
+            !edit.new_text.contains("showStatus"),
+            "old name gone: {}",
+            edit.new_text
+        );
+        assert_eq!(
+            edit.source_identity,
+            crate::input_identity(source),
+            "the edit carries the source identity precondition"
+        );
     }
 
     #[test]
