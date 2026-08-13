@@ -47,7 +47,7 @@ struct Parser<'a> {
     errors: Vec<FrontendError>,
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     fn peek(&self) -> &Token {
         &self.tokens[self.pos.min(self.tokens.len() - 1)]
     }

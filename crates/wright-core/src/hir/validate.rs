@@ -337,32 +337,26 @@ fn validate_exprs(
                 errors.push(error);
             }
             match node {
-                Expr::GlobalVar { name, span } => {
-                    if !tables.globals.contains(&name.as_str()) {
-                        errors.push(invalid(
-                            "unresolved-reference",
-                            format!("reference to unknown global variable '{name}'"),
-                            *span,
-                        ));
-                    }
+                Expr::GlobalVar { name, span } if !tables.globals.contains(&name.as_str()) => {
+                    errors.push(invalid(
+                        "unresolved-reference",
+                        format!("reference to unknown global variable '{name}'"),
+                        *span,
+                    ));
                 }
-                Expr::PlayerVar { name, span, .. } => {
-                    if !tables.players.contains(&name.as_str()) {
-                        errors.push(invalid(
-                            "unresolved-reference",
-                            format!("reference to unknown player variable '{name}'"),
-                            *span,
-                        ));
-                    }
+                Expr::PlayerVar { name, span, .. } if !tables.players.contains(&name.as_str()) => {
+                    errors.push(invalid(
+                        "unresolved-reference",
+                        format!("reference to unknown player variable '{name}'"),
+                        *span,
+                    ));
                 }
-                Expr::Constant { name, span } => {
-                    if !tables.constants.contains(&name.as_str()) {
-                        errors.push(invalid(
-                            "unresolved-reference",
-                            format!("reference to unknown constant '{name}'"),
-                            *span,
-                        ));
-                    }
+                Expr::Constant { name, span } if !tables.constants.contains(&name.as_str()) => {
+                    errors.push(invalid(
+                        "unresolved-reference",
+                        format!("reference to unknown constant '{name}'"),
+                        *span,
+                    ));
                 }
                 _ => {}
             }

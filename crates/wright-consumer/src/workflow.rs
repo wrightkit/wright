@@ -119,16 +119,12 @@ fn first_global(source: &str) -> Option<&str> {
         .lines()
         .find_map(|line| {
             let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("globalvar") {
-                Some(
-                    rest.trim_start()
-                        .split(|c: char| c.is_whitespace() || c == '=')
-                        .next()
-                        .unwrap_or(""),
-                )
-            } else {
-                None
-            }
+            trimmed.strip_prefix("globalvar").map(|rest| {
+                rest.trim_start()
+                    .split(|c: char| c.is_whitespace() || c == '=')
+                    .next()
+                    .unwrap_or("")
+            })
         })
         .filter(|name| !name.is_empty())
 }

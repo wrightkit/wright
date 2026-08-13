@@ -32,7 +32,7 @@ struct Emitter<'a> {
     out: String,
 }
 
-impl<'a> Emitter<'a> {
+impl Emitter<'_> {
     fn run(mut self) -> Result<String> {
         if !self.program.global_variables.is_empty() || !self.program.player_variables.is_empty() {
             self.line(0, "variables {")?;

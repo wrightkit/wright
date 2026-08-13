@@ -63,7 +63,7 @@ struct Parser<'a> {
     subroutines: HashMap<String, wir::SubroutineId>,
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     fn program(mut self) -> Result<wir::Program> {
         let file = self.target.files.push(SourceFile::new("workshop.txt"));
         // Re-point synthetic spans at the real file id by keeping a helper.
