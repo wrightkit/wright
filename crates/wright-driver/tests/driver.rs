@@ -47,7 +47,7 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "wright-driver-test-{}-{}",
+        "wright-driver-file-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::SeqCst)
     ));
@@ -61,7 +61,7 @@ fn temp_dir() -> PathBuf {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "wright-driver-test-{}-{}",
+        "wright-driver-dir-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::SeqCst)
     ));
