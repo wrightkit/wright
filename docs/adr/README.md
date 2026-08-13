@@ -29,3 +29,4 @@ contracts in [`ARCHITECTURE.md`](../../ARCHITECTURE.md) and
 * [ADR-0004: OverPy licensing and clean-room boundary](0004-overpy-licensing-boundary.md)
 * [ADR-0005: Opy HIR v1 frontend protocol](0005-opy-hir-v1.md)
 * [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](0006-rust-ir-core.md)
+* [ADR-0007: OverPy reference pinning policy](0007-reference-pinning-policy.md)
