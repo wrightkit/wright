@@ -271,3 +271,87 @@ forced parity row exists in the tree.
   settings-section evidence stands.
 - The next-blocker records in `m11-inventory-rebaseline.md` (parabola,
   inputhud, lucioball) need a doc correction on the next inventory refresh.
+
+---
+
+## Remediation verification (`1cd07ab`)
+
+Re-verification of the three remediation items after commit
+`1cd07ab4cab6ee2167c916924b37b12f620f80ea` (CI run 31747128723, headSha
+`1cd07ab`, all six jobs green). Independent re-derivation only; nothing taken
+from the commit message on trust.
+
+### a) inputhud AC-2 and `\n` re-escaping — **VERIFIED**
+
+- Minimal end-to-end repro (real settings block with
+  `"description": "Line one\n\nLine two"` + `gamemodes.general.heroLimit` +
+  one rule) through `wright compile --profile compat`:
+  - native `od -c`: `L i n e   o n e   \   n   \   n` — the description now
+    emits the **literal two-character `\n`** (0x5C 0x6E), matching the
+    oracle's spelling byte-for-byte.
+  - `escape_string` re-escapes every JSONC decode (`\` `"` `\n` `\t` `\r`,
+    `crates/wright-workshop/src/emitter.rs`); whitespace-collapsed settings
+    sections equal for the repro.
+- inputhud end-to-end (production path): the real settings block was
+  extracted byte-identically from `inputhud.opy` (722 chars) and compiled
+  with a minimal rule body — exit 0; the emitted settings section is
+  **476/476 chars equal** (whitespace-collapsed) to inputhud's `oracle.json`
+  section, with `byZezombye.\n\nYouare…` literal `\n` in the collapsed
+  Description. This mirrors the committed driver test
+  `opy_inputhud_settings_section_matches_the_oracle`.
+- Spot-checks: parabola **136/136** and crosshair **144/144** settings
+  sections (same production-path method) equal their oracle snapshots.
+- Full re-run of all 7 evidence programs: pixelart exit 0 + 256/256 section;
+  santa 350/350; broken-weapons 511/511; client-to-server 297/297; parabola
+  136/136; crosshair 144/144; inputhud 476/476 — **all sections equal**;
+  first failures unchanged (santa 192:99, broken-weapons 53:55,
+  client-to-server 55:53).
+
+### b) Mode subsets — **VERIFIED**
+
+- `gamemodes.assault.heroLimit` → `settings-unknown-key` at the key span
+  (4:13), identical for `wright check` and `wright compile`.
+- `gamemodes.general.roleLimit` → `settings-unknown-key` (4:13), check and
+  compile identical.
+- The emission table now uses **34 exact-path entries** (per-mode subsets:
+  `enabledMaps` under assault/control/escort/hybrid/skirmish/ffa; `enabled`,
+  `roleLimit`, `enableCompetitiveRules` under assault/control/escort/hybrid;
+  general keys under `general` only) instead of the uniform Mode wildcard.
+- All 7 evidence programs still validate and their sections match (see a).
+
+### c) Provenance — **VERIFIED**
+
+- `roleLimit: "off"` → `settings-unknown-value` (check and compile,
+  message names the value and key).
+- `crates/wright-ir/src/settings/table.rs`: the `roleLimit` domain documents
+  exactly one evidenced member (`2OfEachRolePerTeam`, pixelart +
+  broken-weapons) and states that `"off"` appears only in the
+  **not-acquired** skirmish_elim source and is rejected until a snapshot
+  evidences it — no skirmish_elim evidence claim remains. `heroLimit`
+  "off" is cited to santa, clientToServer, parabola, crosshair, inputhud.
+- The `heroes.<team>.general`, `roleLimit under general`, `heroLimit under a
+  named mode` rejection list in the table comment matches observed behavior.
+
+### Re-runs at `1cd07ab`
+
+| Suite | Result |
+| --- | --- |
+| `cargo test -p wright-opy --test differential` | green (1/1; PARITY_CASES still 7 rows) |
+| `cargo test -p wright-workshop --test emitter` | 17/17 green (incl. the new re-escape and inputhud tests) |
+| `python3 compatibility/run_oracle.py` | 20/20 PASS |
+| `node --test` (adapter/) | 22/22 pass |
+| `python3 scripts/v1-gates.py` | 6/6 pass (FIXTURES unchanged) |
+| meipocalypse dict literal | `lex-error` `unexpected character '{'` at `meipocalypse.opy:223:37` — unchanged |
+
+### AC status after remediation
+
+- **AC-2 now fully passes** for all 7 oracle-success programs (inputhud's
+  earlier `\n` failure is resolved; Discrepancy 1 of this report is
+  superseded).
+- AC-3's full-program row for pixelart remains **not justified** — see the
+  TASK-2 classification in `m11-inventory-post86.md` (class 3, emission
+  divergence on the supported string-array construct). This is now a gate
+  item, not an #86 acceptance failure (AC-8 was respected: no row forced).
+- The next-blocker records in `m11-inventory-rebaseline.md` are corrected
+  in `m11-inventory-post86.md` (parabola `Team.2` 35:37, inputhud
+  conditional 41:63, lucioball multiline string 66:1).
