@@ -1,0 +1,329 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "source.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [],
+  "rules": [
+    {
+      "name": "setup",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 26,
+          "col": 1
+        },
+        "end": {
+          "line": 26,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 27,
+            "col": 5
+          },
+          "end": {
+            "line": 27,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "expr",
+          "expr": {
+            "kind": "call",
+            "name": "disableInspector",
+            "args": [],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 28,
+                "col": 5
+              },
+              "end": {
+                "line": 28,
+                "col": 24
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 28,
+              "col": 5
+            },
+            "end": {
+              "line": 28,
+              "col": 24
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "span": {
+      "file": 0,
+      "start": {
+        "line": 1,
+        "col": 1
+      },
+      "end": {
+        "line": 24,
+        "col": 2
+      }
+    },
+    "children": [
+      {
+        "kind": "group",
+        "name": "main",
+        "children": [
+          {
+            "kind": "string",
+            "name": "description",
+            "value": "M11 bounded settings fixture",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 3,
+                "col": 9
+              },
+              "end": {
+                "line": 3,
+                "col": 54
+              }
+            }
+          }
+        ],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 2,
+            "col": 5
+          },
+          "end": {
+            "line": 4,
+            "col": 6
+          }
+        }
+      },
+      {
+        "kind": "group",
+        "name": "gamemodes",
+        "children": [
+          {
+            "kind": "group",
+            "name": "skirmish",
+            "children": [
+              {
+                "kind": "list",
+                "name": "enabledMaps",
+                "elements": [
+                  {
+                    "value": "workshopIsland",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 8,
+                        "col": 17
+                      },
+                      "end": {
+                        "line": 8,
+                        "col": 33
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 7,
+                    "col": 13
+                  },
+                  "end": {
+                    "line": 9,
+                    "col": 14
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 6,
+                "col": 9
+              },
+              "end": {
+                "line": 10,
+                "col": 10
+              }
+            }
+          },
+          {
+            "kind": "group",
+            "name": "general",
+            "children": [
+              {
+                "kind": "string",
+                "name": "heroLimit",
+                "value": "off",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 12,
+                    "col": 13
+                  },
+                  "end": {
+                    "line": 12,
+                    "col": 31
+                  }
+                }
+              },
+              {
+                "kind": "number",
+                "name": "respawnTime%",
+                "value": 30,
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 13,
+                    "col": 13
+                  },
+                  "end": {
+                    "line": 13,
+                    "col": 31
+                  }
+                }
+              },
+              {
+                "kind": "bool",
+                "name": "enableHeroSwitching",
+                "value": true,
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 14,
+                    "col": 13
+                  },
+                  "end": {
+                    "line": 14,
+                    "col": 40
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 11,
+                "col": 9
+              },
+              "end": {
+                "line": 15,
+                "col": 10
+              }
+            }
+          }
+        ],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 5,
+            "col": 5
+          },
+          "end": {
+            "line": 16,
+            "col": 6
+          }
+        }
+      },
+      {
+        "kind": "group",
+        "name": "heroes",
+        "children": [
+          {
+            "kind": "group",
+            "name": "allTeams",
+            "children": [
+              {
+                "kind": "group",
+                "name": "mei",
+                "children": [
+                  {
+                    "kind": "number",
+                    "name": "health%",
+                    "value": 200,
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 20,
+                        "col": 17
+                      },
+                      "end": {
+                        "line": 20,
+                        "col": 31
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 19,
+                    "col": 13
+                  },
+                  "end": {
+                    "line": 21,
+                    "col": 14
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 18,
+                "col": 9
+              },
+              "end": {
+                "line": 22,
+                "col": 10
+              }
+            }
+          }
+        ],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 17,
+            "col": 5
+          },
+          "end": {
+            "line": 23,
+            "col": 6
+          }
+        }
+      }
+    ]
+  }
+}

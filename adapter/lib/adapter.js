@@ -66,11 +66,13 @@ const ENUM_WRAPPERS = new Set([
  *   `__def__`, and frontend plumbing rules).
  * @param {object} options.compiler The frontend compiler state (variables,
  *   subroutines, constants, macros, initializers, defines).
+ * @param {object | null} options.settings The extracted settings block (see
+ *   driver.js), or null when the program has none.
  * @param {import("./span.js").SpanBuilder} options.spans
  * @param {object} options.generator `{ name, version, frontend }`
  * @returns {object} The HIR program object.
  */
-export function convertProgram({ astRules, compiler, spans, generator }) {
+export function convertProgram({ astRules, compiler, settings, spans, generator }) {
   const mapper = createMapper(compiler.astMacros, spans);
   const declarations = [];
   const rules = [];
@@ -166,13 +168,305 @@ export function convertProgram({ astRules, compiler, spans, generator }) {
   }
 
   return {
-    protocol: { name: "wright/opy-hir", version: "1.0.0" },
+    protocol: { name: "wright/opy-hir", version: "1.1.0" },
     generator,
     files: spans.files(),
     defines,
     declarations,
     rules,
+    ...(settings ? { settings: mapSettings(settings, spans) } : {}),
   };
+}
+
+/**
+ * Map the extracted settings block onto the Opy HIR v1 settings node (§2 of
+ * the settings design constraints): a small JSONC parser (quoted keys,
+ * `"`/`'` strings with `\` escapes, numbers, `true`/`false`, arrays, nested
+ * objects, trailing commas, duplicate-key rejection) producing typed nodes
+ * with adapter-computed spans at key/value-token granularity. Enum-ness and
+ * list domains are table data downstream, never wire data, so values map to
+ * plain string/number/bool/list nodes.
+ *
+ * @param {object} block The extraction result from `extractSettingsBlock`.
+ * @param {import("./span.js").SpanBuilder} spans
+ * @returns {object} The wire `settings` node.
+ */
+function mapSettings(block, spans) {
+  const fileId = spans.fileId(block.file);
+  const toSpan = (start, end) => ({ file: fileId, start, end });
+  const cursor = new SettingsCursor(block.text, block.open.line, block.open.col + 1, fileId);
+  const entries = parseSettingsObjectEntries(cursor, toSpan);
+  return {
+    span: toSpan(block.keyword, block.end),
+    children: entries.map((entry) => mapSettingsNode(entry, toSpan)),
+  };
+}
+
+/**
+ * Recursive-descent JSONC parser cursor over the settings text. Positions are
+ * computed from the block's base position (one past the opening brace).
+ */
+class SettingsCursor {
+  constructor(text, baseLine, baseCol, fileId) {
+    this.text = text;
+    this.pos = 0;
+    this.baseLine = baseLine;
+    this.baseCol = baseCol;
+    this.fileId = fileId;
+  }
+
+  /** 1-based position of `offset` in the original source text. */
+  position(offset = this.pos) {
+    const prefix = this.text.slice(0, offset);
+    const newlines = prefix.split("\n");
+    if (newlines.length === 1) {
+      return { line: this.baseLine, col: this.baseCol + offset };
+    }
+    return { line: this.baseLine + newlines.length - 1, col: newlines[newlines.length - 1].length + 1 };
+  }
+
+  peek() {
+    return this.pos < this.text.length ? this.text[this.pos] : null;
+  }
+
+  advance() {
+    return this.text[this.pos++];
+  }
+
+  eof() {
+    return this.pos >= this.text.length;
+  }
+}
+
+function settingsParseError(message, start, end, fileId) {
+  return new AdapterError("parse", message, { file: fileId, start, end });
+}
+
+function skipSettingsWs(cursor) {
+  while (!cursor.eof() && /\s/.test(cursor.peek())) {
+    cursor.advance();
+  }
+}
+
+/** JSONC string: `"..."` or `'...'` with backslash escapes. */
+function parseSettingsString(cursor, toSpan) {
+  const start = cursor.position();
+  const fileId = start.file;
+  const quote = cursor.advance();
+  let value = "";
+  for (;;) {
+    const char = cursor.peek();
+    if (char === null || char === "\n") {
+      throw settingsParseError("unterminated string in settings block", start, cursor.position(), fileId);
+    }
+    if (char === "\\") {
+      cursor.advance();
+      const escaped = cursor.advance();
+      if (escaped === "n") {
+        value += "\n";
+      } else if (escaped === "t") {
+        value += "\t";
+      } else if (escaped === "\\" || escaped === '"' || escaped === "'") {
+        value += escaped;
+      } else {
+        value += escaped;
+      }
+      continue;
+    }
+    if (char === quote) {
+      cursor.advance();
+      break;
+    }
+    value += char;
+    cursor.advance();
+  }
+  return { type: "string", value, span: toSpan(start, cursor.position()) };
+}
+
+function parseSettingsNumber(cursor, toSpan) {
+  const start = cursor.position();
+  let text = "";
+  if (cursor.peek() === "-") {
+    text += cursor.advance();
+  }
+  while (!cursor.eof() && /[0-9]/.test(cursor.peek())) {
+    text += cursor.advance();
+  }
+  if (cursor.peek() === ".") {
+    text += cursor.advance();
+    while (!cursor.eof() && /[0-9]/.test(cursor.peek())) {
+      text += cursor.advance();
+    }
+  }
+  if (cursor.peek() === "e" || cursor.peek() === "E") {
+    text += cursor.advance();
+    if (cursor.peek() === "-" || cursor.peek() === "+") {
+      text += cursor.advance();
+    }
+    while (!cursor.eof() && /[0-9]/.test(cursor.peek())) {
+      text += cursor.advance();
+    }
+  }
+  return { type: "number", value: Number(text), span: toSpan(start, cursor.position()) };
+}
+
+function parseSettingsBool(cursor, toSpan) {
+  const start = cursor.position();
+  const literal = cursor.peek() === "t" ? "true" : "false";
+  for (const char of literal) {
+    if (cursor.peek() !== char) {
+      throw settingsParseError("unexpected settings value", start, cursor.position(), cursor.fileId);
+    }
+    cursor.advance();
+  }
+  return { type: "bool", value: literal === "true", span: toSpan(start, cursor.position()) };
+}
+
+function parseSettingsArray(cursor, toSpan) {
+  const start = cursor.position();
+  cursor.advance(); // '['
+  skipSettingsWs(cursor);
+  const elements = [];
+  if (cursor.peek() === "]") {
+    cursor.advance();
+    return { type: "array", elements, span: toSpan(start, cursor.position()) };
+  }
+  for (;;) {
+    skipSettingsWs(cursor);
+    const element = parseSettingsValue(cursor, toSpan);
+    if (element.type !== "string") {
+      throw settingsParseError(
+        "settings list elements must be strings",
+        element.span.start,
+        element.span.end,
+        element.span.start.file,
+      );
+    }
+    elements.push({ value: element.value, span: element.span });
+    skipSettingsWs(cursor);
+    const char = cursor.peek();
+    if (char === ",") {
+      cursor.advance();
+      skipSettingsWs(cursor);
+      if (cursor.peek() === "]") {
+        cursor.advance();
+        break;
+      }
+      continue;
+    }
+    if (char === "]") {
+      cursor.advance();
+      break;
+    }
+    throw settingsParseError("expected ',' or ']' in settings list", cursor.position(), cursor.position(), start.file);
+  }
+  return { type: "array", elements, span: toSpan(start, cursor.position()) };
+}
+
+function parseSettingsObject(cursor, toSpan) {
+  const start = cursor.position();
+  cursor.advance(); // '{'
+  const entries = parseSettingsObjectEntries(cursor, toSpan);
+  return { type: "object", entries, span: toSpan(start, cursor.position()) };
+}
+
+/** The `key: value` entry list of one object (with or without braces). */
+function parseSettingsObjectEntries(cursor, toSpan) {
+  skipSettingsWs(cursor);
+  const entries = [];
+  const seen = new Set();
+  if (cursor.peek() === "}") {
+    cursor.advance();
+    return entries;
+  }
+  for (;;) {
+    skipSettingsWs(cursor);
+    const keyStart = cursor.position();
+    const key = parseSettingsString(cursor, toSpan);
+    if (seen.has(key.value)) {
+      throw settingsParseError(`duplicate settings key '${key.value}'`, keyStart, key.span.end, keyStart.file);
+    }
+    seen.add(key.value);
+    skipSettingsWs(cursor);
+    if (cursor.peek() !== ":") {
+      throw settingsParseError("expected ':' after settings key", cursor.position(), cursor.position(), keyStart.file);
+    }
+    cursor.advance();
+    skipSettingsWs(cursor);
+    const value = parseSettingsValue(cursor, toSpan);
+    const entrySpan = { start: keyStart, end: value.span.end };
+    entries.push({ key: key.value, ...value, entrySpan });
+    skipSettingsWs(cursor);
+    const char = cursor.peek();
+    if (char === ",") {
+      cursor.advance();
+      skipSettingsWs(cursor);
+      if (cursor.peek() === "}") {
+        cursor.advance();
+        break;
+      }
+      continue;
+    }
+    if (char === "}") {
+      cursor.advance();
+      break;
+    }
+    if (char === null) {
+      break; // top-level block text ends without an enclosing brace
+    }
+    throw settingsParseError("expected ',' or '}' in settings block", cursor.position(), cursor.position(), keyStart.file);
+  }
+  return entries;
+}
+
+function parseSettingsValue(cursor, toSpan) {
+  skipSettingsWs(cursor);
+  const char = cursor.peek();
+  if (char === '"' || char === "'") {
+    return parseSettingsString(cursor, toSpan);
+  }
+  if (char === "{") {
+    return parseSettingsObject(cursor, toSpan);
+  }
+  if (char === "[") {
+    return parseSettingsArray(cursor, toSpan);
+  }
+  if (char === "t" || char === "f") {
+    return parseSettingsBool(cursor, toSpan);
+  }
+  if (char === "-" || (char !== null && char >= "0" && char <= "9")) {
+    return parseSettingsNumber(cursor, toSpan);
+  }
+  throw settingsParseError("unsupported settings value", cursor.position(), cursor.position(), cursor.fileId);
+}
+
+/**
+ * Map one parsed settings entry to a wire node. Object entries become
+ * `group` nodes, arrays become `list` nodes, and scalar entries become
+ * `number`/`bool`/`string` nodes; every node carries the span of its
+ * key/value-token region.
+ */
+function mapSettingsNode(entry, toSpan) {
+  const span = toSpan(entry.entrySpan.start, entry.entrySpan.end);
+  switch (entry.type) {
+    case "object":
+      return {
+        kind: "group",
+        name: entry.key,
+        children: entry.entries.map((child) => mapSettingsNode(child, toSpan)),
+        span,
+      };
+    case "array":
+      return { kind: "list", name: entry.key, elements: entry.elements, span };
+    case "number":
+      return { kind: "number", name: entry.key, value: entry.value, span };
+    case "bool":
+      return { kind: "bool", name: entry.key, value: entry.value, span };
+    case "string":
+      return { kind: "string", name: entry.key, value: entry.value, span };
+    default:
+      throw unsupported(`settings value '${entry.key}' is outside the Opy HIR v1 corpus boundary`, span);
+  }
 }
 
 /**

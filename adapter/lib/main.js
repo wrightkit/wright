@@ -62,6 +62,7 @@ export async function convert({ content, rootPath, mainFileName }) {
   return convertProgram({
     astRules: parsed.astRules,
     compiler: parsed.compiler,
+    settings: parsed.settings ?? null,
     spans: new SpanBuilder(),
     generator: generatorIdentity(),
   });

@@ -34,18 +34,19 @@ const SUCCESS_FIXTURES = [
   "synthetic/declarations-rules",
   "synthetic/expressions-values",
   "synthetic/preprocessing",
+  "synthetic/settings",
   "real-world/overpy-cake",
+  "real-world/overpy-pixelart",
+  "real-world/overpy-client-to-server",
 ];
 
 const FAILURE_FIXTURES = [
   { id: "synthetic/diagnostics", code: "parse" },
-  { id: "real-world/overpy-pixelart", code: "unsupported" },
   { id: "real-world/overpy-santa", code: "unsupported" },
   { id: "real-world/overpy-meipocalypse", code: "parse" },
   { id: "real-world/overpy-zencopter", code: "parse" },
   { id: "real-world/overpy-cronch", code: "unsupported" },
   { id: "real-world/overpy-broken-weapons", code: "unsupported" },
-  { id: "real-world/overpy-client-to-server", code: "unsupported" },
   { id: "real-world/ow1-emulator", code: "parse" },
   { id: "real-world/6v6-adjustments", code: "parse" },
 ];
@@ -55,18 +56,14 @@ const FAILURE_FIXTURES = [
 // the fixture directory path, so its expected message is constructed from the
 // same root the adapter receives; every other message is machine-stable.
 const FAILURE_MESSAGES = {
-  "real-world/overpy-pixelart":
-    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
   "real-world/overpy-santa":
-    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
+    "construct '__doWhile__' is outside the Opy HIR v1 corpus boundary",
   "real-world/overpy-zencopter":
     "Invalid content before string: 'arena'\n    | line 38, col 17, at heli.opy",
   "real-world/overpy-cronch":
     "construct '@Name' is outside the Opy HIR v1 corpus boundary",
   "real-world/overpy-broken-weapons":
-    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
-  "real-world/overpy-client-to-server":
-    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
+    "construct '__doWhile__' is outside the Opy HIR v1 corpus boundary",
   "real-world/ow1-emulator":
     "Found 'if', but no 'else'\n    | line 94, col 14, at arena.opy\n    | line 86, col 1, at 1v1_main.opy",
   "real-world/6v6-adjustments":
@@ -108,7 +105,7 @@ for (const fixtureId of SUCCESS_FIXTURES) {
     const content = readFileSync(source, "utf8");
     const program = await convert({ content, rootPath: root, mainFileName: mainFile });
     assert.equal(program.protocol.name, "wright/opy-hir");
-    assert.equal(program.protocol.version, "1.0.0");
+    assert.equal(program.protocol.version, "1.1.0");
     assertSnapshot(fixtureId, program, snapshotPath(fixtureId));
   });
 }
@@ -139,8 +136,8 @@ for (const failure of FAILURE_FIXTURES) {
   });
 }
 
-const MINI_SNAPSHOTS = ["constants", "macros"];
-const MINI_UNSUPPORTED = ["unsupported-goto", "unsupported-annotation", "unsupported-settings"];
+const MINI_SNAPSHOTS = ["constants", "macros", "settings"];
+const MINI_UNSUPPORTED = ["unsupported-goto", "unsupported-annotation"];
 
 for (const name of MINI_SNAPSHOTS) {
   test(`converts mini-fixture ${name}`, async () => {
