@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "The primary `wright` command-line interface over the compiler/session driver."
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "wright"
 path = "src/main.rs"

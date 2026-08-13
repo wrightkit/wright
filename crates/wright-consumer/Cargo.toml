@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "An external consumer fixture proving Wright's public embedding/tool contracts (M9 #61)."
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "wright-consumer"
 path = "src/main.rs"

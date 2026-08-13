@@ -5,3 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Wright's typed intermediate-representation core: Opy HIR and Workshop IR models."
+
+[lints]
+workspace = true

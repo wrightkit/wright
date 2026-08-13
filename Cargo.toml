@@ -7,3 +7,21 @@ edition = "2024"
 rust-version = "1.85.0"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/wrightkit/wright"
+
+[workspace.lints.rust]
+# Unsafe operations inside an unsafe function still need an explicit block so
+# the unsafe surface and its invariants remain visible at the operation site.
+unsafe_op_in_unsafe_fn = "deny"
+# Public items in a private module are not part of a usable crate API.
+unreachable_pub = "deny"
+
+[workspace.lints.clippy]
+# These groups cover bug-prone findings without enabling broad style or
+# restriction policies; CI promotes the remaining warning-level checks.
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "warn", priority = -1 }
+# These development/progress macros must not reach compiler or tooling code.
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

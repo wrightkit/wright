@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Wright's reproducible performance/resource benchmark harness."
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "wright-bench"
 path = "src/main.rs"

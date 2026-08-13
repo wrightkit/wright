@@ -11,7 +11,7 @@ use wright_driver::config::OutputFormat;
 use wright_driver::result::Envelope;
 
 /// Render one result envelope in the requested format.
-pub fn render<T: serde::Serialize>(envelope: &Envelope<T>, format: OutputFormat) {
+pub(crate) fn render<T: serde::Serialize>(envelope: &Envelope<T>, format: OutputFormat) {
     match format {
         OutputFormat::Json => {
             let value = serde_json::to_value(envelope).expect("envelope serializes");

@@ -79,6 +79,12 @@ Prefer idiomatic, explicit Rust and strong types where they improve semantic saf
 
 Avoid unnecessary `unsafe`, highly generic trait hierarchies, dynamic dispatch, lifetime complexity, and premature micro-optimization. Use `unsafe` only for a concrete systems or performance requirement, with documented invariants and tests.
 
+The enforceable workspace lint baseline and the audited, context-sensitive Rust
+conventions are maintained in [`CONTRIBUTING.md`](CONTRIBUTING.md). Do not turn
+that policy into a blanket ban on `unwrap`, `expect`, `panic!`, `unsafe`,
+`HashMap`, cloning, or interior mutability; judge those choices at their
+compiler, tooling, benchmark, serialization, or test boundary.
+
 Prioritize correctness, semantic clarity, architectural consistency, inspectability, testability, determinism, maintainability, and then performance. Add an abstraction only when a concrete requirement, repeated use case, or accepted architecture justifies it.
 
 ## Validation

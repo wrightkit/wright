@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "The Wright LSP server: a thin protocol adapter over the editor-neutral language services."
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "wright-lsp"
 path = "src/main.rs"
