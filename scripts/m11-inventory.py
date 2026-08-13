@@ -35,6 +35,7 @@ REPORT = ROOT / "target" / "m11-nlevel.json"
 GAP_REPORT = ROOT / "target" / "m11-gap-inventory.json"
 
 FIXTURES = [
+    "synthetic/settings",
     "real-world/overpy-pixelart",
     "real-world/overpy-santa",
     "real-world/overpy-meipocalypse",
@@ -42,6 +43,9 @@ FIXTURES = [
     "real-world/overpy-cronch",
     "real-world/overpy-broken-weapons",
     "real-world/overpy-client-to-server",
+    "real-world/overpy-parabola",
+    "real-world/overpy-crosshair",
+    "real-world/overpy-inputhud",
     "real-world/ow1-emulator",
     "real-world/6v6-adjustments",
 ]
