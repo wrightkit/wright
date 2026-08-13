@@ -3,7 +3,7 @@
     "diagnostics": [
       {
         "severity": "error",
-        "text": "Error: ENOENT: no such file or directory, lstat '/Users/teakowa/Repos/wrightkit/wright/compatibility/fixtures/real-world/overpy-meipocalypse/generateWalls.js'"
+        "text": "Error: ENOENT: no such file or directory, lstat '<fixture-dir>/generateWalls.js'"
       }
     ],
     "exitCode": 1,

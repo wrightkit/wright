@@ -208,6 +208,12 @@ def run_fixture(
                 "pnpm install --dir compatibility/oracle"
             ) from error
 
+        # Recorded diagnostics must be checkout-path-independent: replace the
+        # absolute fixture-directory path with a stable placeholder so oracle
+        # snapshots do not embed local state (COMPATIBILITY.md).
+        stderr = completed.stderr.replace(str(fixture_dir), "<fixture-dir>")
+        stdout = completed.stdout.replace(str(fixture_dir), "<fixture-dir>")
+
         workshop_exact = ""
         if output_path.is_file():
             workshop_exact = output_path.read_text(encoding="utf-8")
@@ -225,8 +231,8 @@ def run_fixture(
         "compile": {
             "status": status,
             "exitCode": completed.returncode,
-            "diagnostics": normalize_diagnostics(completed.stderr),
-            "stdout": normalize_text(completed.stdout),
+            "diagnostics": normalize_diagnostics(stderr),
+            "stdout": normalize_text(stdout),
             "workshopExact": workshop_exact,
             "workshop": workshop,
             "workshopSha256": sha256_text(workshop),

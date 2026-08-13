@@ -3,7 +3,7 @@
     "diagnostics": [
       {
         "severity": "info",
-        "text": "The file '/Users/teakowa/Repos/wrightkit/wright/compatibility/fixtures/real-world/ow1-emulator/utilities/watermark.opy' was already imported and will not be imported again. (w_already_imported)\n    | line 84, col 1, at 1v1_main.opy\nError: Found 'if', but no 'else'\n    | line 94, col 14, at arena.opy\n    | line 86, col 1, at 1v1_main.opy"
+        "text": "The file '<fixture-dir>/utilities/watermark.opy' was already imported and will not be imported again. (w_already_imported)\n    | line 84, col 1, at 1v1_main.opy\nError: Found 'if', but no 'else'\n    | line 94, col 14, at arena.opy\n    | line 86, col 1, at 1v1_main.opy"
       }
     ],
     "exitCode": 1,
