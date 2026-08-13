@@ -5,10 +5,14 @@
 //! locale-specific spellings; unknown or unsupported identities produce
 //! structured diagnostics instead of partial silent output. The formatting
 //! is fixed and presentation-canonical, so the same WIR/config emits
-//! byte-stable text that reparses to equivalent WIR.
+//! byte-stable text that reparses to equivalent WIR — except for the
+//! `settings` section: settings-bearing emissions are deliberately rejected
+//! by the Workshop parser (a `.ws` decompiler is a non-goal, #86).
 
 use std::fmt::Write;
 
+use wright_ir::settings::table::{self, KeyKind, PathPart};
+use wright_ir::settings::{SettingsNode, Settings as SettingsTree};
 use wright_ir::wir;
 
 use crate::catalog::{Catalog, Kind, Locale};
@@ -34,6 +38,11 @@ struct Emitter<'a> {
 
 impl Emitter<'_> {
     fn run(mut self) -> Result<String> {
+        // Section order: settings, variables, subroutines, rules.
+        if let Some(settings) = &self.program.settings {
+            self.emit_settings(settings)?;
+            self.out.push('\n');
+        }
         if !self.program.global_variables.is_empty() || !self.program.player_variables.is_empty() {
             self.line(0, "variables {")?;
             if !self.program.global_variables.is_empty() {
@@ -66,6 +75,206 @@ impl Emitter<'_> {
             self.rule(rule)?;
         }
         Ok(self.out)
+    }
+
+    /// Emit the `settings { ... }` section from the validated settings
+    /// carrier, table-driven (fixture-evidenced names, #86). Only runs on
+    /// validated programs, so unknown keys cannot reach this point.
+    fn emit_settings(&mut self, settings: &SettingsTree) -> Result<()> {
+        self.line(0, "settings {")?;
+        for child in &settings.children {
+            let SettingsNode::Group { name, children, .. } = child else {
+                return Err(self.malformed("settings block children must be groups"));
+            };
+            match name.as_str() {
+                "main" | "lobby" => {
+                    self.line(1, &format!("{name} {{"))?;
+                    for member in children {
+                        self.settings_member(member, 2, &[PathPart::Part(name)])?;
+                    }
+                    self.line(1, "}")?;
+                }
+                "gamemodes" => self.emit_modes(children)?,
+                "heroes" => self.emit_heroes(children)?,
+                other => {
+                    return Err(self.malformed(format!(
+                        "unknown top-level settings group '{other}'"
+                    )));
+                }
+            }
+        }
+        self.line(0, "}")?;
+        Ok(())
+    }
+
+    /// Emit the `modes { <Mode> { ... } }` block of a gamemodes group.
+    fn emit_modes(&mut self, modes: &[SettingsNode]) -> Result<()> {
+        self.line(1, "modes {")?;
+        for mode in modes {
+            let SettingsNode::Group { name, children, .. } = mode else {
+                return Err(self.malformed("mode entries must be groups"));
+            };
+            let display = table::mode_name(name)
+                .ok_or_else(|| self.malformed(format!("unknown game mode '{name}'")))?;
+            // `enabled: false` prefixes the mode header; true renders with no
+            // prefix (only false is evidenced in the corpus, #86).
+            let disabled = children.iter().any(|member| {
+                matches!(
+                    member,
+                    SettingsNode::Bool { name: n, value: false, .. } if n == "enabled"
+                )
+            });
+            let header = if disabled {
+                format!("disabled {display}")
+            } else {
+                display.to_string()
+            };
+            self.line(2, &format!("{header} {{"))?;
+            for member in children {
+                if matches!(member, SettingsNode::Bool { name: n, .. } if n == "enabled") {
+                    continue;
+                }
+                self.settings_member(
+                    member,
+                    3,
+                    &[PathPart::Part("gamemodes"), PathPart::Mode],
+                )?;
+            }
+            self.line(2, "}")?;
+        }
+        self.line(1, "}")?;
+        Ok(())
+    }
+
+    /// Emit the `heroes { <Team> { ... } }` block of a heroes group.
+    fn emit_heroes(&mut self, teams: &[SettingsNode]) -> Result<()> {
+        self.line(1, "heroes {")?;
+        for team in teams {
+            let SettingsNode::Group { name, children, .. } = team else {
+                return Err(self.malformed("team entries must be groups"));
+            };
+            let display = table::team_name(name)
+                .ok_or_else(|| self.malformed(format!("unknown team '{name}'")))?;
+            self.line(2, &format!("{display} {{"))?;
+            for member in children {
+                match member {
+                    SettingsNode::Group { name, children, .. } => {
+                        let hero = table::hero_name(name)
+                            .ok_or_else(|| self.malformed(format!("unknown hero '{name}'")))?;
+                        self.line(3, &format!("{hero} {{"))?;
+                        for inner in children {
+                            self.settings_member(
+                                inner,
+                                4,
+                                &[
+                                    PathPart::Part("heroes"),
+                                    PathPart::Team,
+                                    PathPart::Hero,
+                                ],
+                            )?;
+                        }
+                        self.line(3, "}")?;
+                    }
+                    other => self.settings_member(
+                        other,
+                        3,
+                        &[PathPart::Part("heroes"), PathPart::Team],
+                    )?,
+                }
+            }
+            self.line(2, "}")?;
+        }
+        self.line(1, "}")?;
+        Ok(())
+    }
+
+    /// Emit one leaf-level settings member (`Name: value`, lists as blocks).
+    fn settings_member(
+        &mut self,
+        node: &SettingsNode,
+        level: usize,
+        path: &[PathPart],
+    ) -> Result<()> {
+        let name = node.name();
+        let mut full = path.to_vec();
+        full.push(PathPart::Part(name));
+        let entry = table::lookup(&full).ok_or_else(|| {
+            self.malformed(format!(
+                "settings key '{}' is outside the emission table",
+                table::path_string(&full)
+            ))
+        })?;
+        match (node, &entry.kind) {
+            (SettingsNode::String { value, .. }, KeyKind::String) => {
+                self.line(
+                    level,
+                    &format!("{}: \"{}\"", entry.workshop_name, escape_string(value)),
+                )?;
+            }
+            (SettingsNode::String { value, .. }, KeyKind::Enum(domain)) => {
+                let display = table::enum_name(domain, value).ok_or_else(|| {
+                    self.malformed(format!(
+                        "unknown value '{value}' for settings key '{name}'"
+                    ))
+                })?;
+                self.line(level, &format!("{}: {display}", entry.workshop_name))?;
+            }
+            (SettingsNode::Number { value, .. }, KeyKind::Number) => {
+                self.line(
+                    level,
+                    &format!("{}: {}", entry.workshop_name, format_number(*value)),
+                )?;
+            }
+            (SettingsNode::Number { value, .. }, KeyKind::Percent) => {
+                self.line(
+                    level,
+                    &format!("{}: {}%", entry.workshop_name, format_number(*value)),
+                )?;
+            }
+            (SettingsNode::Bool { value, .. }, KeyKind::Bool) => {
+                let rendered = if *value { "On" } else { "Off" };
+                self.line(level, &format!("{}: {rendered}", entry.workshop_name))?;
+            }
+            (SettingsNode::List { elements, .. }, KeyKind::ListMap) => {
+                self.line(level, &format!("{} {{", entry.workshop_name))?;
+                for element in elements {
+                    let display = table::map_name(&element.value).ok_or_else(|| {
+                        self.malformed(format!(
+                            "unknown map '{}' in settings list '{name}'",
+                            element.value
+                        ))
+                    })?;
+                    self.line(level + 1, display)?;
+                }
+                self.line(level, "}")?;
+            }
+            (SettingsNode::List { elements, .. }, KeyKind::ListHero) => {
+                self.line(level, &format!("{} {{", entry.workshop_name))?;
+                for element in elements {
+                    let display = table::hero_name(&element.value).ok_or_else(|| {
+                        self.malformed(format!(
+                            "unknown hero '{}' in settings list '{name}'",
+                            element.value
+                        ))
+                    })?;
+                    self.line(level + 1, display)?;
+                }
+                self.line(level, "}")?;
+            }
+            _ => {
+                return Err(self.malformed(format!(
+                    "settings key '{name}' does not match its table kind"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn malformed(&self, message: impl Into<String>) -> WorkshopError {
+        WorkshopError::Malformed {
+            message: message.into(),
+            span: None,
+        }
     }
 
     fn rule(&mut self, rule: &wir::Rule) -> Result<()> {

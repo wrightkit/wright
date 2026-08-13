@@ -169,3 +169,284 @@ fn unknown_value_id_fails_explicitly() {
     let error = emitter::emit(&program, &catalog(), &en()).expect_err("unknown id must fail");
     assert!(error.to_string().contains("notACatalogId"), "{error}");
 }
+
+use wright_ir::settings::{Settings, SettingsListElement, SettingsNode};
+
+fn settings(children: Vec<SettingsNode>) -> Settings {
+    Settings { span: None, children }
+}
+
+fn group(name: &str, children: Vec<SettingsNode>) -> SettingsNode {
+    SettingsNode::Group {
+        name: name.to_string(),
+        children,
+        span: None,
+    }
+}
+
+fn string(name: &str, value: &str) -> SettingsNode {
+    SettingsNode::String {
+        name: name.to_string(),
+        value: value.to_string(),
+        span: None,
+    }
+}
+
+fn number(name: &str, value: f64) -> SettingsNode {
+    SettingsNode::Number {
+        name: name.to_string(),
+        value,
+        span: None,
+    }
+}
+
+fn boolean(name: &str, value: bool) -> SettingsNode {
+    SettingsNode::Bool {
+        name: name.to_string(),
+        value,
+        span: None,
+    }
+}
+
+fn list(name: &str, elements: &[&str]) -> SettingsNode {
+    SettingsNode::List {
+        name: name.to_string(),
+        elements: elements
+            .iter()
+            .map(|value| SettingsListElement {
+                value: value.to_string(),
+                span: None,
+            })
+            .collect(),
+        span: None,
+    }
+}
+
+/// The pixelart settings tree (source order: assault, control, escort,
+/// hybrid, skirmish).
+fn pixelart_settings() -> Settings {
+    let mode = |name: &str| {
+        group(
+            name,
+            vec![list("enabledMaps", &[]), string("roleLimit", "2OfEachRolePerTeam")],
+        )
+    };
+    settings(vec![group(
+        "gamemodes",
+        vec![
+            mode("assault"),
+            mode("control"),
+            mode("escort"),
+            mode("hybrid"),
+            group("skirmish", vec![list("enabledMaps", &["workshopIsland"])]),
+        ],
+    )])
+}
+
+/// The santa settings tree (source order).
+fn santa_settings() -> Settings {
+    settings(vec![
+        group("lobby", vec![number("ffaSlots", 6.0)]),
+        group(
+            "gamemodes",
+            vec![
+                group("ffa", vec![list("enabledMaps", &["kingsRowWinter"])]),
+                group(
+                    "general",
+                    vec![
+                        boolean("enableHeroSwitching", false),
+                        string("heroLimit", "off"),
+                        boolean("enableRandomHeroes", true),
+                        number("respawnTime%", 30.0),
+                    ],
+                ),
+            ],
+        ),
+        group(
+            "heroes",
+            vec![group(
+                "allTeams",
+                vec![
+                    group(
+                        "mei",
+                        vec![
+                            boolean("enablePrimaryFire", false),
+                            boolean("enableSecondaryFire", false),
+                            boolean("enableAbility1", false),
+                            number("health%", 266.4),
+                            boolean("enableAbility2", false),
+                            number("passiveUltGen%", 0.0),
+                            number("combatUltGen%", 0.0),
+                        ],
+                    ),
+                    list("enabledHeroes", &["mei"]),
+                ],
+            )],
+        ),
+    ])
+}
+
+fn program_with_settings(settings: Settings) -> wir::Program {
+    let mut program = wir::Program::default();
+    program.settings = Some(settings);
+    program
+}
+
+/// The `settings` section of a Workshop text (the text starts with it).
+fn settings_section(text: &str) -> String {
+    let start = text.find("settings").expect("text has a settings section");
+    let mut depth = 0usize;
+    let mut end = start;
+    for (index, ch) in text[start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = start + index + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    text[start..end].to_string()
+}
+
+/// Collapse all whitespace for structural equality (string contents are
+/// compared collapsed too; both sides render the same values).
+fn collapse(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+#[test]
+fn settings_emission_matches_oracle_for_pixelart() {
+    let program = program_with_settings(pixelart_settings());
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    let oracle = corpus_text("real-world/overpy-pixelart");
+    assert_eq!(
+        collapse(&settings_section(&emitted)),
+        collapse(&settings_section(&oracle)),
+        "emitted settings section must match the oracle region (whitespace-collapsed)"
+    );
+}
+
+#[test]
+fn settings_emission_matches_oracle_for_santa() {
+    let program = program_with_settings(santa_settings());
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    let oracle = corpus_text("real-world/overpy-santa");
+    assert_eq!(
+        collapse(&settings_section(&emitted)),
+        collapse(&settings_section(&oracle)),
+        "emitted settings section must match the oracle region (whitespace-collapsed)"
+    );
+}
+
+#[test]
+fn settings_emission_is_deterministic() {
+    let program = program_with_settings(santa_settings());
+    let first = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    let second = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert_eq!(first, second);
+}
+
+#[test]
+fn settings_free_program_emits_no_settings_section() {
+    let mut program = wir::Program::default();
+    let rule = program.rules.push(wir::Rule {
+        name: "x".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::Global,
+        conditions: vec![],
+        actions: vec![],
+    });
+    let _ = rule;
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        !emitted.contains("settings"),
+        "settings-free programs emit no settings section:\n{emitted}"
+    );
+}
+
+#[test]
+fn settings_emission_is_rejected_by_the_workshop_parser() {
+    // Roundtrip boundary (#86): the ws parser never learns the settings
+    // section, so a settings-bearing emission cannot reparse.
+    let program = program_with_settings(pixelart_settings());
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(emitted.starts_with("settings {"));
+    assert!(
+        parser::parse(&emitted, &catalog(), &en()).is_err(),
+        "settings-bearing emission must be rejected by the ws parser"
+    );
+}
+
+#[test]
+fn enabled_false_prefixes_the_mode_header() {
+    let program = program_with_settings(settings(vec![group(
+        "gamemodes",
+        vec![group(
+            "assault",
+            vec![boolean("enabled", false), boolean("enableCompetitiveRules", true)],
+        )],
+    )]));
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    let section = settings_section(&emitted);
+    assert!(collapse(&section).contains("disabledAssault{CompetitiveRules:On}"));
+}
+
+#[test]
+fn empty_list_emits_empty_braces_block() {
+    let program = program_with_settings(settings(vec![group(
+        "gamemodes",
+        vec![group("skirmish", vec![list("enabledMaps", &[])])],
+    )]));
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    let section = settings_section(&emitted);
+    assert!(
+        collapse(&section).contains("Skirmish{enabledmaps{}}"),
+        "empty lists emit an empty braces block:\n{section}"
+    );
+}
+
+#[test]
+fn settings_section_precedes_variables() {
+    let mut program = program_with_settings(santa_settings());
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "x".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    let settings_pos = emitted.find("settings").unwrap();
+    let variables_pos = emitted.find("variables {").unwrap();
+    assert!(settings_pos < variables_pos, "settings precedes variables");
+}
+
+#[test]
+fn percent_keys_append_the_suffix() {
+    let program = program_with_settings(settings(vec![group(
+        "gamemodes",
+        vec![group("general", vec![number("respawnTime%", 30.0)])],
+    )]));
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(collapse(&settings_section(&emitted)).contains("RespawnTimeScalar:30%"));
+}
+
+#[test]
+fn string_values_are_escaped() {
+    let program = program_with_settings(settings(vec![group(
+        "main",
+        vec![string("description", "a \"quoted\" line")],
+    )]));
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        collapse(&settings_section(&emitted)).contains("Description:\"a\\\"quoted\\\"line\""),
+        "strings are escaped: {emitted}"
+    );
+}
