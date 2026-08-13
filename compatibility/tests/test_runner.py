@@ -36,18 +36,29 @@ class RunnerTests(unittest.TestCase):
         fixtures = run_oracle.discover_fixtures(
             COMPATIBILITY_DIR / "fixtures"
         )
-        self.assertEqual(len(fixtures), 7)
+        self.assertEqual(len(fixtures), 16)
         for fixture_path, fixture in fixtures:
             snapshot = fixture_path.parent / "oracle.json"
             self.assertTrue(snapshot.is_file(), fixture["id"])
             snapshot_data = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(snapshot_data["fixture"], fixture["id"])
 
-        real_world = next(
+        real_world = [
+            fixture for _, fixture in fixtures if fixture["category"] == "real-world"
+        ]
+        self.assertGreaterEqual(len(real_world), 6)
+        for fixture in real_world:
+            self.assertTrue(fixture["provenance"]["redistributable"])
+            self.assertEqual(fixture["provenance"]["modifications"], "none")
+            self.assertEqual(
+                len(fixture["provenance"]["sourceCommit"]), 40,
+                fixture["id"],
+            )
+
+        overpy_cake = next(
             fixture for _, fixture in fixtures if fixture["id"] == "real-world/overpy-cake"
         )
-        self.assertTrue(real_world["provenance"]["redistributable"])
-        self.assertEqual(real_world["provenance"]["modifications"], "none")
+        self.assertEqual(overpy_cake["provenance"]["kind"], "imported-example")
 
 
 if __name__ == "__main__":

@@ -37,7 +37,41 @@ const SUCCESS_FIXTURES = [
   "real-world/overpy-cake",
 ];
 
-const FAILURE_FIXTURES = ["synthetic/diagnostics"];
+const FAILURE_FIXTURES = [
+  { id: "synthetic/diagnostics", code: "parse" },
+  { id: "real-world/overpy-pixelart", code: "unsupported" },
+  { id: "real-world/overpy-santa", code: "unsupported" },
+  { id: "real-world/overpy-meipocalypse", code: "parse" },
+  { id: "real-world/overpy-zencopter", code: "parse" },
+  { id: "real-world/overpy-cronch", code: "unsupported" },
+  { id: "real-world/overpy-broken-weapons", code: "unsupported" },
+  { id: "real-world/overpy-client-to-server", code: "unsupported" },
+  { id: "real-world/ow1-emulator", code: "parse" },
+  { id: "real-world/6v6-adjustments", code: "parse" },
+];
+
+// Recorded reference failures (code and message verbatim, recorded from the
+// pinned adapter at M11 acquisition). The meipocalypse ENOENT message embeds
+// the fixture directory path, so its expected message is constructed from the
+// same root the adapter receives; every other message is machine-stable.
+const FAILURE_MESSAGES = {
+  "real-world/overpy-pixelart":
+    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
+  "real-world/overpy-santa":
+    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
+  "real-world/overpy-zencopter":
+    "Invalid content before string: 'arena'\n    | line 38, col 17, at heli.opy",
+  "real-world/overpy-cronch":
+    "construct '@Name' is outside the Opy HIR v1 corpus boundary",
+  "real-world/overpy-broken-weapons":
+    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
+  "real-world/overpy-client-to-server":
+    "custom game settings blocks are outside the Opy HIR v1 corpus boundary",
+  "real-world/ow1-emulator":
+    "Found 'if', but no 'else'\n    | line 94, col 14, at arena.opy\n    | line 86, col 1, at 1v1_main.opy",
+  "real-world/6v6-adjustments":
+    "Unknown member '_hp_reset' of 'eventPlayer'\n    | line 31, col 17, at custom_hp.opy\n    | line 14, col 1, at main.opy",
+};
 
 function corpusSource(fixtureId) {
   const dir = join(CORPUS, fixtureId);
@@ -79,17 +113,26 @@ for (const fixtureId of SUCCESS_FIXTURES) {
   });
 }
 
-for (const fixtureId of FAILURE_FIXTURES) {
-  test(`fails explicitly on corpus fixture ${fixtureId}`, async () => {
-    const { source, root, mainFile } = corpusSource(fixtureId);
+for (const failure of FAILURE_FIXTURES) {
+  test(`fails explicitly on corpus fixture ${failure.id}`, async () => {
+    const { source, root, mainFile } = corpusSource(failure.id);
     const content = readFileSync(source, "utf8");
     await assert.rejects(
       convert({ content, rootPath: root, mainFileName: mainFile }),
       (error) => {
         assert.ok(error instanceof AdapterError, "expected an AdapterError");
-        assert.equal(error.code, "parse");
+        assert.equal(error.code, failure.code);
         assert.ok(error.message.length > 0);
-        assert.ok(error.span, "parse error must carry a source span");
+        if (failure.id === "real-world/overpy-meipocalypse") {
+          assert.equal(
+            error.message,
+            `ENOENT: no such file or directory, lstat '${join(root, "generateWalls.js")}'`
+          );
+        } else if (FAILURE_MESSAGES[failure.id] !== undefined) {
+          assert.equal(error.message, FAILURE_MESSAGES[failure.id]);
+        } else {
+          assert.ok(error.span, "parse error must carry a source span");
+        }
         return true;
       }
     );

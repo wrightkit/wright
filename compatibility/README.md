@@ -42,15 +42,25 @@ compatibility/fixtures/<category>/<name>/
 
 Imported fixtures should also record an immutable `sourceCommit`, a direct
 `sourceUrl`, a `licenseUrl`, and whether the source was modified. The corpus
-currently contains original synthetic cases and the GPL-3.0-only
-`real-world/overpy-cake` example imported unchanged from the pinned OverPy
-repository. Fixtures from a project without an explicit redistribution license
-remain out of the corpus until that status is resolved.
+currently contains original synthetic cases and the real-world M11 phase-1
+set: the GPL-3.0-only OverPy examples (`real-world/overpy-cake`,
+`overpy-pixelart`, `overpy-santa`, `overpy-meipocalypse`, `overpy-zencopter`,
+`overpy-cronch`, `overpy-broken-weapons`, `overpy-client-to-server`) and the
+independent BSD-2-Clause projects `real-world/ow1-emulator` and
+`real-world/6v6-adjustments` (full include closures). Sources are committed
+unchanged from immutable pinned commits; every fixture records per-file
+SHA-256 in its `files` map, and `scripts/acquire-corpus.py` re-verifies them
+(provenance manifest at `scripts/corpus-manifest.json`). Fixtures from a
+project without an explicit redistribution license remain out of the corpus
+until that status is resolved.
 
 The synthetic cases cover declarations/rules, events/conditions,
 expressions/arrays/strings/vectors, control flow, preprocessing/includes, and a
-failure diagnostic. The real-world example exercises a larger macro, array,
-loop, vector, and Workshop-effect program.
+failure diagnostic. The real-world set exercises large macro/array/loop
+programs, multi-file include closures, custom game settings blocks, subroutines,
+and Workshop enum/action surfaces; fixtures whose pinned oracle or adapter
+outcome is a recorded failure keep `expectedStatus: failure` with the reference
+diagnostics in the snapshot.
 
 `oracle.json` captures the pinned oracle identity, source hash, compile status,
 exit code, normalized diagnostics, normalized Workshop text, and normalized
