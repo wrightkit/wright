@@ -6,7 +6,9 @@
 //! Content-Length framing, and manages document lifecycle with correct
 //! version identity. No duplicate semantic logic exists here.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use lsp_types::notification::{Notification, PublishDiagnostics};
@@ -85,7 +87,7 @@ fn run() -> Result<(), String> {
                     params.text_document.version,
                 );
                 service.store.open(document);
-                publish_diagnostics(&mut writer, &mut service, &uri)?;
+                publish_affected_diagnostics(&mut writer, &service, &uri)?;
             }
             "textDocument/didChange" => {
                 let params: DidChangeTextDocumentParams =
@@ -96,12 +98,15 @@ fn run() -> Result<(), String> {
                         .store
                         .change(&uri, &change.text, params.text_document.version);
                 }
-                publish_diagnostics(&mut writer, &mut service, &uri)?;
+                publish_affected_diagnostics(&mut writer, &service, &uri)?;
             }
             "textDocument/didClose" => {
                 let params: DidCloseTextDocumentParams =
                     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())?;
-                service.store.close(&params.text_document.uri.to_string());
+                let uri = params.text_document.uri.to_string();
+                service.store.close(&uri);
+                publish_empty_diagnostics(&mut writer, &uri)?;
+                publish_affected_diagnostics(&mut writer, &service, &uri)?;
             }
             "textDocument/hover" => {
                 let params: TextDocumentPositionParams =
@@ -348,32 +353,83 @@ fn write_error(
         .map_err(|error| error.to_string())
 }
 
-/// Publish the diagnostics of a document as an LSP notification.
+/// Publish diagnostics for every document affected by a change to `uri`.
+fn publish_affected_diagnostics(
+    writer: &mut impl Write,
+    service: &LanguageService,
+    changed_uri: &str,
+) -> Result<(), String> {
+    for affected_uri in service.dependent_documents(changed_uri) {
+        publish_diagnostics(writer, service, &affected_uri)?;
+    }
+    Ok(())
+}
+
+/// Publish the diagnostics of one document, grouping them by their source
+/// identity so included-file diagnostics are published under the included
+/// file's URI rather than the requesting document's URI.
 fn publish_diagnostics(
     writer: &mut impl Write,
-    service: &mut LanguageService,
+    service: &LanguageService,
     uri: &str,
 ) -> Result<(), String> {
-    let url = Uri::from_str(uri).map_err(|error| error.to_string())?;
-    let diagnostics: Vec<LspDiagnostic> = service
-        .diagnostics(uri)
-        .into_iter()
-        .map(|diagnostic| LspDiagnostic {
-            range: convert_range(diagnostic.range),
-            severity: Some(match diagnostic.severity.as_str() {
-                "error" => DiagnosticSeverity::ERROR,
-                "warning" => DiagnosticSeverity::WARNING,
-                _ => DiagnosticSeverity::INFORMATION,
-            }),
-            code: Some(lsp_types::NumberOrString::String(diagnostic.code)),
-            message: diagnostic.message,
-            ..Default::default()
-        })
-        .collect();
+    let diagnostics = service.diagnostics(uri);
+    let mut by_source: BTreeMap<String, Vec<LspDiagnostic>> = BTreeMap::new();
+    for diagnostic in diagnostics {
+        let source = diagnostic.source.clone();
+        by_source
+            .entry(source)
+            .or_default()
+            .push(convert_diagnostic(diagnostic));
+    }
+    // Always publish (possibly empty) for the requested document so stale
+    // markers are cleared.
+    by_source.entry(uri.to_string()).or_default();
+
+    for (source, diagnostics) in by_source {
+        publish_to(
+            writer,
+            &source,
+            source_version(service, &source),
+            diagnostics,
+        )?;
+    }
+    Ok(())
+}
+
+/// Publish empty diagnostics for a document, retiring previously published
+/// markers (used on `didClose`).
+fn publish_empty_diagnostics(writer: &mut impl Write, uri: &str) -> Result<(), String> {
+    publish_to(writer, uri, None, Vec::new())
+}
+
+/// Convert one editor-neutral source-aware diagnostic into an LSP diagnostic.
+fn convert_diagnostic(diagnostic: wright_language::SourceDiagnostic) -> LspDiagnostic {
+    LspDiagnostic {
+        range: convert_range(diagnostic.range),
+        severity: Some(match diagnostic.severity.as_str() {
+            "error" => DiagnosticSeverity::ERROR,
+            "warning" => DiagnosticSeverity::WARNING,
+            _ => DiagnosticSeverity::INFORMATION,
+        }),
+        code: Some(lsp_types::NumberOrString::String(diagnostic.code)),
+        message: diagnostic.message,
+        ..Default::default()
+    }
+}
+
+/// Write one `textDocument/publishDiagnostics` notification for a source
+/// identity (document URI or resolved filesystem path).
+fn publish_to(
+    writer: &mut impl Write,
+    source: &str,
+    version: Option<i32>,
+    diagnostics: Vec<LspDiagnostic>,
+) -> Result<(), String> {
     let params = PublishDiagnosticsParams {
-        uri: url,
+        uri: source_to_uri(source),
         diagnostics,
-        version: service.store.document(uri).map(|document| document.version),
+        version,
     };
     let notification = serde_json::json!({
         "jsonrpc": "2.0",
@@ -384,6 +440,19 @@ fn publish_diagnostics(
     write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)
         .and_then(|_| writer.flush())
         .map_err(|error| error.to_string())
+}
+
+/// The current version of a source identity, when it is an open document.
+fn source_version(service: &LanguageService, source: &str) -> Option<i32> {
+    if let Some(document) = service.store.document(source) {
+        return Some(document.version);
+    }
+    let path = PathBuf::from(source);
+    service
+        .store
+        .uri_for_path(&path)
+        .and_then(|uri| service.store.document(&uri))
+        .map(|document| document.version)
 }
 
 fn convert_position(position: LspPosition) -> Position {

@@ -144,6 +144,18 @@ impl DocumentStore {
         std::fs::read_to_string(path).ok()
     }
 
+    /// The open document URI for a filesystem path, when one is open.
+    pub fn uri_for_path(&self, path: &PathBuf) -> Option<String> {
+        for document in self.documents.values() {
+            if let Some(document_path) = uri_to_path(&document.uri) {
+                if document_path == *path {
+                    return Some(document.uri.clone());
+                }
+            }
+        }
+        None
+    }
+
     /// Build an overlay map for include resolution: open documents keyed by
     /// their include-relative path and their absolute filesystem path, so
     /// unsaved editor buffers participate in include resolution rather than
@@ -172,7 +184,7 @@ impl DocumentStore {
 }
 
 /// Convert a `file://` URI to a filesystem path, when applicable.
-fn uri_to_path(uri: &str) -> Option<PathBuf> {
+pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
     let path = uri.strip_prefix("file://")?;
     Some(PathBuf::from(path))
 }

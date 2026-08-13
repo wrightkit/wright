@@ -17,6 +17,10 @@ fn main_document() -> Document {
     Document::new("file:///project/main.opy", text, root)
 }
 
+fn broken_include_fixtures() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/broken-include")
+}
+
 #[test]
 fn definition_points_to_the_included_file() {
     let document = main_document();
@@ -79,5 +83,32 @@ fn references_span_both_files() {
     assert!(
         references.iter().any(|location| location.source == uri),
         "the call site lives in main.opy: {references:?}"
+    );
+}
+
+#[test]
+fn filesystem_include_diagnostics_keep_source_identity() {
+    let root = broken_include_fixtures();
+    let main = std::fs::read_to_string(root.join("main.opy")).unwrap();
+    let uri = format!("file://{}", root.join("main.opy").display());
+    let mut service = LanguageService::new(root.clone());
+    service
+        .store
+        .open(Document::new(uri.clone(), main, root.clone()));
+
+    let diagnostics = service.diagnostics(&uri);
+    let error = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == "error")
+        .expect("broken filesystem include produces an error diagnostic");
+    assert!(
+        error.source.ends_with("bad.opy"),
+        "diagnostic source is the filesystem include, not the requesting document: {}",
+        error.source
+    );
+    assert_eq!(
+        error.range.start.line, 0,
+        "range is source-local to bad.opy, not the requesting document line: {:?}",
+        error.range
     );
 }

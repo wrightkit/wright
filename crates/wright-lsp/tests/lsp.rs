@@ -96,6 +96,17 @@ impl LspClient {
         }
         None
     }
+
+    /// Read `count` notifications of the given method, in order.
+    fn read_notifications(&mut self, method: &str, count: usize) -> Vec<serde_json::Value> {
+        let mut notifications = Vec::new();
+        for _ in 0..count {
+            if let Some(notification) = self.read_notification(method) {
+                notifications.push(notification);
+            }
+        }
+        notifications
+    }
 }
 
 fn workspace_root() -> PathBuf {
@@ -680,6 +691,185 @@ fn lsp_handles_malformed_input_without_crashing() {
             .is_empty(),
         "malformed input reports diagnostics, not a crash"
     );
+    client.request(2, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_didclose_clears_diagnostics() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    let broken = "rule \"x\"\n    @Event global\n    if broken";
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("closed.opy"), "languageId": "opy", "version": 1, "text": broken },
+        }),
+    );
+    let published = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("open publish");
+    assert!(
+        !published["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "malformed document publishes diagnostics before close"
+    );
+
+    client.notify(
+        "textDocument/didClose",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("closed.opy") },
+        }),
+    );
+    let cleared = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("close clears diagnostics");
+    assert_eq!(cleared["params"]["uri"], uri_for("closed.opy"));
+    assert!(
+        cleared["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "closed document diagnostics are cleared"
+    );
+    assert!(
+        cleared["params"]["version"].is_null(),
+        "closed document publish carries no version"
+    );
+
+    client.request(2, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_include_change_refreshes_dependent_diagnostics() {
+    let fixtures = workspace_root().join("crates/wright-language/tests/fixtures/overlay");
+    let main = std::fs::read_to_string(fixtures.join("main.opy")).unwrap();
+    let shared_good = "subroutine showStatus\n\ndef showStatus():\n    print(\"overlay\")\n";
+    let shared_broken = "this is not valid opy\n";
+    let main_uri = uri_for("main.opy");
+    let shared_uri = format!("file://{}", fixtures.join("shared.opy").display());
+
+    let mut client = LspClient::spawn(&fixtures);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", fixtures.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    // Open main first (shared.opy is not on disk yet), then open the unsaved
+    // overlay. Opening an overlay refreshes shared and its dependent main.
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "opy", "version": 1, "text": main },
+        }),
+    );
+    let _ = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("main open diagnostics");
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "languageId": "opy", "version": 1, "text": shared_good },
+        }),
+    );
+    let _ = client.read_notifications("textDocument/publishDiagnostics", 2);
+
+    // Change the open overlay to an invalid state; both shared.opy and the
+    // dependent main.opy must be refreshed.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "version": 2 },
+            "contentChanges": [{ "text": shared_broken }],
+        }),
+    );
+    let notifications = client.read_notifications("textDocument/publishDiagnostics", 3);
+    let shared_error = notifications.iter().any(|notification| {
+        notification["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("shared.opy")
+            && notification["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|diagnostic| diagnostic["severity"] == 1)
+    });
+    assert!(
+        shared_error,
+        "broken overlay publishes an error for shared.opy: {notifications:?}"
+    );
+    let main_refreshed = notifications.iter().any(|notification| {
+        notification["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("main.opy")
+    });
+    assert!(
+        main_refreshed,
+        "dependent main.opy is refreshed: {notifications:?}"
+    );
+
+    // Change the open overlay back to valid without reopening the root.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": shared_uri, "version": 3 },
+            "contentChanges": [{ "text": shared_good }],
+        }),
+    );
+    let notifications = client.read_notifications("textDocument/publishDiagnostics", 2);
+    let shared_clear = notifications.iter().any(|notification| {
+        notification["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("shared.opy")
+            && notification["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|diagnostic| diagnostic["severity"] != 1)
+    });
+    assert!(
+        shared_clear,
+        "restored overlay clears shared.opy diagnostics: {notifications:?}"
+    );
+    let main_clear = notifications.iter().any(|notification| {
+        notification["params"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("main.opy")
+            && notification["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|diagnostic| diagnostic["severity"] != 1)
+    });
+    assert!(
+        main_clear,
+        "restored overlay clears dependent main.opy diagnostics: {notifications:?}"
+    );
+
     client.request(2, "shutdown", serde_json::json!(null));
     client.notify("exit", serde_json::json!(null));
 }

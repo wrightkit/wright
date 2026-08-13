@@ -51,10 +51,55 @@ pub fn compile_with_overlay(
     root: &Path,
     overlay: &std::collections::BTreeMap<String, String>,
 ) -> FrontendResult<wright_core::hir::Program> {
-    let (preprocessed, files) = preprocess_with_overlay(source, main_path, root, overlay)?;
+    let outcome = compile_with_overlay_outcome(source, main_path, root, overlay);
+    match outcome.hir {
+        Some(hir) => Ok(hir),
+        None => Err(outcome
+            .error
+            .expect("a failed compile outcome always carries an error")),
+    }
+}
+
+/// The outcome of a compile with overlays.
+///
+/// Unlike [`compile_with_overlay`], this retains the frontend file registry
+/// even when parsing or lowering fails, so language tooling can map span file
+/// ids to their actual source identities without building a diagnostics-only
+/// project model.
+pub struct CompileOutcome {
+    pub hir: Option<wright_core::hir::Program>,
+    pub error: Option<FrontendError>,
+    pub files: Vec<preprocess::FileRecord>,
+}
+
+/// Compile with open-document overlays while retaining the frontend file
+/// registry on parse/lower failure.
+pub fn compile_with_overlay_outcome(
+    source: &str,
+    main_path: &str,
+    root: &Path,
+    overlay: &std::collections::BTreeMap<String, String>,
+) -> CompileOutcome {
+    let (preprocessed, files) = match preprocess_with_overlay(source, main_path, root, overlay) {
+        Ok(preprocessed) => preprocessed,
+        Err(error) => {
+            return CompileOutcome {
+                hir: None,
+                error: Some(error),
+                files: vec![preprocess::FileRecord {
+                    id: 0,
+                    path: main_path.to_string(),
+                }],
+            };
+        }
+    };
     let parsed = parse(&preprocessed.tokens);
     if let Some(error) = parsed.errors.first() {
-        return Err(error.clone());
+        return CompileOutcome {
+            hir: None,
+            error: Some(error.clone()),
+            files,
+        };
     }
     let program = parsed
         .program
@@ -68,12 +113,23 @@ pub fn compile_with_overlay(
             span: define.span.map(Into::into),
         })
         .collect();
-    let files = files
-        .into_iter()
+    let hir_files = files
+        .iter()
         .map(|file| wright_core::hir::types::SourceFile {
             id: file.id,
-            path: file.path,
+            path: file.path.clone(),
         })
         .collect();
-    lower(&program, files, defines)
+    match lower(&program, hir_files, defines) {
+        Ok(hir) => CompileOutcome {
+            hir: Some(hir),
+            error: None,
+            files,
+        },
+        Err(error) => CompileOutcome {
+            hir: None,
+            error: Some(error),
+            files,
+        },
+    }
 }

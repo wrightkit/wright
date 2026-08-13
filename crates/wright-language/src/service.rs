@@ -5,21 +5,35 @@
 //! the document version it was computed for, so stale results are
 //! deterministic and replaceable (#64). No LSP types appear here.
 
+use std::path::PathBuf;
+
 use serde::Serialize;
 use wright_analyzer::analysis::{self, Finding};
 use wright_analyzer::symbols::{SemanticIndex, Symbol};
 use wright_ir::wir;
+use wright_opy::preprocess::FileRecord;
 
 use crate::document::{Document, DocumentStore, Position, Range};
 
-/// A language diagnostic (editor-neutral).
+/// A source-aware language diagnostic (editor-neutral).
+///
+/// Unlike a range-only diagnostic, this carries the source/document identity
+/// the diagnostic belongs to, the version of that source when it is an open
+/// document, and the version of the requesting (root) document. A diagnostic
+/// from an included file is therefore never mapped through the requesting
+/// document's text.
 #[derive(Debug, Clone, Serialize)]
-pub struct Diagnostic {
+pub struct SourceDiagnostic {
+    /// The source identity: the requesting document URI for the main file, or
+    /// the resolved path for an included file.
+    pub source: String,
     pub range: Range,
     pub severity: String,
     pub code: String,
     pub message: String,
-    /// The document version this diagnostic was computed for.
+    /// The version of the document owning `source`, when it is open (else 0).
+    pub source_version: i32,
+    /// The version of the document that requested the analysis.
     pub document_version: i32,
 }
 
@@ -78,6 +92,9 @@ pub struct Analysis {
     pub index: Option<SemanticIndex>,
     pub findings: Vec<Finding>,
     pub parse_errors: Vec<wright_opy::FrontendError>,
+    /// The frontend file registry, retained even when parsing/lowering fails
+    /// so diagnostic spans can be mapped to their actual source.
+    pub files: Vec<FileRecord>,
 }
 
 /// The editor-neutral language service over a workspace.
@@ -100,24 +117,22 @@ impl LanguageService {
     /// Open-document overlays (unsaved editor buffers) participate in include
     /// resolution before the filesystem.
     pub fn analyze(&self, document: &Document) -> Analysis {
-        let mut parse_errors = Vec::new();
         let overlay = self.store.overlay(&self.root);
-        let hir = match wright_opy::compile_with_overlay(
-            &document.text,
-            &document.uri,
-            &self.root,
-            &overlay,
-        ) {
-            Ok(hir) => hir,
-            Err(error) => {
-                parse_errors.push(error);
-                return Analysis {
-                    program: wir::Program::default(),
-                    index: None,
-                    findings: Vec::new(),
-                    parse_errors,
-                };
-            }
+        let wright_opy::CompileOutcome { hir, error, files } =
+            wright_opy::compile_with_overlay_outcome(
+                &document.text,
+                &document.uri,
+                &self.root,
+                &overlay,
+            );
+        let Some(hir) = hir else {
+            return Analysis {
+                program: wir::Program::default(),
+                index: None,
+                findings: Vec::new(),
+                parse_errors: error.into_iter().collect(),
+                files,
+            };
         };
         let mut findings = Vec::new();
         let mut program = wir::Program::default();
@@ -132,46 +147,90 @@ impl LanguageService {
             program,
             index,
             findings,
-            parse_errors,
+            parse_errors: Vec::new(),
+            files,
         }
     }
 
-    /// Diagnostics for a document: parse errors and semantic findings.
-    pub fn diagnostics(&self, uri: &str) -> Vec<Diagnostic> {
+    /// Diagnostics for a document: parse errors and semantic findings,
+    /// each source-aware (see [`SourceDiagnostic`]).
+    pub fn diagnostics(&self, uri: &str) -> Vec<SourceDiagnostic> {
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
         };
         let analysis = self.analyze(document);
         let mut diagnostics = Vec::new();
         for error in &analysis.parse_errors {
-            let range = error.span.map_or_else(empty_range, |span| {
-                document.from_span(&wright_ir::source::Span::new(
-                    wright_ir::ids::Id::from_index(span.file as usize),
-                    wright_ir::source::Position::new(span.start.line, span.start.col),
-                    wright_ir::source::Position::new(span.end.line, span.end.col),
-                ))
-            });
-            diagnostics.push(Diagnostic {
+            let span = error.span.as_ref().map(ir_span);
+            let (source, range) = self.diagnostic_location(&analysis.files, document, span);
+            let source_version = self.source_version(&source, document);
+            diagnostics.push(SourceDiagnostic {
+                source,
                 range,
                 severity: "error".to_string(),
                 code: error.code.clone(),
                 message: error.message.clone(),
+                source_version,
                 document_version: document.version,
             });
         }
         for finding in &analysis.findings {
-            let range = finding
-                .span
-                .map_or_else(empty_range, |span| document.from_span(&span));
-            diagnostics.push(Diagnostic {
+            let (source, range) = self.diagnostic_location(&analysis.files, document, finding.span);
+            let source_version = self.source_version(&source, document);
+            diagnostics.push(SourceDiagnostic {
+                source,
                 range,
                 severity: severity_name(finding.severity).to_string(),
                 code: finding.code.to_string(),
                 message: finding.message.clone(),
+                source_version,
                 document_version: document.version,
             });
         }
         diagnostics
+    }
+
+    /// Open document URIs whose analysis may change when `uri` changes,
+    /// including `uri` itself when it is open. A document depends on another
+    /// when the latter appears in its frontend include closure, so an open
+    /// overlay or filesystem include change refreshes dependent root
+    /// documents without a diagnostics-only project model.
+    pub fn dependent_documents(&self, uri: &str) -> Vec<String> {
+        let mut affected = Vec::new();
+        if self.store.document(uri).is_some() {
+            affected.push(uri.to_string());
+        }
+        let changed_path = crate::document::uri_to_path(uri);
+        for open_uri in self.store.uris() {
+            if open_uri == uri {
+                continue;
+            }
+            if self.document_includes_path(open_uri, changed_path.as_ref()) {
+                affected.push(open_uri.to_string());
+            }
+        }
+        affected
+    }
+
+    /// Whether `document_uri` includes `changed_path` directly or
+    /// transitively, according to the frontend file registry.
+    fn document_includes_path(&self, document_uri: &str, changed_path: Option<&PathBuf>) -> bool {
+        let Some(changed_path) = changed_path else {
+            return false;
+        };
+        let Some(document) = self.store.document(document_uri) else {
+            return false;
+        };
+        let analysis = self.analyze(document);
+        analysis.files.iter().skip(1).any(|file| {
+            let include_path = PathBuf::from(&file.path);
+            let resolved = if include_path.is_absolute() {
+                include_path
+            } else {
+                self.root.join(include_path)
+            };
+            &resolved == changed_path
+        })
     }
 
     /// Hover content for a symbol at a position.
@@ -218,7 +277,7 @@ impl LanguageService {
                     .and_then(|reference| reference.span)
             })
             .or(symbol.span)?;
-        Some(self.source_location(&analysis.program, document, span))
+        Some(self.source_location(&analysis.files, document, span))
     }
 
     /// Every reference location of the symbol at a position.
@@ -242,7 +301,7 @@ impl LanguageService {
                     .references(symbol.id)
                     .iter()
                     .filter_map(|reference| reference.span)
-                    .map(|span| self.source_location(&analysis.program, document, span))
+                    .map(|span| self.source_location(&analysis.files, document, span))
                     .collect()
             })
             .unwrap_or_default()
@@ -251,43 +310,35 @@ impl LanguageService {
     /// Map a compiler span to its source identity and 0-based range.
     fn source_location(
         &self,
-        program: &wir::Program,
+        files: &[FileRecord],
         document: &Document,
         span: wright_ir::source::Span,
     ) -> SourceLocation {
         let file_index = span.file.index();
-        let source = self.source_identity(program, document, file_index);
-        let source_text = if file_index == 0 {
-            document.text.clone()
-        } else {
-            let path = std::path::PathBuf::from(&source);
-            self.store.text_for_path(&path).unwrap_or_default()
-        };
+        let source = self.source_identity(files, document, file_index);
+        let source_text = self.source_text(&source, document);
         SourceLocation {
             source,
             range: crate::document::span_to_range(&span, &source_text),
         }
     }
 
-    /// The editor-neutral source identity for a compiler file index: the
+    /// The editor-neutral source identity for a frontend file id: the
     /// requesting document URI for the main file, or a resolved path for an
     /// included file (relative include paths resolve against the workspace
     /// root).
     fn source_identity(
         &self,
-        program: &wir::Program,
+        files: &[FileRecord],
         document: &Document,
         file_index: usize,
     ) -> String {
         if file_index == 0 {
             return document.uri.clone();
         }
-        match program
-            .files
-            .get(wright_ir::ids::Id::from_index(file_index))
-        {
+        match files.iter().find(|file| file.id as usize == file_index) {
             Some(file) => {
-                let path = std::path::PathBuf::from(&file.path);
+                let path = PathBuf::from(&file.path);
                 if path.is_absolute() {
                     path.to_string_lossy().into_owned()
                 } else {
@@ -296,6 +347,48 @@ impl LanguageService {
             }
             None => format!("<file {file_index}>"),
         }
+    }
+
+    /// The text of a source identity, preferring an open unsaved document
+    /// overlay and falling back to the filesystem.
+    fn source_text(&self, source: &str, document: &Document) -> String {
+        if source == document.uri {
+            return document.text.clone();
+        }
+        let path = PathBuf::from(source);
+        self.store.text_for_path(&path).unwrap_or_default()
+    }
+
+    /// The version of a source identity: the document version for the main
+    /// source, the open overlay's version when the source is an open
+    /// document, or 0 for a filesystem-backed include without an open buffer.
+    fn source_version(&self, source: &str, document: &Document) -> i32 {
+        if source == document.uri {
+            return document.version;
+        }
+        let path = PathBuf::from(source);
+        self.store
+            .uri_for_path(&path)
+            .and_then(|uri| self.store.document(&uri))
+            .map(|document| document.version)
+            .unwrap_or(0)
+    }
+
+    /// Map an optional compiler span to its source identity and 0-based
+    /// range, using the span's actual source text.
+    fn diagnostic_location(
+        &self,
+        files: &[FileRecord],
+        document: &Document,
+        span: Option<wright_ir::source::Span>,
+    ) -> (String, Range) {
+        let Some(span) = span else {
+            return (document.uri.clone(), empty_range());
+        };
+        let file_index = span.file.index();
+        let source = self.source_identity(files, document, file_index);
+        let source_text = self.source_text(&source, document);
+        (source, crate::document::span_to_range(&span, &source_text))
     }
 
     /// Completion items: declared symbols, builtin names, and keywords.
@@ -473,6 +566,15 @@ impl LanguageService {
         }
         None
     }
+}
+
+/// Convert a frontend span to the IR span representation.
+fn ir_span(span: &wright_opy::diag::Span) -> wright_ir::source::Span {
+    wright_ir::source::Span::new(
+        wright_ir::ids::Id::from_index(span.file as usize),
+        wright_ir::source::Position::new(span.start.line, span.start.col),
+        wright_ir::source::Position::new(span.end.line, span.end.col),
+    )
 }
 
 fn span_contains(span: wright_ir::source::Span, line: u32, col: u32) -> bool {

@@ -13,6 +13,5 @@ pub mod service;
 
 pub use document::{Document, DocumentStore, Position, Range};
 pub use service::{
-    CompletionItem, Diagnostic as LanguageDiagnostic, Hover, LanguageService, SemanticToken,
-    SourceLocation,
+    CompletionItem, Hover, LanguageService, SemanticToken, SourceDiagnostic, SourceLocation,
 };

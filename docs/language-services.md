@@ -47,8 +47,10 @@ is the measured option B of the M10 contract, not an unexamined shortcut.
 
 ## Services (#65/#66)
 
-* **Diagnostics** — structured parse errors and analyzer findings with
-  ranges, severity, code, and version.
+* **Diagnostics** — source-aware `SourceDiagnostic`s for parse errors and
+  analyzer findings, carrying source identity, source-local range, severity,
+  code, message, and source/requesting-document versions; included-file spans
+  are resolved against their own source text, not the requesting document.
 * **Hover** — symbol name/kind and usage summary (reads/writes/calls/rules).
 * **Definition / References** — via the M4 semantic index over source spans.
 * **Completion** — declared symbols, corpus-evidenced builtins, keywords.
@@ -62,9 +64,11 @@ is the measured option B of the M10 contract, not an unexamined shortcut.
 
 `wright-lsp` (stdio, Content-Length framing) implements: initialize
 (capability negotiation: hover/definition/references/completion/rename/full
-semantic tokens), didOpen/didChange/didClose, publishDiagnostics (versioned),
-hover, definition, references, completion, rename (workspace edit with the
-validated preview), semanticTokens/full, shutdown/exit. The end-to-end
+semantic tokens), didOpen/didChange/didClose, publishDiagnostics (versioned
+and grouped by source identity, with didClose cleanup), dependency-refresh of
+affected documents on include/overlay changes, hover, definition, references,
+completion, rename (workspace edit with the validated preview),
+semanticTokens/full, shutdown/exit. The end-to-end
 harness (`wright-lsp/tests/lsp.rs`) drives the real binary and verifies
 capability negotiation, lifecycle, navigation, completion, rename, semantic
 tokens, and stale-version suppression.
