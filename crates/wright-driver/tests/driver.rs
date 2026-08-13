@@ -341,3 +341,99 @@ fn opy_include_diagnostics_resolve_through_the_registry() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn opy_unknown_settings_key_fails_check_and_compile_identically() {
+    // A settings key outside the emission table must fail both `check` and
+    // `compile` with the same settings-unknown-key code and span (#86).
+    let dir = temp_dir();
+    std::fs::write(
+        dir.join("main.opy"),
+        "settings {\n    \"gamemodes\": {\n        \"general\": {\n            \"scoreToWin\": 3\n        }\n    }\n}\nrule \"r\":\n    pass\n",
+    )
+    .unwrap();
+    let main_path = dir.join("main.opy");
+    let mut check_session =
+        CompilerSession::new(SessionConfig::from_path(main_path.clone())).unwrap();
+    let check = check_session.check();
+    assert!(!check.ok);
+    let mut compile_session = CompilerSession::new(SessionConfig::from_path(main_path)).unwrap();
+    let compile = compile_session.compile();
+    assert!(!compile.ok);
+    let check_diag = check
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "settings-unknown-key")
+        .expect("check reports settings-unknown-key");
+    let compile_diag = compile
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "settings-unknown-key")
+        .expect("compile reports settings-unknown-key");
+    assert_eq!(
+        check_diag.span, compile_diag.span,
+        "check and compile must report the same settings-unknown-key span"
+    );
+    assert_eq!(
+        check_diag.span.as_ref().unwrap().start.line, 4,
+        "the span points at the offending key"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
+    // End-to-end: the pixelart fixture compiles with the compat profile and
+    // its emitted settings section equals the oracle region
+    // (whitespace-collapsed, #86).
+    let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(root.join("pixelart.opy")),
+        root: Some(root.clone()),
+        profile: wright_transform::Profile::Compat,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let envelope = session.compile();
+    assert!(
+        envelope.ok,
+        "pixelart must compile: {:?}",
+        envelope.diagnostics
+    );
+    let text = envelope.result.output.expect("output").text;
+    let oracle = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(root.join("oracle.json")).unwrap(),
+    )
+    .unwrap();
+    let oracle_text = oracle["compile"]["workshop"].as_str().unwrap();
+    assert_eq!(
+        collapse_whitespace(&settings_section(&text)),
+        collapse_whitespace(&settings_section(oracle_text)),
+        "the emitted settings section must match the oracle region"
+    );
+}
+
+/// The leading `settings` section of a workshop text.
+fn settings_section(text: &str) -> String {
+    let start = text.find("settings").expect("text has a settings section");
+    let mut depth = 0usize;
+    let mut end = start;
+    for (index, ch) in text[start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = start + index + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    text[start..end].to_string()
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}

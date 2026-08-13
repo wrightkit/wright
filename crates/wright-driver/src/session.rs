@@ -179,12 +179,19 @@ impl CompilerSession {
         self.load_hir(protocol, resolved)
     }
 
-    /// Ingest an already-parsed Opy HIR program: convert, lower, validate.
+    /// Ingest an already-parsed Opy HIR program: validate, convert, lower.
     fn load_hir(
         &mut self,
         protocol: wright_core::hir::Program,
         resolved: &ResolvedInput,
     ) -> Result<wir::Program, Diagnostic> {
+        // The native path is protocol-validated here for the first time
+        // (settings domain checks against the emission table, #86); the
+        // adapter path validates inside parse_str, so this is a double
+        // validation there — acceptable.
+        protocol
+            .validate()
+            .map_err(|error| hir_diag(error, resolved))?;
         let model = protocol
             .to_ir()
             .map_err(|error| ir_diag("convert-error", Stage::Lowering, error, resolved))?;

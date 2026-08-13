@@ -57,3 +57,42 @@ pub fn run(
     }
     Ok(results)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wright_ir::settings::{Settings, SettingsNode};
+
+    fn program_with_settings() -> wir::Program {
+        let mut program = wir::Program::default();
+        program.settings = Some(Settings {
+            span: None,
+            children: vec![SettingsNode::Group {
+                name: "gamemodes".to_string(),
+                children: vec![SettingsNode::Group {
+                    name: "skirmish".to_string(),
+                    children: vec![SettingsNode::List {
+                        name: "enabledMaps".to_string(),
+                        elements: vec![],
+                        span: None,
+                    }],
+                    span: None,
+                }],
+                span: None,
+            }],
+        });
+        program
+    }
+
+    #[test]
+    fn settings_carrier_survives_every_profile() {
+        for profile in [Profile::Off, Profile::Compat, Profile::Aggressive] {
+            let mut program = program_with_settings();
+            run(&mut program, profile).expect("pipeline runs");
+            assert!(
+                program.settings.is_some(),
+                "{profile:?} must preserve the settings carrier"
+            );
+        }
+    }
+}
