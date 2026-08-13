@@ -63,7 +63,8 @@ node adapter/bin/wright-adapter.js --input <examples-dir>/<name> --root \
 | inputhud.opy | 2602 B | `ae7a0e00…eefc1` | lines 4–20 (of 94) | 0 | success | `lex-error` `unexpected character '{'` at 4:10 | `unsupported` (settings boundary) |
 | lucioball_all_heroes.opy | 6114 B | `3e482e96…454840` | lines 6–43 (of 223) | 1 | failure | `lex-error` `unexpected character '{'` at 6:10 | `parse` (lucioball gamemode 39:34) |
 
-First 20 lines of every candidate open with comments and then `settings {`
+First 20 lines of every candidate open with comments and then `settings {`,
+except skirmish_elim, which opens directly with `settings {` at line 1
 (parabola:4, skirmish_elim:1, crosshair:7, inputhud:4,
 lucioball_all_heroes:6); the blocks carry `main` description and
 `gamemodes` configuration. None of the five is settings-free.

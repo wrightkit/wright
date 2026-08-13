@@ -107,8 +107,8 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
   unrelated constructs).
 - Postfix increment/decrement (`++`/`--`) — rejected at parsing (native
   `parse-error` `expected an expression but found '+'` on `++` in
-  overpy-cronch, `cronch.opy:32`; `--` not separately observed in the
-  phase-1 corpus).
+  overpy-cronch, `cronch.opy:32`; `--` occurs in overpy-meipocalypse but
+  is never the first failure (the dict-literal lex-error preempts it)).
 - Dict literals (`{...}`) — rejected at lexing (native `lex-error`
   `unexpected character '{'` on meipocalypse, `meipocalypse.opy:223`).
 - Triple-quoted strings / docstrings (`"""`) — rejected at lexing (native
