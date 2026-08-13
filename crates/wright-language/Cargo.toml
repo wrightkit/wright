@@ -15,3 +15,6 @@ wright-driver = { path = "../wright-driver" }
 wright-ir = { path = "../wright-ir" }
 wright-opy = { path = "../wright-opy" }
 wright-workshop = { path = "../wright-workshop" }
+
+[dev-dependencies]
+libc = "0.2"

@@ -34,12 +34,16 @@ analyzer contracts.
 
 ## Incremental behavior (#64)
 
-Reanalysis is a deterministic full recomputation over the changed document
-(the corpus compiles in ~1–3 ms per the M8 benchmark, so caching is not
-required for correctness). The mandatory contract is version identity:
-results for a previous document version are replaced by the current
-version's results (tested in `wright-language/tests/service.rs` and the LSP
-harness).
+Reanalysis is a deterministic full recomputation over the changed document.
+The committed language-service perf harness (`wright-language/tests/perf.rs`)
+measures the heaviest corpus fixture: analyze ≈2.3 ms, diagnostics ≈1.3 ms,
+hover ≈1.0 ms, peak RSS ≈6 MB (`target/language-service-perf.json`). Because
+each workflow is bounded far below interactive latency, **true cancellation
+is explicitly deferred**; the synchronous-recomputation path cannot be
+interrupted mid-flight, but it also cannot surface obsolete results as
+current: results are version-tagged, stale/out-of-order client versions are
+rejected, and every query re-reads the current document state. This decision
+is the measured option B of the M10 contract, not an unexamined shortcut.
 
 ## Services (#65/#66)
 
