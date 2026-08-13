@@ -69,10 +69,11 @@ fn run() -> Result<(), String> {
                 let params: DidOpenTextDocumentParams =
                     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())?;
                 let uri = params.text_document.uri.to_string();
-                let document = Document::new(
+                let document = Document::with_version(
                     uri.clone(),
                     params.text_document.text,
                     std::env::current_dir().map_err(|e| e.to_string())?,
+                    params.text_document.version,
                 );
                 service.store.open(document);
                 publish_diagnostics(&mut writer, &mut service, &uri)?;
@@ -82,7 +83,9 @@ fn run() -> Result<(), String> {
                     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())?;
                 let uri = params.text_document.uri.to_string();
                 if let Some(change) = params.content_changes.last() {
-                    service.store.change(&uri, &change.text);
+                    service
+                        .store
+                        .change(&uri, &change.text, params.text_document.version);
                 }
                 publish_diagnostics(&mut writer, &mut service, &uri)?;
             }
@@ -169,25 +172,38 @@ fn run() -> Result<(), String> {
                     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())?;
                 let position = convert_position(params.text_document_position.position);
                 let uri = params.text_document_position.text_document.uri;
-                let result = service
-                    .rename(&uri.to_string(), position, &params.new_name)
-                    .and_then(|rename| rename.preview)
-                    .map(|preview| WorkspaceEdit {
-                        changes: Some(
-                            [(
-                                uri.clone(),
-                                vec![TextEdit {
-                                    range: whole_document_range(),
-                                    new_text: preview,
-                                }],
-                            )]
-                            .into_iter()
-                            .collect(),
-                        ),
-                        ..Default::default()
-                    })
-                    .or_else(|| Some(WorkspaceEdit::default()));
-                write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
+                match service.rename(&uri.to_string(), position, &params.new_name) {
+                    Some(rename) if rename.ok => {
+                        let range = rename
+                            .range
+                            .map(convert_range)
+                            .expect("rename result always carries a full-document range");
+                        let preview = rename.preview.unwrap_or_default();
+                        let edit = WorkspaceEdit {
+                            changes: Some(
+                                [(
+                                    uri.clone(),
+                                    vec![TextEdit {
+                                        range,
+                                        new_text: preview,
+                                    }],
+                                )]
+                                .into_iter()
+                                .collect(),
+                            ),
+                            ..Default::default()
+                        };
+                        write_response(&mut writer, id, serde_json::to_value(edit).unwrap())?;
+                    }
+                    _ => {
+                        write_error(
+                            &mut writer,
+                            id,
+                            -32602,
+                            "rename refused: no symbol resolvable at the position or the edit failed validation",
+                        )?;
+                    }
+                }
             }
             "textDocument/semanticTokens/full" => {
                 let params: SemanticTokensParams =
@@ -309,6 +325,24 @@ fn write_response(writer: &mut impl Write, id: Option<Value>, result: Value) -> 
         .map_err(|error| error.to_string())
 }
 
+/// Write one LSP error response message (structured refusal).
+fn write_error(
+    writer: &mut impl Write,
+    id: Option<Value>,
+    code: i64,
+    message: &str,
+) -> Result<(), String> {
+    let response = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message },
+    });
+    let body = serde_json::to_string(&response).map_err(|error| error.to_string())?;
+    write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)
+        .and_then(|_| writer.flush())
+        .map_err(|error| error.to_string())
+}
+
 /// Publish the diagnostics of a document as an LSP notification.
 fn publish_diagnostics(
     writer: &mut impl Write,
@@ -377,19 +411,6 @@ fn completion_kind(kind: &str) -> CompletionItemKind {
         "rule" => CompletionItemKind::CLASS,
         "keyword" => CompletionItemKind::KEYWORD,
         _ => CompletionItemKind::TEXT,
-    }
-}
-
-fn whole_document_range() -> LspRange {
-    LspRange {
-        start: LspPosition {
-            line: 0,
-            character: 0,
-        },
-        end: LspPosition {
-            line: 0,
-            character: 0,
-        },
     }
 }
 

@@ -155,6 +155,70 @@ fn rename_uses_the_safe_edit_contract() {
         !preview.contains("globalvar score"),
         "old name gone: {preview}"
     );
+    // The edit range must be a real, applicable full-document range, not a
+    // degenerate (0,0)..(0,0) placeholder.
+    let range = result.range.expect("rename carries a range");
+    assert_eq!(range.start.line, 0);
+    assert_eq!(range.start.character, 0);
+    assert!(range.end.line > 0, "range covers the document: {range:?}");
+    // The last line may be empty (trailing newline), so character may be 0;
+    // the line must still be the final line of the buffer.
+    let expected_last_line = corpus_text(CORPUS).split('\n').count() as u32 - 1;
+    assert_eq!(
+        range.end.line, expected_last_line,
+        "range ends on the last line"
+    );
+}
+
+#[test]
+fn rename_edit_applies_to_produce_the_validated_result() {
+    let source = corpus_text(CORPUS);
+    let document = doc(CORPUS);
+    let (service, uri) = service_with(document.clone());
+    let result = service
+        .rename(
+            &uri,
+            Position {
+                line: 0,
+                character: 3,
+            },
+            "total",
+        )
+        .unwrap();
+    assert!(result.ok);
+    let range = result.range.expect("range");
+    let preview = result.preview.clone().expect("preview");
+
+    // Applying a full-document range with the preview text must reproduce the
+    // validated preview exactly (this is what an LSP client does).
+    let applied = apply_full_document(&source, &range, &preview);
+    assert_eq!(
+        applied, preview,
+        "applying the edit yields the validated result"
+    );
+}
+
+fn apply_full_document(
+    source: &str,
+    range: &wright_language::document::Range,
+    new_text: &str,
+) -> String {
+    // A full-document range replaces the whole buffer.
+    assert_eq!(range.start.line, 0);
+    assert_eq!(range.start.character, 0);
+    let lines: Vec<&str> = source.split('\n').collect();
+    assert_eq!(
+        range.end.line as usize,
+        lines.len() - 1,
+        "range ends on the last line"
+    );
+    let last_line = lines.last().unwrap_or(&"");
+    assert_eq!(
+        range.end.character as usize,
+        last_line.chars().count(),
+        "range ends at last line length"
+    );
+    new_text.to_string()
 }
 
 #[test]
@@ -185,11 +249,12 @@ fn changed_documents_are_incremental_and_equivalent_to_full_recomputation() {
     service.store.open(document.clone());
 
     let before = service.diagnostics(&uri);
-    let version = service
-        .store
-        .change(&uri, &(document.text.clone() + "\n"))
-        .unwrap();
-    assert_eq!(version, 1, "version bumps on change");
+    assert!(
+        service
+            .store
+            .change(&uri, &(document.text.clone() + "\n"), 1),
+        "a newer client version applies"
+    );
     let after = service.diagnostics(&uri);
     assert!(
         after.iter().all(|d| d.document_version == 1),
@@ -223,8 +288,7 @@ fn stale_results_are_detected_by_version() {
     assert_eq!(diagnostics[0].document_version, 0);
     service
         .store
-        .change(&uri, &(document.text.clone() + "\n"))
-        .unwrap();
+        .change(&uri, &(document.text.clone() + "\n"), 1);
     let updated = service.diagnostics(&uri);
     assert!(
         updated.iter().all(|d| d.document_version == 1),

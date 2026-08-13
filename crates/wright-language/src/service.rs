@@ -20,7 +20,7 @@ pub struct Diagnostic {
     pub code: String,
     pub message: String,
     /// The document version this diagnostic was computed for.
-    pub document_version: i64,
+    pub document_version: i32,
 }
 
 /// Hover content.
@@ -28,7 +28,7 @@ pub struct Diagnostic {
 pub struct Hover {
     pub contents: String,
     pub range: Option<Range>,
-    pub document_version: i64,
+    pub document_version: i32,
 }
 
 /// A completion item.
@@ -52,11 +52,13 @@ pub struct SemanticToken {
 #[derive(Debug, Clone, Serialize)]
 pub struct RenameResult {
     /// The current document version.
-    pub document_version: i64,
+    pub document_version: i32,
     /// Whether the rename validates through the compiler pipeline.
     pub ok: bool,
     /// The previewed edited source text.
     pub preview: Option<String>,
+    /// The applicable full-document replacement range.
+    pub range: Option<Range>,
     /// Structured diagnostics from validation, when the edit was rejected.
     pub diagnostics: Vec<crate::document::Range>,
 }
@@ -240,6 +242,10 @@ impl LanguageService {
     }
 
     /// Rename the symbol at a position using the M9 safe-edit contract.
+    ///
+    /// Returns `None` when no symbol resolves at the position (an explicit
+    /// refusal); the caller must surface that as a structured refusal rather
+    /// than an empty edit.
     pub fn rename(&self, uri: &str, position: Position, new_name: &str) -> Option<RenameResult> {
         let document = self.store.document(uri)?;
         let analysis = self.analyze(document);
@@ -261,6 +267,7 @@ impl LanguageService {
             document_version: document.version,
             ok: validation.ok,
             preview: validation.preview,
+            range: Some(full_document_range(&document.text)),
             diagnostics: Vec::new(),
         })
     }
@@ -349,6 +356,24 @@ fn empty_range() -> Range {
         end: Position {
             line: 0,
             character: 0,
+        },
+    }
+}
+
+/// A 0-based range covering the entire source text, including any trailing
+/// newline (so a full-document replacement can delete the final line break).
+fn full_document_range(text: &str) -> Range {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let line_count = lines.len().max(1) as u32;
+    let last_line_len = lines.last().unwrap_or(&"").chars().count() as u32;
+    Range {
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: line_count - 1,
+            character: last_line_len,
         },
     }
 }

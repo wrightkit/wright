@@ -33,20 +33,31 @@ pub struct Document {
     /// The current source text.
     pub text: String,
     /// The host-assigned version (monotonic across edits).
-    pub version: i64,
+    pub version: i32,
     /// The project root used for include resolution.
     pub root: PathBuf,
 }
 
 impl Document {
-    /// Create a document at version 0.
-    pub fn new(uri: impl Into<String>, text: impl Into<String>, root: PathBuf) -> Document {
+    /// Create a document with an explicit client version.
+    pub fn with_version(
+        uri: impl Into<String>,
+        text: impl Into<String>,
+        root: PathBuf,
+        version: i32,
+    ) -> Document {
         Document {
             uri: uri.into(),
             text: text.into(),
-            version: 0,
+            version,
             root,
         }
+    }
+
+    /// Create a document at version 0 (used when the host does not supply a
+    /// version, e.g. in-process consumers).
+    pub fn new(uri: impl Into<String>, text: impl Into<String>, root: PathBuf) -> Document {
+        Self::with_version(uri, text, root, 0)
     }
 
     /// The 1-based line/column of a 0-based editor position (clamped).
@@ -87,17 +98,26 @@ impl DocumentStore {
         }
     }
 
-    /// Open (or replace) a document at a fresh version.
+    /// Open (or replace) a document.
     pub fn open(&mut self, document: Document) {
         self.documents.insert(document.uri.clone(), document);
     }
 
-    /// Apply a full-document change, bumping the version.
-    pub fn change(&mut self, uri: &str, new_text: &str) -> Option<i64> {
-        let document = self.documents.get_mut(uri)?;
+    /// Apply a full-document change with the client's document version.
+    ///
+    /// Out-of-order or stale versions (a version less than or equal to the
+    /// currently stored version) are rejected: they cannot overwrite newer
+    /// semantic state. Returns `true` when the change was applied.
+    pub fn change(&mut self, uri: &str, new_text: &str, version: i32) -> bool {
+        let Some(document) = self.documents.get_mut(uri) else {
+            return false;
+        };
+        if version <= document.version {
+            return false;
+        }
         document.text = new_text.to_string();
-        document.version += 1;
-        Some(document.version)
+        document.version = version;
+        true
     }
 
     /// Close a document.
@@ -113,5 +133,49 @@ impl DocumentStore {
     /// Every open document URI.
     pub fn uris(&self) -> impl Iterator<Item = &str> {
         self.documents.keys().map(String::as_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_versions_are_preserved_on_open_and_change() {
+        let mut store = DocumentStore::new(PathBuf::from("/project"));
+        store.open(Document::with_version(
+            "file:///a.opy",
+            "rule \"a\":\n",
+            PathBuf::from("/project"),
+            3,
+        ));
+        assert_eq!(store.document("file:///a.opy").unwrap().version, 3);
+        assert!(
+            store.change("file:///a.opy", "rule \"a\":\n    @Event global\n", 4),
+            "newer client version applies"
+        );
+        assert_eq!(store.document("file:///a.opy").unwrap().version, 4);
+    }
+
+    #[test]
+    fn stale_or_out_of_order_versions_cannot_overwrite_newer_state() {
+        let mut store = DocumentStore::new(PathBuf::from("/project"));
+        store.open(Document::with_version(
+            "file:///a.opy",
+            "rule \"a\":\n",
+            PathBuf::from("/project"),
+            5,
+        ));
+        // Equal and older versions are rejected.
+        assert!(!store.change("file:///a.opy", "stale equal", 5));
+        assert!(!store.change("file:///a.opy", "stale older", 4));
+        assert_eq!(
+            store.document("file:///a.opy").unwrap().text,
+            "rule \"a\":\n"
+        );
+        // A newer version applies.
+        assert!(store.change("file:///a.opy", "newer", 6));
+        assert_eq!(store.document("file:///a.opy").unwrap().text, "newer");
+        assert_eq!(store.document("file:///a.opy").unwrap().version, 6);
     }
 }

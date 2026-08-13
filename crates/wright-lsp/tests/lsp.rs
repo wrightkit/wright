@@ -102,6 +102,32 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
+/// Apply a full-document WorkspaceEdit range to the original source.
+fn apply_lsp_edit(source: &str, result: &serde_json::Value, uri: &str) -> String {
+    let edit = &result["changes"][uri][0];
+    let range = &edit["range"];
+    let new_text = edit["newText"].as_str().unwrap();
+    let start_line = range["start"]["line"].as_u64().unwrap() as usize;
+    let start_char = range["start"]["character"].as_u64().unwrap() as usize;
+    let end_line = range["end"]["line"].as_u64().unwrap() as usize;
+    let end_char = range["end"]["character"].as_u64().unwrap() as usize;
+    let lines: Vec<&str> = source.split('\n').collect();
+    assert_eq!(start_line, 0, "full-document edit starts at the top");
+    assert_eq!(start_char, 0, "full-document edit starts at column 0");
+    assert_eq!(
+        end_line,
+        lines.len() - 1,
+        "full-document edit ends on the last line"
+    );
+    let last_line = lines.last().unwrap_or(&"");
+    assert_eq!(
+        end_char,
+        last_line.chars().count(),
+        "full-document edit ends at last line length"
+    );
+    new_text.to_string()
+}
+
 fn corpus_source(id: &str) -> String {
     std::fs::read_to_string(
         workspace_root()
@@ -149,8 +175,8 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
         .read_notification("textDocument/publishDiagnostics")
         .expect("diagnostics published");
     assert_eq!(
-        published["params"]["version"], 0,
-        "first open is internal version 0"
+        published["params"]["version"], 1,
+        "didOpen version is preserved"
     );
 
     // Hover on `score` (line 1, col 3).
@@ -221,6 +247,26 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
         .unwrap();
     assert!(new_text.contains("globalvar total"), "renamed: {new_text}");
     assert!(!new_text.contains("globalvar score"));
+    let range = &rename["result"]["changes"][uri_for("main.opy")][0]["range"];
+    assert!(
+        !(range["start"]["line"] == 0
+            && range["start"]["character"] == 0
+            && range["end"]["line"] == 0
+            && range["end"]["character"] == 0),
+        "rename range must not be the degenerate (0,0)..(0,0): {range}"
+    );
+    assert!(
+        range["end"]["line"].as_u64().unwrap() > 0,
+        "range covers the document: {range}"
+    );
+    // Applying the returned edit to the original source reproduces the
+    // validated preview exactly.
+    let original = corpus_source("synthetic/declarations-rules");
+    let applied = apply_lsp_edit(&original, &rename["result"], &uri_for("main.opy"));
+    assert_eq!(
+        applied, new_text,
+        "applying the WorkspaceEdit yields the validated result"
+    );
 
     // Semantic tokens classify the document.
     let tokens = client.request(
@@ -245,8 +291,8 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
         .read_notification("textDocument/publishDiagnostics")
         .expect("updated diagnostics");
     assert_eq!(
-        published["params"]["version"], 1,
-        "stale version-0 results are replaced"
+        published["params"]["version"], 2,
+        "didChange version is preserved"
     );
     let has_error = published["params"]["diagnostics"]
         .as_array()
@@ -257,6 +303,85 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
 
     // Shutdown and exit.
     client.request(8, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn stale_didchange_does_not_overwrite_newer_state() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    let clean = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
+    let newer = "globalvar total = 0\n\nrule \"r\":\n    @Event global\n    total += 1\n";
+    let stale = "rule \"broken\"\n";
+
+    // Open at version 5.
+    client.notify("textDocument/didOpen", serde_json::json!({
+        "textDocument": { "uri": uri_for("v.opy"), "languageId": "opy", "version": 5, "text": clean },
+    }));
+    let published = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("open publish");
+    assert_eq!(published["params"]["version"], 5);
+
+    // A stale didChange (version 4) must not overwrite the newer text; the
+    // server republishes the still-current version 5.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("v.opy"), "version": 4 },
+            "contentChanges": [{ "text": stale }],
+        }),
+    );
+    let published = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("stale publish");
+    assert_eq!(
+        published["params"]["version"], 5,
+        "stale change does not overwrite version 5"
+    );
+
+    // A newer didChange (version 6) applies and publishes version 6.
+    client.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("v.opy"), "version": 6 },
+            "contentChanges": [{ "text": newer }],
+        }),
+    );
+    let published = client
+        .read_notification("textDocument/publishDiagnostics")
+        .expect("newer publish");
+    assert_eq!(published["params"]["version"], 6, "newer change applies");
+
+    // Hover reflects the newer document (total, not score).
+    let hover = client.request(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": uri_for("v.opy") },
+            "position": { "line": 0, "character": 3 },
+        }),
+    );
+    assert!(
+        serde_json::to_string(&hover["result"])
+            .unwrap()
+            .contains("total"),
+        "hover reflects the newer document: {}",
+        hover
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
     client.notify("exit", serde_json::json!(null));
 }
 
