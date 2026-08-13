@@ -4,9 +4,7 @@
 //! issue reports. It is not part of the wire contract: the same validated
 //! payload always produces the same dump, in payload order.
 
-use super::types::{
-    Declaration, Event, Expr, Program, Rule, RuleEntry, SettingsNode, Span, Stmt,
-};
+use super::types::{Declaration, Event, Expr, Program, Rule, RuleEntry, SettingsNode, Span, Stmt};
 
 /// Render a validated program as a deterministic text dump.
 pub fn dump(program: &Program) -> String {

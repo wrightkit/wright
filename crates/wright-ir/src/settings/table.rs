@@ -87,96 +87,183 @@ macro_rules! entry {
 /// at validation (only evidenced in oracle-failing programs; corpus-bounded).
 pub static ENTRIES: &[TableEntry] = &[
     // main
-    entry!([PathPart::Part("main"), PathPart::Part("description")], "Description", KeyKind::String),
-    entry!([PathPart::Part("main"), PathPart::Part("modeName")], "Mode Name", KeyKind::String),
+    entry!(
+        [PathPart::Part("main"), PathPart::Part("description")],
+        "Description",
+        KeyKind::String
+    ),
+    entry!(
+        [PathPart::Part("main"), PathPart::Part("modeName")],
+        "Mode Name",
+        KeyKind::String
+    ),
     // lobby
-    entry!([PathPart::Part("lobby"), PathPart::Part("ffaSlots")], "Max FFA Players", KeyKind::Number),
+    entry!(
+        [PathPart::Part("lobby"), PathPart::Part("ffaSlots")],
+        "Max FFA Players",
+        KeyKind::Number
+    ),
     // gamemodes.<mode>
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("enabled")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("enabled")
+        ],
         "enabled",
         KeyKind::Bool
     ),
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("enabledMaps")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("enabledMaps")
+        ],
         "enabled maps",
         KeyKind::ListMap
     ),
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("roleLimit")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("roleLimit")
+        ],
         "Limit Roles",
         KeyKind::Enum("roleLimit")
     ),
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("enableCompetitiveRules")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("enableCompetitiveRules")
+        ],
         "Competitive Rules",
         KeyKind::Bool
     ),
     // gamemodes.general (the Mode slot matches `general` via the mode map)
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("heroLimit")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("heroLimit")
+        ],
         "Hero Limit",
         KeyKind::Enum("heroLimit")
     ),
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("respawnTime%")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("respawnTime%")
+        ],
         "Respawn Time Scalar",
         KeyKind::Percent
     ),
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("enableHeroSwitching")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("enableHeroSwitching")
+        ],
         "Allow Hero Switching",
         KeyKind::Bool
     ),
     entry!(
-        [PathPart::Part("gamemodes"), PathPart::Mode, PathPart::Part("enableRandomHeroes")],
+        [
+            PathPart::Part("gamemodes"),
+            PathPart::Mode,
+            PathPart::Part("enableRandomHeroes")
+        ],
         "Respawn As Random Hero",
         KeyKind::Bool
     ),
     // heroes.<team>
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Part("enabledHeroes")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Part("enabledHeroes")
+        ],
         "enabled heroes",
         KeyKind::ListHero
     ),
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Part("disabledHeroes")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Part("disabledHeroes")
+        ],
         "disabled heroes",
         KeyKind::ListHero
     ),
     // heroes.<team>.<hero> config groups
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Hero, PathPart::Part("enablePrimaryFire")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Hero,
+            PathPart::Part("enablePrimaryFire")
+        ],
         "Primary Fire",
         KeyKind::Bool
     ),
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Hero, PathPart::Part("enableSecondaryFire")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Hero,
+            PathPart::Part("enableSecondaryFire")
+        ],
         "Secondary Fire",
         KeyKind::Bool
     ),
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Hero, PathPart::Part("enableAbility1")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Hero,
+            PathPart::Part("enableAbility1")
+        ],
         "Cryo-Freeze",
         KeyKind::Bool
     ),
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Hero, PathPart::Part("enableAbility2")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Hero,
+            PathPart::Part("enableAbility2")
+        ],
         "Ice Wall",
         KeyKind::Bool
     ),
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Hero, PathPart::Part("health%")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Hero,
+            PathPart::Part("health%")
+        ],
         "Health",
         KeyKind::Percent
     ),
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Hero, PathPart::Part("passiveUltGen%")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Hero,
+            PathPart::Part("passiveUltGen%")
+        ],
         "Ultimate Generation - Passive Blizzard",
         KeyKind::Percent
     ),
     entry!(
-        [PathPart::Part("heroes"), PathPart::Team, PathPart::Hero, PathPart::Part("combatUltGen%")],
+        [
+            PathPart::Part("heroes"),
+            PathPart::Team,
+            PathPart::Hero,
+            PathPart::Part("combatUltGen%")
+        ],
         "Ultimate Generation - Combat Blizzard",
         KeyKind::Percent
     ),
@@ -192,33 +279,90 @@ pub struct NameMap {
 /// Game-mode names (evidenced: assault, control, escort, hybrid, skirmish,
 /// ffa, general).
 pub static MODE_NAMES: &[NameMap] = &[
-    NameMap { key: "assault", name: "Assault" },
-    NameMap { key: "control", name: "Control" },
-    NameMap { key: "escort", name: "Escort" },
-    NameMap { key: "hybrid", name: "Hybrid" },
-    NameMap { key: "skirmish", name: "Skirmish" },
-    NameMap { key: "ffa", name: "Deathmatch" },
-    NameMap { key: "general", name: "General" },
+    NameMap {
+        key: "assault",
+        name: "Assault",
+    },
+    NameMap {
+        key: "control",
+        name: "Control",
+    },
+    NameMap {
+        key: "escort",
+        name: "Escort",
+    },
+    NameMap {
+        key: "hybrid",
+        name: "Hybrid",
+    },
+    NameMap {
+        key: "skirmish",
+        name: "Skirmish",
+    },
+    NameMap {
+        key: "ffa",
+        name: "Deathmatch",
+    },
+    NameMap {
+        key: "general",
+        name: "General",
+    },
 ];
 
 /// Map names inside `enabledMaps` lists.
 pub static MAP_NAMES: &[NameMap] = &[
-    NameMap { key: "workshopIsland", name: "Workshop Island" },
-    NameMap { key: "kingsRowWinter", name: "King's Row Winter" },
+    NameMap {
+        key: "workshopIsland",
+        name: "Workshop Island",
+    },
+    NameMap {
+        key: "kingsRowWinter",
+        name: "King's Row Winter",
+    },
 ];
 
 /// Hero names inside hero lists and hero-config groups.
 pub static HERO_NAMES: &[NameMap] = &[
-    NameMap { key: "ashe", name: "Ashe" },
-    NameMap { key: "bastion", name: "Bastion" },
-    NameMap { key: "dva", name: "D.Va" },
-    NameMap { key: "doomfist", name: "Doomfist" },
-    NameMap { key: "echo", name: "Echo" },
-    NameMap { key: "moira", name: "Moira" },
-    NameMap { key: "reinhardt", name: "Reinhardt" },
-    NameMap { key: "hammond", name: "Wrecking Ball" },
-    NameMap { key: "zenyatta", name: "Zenyatta" },
-    NameMap { key: "mei", name: "Mei" },
+    NameMap {
+        key: "ashe",
+        name: "Ashe",
+    },
+    NameMap {
+        key: "bastion",
+        name: "Bastion",
+    },
+    NameMap {
+        key: "dva",
+        name: "D.Va",
+    },
+    NameMap {
+        key: "doomfist",
+        name: "Doomfist",
+    },
+    NameMap {
+        key: "echo",
+        name: "Echo",
+    },
+    NameMap {
+        key: "moira",
+        name: "Moira",
+    },
+    NameMap {
+        key: "reinhardt",
+        name: "Reinhardt",
+    },
+    NameMap {
+        key: "hammond",
+        name: "Wrecking Ball",
+    },
+    NameMap {
+        key: "zenyatta",
+        name: "Zenyatta",
+    },
+    NameMap {
+        key: "mei",
+        name: "Mei",
+    },
 ];
 
 /// Team names inside `heroes` (evidenced: allTeams).
@@ -258,12 +402,7 @@ pub static ENUM_MEMBERS: &[EnumMember] = &[
 /// Look up a settings leaf entry by its exact path.
 pub fn lookup(path: &[PathPart<'_>]) -> Option<&'static TableEntry> {
     ENTRIES.iter().find(|entry| {
-        entry.path.len() == path.len()
-            && entry
-                .path
-                .iter()
-                .zip(path.iter())
-                .all(|(a, b)| a == b)
+        entry.path.len() == path.len() && entry.path.iter().zip(path.iter()).all(|(a, b)| a == b)
     })
 }
 

@@ -375,7 +375,8 @@ fn opy_unknown_settings_key_fails_check_and_compile_identically() {
         "check and compile must report the same settings-unknown-key span"
     );
     assert_eq!(
-        check_diag.span.as_ref().unwrap().start.line, 4,
+        check_diag.span.as_ref().unwrap().start.line,
+        4,
         "the span points at the offending key"
     );
     let _ = std::fs::remove_dir_all(&dir);

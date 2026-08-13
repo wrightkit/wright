@@ -173,7 +173,10 @@ fn unknown_value_id_fails_explicitly() {
 use wright_ir::settings::{Settings, SettingsListElement, SettingsNode};
 
 fn settings(children: Vec<SettingsNode>) -> Settings {
-    Settings { span: None, children }
+    Settings {
+        span: None,
+        children,
+    }
 }
 
 fn group(name: &str, children: Vec<SettingsNode>) -> SettingsNode {
@@ -228,7 +231,10 @@ fn pixelart_settings() -> Settings {
     let mode = |name: &str| {
         group(
             name,
-            vec![list("enabledMaps", &[]), string("roleLimit", "2OfEachRolePerTeam")],
+            vec![
+                list("enabledMaps", &[]),
+                string("roleLimit", "2OfEachRolePerTeam"),
+            ],
         )
     };
     settings(vec![group(
@@ -390,7 +396,10 @@ fn enabled_false_prefixes_the_mode_header() {
         "gamemodes",
         vec![group(
             "assault",
-            vec![boolean("enabled", false), boolean("enableCompetitiveRules", true)],
+            vec![
+                boolean("enabled", false),
+                boolean("enableCompetitiveRules", true),
+            ],
         )],
     )]));
     let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");

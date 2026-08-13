@@ -211,11 +211,7 @@ pub fn lower(
 fn lower_settings(settings: &cst::Settings) -> HirSettings {
     HirSettings {
         span: Some(settings.span.into()),
-        children: settings
-            .children
-            .iter()
-            .map(lower_settings_node)
-            .collect(),
+        children: settings.children.iter().map(lower_settings_node).collect(),
     }
 }
 

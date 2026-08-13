@@ -12,7 +12,7 @@
 use std::fmt::Write;
 
 use wright_ir::settings::table::{self, KeyKind, PathPart};
-use wright_ir::settings::{SettingsNode, Settings as SettingsTree};
+use wright_ir::settings::{Settings as SettingsTree, SettingsNode};
 use wright_ir::wir;
 
 use crate::catalog::{Catalog, Kind, Locale};
@@ -97,9 +97,9 @@ impl Emitter<'_> {
                 "gamemodes" => self.emit_modes(children)?,
                 "heroes" => self.emit_heroes(children)?,
                 other => {
-                    return Err(self.malformed(format!(
-                        "unknown top-level settings group '{other}'"
-                    )));
+                    return Err(
+                        self.malformed(format!("unknown top-level settings group '{other}'"))
+                    );
                 }
             }
         }
@@ -134,11 +134,7 @@ impl Emitter<'_> {
                 if matches!(member, SettingsNode::Bool { name: n, .. } if n == "enabled") {
                     continue;
                 }
-                self.settings_member(
-                    member,
-                    3,
-                    &[PathPart::Part("gamemodes"), PathPart::Mode],
-                )?;
+                self.settings_member(member, 3, &[PathPart::Part("gamemodes"), PathPart::Mode])?;
             }
             self.line(2, "}")?;
         }
@@ -166,20 +162,14 @@ impl Emitter<'_> {
                             self.settings_member(
                                 inner,
                                 4,
-                                &[
-                                    PathPart::Part("heroes"),
-                                    PathPart::Team,
-                                    PathPart::Hero,
-                                ],
+                                &[PathPart::Part("heroes"), PathPart::Team, PathPart::Hero],
                             )?;
                         }
                         self.line(3, "}")?;
                     }
-                    other => self.settings_member(
-                        other,
-                        3,
-                        &[PathPart::Part("heroes"), PathPart::Team],
-                    )?,
+                    other => {
+                        self.settings_member(other, 3, &[PathPart::Part("heroes"), PathPart::Team])?
+                    }
                 }
             }
             self.line(2, "}")?;
@@ -213,9 +203,7 @@ impl Emitter<'_> {
             }
             (SettingsNode::String { value, .. }, KeyKind::Enum(domain)) => {
                 let display = table::enum_name(domain, value).ok_or_else(|| {
-                    self.malformed(format!(
-                        "unknown value '{value}' for settings key '{name}'"
-                    ))
+                    self.malformed(format!("unknown value '{value}' for settings key '{name}'"))
                 })?;
                 self.line(level, &format!("{}: {display}", entry.workshop_name))?;
             }

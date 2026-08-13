@@ -253,7 +253,8 @@ fn invalid_rule_payload(rule_json: &str) -> String {
     )
 }
 
-const SPAN: &str = r#"{ "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } }"#;
+const SPAN: &str =
+    r#"{ "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } }"#;
 
 /// A minimal valid settings block (every leaf uses evidenced table keys).
 const VALID_SETTINGS: &str = r#"{

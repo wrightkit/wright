@@ -292,7 +292,12 @@ enum Slot {
 }
 
 fn validate_group(program: &Program, node: &SettingsNode, slot: Slot) -> Result<(), HirError> {
-    let SettingsNode::Group { name, children, span } = node else {
+    let SettingsNode::Group {
+        name,
+        children,
+        span,
+    } = node
+    else {
         return Err(invalid(
             "settings-invalid",
             "expected a settings group",
@@ -356,11 +361,7 @@ fn validate_group(program: &Program, node: &SettingsNode, slot: Slot) -> Result<
                 if matches!(child, SettingsNode::Group { .. }) {
                     validate_group(program, child, Slot::Hero)?;
                 } else {
-                    validate_member(
-                        program,
-                        child,
-                        &[PathPart::Part("heroes"), PathPart::Team],
-                    )?;
+                    validate_member(program, child, &[PathPart::Part("heroes"), PathPart::Team])?;
                 }
             }
             Ok(())
@@ -408,10 +409,7 @@ fn validate_member(
     let Some(entry) = table::lookup(&full) else {
         return Err(invalid(
             "settings-unknown-key",
-            format!(
-                "unknown settings key '{}'",
-                display_path(&full, name)
-            ),
+            format!("unknown settings key '{}'", display_path(&full, name)),
             span,
         ));
     };
@@ -429,14 +427,12 @@ fn validate_member(
             }
             Ok(())
         }
-        (
-            SettingsNode::List { elements, span, .. },
-            KeyKind::ListMap,
-        ) => validate_list_elements(program, name, elements, *span, table::map_name),
-        (
-            SettingsNode::List { elements, span, .. },
-            KeyKind::ListHero,
-        ) => validate_list_elements(program, name, elements, *span, table::hero_name),
+        (SettingsNode::List { elements, span, .. }, KeyKind::ListMap) => {
+            validate_list_elements(program, name, elements, *span, table::map_name)
+        }
+        (SettingsNode::List { elements, span, .. }, KeyKind::ListHero) => {
+            validate_list_elements(program, name, elements, *span, table::hero_name)
+        }
         _ => Err(invalid(
             "settings-unknown-value",
             format!("settings key '{name}' has the wrong value type"),
@@ -459,7 +455,10 @@ fn validate_list_elements(
         if known(&element.value).is_none() {
             return Err(invalid(
                 "settings-unknown-value",
-                format!("unknown value '{}' in settings list '{name}'", element.value),
+                format!(
+                    "unknown value '{}' in settings list '{name}'",
+                    element.value
+                ),
                 element.span,
             ));
         }

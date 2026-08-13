@@ -77,8 +77,7 @@ pub fn find_blocks(text: &str, file_id: u32) -> FrontendResult<Vec<SettingsBlock
             let keyword_offset = scanner.pos;
             let word = scanner.read_word();
             if word == "settings" {
-                let keyword_span =
-                    Span::new(file_id, keyword_start, scanner.here());
+                let keyword_span = Span::new(file_id, keyword_start, scanner.here());
                 if seen_first_construct || !blocks.is_empty() {
                     return Err(FrontendError::at(
                         "settings-placement",
@@ -86,12 +85,7 @@ pub fn find_blocks(text: &str, file_id: u32) -> FrontendResult<Vec<SettingsBlock
                         keyword_span,
                     ));
                 }
-                let block = match_block(
-                    &mut scanner,
-                    keyword_start,
-                    keyword_offset,
-                    keyword_span,
-                )?;
+                let block = match_block(&mut scanner, keyword_start, keyword_offset, keyword_span)?;
                 blocks.push(block);
                 seen_first_construct = true;
                 continue;
@@ -160,11 +154,7 @@ fn match_block(
                 if depth == 0 {
                     let text = scanner
                         .chars
-                        .get(
-                            text_start_offset
-                                .expect("text start offset set on '{'")
-                                ..scanner.pos,
-                        )
+                        .get(text_start_offset.expect("text start offset set on '{'")..scanner.pos)
                         .map(|slice| slice.iter().collect::<String>())
                         .unwrap_or_default();
                     return Ok(SettingsBlock {
@@ -222,9 +212,10 @@ pub fn parse_block(block: &SettingsBlock) -> FrontendResult<cst::Settings> {
             "unexpected content after the settings object".to_string(),
         ));
     }
-    if !children.iter().any(|node| {
-        matches!(node, cst::SettingsNode::Group { name, .. } if name == "gamemodes")
-    }) {
+    if !children
+        .iter()
+        .any(|node| matches!(node, cst::SettingsNode::Group { name, .. } if name == "gamemodes"))
+    {
         return Err(FrontendError::at(
             "settings-invalid",
             "settings block must contain a gamemodes group".to_string(),
@@ -346,7 +337,11 @@ impl Jsonc<'_> {
     }
 
     fn error(&self, code: &str, message: String) -> FrontendError {
-        FrontendError::at(code, message, Span::new(self.file, self.here(), self.here()))
+        FrontendError::at(
+            code,
+            message,
+            Span::new(self.file, self.here(), self.here()),
+        )
     }
 
     fn error_at(&self, code: &str, message: String, span: Span) -> FrontendError {
@@ -651,9 +646,11 @@ fn build_node(
             children,
             span,
         },
-        cst::SettingsNode::Number { value, .. } => {
-            cst::SettingsNode::Number { name: key, value, span }
-        }
+        cst::SettingsNode::Number { value, .. } => cst::SettingsNode::Number {
+            name: key,
+            value,
+            span,
+        },
         cst::SettingsNode::Bool { value, .. } => cst::SettingsNode::Bool {
             name: key,
             value,
@@ -701,7 +698,11 @@ mod tests {
 
     #[test]
     fn no_blocks_for_plain_program() {
-        assert!(find_blocks("rule \"r\":\n    pass\n", 0).unwrap().is_empty());
+        assert!(
+            find_blocks("rule \"r\":\n    pass\n", 0)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -733,7 +734,8 @@ mod tests {
 
     #[test]
     fn braces_inside_strings_do_not_unbalance() {
-        let found = block("settings {\n    \"description\": \"a { b }\",\n    \"gamemodes\": {}\n}\n");
+        let found =
+            block("settings {\n    \"description\": \"a { b }\",\n    \"gamemodes\": {}\n}\n");
         assert!(found.text.contains("a { b }"));
     }
 
@@ -810,13 +812,15 @@ mod tests {
             }
             other => panic!("{other:?}"),
         };
-        assert!(matches!(lobby[0], cst::SettingsNode::Number { value: 6.0, .. }));
+        assert!(matches!(
+            lobby[0],
+            cst::SettingsNode::Number { value: 6.0, .. }
+        ));
     }
 
     #[test]
     fn spans_are_computed_from_block_base() {
-        let text =
-            "settings {\n    \"lobby\": {\n        \"ffaSlots\": 6\n    },\n    \"gamemodes\": {}\n}\n";
+        let text = "settings {\n    \"lobby\": {\n        \"ffaSlots\": 6\n    },\n    \"gamemodes\": {}\n}\n";
         let found = block(text);
         let parsed = parse_block(&found).unwrap();
         let cst::SettingsNode::Group { children, .. } = &parsed.children[0] else {

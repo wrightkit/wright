@@ -692,16 +692,22 @@ mod tests {
 
     #[test]
     fn settings_in_include_is_rejected() {
-        let dir = std::env::temp_dir().join(format!(
-            "wright-opy-settings-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("wright-opy-settings-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("shared.opy"), "settings {\n    \"gamemodes\": {}\n}\n").unwrap();
+        std::fs::write(
+            dir.join("shared.opy"),
+            "settings {\n    \"gamemodes\": {}\n}\n",
+        )
+        .unwrap();
         let main = format!("#!include \"shared.opy\"\nrule \"r\":\n    pass\n");
         let error = preprocess(&main, "main.opy", &dir).unwrap_err();
         assert_eq!(error.code, "settings-placement");
-        assert_eq!(error.span.unwrap().file, 1, "the span names the included file");
+        assert_eq!(
+            error.span.unwrap().file,
+            1,
+            "the span names the included file"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
