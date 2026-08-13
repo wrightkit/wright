@@ -42,7 +42,7 @@ pub enum PathPart<'a> {
     Hero,
 }
 
-impl<'a, 'b> PartialEq<PathPart<'b>> for PathPart<'a> {
+impl<'b> PartialEq<PathPart<'b>> for PathPart<'_> {
     fn eq(&self, other: &PathPart<'b>) -> bool {
         match (self, other) {
             (PathPart::Part(left), PathPart::Part(right)) => left == right,

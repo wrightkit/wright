@@ -615,9 +615,7 @@ impl Jsonc<'_> {
                 return Some(value);
             }
             if ch == '\\' {
-                let Some(escaped) = self.advance() else {
-                    return None;
-                };
+                let escaped = self.advance()?;
                 match escaped {
                     'n' => value.push('\n'),
                     't' => value.push('\t'),

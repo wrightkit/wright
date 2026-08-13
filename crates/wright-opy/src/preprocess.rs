@@ -700,8 +700,8 @@ mod tests {
             "settings {\n    \"gamemodes\": {}\n}\n",
         )
         .unwrap();
-        let main = format!("#!include \"shared.opy\"\nrule \"r\":\n    pass\n");
-        let error = preprocess(&main, "main.opy", &dir).unwrap_err();
+        let main = "#!include \"shared.opy\"\nrule \"r\":\n    pass\n";
+        let error = preprocess(main, "main.opy", &dir).unwrap_err();
         assert_eq!(error.code, "settings-placement");
         assert_eq!(
             error.span.unwrap().file,

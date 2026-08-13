@@ -64,24 +64,25 @@ mod tests {
     use wright_ir::settings::{Settings, SettingsNode};
 
     fn program_with_settings() -> wir::Program {
-        let mut program = wir::Program::default();
-        program.settings = Some(Settings {
-            span: None,
-            children: vec![SettingsNode::Group {
-                name: "gamemodes".to_string(),
+        wir::Program {
+            settings: Some(Settings {
+                span: None,
                 children: vec![SettingsNode::Group {
-                    name: "skirmish".to_string(),
-                    children: vec![SettingsNode::List {
-                        name: "enabledMaps".to_string(),
-                        elements: vec![],
+                    name: "gamemodes".to_string(),
+                    children: vec![SettingsNode::Group {
+                        name: "skirmish".to_string(),
+                        children: vec![SettingsNode::List {
+                            name: "enabledMaps".to_string(),
+                            elements: vec![],
+                            span: None,
+                        }],
                         span: None,
                     }],
                     span: None,
                 }],
-                span: None,
-            }],
-        });
-        program
+            }),
+            ..wir::Program::default()
+        }
     }
 
     #[test]

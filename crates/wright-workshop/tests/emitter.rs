@@ -293,9 +293,10 @@ fn santa_settings() -> Settings {
 }
 
 fn program_with_settings(settings: Settings) -> wir::Program {
-    let mut program = wir::Program::default();
-    program.settings = Some(settings);
-    program
+    wir::Program {
+        settings: Some(settings),
+        ..wir::Program::default()
+    }
 }
 
 /// The `settings` section of a Workshop text (the text starts with it).
