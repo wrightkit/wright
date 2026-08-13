@@ -100,6 +100,21 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
 - Additional OverPy enum spellings beyond the corpus table (a data change).
 - Rule `disabled` markers and custom-game-settings blocks (no corpus
   evidence; the adapter already rejects settings outside the boundary).
+- Backslash line continuation (`\` at end of line inside string
+  concatenations / macro bodies) — rejected at lexing (native `lex-error`
+  `unexpected character '\'` on ow1-emulator and 6v6-adjustments); the pinned
+  oracle 9.7.10 compiles it (its failures on those fixtures occur later, on
+  unrelated constructs).
+- Postfix increment/decrement (`++`/`--`) — rejected at parsing (native
+  `parse-error` `expected an expression but found '+'` on `++` in
+  overpy-cronch, `cronch.opy:32`; `--` not separately observed in the
+  phase-1 corpus).
+- Dict literals (`{...}`) — rejected at lexing (native `lex-error`
+  `unexpected character '{'` on meipocalypse, `meipocalypse.opy:223`).
+- Triple-quoted strings / docstrings (`"""`) — rejected at lexing (native
+  `lex-error`, `unterminated string literal`, on zencopter, `heli.opy:38`);
+  the pinned oracle 9.7.10 also fails on this construct (recorded reference
+  limitation).
 - Subroutine parameters, default `@Team`/`@Slot` overrides, named arguments.
 - Full OverPy formatting semantics: `debug()`/`print()` emission
   (`Create HUD Text` etc.) is an M8 emission item, not a frontend one.
