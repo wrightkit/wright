@@ -80,16 +80,15 @@ pub fn compile_with_overlay_outcome(
     root: &Path,
     overlay: &std::collections::BTreeMap<String, String>,
 ) -> CompileOutcome {
-    let (preprocessed, files) = match preprocess_with_overlay(source, main_path, root, overlay) {
-        Ok(preprocessed) => preprocessed,
+    let preprocess::PreprocessOutcome { result, files } =
+        preprocess::preprocess_with_overlay_outcome(source, main_path, root, overlay);
+    let preprocessed = match result {
+        Ok((preprocessed, _)) => preprocessed,
         Err(error) => {
             return CompileOutcome {
                 hir: None,
                 error: Some(error),
-                files: vec![preprocess::FileRecord {
-                    id: 0,
-                    path: main_path.to_string(),
-                }],
+                files,
             };
         }
     };

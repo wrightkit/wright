@@ -59,6 +59,25 @@ pub fn preprocess_with_overlay(
     root: &Path,
     overlay: &BTreeMap<String, String>,
 ) -> FrontendResult<(Preprocessed, Vec<FileRecord>)> {
+    preprocess_with_overlay_outcome(main_text, main_path, root, overlay).result
+}
+
+/// The outcome of preprocessing with overlays, retaining the file registry
+/// registered so far even when a directive or expansion fails, so callers can
+/// map an error's span file id to its actual source.
+pub struct PreprocessOutcome {
+    pub result: FrontendResult<(Preprocessed, Vec<FileRecord>)>,
+    pub files: Vec<FileRecord>,
+}
+
+/// Preprocess with open-document overlays while retaining the file registry
+/// registered so far on failure.
+pub fn preprocess_with_overlay_outcome(
+    main_text: &str,
+    main_path: &str,
+    root: &Path,
+    overlay: &BTreeMap<String, String>,
+) -> PreprocessOutcome {
     let mut pre = Preprocessor {
         files: vec![FileRecord {
             id: 0,
@@ -71,19 +90,43 @@ pub fn preprocess_with_overlay(
         macros: Vec::new(),
         defines: Vec::new(),
     };
-    let mut tokens = lex(LexInput {
+    let mut tokens = match lex(LexInput {
         file_id: 0,
         text: main_text,
-    })?;
-    pre.process_directives(&mut tokens)?;
-    let tokens = pre.expand(tokens)?;
-    Ok((
-        Preprocessed {
-            tokens,
-            defines: pre.defines,
+    }) {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            return PreprocessOutcome {
+                result: Err(error),
+                files: pre.files,
+            };
+        }
+    };
+    if let Err(error) = pre.process_directives(&mut tokens) {
+        return PreprocessOutcome {
+            result: Err(error),
+            files: pre.files,
+        };
+    }
+    match pre.expand(tokens) {
+        Ok(tokens) => {
+            let result = Ok((
+                Preprocessed {
+                    tokens,
+                    defines: pre.defines,
+                },
+                pre.files.clone(),
+            ));
+            PreprocessOutcome {
+                result,
+                files: pre.files,
+            }
+        }
+        Err(error) => PreprocessOutcome {
+            result: Err(error),
+            files: pre.files,
         },
-        pre.files,
-    ))
+    }
 }
 
 struct Preprocessor {

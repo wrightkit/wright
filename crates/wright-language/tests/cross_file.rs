@@ -114,6 +114,33 @@ fn filesystem_include_semantic_diagnostics_keep_source_identity() {
 }
 
 #[test]
+fn filesystem_include_preprocess_diagnostics_keep_source_identity() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/preprocess-include");
+    let main = std::fs::read_to_string(root.join("main.opy")).unwrap();
+    let uri = format!("file://{}", root.join("main.opy").display());
+    let mut service = LanguageService::new(root.clone());
+    service
+        .store
+        .open(Document::new(uri.clone(), main, root.clone()));
+
+    let diagnostics = service.diagnostics(&uri);
+    let error = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "unsupported-directive")
+        .expect("unsupported directive in the include produces a structured error");
+    assert!(
+        error.source.ends_with("broken.opy"),
+        "preprocess diagnostic keeps the include source identity: {}",
+        error.source
+    );
+    assert_eq!(
+        error.range.start.line, 0,
+        "range is source-local to broken.opy (the directive line): {:?}",
+        error.range
+    );
+}
+
+#[test]
 fn filesystem_include_diagnostics_keep_source_identity() {
     let root = broken_include_fixtures();
     let main = std::fs::read_to_string(root.join("main.opy")).unwrap();
