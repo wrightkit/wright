@@ -502,19 +502,28 @@ impl LanguageService {
     pub fn rename(&self, uri: &str, position: Position, new_name: &str) -> Option<RenameResult> {
         let requesting = self.store.document(uri)?;
         let (line, col) = requesting.to_line_col(position);
+        let requesting_canonical = self.canonical_source(&requesting.uri);
         let mut from: Option<String> = None;
         let mut affected: BTreeSet<String> = BTreeSet::new();
         let mut collision: Option<String> = None;
 
         // Union the symbol's references across every open root whose project
         // includes the requesting document, so a rename from a declaration in
-        // an included file also reaches the roots that reference it.
+        // an included file also reaches the roots that reference it. The
+        // position is matched only against spans in the requesting document's
+        // file, never by coincidental line/column in another file.
         for root_uri in self.dependent_documents(uri) {
             let Some(root_document) = self.store.document(&root_uri) else {
                 continue;
             };
             let analysis = self.analyze(root_document);
-            let Some(symbol) = self.symbol_at_line_col(&analysis, line, col) else {
+            let Some(file_index) = (0..analysis.files.len()).find(|index| {
+                let source = self.source_identity(&analysis.files, root_document, *index);
+                self.canonical_source(&source) == requesting_canonical
+            }) else {
+                continue;
+            };
+            let Some(symbol) = self.symbol_at_in_file(&analysis, file_index, line, col) else {
                 continue;
             };
             from.get_or_insert_with(|| symbol.name.clone());
@@ -784,6 +793,37 @@ impl LanguageService {
             for reference in index.references(symbol_id) {
                 if let Some(span) = reference.span {
                     if span_contains(span, line, col) {
+                        return Some(symbol.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// The symbol whose declaration or reference span in `file_index`
+    /// contains a 1-based line/column. Unlike [`Self::symbol_at_line_col`],
+    /// spans in other files are never considered, so a position in the
+    /// requesting document cannot resolve to a coincidental same-coordinate
+    /// symbol in an included file.
+    fn symbol_at_in_file(
+        &self,
+        analysis: &Analysis,
+        file_index: usize,
+        line: u32,
+        col: u32,
+    ) -> Option<Symbol> {
+        let index = analysis.index.as_ref()?;
+        for symbol in index.symbols() {
+            let symbol_id = symbol.id;
+            if let Some(span) = symbol.span {
+                if span.file.index() == file_index && span_contains(span, line, col) {
+                    return Some(symbol.clone());
+                }
+            }
+            for reference in index.references(symbol_id) {
+                if let Some(span) = reference.span {
+                    if span.file.index() == file_index && span_contains(span, line, col) {
                         return Some(symbol.clone());
                     }
                 }

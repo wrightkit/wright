@@ -272,6 +272,57 @@ fn rename_from_include_declaration_updates_the_root() {
 }
 
 #[test]
+fn rename_resolves_the_symbol_in_the_requesting_file_when_positions_collide() {
+    // a.opy has a reference to `alpha` at the same line/column as main.opy's
+    // `score` reference; rename must resolve `score`, not `alpha`.
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/same-position-includes");
+    let main = std::fs::read_to_string(root.join("main.opy")).unwrap();
+    let uri = format!("file://{}", root.join("main.opy").display());
+    let mut service = LanguageService::new(root.clone());
+    service
+        .store
+        .open(Document::new(uri.clone(), main, root.clone()));
+
+    let result = service
+        .rename(
+            &uri,
+            Position {
+                line: 6,
+                character: 5,
+            },
+            "total",
+        )
+        .expect("rename resolves");
+    assert!(result.ok, "rename validates: {:?}", result.diagnostics);
+    let main_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("main.opy"))
+        .expect("main edit");
+    assert!(
+        main_edit.new_text.contains("globalvar total"),
+        "score renamed in main: {}",
+        main_edit.new_text
+    );
+    assert!(
+        main_edit.new_text.contains("total += 1"),
+        "score reference renamed in main: {}",
+        main_edit.new_text
+    );
+    // alpha in a.opy must not be touched by a rename of score.
+    let alpha_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("a.opy"));
+    assert!(
+        alpha_edit.is_none_or(|edit| edit.new_text.contains("alpha")),
+        "a.opy's unrelated alpha is left alone: {:?}",
+        result.edits
+    );
+}
+
+#[test]
 fn filesystem_include_diagnostics_keep_source_identity() {
     let root = broken_include_fixtures();
     let main = std::fs::read_to_string(root.join("main.opy")).unwrap();
