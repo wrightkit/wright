@@ -503,15 +503,10 @@ fn uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
 }
 
 /// Map an editor-neutral source identity (a file URI or a resolved
-/// filesystem path) to a valid LSP URI through the standard file-URI
-/// encoding, so percent-encoded/spaced/Unicode paths round-trip correctly.
+/// filesystem path) to a valid LSP URI through the shared standard file-URI
+/// conversion, so percent-encoded/spaced/Unicode paths round-trip correctly.
 fn source_to_uri(source: &str) -> Uri {
-    if source.starts_with("file://") {
-        if let Ok(uri) = Uri::from_str(source) {
-            return uri;
-        }
-    }
-    match wright_language::document::path_to_uri(std::path::Path::new(source)) {
+    match wright_language::document::source_to_uri(source) {
         Some(uri) => Uri::from_str(&uri).unwrap_or_else(|_| fallback_uri()),
         None => fallback_uri(),
     }

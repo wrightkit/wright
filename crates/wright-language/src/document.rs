@@ -204,6 +204,22 @@ pub fn path_to_uri(path: &Path) -> Option<String> {
         .map(|url| url.to_string())
 }
 
+/// Normalize a source identity — a file URI or a resolved filesystem path —
+/// into a standard `file://` URI string, when applicable.
+///
+/// Both directions (`uri_to_path` and this) go through the same URL parser,
+/// so a produced URI always decodes back to the intended path and round-trips
+/// through the standard encoding for spaces, percent-encoding, Unicode
+/// filenames, and platform drive paths.
+pub fn source_to_uri(source: &str) -> Option<String> {
+    if let Ok(url) = url::Url::parse(source) {
+        if url.scheme() == "file" {
+            return Some(url.to_string());
+        }
+    }
+    path_to_uri(Path::new(source))
+}
+
 /// The UTF-16 code-unit length of a string (non-BMP chars count 2).
 pub fn utf16_len(s: &str) -> usize {
     s.chars().map(|c| c.len_utf16()).sum()
@@ -365,6 +381,27 @@ mod tests {
             Some(PathBuf::from("/tmp/my dir/文件.opy")),
             "path -> URI -> path round-trips"
         );
+    }
+
+    #[test]
+    fn source_to_uri_normalizes_uris_and_paths_consistently() {
+        // A percent-encoded file URI round-trips through the same parser.
+        let uri = source_to_uri("file:///tmp/my%20dir/%E6%96%87%E4%BB%B6.opy").unwrap();
+        assert_eq!(
+            uri_to_path(&uri),
+            Some(PathBuf::from("/tmp/my dir/文件.opy")),
+            "normalized URI decodes back to the intended path"
+        );
+        // A resolved filesystem path converts to a standard file URI.
+        let uri = source_to_uri("/tmp/my dir/文件.opy").unwrap();
+        assert!(uri.starts_with("file:///tmp/my%20dir/"), "{uri}");
+        assert_eq!(
+            uri_to_path(&uri),
+            Some(PathBuf::from("/tmp/my dir/文件.opy")),
+            "path -> URI -> path round-trips"
+        );
+        // Non-file identities are not filesystem sources.
+        assert_eq!(source_to_uri("untitled:scratch"), None);
     }
 
     #[test]
