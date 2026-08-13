@@ -5,7 +5,7 @@ Scope: the interchange format between the temporary OverPy frontend adapter
 and the Wright Rust core
 
 This document is the normative specification for `wright/opy-hir` protocol
-version `1.0.0`. It defines the JSON payload that the compatibility adapter
+version `1.1.0`. It defines the JSON payload that the compatibility adapter
 (`adapter/`) emits and that the Rust core (`crates/wright-core/src/hir/`)
 validates and consumes. The adapter is the only component allowed to know how
 an OverPy AST maps onto this schema; the Rust core sees only this protocol.
@@ -41,13 +41,14 @@ Every payload is a JSON object with the following top-level fields.
 | `defines` | array | no | Preprocessor constant/function macros seen by the frontend. |
 | `declarations` | array | yes | Symbols declared at program scope, grouped by kind, each group in declaration order. |
 | `rules` | array | yes | Rule and subroutine-definition bodies, in source order. |
+| `settings` | object | no | The typed custom-game-settings block, when the source had one (§2.5). |
 
 ### 2.1 `protocol`
 
 ```jsonc
 {
   "name": "wright/opy-hir",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
 ```
 
@@ -96,6 +97,50 @@ payload because expansion already happened.
 ```jsonc
 { "name": "CAKE_SIDE_LENGTH", "isFunction": false, "span": { "file": 0, "start": { "line": 10, "col": 1 }, "end": { "line": 10, "col": 24 } } }
 ```
+
+### 2.5 `settings` (v1.1.0, additive)
+
+The typed custom-game-settings block (`settings { ... }` in the source),
+carried as an ordered tree so the consumer can validate it against the
+fixture-evidenced emission table and emit the Workshop `settings` section.
+The payload is Wright-owned typed data (JSONC parsed by the producers), not
+a raw text blob: enum-ness and list domains are table data at validation and
+emission, never wire data.
+
+```jsonc
+{
+  "span": { "file": 0, "start": { "line": 7, "col": 1 }, "end": { "line": 31, "col": 2 } },
+  "children": [
+    {
+      "kind": "group", "name": "gamemodes",
+      "children": [
+        {
+          "kind": "group", "name": "assault",
+          "children": [
+            { "kind": "list", "name": "enabledMaps", "elements": [], "span": { ... } },
+            { "kind": "string", "name": "roleLimit", "value": "2OfEachRolePerTeam", "span": { ... } }
+          ],
+          "span": { ... }
+        }
+      ],
+      "span": { ... }
+    }
+  ]
+}
+```
+
+Node grammar:
+
+* `settings` has an optional `span` (the whole block) and a `children` array.
+* Every child is an object discriminated by `kind` (`group`, `number`,
+  `bool`, `string`, `list`), carries a non-empty `name` (the source key) and
+  an optional `span` covering the key..value member region.
+* `group` has a `children` array; `number` carries an `f64` `value`; `bool`
+  carries a boolean `value`; `string` carries a string `value`; `list` has an
+  `elements` array of `{ "value": string, "span": optional }` objects.
+* A valid block must contain a `gamemodes` group. Domain checks (known keys,
+  known enum values, known map/hero list elements) run at validation against
+  the emission table in `wright-ir` (§8).
 
 ## 3. Source provenance
 
@@ -375,7 +420,11 @@ A consumer must validate, in order:
    to a matching declaration; `callSubroutine` references resolve to a
    `subroutine` declaration or a `subroutineDef` in `rules`; loop variables in
    `for` resolve to a global variable.
-6. **Unsupported nodes**: unknown node kinds produce the §7.3 error.
+6. **Settings**: every settings node's span is valid; keys are non-empty; a
+   `gamemodes` group is present; every leaf key resolves against the emission
+   table (`settings-unknown-key` otherwise); enum values and list elements
+   resolve against their table domains (`settings-unknown-value` otherwise).
+7. **Unsupported nodes**: unknown node kinds produce the §7.3 error.
 
 Validation failures are structured: they carry a stable code, a message, and
 the offending span or path when available. Human-readable wording is not part
@@ -396,8 +445,9 @@ validated payload, intended for tests and issue reports. It is an
 implementation-defined presentation, not part of the wire contract. It must:
 
 * be reproducible byte-for-byte for the same validated payload;
-* show protocol identity, files, declarations, rules, events, conditions,
-  statements, and expressions with their spans; and
+* show protocol identity, files, declarations, settings (when present),
+  rules, events, conditions, statements, and expressions with their spans;
+  and
 * print in a stable order matching the payload order.
 
 ## 11. Out of scope for v1
@@ -407,7 +457,6 @@ adapter as unsupported when encountered:
 
 * rule labels and relative gotos (`__skip__` / `__distanceTo__` forms);
 * decompilation-only constructs;
-* custom game settings blocks (`settings { ... }`);
 * semantic analysis beyond structural validation (type checking, dead code,
   optimization).
 
@@ -425,3 +474,12 @@ reason to extend the schema silently.
   the Rust consumer, and the corpus fixtures together (see
   [`ARCHITECTURE.md`](../../ARCHITECTURE.md) and
   [`LICENSE-BOUNDARY.md`](../../LICENSE-BOUNDARY.md)).
+
+## 13. Version history
+
+* **1.1.0** (v1-additive, issue #86): adds the optional `settings` payload
+  (§2.5) with typed settings nodes, validation checks (§8 item 6), and a
+  settings dump section. No existing node or field changed; consumers of the
+  1.x major accept the payload unchanged (`check_envelope` gates the major
+  only). Both producers (`wright-opy` native frontend and the OverPy
+  adapter) emit 1.1.0.

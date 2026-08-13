@@ -99,10 +99,11 @@ Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
 machine contract.
 
 Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
-`unsupported-construct` (frontend), `convert-error`/`lower-error` (lowering),
-`validation-error` (validation), `input-*`/`stdin-*` (discovery), `output-io`
-(emission), analysis findings reuse the analyzer's codes, and `*-internal` /
-`*-unavailable` (internal).
+`unsupported-construct`, `settings-invalid`, `settings-placement` (frontend),
+`settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/
+`lower-error` (lowering), `validation-error` (validation), `input-*`/
+`stdin-*` (discovery), `output-io` (emission), analysis findings reuse the
+analyzer's codes, and `*-internal` / `*-unavailable` (internal).
 
 ## Determinism
 

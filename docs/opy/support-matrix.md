@@ -28,8 +28,10 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
 - Identifiers, integer and decimal number literals (source text preserved),
   double-quoted strings with `\n`/`\t`/`\\` escapes, `true`/`false`/`None`.
 - Line comments (`#`), block comments (`/* */`), `#!` directives.
-- Operators: `+ - * / // % ** == != < <= > >= = += -= *= /= //= %= and or not in`,
-  plus `.`/`,`/`:`/`(`/`)`/`[`/`]`/`@`.
+- Operators: `+ - * / // % ** == != < <= > >= = += -= *= /= //= %= and or not`,
+  plus `.`/`,`/`:`/`(`/`)`/`[`/`]`/`@`. (`in` is only the `for ... in`
+  header keyword; expression-level `in`/`not in` membership operators are not
+  supported — see the deferred list.)
 
 ### Declarations
 - `globalvar name` / `globalvar name = expr` / `globalvar name <index>`
@@ -93,13 +95,35 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
 - Native diagnostics map into the shared `wright-result/v1` contract (stage
   `frontend`, severity `error`).
 
+### Settings (issue #86)
+- Top-of-file `settings { ... }` custom-game-settings blocks (JSONC: quoted
+  keys, `"`/`'` strings with escapes, numbers, `true`/`false`, string lists,
+  nested groups, trailing commas) — recognized and consumed before lexing
+  (scoped lexing: the block never enters the token stream and the lexer
+  gains no global braces), parsed into the typed HIR `settings` payload, and
+  emitted as the Workshop `settings` section before `variables`.
+- Corpus-evidenced keys render per the emission table (fixture-evidenced
+  data; see `crates/wright-ir/src/settings/table.rs`); keys, enum values,
+  and map/hero list elements outside the table fail explicitly
+  (`settings-unknown-key`/`settings-unknown-value`).
+- Placement rules: the block must be the first construct in the main file
+  (`settings-placement` otherwise); a second block is rejected; a
+  `settings "file"` form is rejected (`settings-invalid`); settings blocks
+  in included files are rejected (`settings-placement` at the included
+  file's keyword span).
+- The emitted `settings` section is deliberately not reparseable by the
+  Workshop parser (a `.ws` decompiler is a non-goal); the settings-free
+  round-trip guarantee is unchanged.
+
 ## Deferred / out of scope (v0.3)
 
 - `.opy` reconstruction from Workshop text; decompiler architecture.
 - Macro/`#!define` values that require runtime evaluation (no scripting).
 - Additional OverPy enum spellings beyond the corpus table (a data change).
-- Rule `disabled` markers and custom-game-settings blocks (no corpus
-  evidence; the adapter already rejects settings outside the boundary).
+- Rule `disabled` markers (no corpus evidence for the source annotation).
+- Expression-level `in`/`not in` membership operators — rejected at parsing
+  (native `parse-error` on `not in` in broken-weapons, `broken_weapons.opy:107`;
+  `for ... in` headers are supported).
 - Backslash line continuation (`\` at end of line inside string
   concatenations / macro bodies) — rejected at lexing (native `lex-error`
   `unexpected character '\'` on ow1-emulator and 6v6-adjustments); the pinned
