@@ -98,6 +98,8 @@ pub struct GlobalVar {
     /// The explicit source index, when the source requested one.
     pub index: Option<u32>,
     pub span: Option<Span>,
+    /// The exact span of the declared identifier token.
+    pub name_span: Option<Span>,
     /// A non-trivial source initializer, when present.
     pub initializer: Option<ExprId>,
 }
@@ -108,6 +110,8 @@ pub struct PlayerVar {
     pub name: String,
     pub index: Option<u32>,
     pub span: Option<Span>,
+    /// The exact span of the declared identifier token.
+    pub name_span: Option<Span>,
     pub initializer: Option<ExprId>,
 }
 
@@ -119,6 +123,8 @@ pub struct Subroutine {
     pub index: Option<u32>,
     /// Span of the `subroutine name` declaration, when present.
     pub decl_span: Option<Span>,
+    /// The exact span of the declared identifier token.
+    pub decl_name_span: Option<Span>,
     /// The definition body, when the source defined one.
     pub body: Option<SubroutineBody>,
 }
@@ -127,6 +133,8 @@ pub struct Subroutine {
 #[derive(Debug, Clone)]
 pub struct SubroutineBody {
     pub span: Option<Span>,
+    /// The exact span of the defined identifier token in `def name():`.
+    pub name_span: Option<Span>,
     pub statements: Vec<StmtId>,
 }
 
@@ -152,6 +160,8 @@ pub struct Macro {
 pub struct Rule {
     pub name: String,
     pub span: Option<Span>,
+    /// The exact span of the rule name inside its string literal.
+    pub name_span: Option<Span>,
     pub disabled: bool,
     pub event: Event,
     pub conditions: Vec<ExprId>,
@@ -196,6 +206,8 @@ pub enum Stmt {
         iterable: ExprId,
         body: Vec<StmtId>,
         span: Option<Span>,
+        /// The exact span of the loop variable identifier.
+        variable_span: Option<Span>,
     },
     /// A loop.
     While {
@@ -207,6 +219,8 @@ pub enum Stmt {
     CallSubroutine {
         subroutine: SubroutineId,
         span: Option<Span>,
+        /// The exact span of the callee identifier occurrence.
+        callee_span: Option<Span>,
     },
     /// A no-op emitted by the frontend.
     Pass { span: Option<Span> },

@@ -31,6 +31,7 @@ impl Pass for SynthesizeInitializers {
                     variable: Id::from_index(position),
                     value: initializer,
                     span: None,
+                    target_span: None,
                 }));
             }
         }
@@ -44,6 +45,7 @@ impl Pass for SynthesizeInitializers {
                     variable: Id::from_index(position),
                     value: initializer,
                     span: None,
+                    target_span: None,
                 }));
             }
         }
@@ -57,6 +59,7 @@ impl Pass for SynthesizeInitializers {
             new_rules.push(Rule {
                 name: "Initialize global variables".to_string(),
                 span: None,
+                name_span: None,
                 disabled: false,
                 event: Event::Global,
                 conditions: Vec::new(),

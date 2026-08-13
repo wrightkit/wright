@@ -187,6 +187,9 @@ impl Parser<'_> {
             } else {
                 span
             }),
+            // Workshop-text sources carry no `.opy` identifier provenance;
+            // exact rename occurrences are only produced by the native path.
+            name_span: None,
             initializer: None,
         })
     }
@@ -212,6 +215,7 @@ impl Parser<'_> {
                 name,
                 index,
                 span: Some(Span::new(self.file(), start, end)),
+                name_span: None,
             });
             self.subroutines
                 .insert(self.target.subroutines.get(id).unwrap().name.clone(), id);
@@ -231,6 +235,7 @@ impl Parser<'_> {
         let mut rule = wir::Rule {
             name,
             span: Some(Span::new(self.file(), rule_start, rule_end)),
+            name_span: None,
             disabled: false,
             event: Event::Global,
             conditions: Vec::new(),
@@ -536,6 +541,7 @@ impl Parser<'_> {
             step,
             body,
             span: Some(Span::new(self.file(), start, end_span.1)),
+            target_span: None,
         };
         Ok(self.target.actions.push(action))
     }
@@ -587,6 +593,7 @@ impl Parser<'_> {
                         variable,
                         value,
                         span: Some(Span::new(self.file(), start, end)),
+                        target_span: None,
                     }))
                 }
                 "modifyGlobalVariable" => {
@@ -604,6 +611,7 @@ impl Parser<'_> {
                         op,
                         value,
                         span: Some(Span::new(self.file(), start, end)),
+                        target_span: None,
                     }))
                 }
                 "setPlayerVariable" => {
@@ -621,6 +629,7 @@ impl Parser<'_> {
                         variable,
                         value,
                         span: Some(Span::new(self.file(), start, end)),
+                        target_span: None,
                     }))
                 }
                 "modifyPlayerVariable" => {
@@ -641,6 +650,7 @@ impl Parser<'_> {
                         op,
                         value,
                         span: Some(Span::new(self.file(), start, end)),
+                        target_span: None,
                     }))
                 }
                 "callSubroutine" => {
@@ -652,6 +662,7 @@ impl Parser<'_> {
                     Ok(self.target.actions.push(Action::CallSubroutine {
                         subroutine,
                         span: Some(Span::new(self.file(), start, end)),
+                        callee_span: None,
                     }))
                 }
                 other => Err(WorkshopError::Unsupported {

@@ -27,6 +27,7 @@ fn build_surface_program() -> wir::Program {
         name: "index".into(),
         index: 0,
         span: Some(s(1, 15, 20)),
+        name_span: Some(s(1, 15, 20)),
         initializer: None,
     });
 
@@ -100,6 +101,7 @@ fn build_surface_program() -> wir::Program {
         op: wir::ModifyOp::Add,
         value: modified,
         span: Some(s(5, 5, 34)),
+        target_span: Some(s(5, 5, 10)),
     });
     let beam = program.actions.push(Action::Call {
         name: "createBeamEffect".into(),
@@ -113,11 +115,13 @@ fn build_surface_program() -> wir::Program {
         step: one,
         body: vec![if_action, modify, beam],
         span: Some(s(3, 5, 31)),
+        target_span: Some(s(3, 5, 10)),
     });
 
     program.rules.push(wir::Rule {
         name: "surface".into(),
         span: Some(s(2, 1, 6)),
+        name_span: Some(s(2, 5, 6)),
         disabled: false,
         event: Event::Global,
         conditions: vec![],

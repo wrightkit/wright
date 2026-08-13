@@ -123,6 +123,7 @@ fn equivalence_detects_semantic_differences() {
     a.rules.push(wright_ir::wir::Rule {
         name: "r".into(),
         span: None,
+        name_span: None,
         disabled: false,
         event: wright_ir::wir::Event::Global,
         conditions: vec![],
@@ -135,6 +136,7 @@ fn equivalence_detects_semantic_differences() {
     b.rules.push(wright_ir::wir::Rule {
         name: "r".into(),
         span: None,
+        name_span: None,
         disabled: false,
         event: wright_ir::wir::Event::Global,
         conditions: vec![],
@@ -184,6 +186,7 @@ fn unknown_builtin_fails_at_emit_stage() {
     program.rules.push(wright_ir::wir::Rule {
         name: "x".into(),
         span: None,
+        name_span: None,
         disabled: false,
         event: wright_ir::wir::Event::Global,
         conditions: vec![],

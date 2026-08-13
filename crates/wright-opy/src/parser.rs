@@ -8,7 +8,7 @@
 //! or the collected errors (never both).
 
 use crate::cst::{Decl, Event, Expr, IfBranch, Program, Rule, RuleEntry, Stmt};
-use crate::diag::{FrontendError, Span};
+use crate::diag::{FrontendError, Position, Span};
 use crate::lexer::{Token, TokenKind};
 
 /// The outcome of a parse.
@@ -155,9 +155,17 @@ impl Parser<'_> {
 
     fn parse_variable(&mut self, declarations: &mut Vec<Decl>, global: bool) -> bool {
         let start = self.advance(); // `globalvar`/`playervar`
+        // The name token follows the keyword; its span is the exact declared
+        // identifier occurrence (rename targets, not the keyword/statement).
+        let name_token = self.peek().clone();
         let name = match self.expect_ident("a variable name after the keyword") {
             Ok(name) => name,
             Err(()) => return false,
+        };
+        let name_span = if name_token.kind == TokenKind::Ident {
+            name_token.span
+        } else {
+            start.span
         };
         let mut index = None;
         let mut initializer = None;
@@ -196,6 +204,7 @@ impl Parser<'_> {
                 name,
                 index,
                 span,
+                name_span,
                 initializer,
             }
         } else {
@@ -203,6 +212,7 @@ impl Parser<'_> {
                 name,
                 index,
                 span,
+                name_span,
                 initializer,
             }
         };
@@ -212,14 +222,23 @@ impl Parser<'_> {
 
     fn parse_subroutine(&mut self, declarations: &mut Vec<Decl>) -> bool {
         let start = self.advance();
+        // The name token follows the `subroutine` keyword; its span is the
+        // exact declared identifier occurrence.
+        let name_token = self.peek().clone();
         let name = match self.expect_ident("a subroutine name") {
             Ok(name) => name,
             Err(()) => return false,
+        };
+        let name_span = if name_token.kind == TokenKind::Ident {
+            name_token.span
+        } else {
+            start.span
         };
         let end = self.peek().span.start;
         declarations.push(Decl::Subroutine {
             name,
             span: Span::new(start.span.file, start.span.start, end),
+            name_span,
         });
         true
     }
@@ -346,7 +365,21 @@ impl Parser<'_> {
                 return false;
             }
         };
-        let name_span = self.tokens[self.pos.saturating_sub(1)].span;
+        let name_token_span = self.tokens[self.pos.saturating_sub(1)].span;
+        // The exact rule-name occurrence is the string content between the
+        // quotes (the `"name"` token itself spans the quotes).
+        let name_span = Span::new(
+            name_token_span.file,
+            Position::new(name_token_span.start.line, name_token_span.start.col + 1),
+            Position::new(
+                name_token_span.end.line,
+                name_token_span
+                    .end
+                    .col
+                    .saturating_sub(1)
+                    .max(name_token_span.start.col + 1),
+            ),
+        );
         if self
             .expect(TokenKind::Colon, "':' after the rule name")
             .is_err()
@@ -379,7 +412,8 @@ impl Parser<'_> {
         }
         rules.push(RuleEntry::Rule(Rule {
             name,
-            span: Span::new(start.span.file, start.span.start, name_span.end),
+            span: Span::new(start.span.file, start.span.start, name_token_span.end),
+            name_span,
             disabled: false,
             event: event.unwrap_or_else(|| Event {
                 name: "global".to_string(),
@@ -446,13 +480,18 @@ impl Parser<'_> {
 
     fn parse_def(&mut self, rules: &mut Vec<RuleEntry>) -> bool {
         let start = self.advance();
-        // The name token follows the `def` keyword; its end bounds the
-        // subroutine-definition span so the semantic index can point at the
-        // definition identifier itself (rename targets, not the keyword).
+        // The name token follows the `def` keyword. `span` covers the
+        // definition (`def name`), and `name_span` is the exact identifier
+        // occurrence (rename targets, not the keyword).
         let name_token = self.peek().clone();
         let name = match self.expect_ident("a subroutine name after `def`") {
             Ok(name) => name,
             Err(()) => return false,
+        };
+        let name_span = if name_token.kind == TokenKind::Ident {
+            name_token.span
+        } else {
+            start.span
         };
         let params = match self.parse_param_list() {
             Some(params) => params,
@@ -481,7 +520,12 @@ impl Parser<'_> {
         } else {
             start.span
         };
-        rules.push(RuleEntry::SubroutineDef { name, span, body });
+        rules.push(RuleEntry::SubroutineDef {
+            name,
+            span,
+            name_span,
+            body,
+        });
         true
     }
 

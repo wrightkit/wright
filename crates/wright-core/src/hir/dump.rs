@@ -71,6 +71,7 @@ fn dump_declaration(declaration: &Declaration, out: &mut String, level: usize) {
             index,
             span,
             initializer,
+            ..
         } => {
             out.push_str(&format!(
                 "{}globalVariable {} (index {}){}",
@@ -90,6 +91,7 @@ fn dump_declaration(declaration: &Declaration, out: &mut String, level: usize) {
             index,
             span,
             initializer,
+            ..
         } => {
             out.push_str(&format!(
                 "{}playerVariable {} (index {}){}",

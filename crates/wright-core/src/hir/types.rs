@@ -83,6 +83,9 @@ pub enum Declaration {
         index: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         span: Option<Span>,
+        /// The exact span of the declared identifier token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name_span: Option<Span>,
         #[serde(default)]
         initializer: Option<Box<Expr>>,
     },
@@ -92,6 +95,9 @@ pub enum Declaration {
         index: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         span: Option<Span>,
+        /// The exact span of the declared identifier token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name_span: Option<Span>,
         #[serde(default)]
         initializer: Option<Box<Expr>>,
     },
@@ -101,6 +107,9 @@ pub enum Declaration {
         index: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         span: Option<Span>,
+        /// The exact span of the declared identifier token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name_span: Option<Span>,
     },
     Constant {
         name: String,
@@ -132,6 +141,9 @@ pub enum RuleEntry {
         name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         span: Option<Span>,
+        /// The exact span of the defined identifier token in `def name():`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name_span: Option<Span>,
         #[serde(default)]
         body: Vec<Stmt>,
     },
@@ -143,6 +155,9 @@ pub struct Rule {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
+    /// The exact span of the rule name inside its string literal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_span: Option<Span>,
     #[serde(default)]
     pub disabled: bool,
     pub event: Event,

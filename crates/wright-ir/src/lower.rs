@@ -34,7 +34,7 @@ use crate::error::{IrError, unsupported};
 use crate::hir::{
     self, BinaryOp, Expr, ExprId, GlobalVarId, MacroId, PlayerVarId, Stmt, StmtId, SubroutineId,
 };
-use crate::source::{SourceFile, Span};
+use crate::source::{Position, SourceFile, Span};
 use crate::wir::{self, Action, ModifyOp, Value, ValueId, ValueNode};
 
 /// Lower an internal Opy HIR program into a Workshop IR program.
@@ -72,7 +72,7 @@ impl<'a> Lowerer<'a> {
 
         // Variable, player, and subroutine tables in HIR order.
         for id in range_ids::<hir::GlobalVar>(self.hir.globals.len()) {
-            let (name, span, initializer, source_index) = {
+            let (name, span, name_span, initializer, source_index) = {
                 let global = self
                     .hir
                     .globals
@@ -81,6 +81,7 @@ impl<'a> Lowerer<'a> {
                 (
                     global.name.clone(),
                     global.span,
+                    global.name_span,
                     global.initializer,
                     global.index,
                 )
@@ -93,12 +94,13 @@ impl<'a> Lowerer<'a> {
                 name,
                 index: source_index.unwrap_or(id.index() as u32),
                 span,
+                name_span,
                 initializer,
             });
             self.globals.insert(id, wir_id);
         }
         for id in range_ids::<hir::PlayerVar>(self.hir.players.len()) {
-            let (name, span, initializer, source_index) = {
+            let (name, span, name_span, initializer, source_index) = {
                 let player = self
                     .hir
                     .players
@@ -107,6 +109,7 @@ impl<'a> Lowerer<'a> {
                 (
                     player.name.clone(),
                     player.span,
+                    player.name_span,
                     player.initializer,
                     player.index,
                 )
@@ -119,28 +122,29 @@ impl<'a> Lowerer<'a> {
                 name,
                 index: source_index.unwrap_or(id.index() as u32),
                 span,
+                name_span,
                 initializer,
             });
             self.players.insert(id, wir_id);
         }
         for id in range_ids::<hir::Subroutine>(self.hir.subroutines.len()) {
-            let name = {
+            let (name, decl_span, decl_name_span) = {
                 let subroutine = self
                     .hir
                     .subroutines
                     .get(id)
                     .ok_or_else(|| dangling("subroutine", id))?;
-                subroutine.name.clone()
+                (
+                    subroutine.name.clone(),
+                    subroutine.decl_span,
+                    subroutine.decl_name_span,
+                )
             };
             let wir_id = self.target.subroutines.push(wir::WorkshopSubroutine {
                 name,
                 index: id.index() as u32,
-                span: self
-                    .hir
-                    .subroutines
-                    .get(id)
-                    .ok_or_else(|| dangling("subroutine", id))?
-                    .decl_span,
+                span: decl_span,
+                name_span: decl_name_span,
             });
             self.subroutines.insert(id, wir_id);
         }
@@ -149,7 +153,7 @@ impl<'a> Lowerer<'a> {
         // Subroutine definition bodies become rules with the Subroutine
         // event, emitted before normal rules (reference ordering).
         for id in range_ids::<hir::Subroutine>(self.hir.subroutines.len()) {
-            let (name, body_span, statements) = {
+            let (name, body_span, body_name_span, statements) = {
                 let subroutine = self
                     .hir
                     .subroutines
@@ -158,12 +162,18 @@ impl<'a> Lowerer<'a> {
                 let Some(body) = &subroutine.body else {
                     continue;
                 };
-                (subroutine.name.clone(), body.span, body.statements.clone())
+                (
+                    subroutine.name.clone(),
+                    body.span,
+                    body.name_span,
+                    body.statements.clone(),
+                )
             };
             let actions = self.lower_actions(&statements)?;
             self.target.rules.push(wir::Rule {
                 name: format!("Subroutine {name}"),
                 span: body_span,
+                name_span: body_name_span,
                 disabled: false,
                 event: wir::Event::Subroutine(self.subroutines[&id]),
                 conditions: Vec::new(),
@@ -204,6 +214,7 @@ impl<'a> Lowerer<'a> {
         self.target.rules.push(wir::Rule {
             name: rule.name,
             span: rule.span,
+            name_span: rule.name_span,
             disabled: rule.disabled,
             event,
             conditions,
@@ -257,8 +268,9 @@ impl<'a> Lowerer<'a> {
                 variable,
                 iterable,
                 body,
+                variable_span,
                 ..
-            } => self.lower_for(*variable, *iterable, body, span)?,
+            } => self.lower_for(*variable, *iterable, body, span, *variable_span)?,
             Stmt::While {
                 condition, body, ..
             } => Action::While {
@@ -266,9 +278,14 @@ impl<'a> Lowerer<'a> {
                 body: self.lower_actions(body)?,
                 span,
             },
-            Stmt::CallSubroutine { subroutine, .. } => Action::CallSubroutine {
+            Stmt::CallSubroutine {
+                subroutine,
+                callee_span,
+                ..
+            } => Action::CallSubroutine {
                 subroutine: self.subroutine(*subroutine)?,
                 span,
+                callee_span: *callee_span,
             },
             Stmt::Pass { .. } => return Ok(()), // no-op; dropped
         };
@@ -356,6 +373,7 @@ impl<'a> Lowerer<'a> {
                 op: ModifyOp::AppendToArray,
                 value,
                 span,
+                target_span: self.occurrence_span(receiver_expr),
             }),
             Expr::PlayerVar {
                 player, variable, ..
@@ -367,6 +385,7 @@ impl<'a> Lowerer<'a> {
                     op: ModifyOp::AppendToArray,
                     value,
                     span,
+                    target_span: self.occurrence_span(receiver_expr),
                 })
             }
             other => Err(unsupported(
@@ -393,17 +412,20 @@ impl<'a> Lowerer<'a> {
         match target_expr {
             Expr::GlobalVar { variable, .. } => {
                 let global = self.global(*variable)?;
+                let target_span = self.occurrence_span(target_expr);
                 match self.global_modify(value, *variable)? {
                     Some((op, operand)) => Ok(Action::ModifyGlobalVariable {
                         variable: global,
                         op,
                         value: operand,
                         span,
+                        target_span,
                     }),
                     None => Ok(Action::SetGlobalVariable {
                         variable: global,
                         value: self.lower_value(*value)?,
                         span,
+                        target_span,
                     }),
                 }
             }
@@ -413,6 +435,7 @@ impl<'a> Lowerer<'a> {
                 let player_value = self.lower_value(*player)?;
                 let player_id = *player;
                 let player_var = self.player(*variable)?;
+                let target_span = self.occurrence_span(target_expr);
                 match self.player_modify(value, player_id, *variable)? {
                     Some((op, operand)) => Ok(Action::ModifyPlayerVariable {
                         player: player_value,
@@ -420,12 +443,14 @@ impl<'a> Lowerer<'a> {
                         op,
                         value: operand,
                         span,
+                        target_span,
                     }),
                     None => Ok(Action::SetPlayerVariable {
                         player: player_value,
                         variable: player_var,
                         value: self.lower_value(*value)?,
                         span,
+                        target_span,
                     }),
                 }
             }
@@ -436,6 +461,34 @@ impl<'a> Lowerer<'a> {
                 ),
                 span,
             )),
+        }
+    }
+
+    /// The exact identifier occurrence of a variable-reference expression:
+    /// the name token for a global variable, or the member name for a player
+    /// variable (`receiver.name` — the member is the final token of the
+    /// member expression). Derived where semantic identity is known, never by
+    /// scanning source text for the spelling.
+    fn occurrence_span(&self, expression: &hir::Expr) -> Option<Span> {
+        match expression {
+            hir::Expr::GlobalVar { span, .. } => *span,
+            hir::Expr::PlayerVar { variable, span, .. } => span.map(|span| {
+                let name_len = self
+                    .hir
+                    .players
+                    .get(*variable)
+                    .map(|player| player.name.chars().count() as u32)
+                    .unwrap_or(0);
+                Span::new(
+                    span.file,
+                    Position::new(
+                        span.end.line,
+                        span.end.col.saturating_sub(name_len).max(span.start.col),
+                    ),
+                    span.end,
+                )
+            }),
+            _ => None,
         }
     }
 
@@ -510,6 +563,7 @@ impl<'a> Lowerer<'a> {
         iterable: ExprId,
         body: &[StmtId],
         span: Option<Span>,
+        variable_span: Option<Span>,
     ) -> Result<Action, IrError> {
         let (start, stop, step) = self.range_bounds(iterable)?;
         Ok(Action::ForGlobalVariable {
@@ -519,6 +573,7 @@ impl<'a> Lowerer<'a> {
             step,
             body: self.lower_actions(body)?,
             span,
+            target_span: variable_span,
         })
     }
 

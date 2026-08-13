@@ -26,12 +26,14 @@ fn arithmetic_program() -> wir::Program {
         name: "points".to_string(),
         index: 1,
         span: None,
+        name_span: None,
         initializer: Some(array),
     });
     let variable = program.global_variables.push(wir::WorkshopVariable {
         name: "result".to_string(),
         index: 0,
         span: None,
+        name_span: None,
         initializer: None,
     });
 
@@ -69,10 +71,12 @@ fn arithmetic_program() -> wir::Program {
         variable,
         value: add,
         span: None,
+        target_span: None,
     });
     program.rules.push(wir::Rule {
         name: "compute".to_string(),
         span: None,
+        name_span: None,
         disabled: false,
         event: wir::Event::Global,
         conditions: vec![],

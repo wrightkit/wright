@@ -154,6 +154,7 @@ fn render_stmt(program: &Program, id: super::StmtId, out: &mut String, level: us
             iterable,
             body,
             span,
+            ..
         } => {
             let variable_name = program.globals.get(*variable).map_or_else(
                 || format!("<dangling {}>", variable.index()),
@@ -178,7 +179,9 @@ fn render_stmt(program: &Program, id: super::StmtId, out: &mut String, level: us
                 render_stmt(program, *statement, out, level + 1);
             }
         }
-        Stmt::CallSubroutine { subroutine, span } => {
+        Stmt::CallSubroutine {
+            subroutine, span, ..
+        } => {
             let name = program
                 .subroutines
                 .get(*subroutine)

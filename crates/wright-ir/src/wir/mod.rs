@@ -81,6 +81,8 @@ pub struct WorkshopVariable {
     /// The workshop variable index assigned during lowering.
     pub index: u32,
     pub span: Option<Span>,
+    /// The exact span of the declared identifier token.
+    pub name_span: Option<Span>,
     /// The non-trivial source initializer, if the declaration had one.
     pub initializer: Option<ValueId>,
 }
@@ -91,6 +93,8 @@ pub struct WorkshopSubroutine {
     pub name: String,
     pub index: u32,
     pub span: Option<Span>,
+    /// The exact span of the declared identifier token.
+    pub name_span: Option<Span>,
 }
 
 /// A workshop rule.
@@ -98,6 +102,8 @@ pub struct WorkshopSubroutine {
 pub struct Rule {
     pub name: String,
     pub span: Option<Span>,
+    /// The exact span of the rule name inside its string literal.
+    pub name_span: Option<Span>,
     pub disabled: bool,
     pub event: Event,
     pub conditions: Vec<ValueId>,
@@ -167,18 +173,24 @@ pub enum Action {
         variable: GlobalVarId,
         value: ValueId,
         span: Option<Span>,
+        /// The exact span of the assigned variable identifier.
+        target_span: Option<Span>,
     },
     ModifyGlobalVariable {
         variable: GlobalVarId,
         op: ModifyOp,
         value: ValueId,
         span: Option<Span>,
+        /// The exact span of the modified variable identifier.
+        target_span: Option<Span>,
     },
     SetPlayerVariable {
         player: ValueId,
         variable: PlayerVarId,
         value: ValueId,
         span: Option<Span>,
+        /// The exact span of the assigned variable identifier.
+        target_span: Option<Span>,
     },
     ModifyPlayerVariable {
         player: ValueId,
@@ -186,10 +198,14 @@ pub enum Action {
         op: ModifyOp,
         value: ValueId,
         span: Option<Span>,
+        /// The exact span of the modified variable identifier.
+        target_span: Option<Span>,
     },
     CallSubroutine {
         subroutine: SubroutineId,
         span: Option<Span>,
+        /// The exact span of the callee identifier occurrence.
+        callee_span: Option<Span>,
     },
     If {
         branches: Vec<IfBranch>,
@@ -208,6 +224,8 @@ pub enum Action {
         step: ValueId,
         body: Vec<ActionId>,
         span: Option<Span>,
+        /// The exact span of the loop variable identifier.
+        target_span: Option<Span>,
     },
     /// The `debug(value)` HUD debug effect.
     Debug { value: ValueId, span: Option<Span> },

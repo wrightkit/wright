@@ -537,6 +537,227 @@ fn rename_refuses_target_collision() {
 }
 
 #[test]
+fn rename_write_target_with_same_statement_string() {
+    // Test A (#73): `score = "score"` — the assignment target is the exact
+    // occurrence; the same-spelled string literal in the same statement is
+    // byte-for-byte unchanged.
+    let source = "globalvar score\n\nrule \"r\":\n    @Event global\n    score = \"score\"\n";
+    let document = Document::new("file:///a.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "same-statement string rename validates: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("globalvar total"),
+        "declaration identifier renamed: {new_text}"
+    );
+    assert!(
+        new_text.contains("total = \"score\""),
+        "the write target is renamed but the string survives: {new_text}"
+    );
+    assert!(
+        !new_text.contains("total = \"total\""),
+        "the string is never rewritten: {new_text}"
+    );
+    assert!(
+        new_text.contains("\"score\""),
+        "the string literal is byte-for-byte unchanged: {new_text}"
+    );
+}
+
+#[test]
+fn rename_modify_target_with_unrelated_textual_score() {
+    // Test B (#73): the supported modify form edits only the semantic target;
+    // a same-spelled string in the operand is untouched.
+    let source = "globalvar score\n\nrule \"r\":\n    @Event global\n    score += \"score\"\n";
+    let document = Document::new("file:///b.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "modify-form rename validates: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("total += \"score\""),
+        "the modify target is renamed, the operand string survives: {new_text}"
+    );
+    assert!(
+        !new_text.contains("total += \"total\""),
+        "the operand string is never rewritten: {new_text}"
+    );
+}
+
+#[test]
+fn rename_declaration_initializer_leaves_the_string_unchanged() {
+    // Test C (#73): `globalvar score = "score"` — the declaration identifier
+    // changes while the same-statement string stays byte-for-byte unchanged.
+    let source =
+        "globalvar score = \"score\"\n\nrule \"r\":\n    @Event global\n    debug(score)\n";
+    let document = Document::new("file:///c.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "declaration-initializer rename validates: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("globalvar total = \"score\""),
+        "the declaration identifier is renamed, the initializer string survives: {new_text}"
+    );
+    assert!(
+        !new_text.contains("total = \"total\""),
+        "the initializer string is never rewritten: {new_text}"
+    );
+    assert!(
+        new_text.contains("debug(total)"),
+        "the reference is renamed: {new_text}"
+    );
+}
+
+#[test]
+fn rename_rhs_reference_leaves_same_statement_sibling_untouched() {
+    // Test D (#73): `score = score2` — renaming `score` edits the write
+    // target and any read of `score`; the same-statement sibling `score2`
+    // belongs to a different symbol and stays untouched.
+    let source = "globalvar score\nglobalvar score2\n\nrule \"r\":\n    @Event global\n    score = score2\n    debug(score)\n";
+    let document = Document::new("file:///d.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "sibling rename validates: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("total = score2"),
+        "the write target is renamed, the sibling read survives: {new_text}"
+    );
+    assert!(
+        new_text.contains("globalvar score2"),
+        "the sibling declaration survives: {new_text}"
+    );
+    assert!(
+        new_text.contains("debug(total)"),
+        "the selected symbol's reference is renamed: {new_text}"
+    );
+}
+
+#[test]
+fn rename_multiple_genuine_occurrences_in_one_statement_edit_exactly_once() {
+    // Test E (#73): `debug(score + score)` contains two genuine references to
+    // the same symbol in one statement; both change exactly once, no
+    // duplicate/overlapping edit is produced, and repeated runs agree.
+    let source = "globalvar score\n\nrule \"r\":\n    @Event global\n    debug(score + score)\n";
+    let document = Document::new("file:///e.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "multi-occurrence rename validates: {:?}",
+        result.diagnostics
+    );
+    let new_text = &result.edits[0].new_text;
+    assert!(
+        new_text.contains("debug(total + total)"),
+        "every genuine occurrence changes exactly once: {new_text}"
+    );
+    assert_eq!(
+        new_text.matches("total").count(),
+        3,
+        "declaration + two references, no duplicates: {new_text}"
+    );
+    assert_eq!(
+        new_text.matches("score").count(),
+        0,
+        "no old spelling remains: {new_text}"
+    );
+
+    // Determinism: a second rename on the same state produces the same edit.
+    let again = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "total",
+    );
+    assert!(again.ok, "{:?}", again.diagnostics);
+    assert_eq!(
+        &again.edits[0].new_text, new_text,
+        "repeated renames agree exactly"
+    );
+}
+
+#[test]
+fn rename_refuses_when_the_edited_project_fails_validation() {
+    // Test F (#73): a new name that makes the edited project fail to compile
+    // (here an invalid identifier) is an explicit refusal with no edits.
+    let source = "globalvar score\n\nrule \"r\":\n    @Event global\n    debug(score)\n";
+    let document = Document::new("file:///badname.opy", source, workspace_root());
+    let (service, uri) = service_with(document);
+    let result = service.rename(
+        &uri,
+        Position {
+            line: 0,
+            character: 11,
+        },
+        "1invalid",
+    );
+    assert!(
+        !result.ok,
+        "a new name that breaks the edited project refuses explicitly"
+    );
+    assert!(
+        result.edits.is_empty(),
+        "a failed edited-project validation never returns edits"
+    );
+}
+
+#[test]
 fn rename_does_not_touch_longer_identifiers_containing_the_spelling() {
     // Blocker 1 (#73): `scoreboard` merely contains the spelling `score`; the
     // word-boundary carve inside the semantic span must leave it untouched.

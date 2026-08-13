@@ -36,6 +36,9 @@ pub struct Symbol {
     pub name: String,
     /// The declaration site, when the IR carries one.
     pub span: Option<Span>,
+    /// The exact span of the declared identifier occurrence (the rename
+    /// target); `None` when provenance could not be preserved.
+    pub occurrence: Option<Span>,
     /// The rule that owns this symbol, for rule symbols.
     pub rule: Option<RuleId>,
 }
@@ -61,6 +64,9 @@ pub struct Reference {
     pub symbol: SymbolId,
     pub kind: ReferenceKind,
     pub span: Option<Span>,
+    /// The exact span of the identifier occurrence (the rename target);
+    /// `None` when provenance could not be preserved.
+    pub occurrence: Option<Span>,
     /// The containing rule, for references inside rules.
     pub rule: Option<RuleId>,
     /// The containing action, for references inside actions.
@@ -183,9 +189,10 @@ impl<'a> Builder<'a> {
                 kind: SymbolKind::GlobalVariable,
                 name: variable.name.clone(),
                 span: variable.span,
+                occurrence: variable.name_span,
                 rule: None,
             });
-            self.declare(symbol, variable.span, None)?;
+            self.declare(symbol, variable.span, variable.name_span, None)?;
         }
         let global_count = self.symbols.len();
         for id in 0..self.program.player_variables.len() {
@@ -199,9 +206,10 @@ impl<'a> Builder<'a> {
                 kind: SymbolKind::PlayerVariable,
                 name: variable.name.clone(),
                 span: variable.span,
+                occurrence: variable.name_span,
                 rule: None,
             });
-            self.declare(symbol, variable.span, None)?;
+            self.declare(symbol, variable.span, variable.name_span, None)?;
         }
         let player_start = self.symbols.len();
         for id in 0..self.program.subroutines.len() {
@@ -215,9 +223,10 @@ impl<'a> Builder<'a> {
                 kind: SymbolKind::Subroutine,
                 name: subroutine.name.clone(),
                 span: subroutine.span,
+                occurrence: subroutine.name_span,
                 rule: None,
             });
-            self.declare(symbol, subroutine.span, None)?;
+            self.declare(symbol, subroutine.span, subroutine.name_span, None)?;
         }
         let subroutine_start = self.symbols.len();
         for id in 0..self.program.rules.len() {
@@ -231,9 +240,15 @@ impl<'a> Builder<'a> {
                 kind: SymbolKind::Rule,
                 name: rule.name.clone(),
                 span: rule.span,
+                occurrence: rule.name_span,
                 rule: Some(RuleId::from_index(id)),
             });
-            self.declare(symbol, rule.span, Some(RuleId::from_index(id)))?;
+            self.declare(
+                symbol,
+                rule.span,
+                rule.name_span,
+                Some(RuleId::from_index(id)),
+            )?;
         }
 
         // References from rule bodies.
@@ -251,12 +266,14 @@ impl<'a> Builder<'a> {
         &mut self,
         symbol: SymbolId,
         span: Option<Span>,
+        occurrence: Option<Span>,
         rule: Option<RuleId>,
     ) -> Result<(), IrError> {
         self.push(Reference {
             symbol,
             kind: ReferenceKind::Declaration,
             span,
+            occurrence,
             rule,
             action: None,
             value: None,
@@ -282,6 +299,7 @@ impl<'a> Builder<'a> {
                 symbol,
                 kind: ReferenceKind::Definition,
                 span: rule_data.span,
+                occurrence: rule_data.name_span,
                 rule: Some(rule),
                 action: None,
                 value: None,
@@ -300,25 +318,50 @@ impl<'a> Builder<'a> {
         let span = action.span();
         match &action {
             Action::SetGlobalVariable {
-                variable, value, ..
+                variable,
+                value,
+                target_span,
+                ..
             } => {
-                self.write(self.global_symbol(*variable)?, span, rule, Some(action_id))?;
+                self.write(
+                    self.global_symbol(*variable)?,
+                    span,
+                    *target_span,
+                    rule,
+                    Some(action_id),
+                )?;
                 self.walk_value(*value, rule, Some(action_id))
             }
             Action::ModifyGlobalVariable {
-                variable, value, ..
+                variable,
+                value,
+                target_span,
+                ..
             } => {
                 // A modify reads and writes; it is indexed as a write.
-                self.write(self.global_symbol(*variable)?, span, rule, Some(action_id))?;
+                self.write(
+                    self.global_symbol(*variable)?,
+                    span,
+                    *target_span,
+                    rule,
+                    Some(action_id),
+                )?;
                 self.walk_value(*value, rule, Some(action_id))
             }
             Action::SetPlayerVariable {
                 player,
                 variable,
                 value,
+                target_span,
                 ..
             } => {
-                self.write(self.player_symbol(*variable)?, span, rule, Some(action_id))?;
+                self.write(
+                    self.player_symbol(*variable)?,
+                    span,
+                    *target_span,
+                    rule,
+                    Some(action_id),
+                )?;
                 self.walk_value(*player, rule, Some(action_id))?;
                 self.walk_value(*value, rule, Some(action_id))
             }
@@ -326,15 +369,27 @@ impl<'a> Builder<'a> {
                 player,
                 variable,
                 value,
+                target_span,
                 ..
             } => {
-                self.write(self.player_symbol(*variable)?, span, rule, Some(action_id))?;
+                self.write(
+                    self.player_symbol(*variable)?,
+                    span,
+                    *target_span,
+                    rule,
+                    Some(action_id),
+                )?;
                 self.walk_value(*player, rule, Some(action_id))?;
                 self.walk_value(*value, rule, Some(action_id))
             }
-            Action::CallSubroutine { subroutine, .. } => self.call(
+            Action::CallSubroutine {
+                subroutine,
+                callee_span,
+                ..
+            } => self.call(
                 self.subroutine_symbol(*subroutine)?,
                 span,
+                *callee_span,
                 rule,
                 Some(action_id),
             ),
@@ -371,9 +426,16 @@ impl<'a> Builder<'a> {
                 stop,
                 step,
                 body,
+                target_span,
                 ..
             } => {
-                self.write(self.global_symbol(*variable)?, span, rule, Some(action_id))?;
+                self.write(
+                    self.global_symbol(*variable)?,
+                    span,
+                    *target_span,
+                    rule,
+                    Some(action_id),
+                )?;
                 self.walk_value(*start, rule, Some(action_id))?;
                 self.walk_value(*stop, rule, Some(action_id))?;
                 self.walk_value(*step, rule, Some(action_id))?;
@@ -408,14 +470,21 @@ impl<'a> Builder<'a> {
             Value::GlobalVariable(variable) => self.read(
                 self.global_symbol(*variable)?,
                 node.span,
+                // A global-variable value node spans exactly its name token.
+                node.span,
                 rule,
                 action,
                 Some(value_id),
             ),
             Value::PlayerVariable { player, variable } => {
+                // A player-variable value node spans the whole
+                // `receiver.member` expression; the member name is its final
+                // token, derived here where the identity is known.
+                let occurrence = self.player_occurrence(*variable, node.span);
                 self.read(
                     self.player_symbol(*variable)?,
                     node.span,
+                    occurrence,
                     rule,
                     action,
                     Some(value_id),
@@ -452,6 +521,7 @@ impl<'a> Builder<'a> {
         &mut self,
         symbol: SymbolId,
         span: Option<Span>,
+        occurrence: Option<Span>,
         rule: Option<RuleId>,
         action: Option<ActionId>,
         value: Option<ValueId>,
@@ -460,6 +530,7 @@ impl<'a> Builder<'a> {
             symbol,
             kind: ReferenceKind::Read,
             span,
+            occurrence,
             rule,
             action,
             value,
@@ -470,6 +541,7 @@ impl<'a> Builder<'a> {
         &mut self,
         symbol: SymbolId,
         span: Option<Span>,
+        occurrence: Option<Span>,
         rule: Option<RuleId>,
         action: Option<ActionId>,
     ) -> Result<(), IrError> {
@@ -477,6 +549,7 @@ impl<'a> Builder<'a> {
             symbol,
             kind: ReferenceKind::Write,
             span,
+            occurrence,
             rule,
             action,
             value: None,
@@ -487,6 +560,7 @@ impl<'a> Builder<'a> {
         &mut self,
         symbol: SymbolId,
         span: Option<Span>,
+        occurrence: Option<Span>,
         rule: Option<RuleId>,
         action: Option<ActionId>,
     ) -> Result<(), IrError> {
@@ -494,10 +568,33 @@ impl<'a> Builder<'a> {
             symbol,
             kind: ReferenceKind::Call,
             span,
+            occurrence,
             rule,
             action,
             value: None,
         })
+    }
+
+    /// The exact member-name occurrence of a player variable inside a
+    /// `receiver.member` span: the member token is the final token of the
+    /// member expression, so the occurrence ends at the span end and starts
+    /// `name` characters earlier (columns are char-based).
+    fn player_occurrence(&self, variable: PlayerVarId, span: Option<Span>) -> Option<Span> {
+        let span = span?;
+        let name_len = self
+            .program
+            .player_variables
+            .get(variable)
+            .map(|player| player.name.chars().count() as u32)
+            .unwrap_or(0);
+        Some(Span::new(
+            span.file,
+            wright_ir::source::Position::new(
+                span.end.line,
+                span.end.col.saturating_sub(name_len).max(span.start.col),
+            ),
+            span.end,
+        ))
     }
 
     fn push(&mut self, reference: Reference) -> Result<(), IrError> {

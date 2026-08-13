@@ -122,6 +122,7 @@ fn debug_actions_emit_hud_text() {
     program.rules.push(wir::Rule {
         name: "x".into(),
         span: None,
+        name_span: None,
         disabled: false,
         event: wir::Event::Global,
         conditions: vec![],
@@ -159,6 +160,7 @@ fn unknown_value_id_fails_explicitly() {
     program.rules.push(wir::Rule {
         name: "x".into(),
         span: None,
+        name_span: None,
         disabled: false,
         event: wir::Event::Global,
         conditions: vec![],

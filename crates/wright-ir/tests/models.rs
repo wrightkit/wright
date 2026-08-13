@@ -27,6 +27,7 @@ fn build_hir_program() -> HirProgram {
         name: "index".into(),
         index: None,
         span: Some(s(1, 1, 12)),
+        name_span: Some(s(1, 10, 15)),
         initializer: None,
     });
 
@@ -69,6 +70,7 @@ fn build_hir_program() -> HirProgram {
     program.rules.push(Rule {
         name: "loop".into(),
         span: Some(s(1, 1, 6)),
+        name_span: Some(s(1, 6, 7)),
         disabled: false,
         event: wright_ir::hir::Event {
             name: "global".into(),
@@ -142,6 +144,7 @@ fn build_wir_program() -> WirProgram {
         name: "x".into(),
         index: 0,
         span: Some(span(file, 1, 1, 12)),
+        name_span: Some(span(file, 1, 10, 11)),
         initializer: None,
     });
     let value = program.values.push(wright_ir::wir::ValueNode::new(
@@ -152,10 +155,12 @@ fn build_wir_program() -> WirProgram {
         variable: global,
         value,
         span: Some(span(file, 2, 5, 24)),
+        target_span: Some(span(file, 2, 5, 6)),
     });
     program.rules.push(wir::Rule {
         name: "init".into(),
         span: Some(span(file, 2, 1, 6)),
+        name_span: Some(span(file, 2, 5, 6)),
         disabled: false,
         event: wir::Event::Global,
         conditions: vec![],

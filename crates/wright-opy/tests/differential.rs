@@ -44,10 +44,14 @@ const PARITY_CASES: &[(&str, &str)] = &[
 ];
 
 /// Remove spans and the producer identity: the documented normalization.
+/// `name_span` is frontend-internal provenance (the adapter reference does
+/// not carry exact identifier spans), so it is normalized away alongside the
+/// other span endpoints.
 fn normalize(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
             map.remove("span");
+            map.remove("name_span");
             map.remove("generator");
             for nested in map.values_mut() {
                 normalize(nested);

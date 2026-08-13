@@ -23,17 +23,23 @@ pub enum Decl {
         /// An explicit Workshop index (`globalvar x 100`), when given.
         index: Option<u32>,
         span: Span,
+        /// The exact span of the declared identifier token.
+        name_span: Span,
         initializer: Option<Expr>,
     },
     PlayerVariable {
         name: String,
         index: Option<u32>,
         span: Span,
+        /// The exact span of the declared identifier token.
+        name_span: Span,
         initializer: Option<Expr>,
     },
     Subroutine {
         name: String,
         span: Span,
+        /// The exact span of the declared identifier token.
+        name_span: Span,
     },
     /// A user-defined `enum`; members fold to numeric constants.
     Enum {
@@ -57,6 +63,8 @@ pub enum RuleEntry {
     SubroutineDef {
         name: String,
         span: Span,
+        /// The exact span of the defined identifier token in `def name():`.
+        name_span: Span,
         body: Vec<Stmt>,
     },
 }
@@ -66,6 +74,8 @@ pub enum RuleEntry {
 pub struct Rule {
     pub name: String,
     pub span: Span,
+    /// The exact span of the rule name inside its string literal.
+    pub name_span: Span,
     pub disabled: bool,
     pub event: Event,
     pub conditions: Vec<Expr>,

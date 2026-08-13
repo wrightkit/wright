@@ -66,37 +66,55 @@ impl<'a> Builder<'a> {
         for declaration in &self.protocol.declarations {
             match declaration {
                 Declaration::GlobalVariable {
-                    name, index, span, ..
+                    name,
+                    index,
+                    span,
+                    name_span,
+                    ..
                 } => {
                     let span = self.span(*span)?;
+                    let name_span = self.span(*name_span)?;
                     let id = self.target.globals.push(wright_ir::hir::GlobalVar {
                         name: name.clone(),
                         index: *index,
                         span,
+                        name_span,
                         initializer: None,
                     });
                     self.globals.insert(name.clone(), id);
                 }
                 Declaration::PlayerVariable {
-                    name, index, span, ..
+                    name,
+                    index,
+                    span,
+                    name_span,
+                    ..
                 } => {
                     let span = self.span(*span)?;
+                    let name_span = self.span(*name_span)?;
                     let id = self.target.players.push(wright_ir::hir::PlayerVar {
                         name: name.clone(),
                         index: *index,
                         span,
+                        name_span,
                         initializer: None,
                     });
                     self.players.insert(name.clone(), id);
                 }
                 Declaration::Subroutine {
-                    name, index, span, ..
+                    name,
+                    index,
+                    span,
+                    name_span,
+                    ..
                 } => {
                     let span = self.span(*span)?;
+                    let name_span = self.span(*name_span)?;
                     let id = self.target.subroutines.push(wright_ir::hir::Subroutine {
                         name: name.clone(),
                         index: *index,
                         decl_span: span,
+                        decl_name_span: name_span,
                         body: None,
                     });
                     self.subroutines.insert(name.clone(), id);
@@ -128,7 +146,11 @@ impl<'a> Builder<'a> {
         // Phase B: merge subroutine definitions into the subroutine table.
         for entry in &self.protocol.rules {
             if let RuleEntry::SubroutineDef {
-                name, span, body, ..
+                name,
+                span,
+                name_span,
+                body,
+                ..
             } = entry
             {
                 let id = match self.subroutines.get(name) {
@@ -138,6 +160,7 @@ impl<'a> Builder<'a> {
                             name: name.clone(),
                             index: None,
                             decl_span: None,
+                            decl_name_span: None,
                             body: None,
                         });
                         self.subroutines.insert(name.clone(), id);
@@ -146,12 +169,17 @@ impl<'a> Builder<'a> {
                 };
                 let statements = self.convert_stmts(body)?;
                 let span = self.span(*span)?;
+                let name_span = self.span(*name_span)?;
                 let subroutine = self
                     .target
                     .subroutines
                     .get_mut(id)
                     .expect("subroutine created above");
-                subroutine.body = Some(wright_ir::hir::SubroutineBody { span, statements });
+                subroutine.body = Some(wright_ir::hir::SubroutineBody {
+                    span,
+                    name_span,
+                    statements,
+                });
             }
         }
 
@@ -224,6 +252,7 @@ impl<'a> Builder<'a> {
                 self.target.rules.push(wright_ir::hir::Rule {
                     name: rule.name.clone(),
                     span: self.span(rule.span)?,
+                    name_span: self.span(rule.name_span)?,
                     disabled: rule.disabled,
                     event,
                     conditions,
@@ -287,6 +316,18 @@ impl<'a> Builder<'a> {
                 body,
                 ..
             } => {
+                let variable_span = match variable.as_ref() {
+                    Expr::GlobalVar { span, .. } => self.span(*span)?,
+                    other => {
+                        return Err(unresolved(
+                            format!(
+                                "for-loop variable must be a global variable, got '{}'",
+                                other.kind_name()
+                            ),
+                            span,
+                        ));
+                    }
+                };
                 let variable = match variable.as_ref() {
                     Expr::GlobalVar { name, .. } => *self
                         .globals
@@ -309,6 +350,7 @@ impl<'a> Builder<'a> {
                     iterable,
                     body,
                     span,
+                    variable_span,
                 }
             }
             Stmt::While {
@@ -327,7 +369,21 @@ impl<'a> Builder<'a> {
                     .subroutines
                     .get(name)
                     .ok_or_else(|| unresolved(format!("subroutine '{name}'"), span))?;
-                wright_ir::hir::Stmt::CallSubroutine { subroutine, span }
+                // The callee identifier starts the call statement and runs for
+                // exactly the name's character count (columns are char-based).
+                let callee_span = span.map(|span| {
+                    let end_col = span.start.col + name.chars().count() as u32;
+                    wright_ir::source::Span::new(
+                        span.file,
+                        span.start,
+                        wright_ir::source::Position::new(span.start.line, end_col),
+                    )
+                });
+                wright_ir::hir::Stmt::CallSubroutine {
+                    subroutine,
+                    span,
+                    callee_span,
+                }
             }
             Stmt::Pass { .. } => wright_ir::hir::Stmt::Pass { span },
         };

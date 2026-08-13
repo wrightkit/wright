@@ -98,6 +98,7 @@ fn render_action(program: &Program, id: super::ActionId, out: &mut String, level
             variable,
             value,
             span,
+            ..
         } => {
             out.push_str(&format!("{}setGlobalVariable ", indent(level)));
             render_variable_ref(program, *variable, "global", out);
@@ -110,6 +111,7 @@ fn render_action(program: &Program, id: super::ActionId, out: &mut String, level
             op,
             value,
             span,
+            ..
         } => {
             out.push_str(&format!("{}modifyGlobalVariable ", indent(level)));
             render_variable_ref(program, *variable, "global", out);
@@ -122,6 +124,7 @@ fn render_action(program: &Program, id: super::ActionId, out: &mut String, level
             variable,
             value,
             span,
+            ..
         } => {
             out.push_str(&format!("{}setPlayerVariable ", indent(level)));
             render_value(program, *player, out);
@@ -140,6 +143,7 @@ fn render_action(program: &Program, id: super::ActionId, out: &mut String, level
             op,
             value,
             span,
+            ..
         } => {
             out.push_str(&format!("{}modifyPlayerVariable ", indent(level)));
             render_value(program, *player, out);
@@ -152,7 +156,9 @@ fn render_action(program: &Program, id: super::ActionId, out: &mut String, level
             render_value(program, *value, out);
             out.push_str(&format!("{}\n", span_suffix(*span)));
         }
-        Action::CallSubroutine { subroutine, span } => {
+        Action::CallSubroutine {
+            subroutine, span, ..
+        } => {
             let name = program
                 .subroutines
                 .get(*subroutine)
@@ -209,6 +215,7 @@ fn render_action(program: &Program, id: super::ActionId, out: &mut String, level
             step,
             body,
             span,
+            ..
         } => {
             out.push_str(&format!("{}forGlobalVariable ", indent(level)));
             render_variable_ref(program, *variable, "global", out);

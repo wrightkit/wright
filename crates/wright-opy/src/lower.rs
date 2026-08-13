@@ -104,12 +104,14 @@ pub fn lower(
                 name,
                 index,
                 span,
+                name_span,
                 initializer,
             } => {
                 declarations.push(Declaration::GlobalVariable {
                     name: name.clone(),
                     index: *index,
                     span: Some(span.into()),
+                    name_span: Some(name_span.into()),
                     initializer: lowerer.initializer(initializer.as_ref()),
                 });
             }
@@ -117,20 +119,27 @@ pub fn lower(
                 name,
                 index,
                 span,
+                name_span,
                 initializer,
             } => {
                 declarations.push(Declaration::PlayerVariable {
                     name: name.clone(),
                     index: *index,
                     span: Some(span.into()),
+                    name_span: Some(name_span.into()),
                     initializer: lowerer.initializer(initializer.as_ref()),
                 });
             }
-            Decl::Subroutine { name, span } => {
+            Decl::Subroutine {
+                name,
+                span,
+                name_span,
+            } => {
                 declarations.push(Declaration::Subroutine {
                     name: name.clone(),
                     index: None,
                     span: Some(span.into()),
+                    name_span: Some(name_span.into()),
                 });
             }
             Decl::Enum { .. } => {
@@ -158,11 +167,17 @@ pub fn lower(
     for entry in &program.rules {
         match entry {
             CstRuleEntry::Rule(rule) => rules.push(RuleEntry::Rule(lowerer.lower_rule(rule))),
-            CstRuleEntry::SubroutineDef { name, span, body } => {
+            CstRuleEntry::SubroutineDef {
+                name,
+                span,
+                name_span,
+                body,
+            } => {
                 rules.push(RuleEntry::SubroutineDef {
                     kind: "subroutineDef".to_string(),
                     name: name.clone(),
                     span: Some(span.into()),
+                    name_span: Some(name_span.into()),
                     body: lowerer.lower_block(body, &[]),
                 });
             }
@@ -237,6 +252,7 @@ impl Lowerer {
         Rule {
             name: rule.name.clone(),
             span: Some(rule.span.into()),
+            name_span: Some(rule.name_span.into()),
             disabled: rule.disabled,
             event: Event {
                 name: rule.event.name.clone(),
