@@ -37,6 +37,9 @@ pub struct Program {
     /// The source-file registry, copied from the source HIR so spans remain
     /// resolvable for diagnostics.
     pub files: Arena<SourceFile>,
+    /// The custom-game-settings carrier, copied inertly from the source HIR
+    /// (emitted verbatim, never lowered, #86).
+    pub settings: Option<super::settings::Settings>,
     pub global_variables: Arena<WorkshopVariable>,
     pub player_variables: Arena<WorkshopVariable>,
     pub subroutines: Arena<WorkshopSubroutine>,
@@ -49,6 +52,7 @@ impl Default for Program {
     fn default() -> Self {
         Program {
             files: Arena::new(),
+            settings: None,
             global_variables: Arena::new(),
             player_variables: Arena::new(),
             subroutines: Arena::new(),

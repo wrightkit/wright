@@ -69,6 +69,9 @@ impl<'a> Lowerer<'a> {
         for file in self.hir.files.iter() {
             self.target.files.push(SourceFile::new(file.path.clone()));
         }
+        // The settings carrier is copied inertly (file ids align 1:1); the
+        // settings tree is carried to emission, never lowered (#86).
+        self.target.settings = self.hir.settings.clone();
 
         // Variable, player, and subroutine tables in HIR order.
         for id in range_ids::<hir::GlobalVar>(self.hir.globals.len()) {

@@ -6,6 +6,7 @@
 //! * [`ids`] — strongly typed IDs for every stable identity;
 //! * [`arena`] — bounds-checked arena storage for nodes;
 //! * [`source`] — the source-file model and spans;
+//! * [`settings`] — the neutral custom-game-settings carrier and table;
 //! * [`hir`] — the internal Opy HIR model (frontend semantics);
 //! * [`wir`] — the Workshop IR model (workshop program structure);
 //! * [`lower`] — the HIR → Workshop IR lowering boundary;
@@ -20,5 +21,6 @@ pub mod error;
 pub mod hir;
 pub mod ids;
 pub mod lower;
+pub mod settings;
 pub mod source;
 pub mod wir;

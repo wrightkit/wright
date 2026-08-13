@@ -53,6 +53,9 @@ pub struct Program {
     pub rules: Arena<Rule>,
     pub stmts: Arena<Stmt>,
     pub exprs: Arena<Expr>,
+    /// The custom-game-settings carrier, copied through from the protocol
+    /// (inert in the internal model, #86).
+    pub settings: Option<super::settings::Settings>,
 }
 
 impl Default for Program {
@@ -67,6 +70,7 @@ impl Default for Program {
             rules: Arena::new(),
             stmts: Arena::new(),
             exprs: Arena::new(),
+            settings: None,
         }
     }
 }
