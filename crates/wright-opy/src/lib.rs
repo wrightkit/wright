@@ -17,6 +17,7 @@ pub mod lexer;
 pub mod lower;
 pub mod parser;
 pub mod preprocess;
+pub mod settings;
 
 use std::path::Path;
 
@@ -100,9 +101,23 @@ pub fn compile_with_overlay_outcome(
             files,
         };
     }
-    let program = parsed
+    let mut program = parsed
         .program
         .expect("program present when errors are empty");
+    // Parse the extracted settings block into the CST; errors flow through
+    // the same error path (registry retained for span mapping, #86).
+    if let Some(block) = &preprocessed.settings {
+        match settings::parse_block(block) {
+            Ok(parsed_settings) => program.settings = Some(parsed_settings),
+            Err(error) => {
+                return CompileOutcome {
+                    hir: None,
+                    error: Some(error),
+                    files,
+                };
+            }
+        }
+    }
     let defines = preprocessed
         .defines
         .iter()

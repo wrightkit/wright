@@ -116,6 +116,7 @@ impl Parser<'_> {
         Program {
             declarations,
             rules,
+            settings: None,
         }
     }
 

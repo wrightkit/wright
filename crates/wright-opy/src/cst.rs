@@ -13,6 +13,52 @@ use crate::diag::Span;
 pub struct Program {
     pub declarations: Vec<Decl>,
     pub rules: Vec<RuleEntry>,
+    /// The parsed top-of-file `settings { ... }` block, when present (#86).
+    pub settings: Option<Settings>,
+}
+
+/// A parsed `settings { ... }` block (JSONC, #86).
+#[derive(Debug, Clone)]
+pub struct Settings {
+    pub span: Span,
+    pub children: Vec<SettingsNode>,
+}
+
+/// One member of a settings group.
+#[derive(Debug, Clone)]
+pub enum SettingsNode {
+    Group {
+        name: String,
+        children: Vec<SettingsNode>,
+        span: Span,
+    },
+    Number {
+        name: String,
+        value: f64,
+        span: Span,
+    },
+    Bool {
+        name: String,
+        value: bool,
+        span: Span,
+    },
+    String {
+        name: String,
+        value: String,
+        span: Span,
+    },
+    List {
+        name: String,
+        elements: Vec<SettingsListElement>,
+        span: Span,
+    },
+}
+
+/// One element of a settings list.
+#[derive(Debug, Clone)]
+pub struct SettingsListElement {
+    pub value: String,
+    pub span: Span,
 }
 
 /// A program-scope declaration.

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::diag::{FrontendError, FrontendResult, Span};
 use crate::lexer::{LexInput, Token, TokenKind, lex};
+use crate::settings::SettingsBlock;
 
 /// A recorded preprocessing define (HIR provenance).
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +32,8 @@ pub struct Preprocessed {
     pub tokens: Vec<Token>,
     /// The recorded defines in definition order.
     pub defines: Vec<DefineRecord>,
+    /// The top-of-file `settings { ... }` block, when present (#86).
+    pub settings: Option<SettingsBlock>,
 }
 
 /// The output file registry: the main file only (reference convention).
@@ -90,10 +93,32 @@ pub fn preprocess_with_overlay_outcome(
         macros: Vec::new(),
         defines: Vec::new(),
     };
-    let mut tokens = match lex(LexInput {
-        file_id: 0,
-        text: main_text,
-    }) {
+    // The top-of-file settings block is extracted before lexing and blanked
+    // out of the lexed text, so the lexer never sees the block's braces
+    // (scoped settings lexing, #86).
+    let settings = match crate::settings::find_blocks(main_text, 0) {
+        Ok(mut blocks) => blocks.pop(),
+        Err(error) => {
+            return PreprocessOutcome {
+                result: Err(error),
+                files: pre.files,
+            };
+        }
+    };
+    let tokens = match &settings {
+        Some(block) => {
+            let sanitized = crate::settings::sanitize_for_lex(main_text, block);
+            lex(LexInput {
+                file_id: 0,
+                text: &sanitized,
+            })
+        }
+        None => lex(LexInput {
+            file_id: 0,
+            text: main_text,
+        }),
+    };
+    let mut tokens = match tokens {
         Ok(tokens) => tokens,
         Err(error) => {
             return PreprocessOutcome {
@@ -114,6 +139,7 @@ pub fn preprocess_with_overlay_outcome(
                 Preprocessed {
                     tokens,
                     defines: pre.defines,
+                    settings,
                 },
                 pre.files.clone(),
             ));
@@ -264,6 +290,20 @@ impl Preprocessor {
             path: include.to_string(),
         });
         self.include_stack.push(identity);
+        // Settings blocks are only supported in the main file; an included
+        // file's block is rejected at its keyword span (file id of the
+        // included file, #86).
+        match crate::settings::find_blocks(&text, file_id) {
+            Err(error) => return Err(error),
+            Ok(blocks) if !blocks.is_empty() => {
+                return Err(FrontendError::at(
+                    "settings-placement",
+                    "settings blocks are only supported in the main file".to_string(),
+                    blocks[0].keyword_span,
+                ));
+            }
+            Ok(_) => {}
+        }
         let mut included = lex(LexInput {
             file_id,
             text: &text,
@@ -631,5 +671,52 @@ mod tests {
     fn unsupported_directive_is_structured() {
         let error = preprocess("#!frobnicate\n", "main.opy", Path::new(".")).unwrap_err();
         assert_eq!(error.code, "unsupported-directive");
+    }
+
+    #[test]
+    fn settings_block_is_extracted_before_lexing() {
+        let (pre, _) = preprocess(
+            "settings {\n    \"gamemodes\": {}\n}\nrule \"r\":\n    pass\n",
+            "main.opy",
+            Path::new("."),
+        )
+        .unwrap();
+        let block = pre.settings.expect("settings block extracted");
+        assert!(block.text.contains("gamemodes"));
+        // The block never enters the token stream.
+        assert!(
+            !pre.tokens.iter().any(|t| t.text.contains("gamemodes")),
+            "settings content must not be lexed"
+        );
+    }
+
+    #[test]
+    fn settings_in_include_is_rejected() {
+        let dir = std::env::temp_dir().join(format!(
+            "wright-opy-settings-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("shared.opy"), "settings {\n    \"gamemodes\": {}\n}\n").unwrap();
+        let main = format!("#!include \"shared.opy\"\nrule \"r\":\n    pass\n");
+        let error = preprocess(&main, "main.opy", &dir).unwrap_err();
+        assert_eq!(error.code, "settings-placement");
+        assert_eq!(error.span.unwrap().file, 1, "the span names the included file");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dict_literal_braces_still_lex_error() {
+        // Scoped settings lexing must not mask expression-level braces:
+        // meipocalypse-style dict literals keep failing as a lex-error.
+        let error = preprocess(
+            "rule \"r\":\n    money += {\n        Mei.GENERIC: 10,\n    }\n",
+            "main.opy",
+            Path::new("."),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "lex-error");
+        assert!(error.message.contains("unexpected character '{'"));
+        assert_eq!(error.span.unwrap().start.line, 2);
     }
 }
