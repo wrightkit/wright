@@ -13,12 +13,20 @@ fn arithmetic_program() -> wir::Program {
         .files
         .push(wright_ir::source::SourceFile::new("test.opy"));
 
-    let one = program
-        .values
-        .push(ValueNode::new(Value::Number(1.0), None));
-    let two_literal = program
-        .values
-        .push(ValueNode::new(Value::Number(2.0), None));
+    let one = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 1.0,
+            text: "1".to_string(),
+        },
+        None,
+    ));
+    let two_literal = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 2.0,
+            text: "2".to_string(),
+        },
+        None,
+    ));
     let array = program
         .values
         .push(ValueNode::new(Value::Array(vec![one, two_literal]), None));
@@ -37,12 +45,20 @@ fn arithmetic_program() -> wir::Program {
         initializer: None,
     });
 
-    let two = program
-        .values
-        .push(ValueNode::new(Value::Number(2.0), None));
-    let three = program
-        .values
-        .push(ValueNode::new(Value::Number(3.0), None));
+    let two = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 2.0,
+            text: "2".to_string(),
+        },
+        None,
+    ));
+    let three = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 3.0,
+            text: "3".to_string(),
+        },
+        None,
+    ));
     let multiply = program.values.push(ValueNode::new(
         Value::Call {
             name: "*".to_string(),
@@ -126,7 +142,7 @@ fn compat_profile_folds_constants_with_metrics() {
             );
             let right = program.values.get(args[1]).unwrap();
             match right.value {
-                Value::Number(n) => assert_eq!(n, 6.0, "2 * 3 folds to 6"),
+                Value::Number { value: n, .. } => assert_eq!(n, 6.0, "2 * 3 folds to 6"),
                 ref other => panic!("right side should be the literal 6, got {other:?}"),
             }
         }

@@ -193,7 +193,7 @@ fn check_value(program: &Program, id: super::ValueId) -> Result<(), IrError> {
                 check_value(program, *arg)?;
             }
         }
-        Value::Number(_)
+        Value::Number { .. }
         | Value::String(_)
         | Value::Bool(_)
         | Value::Null

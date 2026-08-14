@@ -116,7 +116,7 @@ impl Parser<'_> {
                     self.pos += 1;
                     self.expect(TokenKind::Colon, "expected ':' after 'global'")?;
                     while let Some(Token {
-                        kind: TokenKind::Number(_),
+                        kind: TokenKind::Number { .. },
                         ..
                     }) = self.peek()
                     {
@@ -136,7 +136,7 @@ impl Parser<'_> {
                     self.pos += 1;
                     self.expect(TokenKind::Colon, "expected ':' after 'player'")?;
                     while let Some(Token {
-                        kind: TokenKind::Number(_),
+                        kind: TokenKind::Number { .. },
                         ..
                     }) = self.peek()
                     {
@@ -166,7 +166,7 @@ impl Parser<'_> {
     fn variable_line(&mut self) -> Result<wir::WorkshopVariable> {
         let (index, span) = match self.next() {
             Some(Token {
-                kind: TokenKind::Number(value),
+                kind: TokenKind::Number { value, .. },
                 start,
                 end,
             }) => (
@@ -198,13 +198,13 @@ impl Parser<'_> {
         self.expect_word("subroutines")?;
         self.expect(TokenKind::LBrace, "expected '{' after 'subroutines'")?;
         while let Some(Token {
-            kind: TokenKind::Number(_),
+            kind: TokenKind::Number { .. },
             ..
         }) = self.peek()
         {
             let index = match self.next() {
                 Some(Token {
-                    kind: TokenKind::Number(value),
+                    kind: TokenKind::Number { value, .. },
                     ..
                 }) => value as u32,
                 _ => unreachable!(),
@@ -763,7 +763,7 @@ impl Parser<'_> {
     fn primary(&mut self) -> Result<wir::ValueId> {
         match self.peek() {
             Some(Token {
-                kind: TokenKind::Number(value),
+                kind: TokenKind::Number { value, text },
                 start,
                 end,
             }) => {
@@ -772,7 +772,7 @@ impl Parser<'_> {
                 Ok(self
                     .target
                     .values
-                    .push(ValueNode::new(Value::Number(value), span)))
+                    .push(ValueNode::new(Value::Number { value, text }, span)))
             }
             Some(Token {
                 kind: TokenKind::Op(op),
@@ -780,17 +780,20 @@ impl Parser<'_> {
                 ..
             }) if op == "-" => {
                 if let Some(Token {
-                    kind: TokenKind::Number(value),
+                    kind: TokenKind::Number { value, text },
                     end: number_end,
                     ..
                 }) = self.peek_at(1)
                 {
                     let span = Some(Span::new(self.file(), start, number_end));
                     self.pos += 2;
-                    Ok(self
-                        .target
-                        .values
-                        .push(ValueNode::new(Value::Number(-value), span)))
+                    Ok(self.target.values.push(ValueNode::new(
+                        Value::Number {
+                            value: -value,
+                            text: format!("-{text}"),
+                        },
+                        span,
+                    )))
                 } else {
                     Err(self.malformed("expected a number after '-'", &self.peek().unwrap()))
                 }
@@ -1133,7 +1136,7 @@ impl Parser<'_> {
                     self.pos += 1;
                 }
                 Some(Token {
-                    kind: TokenKind::Number(value),
+                    kind: TokenKind::Number { value, .. },
                     ..
                 }) => {
                     parts.push(value.to_string());

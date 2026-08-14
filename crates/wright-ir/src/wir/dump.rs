@@ -278,7 +278,7 @@ fn render_value(program: &Program, id: super::ValueId, out: &mut String) {
     };
     let value = &node.value;
     match value {
-        Value::Number(value) => out.push_str(&format_number(*value)),
+        Value::Number { value, .. } => out.push_str(&format_number(*value)),
         Value::String(value) => out.push_str(&format!("{:?}", value)),
         Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
         Value::Null => out.push_str("null"),

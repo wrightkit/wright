@@ -105,11 +105,17 @@ fn equivalence_detects_semantic_differences() {
         .push(wright_ir::source::SourceFile::new("workshop.txt"));
 
     let value_a = a.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number(1.0),
+        wright_ir::wir::Value::Number {
+            value: 1.0,
+            text: "1".to_string(),
+        },
         None,
     ));
     let value_b = b.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number(2.0),
+        wright_ir::wir::Value::Number {
+            value: 2.0,
+            text: "2".to_string(),
+        },
         None,
     ));
     a.actions.push(wright_ir::wir::Action::Debug {

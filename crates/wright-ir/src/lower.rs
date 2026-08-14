@@ -599,14 +599,20 @@ impl<'a> Lowerer<'a> {
                 *span,
             ));
         }
-        let zero = self
-            .target
-            .values
-            .push(ValueNode::new(Value::Number(0.0), None));
-        let one = self
-            .target
-            .values
-            .push(ValueNode::new(Value::Number(1.0), None));
+        let zero = self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: 0.0,
+                text: "0".to_string(),
+            },
+            None,
+        ));
+        let one = self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: 1.0,
+                text: "1".to_string(),
+            },
+            None,
+        ));
         match args.as_slice() {
             [stop] => Ok((zero, self.lower_value(*stop)?, one)),
             [start, stop] => Ok((self.lower_value(*start)?, self.lower_value(*stop)?, one)),
@@ -641,7 +647,13 @@ impl<'a> Lowerer<'a> {
             .ok_or_else(|| dangling("expression", id))?;
         let span = expression.span();
         let value = match expression {
-            Expr::Number { value, .. } => ValueNode::new(Value::Number(*value), span),
+            Expr::Number { value, text, .. } => ValueNode::new(
+                Value::Number {
+                    value: *value,
+                    text: text.clone(),
+                },
+                span,
+            ),
             Expr::String { value, .. } => ValueNode::new(Value::String(value.clone()), span),
             Expr::Bool { value, .. } => ValueNode::new(Value::Bool(*value), span),
             Expr::Null { .. } => ValueNode::new(Value::Null, span),

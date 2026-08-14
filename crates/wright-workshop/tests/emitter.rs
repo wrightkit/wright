@@ -113,7 +113,10 @@ fn debug_actions_emit_hud_text() {
         .files
         .push(wright_ir::source::SourceFile::new("workshop.txt"));
     let value = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number(1.0),
+        wright_ir::wir::Value::Number {
+            value: 1.0,
+            text: "1".to_string(),
+        },
         None,
     ));
     let debug = program

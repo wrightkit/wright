@@ -135,7 +135,12 @@ pub struct ValueNode {
 /// A workshop value (expression).
 #[derive(Debug, Clone)]
 pub enum Value {
-    Number(f64),
+    /// A numeric literal with its source spelling (`5`, `0.0`, `-22.05`);
+    /// computed values (constant folding) carry the formatted spelling.
+    Number {
+        value: f64,
+        text: String,
+    },
     String(String),
     Bool(bool),
     Null,

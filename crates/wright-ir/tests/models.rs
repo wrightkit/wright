@@ -148,7 +148,10 @@ fn build_wir_program() -> WirProgram {
         initializer: None,
     });
     let value = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number(5.0),
+        wright_ir::wir::Value::Number {
+            value: 5.0,
+            text: "5".to_string(),
+        },
         None,
     ));
     let action = program.actions.push(Action::SetGlobalVariable {

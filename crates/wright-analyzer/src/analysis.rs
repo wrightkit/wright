@@ -128,7 +128,9 @@ fn body_has_min_wait(program: &wir::Program, actions: &[ActionId]) -> bool {
 fn wait_duration(program: &wir::Program, args: &[ValueId]) -> Option<f64> {
     let first = program.values.get(*args.first()?)?;
     match &first.value {
-        Value::Number(duration) => Some(*duration),
+        Value::Number {
+            value: duration, ..
+        } => Some(*duration),
         _ => None,
     }
 }
@@ -331,7 +333,7 @@ fn visit_value(program: &wir::Program, id: ValueId, f: &mut impl FnMut(ValueId))
                 visit_value(program, *arg, f);
             }
         }
-        Value::Number(_)
+        Value::Number { .. }
         | Value::String(_)
         | Value::Bool(_)
         | Value::Null
@@ -348,7 +350,7 @@ fn structurally_equal(program: &wir::Program, a: ValueId, b: ValueId) -> bool {
         return false;
     };
     match (&na.value, &nb.value) {
-        (Value::Number(x), Value::Number(y)) => x == y,
+        (Value::Number { value: x, .. }, Value::Number { value: y, .. }) => x == y,
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Null, Value::Null) => true,

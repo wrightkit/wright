@@ -508,7 +508,7 @@ impl<'a> Builder<'a> {
                 }
                 Ok(())
             }
-            Value::Number(_)
+            Value::Number { .. }
             | Value::String(_)
             | Value::Bool(_)
             | Value::Null

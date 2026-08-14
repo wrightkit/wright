@@ -31,15 +31,27 @@ fn build_surface_program() -> wir::Program {
         initializer: None,
     });
 
-    let zero = program
-        .values
-        .push(ValueNode::new(Value::Number(0.0), Some(s(3, 24, 25))));
-    let stop = program
-        .values
-        .push(ValueNode::new(Value::Number(3.0), Some(s(3, 27, 28))));
-    let one = program
-        .values
-        .push(ValueNode::new(Value::Number(1.0), Some(s(3, 30, 31))));
+    let zero = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 0.0,
+            text: "0".to_string(),
+        },
+        Some(s(3, 24, 25)),
+    ));
+    let stop = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 3.0,
+            text: "3".to_string(),
+        },
+        Some(s(3, 27, 28)),
+    ));
+    let one = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 1.0,
+            text: "1".to_string(),
+        },
+        Some(s(3, 30, 31)),
+    ));
     let index_ref = program.values.push(ValueNode::new(
         Value::GlobalVariable(index),
         Some(s(4, 18, 23)),
@@ -80,9 +92,13 @@ fn build_surface_program() -> wir::Program {
         Some(s(6, 14, 24)),
     ));
 
-    let debug_value = program
-        .values
-        .push(ValueNode::new(Value::Number(1.0), Some(s(7, 11, 12))));
+    let debug_value = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 1.0,
+            text: "1".to_string(),
+        },
+        Some(s(7, 11, 12)),
+    ));
     let debug = program.actions.push(Action::Debug {
         value: debug_value,
         span: Some(s(7, 9, 13)),

@@ -71,10 +71,10 @@ fn fold_one(program: &wir::Program, value: &Value) -> Option<Value> {
                 let right = number(program, args[1]);
                 if let (Some(left), Some(right)) = (left, right) {
                     let folded = match name.as_str() {
-                        "+" | "add" => Some(Value::Number(left + right)),
-                        "-" | "subtract" => Some(Value::Number(left - right)),
-                        "*" | "multiply" => Some(Value::Number(left * right)),
-                        "/" | "divide" => Some(Value::Number(left / right)),
+                        "+" | "add" => Some(folded_number(left + right)),
+                        "-" | "subtract" => Some(folded_number(left - right)),
+                        "*" | "multiply" => Some(folded_number(left * right)),
+                        "/" | "divide" => Some(folded_number(left / right)),
                         "==" => Some(Value::Bool(left == right)),
                         "!=" => Some(Value::Bool(left != right)),
                         "<" => Some(Value::Bool(left < right)),
@@ -113,9 +113,9 @@ fn fold_one(program: &wir::Program, value: &Value) -> Option<Value> {
             if args.len() == 1 {
                 if let Some(operand) = number(program, args[0]) {
                     match name.as_str() {
-                        "-" => return Some(Value::Number(-operand)),
-                        "sqrt" => return Some(Value::Number(operand.sqrt())),
-                        "abs" | "absoluteValue" => return Some(Value::Number(operand.abs())),
+                        "-" => return Some(folded_number(-operand)),
+                        "sqrt" => return Some(folded_number(operand.sqrt())),
+                        "abs" | "absoluteValue" => return Some(folded_number(operand.abs())),
                         _ => {}
                     }
                 }
@@ -150,10 +150,19 @@ fn fold_one(program: &wir::Program, value: &Value) -> Option<Value> {
     }
 }
 
+/// A folded numeric literal carrying the formatted spelling (the reference
+/// emits computed values with the same formatting as literal integers).
+fn folded_number(value: f64) -> Value {
+    Value::Number {
+        value,
+        text: wright_ir::format::format_number(value),
+    }
+}
+
 /// The numeric value of a node, if it is a number literal.
 fn number(program: &wir::Program, id: wright_ir::ids::Id<wir::ValueNode>) -> Option<f64> {
     match program.values.get(id)?.value {
-        Value::Number(value) => Some(value),
+        Value::Number { value, .. } => Some(value),
         _ => None,
     }
 }

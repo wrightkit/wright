@@ -13,7 +13,11 @@ pub enum TokenKind {
     /// A run of identifier characters (`[A-Za-z_][A-Za-z0-9_]*`).
     Word(String),
     /// A numeric literal.
-    Number(f64),
+    /// A numeric literal with its source spelling.
+    Number {
+        value: f64,
+        text: String,
+    },
     /// A string literal (content, unescaped).
     String(String),
     /// An operator token: `== != < <= > >= + - * / %`.
@@ -205,7 +209,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
                     position: start,
                 })?;
                 tokens.push(Token {
-                    kind: TokenKind::Number(value),
+                    kind: TokenKind::Number { value, text },
                     start,
                     end: pos!(),
                 });

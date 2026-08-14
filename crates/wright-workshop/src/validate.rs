@@ -170,7 +170,7 @@ fn validate_value(
         wir::Value::PlayerVariable { player, .. } => {
             validate_value(program, catalog, *player, errors);
         }
-        wir::Value::Number(_)
+        wir::Value::Number { .. }
         | wir::Value::String(_)
         | wir::Value::Bool(_)
         | wir::Value::Null
