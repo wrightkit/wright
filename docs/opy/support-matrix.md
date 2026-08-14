@@ -1,17 +1,15 @@
-# M7 Native `.opy` Frontend Support Matrix
+# Native .opy Frontend Support Matrix
 
-Status: reviewable contract for milestone M7 (issue #42)
+Status: accepted baseline — living .opy frontend support matrix
 Scope: the `.opy` source-language surface Wright's native frontend supports,
-with the production/corpus evidence for each feature and the explicitly
-deferred constructs
+with production/corpus evidence for each feature and explicitly deferred
+constructs
 
-This document is the audit deliverable of [#42]. Every claimed feature is
-backed by the compatibility corpus (`compatibility/fixtures/**/source.opy`
-and the pinned adapter HIR fixtures) or marked as investigation. The
-architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy HIR`
-(see [`ARCHITECTURE.md`](../../ARCHITECTURE.md) and `crates/wright-opy`).
-
-[#42]: https://github.com/wrightkit/wright/issues/42
+Every claimed feature is backed by the compatibility corpus
+(`compatibility/fixtures/**/source.opy` and pinned adapter HIR fixtures) or
+marked as investigation. The architecture is `lexer → preprocess → CST/parser →
+resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
+`crates/wright-opy`).
 
 ## Evidence sources
 
@@ -19,7 +17,7 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
 | --- | --- |
 | `compatibility/fixtures/{basic-rule,control-flow,declarations-rules,expressions-values,preprocessing,diagnostics}/source.opy` | Synthetic corpus surface |
 | `compatibility/fixtures/real-world/overpy-cake/source.opy` | Real-world surface (arrays, macros, effects) |
-| `adapter/fixtures/**/*.json` | The pinned OverPy 9.7.10 HIR reference for each source |
+| `adapter/fixtures/**/*.json` | Pinned OverPy 9.7.10 HIR reference for each source |
 | `crates/wright-opy/tests/differential.rs` | Native-vs-reference parity suite (machine-readable report at `target/wright-differential-report.json`) |
 
 ## Supported surface (corpus-evidenced)
@@ -48,7 +46,7 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
   → `1`), matching the reference.
 - `macro name(params):` statement bodies with `MacroParam` references.
 
-### Preprocessing (issue #44)
+### Preprocessing
 - `#!include "file.opy"` — root-relative include resolution, cycle detection
   (`include-cycle`), missing-file diagnostics (`include-not-found`), included
   files registered in the HIR file registry (reference behavior).
@@ -67,7 +65,7 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
 - Statements: expression statements, `=` and augmented assignment,
   `if`/`elif`/`else`, `for x in range(...)`, `while`, `pass`.
 
-### Expressions and resolution (issue #45)
+### Expressions and resolution
 - Literals, arrays `[...]`, parenthesized expressions.
 - Calls (`range`, `len`, `abs`, `sqrt`, `debug`, `print`, `wait`, `createBeam`,
   `playEffect`, `getAllPlayers`, `disableInspector`, …).
@@ -89,14 +87,14 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
   accesses are structured, source-located semantic errors
   (`unknown-identifier`, `enum-type-without-member`, `unsupported-member`).
 
-### Diagnostics (issue #43)
+### Diagnostics
 - Malformed input produces structured `FrontendError`s (stable codes like
   `parse-error`, `lex-error`) with 1-based source spans; the parser recovers
   at statement boundaries to report multiple useful errors.
 - Native diagnostics map into the shared `wright-result/v1` contract (stage
   `frontend`, severity `error`).
 
-### Settings (issue #86)
+### Settings
 - Top-of-file `settings { ... }` custom-game-settings blocks (JSONC: quoted
   keys, `"`/`'` strings with escapes, numbers, `true`/`false`, string lists,
   nested groups, trailing commas) — recognized and consumed before lexing
@@ -116,33 +114,23 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
   Workshop parser (a `.ws` decompiler is a non-goal); the settings-free
   round-trip guarantee is unchanged.
 
-## Deferred / out of scope (v0.3)
+## Deferred / out of scope
 
 - `.opy` reconstruction from Workshop text; decompiler architecture.
 - Macro/`#!define` values that require runtime evaluation (no scripting).
 - Additional OverPy enum spellings beyond the corpus table (a data change).
 - Rule `disabled` markers (no corpus evidence for the source annotation).
 - Expression-level `in`/`not in` membership operators — rejected at parsing
-  (native `parse-error` on `not in` in broken-weapons, `broken_weapons.opy:107`;
-  `for ... in` headers are supported).
+  (`for ... in` headers are supported).
 - Backslash line continuation (`\` at end of line inside string
-  concatenations / macro bodies) — rejected at lexing (native `lex-error`
-  `unexpected character '\'` on ow1-emulator and 6v6-adjustments); the pinned
-  oracle 9.7.10 compiles it (its failures on those fixtures occur later, on
-  unrelated constructs).
-- Postfix increment/decrement (`++`/`--`) — rejected at parsing (native
-  `parse-error` `expected an expression but found '+'` on `++` in
-  overpy-cronch, `cronch.opy:32`; `--` occurs in overpy-meipocalypse but
-  is never the first failure (the dict-literal lex-error preempts it)).
-- Dict literals (`{...}`) — rejected at lexing (native `lex-error`
-  `unexpected character '{'` on meipocalypse, `meipocalypse.opy:223`).
-- Triple-quoted strings / docstrings (`"""`) — rejected at lexing (native
-  `lex-error`, `unterminated string literal`, on zencopter, `heli.opy:38`);
-  the pinned oracle 9.7.10 also fails on this construct (recorded reference
-  limitation).
+  concatenations / macro bodies) — rejected at lexing.
+- Postfix increment/decrement (`++`/`--`) — rejected at parsing.
+- Dict literals (`{...}`) — rejected at lexing.
+- Triple-quoted strings / docstrings (`"""`) — rejected at lexing.
 - Subroutine parameters, default `@Team`/`@Slot` overrides, named arguments.
 - Full OverPy formatting semantics: `debug()`/`print()` emission
-  (`Create HUD Text` etc.) is an M8 emission item, not a frontend one.
+  (`Create HUD Text` etc.) follows the simplified semantic formatting documented
+  in [`v1-matrix.md`](../v1-matrix.md).
 
 ## Boundary contract
 

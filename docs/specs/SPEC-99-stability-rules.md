@@ -183,8 +183,8 @@ indicator). No new `heuristic`-class rules are added in this set.
   statically exact structural fact (presence of a `wait` call in the loop body
   tree) with a negligible false-positive surface. No rule claims corpus evidence
   it does not have.
-  Note (amendment): the evidence review's per-additional-occurrence counts
-  (`docs/m12-issue99-evidence-review.md` §2.1: overpy-santa 4 findings,
+  Note (amendment): the earlier evidence review's per-additional-occurrence counts
+  (issue #99 §2.1: overpy-santa 4 findings,
   overpy-parabola 6 findings) are **superseded** by the amended per-shape
   reporting rule (REQ-001, Q-001); the corpus occurrence structure this
   requirement records (6 `Vector Towards` occurrences in two families; 2
@@ -254,31 +254,31 @@ indicator). No new `heuristic`-class rules are added in this set.
 
 ## Architecture constraints and references
 
-- **ADR-0008** (`docs/adr/0008-tooling-first-semantic-platform.md`): tooling
+- **ADR-0008** (`../adr/0008-tooling-first-semantic-platform.md`): tooling
   first, evidence-backed claims, support claims are corpus-defined, no invented
   language features. Constraint: every shipped rule must carry an evidence
   classification and a corpus or explicit synthetic justification; findings
   must not overstate static analysis.
-- **#97 registry contract** (`crates/wright-analyzer/src/registry.rs`): stable
+- **#97 registry contract** (`../../crates/wright-analyzer/src/registry.rs`): stable
   rule IDs matching finding `code`, `RuleMeta` fields, fixed canonical order,
   deterministic `LintRegistry::run`, `LintConfig` enable/disable/severity.
   Constraint: new rules are first-party `RegistryEntry` values; third-party
   plugin loading remains out of scope.
-- **#98 lint surface** (`docs/cli.md` "`wright lint` and the lint configuration";
+- **#98 lint surface** ([`../cli.md`](../cli.md) "`wright lint` and the lint configuration";
   `CompilerSession::lint`; `ToolRequest::Lint`/`LintRules`): structured findings
   with `evidence`, rule metadata in the result envelope, deterministic config
   across CLI and tool/agent paths. Constraint: new rules surface through the
   existing path with no new protocol surface.
-- **EvidenceClass contract** (`crates/wright-analyzer/src/analysis.rs`):
+- **EvidenceClass contract** (`../../crates/wright-analyzer/src/analysis.rs`):
   `exact` / `static-indicator` / `heuristic` / `runtime-validated` (reserved).
   Constraint: `repeated-value` uses `exact`; `while-without-wait` uses
   `static-indicator`; the finding's `evidence` field mirrors the producing
   rule's class (single source of truth).
 - **Structural-equality semantics** (`structurally_equal` in
-  `crates/wright-analyzer/src/analysis.rs`): arena-id-independent recursive
+  `../../crates/wright-analyzer/src/analysis.rs`): arena-id-independent recursive
   equality over `Value`. Constraint: `repeated-value` reuses this semantics so
   duplicate-condition and repeated-value agree on identity.
-- **Fixture pattern** (`crates/wright-analyzer/tests/fixtures/README.md`):
+- **Fixture pattern** (`../../crates/wright-analyzer/tests/fixtures/README.md`):
   `.opy` source + pinned adapter `.json` payload, Wright-authored. Constraint:
   new fixtures follow the same provenance and regeneration process.
 
@@ -290,10 +290,10 @@ indicator). No new `heuristic`-class rules are added in this set.
 - **#98 (lint surface)** — implementation at `a54433b`
   (`feat(cli): add first-class lint command with shared structured results
   (M12)`), issue still OPEN; independent QA verification recorded
-  (`docs/m12-issue98-verification.md`, VERIFIED at `a54433b`); next step is PM
+  in issue #98 (VERIFIED at `a54433b`); next step is PM
   acceptance of #98. The registry + lint surface exist in the current tree, so
   #99 may proceed on them.
-- **Corpus fixtures** — `compatibility/fixtures/real-world/` (13 pinned
+- **Corpus fixtures** — `../../compatibility/fixtures/real-world/` (13 pinned
   projects with provenance in each `fixture.json`), present. Evidence boundary
   (re-verified at spec time): only overpy-cake (1 `min-wait-loop` finding at
   `source.opy:54` / workshop line 46) and overpy-pixelart (0 findings) parse
@@ -302,7 +302,7 @@ indicator). No new `heuristic`-class rules are added in this set.
   by the workshop parser (`settings` top-level section rejected per
   `crates/wright-workshop/src/emitter.rs`; settings-stripped pixelart parses with
   0 findings).
-- **Adapter** — pinned `overpy@9.7.10` adapter (`adapter/bin/wright-adapter.js`)
+- **Adapter** — pinned `overpy@9.7.10` adapter (`../../adapter/bin/wright-adapter.js`)
   for regenerating analyzer fixture payloads when needed.
 
 ## Unresolved questions

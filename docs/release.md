@@ -1,6 +1,8 @@
-# Wright Release Process and Distribution Contract (M8, issue #54; v0.1 contract, issue #101)
+# Wright Release Process and Distribution Contract
 
-Status: v1 release automation contract
+Status: accepted baseline — release automation and distribution contract
+Scope: release artifact packaging, validation gates, version stamping, and
+public distribution
 
 ## Local release artifact
 
@@ -42,14 +44,14 @@ CLI banner, `wright-lsp --version` prints the LSP banner, and the LSP
 envelope carries `wright.version` + `wright.contract`. The release archive's
 `version.json` is the authoritative stamp for a shipped artifact.
 
-## Public distribution contract (issue #101)
+## Public distribution contract
 
 A `v*` tag push (e.g. `v0.1.0`) drives `.github/workflows/release.yml`:
 
 1. **release-gates** verifies the tag version equals the workspace
    implementation version (drift guard), then runs the full `scripts/release.sh`
    gate suite.
-2. **build** compiles `wright` + `wright-lsp` for the initial target matrix and
+2. **build** compiles `wright` + `wright-lsp` for the target matrix and
    packages each platform-appropriate archive.
 3. **publish** verifies the complete artifact set and creates the GitHub
    Release from the tag with archives and checksums attached.
@@ -69,8 +71,7 @@ implementation version. Then either:
 * **From GitHub:** run the **Release tag** workflow
   (Actions → Release tag → Run workflow) with the version, e.g. `0.1.0`. It
   validates the semver and the workspace-version match, fails if the tag
-  already exists, pushes `v<version>`, and then dispatches `release.yml`
-  (a tag pushed by CI would otherwise not retrigger the tag workflow).
+  already exists, pushes `v<version>`, and then dispatches `release.yml`.
 
 Both paths run the same release gates, build the same target matrix, and
 publish through the same `publish` job.
@@ -108,7 +109,7 @@ TARGET=x86_64-unknown-linux-gnu
 BASE="https://github.com/wrightkit/wright/releases/download/v$VERSION"
 curl -fsSL -O "$BASE/wright-$VERSION-$TARGET.tar.gz"
 curl -fsSL -O "$BASE/wright-$VERSION-$TARGET.tar.gz.sha256"
-shasum -a 256 -c "wright-$VERSION-$TARGET.tar.gz.sha256"   # verify before use
+shasum -a 256 -c "wright-$VERSION-$TARGET.tar.gz.sha256" # verify before use
 tar -xzf "wright-$VERSION-$TARGET.tar.gz"
 export PATH="$PWD/wright-$VERSION-$TARGET:$PATH"
 wright --version
@@ -130,8 +131,7 @@ before the Release is created.
 
 ### Deferred distribution channels
 
-The v0.1 binary contract deliberately does not solve: crates.io publication,
+The binary contract deliberately does not solve: crates.io publication,
 Homebrew/Scoop/Winget packages, npm wrappers, auto-update behavior,
 signed/notarized installers, or independent crate-by-crate versioning. Those
-can be added after the binary contract is proven by real consumers
-(e.g. `wrightkit/agent-lab`).
+can be added after the binary contract is proven by real consumers.

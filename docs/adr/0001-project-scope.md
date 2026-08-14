@@ -37,7 +37,7 @@ future adapters and backends are added when their contracts are needed.
 
 ## Compatibility impact
 
-Compatibility claims use the levels in [`COMPATIBILITY.md`](../../COMPATIBILITY.md)
+Compatibility claims use the levels in [`docs/compatibility.md`](../compatibility.md)
 and identify the OverPy reference version and corpus. The scope decision alone
 does not claim syntax, diagnostic, normalized-output, or semantic parity.
 

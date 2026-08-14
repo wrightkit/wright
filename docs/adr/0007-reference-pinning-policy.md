@@ -2,21 +2,19 @@
 
 - Status: Accepted
 - Date: 2026-08-14
-- Related: [`COMPATIBILITY.md`](../../COMPATIBILITY.md) ("supported OverPy
+- Related: [`docs/compatibility.md`](../compatibility.md) ("supported OverPy
   version range and extension policy" open question),
   [ADR-0002](0002-compatibility-strategy.md),
   [ADR-0004](0004-overpy-licensing-boundary.md),
   [Issue #82](https://github.com/wrightkit/wright/issues/82),
-  [Issue #86](https://github.com/wrightkit/wright/issues/86),
-  [`m11-oracle-version-investigation.md`](../opy/m11-oracle-version-investigation.md)
+  [Issue #86](https://github.com/wrightkit/wright/issues/86)
 
 ## Context
 
 The compatibility oracle is pinned to `overpy@9.7.10` (npm content == git
 commit `889d974`, tag `v9.7.10`). M11 phase-1 evidence (issue #81/#82) flagged
 five constructs as "inconclusive on version" — it was unverified whether a
-newer OverPy accepts them. The Track B investigation (committed as
-[`m11-oracle-version-investigation.md`](../opy/m11-oracle-version-investigation.md))
+newer OverPy accepts them. The Track B investigation (issue #82)
 installed the newest reference (npm `9.7.13`, content == master HEAD commit
 `d854bf0`) in isolation and measured every evidence construct: **every accept
 and every reject is identical across the 9.7.10 → 9.7.13 range**, with
@@ -58,7 +56,7 @@ changed only on **demonstrated behavioral need — never on release recency**.
    without evidence.
 5. **Identity in every result.** Every compatibility result continues to
    record the exact pinned identity (version, content commit, integrity) as
-   required by [`COMPATIBILITY.md`](../../COMPATIBILITY.md), so historical
+   required by [`docs/compatibility.md`](../compatibility.md), so historical
    claims remain interpretable after any future re-baseline.
 
 ## Consequences
@@ -72,7 +70,7 @@ changed only on **demonstrated behavioral need — never on release recency**.
   newer than the pin (dmon/domina/mizuki/vendetta hero settings) is not
   available to fixtures until a demonstrated need triggers the upgrade.
 * **Matrix re-run at each evaluation point.** The sensitivity matrix in
-  [`m11-oracle-version-investigation.md`](../opy/m11-oracle-version-investigation.md)
+  the Track B investigation (issue #82)
   is the reusable decision tool; a new OverPy release triggers a re-run when
   an evaluation point (fixture acquisition, corpus extension, or claimed
   behavior) depends on it.

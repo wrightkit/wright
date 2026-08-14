@@ -1,38 +1,36 @@
-# Wright v1 Compatibility Matrix and Release Gates
+# Wright Compatibility Matrix and Release Gates
 
-Status: v1 release contract (milestone M8, issue #49); semantic compatibility
-priority clarified post-M11 by [ADR-0008](adr/0008-tooling-first-semantic-platform.md)
-Scope: the frozen input surfaces, target/runtime claims, S/D/N/E gate
-thresholds, unsupported constructs, and intentional differences of the v1
-release
+Status: accepted baseline — release gates and compatibility matrix (ADR-0008)
+Scope: frozen input surfaces, target/runtime claims, S/D/N/E gate
+thresholds, unsupported constructs, and intentional differences
 
-## Frozen v1 input surfaces
+## Frozen input surfaces
 
-| Surface | Owner | Frozen by |
+| Surface | Owner | Documented by |
 | --- | --- | --- |
-| Native `.opy` (lexer/preprocess/parser/resolve/lower) | `wright-opy` | `docs/opy/support-matrix.md` (M7) |
-| Localized Workshop text (catalog/lexer/parser/emitter) | `wright-workshop` | `docs/workshop/support-matrix.md` (M5) |
-| Driver/CLI result contract | `wright-driver`/`wright-cli` | `docs/cli.md` (M6) |
+| Native `.opy` (lexer/preprocess/parser/resolve/lower/settings) | `wright-opy` | [`opy/support-matrix.md`](opy/support-matrix.md) |
+| Localized Workshop text (catalog/lexer/parser/emitter) | `wright-workshop` | [`workshop/support-matrix.md`](workshop/support-matrix.md) |
+| Driver/CLI result contract | `wright-driver`/`wright-cli` | [`cli.md`](cli.md) |
 
 Supported Workshop target: the Overwatch Workshop surface evidenced by the
-v1 corpus (`compatibility/fixtures/**`), pinned OverPy 9.7.10 as the
-reference oracle, en-US locale (additional locales are a data change).
+corpus (`compatibility/fixtures/**`), pinned OverPy 9.7.10 as the reference
+oracle, en-US locale (additional locales are a data change).
 
 ## Compatibility levels and gates
 
-| Gate | Claim | Evidence set | Status (v0.3) |
+| Gate | Claim | Evidence set | Status |
 | --- | --- | --- | --- |
 | S — syntax | Native and reference agree on accept/reject for the corpus; accepted inputs classify into the same supported subset | `crates/wright-opy/tests/differential.rs` (HIR parity, full corpus) | PASS |
 | D — diagnostics | Malformed inputs produce the same diagnostic category and source region | Diagnostics fixture (`synthetic/diagnostics`) both reject with a parse error at the same line; structured `wright-result/v1` diagnostics | PASS |
 | N — normalized output | Compiled Workshop text equals the reference after the documented normalizer | `scripts/v1-gates.py` report (`target/v1-gates-report.json`); `compat` profile | PASS with documented debug/print differences (below) |
-| E — semantic | High-risk behaviors have repeatable scenario evidence | `scripts/run-scenarios.py` (`target/scenarios-report.json`) | PASS (compile-time WIR evidence; client execution is out of scope, see below) |
+| E — semantic | High-risk behaviors have repeatable scenario evidence | `scripts/run-scenarios.py` (`target/scenarios-report.json`) | PASS (compile-time WIR evidence; client execution is out of scope) |
 
-The v1 release does **not** claim:
+The compatibility contract does **not** claim:
 * compatibility outside the declared corpus surface;
-* historical OverPy feature breadth beyond the frozen matrix;
+* historical OverPy feature breadth beyond the declared matrix;
 * client-side runtime equivalence beyond the recorded scenario evidence.
 
-> **Post-M11 priority note (ADR-0008):** N-level gate status reflects
+> **Semantic Priority Note (ADR-0008):** N-level gate status reflects
 > normalized-output comparison evidence. Presentation-only N-level differences
 > (e.g. the documented `debug()`/`print()` formatting difference below) are not
 > product bugs and must not automatically create implementation work.
@@ -54,24 +52,21 @@ The v1 release does **not** claim:
 3. **Float formatting.** Floats emit with at most 16 significant digits,
    matching the reference snapshots.
 
-## Unsupported / deferred (v1)
+## Unsupported / deferred
 
-* Custom-game-settings blocks (outside the HIR corpus boundary; the adapter
-  rejects them too).
-* `%`/`**`/`//` arithmetic operators in `.opy` (no corpus evidence; explicit
-  `unsupported-operator` diagnostics).
-* Additional locales, rule-disabled markers, subroutine parameters, named
-  arguments.
-* Client-automation for E-level scenarios (deferred until evidence shows it
-  is required).
+* Rule `disabled` source annotations (no corpus evidence).
+* Subroutine parameters, named arguments, and default `@Team`/`@Slot` parameter overrides.
+* Workshop client locales beyond `en-US` (data pipeline ready; requires localization data review).
+* Reparsing emitted `settings` sections in the Workshop frontend (`.ws` decompiler is a non-goal).
+* Client-automation for E-level scenarios (deferred until evidence shows it is required).
 
 ## Running the gates
 
 ```sh
-cargo test --workspace --all-targets          # S/D evidence (differential suite)
-python3 scripts/v1-gates.py                   # N report -> target/v1-gates-report.json
-python3 scripts/run-scenarios.py              # E report -> target/scenarios-report.json
-cargo run -p wright-bench --bin wright-bench  # resource/regression thresholds
+cargo test --workspace --all-targets </dev/null # S/D evidence (differential suite)
+python3 scripts/v1-gates.py                     # N report -> target/v1-gates-report.json
+python3 scripts/run-scenarios.py                # E report -> target/scenarios-report.json
+cargo run -p wright-bench --bin wright-bench    # resource/regression thresholds
 ```
 
 Each report records the corpus identity (fixture hashes), the reference

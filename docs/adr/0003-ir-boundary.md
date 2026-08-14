@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-12
-- Related: [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
+- Related: [`docs/architecture.md`](../architecture.md)
 
 ## Context
 

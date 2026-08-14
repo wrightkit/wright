@@ -5,8 +5,8 @@ Scope: the Wright tooling and compiler core, its semantic frontends, and
 compatibility boundaries
 
 This document defines the responsibilities and observable contracts that later
-milestones may rely on. It does not promise that every component named here is
-implemented at any given milestone.
+development may rely on. It does not promise that every component named here is
+implemented at any given moment.
 
 ## Product surface
 
@@ -37,7 +37,7 @@ Current ownership:
   target semantics (`wright-workshop`);
 - **OPY** — Wright-owned compatible semantic frontend (`wright-opy`);
 - **OSTW** — future first-class compatible semantic frontend, introduced only
-  through an evidence-backed milestone (see [ADR-0008](docs/adr/0008-tooling-first-semantic-platform.md)).
+  through an evidence-backed milestone (see [ADR-0008](adr/0008-tooling-first-semantic-platform.md)).
 
 Upstream compilers and language services (OverPy, OSTW) remain compatibility
 oracles, behavior references, and test inputs. They are **not** production
@@ -47,8 +47,8 @@ Workshop is the canonical interoperability and target boundary. The required
 long-term conversion directions are:
 
 ```text
-OPY   → Workshop
-OSTW  → Workshop
+OPY      → Workshop
+OSTW     → Workshop
 Workshop → OPY
 Workshop → OSTW
 Workshop → Workshop
@@ -91,7 +91,7 @@ through Wright APIs.
 
 **`wright-opy`** — the native Rust OPY frontend: lexer → preprocessing
 (includes/defines) → CST/parser → semantic resolution → Opy HIR. The supported
-surface is declared in [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md)
+surface is declared in [`docs/opy/support-matrix.md`](opy/support-matrix.md)
 and verified at the HIR boundary by the differential suite. The pinned OverPy
 adapter remains the compatibility oracle.
 
@@ -150,7 +150,7 @@ shared by the CLI, library consumers, and tool/LSP adapters: input discovery →
 frontend selection → validation → lowering → analysis → emission. The `wright`
 CLI (`wright-cli`) is a thin argv/presentation layer; human text and
 machine-readable JSON (`wright-result/v1`) are two renderings of the same typed
-result envelope. The normative contract is [`docs/cli.md`](docs/cli.md).
+result envelope. The normative contract is [`docs/cli.md`](cli.md).
 
 ### Semantic analysis and tooling
 
@@ -175,11 +175,11 @@ layer and do not depend on backend or compatibility tooling.
 Compatibility tooling is an evaluation boundary around the core. It records
 the reference version, corpus identity, normalization rules, and comparison
 result for each claim. It may call OverPy, compare normalized artifacts, or run
-behavioral scenarios according to [`COMPATIBILITY.md`](COMPATIBILITY.md).
+behavioral scenarios according to [`docs/compatibility.md`](compatibility.md).
 
 The harness is not evidence that the core may link to or copy OverPy code. The
 engineering and licensing boundary is defined in
-[`LICENSE-BOUNDARY.md`](LICENSE-BOUNDARY.md).
+[`docs/licensing.md`](licensing.md).
 
 ## Dependency direction
 
@@ -207,7 +207,7 @@ contract should be introduced with the milestone that needs it.
 
 ## Cross-cutting contracts
 
-The following are normative for post-M11 work:
+The following are normative:
 
 * **Tooling-first priority:** compiler parity work must not consume the roadmap
   when it does not block real compilation, analysis, source tooling, or a
@@ -242,17 +242,16 @@ The following remain outside the current contract:
 * reproducing OverPy internals merely for implementation parity;
 * a full decompiler rewrite without an accepted contract;
 * direct OPY ↔ OSTW source conversion without both frontends and evidence;
-* an OSTW frontend before the evidence-backed M13 milestone; and
+* an OSTW frontend before an evidence-backed milestone; and
 * guaranteeing successful execution in every live Overwatch runtime without
   separate runtime evidence.
 
-A native Rust `.opy` parser (formerly listed as a v1 non-goal in ADR-0001) is
-now implemented as `wright-opy` under the M7 milestone. That non-goal entry is
-historical.
+A native Rust `.opy` parser (formerly listed as an initial non-goal in ADR-0001)
+is implemented as `wright-opy`. That non-goal entry is historical.
 
 ## Open questions
 
-These questions are intentionally left for the milestone that has enough
+These questions are intentionally left for milestones that have enough
 implementation evidence to answer them:
 
 1. Which Workshop output targets and runtime versions are covered by E-level
@@ -261,19 +260,18 @@ implementation evidence to answer them:
    external clients?
 3. Which compatibility corpus entries can be redistributed, and which must be
    generated locally?
-4. What extension mechanism for third-party lint rules is justified by evidence
-   (tracked in issue #89)?
+4. What extension mechanism for third-party lint rules is justified by evidence?
 5. Which licensing questions require advice from qualified counsel?
 
 Decisions that answer or materially revise these questions belong in an ADR.
 
 ## Related decisions
 
-* [ADR-0001: Project scope](docs/adr/0001-project-scope.md) _(superseded by ADR-0008)_
-* [ADR-0002: Compatibility strategy](docs/adr/0002-compatibility-strategy.md)
-* [ADR-0003: IR boundary](docs/adr/0003-ir-boundary.md)
-* [ADR-0004: OverPy licensing and clean-room boundary](docs/adr/0004-overpy-licensing-boundary.md)
-* [ADR-0005: Opy HIR v1 frontend protocol](docs/adr/0005-opy-hir-v1.md)
-* [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](docs/adr/0006-rust-ir-core.md)
-* [ADR-0007: OverPy reference pinning policy](docs/adr/0007-reference-pinning-policy.md)
-* [ADR-0008: Tooling-first semantic platform rebaseline](docs/adr/0008-tooling-first-semantic-platform.md)
+* [ADR-0001: Project scope](adr/0001-project-scope.md) _(superseded by ADR-0008)_
+* [ADR-0002: Compatibility strategy](adr/0002-compatibility-strategy.md)
+* [ADR-0003: IR boundary](adr/0003-ir-boundary.md)
+* [ADR-0004: OverPy licensing and clean-room boundary](adr/0004-overpy-licensing-boundary.md)
+* [ADR-0005: Opy HIR v1 frontend protocol](adr/0005-opy-hir-v1.md)
+* [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](adr/0006-rust-ir-core.md)
+* [ADR-0007: OverPy reference pinning policy](adr/0007-reference-pinning-policy.md)
+* [ADR-0008: Tooling-first semantic platform rebaseline](adr/0008-tooling-first-semantic-platform.md)

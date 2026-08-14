@@ -65,7 +65,7 @@ This ADR defines the interchange contract for S/D-level compatibility work:
 the corpus converts reproducibly (S), and failures carry structured
 diagnostics with spans (D). It does not claim N/E-level parity with OverPy
 output. Protocol equality alone is not semantic evidence, per
-[ADR-0003](0003-ir-boundary.md) and [`COMPATIBILITY.md`](../../COMPATIBILITY.md).
+[ADR-0003](0003-ir-boundary.md) and [`docs/compatibility.md`](../compatibility.md).
 
 ## Open questions
 

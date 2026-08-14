@@ -1,12 +1,14 @@
 # Wright Agent Team Contract
 
-Status: active repository contract for #78; default-adoption pilot tracked by
-[#80](https://github.com/wrightkit/wright/issues/80)
+Status: active repository contract
+Scope: multi-agent role governance, decision authority, workflow states,
+and specification lifecycle
 
 This contract coordinates PM, Architect, Engineer, and QA work through durable
-repository state. It does not select or require a model, vendor, harness, or
-orchestration service. GitHub issues remain the project roadmap and product
-record; this document defines how roles use that record.
+repository state. It does not select or require a specific model, vendor,
+harness, or external orchestration service. GitHub issues remain the project
+roadmap and product record; this document defines how roles interact with that
+record.
 
 ## Roles and authority
 
@@ -67,14 +69,32 @@ When artifacts conflict, stop at the affected decision class and route to its
 owner. Do not silently make the implementation, a test, or a QA plan the new
 source of truth.
 
-## Feature spec schema
+## Subagent execution and orchestration principles
 
-Use a spec when a change needs coordination across roles. The spec refines one
-active issue; it does not become a second roadmap or add unapproved scope.
-Requirement IDs are stable within the spec and must not be reused after a
-requirement is removed.
+Pilot evaluations established the following durable architectural principles:
+
+1. **One-level subagent isolation**: Launching independent, one-level child
+   role sessions (PM, Architect, Engineer, QA) in parallel provides sufficient
+   context isolation and prevents authority leakage.
+2. **Non-authoritative router**: The top-level controller session performs only
+   deterministic routing, status checks, and pre-authorized writes. It does
+   not make product, architecture, or QA decisions on its own.
+3. **No custom cross-session orchestrator needed**: Native tool execution with
+   role prompts and read-only subagent tool permissions is sufficient. Durable
+   state lives in GitHub issues, specs, and repository files, not in session
+   memory.
+4. **Independent verification**: QA must execute fresh local checks and inspect
+   CI independently rather than relying on Engineer self-reports.
+
+## Feature spec schema and lifecycle
+
+Use a spec when a change needs coordination across roles. Active specs reside in
+[`docs/specs/`](specs/). A spec refines one active issue; it does not become a
+second roadmap or add unapproved scope. Requirement IDs are stable within the
+spec and must not be reused after a requirement is removed.
 
 ```yaml
+---
 kind: wright-spec/v1
 id: SPEC-<issue>-<short-name>
 title: <observable feature name>
@@ -83,6 +103,7 @@ related_issue: "#<number>"
 owner: PM
 freshness: live | snapshot
 as_of_commit: <40-hex commit> # required when freshness is snapshot
+---
 ```
 
 The body contains these sections:
@@ -108,8 +129,16 @@ The body contains these sections:
 - Q-001 [product|architecture|verification]: <question and owner>, if any
 ```
 
-The `related_issue`, `REQ-*` IDs, and referenced ADRs make scope and decisions
-traceable without copying the issue's roadmap state.
+### Spec Lifecycle
+
+1. **Creation**: Created under `docs/specs/` by PM when multi-role coordination
+   is needed.
+2. **Execution**: Refined through Architect and QA reviews, implemented by
+   Engineer, and verified by QA.
+3. **Post-Acceptance**: Upon issue acceptance, durable contracts are integrated
+   into the living documentation under `docs/` or recorded in a new ADR. The
+   spec is either retired or removed from `main`, with Git history and the
+   GitHub issue record serving as the permanent historical log.
 
 ## QA test-plan schema
 
@@ -117,6 +146,7 @@ QA creates a companion plan after the requirements are stable. Each requirement
 must have a row, including requirements whose evidence is currently blocked.
 
 ```yaml
+---
 kind: wright-qa/v1
 id: QA-<spec-id>
 spec: SPEC-<issue>-<short-name>
@@ -125,6 +155,7 @@ status: planned | running | blocked | passed | failed
 owner: QA
 freshness: live | snapshot
 as_of_commit: <40-hex commit> # required when freshness is snapshot
+---
 ```
 
 | Requirement ID | Observable check | Evidence layer | Command, fixture, or CI job | Expected result | Result | Evidence boundary |
@@ -148,7 +179,6 @@ historical evidence current.
 
 ## Related authorities
 
-* [Repository architecture](../ARCHITECTURE.md) and [compatibility contract](../COMPATIBILITY.md)
-* [Architecture decision records](adr/README.md)
-* [Contribution and Rust validation policy](../CONTRIBUTING.md)
-* [GitHub issue #77](https://github.com/wrightkit/wright/issues/77), [#78](https://github.com/wrightkit/wright/issues/78), and [#79](https://github.com/wrightkit/wright/issues/79)
+* [Repository Architecture](architecture.md) and [Compatibility Contract](compatibility.md)
+* [Architecture Decision Records](adr/README.md)
+* [Contribution and Rust Validation Policy](../CONTRIBUTING.md)

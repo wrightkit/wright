@@ -1,13 +1,13 @@
-# Wright CLI and Driver Contract (M6)
+# Wright CLI and Driver Contract
 
-Status: accepted baseline for v0.3 (milestone M6)
+Status: accepted baseline — living driver and CLI contract
 Scope: `wright` executable, `wright-driver` crate, and their machine-readable
 contracts
 
-This document is the normative contract for the M6 compiler driver and CLI
-(issues #37–#41). It defines the shared driver model, the command surface,
-exit codes, stdout/stderr ownership, and the `wright-result/v1` envelope that
-CI and agents consume.
+This document is the normative contract for the compiler driver and CLI.
+It defines the shared driver model, the command surface, exit codes,
+stdout/stderr ownership, and the `wright-result/v1` envelope that CI and
+agents consume.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ result.
 
 ## Commands
 
-| Command   | Purpose | Text-mode stdout |
+| Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
 | `wright check [INPUT]` | Parse, lower, validate, analyze | `check: ok` (or nothing on failure) |
@@ -43,8 +43,8 @@ result.
 
 `wright version` and `wright --version` print the implementation version
 banner (`wright <version> (wright-driver <version>)`); the version is the
-single authoritative workspace implementation version (issue #101) and is
-also reported inside every `wright-result/v1` envelope.
+single authoritative workspace implementation version and is also reported
+inside every `wright-result/v1` envelope.
 
 All commands accept a file path or `-`/omitted for stdin. Input kind is
 detected from the extension (`.opy`, `.json`, `.txt`/`.ws`) or stdin content
@@ -53,14 +53,14 @@ with `--kind auto|opy|workshop|protocol`. `--locale` overrides Workshop
 client-locale detection; `--root` sets the `.opy` include root; `-o/--output`
 writes compiled output to a file.
 
-## `wright lint` and the lint configuration (M12, #98)
+## `wright lint` and the lint configuration
 
 `wright lint` runs through the same compiler/session pipeline as the other
 commands and reports structured findings with stable rule IDs, configured
 severity, an evidence class, and original source identity/spans where
-available. It reuses the M12 lint registry (#97), so rule
-enable/disable/severity configuration is deterministic and identical across
-CLI and programmatic (`CompilerSession::lint`, tool/agent `lint`) use.
+available. It reuses the lint registry, so rule enable/disable/severity
+configuration is deterministic and identical across CLI and programmatic
+(`CompilerSession::lint`, tool/agent `lint`) use.
 
 Two lint-only flags configure the registry; both are repeatable:
 
@@ -151,11 +151,9 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
 }
 ```
 
-Additive contract change: analysis findings (`analyze`, `lint`, and the
-tool/agent `getFindings`/`lint` responses) now also carry an `evidence` field
-classifying how strongly the finding is supported (`exact`,
-`static-indicator`, `heuristic`, `runtime-validated`). This is additive and
-does not change any previously documented field.
+Analysis findings (`analyze`, `lint`, and the tool/agent `getFindings`/`lint`
+responses) carry an `evidence` field classifying how strongly the finding is
+supported (`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
 
 ## Exit codes
 
@@ -224,17 +222,18 @@ carry their own SHA-256 (`result.output.sha256`).
 
 ## The `.opy` frontend
 
-Since M7, `.opy` inputs are compiled by the native Rust frontend
-(`wright-opy`): no Node, no OverPy, and stdin `.opy` is supported (the
-include root defaults to the working directory for stdin, `--root` for
-files). The pinned OverPy adapter remains available only as an explicit
-compatibility fallback by setting `WRIGHT_ADAPTER_PATH`; it is never selected
-silently. The frontend surface is declared in `docs/opy/support-matrix.md`.
+`.opy` inputs are compiled by the native Rust frontend (`wright-opy`): no
+Node, no OverPy, and stdin `.opy` is supported (the include root defaults to the
+working directory for stdin, `--root` for files). The pinned OverPy adapter
+remains available only as an explicit compatibility fallback by setting
+`WRIGHT_ADAPTER_PATH`; it is never selected silently. The frontend surface is
+declared in [`opy/support-matrix.md`](opy/support-matrix.md).
 
 ## Library reuse
 
 External Rust consumers depend on `wright-driver` (never the CLI) and drive
-`CompilerSession::new(config)` → `compile`/`check`/`analyze`/`inspect`, each
-returning a typed `Envelope<T>`. Loading is idempotent (`Session::load`), and
-the driver exposes the resolved locale, input identity, and origin metadata.
-See `crates/wright-driver/tests/driver.rs` for the reusable test surface.
+`CompilerSession::new(config)` → `compile`/`check`/`analyze`/`inspect`/`lint`,
+each returning a typed `Envelope<T>`. Loading is idempotent (`Session::load`),
+and the driver exposes the resolved locale, input identity, and origin
+metadata. See `crates/wright-driver/tests/driver.rs` for the reusable test
+surface.

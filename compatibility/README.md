@@ -1,7 +1,7 @@
 # Compatibility Oracle and Fixture Layout
 
 This directory contains the reproducible compatibility harness described by
-[`COMPATIBILITY.md`](../COMPATIBILITY.md). It is evaluation tooling, not a
+[`docs/compatibility.md`](../docs/compatibility.md). It is evaluation tooling, not a
 dependency of `wright-core`.
 
 ## Pinned oracle

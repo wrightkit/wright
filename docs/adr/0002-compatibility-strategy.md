@@ -2,7 +2,7 @@
 
 - Status: Accepted (amended by [ADR-0008](0008-tooling-first-semantic-platform.md))
 - Date: 2026-08-12
-- Related: [`COMPATIBILITY.md`](../../COMPATIBILITY.md),
+- Related: [`docs/compatibility.md`](../compatibility.md),
   [ADR-0008](0008-tooling-first-semantic-platform.md)
 
 ## Context
@@ -39,7 +39,7 @@ environment details before a release can claim higher compatibility.
 No level is implied by another. N-level output comparison is not E-level
 semantic evidence, and a successful build is not compatibility evidence. The
 release gates and fixture requirements are normative in
-[`COMPATIBILITY.md`](../../COMPATIBILITY.md).
+[`docs/compatibility.md`](../compatibility.md).
 
 [ADR-0008](0008-tooling-first-semantic-platform.md) adds a priority rule over
 this framework: **E-level observable semantics outrank N-level output-text

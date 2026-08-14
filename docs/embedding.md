@@ -1,6 +1,6 @@
-# Wright Embedding and Tool API (M9)
+# Wright Embedding and Tool API
 
-Status: public contract baseline for milestone M9 (issue #56)
+Status: accepted baseline — living embedding and tool contract
 Scope: `wright-driver`'s embedding surface, the session-aware tool service,
 safe source-edit contracts, and the transport adapters
 
@@ -8,9 +8,9 @@ safe source-edit contracts, and the transport adapters
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| `wright_driver::{CompilerSession, SessionConfig, InputSpec, SourceKind, OutputFormat, Profile}` | **stable** | One driver for compile/check/analyze/inspect; `load()` is idempotent |
-| `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract (`docs/cli.md`) |
-| `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/callGraph/costEstimate/targetMetadata/capabilities) |
+| `wright_driver::{CompilerSession, SessionConfig, InputSpec, SourceKind, OutputFormat, Profile}` | **stable** | One driver for compile/check/analyze/inspect/lint; `load()` is idempotent |
+| `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
+| `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) |
 | `wright_driver::edit::{SourceEdit, EditValidation, RenameRequest, rename_symbol, validate_edit}` | **stable** | Safe source-oriented edits; validated through the compiler pipeline |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
@@ -32,6 +32,7 @@ let mut session = CompilerSession::new(SessionConfig {
     ..SessionConfig::default()
 })?;
 let check = session.check();      // typed Envelope<CheckResult>
+let lint = session.lint();        // typed Envelope<LintResult>
 let compile = session.compile();  // typed Envelope<CompileResult>
 ```
 
@@ -58,8 +59,7 @@ and pipeline validation. Raw HIR/WIR mutation is never public.
 
 `wright-serve` exposes the same operations over stdio JSON-lines and
 JSON-RPC 2.0; both are thin mappings with identical semantics to in-process
-consumers (equivalence tested). MCP is intentionally absent in v1 — no
-agent-integration evidence justified it (the issue's non-goals are honored).
+consumers (equivalence tested).
 
 ## Versioning
 
@@ -73,5 +73,5 @@ agent-integration evidence justified it (the issue's non-goals are honored).
 ## External consumer evidence
 
 `crates/wright-consumer` is a committed consumer that depends only on
-`wright-driver` and runs compile/check/analyze, all tool queries, and a
+`wright-driver` and runs compile/check/analyze/lint, all tool queries, and a
 validated rename over the corpus (`wright-consumer/tests/consumer.rs`).

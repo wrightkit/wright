@@ -15,8 +15,8 @@ their state into `docs/`.
 Before editing, read the active issue and acceptance criteria, inspect the
 branch and working-tree status, and identify the owning crate, contract,
 fixture, or document. Preserve unrelated or concurrent changes. Read the
-applicable authority: [`ARCHITECTURE.md`](ARCHITECTURE.md),
-[`COMPATIBILITY.md`](COMPATIBILITY.md), an accepted [`docs/adr/`](docs/adr/README.md)
+applicable authority: [`docs/architecture.md`](docs/architecture.md),
+[`docs/compatibility.md`](docs/compatibility.md), an accepted [`docs/adr/`](docs/adr/README.md)
 decision, or the relevant package/test contract.
 
 Keep public interfaces Wright-owned. Do not infer scope from roadmap language
@@ -37,12 +37,12 @@ The native `.opy` path is owned by `wright-opy`; HIR, Workshop IR, lowering,
 diagnostics, and backend contracts are Wright-owned. Frontends do not leak
 external AST types, HIR does not depend on a frontend/backend, and backends do
 not reparse source. Unsupported behavior is an explicit diagnostic or
-documented rejection. See [`ARCHITECTURE.md`](ARCHITECTURE.md) and its ADRs.
+documented rejection. See [`docs/architecture.md`](docs/architecture.md) and its ADRs.
 
 OverPy is an isolated frontend/oracle dependency, not a Rust-core dependency.
 Do not copy its source/types, expose its artifacts, or commit third-party
 fixtures without provenance and redistribution review. Follow
-[`LICENSE-BOUNDARY.md`](LICENSE-BOUNDARY.md).
+[`docs/licensing.md`](docs/licensing.md).
 
 ## Verified extension paths
 
@@ -69,7 +69,7 @@ that proves the behavior.
 
 ### Compatibility or oracle regression
 
-1. Read [`COMPATIBILITY.md`](COMPATIBILITY.md) and
+1. Read [`docs/compatibility.md`](docs/compatibility.md) and
    [`compatibility/README.md`](compatibility/README.md); establish the S, D, N,
    or E claim and provenance first.
 2. Add the existing fixture manifest/source/snapshot, or a generator/hash when

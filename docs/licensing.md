@@ -1,6 +1,6 @@
 # Wright and OverPy License Boundary
 
-Status: accepted engineering policy for v0.1
+Status: accepted engineering policy
 This document is not legal advice and does not settle questions that require a
 qualified lawyer.
 
@@ -8,24 +8,23 @@ qualified lawyer.
 
 Wright is independently implemented Rust software for an OverPy-compatible
 workflow. The repository's root license is GNU AGPL v3.0 or later, as stated in
-[`README.md`](README.md) and provided in [`LICENSE`](LICENSE). That license
+[`README.md`](../README.md) and provided in [`LICENSE`](../LICENSE). That license
 governs Wright's own repository content; it does not grant permission to copy,
 modify, bundle, or redistribute OverPy or another third party's material.
 
 The project currently treats the OverPy reference used for compatibility work
-as GPL-3.0-licensed according to the v0.1 project assumption. The exact OverPy
+as GPL-3.0-licensed according to the project assumption. The exact OverPy
 version, license notice, and distribution terms must be checked for every
 version used. This assumption is not a legal conclusion.
 
 ## Component boundary
 
-The following policy applies to components as they are introduced. The current
-checkout has no OverPy-dependent source component.
+The following policy applies to components across the workspace:
 
 | Component | May invoke or inspect OverPy? | Boundary and distribution rule |
 | --- | --- | --- |
 | Wright Rust core, including HIR, Workshop IR, lowering, diagnostics, and backends | No | Independently implemented code. It must not link to OverPy, copy its source, import its internal AST/types, or compile against its generated artifacts. |
-| Frontend adapter/bridge (`adapter/`) | Only through an explicitly documented input or process boundary | It may translate a reviewed interchange result or observed frontend behavior into Wright-owned types. It must not make OverPy internal types a Wright API. Ownership, license, and invocation are recorded in its [`README`](adapter/README.md). |
+| Frontend adapter/bridge (`adapter/`) | Only through an explicitly documented input or process boundary | It may translate a reviewed interchange result or observed frontend behavior into Wright-owned types. It must not make OverPy internal types a Wright API. Ownership, license, and invocation are recorded in its [`README`](../adapter/README.md). |
 | Compatibility harness/oracle tool | Yes, for isolated evaluation | It may invoke a separately installed/pinned OverPy tool and compare documented or generated results. It must remain separable from the core build and runtime distribution. |
 | Compatibility fixtures and generated reference artifacts | Only after provenance review | Store identifiers, hashes, generators, or reviewable artifacts only when their license and redistribution status are recorded. Do not add copied OverPy source or unclear third-party content. |
 | CI and development scripts | Yes, when isolated | They may install or invoke a pinned external oracle for a compatibility check, but must not silently turn it into a core dependency or bundled release component. |
@@ -69,7 +68,7 @@ itself a legal determination that two works may be combined or distributed.
 
 ## Distribution policy
 
-The default v0.1 distribution contains Wright's independently implemented Rust
+The default distribution contains Wright's independently implemented Rust
 core and its own documentation and tests. It does not bundle OverPy, its source
 tree, its internal libraries, or reference artifacts whose redistribution has
 not been reviewed.
@@ -101,6 +100,6 @@ component, obtain qualified legal review and record the decision in a new ADR.
 
 ## Related decisions
 
-* [ADR-0001: Project scope](docs/adr/0001-project-scope.md)
-* [ADR-0003: IR boundary](docs/adr/0003-ir-boundary.md)
-* [ADR-0004: OverPy licensing and clean-room boundary](docs/adr/0004-overpy-licensing-boundary.md)
+* [ADR-0001: Project scope](adr/0001-project-scope.md)
+* [ADR-0003: IR boundary](adr/0003-ir-boundary.md)
+* [ADR-0004: OverPy licensing and clean-room boundary](adr/0004-overpy-licensing-boundary.md)

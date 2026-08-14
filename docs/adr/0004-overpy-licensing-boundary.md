@@ -2,7 +2,7 @@
 
 - Status: Accepted engineering policy
 - Date: 2026-08-12
-- Related: [`LICENSE-BOUNDARY.md`](../../LICENSE-BOUNDARY.md)
+- Related: [`docs/licensing.md`](../licensing.md)
 
 ## Context
 
@@ -49,7 +49,7 @@ Wright public contract.
 ## Compatibility impact
 
 The policy permits S/D/N/E compatibility evidence under
-[`COMPATIBILITY.md`](../../COMPATIBILITY.md), but none of those levels grants
+[`docs/compatibility.md`](../compatibility.md), but none of those levels grants
 permission to copy or redistribute OverPy. Reference identity, fixture
 provenance, and the invocation or comparison method remain part of the evidence
 record.

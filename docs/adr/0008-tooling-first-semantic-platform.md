@@ -5,8 +5,8 @@
 - Supersedes: [ADR-0001: Project scope](0001-project-scope.md)
 - Amends: [ADR-0002: Compatibility strategy](0002-compatibility-strategy.md)
 - Related: [Issue #88](https://github.com/wrightkit/wright/issues/88),
-  [ARCHITECTURE.md](../../ARCHITECTURE.md),
-  [COMPATIBILITY.md](../../COMPATIBILITY.md)
+  [docs/architecture.md](../architecture.md),
+  [docs/compatibility.md](../compatibility.md)
 
 ## Context
 

@@ -1,8 +1,8 @@
 # Contributing to Wright
 
 Wright is being built incrementally. Read [`AGENTS.md`](AGENTS.md),
-[`ARCHITECTURE.md`](ARCHITECTURE.md), [`COMPATIBILITY.md`](COMPATIBILITY.md),
-and [`LICENSE-BOUNDARY.md`](LICENSE-BOUNDARY.md) before changing compiler
+[`docs/architecture.md`](docs/architecture.md), [`docs/compatibility.md`](docs/compatibility.md),
+and [`docs/licensing.md`](docs/licensing.md) before changing compiler
 boundaries or compatibility tooling.
 
 ## Toolchain policy

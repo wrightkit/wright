@@ -1,26 +1,25 @@
 # Workshop Catalog Data Pipeline
 
-Status: reproducible pipeline for milestone M5 (#30)
-Scope: how Wright generates, validates, and updates the canonical Workshop
+Status: accepted baseline — canonical catalog localization pipeline
+Scope: how Wright generates, validates, and updates canonical Workshop
 catalog localization data
 
 The catalog (`crates/wright-workshop/src/catalog/data/catalog.json`) is
 Wright-authored data with recorded provenance. It is the locale-identity
-layer for the native Workshop parser/emitter; parser and emitter code never
+layer for the native Workshop parser and emitter; parser and emitter code never
 contain locale-specific branches.
 
 ## Sources and licensing
 
-* The v0.2 catalog covers the M5 P0 surface in `en-US`; spellings are
+* The catalog covers the supported Workshop surface in `en-US`; spellings are
   transcribed from the compatibility corpus workshop snapshots and recorded
-  in the support matrix
-  ([`docs/workshop/support-matrix.md`](support-matrix.md)).
+  in the support matrix ([`support-matrix.md`](support-matrix.md)).
 * OverPy's translation tables are GPL-3.0 reference data and are not
   automatically reusable as implementation data
-  ([`LICENSE-BOUNDARY.md`](../../LICENSE-BOUNDARY.md),
-  [`ADR-0004`](../../docs/adr/0004-overpy-licensing-boundary.md)). Adding a
-  new locale therefore requires a permissible reference source, provenance
-  review, and this pipeline; it is not a code change.
+  ([`docs/licensing.md`](../licensing.md),
+  [`ADR-0004`](../adr/0004-overpy-licensing-boundary.md)). Adding a new locale
+  requires a permissible reference source, provenance review, and this
+  pipeline; it is not a mechanical code change.
 * Every committed catalog file carries `provenance` (generator, source,
   license, reviewed status).
 

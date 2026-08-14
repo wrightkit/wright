@@ -98,7 +98,7 @@ affects:
 
 N-level evidence remains a useful regression-detection tool, but
 presentation-only N-level differences must not automatically create
-implementation work. See [ADR-0008](docs/adr/0008-tooling-first-semantic-platform.md).
+implementation work. See [ADR-0008](adr/0008-tooling-first-semantic-platform.md).
 
 ## Release gates
 
@@ -120,7 +120,7 @@ reported rather than counted as successes.
 
 Compatibility fixtures are executable evidence. The repository layout,
 metadata schema, pinned oracle, and runner commands are defined in
-[`compatibility/README.md`](compatibility/README.md). Each fixture should make
+[`../compatibility/README.md`](../compatibility/README.md). Each fixture should make
 its scope visible and should avoid relying on unrecorded local state. Its
 manifest includes at least:
 
@@ -164,7 +164,7 @@ Record a decision in `docs/adr/` when implementation evidence is available.
 
 ## Related decisions
 
-* [ADR-0002: Compatibility strategy](docs/adr/0002-compatibility-strategy.md)
-* [ADR-0003: IR boundary](docs/adr/0003-ir-boundary.md)
-* [ADR-0004: OverPy licensing and clean-room boundary](docs/adr/0004-overpy-licensing-boundary.md)
-* [ADR-0008: Tooling-first semantic platform rebaseline](docs/adr/0008-tooling-first-semantic-platform.md)
+* [ADR-0002: Compatibility strategy](adr/0002-compatibility-strategy.md)
+* [ADR-0003: IR boundary](adr/0003-ir-boundary.md)
+* [ADR-0004: OverPy licensing and clean-room boundary](adr/0004-overpy-licensing-boundary.md)
+* [ADR-0008: Tooling-first semantic platform rebaseline](adr/0008-tooling-first-semantic-platform.md)

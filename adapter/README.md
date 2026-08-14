@@ -19,7 +19,7 @@ Rust core never imports it and never depends on OverPy types.
   Wright API.
 * The adapter is an optional development/CI component: it is not bundled into
   the Rust core, and `wright-core` builds, tests, and runs without it. See
-  [`LICENSE-BOUNDARY.md`](../LICENSE-BOUNDARY.md) for the component policy and
+  [`docs/licensing.md`](../docs/licensing.md) for the component policy and
   the open licensing questions that remain.
 
 ## Invocation

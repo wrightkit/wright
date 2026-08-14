@@ -2,8 +2,8 @@
 
 ADRs record decisions that affect Wright's observable compiler contract or
 component boundaries. They complement, rather than replace, the normative
-contracts in [`ARCHITECTURE.md`](../../ARCHITECTURE.md) and
-[`COMPATIBILITY.md`](../../COMPATIBILITY.md).
+contracts in [`docs/architecture.md`](../architecture.md) and
+[`docs/compatibility.md`](../compatibility.md).
 
 ## Conventions
 

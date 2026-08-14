@@ -472,8 +472,8 @@ reason to extend the schema silently.
   imports it and never depends on OverPy types.
 * Changes to the node grammar require a review of this document, the adapter,
   the Rust consumer, and the corpus fixtures together (see
-  [`ARCHITECTURE.md`](../../ARCHITECTURE.md) and
-  [`LICENSE-BOUNDARY.md`](../../LICENSE-BOUNDARY.md)).
+  [`docs/architecture.md`](../architecture.md) and
+  [`docs/licensing.md`](../licensing.md)).
 
 ## 13. Version history
 

@@ -1,16 +1,12 @@
-# M5 Workshop Production Support Matrix
+# Workshop Support Matrix
 
-Status: reviewable audit for milestone M5 (v0.2), issue #28
+Status: accepted baseline — living Workshop support matrix
 Scope: the evidence-backed Workshop feature and localization surface Wright
-needs for native localized Workshop input/output
+supports for native localized Workshop input/output
 
-This document is the audit deliverable of [#28]. It inventories the Workshop
-surface evidenced by the compatibility corpus, records the localization
-matrix, identifies gaps in the current IR/catalog, and prioritizes the M5
-feature set. It does not prescribe implementation details; later M5 issues
-use it as acceptance evidence.
-
-[#28]: https://github.com/wrightkit/wright/issues/28
+This document inventories the Workshop surface evidenced by the compatibility
+corpus, records the localization matrix, and specifies the supported feature
+set of the `wright-workshop` frontend and emitter.
 
 ## Evidence sources
 
@@ -74,47 +70,39 @@ In Array, Has Spawned. Literals: numbers (signed), strings (escaped),
 - Team: `All Teams` (inside `All Players(All Teams)`).
 
 ### Settings and extensions
-- Not present in the corpus. Deferred (no evidence).
+- Emitted from native `.opy` `settings { ... }` blocks into the top-of-file
+  Workshop `settings` section. Reparsing emitted settings in the Workshop
+  frontend is a non-goal (a `.ws` decompiler is out of scope).
 
 ## Localization matrix
 
 | Locale | Evidence | Status |
 | --- | --- | --- |
-| `en-US` | Full corpus Workshop text | Supported (v0.2). |
-| `zh-CN` (and other OverPy-supported locales) | Oracle can emit localized reference output (verified for `zh-CN`); no committed samples yet | Investigation. Samples and any catalog aliases require provenance/licensing review ([#30], ADR-0004). |
+| `en-US` | Full corpus Workshop text | Supported. |
+| `zh-CN` (and other OverPy-supported locales) | Oracle can emit localized reference output (verified for `zh-CN`); no committed samples yet | Investigation. Samples and catalog aliases require provenance/licensing review ([`docs/licensing.md`](../licensing.md), [ADR-0004](../adr/0004-overpy-licensing-boundary.md)). |
 
-Localization coverage is therefore explicit: only `en-US` is claimed in v0.2.
-Cross-locale behavior is not inferred from English-only fixtures.
+Localization coverage is therefore explicit: `en-US` is the primary supported
+locale. Cross-locale behavior is not inferred from English-only fixtures.
 
-## Gaps in the current IR/catalog
+## Catalog and IR design
 
-Identified without prescribing implementation:
-
-1. WIR builtin references (`Action::Call`/`Value::Call` `name`) are plain
-   strings; native parsing needs a canonical-identity contract so no
+1. Builtin references (`Action::Call`/`Value::Call` `name`) use canonical
+   identifiers (`crates/wright-workshop/src/catalog/data/catalog.json`) so no
    locale-specific spelling becomes semantic identity.
-2. Enum spellings ("Grapple Beam", "Ignore Condition", …) have no
-   locale-independent identity table; round-trip requires one.
-3. WIR events cover `Global`, `EachPlayer`, `Subroutine`; the corpus needs no
-   more, so expansion is deferred until evidence demands it.
-4. The corpus has no settings/extension blocks; WIR has no representation and
-   none is added without evidence.
-5. Comparison operators appear inline in `Compare(...)`; parsing must accept
+2. Enum spellings ("Grapple Beam", "Ignore Condition", …) map to
+   locale-independent canonical identities.
+3. Supported events cover `Global`, `EachPlayer`, `Subroutine`.
+4. Comparison operators appear inline in `Compare(...)`; parsing accepts
    operator tokens as arguments.
+5. Catalog data updates follow the deterministic pipeline in
+   [`catalog-pipeline.md`](catalog-pipeline.md).
 
-## Prioritized M5 feature set
+## Supported surface and priorities
 
-- **P0 (supported, corpus-evidenced, en-US):** variables, subroutines, rules,
-  the three corpus events, conditions, the corpus actions/values/enums above,
-  deterministic en-US emission, same-locale round-trip, and integration with
-  the M4 analyzer stack.
-- **P1 (deferred, blocked on data/licensing):** additional client locales,
-  cross-locale equivalence, settings/extensions, additional events.
-- **Explicitly out of v0.2:** `.opy` reconstruction from Workshop text,
+- **Supported (corpus-evidenced, en-US):** variables, subroutines, rules,
+  the three corpus events, conditions, corpus actions/values/enums above,
+  deterministic en-US emission, same-locale round-trip, and analyzer integration.
+- **Deferred (data/licensing gated):** additional client locales,
+  cross-locale equivalence, additional events.
+- **Explicitly out of scope:** `.opy` reconstruction from Workshop text,
   OverPy decompiler architecture, editor/browser integrations.
-
-## Follow-up evidence (noted, not edited)
-
-`COMPATIBILITY.md` and `ARCHITECTURE.md` still describe the workshop
-normalizer, language matrix, and tooling surface as open questions; updating
-those documents is a separately approved follow-up, not part of this issue.
