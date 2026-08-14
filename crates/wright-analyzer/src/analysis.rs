@@ -15,6 +15,10 @@
 //! statically known are treated as not-minimum; duplicate detection is
 //! structural (arena-id-independent) and rule-local; the expensive-call list
 //! is a heuristic that may miss or over-flag exotic predicates.
+//!
+//! Every [`Finding`] also carries the [`EvidenceClass`] of its rule (M12,
+//! #98): whether the finding is an exact structural fact, a static indicator,
+//! a documented heuristic, or (reserved) runtime-validated.
 
 use serde::{Deserialize, Serialize};
 use wright_ir::source::Span;
@@ -31,6 +35,42 @@ pub enum Severity {
     Info,
 }
 
+/// How strongly a finding is supported by the available evidence.
+///
+/// Classifies the *kind* of evidence behind a rule's findings, not the
+/// severity or the certainty of an individual finding:
+///
+/// * `Exact` — a structural fact of the program (e.g. a duplicated
+///   condition) that holds regardless of runtime values.
+/// * `StaticIndicator` — the trigger is statically known but the impact
+///   (e.g. runtime loop frequency) is an indicator, not a measurement.
+/// * `Heuristic` — a documented fixed heuristic list that may miss or
+///   over-flag edge cases.
+/// * `RuntimeValidated` — reserved for rules whose findings are confirmed
+///   by runtime evaluation; not produced by the v0.2 static rule set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EvidenceClass {
+    Exact,
+    StaticIndicator,
+    Heuristic,
+    RuntimeValidated,
+}
+
+impl EvidenceClass {
+    /// The stable serialized spelling of this class
+    /// (`"exact"`, `"static-indicator"`, `"heuristic"`,
+    /// `"runtime-validated"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EvidenceClass::Exact => "exact",
+            EvidenceClass::StaticIndicator => "static-indicator",
+            EvidenceClass::Heuristic => "heuristic",
+            EvidenceClass::RuntimeValidated => "runtime-validated",
+        }
+    }
+}
+
 /// One analysis finding, linked to its source location and IR node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
@@ -42,12 +82,18 @@ pub struct Finding {
     pub rule: RuleId,
     pub action: Option<ActionId>,
     pub value: Option<ValueId>,
+    /// The evidence class of this finding, taken from the producing rule.
+    pub evidence: EvidenceClass,
 }
 
 /// A Workshop-specific static analysis.
 pub trait Analysis {
     /// The stable analysis name (also the finding code).
     fn name(&self) -> &'static str;
+    /// The evidence class of this rule's findings (single source of truth
+    /// for the `evidence` field on every [`Finding`] and on the rule's
+    /// metadata).
+    fn evidence(&self) -> EvidenceClass;
     /// Run the analysis over one rule and its CFG.
     fn run(&self, program: &wir::Program, rule: RuleId, cfg: &Cfg) -> Vec<Finding>;
 }
@@ -73,6 +119,12 @@ impl Analysis for MinWaitLoop {
         "min-wait-loop"
     }
 
+    fn evidence(&self) -> EvidenceClass {
+        // The minimum-duration wait is statically known, but the loop's
+        // runtime frequency impact is an indicator, not a measurement.
+        EvidenceClass::StaticIndicator
+    }
+
     fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
         let Some(rule_data) = program.rules.get(rule).cloned() else {
             return Vec::new();
@@ -94,6 +146,7 @@ impl Analysis for MinWaitLoop {
                     rule,
                     action: Some(action_id),
                     value: None,
+                    evidence: self.evidence(),
                 });
             }
         });
@@ -140,6 +193,12 @@ impl Analysis for DuplicateCondition {
         "duplicate-condition"
     }
 
+    fn evidence(&self) -> EvidenceClass {
+        // A duplicated condition is a structural fact of the rule: it holds
+        // for every execution, independent of runtime values.
+        EvidenceClass::Exact
+    }
+
     fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
         let Some(rule_data) = program.rules.get(rule).cloned() else {
             return Vec::new();
@@ -169,6 +228,7 @@ impl Analysis for DuplicateCondition {
                         rule,
                         action: Some(action_id),
                         value: Some(condition),
+                        evidence: self.evidence(),
                     });
                 } else {
                     conditions.push((condition, Some(action_id), span));
@@ -188,6 +248,12 @@ pub const EXPENSIVE_PREDICATES: &[&str] = &["distance", "raycast", "isInLoS"];
 impl Analysis for ExpensiveLoopCheck {
     fn name(&self) -> &'static str {
         "expensive-loop-check"
+    }
+
+    fn evidence(&self) -> EvidenceClass {
+        // The expensive-call list is a documented fixed heuristic that may
+        // miss unusual predicates or over-flag cheap ones.
+        EvidenceClass::Heuristic
     }
 
     fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
@@ -211,6 +277,7 @@ impl Analysis for ExpensiveLoopCheck {
                     rule,
                     action: Some(action_id),
                     value: Some(value),
+                    evidence: self.evidence(),
                 });
             }
         });

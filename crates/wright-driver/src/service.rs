@@ -46,6 +46,10 @@ pub enum ToolRequest {
     Cfg { rule: u32 },
     /// Every static-analysis finding.
     Findings,
+    /// Lint findings plus rule metadata and effective configuration (M12, #98).
+    Lint,
+    /// The registered lint rules and the effective lint configuration.
+    LintRules,
     /// The subroutine call graph (caller rules → callee subroutines).
     CallGraph,
     /// Generated-resource cost estimates (exact counts + findings).
@@ -113,6 +117,8 @@ impl<'a> ToolService<'a> {
                 "usage",
                 "cfg",
                 "findings",
+                "lint",
+                "lintRules",
                 "callGraph",
                 "costEstimate",
                 "targetMetadata",
@@ -160,6 +166,11 @@ impl<'a> ToolService<'a> {
             ToolRequest::Findings => {
                 self.semantic_query(wright_analyzer::service::Request::GetFindings)
             }
+            ToolRequest::Lint => self.lint(),
+            ToolRequest::LintRules => self.semantic_query_with_config(
+                wright_analyzer::service::Request::LintRules,
+                self.session.config.lint.clone(),
+            ),
             ToolRequest::CallGraph => self.ok(self.call_graph()),
             ToolRequest::CostEstimate => self.ok(self.cost_estimate()),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
@@ -201,11 +212,25 @@ impl<'a> ToolService<'a> {
 
     /// Run one M4 semantic query over the loaded program.
     fn semantic_query(&self, request: wright_analyzer::service::Request) -> ToolResponse {
+        self.semantic_query_with_config(request, wright_analyzer::registry::LintConfig::default())
+    }
+
+    /// Run one semantic query over the loaded program with an explicit lint
+    /// configuration.
+    fn semantic_query_with_config(
+        &self,
+        request: wright_analyzer::service::Request,
+        config: wright_analyzer::registry::LintConfig,
+    ) -> ToolResponse {
         let origin = wright_analyzer::service::Origin {
             kind: self.loaded.origin.kind.clone(),
             locale: self.loaded.origin.locale.clone(),
         };
-        match wright_analyzer::service::SemanticService::with_origin(&self.loaded.program, origin) {
+        match wright_analyzer::service::SemanticService::with_origin_and_config(
+            &self.loaded.program,
+            origin,
+            config,
+        ) {
             Ok(service) => match service.handle(&request) {
                 wright_analyzer::service::Response::Ok { result } => ToolResponse::Ok { result },
                 wright_analyzer::service::Response::Error { error } => ToolResponse::Error {
@@ -215,6 +240,42 @@ impl<'a> ToolService<'a> {
                     },
                 },
             },
+            Err(error) => self.error("analysis-error", error.to_string()),
+        }
+    }
+
+    /// `lint`: rule metadata, effective configuration, and findings over the
+    /// loaded program through the same semantic-service path as the CLI
+    /// `lint` workflow (no duplicated rule execution, M12 #98).
+    fn lint(&self) -> ToolResponse {
+        let config = self.session.config.lint.clone();
+        let origin = wright_analyzer::service::Origin {
+            kind: self.loaded.origin.kind.clone(),
+            locale: self.loaded.origin.locale.clone(),
+        };
+        match wright_analyzer::service::SemanticService::with_origin_and_config(
+            &self.loaded.program,
+            origin,
+            config,
+        ) {
+            Ok(service) => {
+                let lint_rules = match service.handle(&wright_analyzer::service::Request::LintRules)
+                {
+                    wright_analyzer::service::Response::Ok { result } => result,
+                    wright_analyzer::service::Response::Error { .. } => serde_json::json!({}),
+                };
+                let findings = match service.handle(&wright_analyzer::service::Request::GetFindings)
+                {
+                    wright_analyzer::service::Response::Ok { result } => result,
+                    wright_analyzer::service::Response::Error { .. } => serde_json::json!([]),
+                };
+                self.ok(json!({
+                    "inputIdentity": self.loaded.input.identity,
+                    "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
+                    "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
+                    "findings": findings,
+                }))
+            }
             Err(error) => self.error("analysis-error", error.to_string()),
         }
     }

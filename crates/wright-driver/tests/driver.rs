@@ -139,6 +139,93 @@ fn workshop_analyze_reports_program_and_findings() {
     );
 }
 
+// ── Lint (M12, #98) ──────────────────────────────────────────────────────────
+
+#[test]
+fn workshop_lint_reports_structured_findings_rules_and_config() {
+    let text = corpus_workshop_text("synthetic/control-flow");
+    let path = temp_file("flow.txt", &text);
+    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
+    let envelope = session.lint();
+    assert!(envelope.ok, "lint must succeed: {:?}", envelope.diagnostics);
+    assert_eq!(
+        envelope.result.input_identity.len(),
+        64,
+        "input identity is the SHA-256 hex digest"
+    );
+    assert_eq!(envelope.result.program["rules"], 2);
+    let rules = envelope.result.rules.as_array().unwrap();
+    assert_eq!(rules.len(), 3, "all three M12 rules are reported");
+    let config_rules = envelope.result.config["rules"].as_object().unwrap();
+    assert_eq!(
+        config_rules.len(),
+        3,
+        "the config summary covers every rule"
+    );
+    let findings = envelope.result.findings.as_array().unwrap();
+    let min_wait = findings
+        .iter()
+        .find(|finding| finding["code"] == "min-wait-loop")
+        .expect("control-flow fires min-wait-loop");
+    assert_eq!(
+        min_wait["evidence"], "static-indicator",
+        "findings carry the rule's evidence class"
+    );
+    let span = min_wait["span"].as_object().expect("findings carry spans");
+    assert_eq!(
+        span["path"],
+        path.display().to_string(),
+        "file-0 spans carry the resolved input display path"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_respects_configured_rule_disabling() {
+    let text = corpus_workshop_text("synthetic/control-flow");
+    let path = temp_file("flow.txt", &text);
+    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
+    session.config.lint.disable("min-wait-loop");
+    let envelope = session.lint();
+    assert!(envelope.ok);
+    let findings = envelope.result.findings.as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["code"] != "min-wait-loop"),
+        "the disabled rule must produce no findings"
+    );
+    let rules = envelope.result.rules.as_array().unwrap();
+    let min_wait = rules
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .expect("the disabled rule is still reported in the rules summary");
+    assert_eq!(min_wait["enabled"], false);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn opy_input_lints_through_the_native_frontend() {
+    // Supported OPY input lints through the shared native frontend path.
+    let source = corpus_source_opy("synthetic/control-flow");
+    let path = temp_file("control-flow.opy", &source);
+    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
+    let envelope = session.lint();
+    assert!(
+        envelope.ok,
+        "opy lint must succeed: {:?}",
+        envelope.diagnostics
+    );
+    let findings = envelope.result.findings.as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["code"] == "min-wait-loop"),
+        "opy control-flow fires min-wait-loop"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[test]
 fn workshop_inspect_returns_structural_model() {
     let text = corpus_workshop_text("synthetic/declarations-rules");

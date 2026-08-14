@@ -37,6 +37,7 @@ fn render_text<T: serde::Serialize>(envelope: &Envelope<T>) {
         "compile" => render_compile(envelope),
         "check" => println!("check: ok"),
         "analyze" => render_analyze(envelope),
+        "lint" => render_lint(envelope),
         "inspect" => render_inspect(envelope),
         other => println!("{other}: ok"),
     }
@@ -85,6 +86,48 @@ fn render_analyze<T: serde::Serialize>(envelope: &Envelope<T>) {
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
         println!("  {severity}[{code}]: {message}");
+        if let Some(span) = finding.get("span") {
+            print_span(span, "      ");
+        }
+    }
+}
+
+fn render_lint<T: serde::Serialize>(envelope: &Envelope<T>) {
+    let value = serde_json::to_value(envelope).expect("envelope serializes");
+    let findings = value
+        .pointer("/result/findings")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let rules = value
+        .pointer("/result/rules")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    println!(
+        "lint: {} finding(s) across {} rule(s), {} diagnostic(s)",
+        findings.len(),
+        rules.len(),
+        envelope.diagnostics.len()
+    );
+    for finding in &findings {
+        let code = finding
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("finding");
+        let severity = finding
+            .get("severity")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("info");
+        let evidence = finding
+            .get("evidence")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("exact");
+        let message = finding
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        println!("  {severity}[{code}] (evidence: {evidence}): {message}");
         if let Some(span) = finding.get("span") {
             print_span(span, "      ");
         }

@@ -29,6 +29,7 @@ COMMANDS:
     compile    Parse, lower, and emit Workshop text for the input
     check      Parse, validate, and analyze the input; report diagnostics
     analyze    Parse, lower, and run semantic analysis; report findings
+    lint       Parse, lower, and lint the input; report findings
     inspect    Parse, lower, and show the structural/semantic program model
     help       Show this help
     version    Show version and result-contract metadata
@@ -47,6 +48,10 @@ OPTIONS:
     -f, --format <FMT>  Output format: text|json (default: text)
     -h, --help          Show this help
 
+LINT OPTIONS:
+    --disable-rule <ID>          Disable a lint rule by stable ID (lint only; repeatable)
+    --rule-severity <ID>:<SEV>   Override a rule's severity: warning|info (lint only; repeatable)
+
 EXIT CODES:
     0  success
     1  source/user error (parse, validation, ambiguous input)
@@ -58,7 +63,9 @@ OUTPUT CONTRACT:
     Text mode writes the command result to stdout and diagnostics to stderr.
     JSON mode writes one `wright-result/v1` envelope to stdout and keeps
     stderr empty on success. Exit codes and the envelope shape are stable;
-    human-readable wording is not part of the machine contract.
+    human-readable wording is not part of the machine contract. `lint`
+    reports findings through the same envelope with rule metadata and the
+    effective configuration (M12, #97/#98).
 ";
 
 fn main() -> ExitCode {
@@ -76,6 +83,7 @@ enum Command {
     Compile,
     Check,
     Analyze,
+    Lint,
     Inspect,
 }
 
@@ -85,6 +93,7 @@ impl Command {
             Command::Compile => "compile",
             Command::Check => "check",
             Command::Analyze => "analyze",
+            Command::Lint => "lint",
             Command::Inspect => "inspect",
         }
     }
@@ -94,6 +103,7 @@ impl Command {
             "compile" => Command::Compile,
             "check" => Command::Check,
             "analyze" => Command::Analyze,
+            "lint" => Command::Lint,
             "inspect" => Command::Inspect,
             _ => return None,
         })
@@ -172,6 +182,33 @@ fn run() -> Result<u8, String> {
                 let value = take_value(&mut args, &arg)?;
                 config.output = Some(PathBuf::from(value));
             }
+            "--disable-rule" => {
+                if command != Command::Lint {
+                    return Err(format!(
+                        "wright: --disable-rule is only valid for `lint` (not `{}`)",
+                        command.as_str()
+                    ));
+                }
+                let value = take_value(&mut args, &arg)?;
+                config.lint.disable(&value);
+            }
+            "--rule-severity" => {
+                if command != Command::Lint {
+                    return Err(format!(
+                        "wright: --rule-severity is only valid for `lint` (not `{}`)",
+                        command.as_str()
+                    ));
+                }
+                let value = take_value(&mut args, &arg)?;
+                let (rule_id, severity) = value.split_once(':').ok_or_else(|| {
+                    format!("wright: --rule-severity expects <ID>:<SEVERITY> (got '{value}')")
+                })?;
+                if !config.lint.set_severity_by_name(rule_id, severity) {
+                    return Err(format!(
+                        "wright: unknown severity '{severity}' (expected warning|info)"
+                    ));
+                }
+            }
             "-" => {
                 config.input = InputSpec::Stdin;
                 args.remove(0);
@@ -212,6 +249,7 @@ fn run() -> Result<u8, String> {
         Command::Compile => run_command(&mut session, wright_driver::CompilerSession::compile),
         Command::Check => run_command(&mut session, wright_driver::CompilerSession::check),
         Command::Analyze => run_command(&mut session, wright_driver::CompilerSession::analyze),
+        Command::Lint => run_command(&mut session, wright_driver::CompilerSession::lint),
         Command::Inspect => run_command(&mut session, wright_driver::CompilerSession::inspect),
     };
     Ok(code)

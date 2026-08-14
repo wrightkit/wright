@@ -8,10 +8,21 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
+use wright_analyzer::analysis::Severity;
+use wright_analyzer::registry::LintConfig;
+use wright_analyzer::service::SemanticService;
+use wright_ir::wir::Program as WirProgram;
+
 fn fixture_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../adapter/fixtures")
         .join(format!("{fixture_id}.json"))
+}
+
+fn local_fixture_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(format!("{name}.json"))
 }
 
 /// Drive the in-process service over a fixture and return responses keyed by
@@ -22,11 +33,35 @@ fn in_process_responses(fixture_id: &str, requests: &[&str]) -> Vec<Value> {
             .unwrap();
     let model = protocol.to_ir().unwrap();
     let program = wright_ir::lower::lower(&model).unwrap();
-    let service = wright_analyzer::service::SemanticService::new(&program).unwrap();
+    let service = SemanticService::new(&program).unwrap();
     requests
         .iter()
         .map(|request| serde_json::from_str(&service.handle_json(request)).unwrap())
         .collect()
+}
+
+fn lowered_program(path: &Path) -> WirProgram {
+    let protocol = wright_core::hir::parse_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let model = protocol.to_ir().unwrap();
+    wright_ir::lower::lower(&model).unwrap()
+}
+
+/// Build a service over a lowered program with an explicit lint config.
+fn service_with_config(program: &WirProgram, config: LintConfig) -> SemanticService<'_> {
+    SemanticService::with_origin_and_config(
+        program,
+        wright_analyzer::service::Origin {
+            kind: "protocol".to_string(),
+            locale: None,
+        },
+        config,
+    )
+    .unwrap()
+}
+
+/// Handle one request over a service and return the parsed JSON response.
+fn handle(service: &SemanticService<'_>, request: &str) -> Value {
+    serde_json::from_str(&service.handle_json(request)).unwrap()
 }
 
 #[test]
@@ -163,6 +198,120 @@ fn findings_are_returned_with_codes_and_spans() {
             finding["span"].is_object(),
             "{} must carry a span",
             finding["code"]
+        );
+        assert!(
+            finding["evidence"].is_string(),
+            "{} must carry an evidence class",
+            finding["code"]
+        );
+    }
+}
+
+// ── Lint rules and configuration (M12, #98) ──────────────────────────────────
+
+#[test]
+fn lint_rules_reports_rule_metadata_and_effective_config() {
+    let responses = in_process_responses(
+        "synthetic/control-flow",
+        &[r#"{"op":"lintRules"}"#, r#"{"op":"lintRules"}"#],
+    );
+    assert_eq!(
+        responses[0], responses[1],
+        "lintRules must be deterministic across calls"
+    );
+    let result = &responses[0]["result"];
+    let rules = result["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 3, "all three M12 rules are reported");
+    for rule in rules {
+        assert!(rule["id"].is_string(), "rules carry stable ids");
+        assert!(rule["defaultSeverity"].is_string());
+        assert!(rule["effectiveSeverity"].is_string());
+        assert_eq!(
+            rule["enabled"], true,
+            "the default config enables every rule"
+        );
+        assert!(
+            rule["evidence"].is_string(),
+            "rules carry an evidence class"
+        );
+        assert!(
+            rule["knownLimits"].is_string(),
+            "rules carry documented known limits"
+        );
+        assert!(rule["tags"].is_array(), "rules carry tags");
+    }
+    let config_rules = result["config"]["rules"].as_object().unwrap();
+    assert_eq!(
+        config_rules.len(),
+        3,
+        "the config summary covers every registered rule"
+    );
+    for rule in rules {
+        let id = rule["id"].as_str().unwrap();
+        let entry = &config_rules[id];
+        assert_eq!(entry["enabled"], true);
+        assert_eq!(
+            entry["severity"], rule["effectiveSeverity"],
+            "config severity agrees with the rule's effective severity"
+        );
+    }
+}
+
+#[test]
+fn lint_config_is_applied_to_findings_and_rules() {
+    let mut config = LintConfig::default();
+    config.disable("min-wait-loop");
+    config.set_severity("expensive-loop-check", Severity::Warning);
+
+    // Control-flow fires min-wait-loop: the disabled rule must produce no
+    // findings, and lintRules must reflect the configuration.
+    let program = lowered_program(&fixture_path("synthetic/control-flow"));
+    let service = service_with_config(&program, config.clone());
+    let findings = handle(&service, r#"{"op":"getFindings"}"#);
+    let findings = findings["result"].as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["code"] != "min-wait-loop"),
+        "the disabled rule must produce no findings"
+    );
+    let rules = handle(&service, r#"{"op":"lintRules"}"#);
+    let rules = rules["result"]["rules"].as_array().unwrap();
+    let min_wait = rules
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .unwrap();
+    assert_eq!(
+        min_wait["enabled"], false,
+        "lintRules reports the disabled rule"
+    );
+    let exp_loop = rules
+        .iter()
+        .find(|rule| rule["id"] == "expensive-loop-check")
+        .unwrap();
+    assert_eq!(
+        exp_loop["effectiveSeverity"], "warning",
+        "lintRules reports the severity override"
+    );
+
+    // The expensive-loop fixture fires expensive-loop-check: its findings
+    // must carry the overridden severity.
+    let program = lowered_program(&local_fixture_path("expensive-loop"));
+    let service = service_with_config(&program, config);
+    let findings = handle(&service, r#"{"op":"getFindings"}"#);
+    let findings = findings["result"].as_array().unwrap();
+    let exp_findings: Vec<&Value> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "expensive-loop-check")
+        .collect();
+    assert!(
+        !exp_findings.is_empty(),
+        "the expensive-loop fixture fires the rule"
+    );
+    for finding in exp_findings {
+        assert_eq!(
+            finding["severity"], "warning",
+            "findings carry the configured severity"
         );
     }
 }

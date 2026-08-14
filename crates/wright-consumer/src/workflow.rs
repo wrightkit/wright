@@ -35,6 +35,16 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         analyze.result.findings.as_array().unwrap().len()
     );
 
+    // Lint through the shared session (M12, #98): the same pipeline with
+    // rule metadata, effective configuration, and evidence-tagged findings.
+    let lint = session.lint();
+    assert!(lint.ok, "lint passes: {:?}", lint.diagnostics);
+    println!(
+        "lint: {} finding(s) across {} rule(s)",
+        lint.result.findings.as_array().unwrap().len(),
+        lint.result.rules.as_array().unwrap().len()
+    );
+
     // Session-aware tool service queries (structured owned results).
     let service = ToolService::new(&mut session).map_err(|error| error.message)?;
     let capabilities = service.handle(&ToolRequest::Capabilities);
@@ -57,12 +67,26 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         ToolRequest::Project,
         ToolRequest::Rules,
         ToolRequest::Findings,
+        ToolRequest::Lint,
+        ToolRequest::LintRules,
         ToolRequest::CostEstimate,
         ToolRequest::TargetMetadata,
     ] {
         let response = service.handle(&request);
         match response {
-            wright_driver::service::ToolResponse::Ok { .. } => {}
+            wright_driver::service::ToolResponse::Ok { result } => {
+                // The tool lint path carries the same evidence-tagged
+                // findings as the session/CLI path.
+                if matches!(request, ToolRequest::Lint) {
+                    let findings = result["findings"].as_array().unwrap();
+                    for finding in findings {
+                        assert!(
+                            finding.get("evidence").is_some(),
+                            "lint findings carry evidence"
+                        );
+                    }
+                }
+            }
             wright_driver::service::ToolResponse::Error { error } => {
                 panic!("query failed: {error:?}");
             }

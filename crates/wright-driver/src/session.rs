@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use wright_analyzer::registry::LintConfig;
 use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService};
 use wright_ir::wir;
 
@@ -17,7 +18,7 @@ use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
 use crate::result::{
-    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, Envelope, InspectResult,
+    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, Envelope, InspectResult, LintResult,
     exit_code_from, version_info,
 };
 use crate::{input_identity, opy};
@@ -342,13 +343,73 @@ impl CompilerSession {
         )
     }
 
+    /// `lint`: load and produce the source identity, program summary, rule
+    /// metadata, effective configuration, and findings (M12, #98).
+    ///
+    /// Lint findings are reported in `result.findings`, not in the envelope
+    /// diagnostics (like `analyze`). Rule enable/disable and severity come
+    /// from `self.config.lint`, the same configuration the CLI flags and
+    /// programmatic consumers set.
+    pub fn lint(&mut self) -> Envelope<LintResult> {
+        let command = "lint";
+        let loaded = match self.load() {
+            Ok(loaded) => loaded,
+            Err(diagnostic) => {
+                self.diagnostics.push(diagnostic);
+                return self.finish(command, LintResult::default());
+            }
+        };
+        let service = match self.service_with(&loaded, self.config.lint.clone()) {
+            Ok(service) => service,
+            Err(diagnostic) => {
+                self.diagnostics.push(diagnostic);
+                return self.finish(command, LintResult::default());
+            }
+        };
+        let program = service_response(&service, &Request::Program);
+        let lint_rules = service_response(&service, &Request::LintRules);
+        let mut findings = service_response(&service, &Request::GetFindings);
+        enrich_finding_spans(&mut findings, &loaded);
+        let (rules, config) = match lint_rules {
+            serde_json::Value::Object(mut object) => (
+                object
+                    .remove("rules")
+                    .unwrap_or_else(|| serde_json::json!([])),
+                object
+                    .remove("config")
+                    .unwrap_or_else(|| serde_json::json!({})),
+            ),
+            _ => (serde_json::json!([]), serde_json::json!({})),
+        };
+        self.finish(
+            command,
+            LintResult {
+                input_identity: loaded.input.identity.clone(),
+                program,
+                rules,
+                config,
+                findings,
+            },
+        )
+    }
+
     /// Build the semantic service over a loaded program.
     fn service<'a>(&self, loaded: &'a Loaded) -> Result<SemanticService<'a>, Diagnostic> {
+        self.service_with(loaded, LintConfig::default())
+    }
+
+    /// Build the semantic service over a loaded program with an explicit lint
+    /// configuration.
+    fn service_with<'a>(
+        &self,
+        loaded: &'a Loaded,
+        config: LintConfig,
+    ) -> Result<SemanticService<'a>, Diagnostic> {
         let origin = ServiceOrigin {
             kind: loaded.origin.kind.clone(),
             locale: loaded.origin.locale.clone(),
         };
-        SemanticService::with_origin(&loaded.program, origin)
+        SemanticService::with_origin_and_config(&loaded.program, origin, config)
             .map_err(|error| ir_diag("analysis-error", Stage::Analysis, error, &loaded.input))
     }
 
@@ -434,6 +495,37 @@ fn span_from_json(value: Option<&serde_json::Value>) -> Option<SourceSpan> {
             col: end.get("col")?.as_u64()? as u32,
         },
     })
+}
+
+/// Add the resolved `path` to every lint finding span.
+///
+/// File 0 is the main input and carries its resolved display path; other
+/// files are named `<file N>` (matching the [`span_from_json`] convention),
+/// so lint output preserves original source identity where available.
+fn enrich_finding_spans(findings: &mut serde_json::Value, loaded: &Loaded) {
+    let Some(list) = findings.as_array_mut() else {
+        return;
+    };
+    for finding in list {
+        let Some(span) = finding.get_mut("span") else {
+            continue;
+        };
+        if !span.is_object() {
+            continue;
+        }
+        let path = span
+            .get("file")
+            .and_then(serde_json::Value::as_u64)
+            .map(|file| {
+                if file == 0 {
+                    loaded.input.display.clone()
+                } else {
+                    format!("<file {file}>")
+                }
+            })
+            .unwrap_or_else(|| loaded.input.display.clone());
+        span["path"] = serde_json::Value::String(path);
+    }
 }
 
 /// Map a Workshop-language error to a driver diagnostic.

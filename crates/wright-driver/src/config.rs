@@ -2,11 +2,14 @@
 //!
 //! [`SessionConfig`] describes one driver run: where the input comes from,
 //! which frontend handles it, optional frontend overrides (Workshop locale,
-//! `.opy` include root), where compiled output goes, and which presentation
-//! format the result is intended for. The CLI, library consumers, and later
-//! tool/LSP adapters all construct the same configuration type.
+//! `.opy` include root), where compiled output goes, which presentation
+//! format the result is intended for, and the lint rule configuration. The
+//! CLI, library consumers, and later tool/LSP adapters all construct the
+//! same configuration type.
 
 use std::path::PathBuf;
+
+pub use wright_analyzer::registry::LintConfig;
 
 /// The concrete input frontend to use, or automatic detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +108,13 @@ pub struct SessionConfig {
     /// The WIR transformation policy (`off` by default; `compat`/`aggressive`
     /// opt into evidence-backed passes).
     pub profile: wright_transform::Profile,
+    /// The lint rule configuration used by `lint` (M12, #97/#98).
+    ///
+    /// [`LintConfig::default`] enables every registered rule at its default
+    /// severity; `--disable-rule`/`--rule-severity` on the CLI and library
+    /// consumers override it here, so CLI and programmatic lint runs apply
+    /// the same deterministic configuration.
+    pub lint: LintConfig,
 }
 
 impl Default for SessionConfig {
@@ -117,6 +127,7 @@ impl Default for SessionConfig {
             output: None,
             format: OutputFormat::Text,
             profile: wright_transform::Profile::Off,
+            lint: LintConfig::default(),
         }
     }
 }

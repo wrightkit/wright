@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use wright_ir::wir;
 
 use crate::analysis::{
-    Analysis, DuplicateCondition, ExpensiveLoopCheck, Finding, MinWaitLoop, Severity,
+    Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop, Severity,
 };
 use crate::cfg::Cfg;
 
@@ -41,6 +41,11 @@ pub struct RuleMeta {
     pub id: &'static str,
     /// Severity used when the rule fires and no override is configured.
     pub default_severity: Severity,
+    /// The evidence class of this rule's findings: whether a finding is an
+    /// exact structural fact, a static indicator, a documented heuristic, or
+    /// runtime-validated. Mirrors [`Analysis::evidence`] of the rule's
+    /// implementation (single source of truth).
+    pub evidence: EvidenceClass,
     /// One-line human-readable description of what the rule detects.
     pub summary: &'static str,
     /// Longer explanation, suitable for documentation or CLI `--explain` output.
@@ -146,6 +151,21 @@ impl LintConfig {
             .severity_override = Some(severity.into());
     }
 
+    /// Override the severity of a rule from its CLI spelling.
+    ///
+    /// Accepts the stable severity names `"warning"` and `"info"`. Returns
+    /// `false` when `severity` is not a known label, leaving the
+    /// configuration unchanged.
+    pub fn set_severity_by_name(&mut self, rule_id: &str, severity: &str) -> bool {
+        let label = match severity {
+            "warning" => SeverityLabel::Warning,
+            "info" => SeverityLabel::Info,
+            _ => return false,
+        };
+        self.set_severity(rule_id, label.into());
+        true
+    }
+
     /// Whether a rule is enabled.
     ///
     /// Returns `true` for unknown IDs (no config entry = enabled by default).
@@ -193,11 +213,18 @@ impl Default for LintRegistry {
     /// their canonical order: `min-wait-loop`, `duplicate-condition`,
     /// `expensive-loop-check`.
     fn default() -> Self {
+        // Build each analysis in a local binding first so the rule metadata
+        // can take its evidence class from the same implementation that
+        // produces findings (single source of truth).
+        let min_wait: Box<dyn Analysis> = Box::new(MinWaitLoop);
+        let duplicate_condition: Box<dyn Analysis> = Box::new(DuplicateCondition);
+        let expensive_loop_check: Box<dyn Analysis> = Box::new(ExpensiveLoopCheck);
         let entries = vec![
             RegistryEntry {
                 meta: RuleMeta {
                     id: "min-wait-loop",
                     default_severity: Severity::Warning,
+                    evidence: min_wait.evidence(),
                     summary: "loop body waits at the workshop minimum rate",
                     documentation: concat!(
                         "A loop whose body contains a `wait` call at the minimum Workshop ",
@@ -210,12 +237,13 @@ impl Default for LintRegistry {
                     ),
                     tags: &["performance", "stability"],
                 },
-                analysis: Box::new(MinWaitLoop),
+                analysis: min_wait,
             },
             RegistryEntry {
                 meta: RuleMeta {
                     id: "duplicate-condition",
                     default_severity: Severity::Warning,
+                    evidence: duplicate_condition.evidence(),
                     summary: "condition is evaluated more than once within one rule",
                     documentation: concat!(
                         "The same condition appears in two or more branches of the same rule. ",
@@ -228,12 +256,13 @@ impl Default for LintRegistry {
                     ),
                     tags: &["correctness"],
                 },
-                analysis: Box::new(DuplicateCondition),
+                analysis: duplicate_condition,
             },
             RegistryEntry {
                 meta: RuleMeta {
                     id: "expensive-loop-check",
                     default_severity: Severity::Info,
+                    evidence: expensive_loop_check.evidence(),
                     summary: "geometry predicate evaluated inside a loop body",
                     documentation: concat!(
                         "A geometry predicate (`distance`, `raycast`, or `isInLoS`) is called ",
@@ -247,7 +276,7 @@ impl Default for LintRegistry {
                     ),
                     tags: &["performance"],
                 },
-                analysis: Box::new(ExpensiveLoopCheck),
+                analysis: expensive_loop_check,
             },
         ];
         Self { entries }

@@ -191,6 +191,133 @@ fn inspect_over_workshop_input_lists_rules_and_symbols() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+// ── Lint (M12, #98) ──────────────────────────────────────────────────────────
+
+#[test]
+fn lint_over_workshop_input_reports_findings_in_text_and_json() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    // Text mode: summary line, findings with evidence and source spans.
+    let output = run(&["lint", path.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("lint:"), "summary line: {stdout}");
+    assert!(stdout.contains("min-wait-loop"), "findings: {stdout}");
+    assert!(
+        stdout.contains("evidence:"),
+        "text mode exposes the evidence class: {stdout}"
+    );
+    // JSON mode: the lint envelope with findings, rules, and config.
+    let output = run(&["lint", path.to_str().unwrap(), "-f", "json"]);
+    assert!(output.status.success());
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["command"], "lint");
+    assert_eq!(envelope["ok"], true);
+    assert!(
+        envelope["result"]["input_identity"].as_str().unwrap().len() == 64,
+        "lint carries the SHA-256 input identity"
+    );
+    let findings = envelope["result"]["findings"].as_array().unwrap();
+    assert!(!findings.is_empty(), "control-flow produces findings");
+    for finding in findings {
+        assert!(finding["evidence"].is_string(), "findings carry evidence");
+        assert!(
+            finding["span"]["path"].is_string(),
+            "finding spans carry the resolved path"
+        );
+    }
+    assert_eq!(
+        envelope["result"]["rules"].as_array().unwrap().len(),
+        3,
+        "all three M12 rules are reported"
+    );
+    assert_eq!(
+        envelope["result"]["config"]["rules"]
+            .as_object()
+            .unwrap()
+            .len(),
+        3
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_rule_flags_control_findings() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    // --disable-rule removes the rule's findings and reports enabled:false.
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--disable-rule",
+        "min-wait-loop",
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope = parse_json(&output.stdout);
+    let findings = envelope["result"]["findings"].as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["code"] != "min-wait-loop"),
+        "the disabled rule must produce no findings"
+    );
+    let rules = envelope["result"]["rules"].as_array().unwrap();
+    let min_wait = rules
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .unwrap();
+    assert_eq!(min_wait["enabled"], false);
+
+    // --rule-severity overrides the effective severity of a rule. The
+    // control-flow fixture produces no expensive-loop-check findings, so
+    // the assertion is on the rules metadata.
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--rule-severity",
+        "expensive-loop-check:warning",
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope = parse_json(&output.stdout);
+    let rules = envelope["result"]["rules"].as_array().unwrap();
+    let exp_loop = rules
+        .iter()
+        .find(|rule| rule["id"] == "expensive-loop-check")
+        .unwrap();
+    assert_eq!(exp_loop["effectiveSeverity"], "warning");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_flags_are_usage_errors_for_other_commands() {
+    for flags in [
+        &["check", "--disable-rule", "min-wait-loop"][..],
+        &["analyze", "--rule-severity", "min-wait-loop:info"][..],
+    ] {
+        let output = run(flags);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{flags:?} must be a usage error"
+        );
+        assert!(output.stdout.is_empty(), "usage errors write stderr only");
+    }
+}
+
 #[test]
 fn stdin_workshop_and_protocol_piping_work() {
     // Workshop text on stdin.
@@ -304,7 +431,7 @@ fn version_and_help_are_documented_contract_surfaces() {
     let output = run(&["--help"]);
     assert!(output.status.success());
     let help = String::from_utf8_lossy(&output.stdout);
-    for command in ["compile", "check", "analyze", "inspect"] {
+    for command in ["compile", "check", "analyze", "lint", "inspect"] {
         assert!(help.contains(command), "help documents {command}");
     }
     assert!(help.contains("EXIT CODES"));

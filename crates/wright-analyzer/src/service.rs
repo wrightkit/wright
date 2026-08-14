@@ -49,6 +49,9 @@ pub enum Request {
     GetCfg { rule: u32 },
     /// Every static-analysis finding.
     GetFindings,
+    /// The registered lint rules and the effective lint configuration
+    /// (M12, #98).
+    LintRules,
 }
 
 /// A semantic query response.
@@ -87,6 +90,7 @@ pub struct SemanticService<'a> {
     index: SemanticIndex,
     findings: Vec<Finding>,
     origin: Origin,
+    config: LintConfig,
 }
 
 impl<'a> SemanticService<'a> {
@@ -144,6 +148,8 @@ impl<'a> SemanticService<'a> {
     ///
     /// `config` controls which rules run and at what severity; callers that
     /// only need the default behavior should use [`SemanticService::with_origin`].
+    /// The retained `config` also drives `lintRules` responses, so rule
+    /// metadata and findings always reflect the same configuration (M12, #98).
     pub fn with_origin_and_config(
         program: &'a wir::Program,
         origin: Origin,
@@ -156,6 +162,7 @@ impl<'a> SemanticService<'a> {
             index,
             findings,
             origin,
+            config,
         })
     }
 
@@ -178,7 +185,7 @@ impl<'a> SemanticService<'a> {
                 result: json!({
                     "name": SERVICE_NAME,
                     "version": SERVICE_VERSION,
-                    "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings"],
+                    "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "lintRules"],
                 }),
             },
             Request::Program => Response::Ok {
@@ -351,11 +358,51 @@ impl<'a> SemanticService<'a> {
                             "rule": finding.rule.index(),
                             "action": finding.action.map(|action| action.index()),
                             "value": finding.value.map(|value| value.index()),
+                            "evidence": finding.evidence.as_str(),
                         })
                     })
                     .collect();
                 Response::Ok {
                     result: json!(findings),
+                }
+            }
+            Request::LintRules => {
+                // Deterministic: iterate the registry in its canonical order
+                // and resolve every rule's effective configuration from the
+                // service config, so rule metadata and findings always agree.
+                let registry = LintRegistry::default();
+                let rules: Vec<serde_json::Value> = registry
+                    .rules()
+                    .map(|meta| {
+                        json!({
+                            "id": meta.id,
+                            "defaultSeverity": severity_name(meta.default_severity),
+                            "effectiveSeverity": severity_name(self.config.effective_severity(meta)),
+                            "enabled": self.config.is_enabled(meta.id),
+                            "summary": meta.summary,
+                            "evidence": meta.evidence.as_str(),
+                            "tags": meta.tags,
+                            "knownLimits": meta.known_limits,
+                        })
+                    })
+                    .collect();
+                let config_rules: serde_json::Map<String, serde_json::Value> = registry
+                    .rules()
+                    .map(|meta| {
+                        (
+                            meta.id.to_string(),
+                            json!({
+                                "enabled": self.config.is_enabled(meta.id),
+                                "severity": severity_name(self.config.effective_severity(meta)),
+                            }),
+                        )
+                    })
+                    .collect();
+                Response::Ok {
+                    result: json!({
+                        "rules": rules,
+                        "config": { "rules": config_rules },
+                    }),
                 }
             }
         }

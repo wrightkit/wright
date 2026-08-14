@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_analyzer::analysis::Severity;
+use wright_analyzer::analysis::{EvidenceClass, Severity};
 use wright_analyzer::registry::{LintConfig, LintRegistry};
 use wright_core::hir;
 use wright_ir::lower;
@@ -119,6 +119,64 @@ fn rule_default_severities_match_known_values() {
         .find(|(id, _)| *id == "expensive-loop-check")
         .unwrap();
     assert_eq!(exp_loop.1, Severity::Info);
+}
+
+// ── Evidence classification (#98) ────────────────────────────────────────────
+
+#[test]
+fn rule_evidence_classes_are_declared() {
+    let registry = LintRegistry::default();
+    let evidence: Vec<(&str, EvidenceClass)> = registry
+        .rules()
+        .map(|meta| (meta.id, meta.evidence))
+        .collect();
+    assert_eq!(
+        evidence_of(&evidence, "min-wait-loop"),
+        EvidenceClass::StaticIndicator,
+        "the minimum-duration wait is statically known; the frequency impact is an indicator"
+    );
+    assert_eq!(
+        evidence_of(&evidence, "duplicate-condition"),
+        EvidenceClass::Exact,
+        "a duplicated condition is a structural fact"
+    );
+    assert_eq!(
+        evidence_of(&evidence, "expensive-loop-check"),
+        EvidenceClass::Heuristic,
+        "the expensive-call list is a documented fixed heuristic"
+    );
+}
+
+fn evidence_of(evidence: &[(&str, EvidenceClass)], id: &str) -> EvidenceClass {
+    evidence
+        .iter()
+        .find(|(rule_id, _)| *rule_id == id)
+        .map(|(_, class)| *class)
+        .expect("registered rule")
+}
+
+#[test]
+fn findings_carry_the_evidence_class_of_their_rule() {
+    let program = corpus_program("synthetic/control-flow");
+    let config = LintConfig::default();
+    let registry = LintRegistry::default();
+
+    let findings = registry.run(&program, &config);
+    assert!(
+        !findings.is_empty(),
+        "control-flow must produce at least one finding"
+    );
+    for finding in &findings {
+        let meta = registry
+            .rules()
+            .find(|meta| meta.id == finding.code)
+            .expect("finding code must match a registered rule");
+        assert_eq!(
+            finding.evidence, meta.evidence,
+            "finding '{}' must carry the evidence class of its rule",
+            finding.code
+        );
+    }
 }
 
 // ── Default configuration ─────────────────────────────────────────────────────
@@ -265,6 +323,35 @@ fn effective_severity_uses_override_when_set() {
         config.effective_severity(meta),
         Severity::Warning,
         "after override: must return the configured severity"
+    );
+}
+
+#[test]
+fn set_severity_by_name_accepts_cli_spellings_and_rejects_unknown_labels() {
+    let registry = LintRegistry::default();
+    let meta = registry
+        .rules()
+        .find(|m| m.id == "expensive-loop-check")
+        .unwrap();
+
+    let mut config = LintConfig::default();
+    assert!(
+        config.set_severity_by_name("expensive-loop-check", "warning"),
+        "'warning' is a known severity label"
+    );
+    assert_eq!(
+        config.effective_severity(meta),
+        Severity::Warning,
+        "the CLI spelling must override the default severity"
+    );
+    assert!(
+        !config.set_severity_by_name("expensive-loop-check", "fatal"),
+        "'fatal' is not a known severity label"
+    );
+    assert_eq!(
+        config.effective_severity(meta),
+        Severity::Warning,
+        "an unknown label must leave the configuration unchanged"
     );
 }
 

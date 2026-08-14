@@ -43,7 +43,7 @@ pub mod exit {
 #[derive(Debug, Clone, Serialize)]
 pub struct Envelope<T: Serialize> {
     pub wright: VersionInfo,
-    /// The command name (`compile`, `check`, `analyze`, `inspect`).
+    /// The command name (`compile`, `check`, `analyze`, `inspect`, `lint`).
     pub command: String,
     /// Whether the workflow produced a usable result.
     pub ok: bool,
@@ -121,6 +121,25 @@ pub struct InspectResult {
     pub rules: serde_json::Value,
     pub symbols: serde_json::Value,
     pub references: serde_json::Value,
+}
+
+/// The result of a `lint` run (M12, #98): source identity, the program
+/// summary, the registered lint rules with their effective configuration,
+/// the active configuration, and the findings.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LintResult {
+    /// SHA-256 of the input bytes (source identity).
+    pub input_identity: String,
+    /// Program summary (from the semantic service `program` request).
+    pub program: serde_json::Value,
+    /// Registered lint rules with default/effective severity, enabled state,
+    /// and evidence class (from the `lintRules` request).
+    pub rules: serde_json::Value,
+    /// The effective lint configuration (from the `lintRules` request).
+    pub config: serde_json::Value,
+    /// Lint findings, each carrying a stable code, severity, evidence class,
+    /// message, and source span (from the `getFindings` request).
+    pub findings: serde_json::Value,
 }
 
 /// Build the envelope metadata block for a command.

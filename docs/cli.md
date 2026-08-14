@@ -38,6 +38,7 @@ result.
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
 | `wright check [INPUT]` | Parse, lower, validate, analyze | `check: ok` (or nothing on failure) |
 | `wright analyze [INPUT]` | Parse, lower, analyze | findings and summary |
+| `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
 | `wright inspect [INPUT]` | Parse, lower, inspect structure | rules, symbols, references summary |
 
 All commands accept a file path or `-`/omitted for stdin. Input kind is
@@ -46,6 +47,69 @@ detected from the extension (`.opy`, `.json`, `.txt`/`.ws`) or stdin content
 with `--kind auto|opy|workshop|protocol`. `--locale` overrides Workshop
 client-locale detection; `--root` sets the `.opy` include root; `-o/--output`
 writes compiled output to a file.
+
+## `wright lint` and the lint configuration (M12, #98)
+
+`wright lint` runs through the same compiler/session pipeline as the other
+commands and reports structured findings with stable rule IDs, configured
+severity, an evidence class, and original source identity/spans where
+available. It reuses the M12 lint registry (#97), so rule
+enable/disable/severity configuration is deterministic and identical across
+CLI and programmatic (`CompilerSession::lint`, tool/agent `lint`) use.
+
+Two lint-only flags configure the registry; both are repeatable:
+
+* `--disable-rule <ID>` — disable a rule by stable ID (`min-wait-loop`,
+  `duplicate-condition`, `expensive-loop-check`).
+* `--rule-severity <ID>:<warning|info>` — override a rule's severity.
+
+These flags are usage errors on every other command (exit 2).
+
+The `lint` result envelope carries `input_identity` (the SHA-256 source
+identity; the tool/agent API exposes the same value as `inputIdentity`),
+`program`, `rules`, `config`, and `findings`:
+
+```json
+{
+  "wright": { "version": "0.1.0", "contract": "wright-result/v1" },
+  "command": "lint",
+  "ok": true,
+  "exit": 0,
+  "diagnostics": [],
+  "result": {
+    "input_identity": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2, "findings": 1 },
+    "rules": [
+      {
+        "id": "min-wait-loop",
+        "defaultSeverity": "warning",
+        "effectiveSeverity": "warning",
+        "enabled": true,
+        "summary": "loop body waits at the workshop minimum rate",
+        "evidence": "static-indicator",
+        "tags": ["performance", "stability"],
+        "knownLimits": "Wait durations that are not statically known ..."
+      }
+    ],
+    "config": { "rules": { "min-wait-loop": { "enabled": true, "severity": "warning" } } },
+    "findings": [
+      {
+        "code": "min-wait-loop",
+        "severity": "warning",
+        "evidence": "static-indicator",
+        "message": "loop body waits at the workshop minimum rate; ...",
+        "span": { "file": 0, "path": "program.txt", "start": { "line": 28, "col": 9 }, "end": { "line": 31, "col": 13 } }
+      }
+    ]
+  }
+}
+```
+
+Additive contract change: analysis findings (`analyze`, `lint`, and the
+tool/agent `getFindings`/`lint` responses) now also carry an `evidence` field
+classifying how strongly the finding is supported (`exact`,
+`static-indicator`, `heuristic`, `runtime-validated`). This is additive and
+does not change any previously documented field.
 
 ## Exit codes
 
