@@ -1,0 +1,269 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "source.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "time_reeval",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 1,
+          "col": 1
+        },
+        "end": {
+          "line": 1,
+          "col": 23
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "rate_reeval",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 2,
+          "col": 1
+        },
+        "end": {
+          "line": 2,
+          "col": 23
+        }
+      },
+      "initializer": null
+    }
+  ],
+  "rules": [
+    {
+      "name": "chase reevaluation enums",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 4,
+          "col": 1
+        },
+        "end": {
+          "line": 4,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 5,
+            "col": 5
+          },
+          "end": {
+            "line": 5,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "assign",
+          "target": {
+            "kind": "globalVar",
+            "name": "time_reeval",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 6,
+                "col": 5
+              },
+              "end": {
+                "line": 6,
+                "col": 17
+              }
+            }
+          },
+          "value": {
+            "kind": "enum",
+            "type": "ChaseTimeReeval",
+            "value": "NONE",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 6,
+                "col": 35
+              },
+              "end": {
+                "line": 6,
+                "col": 40
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 6,
+              "col": 5
+            },
+            "end": {
+              "line": 6,
+              "col": 40
+            }
+          }
+        },
+        {
+          "kind": "assign",
+          "target": {
+            "kind": "globalVar",
+            "name": "time_reeval",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 7,
+                "col": 5
+              },
+              "end": {
+                "line": 7,
+                "col": 17
+              }
+            }
+          },
+          "value": {
+            "kind": "enum",
+            "type": "ChaseTimeReeval",
+            "value": "DESTINATION_AND_DURATION",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 7,
+                "col": 35
+              },
+              "end": {
+                "line": 7,
+                "col": 60
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 7,
+              "col": 5
+            },
+            "end": {
+              "line": 7,
+              "col": 60
+            }
+          }
+        },
+        {
+          "kind": "assign",
+          "target": {
+            "kind": "globalVar",
+            "name": "rate_reeval",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 8,
+                "col": 5
+              },
+              "end": {
+                "line": 8,
+                "col": 17
+              }
+            }
+          },
+          "value": {
+            "kind": "enum",
+            "type": "ChaseRateReeval",
+            "value": "NONE",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 8,
+                "col": 35
+              },
+              "end": {
+                "line": 8,
+                "col": 40
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 8,
+              "col": 5
+            },
+            "end": {
+              "line": 8,
+              "col": 40
+            }
+          }
+        },
+        {
+          "kind": "assign",
+          "target": {
+            "kind": "globalVar",
+            "name": "rate_reeval",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 9,
+                "col": 5
+              },
+              "end": {
+                "line": 9,
+                "col": 17
+              }
+            }
+          },
+          "value": {
+            "kind": "enum",
+            "type": "ChaseRateReeval",
+            "value": "DESTINATION_AND_RATE",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 9,
+                "col": 35
+              },
+              "end": {
+                "line": 9,
+                "col": 56
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 9,
+              "col": 5
+            },
+            "end": {
+              "line": 9,
+              "col": 56
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

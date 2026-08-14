@@ -38,6 +38,10 @@ const PARITY_CASES: &[(&str, &str)] = &[
         "adapter/fixtures/synthetic/expressions-values.json",
     ),
     (
+        "synthetic/chase-enums",
+        "adapter/fixtures/synthetic/chase-enums.json",
+    ),
+    (
         "synthetic/preprocessing",
         "adapter/fixtures/synthetic/preprocessing.json",
     ),

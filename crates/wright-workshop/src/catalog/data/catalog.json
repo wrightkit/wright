@@ -240,6 +240,40 @@
       ]
     },
     {
+      "domain": "ChaseTimeReeval",
+      "members": [
+        {
+          "aliases": {
+            "en-US": "None"
+          },
+          "id": "NONE"
+        },
+        {
+          "aliases": {
+            "en-US": "Destination and Duration"
+          },
+          "id": "DESTINATION_AND_DURATION"
+        }
+      ]
+    },
+    {
+      "domain": "ChaseRateReeval",
+      "members": [
+        {
+          "aliases": {
+            "en-US": "None"
+          },
+          "id": "NONE"
+        },
+        {
+          "aliases": {
+            "en-US": "Destination and Rate"
+          },
+          "id": "DESTINATION_AND_RATE"
+        }
+      ]
+    },
+    {
       "domain": "SpecVisibility",
       "members": [
         {
@@ -376,7 +410,7 @@
     "generatorVersion": "0.1.0",
     "license": "AGPL-3.0-or-later",
     "reviewed": true,
-    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt(); receiver-call action/value spellings (setMoveSpeed, isAlive, getPosition, getHealth, teleport, setMaxHealth, setHealth, setAimSpeed, setGravity, setDamageDealt, setDamageReceived, setUltCharge) from the pinned OverPy 9.7.10 en-US emission surface for .opy eventPlayer.<method>(...) forms, evidenced by the synthetic/receiver-calls corpus fixture"
+    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt(); receiver-call action/value spellings (setMoveSpeed, isAlive, getPosition, getHealth, teleport, setMaxHealth, setHealth, setAimSpeed, setGravity, setDamageDealt, setDamageReceived, setUltCharge) from the pinned OverPy 9.7.10 en-US emission surface for .opy eventPlayer.<method>(...) forms, evidenced by the synthetic/receiver-calls corpus fixture (#104); ChaseTimeReeval and ChaseRateReeval member spellings (None, Destination and Duration, Destination and Rate) reference-validated against the pinned OverPy 9.7.10 enum blocks and emission (#105)"
   },
   "schemaVersion": 1,
   "structural": [

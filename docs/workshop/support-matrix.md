@@ -74,8 +74,17 @@ Literals: numbers (signed), strings (escaped), `True`/`False`,
 - Hud Position: `Left`.
 - Hud Reevaluation: `Visible To Sort Order String and Color`, `Visible To
   and String`.
+- Chase Time Reevaluation: `None`, `Destination and Duration`.
+- Chase Rate Reevaluation: `None`, `Destination and Rate`.
 - Spec Visibility: `Default Visibility`.
 - Team: `All Teams` (inside `All Players(All Teams)`).
+
+The Chase reevaluation `None` member spelling is shared by both reference
+domains (`ChaseTimeReeval.NONE` and `ChaseRateReeval.NONE` emit the same
+`None` text). The flat Workshop parser cannot disambiguate that bare spelling
+across domains, so emitted text containing a bare `None` member is a
+documented round-trip exception until context-sensitive enum resolution
+exists; the emitted semantic value itself is reference-equivalent.
 
 ### Settings and extensions
 - Emitted from native `.opy` `settings { ... }` blocks into the top-of-file
