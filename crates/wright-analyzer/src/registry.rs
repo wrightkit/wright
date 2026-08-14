@@ -152,7 +152,7 @@ impl LintConfig {
     pub fn is_enabled(&self, rule_id: &str) -> bool {
         self.rules
             .get(rule_id)
-            .map_or(true, |config| config.enabled)
+            .is_none_or(|config| config.enabled)
     }
 
     /// Effective severity for a rule given its metadata and this config.
