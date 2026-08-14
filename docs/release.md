@@ -57,6 +57,24 @@ A `v*` tag push (e.g. `v0.1.0`) drives `.github/workflows/release.yml`:
 A failure in any gate or any required target aborts the workflow before
 publication; there is no partial release.
 
+### Creating a release
+
+The tag is the release decision point. Before tagging, bump the version in
+`[workspace.package]` of the root `Cargo.toml` (and land it via a normal PR);
+the release workflows reject a tag whose version does not match the workspace
+implementation version. Then either:
+
+* **From the command line:** `git tag v0.1.0 && git push origin v0.1.0` — the
+  tag push triggers `release.yml` directly; or
+* **From GitHub:** run the **Release tag** workflow
+  (Actions → Release tag → Run workflow) with the version, e.g. `0.1.0`. It
+  validates the semver and the workspace-version match, fails if the tag
+  already exists, pushes `v<version>`, and then dispatches `release.yml`
+  (a tag pushed by CI would otherwise not retrigger the tag workflow).
+
+Both paths run the same release gates, build the same target matrix, and
+publish through the same `publish` job.
+
 ### Target matrix and artifact naming
 
 Artifacts use the stable scheme `wright-<version>-<target-triple>.<ext>`:

@@ -1,0 +1,54 @@
+name: Release tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to tag, e.g. 0.1.0 (must match the workspace version in Cargo.toml)"
+        required: true
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  create-tag:
+    name: Create and push release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          rustflags: ""
+
+      - name: Validate version, then create and push the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "invalid version '$VERSION' (expected semver like 0.1.0)"; exit 1
+          fi
+          PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | \
+            python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "wright-cli"))')"
+          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "version '$VERSION' does not match the workspace implementation version '$PACKAGE_VERSION'; bump [workspace.package] version in a PR first"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "tag v$VERSION already exists on origin"; exit 1
+          fi
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "pushed tag v$VERSION"
+
+      - name: Trigger the release workflow
+        run: gh workflow run release.yml -f version="${{ steps.tag.outputs.version }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

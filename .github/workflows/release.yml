@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.1.0 (a matching v<version> tag must already exist, e.g. via the Release tag workflow)"
+        required: true
 
 permissions:
   contents: write
@@ -12,9 +17,15 @@ jobs:
   release-gates:
     name: Release gates
     runs-on: ubuntu-latest
+    env:
+      # The tag this run releases: the dispatch input (normalized with the v
+      # prefix) or, on a tag push, the tag name itself.
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -26,17 +37,17 @@ jobs:
       - name: Verify tag version matches the workspace implementation version
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | \
             python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "wright-cli"))')"
           if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
-            echo "tag v$VERSION does not match the workspace implementation version $PACKAGE_VERSION"
+            echo "tag $RELEASE_TAG does not match the workspace implementation version $PACKAGE_VERSION"
             exit 1
           fi
-          echo "workspace version $PACKAGE_VERSION matches tag $GITHUB_REF_NAME"
+          echo "workspace version $PACKAGE_VERSION matches tag $RELEASE_TAG"
 
       - name: Run release gates (fmt, clippy, tests, v1 gates, scenarios, benchmarks, standalone proof)
-        run: scripts/release.sh "${GITHUB_REF_NAME#v}"
+        run: scripts/release.sh "${RELEASE_TAG#v}"
 
       - name: Upload gate reports
         if: always()
@@ -72,11 +83,14 @@ jobs:
       run:
         shell: bash
     env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -93,7 +107,7 @@ jobs:
       - name: Package archive with version stamp
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           PAYLOAD="wright-$VERSION-$TARGET"
           mkdir -p "dist/$PAYLOAD"
           scripts/make-version-stamp.sh "$VERSION" "dist/$PAYLOAD/version.json"
@@ -115,7 +129,7 @@ jobs:
       - name: Smoke test the packaged archive
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           PAYLOAD="wright-$VERSION-$TARGET"
           EXTRACT="$(mktemp -d)"
           tar -xf "dist/$PAYLOAD.$EXT" -C "$EXTRACT"
@@ -145,6 +159,8 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v7
@@ -155,7 +171,7 @@ jobs:
       - name: Verify the complete artifact set
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           mkdir -p release
           for triple in x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
             ext="tar.gz"
@@ -172,6 +188,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
