@@ -155,11 +155,11 @@ fn workshop_lint_reports_structured_findings_rules_and_config() {
     );
     assert_eq!(envelope.result.program["rules"], 2);
     let rules = envelope.result.rules.as_array().unwrap();
-    assert_eq!(rules.len(), 3, "all three M12 rules are reported");
+    assert_eq!(rules.len(), 5, "all five M12 rules are reported");
     let config_rules = envelope.result.config["rules"].as_object().unwrap();
     assert_eq!(
         config_rules.len(),
-        3,
+        5,
         "the config summary covers every rule"
     );
     let findings = envelope.result.findings.as_array().unwrap();

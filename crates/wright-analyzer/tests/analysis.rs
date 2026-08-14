@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_analyzer::analysis::{self, Severity};
+use wright_analyzer::analysis::{self, EvidenceClass, Severity};
 use wright_core::hir;
 use wright_ir::lower;
 use wright_ir::wir::Program as WirProgram;
@@ -138,5 +138,217 @@ fn analyze_aggregates_all_shipped_analyses() {
     );
     for finding in &findings {
         assert!(finding.span.is_some(), "{} must carry a span", finding.code);
+    }
+}
+
+#[test]
+fn repeated_value_fires_on_duplicates_within_one_action() {
+    // Parabola shape: two duplicated shape families inside one action of a
+    // `For Global Variable` loop — the `distance(...)` family (2
+    // occurrences) and the `time - offsets[I]` family (3 occurrences) — each
+    // reporting exactly one finding at its first occurrence with the
+    // statically known occurrence count in the message.
+    let program = lower_program(&local_fixture_path("repeated-value-parabola"));
+    let findings = findings_by_code(&program, "repeated-value");
+    assert_eq!(findings.len(), 2, "one finding per duplicated shape family");
+    assert_eq!(
+        findings[0].message,
+        "this value expression is evaluated 2 times within the same loop scope",
+        "the distance family occurs twice"
+    );
+    assert_eq!(
+        findings[1].message,
+        "this value expression is evaluated 3 times within the same loop scope",
+        "the subtract family occurs three times"
+    );
+    for finding in &findings {
+        assert_eq!(finding.severity, Severity::Warning);
+        assert_eq!(finding.evidence, EvidenceClass::Exact);
+        assert!(finding.span.is_some(), "finding must carry its span");
+        assert!(
+            finding.action.is_some(),
+            "finding must link to the loop action"
+        );
+        assert!(
+            finding.value.is_some(),
+            "finding must link to the offending value"
+        );
+    }
+}
+
+#[test]
+fn repeated_value_fires_on_cross_action_duplicates() {
+    // Santa shape: two families of an identical `vectorTowards(...)`
+    // sub-expression (AB and AD) evaluated across sibling modify actions,
+    // three occurrences per family. Under the amended per-shape reporting
+    // rule each family fires exactly one finding at its first occurrence,
+    // with the occurrence count in the message (3 each): 2 findings total.
+    let program = lower_program(&local_fixture_path("repeated-value-santa"));
+    let findings = findings_by_code(&program, "repeated-value");
+    assert_eq!(findings.len(), 2, "one finding per family (AB, AD)");
+    assert_ne!(
+        findings[0].span, findings[1].span,
+        "each family fires at its own first occurrence"
+    );
+    for finding in &findings {
+        assert_eq!(finding.severity, Severity::Warning);
+        assert_eq!(finding.evidence, EvidenceClass::Exact);
+        assert_eq!(
+            finding.message,
+            "this value expression is evaluated 3 times within the same loop scope",
+            "each family occurs three times"
+        );
+        assert!(finding.span.is_some(), "finding must carry its span");
+        assert!(
+            finding.action.is_some(),
+            "finding must link to the loop action"
+        );
+        assert!(
+            finding.value.is_some(),
+            "finding must link to the offending value"
+        );
+    }
+}
+
+#[test]
+fn repeated_value_reports_maximal_shapes_and_per_scope() {
+    // The shapes fixture pins two amended semantics: (a) a duplicated inner
+    // shape nested inside a duplicated larger shape is subsumed (only the
+    // maximal shape fires); (b) the same duplicated shape in two separate
+    // loop scopes of one rule fires once per scope. Rule 1 yields one
+    // finding; rule 2 yields two (one per loop scope): three total.
+    let program = lower_program(&local_fixture_path("repeated-value-shapes"));
+    let findings = findings_by_code(&program, "repeated-value");
+    assert_eq!(
+        findings.len(),
+        3,
+        "one maximal finding in rule 1, one per scope in rule 2"
+    );
+    for finding in &findings {
+        assert_eq!(finding.severity, Severity::Warning);
+        assert_eq!(finding.evidence, EvidenceClass::Exact);
+        assert_eq!(
+            finding.message,
+            "this value expression is evaluated 2 times within the same loop scope",
+            "the maximal shape occurs twice per scope"
+        );
+        assert!(finding.span.is_some(), "finding must carry its span");
+        assert!(finding.action.is_some());
+        assert!(finding.value.is_some());
+    }
+}
+
+#[test]
+fn repeated_value_does_not_fire_on_negative_cases() {
+    let program = lower_program(&local_fixture_path("repeated-value-negative"));
+    assert!(
+        findings_by_code(&program, "repeated-value").is_empty(),
+        "no repeated-value finding on any REQ-001 negative case"
+    );
+}
+
+#[test]
+fn repeated_value_does_not_fire_on_the_corpus() {
+    // The synthetic corpus fixtures contain no duplicated non-trivial value
+    // in a loop scope. overpy-cake is excluded: its geometry-building loops
+    // genuinely duplicate multi-call shapes (e.g. `cakePos[N]+vect(...)` and
+    // the `CAKE_LONG-(abs(i2)-...)` shape), so it is a real positive
+    // observation, not a negative case (see REQ-001 smoke-check evidence).
+    for fixture_id in [
+        "synthetic/basic-rule",
+        "synthetic/control-flow",
+        "synthetic/declarations-rules",
+        "synthetic/expressions-values",
+        "synthetic/preprocessing",
+    ] {
+        let program = corpus_program(fixture_id);
+        assert!(
+            findings_by_code(&program, "repeated-value").is_empty(),
+            "{fixture_id} must produce no repeated-value findings"
+        );
+    }
+}
+
+#[test]
+fn repeated_value_findings_are_deterministic() {
+    let program = lower_program(&local_fixture_path("repeated-value-santa"));
+    let first = findings_by_code(&program, "repeated-value");
+    let second = findings_by_code(&program, "repeated-value");
+    assert_eq!(
+        first.len(),
+        second.len(),
+        "finding count must be identical across runs"
+    );
+    for (a, b) in first.iter().zip(second.iter()) {
+        assert_eq!(a.code, b.code, "finding codes must be stable");
+        assert_eq!(a.severity, b.severity, "finding severities must be stable");
+        assert_eq!(a.span, b.span, "finding spans must be stable");
+        assert_eq!(a.action, b.action, "finding actions must be stable");
+        assert_eq!(a.value, b.value, "finding values must be stable");
+    }
+}
+
+#[test]
+fn while_without_wait_fires_on_waardless_while() {
+    let program = lower_program(&local_fixture_path("while-without-wait-positive"));
+    let findings = findings_by_code(&program, "while-without-wait");
+    assert_eq!(findings.len(), 1, "one waardless while loop");
+    assert_eq!(findings[0].severity, Severity::Warning);
+    assert_eq!(findings[0].evidence, EvidenceClass::StaticIndicator);
+    assert!(findings[0].span.is_some(), "finding must carry its span");
+    assert!(
+        findings[0].action.is_some(),
+        "finding must link to the while action"
+    );
+    assert!(
+        findings[0].value.is_none(),
+        "the finding targets the loop action, not a value"
+    );
+}
+
+#[test]
+fn while_without_wait_does_not_fire_when_body_has_wait() {
+    // Literal wait, computed wait duration, wait nested in an If, and a
+    // waardless `For Global Variable` loop must all stay silent.
+    let program = lower_program(&local_fixture_path("while-without-wait-negative"));
+    assert!(
+        findings_by_code(&program, "while-without-wait").is_empty(),
+        "no while-without-wait finding on any REQ-002 negative case"
+    );
+}
+
+#[test]
+fn while_without_wait_does_not_fire_on_the_corpus() {
+    for fixture_id in [
+        "synthetic/basic-rule",
+        "synthetic/control-flow",
+        "synthetic/declarations-rules",
+        "synthetic/expressions-values",
+        "synthetic/preprocessing",
+        "real-world/overpy-cake",
+    ] {
+        let program = corpus_program(fixture_id);
+        assert!(
+            findings_by_code(&program, "while-without-wait").is_empty(),
+            "{fixture_id} must produce no while-without-wait findings"
+        );
+    }
+}
+
+#[test]
+fn while_without_wait_findings_are_deterministic() {
+    let program = lower_program(&local_fixture_path("while-without-wait-positive"));
+    let first = findings_by_code(&program, "while-without-wait");
+    let second = findings_by_code(&program, "while-without-wait");
+    assert_eq!(
+        first.len(),
+        second.len(),
+        "finding count must be identical across runs"
+    );
+    for (a, b) in first.iter().zip(second.iter()) {
+        assert_eq!(a.code, b.code, "finding codes must be stable");
+        assert_eq!(a.severity, b.severity, "finding severities must be stable");
+        assert_eq!(a.span, b.span, "finding spans must be stable");
+        assert_eq!(a.action, b.action, "finding actions must be stable");
     }
 }

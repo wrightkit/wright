@@ -1,0 +1,2901 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "repeated-value-santa.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "i",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 24,
+          "col": 1
+        },
+        "end": {
+          "line": 24,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "rectangleChimneys",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 25,
+          "col": 1
+        },
+        "end": {
+          "line": 25,
+          "col": 29
+        }
+      },
+      "initializer": {
+        "kind": "array",
+        "elements": [
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 37
+                },
+                "end": {
+                  "line": 25,
+                  "col": 39
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 40
+                },
+                "end": {
+                  "line": 25,
+                  "col": 42
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 43
+                },
+                "end": {
+                  "line": 25,
+                  "col": 45
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 25,
+                "col": 32
+              },
+              "end": {
+                "line": 25,
+                "col": 46
+              }
+            }
+          },
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 1,
+              "text": "1",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 52
+                },
+                "end": {
+                  "line": 25,
+                  "col": 54
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 55
+                },
+                "end": {
+                  "line": 25,
+                  "col": 57
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 58
+                },
+                "end": {
+                  "line": 25,
+                  "col": 60
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 25,
+                "col": 47
+              },
+              "end": {
+                "line": 25,
+                "col": 61
+              }
+            }
+          },
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 2,
+              "text": "2",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 67
+                },
+                "end": {
+                  "line": 25,
+                  "col": 69
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 70
+                },
+                "end": {
+                  "line": 25,
+                  "col": 72
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 73
+                },
+                "end": {
+                  "line": 25,
+                  "col": 75
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 25,
+                "col": 62
+              },
+              "end": {
+                "line": 25,
+                "col": 76
+              }
+            }
+          },
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 3,
+              "text": "3",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 82
+                },
+                "end": {
+                  "line": 25,
+                  "col": 84
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 85
+                },
+                "end": {
+                  "line": 25,
+                  "col": 87
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 25,
+                  "col": 88
+                },
+                "end": {
+                  "line": 25,
+                  "col": 90
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 25,
+                "col": 77
+              },
+              "end": {
+                "line": 25,
+                "col": 91
+              }
+            }
+          }
+        ],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 25,
+            "col": 88
+          },
+          "end": {
+            "line": 25,
+            "col": 90
+          }
+        }
+      }
+    },
+    {
+      "kind": "globalVariable",
+      "name": "rectangleChimneysAB",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 26,
+          "col": 1
+        },
+        "end": {
+          "line": 26,
+          "col": 31
+        }
+      },
+      "initializer": {
+        "kind": "array",
+        "elements": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 26,
+            "col": 33
+          },
+          "end": {
+            "line": 26,
+            "col": 35
+          }
+        }
+      }
+    },
+    {
+      "kind": "globalVariable",
+      "name": "rectangleChimneysAD",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 27,
+          "col": 1
+        },
+        "end": {
+          "line": 27,
+          "col": 31
+        }
+      },
+      "initializer": {
+        "kind": "array",
+        "elements": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 27,
+            "col": 33
+          },
+          "end": {
+            "line": 27,
+            "col": 35
+          }
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "name": "repeated vector towards across sibling actions",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 29,
+          "col": 1
+        },
+        "end": {
+          "line": 29,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 30,
+            "col": 5
+          },
+          "end": {
+            "line": 30,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "for",
+          "variable": {
+            "kind": "globalVar",
+            "name": "i",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 31,
+                "col": 9
+              },
+              "end": {
+                "line": 31,
+                "col": 11
+              }
+            }
+          },
+          "iterable": {
+            "kind": "call",
+            "name": "range",
+            "args": [
+              {
+                "kind": "number",
+                "value": 4,
+                "text": "4",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 31,
+                    "col": 20
+                  },
+                  "end": {
+                    "line": 31,
+                    "col": 22
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 31,
+                "col": 14
+              },
+              "end": {
+                "line": 31,
+                "col": 23
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "receiverCall",
+                "receiver": {
+                  "kind": "globalVar",
+                  "name": "rectangleChimneysAB",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 32,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 32,
+                      "col": 29
+                    }
+                  }
+                },
+                "name": "append",
+                "args": [
+                  {
+                    "kind": "call",
+                    "name": "vectorTowards",
+                    "args": [
+                      {
+                        "kind": "binary",
+                        "op": "*",
+                        "left": {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "rectangleChimneys",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 50
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 68
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "globalVar",
+                              "name": "i",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 32,
+                                  "col": 68
+                                },
+                                "end": {
+                                  "line": 32,
+                                  "col": 70
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "number",
+                              "value": 4,
+                              "text": "4",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 32,
+                                  "col": 72
+                                },
+                                "end": {
+                                  "line": 32,
+                                  "col": 74
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 68
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 74
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 50
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 75
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "vector",
+                          "x": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 82
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 84
+                              }
+                            }
+                          },
+                          "y": {
+                            "kind": "number",
+                            "value": 0,
+                            "text": "0",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 85
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 87
+                              }
+                            }
+                          },
+                          "z": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 88
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 90
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 77
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 91
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 32,
+                            "col": 50
+                          },
+                          "end": {
+                            "line": 32,
+                            "col": 91
+                          }
+                        }
+                      },
+                      {
+                        "kind": "binary",
+                        "op": "*",
+                        "left": {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "rectangleChimneys",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 92
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 110
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "binary",
+                            "op": "+",
+                            "left": {
+                              "kind": "binary",
+                              "op": "*",
+                              "left": {
+                                "kind": "globalVar",
+                                "name": "i",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 32,
+                                    "col": 110
+                                  },
+                                  "end": {
+                                    "line": 32,
+                                    "col": 112
+                                  }
+                                }
+                              },
+                              "right": {
+                                "kind": "number",
+                                "value": 4,
+                                "text": "4",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 32,
+                                    "col": 114
+                                  },
+                                  "end": {
+                                    "line": 32,
+                                    "col": 116
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 32,
+                                  "col": 110
+                                },
+                                "end": {
+                                  "line": 32,
+                                  "col": 116
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "number",
+                              "value": 1,
+                              "text": "1",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 32,
+                                  "col": 118
+                                },
+                                "end": {
+                                  "line": 32,
+                                  "col": 120
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 110
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 120
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 92
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 121
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "vector",
+                          "x": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 128
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 130
+                              }
+                            }
+                          },
+                          "y": {
+                            "kind": "number",
+                            "value": 0,
+                            "text": "0",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 131
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 133
+                              }
+                            }
+                          },
+                          "z": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 134
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 136
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 123
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 137
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 32,
+                            "col": 92
+                          },
+                          "end": {
+                            "line": 32,
+                            "col": 137
+                          }
+                        }
+                      }
+                    ],
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 32,
+                        "col": 36
+                      },
+                      "end": {
+                        "line": 32,
+                        "col": 138
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 32,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 32,
+                    "col": 139
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 32,
+                  "col": 9
+                },
+                "end": {
+                  "line": 32,
+                  "col": 139
+                }
+              }
+            },
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "receiverCall",
+                "receiver": {
+                  "kind": "globalVar",
+                  "name": "rectangleChimneysAD",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 33,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 33,
+                      "col": 29
+                    }
+                  }
+                },
+                "name": "append",
+                "args": [
+                  {
+                    "kind": "call",
+                    "name": "vectorTowards",
+                    "args": [
+                      {
+                        "kind": "binary",
+                        "op": "*",
+                        "left": {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "rectangleChimneys",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 50
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 68
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "binary",
+                            "op": "+",
+                            "left": {
+                              "kind": "binary",
+                              "op": "*",
+                              "left": {
+                                "kind": "globalVar",
+                                "name": "i",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 33,
+                                    "col": 68
+                                  },
+                                  "end": {
+                                    "line": 33,
+                                    "col": 70
+                                  }
+                                }
+                              },
+                              "right": {
+                                "kind": "number",
+                                "value": 4,
+                                "text": "4",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 33,
+                                    "col": 72
+                                  },
+                                  "end": {
+                                    "line": 33,
+                                    "col": 74
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 33,
+                                  "col": 68
+                                },
+                                "end": {
+                                  "line": 33,
+                                  "col": 74
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "number",
+                              "value": 2,
+                              "text": "2",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 33,
+                                  "col": 76
+                                },
+                                "end": {
+                                  "line": 33,
+                                  "col": 78
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 68
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 78
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 33,
+                              "col": 50
+                            },
+                            "end": {
+                              "line": 33,
+                              "col": 79
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "vector",
+                          "x": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 86
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 88
+                              }
+                            }
+                          },
+                          "y": {
+                            "kind": "number",
+                            "value": 0,
+                            "text": "0",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 89
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 91
+                              }
+                            }
+                          },
+                          "z": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 92
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 94
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 33,
+                              "col": 81
+                            },
+                            "end": {
+                              "line": 33,
+                              "col": 95
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 33,
+                            "col": 50
+                          },
+                          "end": {
+                            "line": 33,
+                            "col": 95
+                          }
+                        }
+                      },
+                      {
+                        "kind": "binary",
+                        "op": "*",
+                        "left": {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "rectangleChimneys",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 96
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 114
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "binary",
+                            "op": "+",
+                            "left": {
+                              "kind": "binary",
+                              "op": "*",
+                              "left": {
+                                "kind": "globalVar",
+                                "name": "i",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 33,
+                                    "col": 114
+                                  },
+                                  "end": {
+                                    "line": 33,
+                                    "col": 116
+                                  }
+                                }
+                              },
+                              "right": {
+                                "kind": "number",
+                                "value": 4,
+                                "text": "4",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 33,
+                                    "col": 118
+                                  },
+                                  "end": {
+                                    "line": 33,
+                                    "col": 120
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 33,
+                                  "col": 114
+                                },
+                                "end": {
+                                  "line": 33,
+                                  "col": 120
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "number",
+                              "value": 3,
+                              "text": "3",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 33,
+                                  "col": 122
+                                },
+                                "end": {
+                                  "line": 33,
+                                  "col": 124
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 114
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 124
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 33,
+                              "col": 96
+                            },
+                            "end": {
+                              "line": 33,
+                              "col": 125
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "vector",
+                          "x": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 132
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 134
+                              }
+                            }
+                          },
+                          "y": {
+                            "kind": "number",
+                            "value": 0,
+                            "text": "0",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 135
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 137
+                              }
+                            }
+                          },
+                          "z": {
+                            "kind": "number",
+                            "value": 1,
+                            "text": "1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 33,
+                                "col": 138
+                              },
+                              "end": {
+                                "line": 33,
+                                "col": 140
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 33,
+                              "col": 127
+                            },
+                            "end": {
+                              "line": 33,
+                              "col": 141
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 33,
+                            "col": 96
+                          },
+                          "end": {
+                            "line": 33,
+                            "col": 141
+                          }
+                        }
+                      }
+                    ],
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 33,
+                        "col": 36
+                      },
+                      "end": {
+                        "line": 33,
+                        "col": 142
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 33,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 33,
+                    "col": 143
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 33,
+                  "col": 9
+                },
+                "end": {
+                  "line": 33,
+                  "col": 143
+                }
+              }
+            },
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "receiverCall",
+                "receiver": {
+                  "kind": "globalVar",
+                  "name": "rectangleChimneysAB",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 34,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 34,
+                      "col": 29
+                    }
+                  }
+                },
+                "name": "append",
+                "args": [
+                  {
+                    "kind": "call",
+                    "name": "dotProduct",
+                    "args": [
+                      {
+                        "kind": "call",
+                        "name": "vectorTowards",
+                        "args": [
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 61
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 79
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "*",
+                                "left": {
+                                  "kind": "globalVar",
+                                  "name": "i",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 79
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 81
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 4,
+                                  "text": "4",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 83
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 85
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 79
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 85
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 61
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 86
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 93
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 95
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 96
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 98
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 99
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 101
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 88
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 102
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 34,
+                                "col": 61
+                              },
+                              "end": {
+                                "line": 34,
+                                "col": 102
+                              }
+                            }
+                          },
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 103
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 121
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "+",
+                                "left": {
+                                  "kind": "binary",
+                                  "op": "*",
+                                  "left": {
+                                    "kind": "globalVar",
+                                    "name": "i",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 34,
+                                        "col": 121
+                                      },
+                                      "end": {
+                                        "line": 34,
+                                        "col": 123
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "kind": "number",
+                                    "value": 4,
+                                    "text": "4",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 34,
+                                        "col": 125
+                                      },
+                                      "end": {
+                                        "line": 34,
+                                        "col": 127
+                                      }
+                                    }
+                                  },
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 121
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 127
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 1,
+                                  "text": "1",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 129
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 131
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 121
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 131
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 103
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 132
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 139
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 141
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 142
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 144
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 145
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 147
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 134
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 148
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 34,
+                                "col": 103
+                              },
+                              "end": {
+                                "line": 34,
+                                "col": 148
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 34,
+                            "col": 47
+                          },
+                          "end": {
+                            "line": 34,
+                            "col": 149
+                          }
+                        }
+                      },
+                      {
+                        "kind": "call",
+                        "name": "vectorTowards",
+                        "args": [
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 164
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 182
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "*",
+                                "left": {
+                                  "kind": "globalVar",
+                                  "name": "i",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 182
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 184
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 4,
+                                  "text": "4",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 186
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 188
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 182
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 188
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 164
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 189
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 196
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 198
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 199
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 201
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 202
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 204
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 191
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 205
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 34,
+                                "col": 164
+                              },
+                              "end": {
+                                "line": 34,
+                                "col": 205
+                              }
+                            }
+                          },
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 206
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 224
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "+",
+                                "left": {
+                                  "kind": "binary",
+                                  "op": "*",
+                                  "left": {
+                                    "kind": "globalVar",
+                                    "name": "i",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 34,
+                                        "col": 224
+                                      },
+                                      "end": {
+                                        "line": 34,
+                                        "col": 226
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "kind": "number",
+                                    "value": 4,
+                                    "text": "4",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 34,
+                                        "col": 228
+                                      },
+                                      "end": {
+                                        "line": 34,
+                                        "col": 230
+                                      }
+                                    }
+                                  },
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 224
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 230
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 1,
+                                  "text": "1",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 34,
+                                      "col": 232
+                                    },
+                                    "end": {
+                                      "line": 34,
+                                      "col": 234
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 224
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 234
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 206
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 235
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 242
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 244
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 245
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 247
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 34,
+                                    "col": 248
+                                  },
+                                  "end": {
+                                    "line": 34,
+                                    "col": 250
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 34,
+                                  "col": 237
+                                },
+                                "end": {
+                                  "line": 34,
+                                  "col": 251
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 34,
+                                "col": 206
+                              },
+                              "end": {
+                                "line": 34,
+                                "col": 251
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 34,
+                            "col": 150
+                          },
+                          "end": {
+                            "line": 34,
+                            "col": 252
+                          }
+                        }
+                      }
+                    ],
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 34,
+                        "col": 36
+                      },
+                      "end": {
+                        "line": 34,
+                        "col": 253
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 34,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 34,
+                    "col": 254
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 34,
+                  "col": 9
+                },
+                "end": {
+                  "line": 34,
+                  "col": 254
+                }
+              }
+            },
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "receiverCall",
+                "receiver": {
+                  "kind": "globalVar",
+                  "name": "rectangleChimneysAD",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 35,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 35,
+                      "col": 29
+                    }
+                  }
+                },
+                "name": "append",
+                "args": [
+                  {
+                    "kind": "call",
+                    "name": "dotProduct",
+                    "args": [
+                      {
+                        "kind": "call",
+                        "name": "vectorTowards",
+                        "args": [
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 61
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 79
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "+",
+                                "left": {
+                                  "kind": "binary",
+                                  "op": "*",
+                                  "left": {
+                                    "kind": "globalVar",
+                                    "name": "i",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 79
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 81
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "kind": "number",
+                                    "value": 4,
+                                    "text": "4",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 83
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 85
+                                      }
+                                    }
+                                  },
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 79
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 85
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 2,
+                                  "text": "2",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 87
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 89
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 79
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 89
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 61
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 90
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 97
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 99
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 100
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 102
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 103
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 105
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 92
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 106
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 35,
+                                "col": 61
+                              },
+                              "end": {
+                                "line": 35,
+                                "col": 106
+                              }
+                            }
+                          },
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 107
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 125
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "+",
+                                "left": {
+                                  "kind": "binary",
+                                  "op": "*",
+                                  "left": {
+                                    "kind": "globalVar",
+                                    "name": "i",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 125
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 127
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "kind": "number",
+                                    "value": 4,
+                                    "text": "4",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 129
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 131
+                                      }
+                                    }
+                                  },
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 125
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 131
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 3,
+                                  "text": "3",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 133
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 135
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 125
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 135
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 107
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 136
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 143
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 145
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 146
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 148
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 149
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 151
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 138
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 152
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 35,
+                                "col": 107
+                              },
+                              "end": {
+                                "line": 35,
+                                "col": 152
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 35,
+                            "col": 47
+                          },
+                          "end": {
+                            "line": 35,
+                            "col": 153
+                          }
+                        }
+                      },
+                      {
+                        "kind": "call",
+                        "name": "vectorTowards",
+                        "args": [
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 168
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 186
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "+",
+                                "left": {
+                                  "kind": "binary",
+                                  "op": "*",
+                                  "left": {
+                                    "kind": "globalVar",
+                                    "name": "i",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 186
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 188
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "kind": "number",
+                                    "value": 4,
+                                    "text": "4",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 190
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 192
+                                      }
+                                    }
+                                  },
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 186
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 192
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 2,
+                                  "text": "2",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 194
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 196
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 186
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 196
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 168
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 197
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 204
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 206
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 207
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 209
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 210
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 212
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 199
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 213
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 35,
+                                "col": 168
+                              },
+                              "end": {
+                                "line": 35,
+                                "col": 213
+                              }
+                            }
+                          },
+                          {
+                            "kind": "binary",
+                            "op": "*",
+                            "left": {
+                              "kind": "index",
+                              "array": {
+                                "kind": "globalVar",
+                                "name": "rectangleChimneys",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 214
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 232
+                                  }
+                                }
+                              },
+                              "index": {
+                                "kind": "binary",
+                                "op": "+",
+                                "left": {
+                                  "kind": "binary",
+                                  "op": "*",
+                                  "left": {
+                                    "kind": "globalVar",
+                                    "name": "i",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 232
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 234
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "kind": "number",
+                                    "value": 4,
+                                    "text": "4",
+                                    "span": {
+                                      "file": 0,
+                                      "start": {
+                                        "line": 35,
+                                        "col": 236
+                                      },
+                                      "end": {
+                                        "line": 35,
+                                        "col": 238
+                                      }
+                                    }
+                                  },
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 232
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 238
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "number",
+                                  "value": 3,
+                                  "text": "3",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 35,
+                                      "col": 240
+                                    },
+                                    "end": {
+                                      "line": 35,
+                                      "col": 242
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 232
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 242
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 214
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 243
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "vector",
+                              "x": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 250
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 252
+                                  }
+                                }
+                              },
+                              "y": {
+                                "kind": "number",
+                                "value": 0,
+                                "text": "0",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 253
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 255
+                                  }
+                                }
+                              },
+                              "z": {
+                                "kind": "number",
+                                "value": 1,
+                                "text": "1",
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 35,
+                                    "col": 256
+                                  },
+                                  "end": {
+                                    "line": 35,
+                                    "col": 258
+                                  }
+                                }
+                              },
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 35,
+                                  "col": 245
+                                },
+                                "end": {
+                                  "line": 35,
+                                  "col": 259
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 35,
+                                "col": 214
+                              },
+                              "end": {
+                                "line": 35,
+                                "col": 259
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 35,
+                            "col": 154
+                          },
+                          "end": {
+                            "line": 35,
+                            "col": 260
+                          }
+                        }
+                      }
+                    ],
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 35,
+                        "col": 36
+                      },
+                      "end": {
+                        "line": 35,
+                        "col": 261
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 35,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 35,
+                    "col": 262
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 35,
+                  "col": 9
+                },
+                "end": {
+                  "line": 35,
+                  "col": 262
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 31,
+              "col": 5
+            },
+            "end": {
+              "line": 31,
+              "col": 9
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

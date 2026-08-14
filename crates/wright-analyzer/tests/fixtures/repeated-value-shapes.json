@@ -1,0 +1,2051 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "repeated-value-shapes.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "I",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 16,
+          "col": 1
+        },
+        "end": {
+          "line": 16,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "arr",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 17,
+          "col": 1
+        },
+        "end": {
+          "line": 17,
+          "col": 15
+        }
+      },
+      "initializer": {
+        "kind": "array",
+        "elements": [
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 23
+                },
+                "end": {
+                  "line": 17,
+                  "col": 25
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 26
+                },
+                "end": {
+                  "line": 17,
+                  "col": 28
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 29
+                },
+                "end": {
+                  "line": 17,
+                  "col": 31
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 17,
+                "col": 18
+              },
+              "end": {
+                "line": 17,
+                "col": 32
+              }
+            }
+          },
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 1,
+              "text": "1",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 38
+                },
+                "end": {
+                  "line": 17,
+                  "col": 40
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 41
+                },
+                "end": {
+                  "line": 17,
+                  "col": 43
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 44
+                },
+                "end": {
+                  "line": 17,
+                  "col": 46
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 17,
+                "col": 33
+              },
+              "end": {
+                "line": 17,
+                "col": 47
+              }
+            }
+          },
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 2,
+              "text": "2",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 53
+                },
+                "end": {
+                  "line": 17,
+                  "col": 55
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 56
+                },
+                "end": {
+                  "line": 17,
+                  "col": 58
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 17,
+                  "col": 59
+                },
+                "end": {
+                  "line": 17,
+                  "col": 61
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 17,
+                "col": 48
+              },
+              "end": {
+                "line": 17,
+                "col": 62
+              }
+            }
+          }
+        ],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 17,
+            "col": 59
+          },
+          "end": {
+            "line": 17,
+            "col": 61
+          }
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "name": "maximal shape subsumes nested duplicate",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 19,
+          "col": 1
+        },
+        "end": {
+          "line": 19,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 20,
+            "col": 5
+          },
+          "end": {
+            "line": 20,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "for",
+          "variable": {
+            "kind": "globalVar",
+            "name": "I",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 21,
+                "col": 9
+              },
+              "end": {
+                "line": 21,
+                "col": 11
+              }
+            }
+          },
+          "iterable": {
+            "kind": "call",
+            "name": "range",
+            "args": [
+              {
+                "kind": "number",
+                "value": 3,
+                "text": "3",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 21,
+                    "col": 20
+                  },
+                  "end": {
+                    "line": 21,
+                    "col": 22
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 21,
+                "col": 14
+              },
+              "end": {
+                "line": 21,
+                "col": 23
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "debug",
+                "args": [
+                  {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 24
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 28
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 28
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 30
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 22,
+                              "col": 24
+                            },
+                            "end": {
+                              "line": 22,
+                              "col": 31
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 32
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 36
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 36
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 38
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 22,
+                              "col": 32
+                            },
+                            "end": {
+                              "line": 22,
+                              "col": 39
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 22,
+                          "col": 15
+                        },
+                        "end": {
+                          "line": 22,
+                          "col": 40
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 51
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 55
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 55
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 57
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 22,
+                              "col": 51
+                            },
+                            "end": {
+                              "line": 22,
+                              "col": 58
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 59
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 63
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 22,
+                                "col": 63
+                              },
+                              "end": {
+                                "line": 22,
+                                "col": 65
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 22,
+                              "col": 59
+                            },
+                            "end": {
+                              "line": 22,
+                              "col": 66
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 22,
+                          "col": 42
+                        },
+                        "end": {
+                          "line": 22,
+                          "col": 67
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 22,
+                        "col": 15
+                      },
+                      "end": {
+                        "line": 22,
+                        "col": 67
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 22,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 22,
+                    "col": 68
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 22,
+                  "col": 9
+                },
+                "end": {
+                  "line": 22,
+                  "col": 68
+                }
+              }
+            },
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "debug",
+                "args": [
+                  {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 24
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 28
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 28
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 30
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 23,
+                              "col": 24
+                            },
+                            "end": {
+                              "line": 23,
+                              "col": 31
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 32
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 36
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 36
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 38
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 23,
+                              "col": 32
+                            },
+                            "end": {
+                              "line": 23,
+                              "col": 39
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 23,
+                          "col": 15
+                        },
+                        "end": {
+                          "line": 23,
+                          "col": 40
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 51
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 55
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 55
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 57
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 23,
+                              "col": 51
+                            },
+                            "end": {
+                              "line": 23,
+                              "col": 58
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 59
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 63
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 23,
+                                "col": 63
+                              },
+                              "end": {
+                                "line": 23,
+                                "col": 65
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 23,
+                              "col": 59
+                            },
+                            "end": {
+                              "line": 23,
+                              "col": 66
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 23,
+                          "col": 42
+                        },
+                        "end": {
+                          "line": 23,
+                          "col": 67
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 23,
+                        "col": 15
+                      },
+                      "end": {
+                        "line": 23,
+                        "col": 67
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 23,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 23,
+                    "col": 68
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 9
+                },
+                "end": {
+                  "line": 23,
+                  "col": 68
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 21,
+              "col": 5
+            },
+            "end": {
+              "line": 21,
+              "col": 9
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "same shape in two loop scopes",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 25,
+          "col": 1
+        },
+        "end": {
+          "line": 25,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 26,
+            "col": 5
+          },
+          "end": {
+            "line": 26,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "for",
+          "variable": {
+            "kind": "globalVar",
+            "name": "I",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 27,
+                "col": 9
+              },
+              "end": {
+                "line": 27,
+                "col": 11
+              }
+            }
+          },
+          "iterable": {
+            "kind": "call",
+            "name": "range",
+            "args": [
+              {
+                "kind": "number",
+                "value": 3,
+                "text": "3",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 27,
+                    "col": 20
+                  },
+                  "end": {
+                    "line": 27,
+                    "col": 22
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 27,
+                "col": 14
+              },
+              "end": {
+                "line": 27,
+                "col": 23
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "debug",
+                "args": [
+                  {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 24
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 28
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 28
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 30
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 28,
+                              "col": 24
+                            },
+                            "end": {
+                              "line": 28,
+                              "col": 31
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 32
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 36
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 36
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 38
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 28,
+                              "col": 32
+                            },
+                            "end": {
+                              "line": 28,
+                              "col": 39
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 28,
+                          "col": 15
+                        },
+                        "end": {
+                          "line": 28,
+                          "col": 40
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 51
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 55
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 55
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 57
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 28,
+                              "col": 51
+                            },
+                            "end": {
+                              "line": 28,
+                              "col": 58
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 59
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 63
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 28,
+                                "col": 63
+                              },
+                              "end": {
+                                "line": 28,
+                                "col": 65
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 28,
+                              "col": 59
+                            },
+                            "end": {
+                              "line": 28,
+                              "col": 66
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 28,
+                          "col": 42
+                        },
+                        "end": {
+                          "line": 28,
+                          "col": 67
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 28,
+                        "col": 15
+                      },
+                      "end": {
+                        "line": 28,
+                        "col": 67
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 28,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 28,
+                    "col": 68
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 28,
+                  "col": 9
+                },
+                "end": {
+                  "line": 28,
+                  "col": 68
+                }
+              }
+            },
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "debug",
+                "args": [
+                  {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 24
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 28
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 28
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 30
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 29,
+                              "col": 24
+                            },
+                            "end": {
+                              "line": 29,
+                              "col": 31
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 32
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 36
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 36
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 38
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 29,
+                              "col": 32
+                            },
+                            "end": {
+                              "line": 29,
+                              "col": 39
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 29,
+                          "col": 15
+                        },
+                        "end": {
+                          "line": 29,
+                          "col": 40
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 51
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 55
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 55
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 57
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 29,
+                              "col": 51
+                            },
+                            "end": {
+                              "line": 29,
+                              "col": 58
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 59
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 63
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 29,
+                                "col": 63
+                              },
+                              "end": {
+                                "line": 29,
+                                "col": 65
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 29,
+                              "col": 59
+                            },
+                            "end": {
+                              "line": 29,
+                              "col": 66
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 29,
+                          "col": 42
+                        },
+                        "end": {
+                          "line": 29,
+                          "col": 67
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 29,
+                        "col": 15
+                      },
+                      "end": {
+                        "line": 29,
+                        "col": 67
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 29,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 29,
+                    "col": 68
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 29,
+                  "col": 9
+                },
+                "end": {
+                  "line": 29,
+                  "col": 68
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 27,
+              "col": 5
+            },
+            "end": {
+              "line": 27,
+              "col": 9
+            }
+          }
+        },
+        {
+          "kind": "for",
+          "variable": {
+            "kind": "globalVar",
+            "name": "I",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 30,
+                "col": 9
+              },
+              "end": {
+                "line": 30,
+                "col": 11
+              }
+            }
+          },
+          "iterable": {
+            "kind": "call",
+            "name": "range",
+            "args": [
+              {
+                "kind": "number",
+                "value": 2,
+                "text": "2",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 30,
+                    "col": 20
+                  },
+                  "end": {
+                    "line": 30,
+                    "col": 22
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 30,
+                "col": 14
+              },
+              "end": {
+                "line": 30,
+                "col": 23
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "debug",
+                "args": [
+                  {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 24
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 28
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 28
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 30
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 31,
+                              "col": 24
+                            },
+                            "end": {
+                              "line": 31,
+                              "col": 31
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 32
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 36
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 36
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 38
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 31,
+                              "col": 32
+                            },
+                            "end": {
+                              "line": 31,
+                              "col": 39
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 31,
+                          "col": 15
+                        },
+                        "end": {
+                          "line": 31,
+                          "col": 40
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 51
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 55
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 55
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 57
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 31,
+                              "col": 51
+                            },
+                            "end": {
+                              "line": 31,
+                              "col": 58
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 59
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 63
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 31,
+                                "col": 63
+                              },
+                              "end": {
+                                "line": 31,
+                                "col": 65
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 31,
+                              "col": 59
+                            },
+                            "end": {
+                              "line": 31,
+                              "col": 66
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 31,
+                          "col": 42
+                        },
+                        "end": {
+                          "line": 31,
+                          "col": 67
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 31,
+                        "col": 15
+                      },
+                      "end": {
+                        "line": 31,
+                        "col": 67
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 31,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 31,
+                    "col": 68
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 31,
+                  "col": 9
+                },
+                "end": {
+                  "line": 31,
+                  "col": 68
+                }
+              }
+            },
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "debug",
+                "args": [
+                  {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 24
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 28
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 28
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 30
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 24
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 31
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 32
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 36
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 36
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 38
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 32
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 39
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 32,
+                          "col": 15
+                        },
+                        "end": {
+                          "line": 32,
+                          "col": 40
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "call",
+                      "name": "distance",
+                      "args": [
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 51
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 55
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 55
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 57
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 51
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 58
+                            }
+                          }
+                        },
+                        {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "arr",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 59
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 63
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 32,
+                                "col": 63
+                              },
+                              "end": {
+                                "line": 32,
+                                "col": 65
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 32,
+                              "col": 59
+                            },
+                            "end": {
+                              "line": 32,
+                              "col": 66
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 32,
+                          "col": 42
+                        },
+                        "end": {
+                          "line": 32,
+                          "col": 67
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 32,
+                        "col": 15
+                      },
+                      "end": {
+                        "line": 32,
+                        "col": 67
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 32,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 32,
+                    "col": 68
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 32,
+                  "col": 9
+                },
+                "end": {
+                  "line": 32,
+                  "col": 68
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 30,
+              "col": 5
+            },
+            "end": {
+              "line": 30,
+              "col": 9
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

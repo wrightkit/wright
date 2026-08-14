@@ -10,15 +10,28 @@
 //!   evaluated twice within one rule (a later branch can never be taken).
 //! * [`ExpensiveLoopCheck`] (`expensive-loop-check`) — a geometry predicate
 //!   (`distance`, `raycast`, `isInLoS`) evaluated inside a loop body.
+//! * [`RepeatedValue`] (`repeated-value`) — a value expression evaluated
+//!   more than once within one loop scope, reported once per maximal
+//!   duplicated shape.
+//! * [`WhileWithoutWait`] (`while-without-wait`) — a `While` loop whose body
+//!   tree contains no `wait` call, so it cannot yield while its condition
+//!   holds.
 //!
 //! Known limits (documented, not silent): wait durations that are not
 //! statically known are treated as not-minimum; duplicate detection is
 //! structural (arena-id-independent) and rule-local; the expensive-call list
-//! is a heuristic that may miss or over-flag exotic predicates.
+//! is a heuristic that may miss or over-flag exotic predicates; repeated-value
+//! detection is structural (no value-flow) and loop-scope-local, reports each
+//! duplicated shape once at its maximal form (nested duplicates subsumed) and
+//! never flags single-call expressions such as bare array reads; the
+//! while-without-wait trigger is static but the impact (loop frequency) is an
+//! indicator, and `For Global Variable` loops are never flagged.
 //!
 //! Every [`Finding`] also carries the [`EvidenceClass`] of its rule (M12,
 //! #98): whether the finding is an exact structural fact, a static indicator,
 //! a documented heuristic, or (reserved) runtime-validated.
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use wright_ir::source::Span;
@@ -301,6 +314,346 @@ fn expensive_values_in_actions(program: &wir::Program, actions: &[ActionId]) -> 
     found
 }
 
+/// The same value expression evaluated more than once within one loop scope.
+///
+/// Reports exactly one finding per maximal duplicated shape per loop scope:
+/// a shape is duplicated when it occurs at least twice and every occurrence
+/// contains at least two `Call` value nodes; nested duplicates are subsumed
+/// by their maximal enclosing duplicated shape (REQ-001, amended).
+pub struct RepeatedValue;
+
+impl Analysis for RepeatedValue {
+    fn name(&self) -> &'static str {
+        "repeated-value"
+    }
+
+    fn evidence(&self) -> EvidenceClass {
+        // A structurally identical value scheduled in the same loop scope is
+        // re-evaluated every time its enclosing action executes, independent
+        // of runtime values: a structural fact (the same basis as
+        // duplicate-condition's `exact`).
+        EvidenceClass::Exact
+    }
+
+    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
+        let Some(rule_data) = program.rules.get(rule).cloned() else {
+            return Vec::new();
+        };
+        let mut findings = Vec::new();
+        visit_actions(program, &rule_data.actions, &mut |action_id, action| {
+            let (condition, body) = match action {
+                Action::While {
+                    condition, body, ..
+                } => (Some(*condition), body),
+                Action::ForGlobalVariable { body, .. } => (None, body),
+                _ => return,
+            };
+            // The loop scope: the loop's own condition (`While`) plus the
+            // value positions of every action in the body, in deterministic
+            // program order. Nested loops are their own scopes and are
+            // excluded; `For Global Variable` bounds are excluded.
+            let mut scope: Vec<ValueId> = Vec::new();
+            let mut parents: HashMap<ValueId, ValueId> = HashMap::new();
+            if let Some(condition) = condition {
+                visit_value_with_parent(program, condition, &mut parents, &mut scope);
+            }
+            collect_loop_scope_values(program, body, &mut parents, &mut scope);
+            for family in duplicated_shapes(program, &scope, &parents) {
+                let first = family[0];
+                findings.push(Finding {
+                    code: self.name(),
+                    severity: Severity::Warning,
+                    message: format!(
+                        "this value expression is evaluated {} times within the same loop scope",
+                        family.len()
+                    ),
+                    span: program.values.get(first).and_then(|node| node.span),
+                    rule,
+                    action: Some(action_id),
+                    value: Some(first),
+                    evidence: self.evidence(),
+                });
+            }
+        });
+        findings
+    }
+}
+
+/// The maximal duplicated shapes of one loop scope: structural families with
+/// at least two members whose subtrees each contain at least two `Call`
+/// value nodes (the root counting), reported only when no member is a
+/// descendant of a member of a different candidate family (maximal-shape
+/// subsumption). Returned in first-occurrence order (families are grouped in
+/// program order, and survivors are re-sorted by their first-occurrence
+/// scope index).
+fn duplicated_shapes(
+    program: &wir::Program,
+    scope: &[ValueId],
+    parents: &HashMap<ValueId, ValueId>,
+) -> Vec<Vec<ValueId>> {
+    // Group scope values into structural families, keeping each family's
+    // members in first-occurrence (program) order.
+    let mut families: Vec<(usize, Vec<ValueId>)> = Vec::new();
+    for (position, &value) in scope.iter().enumerate() {
+        if let Some((_, family)) = families
+            .iter_mut()
+            .find(|(_, family)| structurally_equal(program, family[0], value))
+        {
+            family.push(value);
+        } else {
+            families.push((position, vec![value]));
+        }
+    }
+    // Candidate families: at least two occurrences, and every member's
+    // subtree contains at least two `Call` nodes. Structurally identical
+    // members share one call count, so the first member determines it.
+    let candidates: Vec<usize> = families
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, family))| family.len() >= 2 && call_count(program, family[0]) >= 2)
+        .map(|(index, _)| index)
+        .collect();
+    // Map every candidate member to its family so ancestry can be tested.
+    let mut member_to_family: HashMap<ValueId, usize> = HashMap::new();
+    for &family_index in &candidates {
+        for &member in &families[family_index].1 {
+            member_to_family.insert(member, family_index);
+        }
+    }
+    // Maximal-shape subsumption: a candidate family is reported only when no
+    // member of it is a descendant of a member of a different candidate
+    // family (nested duplicates are reported once, at the maximal shape).
+    let mut reported: Vec<usize> = Vec::new();
+    for &family_index in &candidates {
+        let subsumed = families[family_index].1.iter().any(|&member| {
+            ancestor_belongs_to_other_family(member, family_index, parents, &member_to_family)
+        });
+        if !subsumed {
+            reported.push(family_index);
+        }
+    }
+    // Deterministic order: source position of each shape's first occurrence
+    // (recorded while grouping in program order).
+    reported.sort_by_key(|&family_index| families[family_index].0);
+    let mut survivors = Vec::with_capacity(reported.len());
+    for family_index in reported {
+        survivors.push(std::mem::take(&mut families[family_index].1));
+    }
+    survivors
+}
+
+/// Whether walking `member`'s ancestor chain reaches a member of a different
+/// candidate family (i.e. `member` is nested inside a larger duplicated
+/// shape).
+fn ancestor_belongs_to_other_family(
+    mut member: ValueId,
+    own_family: usize,
+    parents: &HashMap<ValueId, ValueId>,
+    member_to_family: &HashMap<ValueId, usize>,
+) -> bool {
+    while let Some(&parent) = parents.get(&member) {
+        if let Some(&family) = member_to_family.get(&parent) {
+            if family != own_family {
+                return true;
+            }
+        }
+        member = parent;
+    }
+    false
+}
+
+/// The number of [`Value::Call`] nodes in the value subtree (the root
+/// counting).
+fn call_count(program: &wir::Program, id: ValueId) -> usize {
+    let mut count = 0;
+    visit_value(program, id, &mut |value_id| {
+        if let Value::Call { .. } = &program.values.get(value_id).expect("in range").value {
+            count += 1;
+        }
+    });
+    count
+}
+
+/// Collect the value surface of a loop body for [`RepeatedValue`]: every
+/// value reachable from each action's value positions, in program order,
+/// recording each child's parent (for ancestry tests). `If` branches are
+/// descended into; nested loops (`While`/`ForGlobalVariable`) are treated as
+/// their own scopes and excluded from the enclosing loop's scope.
+fn collect_loop_scope_values(
+    program: &wir::Program,
+    actions: &[ActionId],
+    parents: &mut HashMap<ValueId, ValueId>,
+    out: &mut Vec<ValueId>,
+) {
+    for action in actions {
+        let Some(data) = program.actions.get(*action) else {
+            continue;
+        };
+        match data {
+            Action::While { .. } | Action::ForGlobalVariable { .. } => {
+                // Nested loops are analyzed as their own separate scopes.
+            }
+            Action::If {
+                branches,
+                else_body,
+                ..
+            } => {
+                for branch in branches {
+                    visit_value_with_parent(program, branch.condition, parents, out);
+                    collect_loop_scope_values(program, &branch.body, parents, out);
+                }
+                if let Some(else_body) = else_body {
+                    collect_loop_scope_values(program, else_body, parents, out);
+                }
+            }
+            other => visit_action_value_roots(program, other, parents, out),
+        }
+    }
+}
+
+/// Visit the value positions of an action's arguments and conditions with
+/// parent tracking. Only called for non-loop, non-`If` actions by the loop
+/// scope walker; the `If`/loop arms mirror [`visit_values_in_action`] for
+/// exhaustiveness.
+fn visit_action_value_roots(
+    program: &wir::Program,
+    action: &Action,
+    parents: &mut HashMap<ValueId, ValueId>,
+    out: &mut Vec<ValueId>,
+) {
+    match action {
+        Action::SetGlobalVariable { value, .. }
+        | Action::ModifyGlobalVariable { value, .. }
+        | Action::Debug { value, .. }
+        | Action::Print { message: value, .. } => {
+            visit_value_with_parent(program, *value, parents, out);
+        }
+        Action::SetPlayerVariable { player, value, .. }
+        | Action::ModifyPlayerVariable { player, value, .. } => {
+            visit_value_with_parent(program, *player, parents, out);
+            visit_value_with_parent(program, *value, parents, out);
+        }
+        Action::CallSubroutine { .. } => {}
+        Action::If { branches, .. } => {
+            for branch in branches {
+                visit_value_with_parent(program, branch.condition, parents, out);
+            }
+        }
+        Action::While { .. } | Action::ForGlobalVariable { .. } => {
+            // Nested loops are excluded from the enclosing loop's scope.
+        }
+        Action::Call { args, .. } => {
+            for arg in args {
+                visit_value_with_parent(program, *arg, parents, out);
+            }
+        }
+    }
+}
+
+/// Collect a value and every value in its subtree into `out` (pre-order),
+/// recording each child's parent in `parents` for ancestry tests.
+fn visit_value_with_parent(
+    program: &wir::Program,
+    id: ValueId,
+    parents: &mut HashMap<ValueId, ValueId>,
+    out: &mut Vec<ValueId>,
+) {
+    out.push(id);
+    let Some(node) = program.values.get(id) else {
+        return;
+    };
+    visit_value_children(&node.value, &mut |child| {
+        parents.insert(child, id);
+        visit_value_with_parent(program, child, parents, out);
+    });
+}
+
+/// Visit every direct child value of a value.
+fn visit_value_children(value: &Value, f: &mut impl FnMut(ValueId)) {
+    match value {
+        Value::Array(elements) => {
+            for element in elements {
+                f(*element);
+            }
+        }
+        Value::Vector { x, y, z } => {
+            f(*x);
+            f(*y);
+            f(*z);
+        }
+        Value::PlayerVariable { player, .. } => f(*player),
+        Value::Call { args, .. } => {
+            for arg in args {
+                f(*arg);
+            }
+        }
+        Value::Number { .. }
+        | Value::String(_)
+        | Value::Bool(_)
+        | Value::Null
+        | Value::Enum { .. }
+        | Value::GlobalVariable(_)
+        | Value::EventPlayer => {}
+    }
+}
+
+/// A `While` loop whose body tree contains no `wait` call.
+pub struct WhileWithoutWait;
+
+impl Analysis for WhileWithoutWait {
+    fn name(&self) -> &'static str {
+        "while-without-wait"
+    }
+
+    fn evidence(&self) -> EvidenceClass {
+        // The absence of a `wait` call in the loop body is statically known,
+        // but the impact (loop frequency) is an indicator, not a measurement.
+        EvidenceClass::StaticIndicator
+    }
+
+    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
+        let Some(rule_data) = program.rules.get(rule).cloned() else {
+            return Vec::new();
+        };
+        let mut findings = Vec::new();
+        visit_actions(program, &rule_data.actions, &mut |action_id, action| {
+            let Action::While { body, span, .. } = action else {
+                return;
+            };
+            if !body_has_wait(program, body) {
+                findings.push(Finding {
+                    code: self.name(),
+                    severity: Severity::Warning,
+                    message: "loop body contains no wait call; the loop cannot yield while its condition holds"
+                        .to_string(),
+                    span: *span,
+                    rule,
+                    action: Some(action_id),
+                    value: None,
+                    evidence: self.evidence(),
+                });
+            }
+        });
+        findings
+    }
+}
+
+/// Whether any action in the tree contains a `wait` call (presence only;
+/// the wait duration does not matter).
+fn body_has_wait(program: &wir::Program, actions: &[ActionId]) -> bool {
+    let mut found = false;
+    visit_actions(program, actions, &mut |_, action| {
+        if !found {
+            if let Action::Call { name, .. } = action {
+                if name == "wait" {
+                    found = true;
+                }
+            }
+        }
+    });
+    found
+}
+
 /// Visit every action in a tree (including nested bodies), in program order.
 fn visit_actions(
     program: &wir::Program,
@@ -380,31 +733,7 @@ fn visit_value(program: &wir::Program, id: ValueId, f: &mut impl FnMut(ValueId))
     let Some(node) = program.values.get(id) else {
         return;
     };
-    match &node.value {
-        Value::Array(elements) => {
-            for element in elements {
-                visit_value(program, *element, f);
-            }
-        }
-        Value::Vector { x, y, z } => {
-            visit_value(program, *x, f);
-            visit_value(program, *y, f);
-            visit_value(program, *z, f);
-        }
-        Value::PlayerVariable { player, .. } => visit_value(program, *player, f),
-        Value::Call { args, .. } => {
-            for arg in args {
-                visit_value(program, *arg, f);
-            }
-        }
-        Value::Number { .. }
-        | Value::String(_)
-        | Value::Bool(_)
-        | Value::Null
-        | Value::Enum { .. }
-        | Value::GlobalVariable(_)
-        | Value::EventPlayer => {}
-    }
+    visit_value_children(&node.value, &mut |child| visit_value(program, child, f));
 }
 
 /// Structural equality of two values, ignoring arena ids (two separately

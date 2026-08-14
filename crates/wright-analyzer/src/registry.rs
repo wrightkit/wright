@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 use wright_ir::wir;
 
 use crate::analysis::{
-    Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop, Severity,
+    Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,
+    RepeatedValue, Severity, WhileWithoutWait,
 };
 use crate::cfg::Cfg;
 
@@ -209,9 +210,9 @@ pub struct LintRegistry {
 }
 
 impl Default for LintRegistry {
-    /// Build the registry containing all three first-party M12 lint rules in
+    /// Build the registry containing all five first-party M12 lint rules in
     /// their canonical order: `min-wait-loop`, `duplicate-condition`,
-    /// `expensive-loop-check`.
+    /// `expensive-loop-check`, `repeated-value`, `while-without-wait`.
     fn default() -> Self {
         // Build each analysis in a local binding first so the rule metadata
         // can take its evidence class from the same implementation that
@@ -219,6 +220,8 @@ impl Default for LintRegistry {
         let min_wait: Box<dyn Analysis> = Box::new(MinWaitLoop);
         let duplicate_condition: Box<dyn Analysis> = Box::new(DuplicateCondition);
         let expensive_loop_check: Box<dyn Analysis> = Box::new(ExpensiveLoopCheck);
+        let repeated_value: Box<dyn Analysis> = Box::new(RepeatedValue);
+        let while_without_wait: Box<dyn Analysis> = Box::new(WhileWithoutWait);
         let entries = vec![
             RegistryEntry {
                 meta: RuleMeta {
@@ -277,6 +280,68 @@ impl Default for LintRegistry {
                     tags: &["performance"],
                 },
                 analysis: expensive_loop_check,
+            },
+            RegistryEntry {
+                meta: RuleMeta {
+                    id: "repeated-value",
+                    default_severity: Severity::Warning,
+                    evidence: repeated_value.evidence(),
+                    summary: "identical value expression evaluated more than once in one loop scope",
+                    documentation: concat!(
+                        "A structurally identical value expression appears more than once within one ",
+                        "loop scope, so it is re-evaluated every iteration even though one ",
+                        "evaluation would suffice. Within a single atomic evaluation the ",
+                        "re-evaluation is redundant for deterministic expressions; the Workshop ",
+                        "ecosystem has an `Evaluate Once` idiom for exactly this cost. One ",
+                        "finding is reported per distinct duplicated shape per loop scope, at ",
+                        "the shape's first occurrence, with the statically known occurrence ",
+                        "count. Real-project evidence: overpy-santa (workshop lines 108-112; ",
+                        "`santa.opy:72-77`) and overpy-parabola (workshop lines 79-80; ",
+                        "`parabola.opy:45-51`), both pinned at `Zezombye/overpy` commit ",
+                        "`eea67adbcf6926c4004e35e25ab4be072624a44e` (GPL-3.0-only, redistributable).",
+                    ),
+                    known_limits: concat!(
+                        "Detection is rule-local and structural (arena-id-independent call name ",
+                        "plus argument shape) with no value-flow analysis: a duplicate across ",
+                        "separate actions proves re-scheduling, not result-equality, because an ",
+                        "intervening action may mutate a read variable. A duplicated expression ",
+                        "is reported once per loop scope at its maximal shape, so nested ",
+                        "duplicates are subsumed; expressions with fewer than two call nodes, ",
+                        "including bare array reads, are never flagged. Sub-expressions ",
+                        "containing non-deterministic values (e.g. `Random Value`/`Random Real`) ",
+                        "are still guaranteed to be re-evaluated, but the finding may not ",
+                        "indicate a defect. `Evaluate Once`-wrapped inner reads reduce but do ",
+                        "not eliminate the outer recomputation. Loop coverage is `While` + ",
+                        "`For Global Variable` only; `For Player Variable` loops are not modeled.",
+                    ),
+                    tags: &["performance", "stability"],
+                },
+                analysis: repeated_value,
+            },
+            RegistryEntry {
+                meta: RuleMeta {
+                    id: "while-without-wait",
+                    default_severity: Severity::Warning,
+                    evidence: while_without_wait.evidence(),
+                    summary: "while loop body contains no wait call",
+                    documentation: concat!(
+                        "A `While` loop whose body contains no `wait` call cannot yield to the ",
+                        "server while its condition holds, so it runs as fast as the Workshop ",
+                        "server executes it. Corpus scan: the two `While` loops in the emitted ",
+                        "corpus workshop text (overpy-cake line 46; overpy-client-to-server line ",
+                        "54) both contain `Wait(0.016, ...)`; there is no corpus positive evidence, ",
+                        "so this rule is validated by synthetic fixtures: the trigger is a ",
+                        "statically exact structural fact with a negligible false-positive surface.",
+                    ),
+                    known_limits: concat!(
+                        "The rule does not distinguish constant-true conditions from ",
+                        "data-dependent conditions. A wait placed outside the loop body does not ",
+                        "suppress the finding. Only `While` loops are covered; `For Global ",
+                        "Variable` loops are never flagged.",
+                    ),
+                    tags: &["stability"],
+                },
+                analysis: while_without_wait,
             },
         ];
         Self { entries }

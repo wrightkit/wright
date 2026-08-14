@@ -1,0 +1,961 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "repeated-value-parabola.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "I",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 22,
+          "col": 1
+        },
+        "end": {
+          "line": 22,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "target",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 23,
+          "col": 1
+        },
+        "end": {
+          "line": 23,
+          "col": 18
+        }
+      },
+      "initializer": {
+        "kind": "array",
+        "elements": [
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 1,
+              "text": "1",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 26
+                },
+                "end": {
+                  "line": 23,
+                  "col": 28
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 29
+                },
+                "end": {
+                  "line": 23,
+                  "col": 31
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 32
+                },
+                "end": {
+                  "line": 23,
+                  "col": 34
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 23,
+                "col": 21
+              },
+              "end": {
+                "line": 23,
+                "col": 35
+              }
+            }
+          },
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 41
+                },
+                "end": {
+                  "line": 23,
+                  "col": 43
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 1,
+              "text": "1",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 44
+                },
+                "end": {
+                  "line": 23,
+                  "col": 46
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 47
+                },
+                "end": {
+                  "line": 23,
+                  "col": 49
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 23,
+                "col": 36
+              },
+              "end": {
+                "line": 23,
+                "col": 50
+              }
+            }
+          },
+          {
+            "kind": "vector",
+            "x": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 56
+                },
+                "end": {
+                  "line": 23,
+                  "col": 58
+                }
+              }
+            },
+            "y": {
+              "kind": "number",
+              "value": 0,
+              "text": "0",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 59
+                },
+                "end": {
+                  "line": 23,
+                  "col": 61
+                }
+              }
+            },
+            "z": {
+              "kind": "number",
+              "value": 1,
+              "text": "1",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 23,
+                  "col": 62
+                },
+                "end": {
+                  "line": 23,
+                  "col": 64
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 23,
+                "col": 51
+              },
+              "end": {
+                "line": 23,
+                "col": 65
+              }
+            }
+          }
+        ],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 23,
+            "col": 62
+          },
+          "end": {
+            "line": 23,
+            "col": 64
+          }
+        }
+      }
+    },
+    {
+      "kind": "globalVariable",
+      "name": "time",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 24,
+          "col": 1
+        },
+        "end": {
+          "line": 24,
+          "col": 16
+        }
+      },
+      "initializer": {
+        "kind": "number",
+        "value": 10,
+        "text": "10",
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 24,
+            "col": 18
+          },
+          "end": {
+            "line": 24,
+            "col": 21
+          }
+        }
+      }
+    },
+    {
+      "kind": "globalVariable",
+      "name": "offsets",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 25,
+          "col": 1
+        },
+        "end": {
+          "line": 25,
+          "col": 19
+        }
+      },
+      "initializer": {
+        "kind": "array",
+        "elements": [
+          {
+            "kind": "number",
+            "value": 1,
+            "text": "1",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 25,
+                "col": 22
+              },
+              "end": {
+                "line": 25,
+                "col": 24
+              }
+            }
+          },
+          {
+            "kind": "number",
+            "value": 2,
+            "text": "2",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 25,
+                "col": 25
+              },
+              "end": {
+                "line": 25,
+                "col": 27
+              }
+            }
+          },
+          {
+            "kind": "number",
+            "value": 3,
+            "text": "3",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 25,
+                "col": 28
+              },
+              "end": {
+                "line": 25,
+                "col": 30
+              }
+            }
+          }
+        ],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 25,
+            "col": 28
+          },
+          "end": {
+            "line": 25,
+            "col": 30
+          }
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "name": "repeated shapes within one action",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 27,
+          "col": 1
+        },
+        "end": {
+          "line": 27,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 28,
+            "col": 5
+          },
+          "end": {
+            "line": 28,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "for",
+          "variable": {
+            "kind": "globalVar",
+            "name": "I",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 29,
+                "col": 9
+              },
+              "end": {
+                "line": 29,
+                "col": 11
+              }
+            }
+          },
+          "iterable": {
+            "kind": "call",
+            "name": "range",
+            "args": [
+              {
+                "kind": "number",
+                "value": 3,
+                "text": "3",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 29,
+                    "col": 20
+                  },
+                  "end": {
+                    "line": 29,
+                    "col": 22
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 29,
+                "col": 14
+              },
+              "end": {
+                "line": 29,
+                "col": 23
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "debug",
+                "args": [
+                  {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "binary",
+                      "op": "+",
+                      "left": {
+                        "kind": "binary",
+                        "op": "+",
+                        "left": {
+                          "kind": "binary",
+                          "op": "+",
+                          "left": {
+                            "kind": "call",
+                            "name": "distance",
+                            "args": [
+                              {
+                                "kind": "receiverCall",
+                                "receiver": {
+                                  "kind": "eventPlayer",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 30,
+                                      "col": 24
+                                    },
+                                    "end": {
+                                      "line": 30,
+                                      "col": 36
+                                    }
+                                  }
+                                },
+                                "name": "getEyePosition",
+                                "args": [],
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 30,
+                                    "col": 24
+                                  },
+                                  "end": {
+                                    "line": 30,
+                                    "col": 53
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "index",
+                                "array": {
+                                  "kind": "globalVar",
+                                  "name": "target",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 30,
+                                      "col": 54
+                                    },
+                                    "end": {
+                                      "line": 30,
+                                      "col": 61
+                                    }
+                                  }
+                                },
+                                "index": {
+                                  "kind": "globalVar",
+                                  "name": "I",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 30,
+                                      "col": 61
+                                    },
+                                    "end": {
+                                      "line": 30,
+                                      "col": 63
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 30,
+                                    "col": 54
+                                  },
+                                  "end": {
+                                    "line": 30,
+                                    "col": 64
+                                  }
+                                }
+                              }
+                            ],
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 30,
+                                "col": 15
+                              },
+                              "end": {
+                                "line": 30,
+                                "col": 65
+                              }
+                            }
+                          },
+                          "right": {
+                            "kind": "call",
+                            "name": "distance",
+                            "args": [
+                              {
+                                "kind": "receiverCall",
+                                "receiver": {
+                                  "kind": "eventPlayer",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 30,
+                                      "col": 76
+                                    },
+                                    "end": {
+                                      "line": 30,
+                                      "col": 88
+                                    }
+                                  }
+                                },
+                                "name": "getEyePosition",
+                                "args": [],
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 30,
+                                    "col": 76
+                                  },
+                                  "end": {
+                                    "line": 30,
+                                    "col": 105
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "index",
+                                "array": {
+                                  "kind": "globalVar",
+                                  "name": "target",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 30,
+                                      "col": 106
+                                    },
+                                    "end": {
+                                      "line": 30,
+                                      "col": 113
+                                    }
+                                  }
+                                },
+                                "index": {
+                                  "kind": "globalVar",
+                                  "name": "I",
+                                  "span": {
+                                    "file": 0,
+                                    "start": {
+                                      "line": 30,
+                                      "col": 113
+                                    },
+                                    "end": {
+                                      "line": 30,
+                                      "col": 115
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "file": 0,
+                                  "start": {
+                                    "line": 30,
+                                    "col": 106
+                                  },
+                                  "end": {
+                                    "line": 30,
+                                    "col": 116
+                                  }
+                                }
+                              }
+                            ],
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 30,
+                                "col": 67
+                              },
+                              "end": {
+                                "line": 30,
+                                "col": 117
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 30,
+                              "col": 15
+                            },
+                            "end": {
+                              "line": 30,
+                              "col": 117
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "binary",
+                          "op": "-",
+                          "left": {
+                            "kind": "globalVar",
+                            "name": "time",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 30,
+                                "col": 120
+                              },
+                              "end": {
+                                "line": 30,
+                                "col": 125
+                              }
+                            }
+                          },
+                          "right": {
+                            "kind": "index",
+                            "array": {
+                              "kind": "globalVar",
+                              "name": "offsets",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 30,
+                                  "col": 127
+                                },
+                                "end": {
+                                  "line": 30,
+                                  "col": 135
+                                }
+                              }
+                            },
+                            "index": {
+                              "kind": "globalVar",
+                              "name": "I",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 30,
+                                  "col": 135
+                                },
+                                "end": {
+                                  "line": 30,
+                                  "col": 137
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 30,
+                                "col": 127
+                              },
+                              "end": {
+                                "line": 30,
+                                "col": 138
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 30,
+                              "col": 120
+                            },
+                            "end": {
+                              "line": 30,
+                              "col": 138
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 30,
+                            "col": 15
+                          },
+                          "end": {
+                            "line": 30,
+                            "col": 139
+                          }
+                        }
+                      },
+                      "right": {
+                        "kind": "binary",
+                        "op": "-",
+                        "left": {
+                          "kind": "globalVar",
+                          "name": "time",
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 30,
+                              "col": 142
+                            },
+                            "end": {
+                              "line": 30,
+                              "col": 147
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "index",
+                          "array": {
+                            "kind": "globalVar",
+                            "name": "offsets",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 30,
+                                "col": 149
+                              },
+                              "end": {
+                                "line": 30,
+                                "col": 157
+                              }
+                            }
+                          },
+                          "index": {
+                            "kind": "globalVar",
+                            "name": "I",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 30,
+                                "col": 157
+                              },
+                              "end": {
+                                "line": 30,
+                                "col": 159
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 30,
+                              "col": 149
+                            },
+                            "end": {
+                              "line": 30,
+                              "col": 160
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 30,
+                            "col": 142
+                          },
+                          "end": {
+                            "line": 30,
+                            "col": 160
+                          }
+                        }
+                      },
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 30,
+                          "col": 15
+                        },
+                        "end": {
+                          "line": 30,
+                          "col": 161
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "binary",
+                      "op": "-",
+                      "left": {
+                        "kind": "globalVar",
+                        "name": "time",
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 30,
+                            "col": 164
+                          },
+                          "end": {
+                            "line": 30,
+                            "col": 169
+                          }
+                        }
+                      },
+                      "right": {
+                        "kind": "index",
+                        "array": {
+                          "kind": "globalVar",
+                          "name": "offsets",
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 30,
+                              "col": 171
+                            },
+                            "end": {
+                              "line": 30,
+                              "col": 179
+                            }
+                          }
+                        },
+                        "index": {
+                          "kind": "globalVar",
+                          "name": "I",
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 30,
+                              "col": 179
+                            },
+                            "end": {
+                              "line": 30,
+                              "col": 181
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 30,
+                            "col": 171
+                          },
+                          "end": {
+                            "line": 30,
+                            "col": 182
+                          }
+                        }
+                      },
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 30,
+                          "col": 164
+                        },
+                        "end": {
+                          "line": 30,
+                          "col": 182
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 30,
+                        "col": 15
+                      },
+                      "end": {
+                        "line": 30,
+                        "col": 183
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 30,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 30,
+                    "col": 184
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 30,
+                  "col": 9
+                },
+                "end": {
+                  "line": 30,
+                  "col": 184
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 29,
+              "col": 5
+            },
+            "end": {
+              "line": 29,
+              "col": 9
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,178 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "while-without-wait-positive.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "counter",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 14,
+          "col": 1
+        },
+        "end": {
+          "line": 14,
+          "col": 19
+        }
+      },
+      "initializer": null
+    }
+  ],
+  "rules": [
+    {
+      "name": "waardless while loop",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 16,
+          "col": 1
+        },
+        "end": {
+          "line": 16,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 17,
+            "col": 5
+          },
+          "end": {
+            "line": 17,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "bool",
+            "value": true,
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 18,
+                "col": 11
+              },
+              "end": {
+                "line": 18,
+                "col": 16
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "counter",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 19,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 19,
+                    "col": 17
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "counter",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 19,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 19,
+                      "col": 17
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 19,
+                      "col": 20
+                    },
+                    "end": {
+                      "line": 19,
+                      "col": 22
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 19,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 19,
+                    "col": 22
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 19,
+                  "col": 9
+                },
+                "end": {
+                  "line": 19,
+                  "col": 22
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 18,
+              "col": 5
+            },
+            "end": {
+              "line": 18,
+              "col": 11
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

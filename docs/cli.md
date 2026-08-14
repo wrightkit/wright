@@ -65,7 +65,8 @@ CLI and programmatic (`CompilerSession::lint`, tool/agent `lint`) use.
 Two lint-only flags configure the registry; both are repeatable:
 
 * `--disable-rule <ID>` — disable a rule by stable ID (`min-wait-loop`,
-  `duplicate-condition`, `expensive-loop-check`).
+  `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
+  `while-without-wait`).
 * `--rule-severity <ID>:<warning|info>` — override a rule's severity.
 
 These flags are usage errors on every other command (exit 2).
@@ -94,6 +95,46 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
         "evidence": "static-indicator",
         "tags": ["performance", "stability"],
         "knownLimits": "Wait durations that are not statically known ..."
+      },
+      {
+        "id": "duplicate-condition",
+        "defaultSeverity": "warning",
+        "effectiveSeverity": "warning",
+        "enabled": true,
+        "summary": "condition is evaluated more than once within one rule",
+        "evidence": "exact",
+        "tags": ["correctness"],
+        "knownLimits": "Detection is structural (not value-flow) and rule-local ..."
+      },
+      {
+        "id": "expensive-loop-check",
+        "defaultSeverity": "info",
+        "effectiveSeverity": "info",
+        "enabled": true,
+        "summary": "geometry predicate evaluated inside a loop body",
+        "evidence": "heuristic",
+        "tags": ["performance"],
+        "knownLimits": "The expensive-call list is a fixed heuristic ..."
+      },
+      {
+        "id": "repeated-value",
+        "defaultSeverity": "warning",
+        "effectiveSeverity": "warning",
+        "enabled": true,
+        "summary": "identical value expression evaluated more than once in one loop scope",
+        "evidence": "exact",
+        "tags": ["performance", "stability"],
+        "knownLimits": "Detection is rule-local and structural ..."
+      },
+      {
+        "id": "while-without-wait",
+        "defaultSeverity": "warning",
+        "effectiveSeverity": "warning",
+        "enabled": true,
+        "summary": "while loop body contains no wait call",
+        "evidence": "static-indicator",
+        "tags": ["stability"],
+        "knownLimits": "The rule does not distinguish constant-true conditions ..."
       }
     ],
     "config": { "rules": { "min-wait-loop": { "enabled": true, "severity": "warning" } } },

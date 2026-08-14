@@ -1,0 +1,933 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "while-without-wait-negative.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "I",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 13,
+          "col": 1
+        },
+        "end": {
+          "line": 13,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "counter",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 14,
+          "col": 1
+        },
+        "end": {
+          "line": 14,
+          "col": 19
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "someDuration",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 15,
+          "col": 1
+        },
+        "end": {
+          "line": 15,
+          "col": 24
+        }
+      },
+      "initializer": {
+        "kind": "number",
+        "value": 0.1,
+        "text": "0.1",
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 15,
+            "col": 28
+          },
+          "end": {
+            "line": 15,
+            "col": 30
+          }
+        }
+      }
+    },
+    {
+      "kind": "globalVariable",
+      "name": "flag",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 16,
+          "col": 1
+        },
+        "end": {
+          "line": 16,
+          "col": 16
+        }
+      },
+      "initializer": {
+        "kind": "bool",
+        "value": false,
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 16,
+            "col": 18
+          },
+          "end": {
+            "line": 16,
+            "col": 24
+          }
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "name": "while with literal wait",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 18,
+          "col": 1
+        },
+        "end": {
+          "line": 18,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 19,
+            "col": 5
+          },
+          "end": {
+            "line": 19,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "bool",
+            "value": true,
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 20,
+                "col": 11
+              },
+              "end": {
+                "line": 20,
+                "col": 16
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "wait",
+                "args": [
+                  {
+                    "kind": "number",
+                    "value": 0.016,
+                    "text": "0.016",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 21,
+                        "col": 16
+                      },
+                      "end": {
+                        "line": 21,
+                        "col": 20
+                      }
+                    }
+                  },
+                  {
+                    "kind": "enum",
+                    "type": "Wait",
+                    "value": "IGNORE_CONDITION",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 21,
+                        "col": 9
+                      },
+                      "end": {
+                        "line": 21,
+                        "col": 21
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 21,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 21,
+                    "col": 21
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 21,
+                  "col": 9
+                },
+                "end": {
+                  "line": 21,
+                  "col": 21
+                }
+              }
+            },
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "counter",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 22,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 22,
+                    "col": 17
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "counter",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 22,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 22,
+                      "col": 17
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 22,
+                      "col": 20
+                    },
+                    "end": {
+                      "line": 22,
+                      "col": 22
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 22,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 22,
+                    "col": 22
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 22,
+                  "col": 9
+                },
+                "end": {
+                  "line": 22,
+                  "col": 22
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 20,
+              "col": 5
+            },
+            "end": {
+              "line": 20,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "while with computed wait",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 24,
+          "col": 1
+        },
+        "end": {
+          "line": 24,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 25,
+            "col": 5
+          },
+          "end": {
+            "line": 25,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "bool",
+            "value": true,
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 26,
+                "col": 11
+              },
+              "end": {
+                "line": 26,
+                "col": 16
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "expr",
+              "expr": {
+                "kind": "call",
+                "name": "wait",
+                "args": [
+                  {
+                    "kind": "globalVar",
+                    "name": "someDuration",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 27,
+                        "col": 14
+                      },
+                      "end": {
+                        "line": 27,
+                        "col": 27
+                      }
+                    }
+                  },
+                  {
+                    "kind": "enum",
+                    "type": "Wait",
+                    "value": "IGNORE_CONDITION",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 27,
+                        "col": 9
+                      },
+                      "end": {
+                        "line": 27,
+                        "col": 28
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 27,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 27,
+                    "col": 28
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 27,
+                  "col": 9
+                },
+                "end": {
+                  "line": 27,
+                  "col": 28
+                }
+              }
+            },
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "counter",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 28,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 28,
+                    "col": 17
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "counter",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 28,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 28,
+                      "col": 17
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 28,
+                      "col": 20
+                    },
+                    "end": {
+                      "line": 28,
+                      "col": 22
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 28,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 28,
+                    "col": 22
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 28,
+                  "col": 9
+                },
+                "end": {
+                  "line": 28,
+                  "col": 22
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 26,
+              "col": 5
+            },
+            "end": {
+              "line": 26,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "while with wait nested in if",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 30,
+          "col": 1
+        },
+        "end": {
+          "line": 30,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 31,
+            "col": 5
+          },
+          "end": {
+            "line": 31,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "bool",
+            "value": true,
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 32,
+                "col": 11
+              },
+              "end": {
+                "line": 32,
+                "col": 16
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "if",
+              "branches": [
+                {
+                  "condition": {
+                    "kind": "globalVar",
+                    "name": "flag",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 33,
+                        "col": 12
+                      },
+                      "end": {
+                        "line": 33,
+                        "col": 17
+                      }
+                    }
+                  },
+                  "body": [
+                    {
+                      "kind": "expr",
+                      "expr": {
+                        "kind": "call",
+                        "name": "wait",
+                        "args": [
+                          {
+                            "kind": "number",
+                            "value": 0.1,
+                            "text": "0.1",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 34,
+                                "col": 20
+                              },
+                              "end": {
+                                "line": 34,
+                                "col": 22
+                              }
+                            }
+                          },
+                          {
+                            "kind": "enum",
+                            "type": "Wait",
+                            "value": "IGNORE_CONDITION",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 34,
+                                "col": 13
+                              },
+                              "end": {
+                                "line": 34,
+                                "col": 23
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 34,
+                            "col": 13
+                          },
+                          "end": {
+                            "line": 34,
+                            "col": 23
+                          }
+                        }
+                      },
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 34,
+                          "col": 13
+                        },
+                        "end": {
+                          "line": 34,
+                          "col": 23
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "else": [
+                {
+                  "kind": "assign",
+                  "target": {
+                    "kind": "globalVar",
+                    "name": "counter",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 36,
+                        "col": 13
+                      },
+                      "end": {
+                        "line": 36,
+                        "col": 21
+                      }
+                    }
+                  },
+                  "value": {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "globalVar",
+                      "name": "counter",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 36,
+                          "col": 13
+                        },
+                        "end": {
+                          "line": 36,
+                          "col": 21
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "number",
+                      "value": 1,
+                      "text": "1",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 36,
+                          "col": 24
+                        },
+                        "end": {
+                          "line": 36,
+                          "col": 26
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 36,
+                        "col": 13
+                      },
+                      "end": {
+                        "line": 36,
+                        "col": 26
+                      }
+                    }
+                  },
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 36,
+                      "col": 13
+                    },
+                    "end": {
+                      "line": 36,
+                      "col": 26
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 33,
+                  "col": 9
+                },
+                "end": {
+                  "line": 33,
+                  "col": 12
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 32,
+              "col": 5
+            },
+            "end": {
+              "line": 32,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "for loop without wait",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 38,
+          "col": 1
+        },
+        "end": {
+          "line": 38,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 39,
+            "col": 5
+          },
+          "end": {
+            "line": 39,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "for",
+          "variable": {
+            "kind": "globalVar",
+            "name": "I",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 40,
+                "col": 9
+              },
+              "end": {
+                "line": 40,
+                "col": 11
+              }
+            }
+          },
+          "iterable": {
+            "kind": "call",
+            "name": "range",
+            "args": [
+              {
+                "kind": "number",
+                "value": 4,
+                "text": "4",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 40,
+                    "col": 20
+                  },
+                  "end": {
+                    "line": 40,
+                    "col": 22
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 40,
+                "col": 14
+              },
+              "end": {
+                "line": 40,
+                "col": 23
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "counter",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 41,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 41,
+                    "col": 17
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "counter",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 41,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 41,
+                      "col": 17
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 41,
+                      "col": 20
+                    },
+                    "end": {
+                      "line": 41,
+                      "col": 22
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 41,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 41,
+                    "col": 22
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 41,
+                  "col": 9
+                },
+                "end": {
+                  "line": 41,
+                  "col": 22
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 40,
+              "col": 5
+            },
+            "end": {
+              "line": 40,
+              "col": 9
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

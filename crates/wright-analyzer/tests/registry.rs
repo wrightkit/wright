@@ -42,18 +42,19 @@ fn local_program(name: &str) -> WirProgram {
 // ── Registry identity ─────────────────────────────────────────────────────────
 
 #[test]
-fn registry_has_three_first_party_rules_with_stable_ids() {
+fn registry_has_five_first_party_rules_with_stable_ids() {
     let registry = LintRegistry::default();
     let ids: Vec<&str> = registry.rules().map(|meta| meta.id).collect();
-    assert_eq!(ids.len(), 3, "exactly three first-party rules in M12");
-    assert!(ids.contains(&"min-wait-loop"), "min-wait-loop present");
-    assert!(
-        ids.contains(&"duplicate-condition"),
-        "duplicate-condition present"
-    );
-    assert!(
-        ids.contains(&"expensive-loop-check"),
-        "expensive-loop-check present"
+    assert_eq!(
+        ids,
+        vec![
+            "min-wait-loop",
+            "duplicate-condition",
+            "expensive-loop-check",
+            "repeated-value",
+            "while-without-wait",
+        ],
+        "exactly five first-party rules in M12, in canonical order"
     );
 }
 
@@ -119,6 +120,18 @@ fn rule_default_severities_match_known_values() {
         .find(|(id, _)| *id == "expensive-loop-check")
         .unwrap();
     assert_eq!(exp_loop.1, Severity::Info);
+
+    let repeated = severities
+        .iter()
+        .find(|(id, _)| *id == "repeated-value")
+        .unwrap();
+    assert_eq!(repeated.1, Severity::Warning);
+
+    let no_wait = severities
+        .iter()
+        .find(|(id, _)| *id == "while-without-wait")
+        .unwrap();
+    assert_eq!(no_wait.1, Severity::Warning);
 }
 
 // ── Evidence classification (#98) ────────────────────────────────────────────
@@ -144,6 +157,16 @@ fn rule_evidence_classes_are_declared() {
         evidence_of(&evidence, "expensive-loop-check"),
         EvidenceClass::Heuristic,
         "the expensive-call list is a documented fixed heuristic"
+    );
+    assert_eq!(
+        evidence_of(&evidence, "repeated-value"),
+        EvidenceClass::Exact,
+        "a duplicated value in one loop scope is a structural fact"
+    );
+    assert_eq!(
+        evidence_of(&evidence, "while-without-wait"),
+        EvidenceClass::StaticIndicator,
+        "the missing wait is statically known; the frequency impact is an indicator"
     );
 }
 
@@ -188,6 +211,8 @@ fn default_config_enables_all_rules() {
         "min-wait-loop",
         "duplicate-condition",
         "expensive-loop-check",
+        "repeated-value",
+        "while-without-wait",
     ] {
         assert!(
             config.is_enabled(id),
@@ -259,6 +284,8 @@ fn all_rules_disabled_produces_empty_findings() {
     config.disable("min-wait-loop");
     config.disable("duplicate-condition");
     config.disable("expensive-loop-check");
+    config.disable("repeated-value");
+    config.disable("while-without-wait");
 
     let findings = LintRegistry::default().run(&program, &config);
     assert!(
