@@ -134,7 +134,7 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
         "summary": "while loop body contains no wait call",
         "evidence": "static-indicator",
         "tags": ["stability"],
-        "knownLimits": "The rule does not distinguish constant-true conditions ..."
+        "knownLimits": "Counter-pattern detection is conservative and structural: only literal-bound comparisons (<, <=, >, >=) are recognized. A statically-bounded claim additionally requires every direct child ..."
       }
     ],
     "config": { "rules": { "min-wait-loop": { "enabled": true, "severity": "warning" } } },
@@ -154,6 +154,22 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
 Analysis findings (`analyze`, `lint`, and the tool/agent `getFindings`/`lint`
 responses) carry an `evidence` field classifying how strongly the finding is
 supported (`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
+
+`while-without-wait` findings additionally carry a machine-readable
+`boundedness` field (`obviously-unbounded` | `statically-bounded` | `unknown`)
+classifying the no-yield loop's repetition evidence, and their severity is
+derived from that evidence class: `warning` for an obviously unbounded or
+unknown loop, `info` for a statically bounded no-yield loop. A statically
+bounded no-yield loop is never treated as equivalent to an unbounded one. For
+example, the agent-lab repro `loop-waitless.opy` (wrightkit/agent-lab#68) is a
+finite 10-iteration counter loop and reports as a statically bounded `info`
+finding:
+
+```json
+{ "code": "while-without-wait", "severity": "info", "boundedness": "statically-bounded", "message": "loop body contains no wait call; the loop is statically bounded by a counter against a literal bound, ..." }
+```
+
+Non-`while-without-wait` findings carry `"boundedness": null`.
 
 ## Exit codes
 

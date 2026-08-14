@@ -1,0 +1,2655 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "no-yield-unknown.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "a",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 44,
+          "col": 1
+        },
+        "end": {
+          "line": 44,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "b",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 45,
+          "col": 1
+        },
+        "end": {
+          "line": 45,
+          "col": 13
+        }
+      },
+      "initializer": {
+        "kind": "number",
+        "value": 10,
+        "text": "10",
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 45,
+            "col": 15
+          },
+          "end": {
+            "line": 45,
+            "col": 18
+          }
+        }
+      }
+    },
+    {
+      "kind": "globalVariable",
+      "name": "x",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 46,
+          "col": 1
+        },
+        "end": {
+          "line": 46,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "n",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 47,
+          "col": 1
+        },
+        "end": {
+          "line": 47,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "v1",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 48,
+          "col": 1
+        },
+        "end": {
+          "line": 48,
+          "col": 14
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "v2",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 49,
+          "col": 1
+        },
+        "end": {
+          "line": 49,
+          "col": 14
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "v3",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 50,
+          "col": 1
+        },
+        "end": {
+          "line": 50,
+          "col": 14
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "v4",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 51,
+          "col": 1
+        },
+        "end": {
+          "line": 51,
+          "col": 14
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "v5",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 52,
+          "col": 1
+        },
+        "end": {
+          "line": 52,
+          "col": 14
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "v6",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 53,
+          "col": 1
+        },
+        "end": {
+          "line": 53,
+          "col": 14
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "v7",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 54,
+          "col": 1
+        },
+        "end": {
+          "line": 54,
+          "col": 14
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "q",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 55,
+          "col": 1
+        },
+        "end": {
+          "line": 55,
+          "col": 13
+        }
+      },
+      "initializer": null
+    },
+    {
+      "kind": "globalVariable",
+      "name": "other",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 56,
+          "col": 1
+        },
+        "end": {
+          "line": 56,
+          "col": 17
+        }
+      },
+      "initializer": {
+        "kind": "number",
+        "value": 3,
+        "text": "3",
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 56,
+            "col": 19
+          },
+          "end": {
+            "line": 56,
+            "col": 21
+          }
+        }
+      }
+    },
+    {
+      "kind": "globalVariable",
+      "name": "flag",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 57,
+          "col": 1
+        },
+        "end": {
+          "line": 57,
+          "col": 16
+        }
+      },
+      "initializer": {
+        "kind": "bool",
+        "value": false,
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 57,
+            "col": 18
+          },
+          "end": {
+            "line": 57,
+            "col": 24
+          }
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "kind": "subroutineDef",
+      "name": "bumpV3",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 59,
+          "col": 1
+        },
+        "end": {
+          "line": 59,
+          "col": 5
+        }
+      },
+      "body": [
+        {
+          "kind": "assign",
+          "target": {
+            "kind": "globalVar",
+            "name": "v3",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 60,
+                "col": 5
+              },
+              "end": {
+                "line": 60,
+                "col": 8
+              }
+            }
+          },
+          "value": {
+            "kind": "binary",
+            "op": "+",
+            "left": {
+              "kind": "globalVar",
+              "name": "v3",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 60,
+                  "col": 5
+                },
+                "end": {
+                  "line": 60,
+                  "col": 8
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 1,
+              "text": "1",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 60,
+                  "col": 11
+                },
+                "end": {
+                  "line": 60,
+                  "col": 13
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 60,
+                "col": 5
+              },
+              "end": {
+                "line": 60,
+                "col": 13
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 60,
+              "col": 5
+            },
+            "end": {
+              "line": 60,
+              "col": 13
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "data-dependent condition loop",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 62,
+          "col": 1
+        },
+        "end": {
+          "line": 62,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 63,
+            "col": 5
+          },
+          "end": {
+            "line": 63,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "a",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 64,
+                  "col": 11
+                },
+                "end": {
+                  "line": 64,
+                  "col": 13
+                }
+              }
+            },
+            "right": {
+              "kind": "globalVar",
+              "name": "b",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 64,
+                  "col": 15
+                },
+                "end": {
+                  "line": 64,
+                  "col": 17
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 64,
+                "col": 11
+              },
+              "end": {
+                "line": 64,
+                "col": 17
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "x",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 65,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 65,
+                    "col": 11
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "x",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 65,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 65,
+                      "col": 11
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 65,
+                      "col": 14
+                    },
+                    "end": {
+                      "line": 65,
+                      "col": 16
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 65,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 65,
+                    "col": 16
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 65,
+                  "col": 9
+                },
+                "end": {
+                  "line": 65,
+                  "col": 16
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 64,
+              "col": 5
+            },
+            "end": {
+              "line": 64,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "conditional progress loop",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 67,
+          "col": 1
+        },
+        "end": {
+          "line": 67,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 68,
+            "col": 5
+          },
+          "end": {
+            "line": 68,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "n",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 69,
+                  "col": 11
+                },
+                "end": {
+                  "line": 69,
+                  "col": 13
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 69,
+                  "col": 15
+                },
+                "end": {
+                  "line": 69,
+                  "col": 18
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 69,
+                "col": 11
+              },
+              "end": {
+                "line": 69,
+                "col": 18
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "if",
+              "branches": [
+                {
+                  "condition": {
+                    "kind": "binary",
+                    "op": "<",
+                    "left": {
+                      "kind": "globalVar",
+                      "name": "a",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 70,
+                          "col": 12
+                        },
+                        "end": {
+                          "line": 70,
+                          "col": 14
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "globalVar",
+                      "name": "b",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 70,
+                          "col": 16
+                        },
+                        "end": {
+                          "line": 70,
+                          "col": 18
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 70,
+                        "col": 12
+                      },
+                      "end": {
+                        "line": 70,
+                        "col": 18
+                      }
+                    }
+                  },
+                  "body": [
+                    {
+                      "kind": "assign",
+                      "target": {
+                        "kind": "globalVar",
+                        "name": "n",
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 71,
+                            "col": 13
+                          },
+                          "end": {
+                            "line": 71,
+                            "col": 15
+                          }
+                        }
+                      },
+                      "value": {
+                        "kind": "binary",
+                        "op": "+",
+                        "left": {
+                          "kind": "globalVar",
+                          "name": "n",
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 71,
+                              "col": 13
+                            },
+                            "end": {
+                              "line": 71,
+                              "col": 15
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "number",
+                          "value": 1,
+                          "text": "1",
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 71,
+                              "col": 18
+                            },
+                            "end": {
+                              "line": 71,
+                              "col": 20
+                            }
+                          }
+                        },
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 71,
+                            "col": 13
+                          },
+                          "end": {
+                            "line": 71,
+                            "col": 20
+                          }
+                        }
+                      },
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 71,
+                          "col": 13
+                        },
+                        "end": {
+                          "line": 71,
+                          "col": 20
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "else": null,
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 70,
+                  "col": 9
+                },
+                "end": {
+                  "line": 70,
+                  "col": 12
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 69,
+              "col": 5
+            },
+            "end": {
+              "line": 69,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "away writer",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 73,
+          "col": 1
+        },
+        "end": {
+          "line": 73,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 74,
+            "col": 5
+          },
+          "end": {
+            "line": 74,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "v1",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 75,
+                  "col": 11
+                },
+                "end": {
+                  "line": 75,
+                  "col": 14
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 75,
+                  "col": 16
+                },
+                "end": {
+                  "line": 75,
+                  "col": 19
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 75,
+                "col": 11
+              },
+              "end": {
+                "line": 75,
+                "col": 19
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v1",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 76,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 76,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 76,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 76,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 76,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 76,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 76,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 76,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 76,
+                  "col": 9
+                },
+                "end": {
+                  "line": 76,
+                  "col": 17
+                }
+              }
+            },
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v1",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 77,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 77,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "-",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 77,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 77,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 2,
+                  "text": "2",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 77,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 77,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 77,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 77,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 77,
+                  "col": 9
+                },
+                "end": {
+                  "line": 77,
+                  "col": 17
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 75,
+              "col": 5
+            },
+            "end": {
+              "line": 75,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "conditional reset",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 79,
+          "col": 1
+        },
+        "end": {
+          "line": 79,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 80,
+            "col": 5
+          },
+          "end": {
+            "line": 80,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "v2",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 81,
+                  "col": 11
+                },
+                "end": {
+                  "line": 81,
+                  "col": 14
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 81,
+                  "col": 16
+                },
+                "end": {
+                  "line": 81,
+                  "col": 19
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 81,
+                "col": 11
+              },
+              "end": {
+                "line": 81,
+                "col": 19
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v2",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 82,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 82,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v2",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 82,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 82,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 82,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 82,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 82,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 82,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 82,
+                  "col": 9
+                },
+                "end": {
+                  "line": 82,
+                  "col": 17
+                }
+              }
+            },
+            {
+              "kind": "if",
+              "branches": [
+                {
+                  "condition": {
+                    "kind": "globalVar",
+                    "name": "flag",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 83,
+                        "col": 12
+                      },
+                      "end": {
+                        "line": 83,
+                        "col": 17
+                      }
+                    }
+                  },
+                  "body": [
+                    {
+                      "kind": "assign",
+                      "target": {
+                        "kind": "globalVar",
+                        "name": "v2",
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 84,
+                            "col": 13
+                          },
+                          "end": {
+                            "line": 84,
+                            "col": 16
+                          }
+                        }
+                      },
+                      "value": {
+                        "kind": "number",
+                        "value": 0,
+                        "text": "0",
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 84,
+                            "col": 18
+                          },
+                          "end": {
+                            "line": 84,
+                            "col": 20
+                          }
+                        }
+                      },
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 84,
+                          "col": 13
+                        },
+                        "end": {
+                          "line": 84,
+                          "col": 20
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "else": null,
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 83,
+                  "col": 9
+                },
+                "end": {
+                  "line": 83,
+                  "col": 12
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 81,
+              "col": 5
+            },
+            "end": {
+              "line": 81,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "subroutine writer",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 86,
+          "col": 1
+        },
+        "end": {
+          "line": 86,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 87,
+            "col": 5
+          },
+          "end": {
+            "line": 87,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "v3",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 88,
+                  "col": 11
+                },
+                "end": {
+                  "line": 88,
+                  "col": 14
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 88,
+                  "col": 16
+                },
+                "end": {
+                  "line": 88,
+                  "col": 19
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 88,
+                "col": 11
+              },
+              "end": {
+                "line": 88,
+                "col": 19
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v3",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 89,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 89,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v3",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 89,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 89,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 89,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 89,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 89,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 89,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 89,
+                  "col": 9
+                },
+                "end": {
+                  "line": 89,
+                  "col": 17
+                }
+              }
+            },
+            {
+              "kind": "callSubroutine",
+              "name": "bumpV3",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 90,
+                  "col": 9
+                },
+                "end": {
+                  "line": 90,
+                  "col": 18
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 88,
+              "col": 5
+            },
+            "end": {
+              "line": 88,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "non literal step",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 92,
+          "col": 1
+        },
+        "end": {
+          "line": 92,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 93,
+            "col": 5
+          },
+          "end": {
+            "line": 93,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "v4",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 94,
+                  "col": 11
+                },
+                "end": {
+                  "line": 94,
+                  "col": 14
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 94,
+                  "col": 16
+                },
+                "end": {
+                  "line": 94,
+                  "col": 19
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 94,
+                "col": 11
+              },
+              "end": {
+                "line": 94,
+                "col": 19
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v4",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 95,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 95,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v4",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 95,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 95,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 95,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 95,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 95,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 95,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 95,
+                  "col": 9
+                },
+                "end": {
+                  "line": 95,
+                  "col": 17
+                }
+              }
+            },
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v4",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 96,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 96,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v4",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 96,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 96,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "globalVar",
+                  "name": "other",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 96,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 96,
+                      "col": 21
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 96,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 96,
+                    "col": 21
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 96,
+                  "col": 9
+                },
+                "end": {
+                  "line": 96,
+                  "col": 21
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 94,
+              "col": 5
+            },
+            "end": {
+              "line": 94,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "nested loop writer",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 98,
+          "col": 1
+        },
+        "end": {
+          "line": 98,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 99,
+            "col": 5
+          },
+          "end": {
+            "line": 99,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "v5",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 100,
+                  "col": 11
+                },
+                "end": {
+                  "line": 100,
+                  "col": 14
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 100,
+                  "col": 16
+                },
+                "end": {
+                  "line": 100,
+                  "col": 19
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 100,
+                "col": 11
+              },
+              "end": {
+                "line": 100,
+                "col": 19
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v5",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 101,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 101,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v5",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 101,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 101,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 101,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 101,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 101,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 101,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 101,
+                  "col": 9
+                },
+                "end": {
+                  "line": 101,
+                  "col": 17
+                }
+              }
+            },
+            {
+              "kind": "while",
+              "condition": {
+                "kind": "bool",
+                "value": true,
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 102,
+                    "col": 15
+                  },
+                  "end": {
+                    "line": 102,
+                    "col": 20
+                  }
+                }
+              },
+              "body": [
+                {
+                  "kind": "assign",
+                  "target": {
+                    "kind": "globalVar",
+                    "name": "v5",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 103,
+                        "col": 13
+                      },
+                      "end": {
+                        "line": 103,
+                        "col": 16
+                      }
+                    }
+                  },
+                  "value": {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "globalVar",
+                      "name": "v5",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 103,
+                          "col": 13
+                        },
+                        "end": {
+                          "line": 103,
+                          "col": 16
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "number",
+                      "value": 1,
+                      "text": "1",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 103,
+                          "col": 19
+                        },
+                        "end": {
+                          "line": 103,
+                          "col": 21
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 103,
+                        "col": 13
+                      },
+                      "end": {
+                        "line": 103,
+                        "col": 21
+                      }
+                    }
+                  },
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 103,
+                      "col": 13
+                    },
+                    "end": {
+                      "line": 103,
+                      "col": 21
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 102,
+                  "col": 9
+                },
+                "end": {
+                  "line": 102,
+                  "col": 15
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 100,
+              "col": 5
+            },
+            "end": {
+              "line": 100,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "nested non terminating inner loop",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 105,
+          "col": 1
+        },
+        "end": {
+          "line": 105,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 106,
+            "col": 5
+          },
+          "end": {
+            "line": 106,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "v6",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 107,
+                  "col": 11
+                },
+                "end": {
+                  "line": 107,
+                  "col": 14
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 107,
+                  "col": 16
+                },
+                "end": {
+                  "line": 107,
+                  "col": 19
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 107,
+                "col": 11
+              },
+              "end": {
+                "line": 107,
+                "col": 19
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v6",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 108,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 108,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v6",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 108,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 108,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 108,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 108,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 108,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 108,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 108,
+                  "col": 9
+                },
+                "end": {
+                  "line": 108,
+                  "col": 17
+                }
+              }
+            },
+            {
+              "kind": "while",
+              "condition": {
+                "kind": "bool",
+                "value": true,
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 109,
+                    "col": 15
+                  },
+                  "end": {
+                    "line": 109,
+                    "col": 20
+                  }
+                }
+              },
+              "body": [
+                {
+                  "kind": "assign",
+                  "target": {
+                    "kind": "globalVar",
+                    "name": "x",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 110,
+                        "col": 13
+                      },
+                      "end": {
+                        "line": 110,
+                        "col": 15
+                      }
+                    }
+                  },
+                  "value": {
+                    "kind": "binary",
+                    "op": "+",
+                    "left": {
+                      "kind": "globalVar",
+                      "name": "x",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 110,
+                          "col": 13
+                        },
+                        "end": {
+                          "line": 110,
+                          "col": 15
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "number",
+                      "value": 1,
+                      "text": "1",
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 110,
+                          "col": 18
+                        },
+                        "end": {
+                          "line": 110,
+                          "col": 20
+                        }
+                      }
+                    },
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 110,
+                        "col": 13
+                      },
+                      "end": {
+                        "line": 110,
+                        "col": 20
+                      }
+                    }
+                  },
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 110,
+                      "col": 13
+                    },
+                    "end": {
+                      "line": 110,
+                      "col": 20
+                    }
+                  }
+                }
+              ],
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 109,
+                  "col": 9
+                },
+                "end": {
+                  "line": 109,
+                  "col": 15
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 107,
+              "col": 5
+            },
+            "end": {
+              "line": 107,
+              "col": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "nested zero step for inside if",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 112,
+          "col": 1
+        },
+        "end": {
+          "line": 112,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 113,
+            "col": 5
+          },
+          "end": {
+            "line": 113,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [],
+      "actions": [
+        {
+          "kind": "while",
+          "condition": {
+            "kind": "binary",
+            "op": "<",
+            "left": {
+              "kind": "globalVar",
+              "name": "v7",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 114,
+                  "col": 11
+                },
+                "end": {
+                  "line": 114,
+                  "col": 14
+                }
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 10,
+              "text": "10",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 114,
+                  "col": 16
+                },
+                "end": {
+                  "line": 114,
+                  "col": 19
+                }
+              }
+            },
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 114,
+                "col": 11
+              },
+              "end": {
+                "line": 114,
+                "col": 19
+              }
+            }
+          },
+          "body": [
+            {
+              "kind": "assign",
+              "target": {
+                "kind": "globalVar",
+                "name": "v7",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 115,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 115,
+                    "col": 12
+                  }
+                }
+              },
+              "value": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                  "kind": "globalVar",
+                  "name": "v7",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 115,
+                      "col": 9
+                    },
+                    "end": {
+                      "line": 115,
+                      "col": 12
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 115,
+                      "col": 15
+                    },
+                    "end": {
+                      "line": 115,
+                      "col": 17
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 115,
+                    "col": 9
+                  },
+                  "end": {
+                    "line": 115,
+                    "col": 17
+                  }
+                }
+              },
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 115,
+                  "col": 9
+                },
+                "end": {
+                  "line": 115,
+                  "col": 17
+                }
+              }
+            },
+            {
+              "kind": "if",
+              "branches": [
+                {
+                  "condition": {
+                    "kind": "globalVar",
+                    "name": "flag",
+                    "span": {
+                      "file": 0,
+                      "start": {
+                        "line": 116,
+                        "col": 12
+                      },
+                      "end": {
+                        "line": 116,
+                        "col": 17
+                      }
+                    }
+                  },
+                  "body": [
+                    {
+                      "kind": "for",
+                      "variable": {
+                        "kind": "globalVar",
+                        "name": "q",
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 117,
+                            "col": 17
+                          },
+                          "end": {
+                            "line": 117,
+                            "col": 19
+                          }
+                        }
+                      },
+                      "iterable": {
+                        "kind": "call",
+                        "name": "range",
+                        "args": [
+                          {
+                            "kind": "number",
+                            "value": 0,
+                            "text": "0",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 117,
+                                "col": 28
+                              },
+                              "end": {
+                                "line": 117,
+                                "col": 30
+                              }
+                            }
+                          },
+                          {
+                            "kind": "number",
+                            "value": 4,
+                            "text": "4",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 117,
+                                "col": 31
+                              },
+                              "end": {
+                                "line": 117,
+                                "col": 33
+                              }
+                            }
+                          },
+                          {
+                            "kind": "number",
+                            "value": 0,
+                            "text": "0",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 117,
+                                "col": 34
+                              },
+                              "end": {
+                                "line": 117,
+                                "col": 36
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "file": 0,
+                          "start": {
+                            "line": 117,
+                            "col": 22
+                          },
+                          "end": {
+                            "line": 117,
+                            "col": 37
+                          }
+                        }
+                      },
+                      "body": [
+                        {
+                          "kind": "assign",
+                          "target": {
+                            "kind": "globalVar",
+                            "name": "x",
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 118,
+                                "col": 17
+                              },
+                              "end": {
+                                "line": 118,
+                                "col": 19
+                              }
+                            }
+                          },
+                          "value": {
+                            "kind": "binary",
+                            "op": "+",
+                            "left": {
+                              "kind": "globalVar",
+                              "name": "x",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 118,
+                                  "col": 17
+                                },
+                                "end": {
+                                  "line": 118,
+                                  "col": 19
+                                }
+                              }
+                            },
+                            "right": {
+                              "kind": "number",
+                              "value": 1,
+                              "text": "1",
+                              "span": {
+                                "file": 0,
+                                "start": {
+                                  "line": 118,
+                                  "col": 22
+                                },
+                                "end": {
+                                  "line": 118,
+                                  "col": 24
+                                }
+                              }
+                            },
+                            "span": {
+                              "file": 0,
+                              "start": {
+                                "line": 118,
+                                "col": 17
+                              },
+                              "end": {
+                                "line": 118,
+                                "col": 24
+                              }
+                            }
+                          },
+                          "span": {
+                            "file": 0,
+                            "start": {
+                              "line": 118,
+                              "col": 17
+                            },
+                            "end": {
+                              "line": 118,
+                              "col": 24
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "file": 0,
+                        "start": {
+                          "line": 117,
+                          "col": 13
+                        },
+                        "end": {
+                          "line": 117,
+                          "col": 17
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "else": null,
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 116,
+                  "col": 9
+                },
+                "end": {
+                  "line": 116,
+                  "col": 12
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 114,
+              "col": 5
+            },
+            "end": {
+              "line": 114,
+              "col": 11
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

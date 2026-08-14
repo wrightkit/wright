@@ -207,6 +207,41 @@ fn findings_are_returned_with_codes_and_spans() {
     }
 }
 
+#[test]
+fn while_without_wait_findings_carry_boundedness_in_json() {
+    // The machine-readable boundedness surface (issue #103): `while-without-wait`
+    // findings expose the kebab-case class, every other finding exposes null.
+    let program = lowered_program(&local_fixture_path("no-yield-bounded"));
+    let service = SemanticService::new(&program).unwrap();
+    let findings = handle(&service, r#"{"op":"getFindings"}"#);
+    let findings = findings["result"].as_array().unwrap();
+    let no_wait: Vec<&Value> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "while-without-wait")
+        .collect();
+    assert_eq!(
+        no_wait.len(),
+        5,
+        "all bounded counter loops in the fixture fire"
+    );
+    for finding in no_wait {
+        assert_eq!(
+            finding["boundedness"], "statically-bounded",
+            "the boundedness field must serialize as the kebab-case class"
+        );
+        assert_eq!(finding["severity"], "info");
+    }
+    for finding in findings
+        .iter()
+        .filter(|finding| finding["code"] != "while-without-wait")
+    {
+        assert!(
+            finding["boundedness"].is_null(),
+            "non-while findings carry boundedness: null"
+        );
+    }
+}
+
 // ── Lint rules and configuration (M12, #98) ──────────────────────────────────
 
 #[test]

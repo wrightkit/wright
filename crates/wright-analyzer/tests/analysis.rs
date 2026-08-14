@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_analyzer::analysis::{self, EvidenceClass, Severity};
+use wright_analyzer::analysis::{self, Boundedness, EvidenceClass, Severity};
 use wright_core::hir;
 use wright_ir::lower;
 use wright_ir::wir::Program as WirProgram;
@@ -295,6 +295,11 @@ fn while_without_wait_fires_on_waardless_while() {
     assert_eq!(findings.len(), 1, "one waardless while loop");
     assert_eq!(findings[0].severity, Severity::Warning);
     assert_eq!(findings[0].evidence, EvidenceClass::StaticIndicator);
+    assert_eq!(
+        findings[0].boundedness,
+        Some(Boundedness::ObviouslyUnbounded),
+        "the waardless `while true:` is obviously unbounded"
+    );
     assert!(findings[0].span.is_some(), "finding must carry its span");
     assert!(
         findings[0].action.is_some(),
@@ -303,6 +308,149 @@ fn while_without_wait_fires_on_waardless_while() {
     assert!(
         findings[0].value.is_none(),
         "the finding targets the loop action, not a value"
+    );
+}
+
+#[test]
+fn while_without_wait_classifies_bounded_loop() {
+    // Rule 1 is the agent-lab#68 repro shape (loopCount < 10, loopCount += 1);
+    // rule 2 pins the subtract direction (n > 0, n -= 1); rules 3-4 pin sound
+    // nested loops (a nested counter `while` and a nested `For Global
+    // Variable` with a non-zero literal step whose body does not write the
+    // loop variable) whose own finite termination keeps the outer loops
+    // bounded. All five findings are statically bounded counter loops,
+    // reported at info severity, and none is overstated as an unbounded
+    // hazard.
+    let program = lower_program(&local_fixture_path("no-yield-bounded"));
+    let findings = findings_by_code(&program, "while-without-wait");
+    assert_eq!(
+        findings.len(),
+        5,
+        "two counter loops plus the nested counter-loop pair and the nested-for outer loop"
+    );
+    for finding in &findings {
+        assert_eq!(
+            finding.boundedness,
+            Some(Boundedness::StaticallyBounded),
+            "{}: bounded counter loop must be classified as statically bounded",
+            finding.message
+        );
+        assert_eq!(
+            finding.severity,
+            Severity::Info,
+            "a statically bounded no-yield loop must not carry warning severity"
+        );
+        assert_eq!(finding.evidence, EvidenceClass::StaticIndicator);
+        assert!(
+            finding.message.contains("statically bounded"),
+            "the message must state the boundedness class: {}",
+            finding.message
+        );
+        assert!(
+            finding.message.contains("no wait call"),
+            "the message must state the no-yield fact: {}",
+            finding.message
+        );
+        assert!(finding.span.is_some(), "finding must carry its span");
+        assert!(
+            finding.action.is_some(),
+            "finding must link to the while action"
+        );
+    }
+}
+
+#[test]
+fn while_without_wait_classifies_unknown_boundedness() {
+    // Data-dependent condition (a < b) with no counter pattern; conditional
+    // progress (modify nested in an if); and the issue #103 counterexample
+    // classes (away-writer, conditional reset, subroutine writer, non-literal
+    // step, nested-loop writer) plus the nested-loop termination corner cases
+    // (a non-terminating inner `while true:` that does not write the counter,
+    // and a zero-step `for` nested inside an `if`) must all be reported
+    // explicitly as unknown boundedness, not guessed. The only non-unknown
+    // findings are the two inner `while true:` loops, which are obviously
+    // unbounded.
+    let program = lower_program(&local_fixture_path("no-yield-unknown"));
+    let findings = findings_by_code(&program, "while-without-wait");
+    assert_eq!(
+        findings.len(),
+        11,
+        "nine waardless while loops plus the two nested inner `while true:` loops"
+    );
+    let unknown: Vec<&analysis::Finding> = findings
+        .iter()
+        .filter(|finding| finding.boundedness == Some(Boundedness::Unknown))
+        .collect();
+    assert_eq!(
+        unknown.len(),
+        9,
+        "every outer/data loop is classified unknown; only the two nested inner loops are not"
+    );
+    for finding in &findings {
+        assert_eq!(
+            finding.severity,
+            Severity::Warning,
+            "every no-yield finding in this fixture carries warning severity: {}",
+            finding.message
+        );
+        assert_eq!(finding.evidence, EvidenceClass::StaticIndicator);
+        assert!(finding.span.is_some(), "finding must carry its span");
+        assert!(
+            finding.action.is_some(),
+            "finding must link to the while action"
+        );
+    }
+    for finding in &unknown {
+        assert!(
+            finding.message.contains("unknown"),
+            "the message must state the unknown boundedness class: {}",
+            finding.message
+        );
+    }
+    let obvious: Vec<&analysis::Finding> = findings
+        .iter()
+        .filter(|finding| finding.boundedness == Some(Boundedness::ObviouslyUnbounded))
+        .collect();
+    assert_eq!(
+        obvious.len(),
+        2,
+        "the two nested inner `while true:` loops are the obviously-unbounded findings"
+    );
+    for finding in &obvious {
+        assert!(
+            finding.message.contains("statically true"),
+            "the inner loop message states the statically-true condition: {}",
+            finding.message
+        );
+    }
+}
+
+#[test]
+fn while_without_wait_unbounded_finding_does_not_claim_a_guaranteed_crash() {
+    let program = lower_program(&local_fixture_path("no-yield-unbounded"));
+    let findings = findings_by_code(&program, "while-without-wait");
+    assert_eq!(findings.len(), 1, "one obviously unbounded no-yield loop");
+    assert_eq!(
+        findings[0].boundedness,
+        Some(Boundedness::ObviouslyUnbounded)
+    );
+    assert_eq!(findings[0].severity, Severity::Warning);
+    assert!(
+        findings[0].message.contains("never terminates on its own"),
+        "the message must state the static non-termination fact"
+    );
+    assert!(
+        findings[0].message.contains("not statically measurable"),
+        "the message must not claim a measured runtime cost"
+    );
+    assert!(
+        !findings[0].message.to_lowercase().contains("crash"),
+        "the message must not claim a guaranteed crash"
+    );
+    assert!(findings[0].span.is_some(), "finding must carry its span");
+    assert!(
+        findings[0].action.is_some(),
+        "finding must link to the while action"
     );
 }
 
@@ -350,5 +498,9 @@ fn while_without_wait_findings_are_deterministic() {
         assert_eq!(a.severity, b.severity, "finding severities must be stable");
         assert_eq!(a.span, b.span, "finding spans must be stable");
         assert_eq!(a.action, b.action, "finding actions must be stable");
+        assert_eq!(
+            a.boundedness, b.boundedness,
+            "finding boundedness must be stable"
+        );
     }
 }

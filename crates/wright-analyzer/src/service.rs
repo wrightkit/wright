@@ -359,6 +359,7 @@ impl<'a> SemanticService<'a> {
                             "action": finding.action.map(|action| action.index()),
                             "value": finding.value.map(|value| value.index()),
                             "evidence": finding.evidence.as_str(),
+                            "boundedness": finding.boundedness.map(|b| b.as_str()),
                         })
                     })
                     .collect();

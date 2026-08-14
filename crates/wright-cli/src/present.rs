@@ -123,11 +123,19 @@ fn render_lint<T: serde::Serialize>(envelope: &Envelope<T>) {
             .get("evidence")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("exact");
+        let boundedness = finding
+            .get("boundedness")
+            .and_then(serde_json::Value::as_str);
         let message = finding
             .get("message")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        println!("  {severity}[{code}] (evidence: {evidence}): {message}");
+        match boundedness {
+            Some(boundedness) => println!(
+                "  {severity}[{code}] (evidence: {evidence}) (boundedness: {boundedness}): {message}"
+            ),
+            None => println!("  {severity}[{code}] (evidence: {evidence}): {message}"),
+        }
         if let Some(span) = finding.get("span") {
             print_span(span, "      ");
         }

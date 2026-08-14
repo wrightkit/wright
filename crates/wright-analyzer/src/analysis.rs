@@ -15,7 +15,8 @@
 //!   duplicated shape.
 //! * [`WhileWithoutWait`] (`while-without-wait`) — a `While` loop whose body
 //!   tree contains no `wait` call, so it cannot yield while its condition
-//!   holds.
+//!   holds; each finding also classifies the loop's boundedness evidence
+//!   (`obviously-unbounded` / `statically-bounded` / `unknown`, #103).
 //!
 //! Known limits (documented, not silent): wait durations that are not
 //! statically known are treated as not-minimum; duplicate detection is
@@ -35,7 +36,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use wright_ir::source::Span;
-use wright_ir::wir::{self, Action, ActionId, RuleId, Value, ValueId};
+use wright_ir::wir::{
+    self, Action, ActionId, GlobalVarId, ModifyOp, PlayerVarId, RuleId, Value, ValueId,
+};
 
 use crate::cfg::Cfg;
 use crate::registry::{LintConfig, LintRegistry};
@@ -84,6 +87,42 @@ impl EvidenceClass {
     }
 }
 
+/// The boundedness evidence of a no-yield `While` loop (issue #103).
+///
+/// Classifies the loop's repetition evidence separately from the no-yield
+/// fact: whether the loop is statically provable to terminate (bounded),
+/// statically provable to never terminate on its own (obviously unbounded),
+/// or not statically decidable from the modeled WIR (unknown).
+///
+/// * `ObviouslyUnbounded` — the condition is statically `true`; the modeled
+///   WIR has no break/goto action, so a constant-true condition with no wait
+///   never terminates.
+/// * `StaticallyBounded` — the condition compares a variable against a
+///   numeric literal and every direct child of the body either provably moves
+///   the compared variable toward the literal by a non-zero literal step or
+///   provably cannot write it.
+/// * `Unknown` — any other condition shape (data-dependent, unrecognized
+///   counter pattern, conditional progress).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Boundedness {
+    ObviouslyUnbounded,
+    StaticallyBounded,
+    Unknown,
+}
+
+impl Boundedness {
+    /// The stable serialized spelling of this class
+    /// (`"obviously-unbounded"`, `"statically-bounded"`, `"unknown"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Boundedness::ObviouslyUnbounded => "obviously-unbounded",
+            Boundedness::StaticallyBounded => "statically-bounded",
+            Boundedness::Unknown => "unknown",
+        }
+    }
+}
+
 /// One analysis finding, linked to its source location and IR node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
@@ -97,6 +136,9 @@ pub struct Finding {
     pub value: Option<ValueId>,
     /// The evidence class of this finding, taken from the producing rule.
     pub evidence: EvidenceClass,
+    /// The boundedness evidence of a no-yield `While` loop finding
+    /// (`while-without-wait` only; `None` on every other rule).
+    pub boundedness: Option<Boundedness>,
 }
 
 /// A Workshop-specific static analysis.
@@ -160,6 +202,7 @@ impl Analysis for MinWaitLoop {
                     action: Some(action_id),
                     value: None,
                     evidence: self.evidence(),
+                    boundedness: None,
                 });
             }
         });
@@ -242,6 +285,7 @@ impl Analysis for DuplicateCondition {
                         action: Some(action_id),
                         value: Some(condition),
                         evidence: self.evidence(),
+                        boundedness: None,
                     });
                 } else {
                     conditions.push((condition, Some(action_id), span));
@@ -291,6 +335,7 @@ impl Analysis for ExpensiveLoopCheck {
                     action: Some(action_id),
                     value: Some(value),
                     evidence: self.evidence(),
+                    boundedness: None,
                 });
             }
         });
@@ -372,6 +417,7 @@ impl Analysis for RepeatedValue {
                     action: Some(action_id),
                     value: Some(first),
                     evidence: self.evidence(),
+                    boundedness: None,
                 });
             }
         });
@@ -598,6 +644,14 @@ fn visit_value_children(value: &Value, f: &mut impl FnMut(ValueId)) {
 }
 
 /// A `While` loop whose body tree contains no `wait` call.
+///
+/// Each flagged loop additionally carries a [`Boundedness`] classification
+/// (issue #103) that separates the static no-yield fact from the loop's
+/// repetition evidence: a statically bounded no-yield loop is reported at
+/// `info` severity and is explicitly NOT treated as equivalent to an
+/// obviously unbounded one (which, like an unknown one, reports at
+/// `warning`). The rule never claims a guaranteed crash or a measured
+/// runtime cost.
 pub struct WhileWithoutWait;
 
 impl Analysis for WhileWithoutWait {
@@ -617,24 +671,350 @@ impl Analysis for WhileWithoutWait {
         };
         let mut findings = Vec::new();
         visit_actions(program, &rule_data.actions, &mut |action_id, action| {
-            let Action::While { body, span, .. } = action else {
+            let Action::While {
+                condition,
+                body,
+                span,
+            } = action
+            else {
                 return;
             };
             if !body_has_wait(program, body) {
+                let class = boundedness_of(program, *condition, body);
                 findings.push(Finding {
                     code: self.name(),
-                    severity: Severity::Warning,
-                    message: "loop body contains no wait call; the loop cannot yield while its condition holds"
-                        .to_string(),
+                    severity: match class {
+                        Boundedness::StaticallyBounded => Severity::Info,
+                        Boundedness::ObviouslyUnbounded | Boundedness::Unknown => Severity::Warning,
+                    },
+                    message: no_wait_message(class),
                     span: *span,
                     rule,
                     action: Some(action_id),
                     value: None,
                     evidence: self.evidence(),
+                    boundedness: Some(class),
                 });
             }
         });
         findings
+    }
+}
+
+/// The human-readable message for a no-yield finding, stating the static
+/// fact AND the boundedness class explicitly without claiming a guaranteed
+/// crash or a measured runtime cost.
+fn no_wait_message(class: Boundedness) -> String {
+    match class {
+        Boundedness::ObviouslyUnbounded => {
+            "loop body contains no wait call and the loop condition is statically true, so the loop repeats without yielding and never terminates on its own; it runs without bound while the rule is active (exact server impact is not statically measurable)".to_string()
+        }
+        Boundedness::StaticallyBounded => {
+            "loop body contains no wait call; the loop is statically bounded by a counter against a literal bound, so it runs a finite number of back-to-back iterations".to_string()
+        }
+        Boundedness::Unknown => {
+            "loop body contains no wait call and the loop's boundedness is unknown (data-dependent condition with no static counter pattern), so the loop may repeat without yielding".to_string()
+        }
+    }
+}
+
+/// Classify the boundedness evidence of a `While` loop with a no-yield body.
+///
+/// Deliberately conservative and structural (issue #103):
+///
+/// * `ObviouslyUnbounded` — the condition is `Value::Bool(true)`. The modeled
+///   WIR has no break/goto action, so a constant-true condition with no wait
+///   never terminates.
+/// * `StaticallyBounded` — the condition is a literal-bound comparison
+///   (`<`, `<=`, `>`, `>=`) of one variable against a numeric literal, and
+///   EVERY direct child that can affect the compared variable either provably
+///   moves it toward the literal by a non-zero literal step or provably cannot
+///   write it (no away-direction modify, no `Set`/non-literal/zero-step
+///   modify, no `CallSubroutine`, no `If`/nested-loop subtree writing it),
+///   and no direct child is a nested loop whose termination is not statically
+///   provable (a non-terminating nested loop prevents the outer loop from
+///   completing an iteration).
+/// * `Unknown` — anything else.
+fn boundedness_of(program: &wir::Program, condition: ValueId, body: &[ActionId]) -> Boundedness {
+    if matches!(
+        program.values.get(condition).map(|node| &node.value),
+        Some(Value::Bool(true))
+    ) {
+        return Boundedness::ObviouslyUnbounded;
+    }
+    let Some((variable, toward)) = counter_comparison(program, condition) else {
+        return Boundedness::Unknown;
+    };
+    let mut progresses = false;
+    for action_id in body {
+        let Some(action) = program.actions.get(*action_id) else {
+            continue;
+        };
+        // A direct-child nested loop whose termination is not statically
+        // provable prevents the outer loop from completing an iteration, so
+        // the outer loop is not provably finite.
+        if action_has_unprovable_loop(program, *action_id) {
+            return Boundedness::Unknown;
+        }
+        match modify_direction(program, action, &variable) {
+            Some(direction) if direction == toward => progresses = true,
+            // A direct child moves the compared variable away from the bound:
+            // progress is not provable.
+            Some(_) => return Boundedness::Unknown,
+            // A direct child that provably cannot progress the counter still
+            // writes the variable (Set, non-literal/zero-step Modify,
+            // CallSubroutine, or an If/nested-loop subtree writing it):
+            // progress is not provable.
+            None if action_writes(program, action, &variable) => return Boundedness::Unknown,
+            // Debug/Print and generic calls that are not user subroutines are
+            // documented non-writers.
+            None => {}
+        }
+    }
+    if progresses {
+        Boundedness::StaticallyBounded
+    } else {
+        Boundedness::Unknown
+    }
+}
+
+/// Whether the subtree rooted at one action id contains a nested loop whose
+/// termination is not statically provable. Recursion is well-founded: it
+/// descends the action tree, which strictly decreases in depth (the action
+/// arena is a tree).
+fn action_has_unprovable_loop(program: &wir::Program, id: ActionId) -> bool {
+    let Some(action) = program.actions.get(id) else {
+        return false;
+    };
+    match action {
+        // A nested `While` is provably finite only when its own boundedness
+        // classification is `StaticallyBounded` (reused verbatim: a nested
+        // `while true:` classifies `ObviouslyUnbounded`, so the outer loop
+        // cannot be proven to complete an iteration).
+        Action::While { condition, body, .. } => {
+            boundedness_of(program, *condition, body) != Boundedness::StaticallyBounded
+                || subtree_has_unprovable_loop(program, body)
+        }
+        // A nested `For Global Variable` is provably finite only with a
+        // non-zero literal step whose subtree does not write its own loop
+        // variable (the Workshop engine re-checks the control variable after
+        // each `+= Step`; a zero or dynamic step may not terminate).
+        Action::ForGlobalVariable {
+            variable,
+            step,
+            body,
+            ..
+        } => {
+            let finite = step_direction(program, &ModifyOp::Add, *step).is_some()
+                && !subtree_writes(program, id, &Variable::Global(*variable));
+            !finite || subtree_has_unprovable_loop(program, body)
+        }
+        Action::If {
+            branches,
+            else_body,
+            ..
+        } => {
+            branches
+                .iter()
+                .any(|branch| subtree_has_unprovable_loop(program, &branch.body))
+                || else_body
+                    .as_ref()
+                    .is_some_and(|body| subtree_has_unprovable_loop(program, body))
+        }
+        _ => false,
+    }
+}
+
+/// Whether any action in a slice has an unprovable nested loop in its
+/// subtree.
+fn subtree_has_unprovable_loop(program: &wir::Program, actions: &[ActionId]) -> bool {
+    actions
+        .iter()
+        .any(|id| action_has_unprovable_loop(program, *id))
+}
+
+/// Whether an action can write the compared variable.
+///
+/// Conservative and tree-walking: `Set`/`Modify` actions targeting the
+/// variable (for player variables, the player expression must be structurally
+/// identical to the one in the condition, so the write provably touches the
+/// same slot), `CallSubroutine` (the callee body may write any variable),
+/// `If`/`While`/`ForGlobalVariable` subtrees containing any of the above, and
+/// a generic `Call` whose name matches a user-defined subroutine (some
+/// frontends lower `def`-defined subroutine calls as generic calls rather
+/// than `CallSubroutine`) all count as writers. `Debug`, `Print`, and generic
+/// `Action::Call`s that are not user subroutines are documented NON-writers:
+/// within the supported OPY/Workshop surface (docs/opy/support-matrix.md)
+/// user-variable writes lower only to `Set`/`Modify` actions (`.append`
+/// lowers to a `Modify` on the variable, so it is caught by the modify
+/// branch), and a generic `Call` that is not a user subroutine is a built-in
+/// workshop function.
+fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -> bool {
+    match action {
+        Action::SetGlobalVariable { variable: target, .. } => {
+            matches!(variable, Variable::Global(v) if *target == *v)
+        }
+        Action::SetPlayerVariable {
+            player,
+            variable: target,
+            ..
+        } => matches!(variable, Variable::Player(condition_player, v)
+            if *target == *v && structurally_equal(program, *condition_player, *player)),
+        Action::ModifyGlobalVariable { variable: target, .. } => {
+            matches!(variable, Variable::Global(v) if *target == *v)
+        }
+        Action::ModifyPlayerVariable {
+            player,
+            variable: target,
+            ..
+        } => matches!(variable, Variable::Player(condition_player, v)
+            if *target == *v && structurally_equal(program, *condition_player, *player)),
+        Action::CallSubroutine { .. } => true,
+        Action::Call { name, .. } => program
+            .subroutines
+            .iter()
+            .any(|subroutine| subroutine.name == *name),
+        Action::If {
+            branches,
+            else_body,
+            ..
+        } => {
+            branches.iter().any(|branch| {
+                branch
+                    .body
+                    .iter()
+                    .any(|id| subtree_writes(program, *id, variable))
+            }) || else_body.as_ref().is_some_and(|body| {
+                body.iter().any(|id| subtree_writes(program, *id, variable))
+            })
+        }
+        Action::While { body, .. } | Action::ForGlobalVariable { body, .. } => {
+            body.iter().any(|id| subtree_writes(program, *id, variable))
+        }
+        Action::Debug { .. } | Action::Print { .. } => false,
+    }
+}
+
+/// Whether the subtree rooted at one action id can write the compared
+/// variable (used for `If`/`While`/`ForGlobalVariable` sub-trees).
+fn subtree_writes(program: &wir::Program, action_id: ActionId, variable: &Variable) -> bool {
+    program
+        .actions
+        .get(action_id)
+        .is_some_and(|action| action_writes(program, action, variable))
+}
+
+/// If `condition` is a literal-bound comparison of exactly one variable
+/// against a numeric literal, return the compared variable and the direction
+/// it must move to reach the literal (`+1` = increasing toward the bound,
+/// `-1` = decreasing). `==`/`!=` and other conditions are not recognized.
+fn counter_comparison(program: &wir::Program, condition: ValueId) -> Option<(Variable, i32)> {
+    let Value::Call { name, args } = &program.values.get(condition)?.value else {
+        return None;
+    };
+    if args.len() != 2 {
+        return None;
+    }
+    let (left, right) = (
+        program.values.get(args[0])?,
+        program.values.get(args[1])?,
+    );
+    let variable_left = variable_of(&left.value);
+    let literal_left = matches!(&left.value, Value::Number { .. });
+    let variable_right = variable_of(&right.value);
+    let literal_right = matches!(&right.value, Value::Number { .. });
+    // Exactly one argument is the variable; the other is the literal.
+    let (variable, variable_is_left) = match (variable_left, literal_right) {
+        (Some(variable), true) => (variable, true),
+        (None, false) => match (literal_left, variable_right) {
+            (true, Some(variable)) => (variable, false),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let toward = match (name.as_str(), variable_is_left) {
+        // V must INCREASE toward K: V < K, V <= K, K > V, K >= V.
+        ("<", true) | ("<=", true) | (">", false) | (">=", false) => 1,
+        // V must DECREASE toward K: V > K, V >= K, K < V, K <= V.
+        (">", true) | (">=", true) | ("<", false) | ("<=", false) => -1,
+        _ => return None,
+    };
+    Some((variable, toward))
+}
+
+/// A variable reference compared in a loop condition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Variable {
+    Global(GlobalVarId),
+    Player(ValueId, PlayerVarId),
+}
+
+/// The variable read by a value, when it is a variable reference.
+fn variable_of(value: &Value) -> Option<Variable> {
+    match value {
+        Value::GlobalVariable(variable) => Some(Variable::Global(*variable)),
+        Value::PlayerVariable { player, variable } => Some(Variable::Player(*player, *variable)),
+        _ => None,
+    }
+}
+
+/// The effective iteration direction of a direct-child `Modify` action on
+/// `variable` (`+1` = the variable increases each iteration, `-1` =
+/// decreases), when the modify has a non-zero numeric literal step. For a
+/// player variable the player expression must be structurally identical to
+/// the one in the condition, so the modify provably touches the same slot.
+fn modify_direction(program: &wir::Program, action: &Action, variable: &Variable) -> Option<i32> {
+    match (action, variable) {
+        (
+            Action::ModifyGlobalVariable {
+                variable: target,
+                op,
+                value,
+                ..
+            },
+            Variable::Global(wanted),
+        ) => {
+            if target != wanted {
+                return None;
+            }
+            step_direction(program, op, *value)
+        }
+        (
+            Action::ModifyPlayerVariable {
+                player,
+                variable: target,
+                op,
+                value,
+                ..
+            },
+            Variable::Player(condition_player, wanted),
+        ) => {
+            if target != wanted {
+                return None;
+            }
+            if !structurally_equal(program, *condition_player, *player) {
+                return None;
+            }
+            step_direction(program, op, *value)
+        }
+        _ => None,
+    }
+}
+
+/// The direction of a `Modify` op with a non-zero literal numeric step:
+/// `Add` steps by `sign(step)`, `Subtract` by `-sign(step)`.
+fn step_direction(program: &wir::Program, op: &ModifyOp, value: ValueId) -> Option<i32> {
+    let Value::Number { value: step, .. } = &program.values.get(value)?.value else {
+        return None;
+    };
+    if *step == 0.0 {
+        return None;
+    }
+    let sign = if *step > 0.0 { 1 } else { -1 };
+    match op {
+        ModifyOp::Add => Some(sign),
+        ModifyOp::Subtract => Some(-sign),
+        _ => None,
     }
 }
 
