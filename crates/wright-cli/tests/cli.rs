@@ -606,3 +606,65 @@ fn opy_corpus_frontend_errors_are_structured() {
     assert_eq!(envelope["diagnostics"][0]["stage"], "frontend");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn opy_chase_reevaluation_enums_compile_with_reference_semantics() {
+    // #105: ChaseTimeReeval.NONE (and the other reference-validated members
+    // of the ChaseTimeReeval/ChaseRateReeval domains) lower through the enum
+    // catalog data path and emit with the same Workshop value as the pinned
+    // oracle — `None`/`Destination and Duration`/`Destination and Rate`,
+    // distinct from the `Null` literal.
+    let fixture = workspace_root().join("compatibility/fixtures/synthetic/chase-enums");
+    let source = std::fs::read_to_string(fixture.join("source.opy")).unwrap();
+    let path = temp_file("chase-enums.opy", &source);
+    let output = run(&["compile", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], true);
+    let oracle = std::fs::read_to_string(fixture.join("oracle.json")).unwrap();
+    let oracle_value: serde_json::Value = serde_json::from_str(&oracle).unwrap();
+    let expected = oracle_value["compile"]["workshop"].as_str().unwrap();
+    let emitted = envelope["result"]["output"]["text"].as_str().unwrap();
+    assert_eq!(
+        emitted.trim(),
+        expected.trim(),
+        "native .opy output matches the oracle Workshop text"
+    );
+    assert!(
+        emitted.contains("None"),
+        "the NONE member emits its spelling: {emitted}"
+    );
+    assert!(emitted.contains("Destination and Duration"), "{emitted}");
+    assert!(emitted.contains("Destination and Rate"), "{emitted}");
+    assert!(
+        emitted.contains("Set Global Variable(time_reeval, None)"),
+        "the enum member emits as a bare spelling, not the Null literal: {emitted}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn opy_unknown_enum_member_is_a_deterministic_frontend_diagnostic() {
+    // #105: enum members outside the evidenced catalog surface keep failing
+    // with a deterministic, source-located structured diagnostic.
+    let path = temp_file(
+        "unknown-member.opy",
+        "globalvar g\nrule \"r\":\n    @Event global\n    g = ChaseTimeReeval.NOPE\n",
+    );
+    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = parse_json(&output.stdout);
+    let diagnostic = &envelope["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "unknown-enum-member");
+    assert_eq!(diagnostic["stage"], "frontend");
+    assert!(
+        diagnostic["span"].is_object(),
+        "the diagnostic is source-located"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

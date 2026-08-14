@@ -207,6 +207,22 @@ fn unsupported_construct_is_distinct_from_malformed() {
 }
 
 #[test]
+fn bare_chase_reevaluation_none_is_ambiguous_across_domains() {
+    // #105: both reference reevaluation domains spell their NONE member
+    // "None". The flat Workshop parser cannot disambiguate the bare spelling,
+    // so it fails with a structured Unsupported diagnostic (documented
+    // round-trip boundary in docs/workshop/support-matrix.md; the emitted
+    // semantic value is reference-equivalent).
+    let text = "variables { global: 0: g }\nrule (\"x\") { event { Ongoing - Global; } actions { Set Global Variable(g, None); } }";
+    let error = parser::parse(text, &catalog(), &Locale::new("en-US")).unwrap_err();
+    assert!(
+        matches!(error, wright_workshop::WorkshopError::Unsupported { .. }),
+        "the shared None member spelling must be a structured ambiguity: {error}"
+    );
+    assert!(error.to_string().contains("ambiguous enum member 'None'"));
+}
+
+#[test]
 fn explicit_locale_is_honored() {
     // en-US parsing is deterministic; the parser never guesses a locale.
     let text = corpus_workshop_text("synthetic/basic-rule");

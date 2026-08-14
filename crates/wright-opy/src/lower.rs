@@ -27,6 +27,12 @@ const PROTOCOL_VERSION: &str = "1.1.0";
 ///
 /// `Wait.IGNORE_CONDITION` is exercised by the corpus (implicit `wait`
 /// default); the remaining entries appear in the corpus `.opy` sources.
+/// `ChaseTimeReeval` and `ChaseRateReeval` are the pinned OverPy 9.7.10
+/// reevaluation domains (#105): both members of each domain are reference-
+/// validated against the oracle enum blocks and emission, and
+/// `ChaseRateReeval.NONE` additionally appears in the real-world
+/// overpy-meipocalypse corpus (as `ChaseReeval.NONE` in `rate=` chase
+/// calls, which the reference resolves to the `ChaseRateReeval` domain).
 /// Additional OverPy enum spellings outside this table fail explicitly.
 const KNOWN_ENUMS: &[(&str, &[&str])] = &[
     ("Beam", &["GOOD", "GRAPPLE"]),
@@ -69,6 +75,8 @@ const KNOWN_ENUMS: &[(&str, &[&str])] = &[
         "EffectReeval",
         &["VISIBILITY", "COLOR", "VISIBILITY_AND_COLOR"],
     ),
+    ("ChaseTimeReeval", &["NONE", "DESTINATION_AND_DURATION"]),
+    ("ChaseRateReeval", &["NONE", "DESTINATION_AND_RATE"]),
     ("Wait", &["IGNORE_CONDITION"]),
 ];
 
@@ -725,5 +733,89 @@ impl From<Span> for HirSpan {
 impl From<&Span> for HirSpan {
     fn from(span: &Span) -> HirSpan {
         (*span).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Lower one rule action and return the assignment's value expression.
+    fn lowered_value(source: &str) -> HirExpr {
+        let program = crate::compile(source, "test.opy", std::path::Path::new(""))
+            .unwrap_or_else(|error| panic!("compile failed: {error}"));
+        let RuleEntry::Rule(rule) = &program.rules[0] else {
+            panic!("expected a rule");
+        };
+        let HirStmt::Assign { value, .. } = &rule.actions[0] else {
+            panic!("expected an assign statement");
+        };
+        (**value).clone()
+    }
+
+    #[test]
+    fn chase_time_reeval_none_lowers_to_the_catalog_enum() {
+        let value = lowered_value(
+            "globalvar g\nrule \"r\":\n    @Event global\n    g = ChaseTimeReeval.NONE\n",
+        );
+        assert_enum(&value, "ChaseTimeReeval", "NONE");
+    }
+
+    #[test]
+    fn chase_time_reeval_destination_and_duration_lowers_to_the_catalog_enum() {
+        let value = lowered_value(
+            "globalvar g\nrule \"r\":\n    @Event global\n    g = ChaseTimeReeval.DESTINATION_AND_DURATION\n",
+        );
+        assert_enum(&value, "ChaseTimeReeval", "DESTINATION_AND_DURATION");
+    }
+
+    #[test]
+    fn chase_rate_reeval_members_lower_to_the_catalog_enum() {
+        for member in ["NONE", "DESTINATION_AND_RATE"] {
+            let source = format!(
+                "globalvar g\nrule \"r\":\n    @Event global\n    g = ChaseRateReeval.{member}\n"
+            );
+            assert_enum(&lowered_value(&source), "ChaseRateReeval", member);
+        }
+    }
+
+    /// Assert the expression is the catalog enum `(domain, member)` node,
+    /// ignoring its source span (the span is frontend-internal provenance).
+    fn assert_enum(value: &HirExpr, domain: &str, member: &str) {
+        match value {
+            HirExpr::Enum {
+                value_type, value, ..
+            } => {
+                assert_eq!(value_type, domain);
+                assert_eq!(value, member);
+            }
+            other => panic!("expected enum {domain}.{member}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_chase_time_reeval_member_is_a_deterministic_source_located_error() {
+        let error = crate::compile(
+            "globalvar g\nrule \"r\":\n    @Event global\n    g = ChaseTimeReeval.NOPE\n",
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect_err("an unknown member must fail");
+        assert_eq!(error.code, "unknown-enum-member");
+        let span = error.span.expect("the error is source-located");
+        assert_eq!(span.start.line, 4);
+    }
+
+    #[test]
+    fn unknown_enum_receiver_is_an_unsupported_member_error() {
+        let error = crate::compile(
+            "globalvar g\nrule \"r\":\n    @Event global\n    g = NotARealEnum.MEMBER\n",
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect_err("an unknown enum type must fail");
+        assert_eq!(error.code, "unsupported-member");
+        let span = error.span.expect("the error is source-located");
+        assert_eq!(span.start.line, 4);
     }
 }

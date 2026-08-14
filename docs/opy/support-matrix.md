@@ -78,7 +78,16 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   (`points.append`, `candlePos[i2]`) → `ReceiverCall`/`Index`.
 - Builtin Workshop enums from the corpus: `Beam.{GOOD,GRAPPLE}`,
   `Color.{YELLOW,WHITE,RED,…}`, `DynamicEffect.{BAD_EXPLOSION,…}`,
-  `EffectReeval.VISIBILITY`, `Wait.IGNORE_CONDITION`. Enum members outside the
+  `EffectReeval.VISIBILITY`, `Wait.IGNORE_CONDITION`,
+  `ChaseTimeReeval.{NONE,DESTINATION_AND_DURATION}` (reference-validated
+  against the pinned OverPy 9.7.10 enum block and emission, #105),
+  `ChaseRateReeval.{NONE,DESTINATION_AND_RATE}` (`NONE` additionally
+  corpus-evidenced by the real-world overpy-meipocalypse `ChaseReeval.NONE`
+  rate-chase calls, which the reference resolves to the `ChaseRateReeval`
+  domain). The `ChaseReeval` source alias is a reference function-level
+  construct resolved by the `chase` call context (`rate=` vs `duration=`),
+  so it stays out of the enum table until the `chase` keyword-argument call
+  surface is supported. Enum members outside the
   table fail explicitly (`unknown-enum-member`).
 - `wait()` / `wait(duration)` default-argument filling: the reference appends
   `Wait.IGNORE_CONDITION` (and `0.016` for the no-argument form); native
