@@ -293,3 +293,73 @@ Final gate standing: pixelart N-level row (`normalizedEqual: true`,
 12-program matrix unchanged, all suites green. The only open class-3 item
 is the augmented-playervar spelling (emission-only, low severity,
 corpus-unexercised).
+
+---
+
+## #87 AC-18 closure record (augmented playervar assignment) at `da38f57` — dated 2026-08-14
+
+Commit `da38f5747027cae8883f69a393f93e135999cc4a` ("fix(ir): lower
+playervar augmented assignments to Modify"); CI run 31773787648 — all six
+jobs success, no skips, headSha `da38f57`. Independently verified:
+
+### AC-18 — repro parity: **PASS**
+
+- `eventPlayer.p += 2` / `-= 2` / `*= 2` / `/= 2` / `%= 2` (oracle re-runs
+  for `+=`, `-=`, `%=` and native for all five) → each emits
+  `Modify Player Variable(Event Player, p, Add|Subtract|Multiply|Divide|Modulo, 2)`,
+  **byte-equal** native vs pinned oracle (full artifact diff clean).
+- `//= 2`: rejected by **both** frontends — native `parse-error` "expected
+  an expression but found '='"; oracle `Error: Expected '(' after '/=', but
+  got '2' (is '/=' a valid keyword/variable?)`. It stays out of the Modify
+  set, matching the commit message.
+- **Support-matrix `//=` listing is a lexing-level overstatement (doc
+  accuracy note, not a finding)**: the matrix's Lexing operator line lists
+  `//=`, but the native lexer never produces a `//=` token — the `/` arm
+  returns `DoubleSlash` immediately (`crates/wright-opy/src/lexer.rs`), so
+  `//=` lexes as `DoubleSlash` + `Assign`; the `DoubleSlashAssign` kind
+  exists in `cst.rs` but is unreachable. Observed behavior is consistent
+  rejection by both engines; the construct is unsupported either way.
+- Global augmented form unchanged: `g += 2` → `Modify Global Variable(g,
+  Add, 2)`, byte-equal.
+
+### The lowering change: **as claimed**
+
+`git show da38f57` touches only `crates/wright-ir/src/lower.rs` (+77: the
+playervar Modify detection now compares the player expression
+**structurally** — `player_exprs_equal` for `EventPlayer≡EventPlayer` and
+`GlobalVar≡GlobalVar-by-id` — instead of node ids, which never matched
+because the frontend clones the target node for the augmented-assignment
+value), plus the driver regression test and the closure-scan family case.
+HIR untouched (no wright-core changes; PARITY_CASES 8 differential green);
+the emitter/parser reuse the existing `ModifyPlayerVariable` rendering and
+`modify_op` spellings.
+
+### Closure scan: **green, no family regressed**
+
+`cargo test -p wright-workshop --test closure` — 1 test, 19 asserted
+families (the playervar-augmented case added; no other family changed).
+Driver integration suite 23/23 (incl. the new
+`opy_playervar_augmented_assignments_match_the_oracle_artifacts` test).
+
+### No regression at `da38f57`
+
+v1-gates 6/6 (`FIXTURES` unchanged); 7 settings sections equal
+(256/350/511/297/136/144/476 — via the driver tests); pixelart full-program
+`normalizedEqual: True` (19,925/19,925); `PARITY_CASES` 8 with the
+differential green; 12-program first-failure matrix unchanged; oracle
+21/21; adapter 23/23; all cargo suites green (0 failures); clippy 0
+warnings; `cargo fmt --check` clean.
+
+### Final no-new-findings statement
+
+The closure scan is the PM-defined boundary for the #87 emission work. Per
+the enumerated closure scan (now 18 families): **no in-surface class-3
+finding remains open.** The AC-18 item (the last scan family) is fixed and
+byte-equal; every previously recorded residual (format placeholder `{0}`
+canonicalization, playervar-read spelling, trailing-if `End;`, long-string
+splitting, value-string re-escaping, empty-rule drop, Custom String
+wrapping, numeric initializers, constant format folding) is closed and
+re-verified. The only outstanding note is the support-matrix `//=` lexing
+listing accuracy (a doc claim; both engines reject the construct — not a
+class-3 finding). With the CI evidence and all suites green, the #87
+acceptance record is complete.
