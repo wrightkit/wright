@@ -151,3 +151,22 @@ jobs:
         with:
           name: wright-differential-report
           path: target/wright-differential-report.json
+
+  dist-validation:
+    name: Distribution validation (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate package-manager metadata and install script
+        run: python3 scripts/verify-dist.py
+
+      - name: Run installer functional tests
+        run: scripts/test-install.sh

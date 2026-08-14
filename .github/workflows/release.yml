@@ -197,3 +197,64 @@ jobs:
             release/wright-*.zip
             release/wright-*.zip.sha256
             release/SHA256SUMS
+
+  package-manifests:
+    name: Generate package-manager manifests
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: wright-*
+          path: artifacts
+
+      - name: Generate manifests from the published checksums
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          for triple in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc; do
+            ext="tar.gz"
+            [[ "$triple" == "x86_64-pc-windows-msvc" ]] && ext="zip"
+            sha256_file="artifacts/wright-$triple/wright-$VERSION-$triple.$ext.sha256"
+            test -f "$sha256_file" || { echo "missing $sha256_file"; exit 1; }
+            hash="$(awk 'NR == 1 { print $1 }' "$sha256_file")"
+            [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid hash in $sha256_file"; exit 1; }
+            case "$triple" in
+              x86_64-unknown-linux-gnu) linux_x64_hash="$hash" ;;
+              aarch64-apple-darwin)     darwin_arm64_hash="$hash" ;;
+              x86_64-apple-darwin)      darwin_x64_hash="$hash" ;;
+              x86_64-pc-windows-msvc)   windows_x64_hash="$hash" ;;
+            esac
+            echo "$triple: $hash"
+          done
+          python3 scripts/update-dist-manifests.py \
+            --version "$VERSION" \
+            --linux-x64-hash "$linux_x64_hash" \
+            --darwin-arm64-hash "$darwin_arm64_hash" \
+            --darwin-x64-hash "$darwin_x64_hash" \
+            --windows-x64-hash "$windows_x64_hash" \
+            --out-dir "$GITHUB_WORKSPACE/manifests"
+          mkdir -p "$GITHUB_WORKSPACE/attach"
+          cp "$GITHUB_WORKSPACE/manifests/dist/homebrew/wright.rb" \
+            "$GITHUB_WORKSPACE/attach/wright-$VERSION.homebrew.rb"
+          cp "$GITHUB_WORKSPACE/manifests/dist/scoop/wright.json" \
+            "$GITHUB_WORKSPACE/attach/wright-$VERSION.scoop.json"
+          (cd "$GITHUB_WORKSPACE/manifests/dist/winget" && tar -a -cf "$GITHUB_WORKSPACE/attach/wright-$VERSION.winget.zip" manifests)
+          ls -l "$GITHUB_WORKSPACE/attach"
+
+      - name: Attach manifests to the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            attach/wright-*.homebrew.rb
+            attach/wright-*.scoop.json
+            attach/wright-*.winget.zip

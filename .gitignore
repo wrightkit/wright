@@ -6,7 +6,8 @@
 ._*
 
 # Custom folder icons
-Icon
+Icon
+
 
 # Volume root files
 .DocumentRevisions-V100
@@ -31,6 +32,9 @@ Cargo.lock
 # Compatibility oracle dependencies
 compatibility/oracle/node_modules/
 compatibility/**/__pycache__/
+
+# Python bytecode
+**/__pycache__/
 
 # Adapter dependencies
 adapter/node_modules/

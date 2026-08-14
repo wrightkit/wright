@@ -97,10 +97,72 @@ Compiler compatibility is rigorously measured under the S/D/N/E framework:
 
 ## Installation
 
-### Prebuilt Binaries
+Wright ships standalone `wright` and `wright-lsp` binaries for Linux x86_64,
+macOS (Apple Silicon and Intel), and Windows x86_64. All installation paths
+below consume the same canonical [GitHub Release](https://github.com/wrightkit/wright/releases)
+archives and verify the published checksums; none of them build Wright from
+source.
 
-Download precompiled release archives for your platform from
-[GitHub Releases](https://github.com/wrightkit/wright/releases):
+### macOS
+
+Homebrew is the recommended path (install the WrightKit tap once, then
+`wright` as a normal formula):
+
+```sh
+brew tap wrightkit/tap
+brew install wrightkit/tap/wright
+```
+
+Alternatively, use the Unix installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wrightkit/wright/main/install.sh | bash
+```
+
+### Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wrightkit/wright/main/install.sh | bash
+```
+
+The installer detects your platform, downloads the matching release archive,
+verifies its SHA-256 checksum, and installs `wright` and `wright-lsp` into
+`~/.local/bin` (add that directory to your `PATH` if the installer asks).
+
+### Windows
+
+WinGet is the recommended path (available after the package clears upstream
+review):
+
+```powershell
+winget install WrightKit.Wright
+```
+
+Scoop is an alternative package-manager path:
+
+```powershell
+scoop bucket add wrightkit https://github.com/wrightkit/scoop-bucket
+scoop install wright
+```
+
+Both WinGet and Scoop consume the same Windows release ZIP.
+
+### CI / agents
+
+Pin an exact version non-interactively for deterministic installs:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wrightkit/wright/main/install.sh | bash -s -- --version 0.1.0
+```
+
+or consume the release archives directly (see below). Installer options:
+`--version <version>` pins an exact version, `--dir <directory>` selects a
+custom installation directory, `--help` lists all options.
+
+### Manual release archives (fallback)
+
+Download precompiled release archives and verify them by hand when you need
+full control:
 
 ```sh
 VERSION=0.1.0
@@ -114,8 +176,10 @@ tar -xzf "wright-$VERSION-$TARGET.tar.gz"
 export PATH="$PWD/wright-$VERSION-$TARGET:$PATH"
 ```
 
-Windows distributions are provided as `.zip` archives. Full packaging details
-are in the [Release Documentation](docs/release.md).
+Windows distributions are provided as `.zip` archives. Full packaging,
+checksum, and package-manager publication details are in the
+[Release Documentation](docs/release.md) and
+[Distribution Documentation](dist/README.md).
 
 ### Building From Source
 

@@ -110,7 +110,7 @@ JSON document asset, and historical artifact across the repository.
 | `docs/cli.md` | Living Durable Contract | `update` | Removed stale M6 milestone framing; updated 5-rule lint configuration and `wright-result/v1` envelope contracts. |
 | `docs/embedding.md` | Living Durable Contract | `update` | Removed stale M9 milestone framing; updated `ToolService` operations and session-aware embedding contracts. |
 | `docs/language-services.md` | Living Durable Contract | `update` | Removed stale M10 milestone framing; updated editor-neutral responsiveness and LSP adapter contracts. |
-| `docs/release.md` | Living Durable Contract | `update` | Removed stale M8 framing; documents release automation, checksum verification, and packaging contracts. |
+| `docs/release.md` | Living Durable Contract | `update` | Removed stale M8 framing; documents release automation, checksum verification, packaging contracts, and supported installation channels. |
 | `docs/v1-matrix.md` | Living Durable Contract | `update` | Reconciled custom-game-settings support; documents release gates, supported surfaces, and intentional differences. |
 | `docs/agent-team.md` | Living Durable Contract | `update` | Updated links; folded in pilot architectural findings (single-level subagents, non-authoritative router) and spec lifecycle. |
 | `docs/opy/support-matrix.md` | Living Durable Contract | `update` | Removed stale M7 framing; updated native `.opy` parser, settings, and preprocessing supported surfaces. |
@@ -130,6 +130,7 @@ JSON document asset, and historical artifact across the repository.
 | `docs/adr/0008-tooling-first-semantic-platform.md` | Architecture Decision Record | `update` | Updated links to `docs/architecture.md` and `docs/compatibility.md`; establishes tooling-first platform baseline. |
 | `adapter/README.md` | Subsystem Contract | `update` | Updated link to `docs/licensing.md`; documents external OverPy adapter boundary and JSON invocation. |
 | `compatibility/README.md` | Subsystem Contract | `update` | Updated link to `docs/compatibility.md`; documents oracle setup, fixture layout, and differential diff runner. |
+| `dist/README.md` | Subsystem Contract | `keep` | Documents package-manager distribution metadata (install.sh, Homebrew, WinGet, Scoop), generation, publication process, and drift detection. |
 | `crates/wright-analyzer/tests/fixtures/README.md` | Subsystem Contract | `keep` | Documents test fixture provenance and regeneration process for analyzer test fixtures. |
 
 ### 2. JSON Schema, Catalogs & Configuration Assets
