@@ -1,6 +1,6 @@
 # ADR-0001: Project scope
 
-- Status: Accepted
+- Status: Superseded by [ADR-0008](0008-tooling-first-semantic-platform.md)
 - Date: 2026-08-12
 - Related: [Issue #1](https://github.com/wrightkit/wright/issues/1)
 
@@ -41,7 +41,9 @@ Compatibility claims use the levels in [`COMPATIBILITY.md`](../../COMPATIBILITY.
 and identify the OverPy reference version and corpus. The scope decision alone
 does not claim syntax, diagnostic, normalized-output, or semantic parity.
 
-## Open questions
+## Historical note
 
-The supported OverPy versions, native frontend timing, and first Workshop
-target remain future decisions.
+The v1 non-goal "a native Rust `.opy` parser" has been achieved: `wright-opy`
+was shipped under the M7 milestone. The remaining non-goals (no new language,
+no OverPy-internal parity) are carried forward in ADR-0008. The OverPy
+openquestions (versions, Workshop target) were resolved in later ADRs.

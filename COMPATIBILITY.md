@@ -1,7 +1,7 @@
 # Wright Compatibility Contract
 
-Status: accepted baseline for v0.1
-Scope: measurable compatibility claims for the OverPy-compatible core
+Status: accepted baseline — semantic compatibility priority (ADR-0008)
+Scope: measurable compatibility claims for the Wright tooling and compiler core
 
 Compatibility is a claim about a named input corpus, reference version,
 configuration, comparison method, and evidence set. A successful build, an HTTP
@@ -10,11 +10,10 @@ compatibility.
 
 ## Reference boundary
 
-Until a later native frontend milestone, existing OverPy is the `.opy`
-frontend/parser and the reference oracle for supported behavior. Wright may
-invoke or compare with that oracle through isolated compatibility tooling. The
-Rust core remains independently implemented and must not expose OverPy's
-internal representation as its API.
+Wright owns its semantic frontends (`wright-opy`, `wright-workshop`). OverPy
+and OSTW compilers and language services are compatibility oracles, behavior
+references, and test inputs for supported surface claims. They are not
+production runtime dependencies for supported standalone workflows.
 
 The reference for every compatibility result must record:
 
@@ -80,6 +79,26 @@ Minimum evidence includes repeatable scenario results, the environment and
 runtime identity, and an explanation for any intentionally unobservable or
 implementation-defined behavior. N-level output comparison alone is not
 E-level evidence.
+
+## Compatibility priority
+
+The four-level framework (S/D/N/E) measures different contracts. Their
+**priority order** is:
+
+> **E (observable semantics) > D (diagnostics) > S (syntax) > N (text output)**
+
+Byte-identical output, identical temporary-variable allocation, identical
+optimizer output, or identical formatting are not goals unless a difference
+affects:
+
+- observable Workshop or game behavior;
+- valid Workshop syntax or native Workshop round-trip behavior;
+- source or tooling contracts; or
+- an explicitly documented compatibility surface.
+
+N-level evidence remains a useful regression-detection tool, but
+presentation-only N-level differences must not automatically create
+implementation work. See [ADR-0008](docs/adr/0008-tooling-first-semantic-platform.md).
 
 ## Release gates
 
@@ -148,3 +167,4 @@ Record a decision in `docs/adr/` when implementation evidence is available.
 * [ADR-0002: Compatibility strategy](docs/adr/0002-compatibility-strategy.md)
 * [ADR-0003: IR boundary](docs/adr/0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](docs/adr/0004-overpy-licensing-boundary.md)
+* [ADR-0008: Tooling-first semantic platform rebaseline](docs/adr/0008-tooling-first-semantic-platform.md)

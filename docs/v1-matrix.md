@@ -1,6 +1,7 @@
 # Wright v1 Compatibility Matrix and Release Gates
 
-Status: v1 release contract (milestone M8, issue #49)
+Status: v1 release contract (milestone M8, issue #49); semantic compatibility
+priority clarified post-M11 by [ADR-0008](adr/0008-tooling-first-semantic-platform.md)
 Scope: the frozen input surfaces, target/runtime claims, S/D/N/E gate
 thresholds, unsupported constructs, and intentional differences of the v1
 release
@@ -30,6 +31,13 @@ The v1 release does **not** claim:
 * compatibility outside the declared corpus surface;
 * historical OverPy feature breadth beyond the frozen matrix;
 * client-side runtime equivalence beyond the recorded scenario evidence.
+
+> **Post-M11 priority note (ADR-0008):** N-level gate status reflects
+> normalized-output comparison evidence. Presentation-only N-level differences
+> (e.g. the documented `debug()`/`print()` formatting difference below) are not
+> product bugs and must not automatically create implementation work.
+> Observable Workshop behavior, valid syntax, and declared tooling contracts
+> outrank text-output identity.
 
 ## Intentional differences (documented, not silent)
 

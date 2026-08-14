@@ -1,9 +1,9 @@
 # Wright
 
-Wright is a Rust compiler and tooling workspace for the Overwatch Workshop /
-OverPy ecosystem. It provides a native `.opy` frontend, a localized Workshop
-parser and emitter, semantic analysis, editor language services, and reusable
-library APIs.
+Wright is a **tooling-first semantic platform** for the Overwatch Workshop and
+OverPy ecosystem. It provides native `.opy` and Workshop semantic frontends,
+typed intermediate representations, lint and static analysis, editor language
+services, compilation and inspection, and reusable library and agent APIs.
 
 ## Current capabilities
 

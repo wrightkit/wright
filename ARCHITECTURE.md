@@ -1,55 +1,103 @@
 # Wright Architecture
 
-Status: accepted baseline for v0.1
-Scope: the Wright compiler core and its compatibility boundary
+Status: accepted baseline — tooling-first semantic platform (ADR-0008)
+Scope: the Wright tooling and compiler core, its semantic frontends, and
+compatibility boundaries
 
 This document defines the responsibilities and observable contracts that later
 milestones may rely on. It does not promise that every component named here is
-implemented in v0.1.
+implemented at any given milestone.
+
+## Product surface
+
+Wright is a **tooling-first semantic platform** for the Overwatch Workshop and
+OverPy ecosystem. Its primary product surface is:
+
+- `check` and deterministic diagnostics;
+- lint and static analysis;
+- source inspection and query;
+- safe source edits and refactoring;
+- agent tooling and embedding APIs;
+- Workshop cost and stability reasoning.
+
+Compilation and language-surface conversion are required infrastructure and
+first-class user capabilities. Compiler parity work must not consume the
+roadmap by default when it does not block real compilation, analysis, source
+tooling, or a declared semantic contract.
 
 ## Project boundary
 
-Wright v1 is an OverPy-compatible Rust compiler core. Existing OverPy remains
-the `.opy` frontend/parser and compatibility oracle until a later native
-frontend milestone. Wright owns the representations and transformations after
-the frontend boundary; it does not reproduce OverPy internals for the sake of
-implementation parity.
+Wright owns independent semantic frontends where required for standalone
+compilation, source-aware analysis, agent source editing, CI, WASM/embedding,
+and long-term ecosystem independence.
 
-The intended flow is:
+Current ownership:
+
+- **Vanilla Workshop** — Wright-owned canonical model, parser, emitter, and
+  target semantics (`wright-workshop`);
+- **OPY** — Wright-owned compatible semantic frontend (`wright-opy`);
+- **OSTW** — future first-class compatible semantic frontend, introduced only
+  through an evidence-backed milestone (see [ADR-0008](docs/adr/0008-tooling-first-semantic-platform.md)).
+
+Upstream compilers and language services (OverPy, OSTW) remain compatibility
+oracles, behavior references, and test inputs. They are **not** production
+runtime dependencies for supported standalone workflows.
+
+Workshop is the canonical interoperability and target boundary. The required
+long-term conversion directions are:
 
 ```text
-`.opy` source
-    -> OverPy frontend/parser (external compatibility component)
-    -> Wright adapter/bridge
-    -> Wright HIR
-    -> Wright Workshop IR
-    -> Wright backend
-    -> Workshop-oriented output
+OPY   → Workshop
+OSTW  → Workshop
+Workshop → OPY
+Workshop → OSTW
+Workshop → Workshop
+```
+
+Direct OPY ↔ OSTW source conversion is optional and must not drive the core
+architecture prematurely.
+
+The intended primary flow is:
+
+```text
+`.opy` or Workshop source
+    → wright-opy / wright-workshop (owned semantic frontend)
+    → Wright HIR
+    → Wright Workshop IR (WIR)
+    → Wright backend
+    → Workshop-oriented output
 ```
 
 Compatibility evaluation is a side path, not a core dependency:
 
 ```text
 the same input and produced artifact
-    -> compatibility harness
-    -> documented OverPy oracle and/or behavior runner
+    → compatibility harness
+    → documented oracle and/or behavior runner
 ```
 
 The harness may invoke an installed OverPy tool or consume its documented
-outputs. It must not make the Rust core depend on OverPy implementation types.
+outputs. It must not make the Rust core depend on OverPy or OSTW
+implementation types.
 
 ## Component responsibilities
 
-### Frontend
+### Frontends
 
-The v1 frontend is Wright's native Rust `.opy` frontend
-(`wright-opy`, milestone M7): lexer → preprocessing (includes/defines) →
-CST/parser → semantic resolution → Opy HIR. It owns source-language parsing,
-frontend syntax rules, and frontend-specific parse structures, and never
-depends on OverPy or Node at runtime. The supported surface is declared in
-[`docs/opy/support-matrix.md`](docs/opy/support-matrix.md) and verified at the
-HIR boundary by the differential suite. The pinned OverPy adapter remains the
-compatibility oracle and an explicit fallback.
+Wright owns its semantic frontends. A frontend is responsible for
+source-language parsing, preprocessing, syntax rules, and producing typed
+Wright data at the HIR boundary. Frontends never expose external AST types
+through Wright APIs.
+
+**`wright-opy`** — the native Rust OPY frontend: lexer → preprocessing
+(includes/defines) → CST/parser → semantic resolution → Opy HIR. The supported
+surface is declared in [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md)
+and verified at the HIR boundary by the differential suite. The pinned OverPy
+adapter remains the compatibility oracle.
+
+**`wright-workshop`** — the native Workshop frontend and emitter: localized
+catalog, lexer, parser, validation, and emitter. Workshop is the canonical
+target for all frontends.
 
 ### Adapter and bridge
 
@@ -79,37 +127,48 @@ source-text preservation.
 
 ### Workshop IR
 
-Workshop IR is Wright's target-oriented representation. It contains the
+Workshop IR (WIR) is Wright's target-oriented representation. It contains the
 validated operations, values, control-flow constructs, and metadata required by
-Workshop backends. Lowering from HIR to Workshop IR is explicit so that target
+Workshop backends. Lowering from HIR to WIR is explicit so that target
 constraints and unsupported semantics are observable at a named boundary.
 
-Workshop IR must be deterministic for the same validated HIR and compiler
+WIR must be deterministic for the same validated HIR and compiler
 configuration. It may carry source provenance for diagnostics, but it must not
 become a catch-all container for frontend implementation details.
 
 ### Backend
 
-A backend consumes Workshop IR and produces a documented Workshop-oriented
-artifact or a structured diagnostic. It owns target serialization, formatting,
-and target-specific validation. It does not reparse `.opy` source or consult
-OverPy internals as part of normal compilation.
+A backend consumes WIR and produces a documented Workshop-oriented artifact or
+a structured diagnostic. It owns target serialization, formatting, and
+target-specific validation. It does not reparse source or consult upstream
+compiler internals as part of normal compilation.
 
-The initial bootstrap does not include a parser, lowering implementation, or
-backend. Adding one requires a focused contract and tests at the corresponding
-boundary.
-
-### Compiler driver and CLI (M6)
+### Compiler driver and CLI
 
 The compiler/session driver (`wright-driver`) is the single orchestration path
-shared by the CLI, library consumers, and later tool/LSP adapters: input
-discovery → frontend selection → validation → lowering → analysis → emission.
-Frontends are selected behind one contract (the temporary `.opy` bridge, the
-native Workshop frontend, or Opy HIR v1 protocol JSON), so the M7 native
-`.opy` frontend replaces the bridge without changing callers. The `wright`
+shared by the CLI, library consumers, and tool/LSP adapters: input discovery →
+frontend selection → validation → lowering → analysis → emission. The `wright`
 CLI (`wright-cli`) is a thin argv/presentation layer; human text and
-machine-readable JSON (`wright-result/v1`) are two renderings of the same
-typed result envelope. The normative contract is `docs/cli.md`.
+machine-readable JSON (`wright-result/v1`) are two renderings of the same typed
+result envelope. The normative contract is [`docs/cli.md`](docs/cli.md).
+
+### Semantic analysis and tooling
+
+`wright-analyzer` provides symbols, references, control-flow graphs, and
+semantic findings. The tooling-first product surface builds on this: lint rules,
+stability findings, inspection queries, and refactoring source edits are all
+consumers of the semantic layer. Tool and agent APIs are exposed through
+`wright-driver`/`wright-serve` rather than through separate services.
+
+Source-oriented **semantic edits against the original source** are the default
+mutation model for agent and refactoring tooling. Full AST/IR regeneration with
+comment and formatting preservation is not the default.
+
+### Language services and LSP
+
+`wright-language` provides editor-neutral language services; `wright-lsp` maps
+them to the LSP transport. Language services are consumers of the semantic
+layer and do not depend on backend or compatibility tooling.
 
 ### Compatibility harness and oracle
 
@@ -127,7 +186,7 @@ engineering and licensing boundary is defined in
 Dependencies point toward owned, stable contracts:
 
 ```text
-frontend-specific adapter -> HIR -> Workshop IR -> backend
+frontend-specific adapter → HIR → Workshop IR → backend
                                       ^
                           compatibility harness (evaluation only)
 ```
@@ -136,9 +195,9 @@ More precisely:
 
 * frontend adapters may depend on the HIR and bridge contracts;
 * HIR must not depend on a frontend or backend;
-* Workshop IR may depend on HIR concepts during lowering, but HIR must not
-  depend on Workshop IR;
-* backends may depend on Workshop IR, not on parser internals;
+* WIR may depend on HIR concepts during lowering, but HIR must not depend on
+  WIR;
+* backends may depend on WIR, not on parser internals;
 * compatibility tooling may depend on public artifacts and documented test
   interfaces, but the core must not require the oracle to compile or run.
 
@@ -148,8 +207,11 @@ contract should be introduced with the milestone that needs it.
 
 ## Cross-cutting contracts
 
-The following are normative for v1 work:
+The following are normative for post-M11 work:
 
+* **Tooling-first priority:** compiler parity work must not consume the roadmap
+  when it does not block real compilation, analysis, source tooling, or a
+  declared semantic contract.
 * **Explicit unsupported behavior:** unsupported syntax or semantics produces a
   structured diagnostic or a documented rejection. Silent fallback is not a
   compatibility strategy.
@@ -158,52 +220,60 @@ The following are normative for v1 work:
 * **Determinism:** equal validated inputs, configuration, and toolchain produce
   stable observable IR and output, subject to explicitly documented volatile
   fields.
-* **Semantic identity:** compatibility claims are about accepted syntax,
-  diagnostics, normalized artifacts, or behavior at a named level. Textual
-  similarity alone is not semantic evidence.
+* **Semantic compatibility over output identity:** observable Workshop/game
+  behavior, valid syntax, source/tooling contracts, and documented compatibility
+  surfaces outrank byte-identical text output. Presentation-only output
+  differences are not automatically product bugs.
+* **Corpus-defined support:** "supported" means the declared corpus/surface is
+  parseable, semantically understood, compilable where claimed, and analyzable
+  through the declared tooling contracts. It does not guarantee successful
+  execution in every live Overwatch runtime.
 * **Owned public interfaces:** Wright APIs expose Wright-owned types and
   contracts, not convenient aliases for external implementation details.
+* **No source-language forking:** Wright must not invent Wright-only OPY or
+  OSTW syntax or language features. Language-level evolution belongs upstream
+  or behind an explicit experimental proposal.
 
-## v1 non-goals
+## Non-goals
 
-The following are outside the v1 contract:
+The following remain outside the current contract:
 
-* a native Rust `.opy` parser;
-* a full decompiler rewrite;
-* a full LSP rewrite;
-* a new language or intentionally incompatible `.opy` semantics; and
-* reproducing OverPy internals merely for implementation parity.
+* inventing Wright-only OPY or OSTW language features;
+* reproducing OverPy internals merely for implementation parity;
+* a full decompiler rewrite without an accepted contract;
+* direct OPY ↔ OSTW source conversion without both frontends and evidence;
+* an OSTW frontend before the evidence-backed M13 milestone; and
+* guaranteeing successful execution in every live Overwatch runtime without
+  separate runtime evidence.
 
-These are scope boundaries, not promises about future roadmap priority.
+A native Rust `.opy` parser (formerly listed as a v1 non-goal in ADR-0001) is
+now implemented as `wright-opy` under the M7 milestone. That non-goal entry is
+historical.
 
 ## Open questions
 
 These questions are intentionally left for the milestone that has enough
 implementation evidence to answer them:
 
-1. Which OverPy versions and extensions form the supported v1 input set?
-2. The HIR schema and versioning policy for the v0.1 bridge is defined by
-   [ADR-0005](docs/adr/0005-opy-hir-v1.md) and
-   [`docs/hir/opy-hir-v1.md`](docs/hir/opy-hir-v1.md); the internal IR data
-   model and the first lowering boundary are defined by
-   [ADR-0006](docs/adr/0006-rust-ir-core.md). Workshop IR text emission and
-   its schema/versioning as an output artifact remain open until an emitter
-   milestone exists.
-3. Which diagnostic codes and machine-readable fields are stable enough for
-   clients?
-4. Which Workshop output targets and runtime versions are covered by semantic
-   tests?
-5. Which compatibility corpus entries can be redistributed, and which must be
+1. Which Workshop output targets and runtime versions are covered by E-level
+   semantic scenarios beyond the current corpus?
+2. Which diagnostic codes and machine-readable fields are stable enough for
+   external clients?
+3. Which compatibility corpus entries can be redistributed, and which must be
    generated locally?
-6. Which licensing questions require advice from qualified counsel?
+4. What extension mechanism for third-party lint rules is justified by evidence
+   (tracked in issue #89)?
+5. Which licensing questions require advice from qualified counsel?
 
 Decisions that answer or materially revise these questions belong in an ADR.
 
 ## Related decisions
 
-* [ADR-0001: Project scope](docs/adr/0001-project-scope.md)
+* [ADR-0001: Project scope](docs/adr/0001-project-scope.md) _(superseded by ADR-0008)_
 * [ADR-0002: Compatibility strategy](docs/adr/0002-compatibility-strategy.md)
 * [ADR-0003: IR boundary](docs/adr/0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](docs/adr/0004-overpy-licensing-boundary.md)
 * [ADR-0005: Opy HIR v1 frontend protocol](docs/adr/0005-opy-hir-v1.md)
 * [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](docs/adr/0006-rust-ir-core.md)
+* [ADR-0007: OverPy reference pinning policy](docs/adr/0007-reference-pinning-policy.md)
+* [ADR-0008: Tooling-first semantic platform rebaseline](docs/adr/0008-tooling-first-semantic-platform.md)

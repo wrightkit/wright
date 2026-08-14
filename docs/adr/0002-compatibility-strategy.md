@@ -1,8 +1,9 @@
 # ADR-0002: Compatibility strategy
 
-- Status: Accepted
+- Status: Accepted (amended by [ADR-0008](0008-tooling-first-semantic-platform.md))
 - Date: 2026-08-12
-- Related: [`COMPATIBILITY.md`](../../COMPATIBILITY.md)
+- Related: [`COMPATIBILITY.md`](../../COMPATIBILITY.md),
+  [ADR-0008](0008-tooling-first-semantic-platform.md)
 
 ## Context
 
@@ -39,6 +40,12 @@ No level is implied by another. N-level output comparison is not E-level
 semantic evidence, and a successful build is not compatibility evidence. The
 release gates and fixture requirements are normative in
 [`COMPATIBILITY.md`](../../COMPATIBILITY.md).
+
+[ADR-0008](0008-tooling-first-semantic-platform.md) adds a priority rule over
+this framework: **E-level observable semantics outrank N-level output-text
+identity**. Presentation-only N-level differences must be evaluated against the
+declared observable and documented compatibility surface before creating
+implementation work; they are not automatically product bugs.
 
 ## Open questions
 

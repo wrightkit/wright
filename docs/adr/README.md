@@ -23,10 +23,11 @@ contracts in [`ARCHITECTURE.md`](../../ARCHITECTURE.md) and
 ## Index
 
 * [ADR template](0000-template.md)
-* [ADR-0001: Project scope](0001-project-scope.md)
+* [ADR-0001: Project scope](0001-project-scope.md) _(superseded by ADR-0008)_
 * [ADR-0002: Compatibility strategy](0002-compatibility-strategy.md)
 * [ADR-0003: IR boundary](0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](0004-overpy-licensing-boundary.md)
 * [ADR-0005: Opy HIR v1 frontend protocol](0005-opy-hir-v1.md)
 * [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](0006-rust-ir-core.md)
 * [ADR-0007: OverPy reference pinning policy](0007-reference-pinning-policy.md)
+* [ADR-0008: Tooling-first semantic platform rebaseline](0008-tooling-first-semantic-platform.md)
