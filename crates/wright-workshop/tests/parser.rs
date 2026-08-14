@@ -165,13 +165,23 @@ fn spans_are_preserved() {
 
 #[test]
 fn malformed_input_is_reported_as_malformed() {
-    let text = "rule (\"broken\") { actions { If(True); } }";
+    // A rule-final If without `End;` is the oracle's valid spelling (#87);
+    // an If whose body never closes at all stays malformed.
+    let text = "rule (\"broken\") { actions { If(True);";
     let error = parser::parse(text, &catalog(), &Locale::new("en-US")).unwrap_err();
     assert!(
         matches!(error, wright_workshop::WorkshopError::Malformed { .. }),
-        "If without End is malformed: {error}"
+        "an unclosed If body is malformed: {error}"
     );
     assert!(error.to_string().contains("malformed"));
+}
+
+#[test]
+fn rule_final_if_without_end_is_the_oracle_spelling() {
+    let text = "rule (\"ok\") { actions { If(True); } }";
+    let program = parser::parse(text, &catalog(), &Locale::new("en-US"))
+        .expect("a rule-final If without End; is valid (oracle spelling, #87)");
+    assert_eq!(program.rules.len(), 1);
 }
 
 #[test]

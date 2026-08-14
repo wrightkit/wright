@@ -284,7 +284,9 @@ impl Parser<'_> {
                     }
                     _ => return Err(self.unknown("rule section", &word)),
                 },
-                Some(token) => return Err(self.malformed("expected a rule section or '}'", &token)),
+                Some(token) => {
+                    return Err(self.malformed("expected a rule section or '}'", &token));
+                }
                 None => return Err(self.malformed("unexpected end of input in rule", self.eof())),
             }
         }
@@ -495,7 +497,12 @@ impl Parser<'_> {
                     stop = next;
                 }
                 Stop::SectionClosed => {
-                    return Err(self.malformed("'If' requires a matching 'End'", self.previous()));
+                    // The oracle closes a rule-final if/if-else with the
+                    // enclosing actions-section `}` (no trailing `End;`,
+                    // #87). Rewind so the enclosing actions section consumes
+                    // that `}` and the rule's own `}` stays intact.
+                    self.pos -= 1;
+                    break;
                 }
             }
         }

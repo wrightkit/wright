@@ -486,6 +486,187 @@ fn settings_strings_re_escape_decoded_escapes() {
 }
 
 #[test]
+fn rule_final_if_omits_the_trailing_end_and_round_trips() {
+    // Amended AC-12: a rule-final if/if-else closes with the `}` (no
+    // trailing `End;`), byte-equal to the oracle's spelling; the ws parser
+    // accepts it and re-emission is a byte-identical fixed point. The
+    // middle-of-rule if keeps `End;`.
+    let oracle_spelling = r#"variables {
+    global:
+        0: x
+}
+
+rule ("r") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.x, ==, 1));
+            Disable Inspector Recording;
+        Else;
+            Disable Inspector Recording;
+    }
+}
+
+"#;
+    let program = parser::parse(oracle_spelling, &catalog(), &en())
+        .expect("the oracle's rule-final if spelling must parse");
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert_eq!(
+        emitted, oracle_spelling,
+        "the rule-final if-else re-emits byte-identically"
+    );
+    assert!(
+        !emitted.contains("End;"),
+        "no trailing End; in the rule-final if-else"
+    );
+    // Middle-of-rule if keeps End;.
+    let middle = parser::parse(
+        r#"variables {
+    global:
+        0: x
+}
+
+rule ("r") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.x, ==, 1));
+            Disable Inspector Recording;
+        End;
+        Set Global Variable(x, 2);
+    }
+}
+
+"#,
+        &catalog(),
+        &en(),
+    )
+    .expect("middle-of-rule if parses");
+    let emitted = emitter::emit(&middle, &catalog(), &en()).expect("emits");
+    assert!(emitted.contains("End;"), "middle-of-rule if keeps End;");
+}
+
+#[test]
+fn constant_format_calls_fold_to_the_substituted_text() {
+    // Amended AC-13: all-constant `.format()` calls fold into the
+    // substituted Custom String text (oracle spelling), including the
+    // two-decimal float rendering; variable arguments stay as format nodes.
+    let mut program = wir::Program::default();
+    let file = program
+        .files
+        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::String("value: {0}".to_string()),
+        None,
+    ));
+    let three = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Number {
+            value: 3.0,
+            text: "3".to_string(),
+        },
+        None,
+    ));
+    let folded = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Call {
+            name: "format".to_string(),
+            args: vec![text, three],
+        },
+        None,
+    ));
+    let action = program.actions.push(wir::Action::SetGlobalVariable {
+        variable: wright_ir::ids::Id::from_index(0),
+        value: folded,
+        span: None,
+        target_span: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "y".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.rules.push(wir::Rule {
+        name: "r".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::Global,
+        conditions: vec![],
+        actions: vec![action],
+    });
+    let _ = file;
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        emitted.contains("Set Global Variable(y, Custom String(\"value: 3\"));"),
+        "constant format folds to the substituted text: {emitted}"
+    );
+    let reparsed = parser::parse(&emitted, &catalog(), &en()).expect("folded output reparses");
+    let reemitted = emitter::emit(&reparsed, &catalog(), &en()).expect("re-emits");
+    assert_eq!(
+        emitted, reemitted,
+        "folded format must be a byte-identical fixed point"
+    );
+}
+
+#[test]
+fn constant_float_format_arguments_use_two_decimals() {
+    // The oracle folds 0.5 to `0.50` and 0.125 to `0.13` (JS toFixed(2)).
+    let mut program = wir::Program::default();
+    let file = program
+        .files
+        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::String("v: {0}".to_string()),
+        None,
+    ));
+    let half = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Number {
+            value: 0.5,
+            text: "0.5".to_string(),
+        },
+        None,
+    ));
+    let folded = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Call {
+            name: "format".to_string(),
+            args: vec![text, half],
+        },
+        None,
+    ));
+    let action = program.actions.push(wir::Action::SetGlobalVariable {
+        variable: wright_ir::ids::Id::from_index(0),
+        value: folded,
+        span: None,
+        target_span: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "y".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.rules.push(wir::Rule {
+        name: "r".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::Global,
+        conditions: vec![],
+        actions: vec![action],
+    });
+    let _ = file;
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        emitted.contains("Set Global Variable(y, Custom String(\"v: 0.50\"));"),
+        "0.5 folds to 0.50 (toFixed(2)): {emitted}"
+    );
+}
+
+#[test]
 fn split_and_reescaped_value_strings_round_trip_byte_identically() {
     // Amended AC-6: a long string (split continuation chain) and an escaped
     // string parse and re-emit byte-identically through the ws parser.

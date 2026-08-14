@@ -160,11 +160,8 @@ fn equivalence_detects_semantic_differences() {
 
 #[test]
 fn malformed_input_is_recorded_not_crashed() {
-    let record = roundtrip::round_trip(
-        "rule (\"broken\") { actions { If(True); } }",
-        &catalog(),
-        &en(),
-    );
+    let record =
+        roundtrip::round_trip("rule (\"broken\") { actions { If(True);", &catalog(), &en());
     assert!(!record.parse_ok);
     assert!(!record.equivalent);
     assert!(record.error.is_some(), "failure is recorded");

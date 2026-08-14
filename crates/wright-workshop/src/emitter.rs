@@ -338,8 +338,9 @@ impl Emitter<'_> {
         }
         if !rule.actions.is_empty() {
             self.line(1, "actions {")?;
-            for action in &rule.actions {
-                self.action(*action, 2)?;
+            for (index, action) in rule.actions.iter().enumerate() {
+                let rule_final = index + 1 == rule.actions.len();
+                self.action(*action, 2, rule_final)?;
             }
             self.line(1, "}")?;
         }
@@ -347,7 +348,10 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn action(&mut self, id: wir::ActionId, level: usize) -> Result<()> {
+    /// Emit one rule action; `rule_final` marks the last action of the rule,
+    /// for which an `if`/`if-else` closes without the trailing `End;`
+    /// (the pinned oracle's spelling, #87).
+    fn action(&mut self, id: wir::ActionId, level: usize, rule_final: bool) -> Result<()> {
         let Some(action) = self.program.actions.get(id) else {
             return Err(WorkshopError::Malformed {
                 message: format!("dangling action {id}"),
@@ -440,16 +444,20 @@ impl Emitter<'_> {
                     let keyword = if index == 0 { "If" } else { "Else If" };
                     self.line(level, &format!("{keyword}({condition});"))?;
                     for action in &branch.body {
-                        self.action(*action, level + 1)?;
+                        self.action(*action, level + 1, false)?;
                     }
                 }
                 if let Some(else_body) = else_body {
                     self.line(level, "Else;")?;
                     for action in else_body {
-                        self.action(*action, level + 1)?;
+                        self.action(*action, level + 1, false)?;
                     }
                 }
-                self.line(level, "End;")?;
+                // A rule-final if closes the rule without `End;` (oracle
+                // spelling); nested and middle-of-rule ifs keep it.
+                if !rule_final {
+                    self.line(level, "End;")?;
+                }
             }
             wir::Action::While {
                 condition, body, ..
@@ -458,7 +466,7 @@ impl Emitter<'_> {
                 self.value(*condition, &mut text)?;
                 self.line(level, &format!("While({text});"))?;
                 for action in body {
-                    self.action(*action, level + 1)?;
+                    self.action(*action, level + 1, false)?;
                 }
                 self.line(level, "End;")?;
             }
@@ -484,7 +492,7 @@ impl Emitter<'_> {
                     ),
                 )?;
                 for action in body {
-                    self.action(*action, level + 1)?;
+                    self.action(*action, level + 1, false)?;
                 }
                 self.line(level, "End;")?;
             }
@@ -728,17 +736,25 @@ impl Emitter<'_> {
                     // Constants (e.g. Empty Array) emit as bare spellings.
                     out.push_str(&spelling);
                 } else if is_custom_string {
-                    // The `Custom String` text argument stays bare (the
-                    // oracle spelling); the remaining arguments are values
-                    // and wrap (#87).
-                    out.push_str(&spelling);
-                    out.push('(');
-                    self.bare_string_value(args[0], out)?;
-                    if args.len() > 1 {
-                        out.push_str(", ");
+                    // Constant `.format()` calls fold to the substituted
+                    // text (the oracle spelling: `"value: {0}".format(3)` ->
+                    // `Custom String("value: 3")`, #87); the folded text
+                    // feeds the value-string path (re-escaping/splitting).
+                    if let Some(folded) = self.fold_format_call(args)? {
+                        self.emit_string_value(&folded, out)?;
+                    } else {
+                        // The `Custom String` text argument stays bare (the
+                        // oracle spelling); the remaining arguments are
+                        // values and wrap (#87).
+                        out.push_str(&spelling);
+                        out.push('(');
+                        self.bare_string_value(args[0], out)?;
+                        if args.len() > 1 {
+                            out.push_str(", ");
+                        }
+                        self.args(&args[1..], out)?;
+                        out.push(')');
                     }
-                    self.args(&args[1..], out)?;
-                    out.push(')');
                 } else {
                     out.push_str(&spelling);
                     out.push('(');
@@ -748,6 +764,33 @@ impl Emitter<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Fold a `Custom String` call whose text argument and constant numeric
+    /// arguments are all literals into the substituted text (the oracle's
+    /// constant `.format()` folding, #87). Returns `None` when the call has
+    /// a variable argument or no numeric arguments (rendered unchanged).
+    fn fold_format_call(&self, args: &[wir::ValueId]) -> Result<Option<String>> {
+        if args.len() < 2 {
+            return Ok(None);
+        }
+        let Some(text) = self.program.values.get(args[0]) else {
+            return Ok(None);
+        };
+        let wir::Value::String(text) = &text.value else {
+            return Ok(None);
+        };
+        let mut values = Vec::with_capacity(args.len() - 1);
+        for id in &args[1..] {
+            let Some(node) = self.program.values.get(*id) else {
+                return Ok(None);
+            };
+            match &node.value {
+                wir::Value::Number { value, .. } => values.push(*value),
+                _ => return Ok(None),
+            }
+        }
+        Ok(Some(fold_format(text, &values)))
     }
 
     fn modify_op_spelling(&self, op: wir::ModifyOp) -> Result<&'static str> {
@@ -934,3 +977,58 @@ fn emit_string_chain(spelling: &str, segments: &[String], out: &mut String) {
     }
 }
 
+/// Substitute `{0}`/`{1}`-style and implicit `{}` placeholders with the
+/// constant arguments, the oracle's constant-`.format()` folding (#87).
+fn fold_format(text: &str, args: &[f64]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut implicit_index = 0usize;
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            let mut inner = String::new();
+            let mut closed = false;
+            for next in chars.by_ref() {
+                if next == '}' {
+                    closed = true;
+                    break;
+                }
+                inner.push(next);
+            }
+            let index: Option<usize> = if inner.is_empty() {
+                let index = implicit_index;
+                implicit_index += 1;
+                Some(index)
+            } else {
+                inner.parse::<usize>().ok()
+            };
+            match index.and_then(|index| args.get(index)) {
+                Some(value) => out.push_str(&fold_number(*value)),
+                None => {
+                    out.push('{');
+                    out.push_str(&inner);
+                    out.push('}');
+                }
+            }
+            if !closed {
+                break;
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Render a constant format argument the way the oracle folds it: integers
+/// without decimals, non-integers with exactly two decimals (JS `toFixed(2)`
+/// rounding: `0.5` -> `0.50`, `0.125` -> `0.13`, #87).
+fn fold_number(value: f64) -> String {
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        format!("{}", value as i64)
+    } else {
+        let scaled = (value * 100.0).round();
+        let sign = if scaled < 0.0 { "-" } else { "" };
+        let scaled = scaled.abs() as i64;
+        format!("{sign}{}.{:02}", scaled / 100, scaled % 100)
+    }
+}
