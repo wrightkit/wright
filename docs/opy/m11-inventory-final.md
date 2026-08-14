@@ -270,3 +270,95 @@ the earlier scans.
   remediation decision (or a documented intentional difference) before
   the #82 final gate; neither changes the first-failure matrix or the
   parity rows.
+
+---
+
+## Final pre-gate scan (AC-15..AC-17) at `4c6a490` — dated 2026-08-14
+
+Independent verification of the final batch (`65b7fb6` placeholder numbering
++ playervar-read spelling; `4c6a490` closure scan; CI run 31772287928, six
+jobs success, headSha `4c6a490`). This section supersedes the two residual
+class-3 items from the previous section: the format placeholder residual is
+**fixed** and the playervar-read divergence is **fixed**; the final scan
+surfaced one new class-3 item (below).
+
+### AC-15 — placeholder numbering: **PASS**
+
+All pinned shapes byte-equal to the oracle: `"v: {}".format(x)` →
+`Custom String("v: {0}", Global.x)`; `"a{}b{}".format(1, 2)` →
+`Custom String("a1b2")`; fold interplay `"{} {}".format(3, x)` →
+`Custom String("3 {0}", Global.x)`; explicit-only `"{0} {0}".format(x)`
+verbatim; explicit constants `"{0} {1}".format(1, 2)` →
+`Custom String("1 2")`. Mixed implicit+explicit (`"{0} {}".format(x, y)`):
+the oracle **errors** ("Cannot use both numbered and unnumbered formatters
+in a custom string"); the native keeps the text unchanged
+(`Custom String("{0} {}", Global.x, Global.y)`) and the artifact
+round-trips through the ws parser. HIR untouched — the
+expressions-values adapter fixture still carries `points: {}` and the
+differential suite is green.
+
+### AC-16 — playervar-read spelling: **PASS**
+
+`g = eventPlayer.p` → `Set Global Variable(g, (Event Player).p)` —
+byte-equal to the oracle in the assignment, condition, and binary-read
+shapes; the oracle artifact parses through the native ws parser; the
+fixed-point roundtrip is byte-identical; the SET form
+(`Set Player Variable(Event Player, p, …)`) and corpus method-call
+receivers (`Has Spawned(Event Player)` from `eventPlayer.hasSpawned()`)
+are byte-unchanged.
+
+### AC-17 — closure scan and final probes: **1 test / 17 families green; two probed results**
+
+`cargo test -p wright-workshop --test closure` green
+(`crates/wright-workshop/tests/closure.rs`): assign_aug (global),
+calls, conditions, decl_index, decl_nums, expr_escapes, expr_literals,
+expr_long, format_fold, format_partial, format_var, if_else, if_final,
+loops, macro, playervar_read, subroutine — self-roundtrip fixed-points
+for the matrix surface. Coverage gaps probed independently: enum
+declarations and function-like `#!define` macros **byte-equal** to the
+oracle; indexed reads (`arr[0]` → `First Of(Global.arr)`) **byte-equal**;
+indexed writes (`arr[1] = 5`) explicitly rejected at lowering
+(`lower-error`, documented outside-surface).
+
+**Engineer's transparent note — `eventPlayer.getCurrentHero()`:
+outside-surface, explicitly rejected — NOT class 3.** The frontend
+rejects the source construct (`unknown-value`: `getCurrentHero` is not in
+the native catalog), so the emitter can never produce the
+`Event Player.getCurrentHero()` spelling from a compiling `.opy`; the ws
+parser also rejects that text spelling. The matrix's "`eventPlayer.member`
+→ `PlayerVar`/receiver call on `EventPlayer`" is corpus-evidenced by
+`eventPlayer.hasSpawned()` (declarations-rules), which works end-to-end
+via the catalog name (`Has Spawned(Event Player)`); other method names
+are a catalog-data gap (the same pattern as `Hero.HANZO` /
+`unknown-enum-member` — a data change, per the matrix precedent), with
+explicit structured rejection, not an emission bug.
+
+**New class-3 finding — augmented playervar assignment.**
+`eventPlayer.p += 1`: native emits `Set Player Variable(Event Player, p,
+Add((Event Player).p, 1))`; the oracle emits
+`Modify Player Variable(Event Player, p, Add, 1)`. Supported surface
+(augmented assignment and `eventPlayer.member` are both matrix-listed),
+oracle success, semantically-equivalent spelling divergence, both
+spellings round-trip through the ws parser, **zero corpus coverage** (no
+fixture augments a playervar; the global form `g += 1` is byte-equal via
+`Modify Global Variable`), no documented intent. **Class 3**, low
+severity, emission-only.
+
+### Regression state at `4c6a490`
+
+Pixelart full-program `normalizedEqual: True` (19,925/19,925); 7 settings
+sections equal (256/350/511/297/136/144/476); v1-gates 6/6 (FIXTURES
+unchanged); `PARITY_CASES` 8 (no pixelart row); 12-program first-failure
+matrix unchanged; oracle 21/21; adapter 23/23; all cargo suites green
+(wright-workshop 11 binaries incl. closure); clippy 0; fmt clean; CI
+31772287928 six jobs success, no skips.
+
+### Gate readiness after the final scan
+
+- **Fixed by this batch**: format placeholder canonicalization (AC-15) and
+  the playervar-read spelling (AC-16); both previous residual class-3
+  items are closed.
+- **Open (class 3)**: the augmented playervar assignment spelling
+  (`Modify Player Variable` vs `Set … Add(...)`) — one item, emission-only,
+  corpus-unexercised, low severity. It needs a remediation decision (or a
+  documented intentional difference) before the #82 final gate.

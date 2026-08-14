@@ -272,3 +272,24 @@ N-level row only (`target/m11-nlevel.json`: `nativeExit: 0`,
 `normalizedEqual: true`); no `PARITY_CASES` row; the native==adapter HIR
 subtree assertion for pixelart remains unverified (per AC-9 the row stays
 N-level; no parity count forced).
+
+---
+
+## #87 AC-15..AC-17 closure record at `4c6a490` — dated 2026-08-14
+
+Final batch `65b7fb6` (placeholder numbering, playervar-read spelling) +
+`4c6a490` (matrix-surface closure scan); CI run 31772287928, all six jobs
+success, no skips, headSha `4c6a490`. Supersedes the residual items in the
+previous closure section (both closed).
+
+| AC | Verdict | Evidence |
+| --- | --- | --- |
+| AC-15 (placeholder numbering) | PASS | all pinned shapes byte-equal (implicit renumbering, multi-arg folding, fold-interplay `3 {0}`, explicit-only verbatim, explicit constant folding); mixed implicit+explicit → oracle error, native keeps text unchanged and round-trips; HIR untouched (expressions-values fixture `points: {}`, differential green) |
+| AC-16 (playervar reads) | PASS | `(Event Player).p` byte-equal in assignment/condition/binary shapes; ws parser accepts the oracle spelling; fixed-point roundtrip byte-identical; SET form and method-call receivers unchanged |
+| AC-17 (closure scan + probes) | PASS with one new class-3 | closure test green (17 families); enum/define/indexed-read probes byte-equal; indexed-write explicitly rejected (lower-error); `eventPlayer.getCurrentHero()` — outside-surface (catalog-data gap, frontend `unknown-value`, ws parser rejects the text spelling; NOT class 3 — the emitter cannot produce it); **new class-3: augmented playervar assignment** (`eventPlayer.p += 1` → native `Set Player Variable(…, Add((Event Player).p, 1))` vs oracle `Modify Player Variable(…, Add, 1)`), supported surface, semantically equivalent, both spellings roundtrip, zero corpus coverage |
+
+Final gate standing: pixelart N-level row (`normalizedEqual: true`,
+19,925/19,925), v1-gates 6/6, PARITY_CASES 8, oracle 21/21, adapter 23/23,
+12-program matrix unchanged, all suites green. The only open class-3 item
+is the augmented-playervar spelling (emission-only, low severity,
+corpus-unexercised).
