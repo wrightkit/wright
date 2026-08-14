@@ -145,7 +145,6 @@ fn build_wir_program() -> WirProgram {
         index: 0,
         span: Some(span(file, 1, 1, 12)),
         name_span: Some(span(file, 1, 10, 11)),
-        initializer: None,
     });
     let value = program.values.push(wright_ir::wir::ValueNode::new(
         wright_ir::wir::Value::Number {

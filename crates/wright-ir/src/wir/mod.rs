@@ -79,6 +79,11 @@ impl Program {
 }
 
 /// A workshop variable (global or player) with its assigned index.
+///
+/// Declaration initializers are lowered into synthetic "Initialize global
+/// variables" / "Initialize player variables" rules during HIR → WIR lowering
+/// (#112); the variable tables carry no initializer field, so the Initialize
+/// rules are the single source of truth.
 #[derive(Debug, Clone)]
 pub struct WorkshopVariable {
     pub name: String,
@@ -87,8 +92,6 @@ pub struct WorkshopVariable {
     pub span: Option<Span>,
     /// The exact span of the declared identifier token.
     pub name_span: Option<Span>,
-    /// The non-trivial source initializer, if the declaration had one.
-    pub initializer: Option<ValueId>,
 }
 
 /// A workshop subroutine with its assigned index.

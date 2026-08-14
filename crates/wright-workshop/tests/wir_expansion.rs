@@ -28,7 +28,6 @@ fn build_surface_program() -> wir::Program {
         index: 0,
         span: Some(s(1, 15, 20)),
         name_span: Some(s(1, 15, 20)),
-        initializer: None,
     });
 
     let zero = program.values.push(ValueNode::new(

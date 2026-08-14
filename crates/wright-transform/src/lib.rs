@@ -10,13 +10,17 @@
 //!   the same evidence-backed compat passes (no speculative passes ship
 //!   without evidence).
 //!
+//! Source-semantic behavior is never owned by this pipeline: declaration
+//! initializers lower into synthetic Initialize rules in the
+//! profile-independent HIR → WIR lowering, so profiles may only change
+//! semantics-preserving representation/resource behavior (#112).
+//!
 //! [`run`] validates the WIR before and after the pipeline, so a pass can
 //! never leave the program in an invalid state.
 
 pub mod fold_constants;
 pub mod pipeline;
 pub mod profile;
-pub mod synthesize_initializers;
 
 pub use pipeline::{PassResult, PassStats, run};
 pub use profile::Profile;

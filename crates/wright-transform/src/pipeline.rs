@@ -4,7 +4,6 @@ use wright_ir::wir;
 
 use crate::fold_constants::FoldConstants;
 use crate::profile::Profile;
-use crate::synthesize_initializers::SynthesizeInitializers;
 
 /// A transformation pass over validated WIR.
 pub trait Pass {
@@ -38,6 +37,11 @@ pub struct PassResult {
 ///
 /// The program is validated before and after the pipeline; `Err` is returned
 /// if the input was invalid or a pass left it invalid (a pass bug).
+///
+/// Source-semantic behavior (declaration initializers) is owned by the
+/// profile-independent HIR → WIR lowering and never appears in this pass
+/// pipeline (#112): profiles may only change semantics-preserving
+/// representation/resource behavior.
 pub fn run(
     program: &mut wir::Program,
     profile: Profile,
@@ -45,9 +49,7 @@ pub fn run(
     program.validate()?;
     let passes: Vec<Box<dyn Pass>> = match profile {
         Profile::Off => Vec::new(),
-        Profile::Compat | Profile::Aggressive => {
-            vec![Box::new(FoldConstants), Box::new(SynthesizeInitializers)]
-        }
+        Profile::Compat | Profile::Aggressive => vec![Box::new(FoldConstants)],
     };
     let mut results = Vec::new();
     for pass in passes {

@@ -9,8 +9,11 @@ pub enum Profile {
     /// No transformation: the clean reference path.
     #[default]
     Off,
-    /// Evidence-backed, compatibility-safe passes (fold-constants,
-    /// synthesize-initializers).
+    /// Evidence-backed, compatibility-safe passes (fold-constants).
+    ///
+    /// Source-semantic behavior (declaration initializers) is owned by the
+    /// profile-independent HIR → WIR lowering, never by a profile pass
+    /// (#112).
     Compat,
     /// Experimental marker; in v1 selects the same evidence-backed passes.
     Aggressive,

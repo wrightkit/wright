@@ -20,11 +20,6 @@ pub(crate) fn dump(program: &Program) -> String {
             variable.index,
             span_suffix(variable.span),
         ));
-        if let Some(initializer) = variable.initializer {
-            out.push_str("    initializer = ");
-            render_value(program, initializer, &mut out);
-            out.push('\n');
-        }
     }
     out.push_str("player variables:\n");
     for variable in program.player_variables.iter() {
@@ -34,11 +29,6 @@ pub(crate) fn dump(program: &Program) -> String {
             variable.index,
             span_suffix(variable.span),
         ));
-        if let Some(initializer) = variable.initializer {
-            out.push_str("    initializer = ");
-            render_value(program, initializer, &mut out);
-            out.push('\n');
-        }
     }
     out.push_str("subroutines:\n");
     for subroutine in program.subroutines.iter() {

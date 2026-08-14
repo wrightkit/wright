@@ -130,6 +130,64 @@ fn golden_path(name: &str) -> PathBuf {
 }
 
 #[test]
+fn declaration_initializers_lower_to_initialize_rules() {
+    // #112: declaration initializer semantics are owned by the
+    // profile-independent HIR → WIR lowering. Lowering the
+    // declarations-numbers adapter fixture must produce the synthetic
+    // Initialize rules directly (no transformation pass), with the global
+    // rule first and the player rule after it, before any user rule.
+    let program = lower_fixture("synthetic/declarations-numbers");
+    program
+        .validate()
+        .expect("lowered declarations-numbers WIR must validate");
+
+    let mut rules = program.rules.iter();
+    let global = rules.next().expect("a global Initialize rule");
+    assert_eq!(global.name, "Initialize global variables");
+    assert!(matches!(global.event, wright_ir::wir::Event::Global));
+    assert_eq!(
+        global.actions.len(),
+        2,
+        "j = 5 and k = 0.0 survive; h = 0 is dropped"
+    );
+    for action in &global.actions {
+        assert!(
+            matches!(
+                program.actions.get(*action),
+                Some(wright_ir::wir::Action::SetGlobalVariable { .. })
+            ),
+            "global initializers lower to Set Global Variable actions"
+        );
+    }
+
+    let player = rules.next().expect("a player Initialize rule");
+    assert_eq!(player.name, "Initialize player variables");
+    assert!(matches!(player.event, wright_ir::wir::Event::EachPlayer));
+    assert_eq!(player.actions.len(), 1, "playervar p = 7 survives");
+    assert!(
+        matches!(
+            program.actions.get(player.actions[0]),
+            Some(wright_ir::wir::Action::SetPlayerVariable { .. })
+        ),
+        "player initializers lower to Set Player Variable actions"
+    );
+
+    // The Initialize rules come before the user rule, matching the reference.
+    let user = rules.next().expect("the user rule");
+    assert_eq!(user.name, "r");
+    assert!(rules.next().is_none(), "no further rules");
+
+    // The dump renders the Initialize rules in order, and no variable table
+    // entry carries an initializer field (the rules are the single source of
+    // truth).
+    let dump = program.dump();
+    let global_pos = dump.find("Initialize global variables").unwrap();
+    let player_pos = dump.find("Initialize player variables").unwrap();
+    let user_pos = dump.find("\"r\"").unwrap();
+    assert!(global_pos < player_pos && player_pos < user_pos, "{dump}");
+}
+
+#[test]
 fn unsupported_event_fails_with_span() {
     let payload = r#"{
         "protocol": { "name": "wright/opy-hir", "version": "1.0.0" },

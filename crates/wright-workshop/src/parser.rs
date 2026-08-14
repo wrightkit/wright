@@ -190,7 +190,6 @@ impl Parser<'_> {
             // Workshop-text sources carry no `.opy` identifier provenance;
             // exact rename occurrences are only produced by the native path.
             name_span: None,
-            initializer: None,
         })
     }
 

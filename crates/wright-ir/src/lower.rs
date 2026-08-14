@@ -11,6 +11,11 @@
 //!
 //! * Variable, player-variable, and subroutine IDs map by table order, so the
 //!   workshop tables are built in HIR order before any body is lowered.
+//! * Declaration initializers lower directly into synthetic
+//!   "Initialize global variables" / "Initialize player variables" rules in
+//!   this profile-independent path (#112): the initializer semantics are
+//!   source semantics owned by lowering, never by an optimization profile,
+//!   and the reference frontend emits the same Initialize rules.
 //! * A subroutine definition (`def`) lowers to one workshop rule whose event
 //!   is `Subroutine(id)`.
 //! * `assign` lowers to `Set*Variable`; the compound-assignment pattern
@@ -73,7 +78,10 @@ impl<'a> Lowerer<'a> {
         // settings tree is carried to emission, never lowered (#86).
         self.target.settings = self.hir.settings.clone();
 
-        // Variable, player, and subroutine tables in HIR order.
+        // Variable, player, and subroutine tables in HIR order. Non-trivial
+        // initializers are collected while the tables are built and lowered
+        // into synthetic Initialize rules below.
+        let mut global_initializers = Vec::new();
         for id in range_ids::<hir::GlobalVar>(self.hir.globals.len()) {
             let (name, span, name_span, initializer, source_index) = {
                 let global = self
@@ -98,10 +106,13 @@ impl<'a> Lowerer<'a> {
                 index: source_index.unwrap_or(id.index() as u32),
                 span,
                 name_span,
-                initializer,
             });
+            if let Some(initializer) = initializer {
+                global_initializers.push((wir_id, initializer));
+            }
             self.globals.insert(id, wir_id);
         }
+        let mut player_initializers = Vec::new();
         for id in range_ids::<hir::PlayerVar>(self.hir.players.len()) {
             let (name, span, name_span, initializer, source_index) = {
                 let player = self
@@ -126,8 +137,10 @@ impl<'a> Lowerer<'a> {
                 index: source_index.unwrap_or(id.index() as u32),
                 span,
                 name_span,
-                initializer,
             });
+            if let Some(initializer) = initializer {
+                player_initializers.push((wir_id, initializer));
+            }
             self.players.insert(id, wir_id);
         }
         for id in range_ids::<hir::Subroutine>(self.hir.subroutines.len()) {
@@ -152,7 +165,66 @@ impl<'a> Lowerer<'a> {
             self.subroutines.insert(id, wir_id);
         }
 
-        // Rules.
+        // Rules. Declaration initializers become synthetic
+        // "Initialize global variables" / "Initialize player variables"
+        // rules here, in the profile-independent lowering path, so
+        // initialization semantics never depend on an optimization profile
+        // (#112). The initialize rules come first, matching the reference
+        // emission: the expressions-values oracle emits the Initialize rule
+        // before the user rules, and the declarations-numbers oracle emits
+        // the player Initialize rule after the global one. The lowered
+        // initializers are the single source of truth; the variable tables
+        // carry no initializer field.
+        if !global_initializers.is_empty() {
+            let actions = global_initializers
+                .into_iter()
+                .map(|(variable, value)| {
+                    self.target.actions.push(Action::SetGlobalVariable {
+                        variable,
+                        value,
+                        span: None,
+                        target_span: None,
+                    })
+                })
+                .collect();
+            self.target.rules.push(wir::Rule {
+                name: "Initialize global variables".to_string(),
+                span: None,
+                name_span: None,
+                disabled: false,
+                event: wir::Event::Global,
+                conditions: Vec::new(),
+                actions,
+            });
+        }
+        if !player_initializers.is_empty() {
+            let actions = player_initializers
+                .into_iter()
+                .map(|(variable, value)| {
+                    let player = self
+                        .target
+                        .values
+                        .push(wir::ValueNode::new(wir::Value::EventPlayer, None));
+                    self.target.actions.push(Action::SetPlayerVariable {
+                        player,
+                        variable,
+                        value,
+                        span: None,
+                        target_span: None,
+                    })
+                })
+                .collect();
+            self.target.rules.push(wir::Rule {
+                name: "Initialize player variables".to_string(),
+                span: None,
+                name_span: None,
+                disabled: false,
+                event: wir::Event::EachPlayer,
+                conditions: Vec::new(),
+                actions,
+            });
+        }
+
         // Subroutine definition bodies become rules with the Subroutine
         // event, emitted before normal rules (reference ordering).
         for id in range_ids::<hir::Subroutine>(self.hir.subroutines.len()) {

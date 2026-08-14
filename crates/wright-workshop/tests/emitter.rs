@@ -434,7 +434,6 @@ fn settings_section_precedes_variables() {
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
     let settings_pos = emitted.find("settings").unwrap();
@@ -587,7 +586,6 @@ fn constant_format_calls_fold_to_the_substituted_text() {
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.rules.push(wir::Rule {
         name: "r".into(),
@@ -648,7 +646,6 @@ fn constant_float_format_arguments_use_two_decimals() {
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.rules.push(wir::Rule {
         name: "r".into(),
@@ -700,14 +697,12 @@ fn split_and_reescaped_value_strings_round_trip_byte_identically() {
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.global_variables.push(wir::WorkshopVariable {
         name: "y".into(),
         index: 1,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.rules.push(wir::Rule {
         name: "r".into(),
@@ -774,14 +769,12 @@ fn implicit_format_placeholders_renumber_to_the_oracle_form() {
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.global_variables.push(wir::WorkshopVariable {
         name: "z".into(),
         index: 1,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.rules.push(wir::Rule {
         name: "r".into(),
@@ -848,14 +841,12 @@ fn partial_constant_format_folds_and_renumbers() {
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.global_variables.push(wir::WorkshopVariable {
         name: "z".into(),
         index: 1,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.rules.push(wir::Rule {
         name: "r".into(),
@@ -905,14 +896,12 @@ fn playervar_reads_parenthesize_the_receiver() {
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.player_variables.push(wir::WorkshopVariable {
         name: "p".into(),
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
     program.rules.push(wir::Rule {
         name: "r".into(),

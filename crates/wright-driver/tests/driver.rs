@@ -673,6 +673,71 @@ fn opy_numeric_initializers_match_the_oracle_artifact() {
 }
 
 #[test]
+fn opy_initializer_semantics_are_profile_independent() {
+    // #112: declaration initializer semantics are owned by the
+    // profile-independent HIR → WIR lowering, so `off`, `compat`, and
+    // `aggressive` must all emit the same Initialize rules byte-identical to
+    // the pinned oracle. Previously the default `off` profile silently
+    // dropped initializers because the synthesis lived in a compat-only
+    // transformation pass.
+    for profile in [
+        wright_transform::Profile::Off,
+        wright_transform::Profile::Compat,
+        wright_transform::Profile::Aggressive,
+    ] {
+        assert_byte_artifact_with_profile(
+            "globalvar j = 5\nglobalvar h = 0\nglobalvar k = 0.0\nplayervar p = 7\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
+            ORACLE_AC11,
+            profile,
+        );
+    }
+}
+
+#[test]
+fn opy_explicit_declaration_indexes_stay_distinct_from_initializers() {
+    // #112: the bare-integer declaration form (`globalvar idx 3`,
+    // `playervar q 1`) is an explicit Workshop variable index and must stay
+    // distinct from initializer syntax (`globalvar j = 5`). The table keeps
+    // the explicit index, only the initializer forms produce Initialize-rule
+    // actions, and every profile agrees.
+    let source = "globalvar j = 5\nglobalvar idx 3\nplayervar p = 7\nplayervar q 1\n\nrule \"r\":\n    @Event global\n    disableInspector()\n";
+    let mut artifacts = Vec::new();
+    for profile in [
+        wright_transform::Profile::Off,
+        wright_transform::Profile::Compat,
+        wright_transform::Profile::Aggressive,
+    ] {
+        let artifact = compile_artifact(source, profile);
+        assert!(
+            artifact.contains("        3: idx"),
+            "explicit global index must appear in the table:\n{artifact}"
+        );
+        assert!(
+            artifact.contains("        1: q"),
+            "explicit player index must appear in the table:\n{artifact}"
+        );
+        assert!(
+            artifact.contains("Set Global Variable(j, 5)"),
+            "initializer form produces an Initialize action:\n{artifact}"
+        );
+        assert!(
+            artifact.contains("Set Player Variable(Event Player, p, 7)"),
+            "player initializer form produces an Initialize action:\n{artifact}"
+        );
+        assert!(
+            !artifact.contains("Set Global Variable(idx,")
+                && !artifact.contains("Set Player Variable(Event Player, q,"),
+            "explicit index forms must never become Initialize actions:\n{artifact}"
+        );
+        artifacts.push(artifact);
+    }
+    assert!(
+        artifacts.windows(2).all(|pair| pair[0] == pair[1]),
+        "all profiles must emit byte-identical artifacts:\n{artifacts:?}"
+    );
+}
+
+#[test]
 fn opy_empty_rules_are_dropped_like_the_oracle() {
     // Amended AC-5: pass-only and condition-without-actions rules emit
     // nothing, byte-equal to the pinned oracle artifacts.
@@ -686,13 +751,28 @@ fn opy_empty_rules_are_dropped_like_the_oracle() {
 /// Compile `.opy` source with the compat profile and assert the emitted
 /// artifact is byte-identical to the quoted pinned-oracle artifact.
 fn assert_byte_artifact(source: &str, artifact: &str) {
+    assert_byte_artifact_with_profile(source, artifact, wright_transform::Profile::Compat);
+}
+
+/// Compile `.opy` source with an explicit profile and assert the emitted
+/// artifact is byte-identical to the quoted pinned-oracle artifact.
+fn assert_byte_artifact_with_profile(
+    source: &str,
+    artifact: &str,
+    profile: wright_transform::Profile,
+) {
+    assert_eq!(compile_artifact(source, profile), artifact);
+}
+
+/// Compile `.opy` source with the given profile and return the emitted text.
+fn compile_artifact(source: &str, profile: wright_transform::Profile) -> String {
     let dir = temp_dir();
     let main = dir.join("repro.opy");
     std::fs::write(&main, source).unwrap();
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(main),
         root: Some(dir.clone()),
-        profile: wright_transform::Profile::Compat,
+        profile,
         ..SessionConfig::default()
     })
     .unwrap();
@@ -703,11 +783,8 @@ fn assert_byte_artifact(source: &str, artifact: &str) {
         envelope.diagnostics
     );
     let text = envelope.result.output.expect("output").text;
-    assert_eq!(
-        text, artifact,
-        "artifact must be byte-identical to the oracle"
-    );
     let _ = std::fs::remove_dir_all(&dir);
+    text
 }
 
 // Byte-quoted pinned-oracle artifacts (overpy 9.7.10, raw CLI output).

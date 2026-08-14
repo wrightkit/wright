@@ -1,48 +1,30 @@
-//! WIR transformation pipeline tests (#51/#52): `off` is a no-op, compat
-//! passes are evidence-backed with before/after metrics, and every pass
-//! leaves the WIR validated.
+//! WIR transformation pipeline tests (#51/#52): `off` is a no-op, the compat
+//! pass is evidence-backed with before/after metrics, and every pass leaves
+//! the WIR validated. Source-semantic initializer synthesis is owned by the
+//! profile-independent HIR → WIR lowering, not by this pipeline (#112).
 
 use wright_ir::wir::{self, Action, Value, ValueNode};
 use wright_transform::profile::Profile;
 use wright_transform::run;
 
-/// Build a program with `x = len(a) + 2 * 3` and an array initializer.
+/// Build a program with `x = len(a) + 2 * 3`.
 fn arithmetic_program() -> wir::Program {
     let mut program = wir::Program::default();
     program
         .files
         .push(wright_ir::source::SourceFile::new("test.opy"));
 
-    let one = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 1.0,
-            text: "1".to_string(),
-        },
-        None,
-    ));
-    let two_literal = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 2.0,
-            text: "2".to_string(),
-        },
-        None,
-    ));
-    let array = program
-        .values
-        .push(ValueNode::new(Value::Array(vec![one, two_literal]), None));
     let points = program.global_variables.push(wir::WorkshopVariable {
         name: "points".to_string(),
         index: 1,
         span: None,
         name_span: None,
-        initializer: Some(array),
     });
     let variable = program.global_variables.push(wir::WorkshopVariable {
         name: "result".to_string(),
         index: 0,
         span: None,
         name_span: None,
-        initializer: None,
     });
 
     let two = program.values.push(ValueNode::new(
@@ -115,7 +97,7 @@ fn off_profile_performs_no_transformation() {
 fn compat_profile_folds_constants_with_metrics() {
     let mut program = arithmetic_program();
     let results = run(&mut program, Profile::Compat).unwrap();
-    assert_eq!(results.len(), 2, "two compat passes");
+    assert_eq!(results.len(), 1, "one compat pass");
 
     // fold-constants: `2 * 3` collapsed to `6`.
     let fold = results
@@ -127,7 +109,7 @@ fn compat_profile_folds_constants_with_metrics() {
     // The folded expression is now the literal 6 in the action.
     let rule = program
         .rules
-        .get(wright_ir::ids::Id::from_index(1))
+        .get(wright_ir::ids::Id::from_index(0))
         .expect("rule");
     let Action::SetGlobalVariable { value, .. } = program.actions.get(rule.actions[0]).unwrap()
     else {
@@ -152,39 +134,6 @@ fn compat_profile_folds_constants_with_metrics() {
 }
 
 #[test]
-fn compat_profile_synthesizes_initializer_rule() {
-    let mut program = arithmetic_program();
-    run(&mut program, Profile::Compat).unwrap();
-
-    // The initialize rule is first and clears the variable initializer.
-    assert_eq!(
-        program
-            .rules
-            .get(wright_ir::ids::Id::from_index(0))
-            .unwrap()
-            .name,
-        "Initialize global variables"
-    );
-    let initialize = program
-        .rules
-        .get(wright_ir::ids::Id::from_index(0))
-        .unwrap();
-    assert_eq!(initialize.actions.len(), 1);
-    assert!(matches!(
-        program.actions.get(initialize.actions[0]),
-        Some(Action::SetGlobalVariable { .. })
-    ));
-    assert!(
-        program
-            .global_variables
-            .iter()
-            .all(|variable| variable.initializer.is_none()),
-        "initializers move into the synthetic rule"
-    );
-    assert!(program.validate().is_ok());
-}
-
-#[test]
 fn folding_is_deterministic() {
     let mut first = arithmetic_program();
     let mut second = arithmetic_program();
@@ -198,6 +147,6 @@ fn folding_is_deterministic() {
 fn aggressive_profile_uses_evidence_backed_passes_only() {
     let mut program = arithmetic_program();
     let results = run(&mut program, Profile::Aggressive).unwrap();
-    assert_eq!(results.len(), 2, "aggressive = compat passes in v1");
+    assert_eq!(results.len(), 1, "aggressive = compat passes in v1");
     assert!(program.validate().is_ok());
 }

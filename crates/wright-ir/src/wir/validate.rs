@@ -14,15 +14,9 @@ pub(crate) fn validate(program: &Program) -> Result<(), IrError> {
     }
     for variable in program.global_variables.iter() {
         check_span(variable.span, program)?;
-        if let Some(initializer) = variable.initializer {
-            check_value(program, initializer)?;
-        }
     }
     for variable in program.player_variables.iter() {
         check_span(variable.span, program)?;
-        if let Some(initializer) = variable.initializer {
-            check_value(program, initializer)?;
-        }
     }
     for subroutine in program.subroutines.iter() {
         check_span(subroutine.span, program)?;
