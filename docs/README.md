@@ -20,7 +20,7 @@ Authority Hierarchy:
 
 ### 1. Repository Entry Points
 Root-level files provide concise, standard navigation entry points:
-- [`README.md`](../README.md) — Public product overview, feature summary, and quick start.
+- [`README.md`](../README.md) — Public product overview, feature summary, ecosystem table, and quick start.
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — Contributor onboarding, toolchain policy, and check workflows.
 - [`AGENTS.md`](../AGENTS.md) — Agent routing rules, architectural boundaries, and task protocols.
 - [`LICENSE`](../LICENSE) — Canonical GNU AGPL v3.0 license text.
@@ -87,3 +87,94 @@ documents in `main`.
 | **HIR Protocol** | [`hir/opy-hir-v1.md`](hir/opy-hir-v1.md) | Typed JSON AST/HIR representation for `.opy` programs. |
 | **Catalog Pipeline** | [`workshop/catalog-pipeline.md`](workshop/catalog-pipeline.md) | Canonical localization data compilation and schema validation. |
 | **Architecture History** | [`adr/README.md`](adr/README.md) | Chronological index of accepted architecture decision records. |
+
+---
+
+## Document Asset Inventory and Action Ledger
+
+This ledger records the classification and lifecycle action (`keep`, `update`,
+`move`, `merge`, `replace`, `delete`) for every maintained Markdown document,
+JSON document asset, and historical artifact across the repository.
+
+### 1. Markdown Documentation Assets
+
+| Asset Path | Document Class | Action | Description & Rationale |
+| --- | --- | --- | --- |
+| `README.md` | Repository Entry Point | `update` | Refreshed as the public product entry point with feature summaries, ecosystem compatibility table, installation, and quick start. |
+| `CONTRIBUTING.md` | Repository Entry Point | `update` | Updated relative contract links to `docs/` (`docs/architecture.md`, `docs/compatibility.md`, `docs/licensing.md`); maintains toolchain & validation policy. |
+| `AGENTS.md` | Repository Entry Point | `update` | Updated task routing links to `docs/`; defines cross-role boundaries and verified extension paths. |
+| `docs/README.md` | Documentation Index & Governance | `keep` | Central documentation information architecture, authority hierarchy, contract map, and full asset inventory. |
+| `docs/architecture.md` (was `ARCHITECTURE.md`) | Living Durable Contract | `move` + `update` | Moved to `docs/`; updated relative links and reframed as living tooling-first architecture baseline (ADR-0008). |
+| `docs/compatibility.md` (was `COMPATIBILITY.md`) | Living Durable Contract | `move` + `update` | Moved to `docs/`; updated relative links and codified the S/D/N/E compatibility framework and priority order. |
+| `docs/licensing.md` (was `LICENSE-BOUNDARY.md`) | Living Durable Contract | `move` + `update` | Moved to `docs/`; updated relative links and formalized clean-room development and oracle isolation policies. |
+| `docs/cli.md` | Living Durable Contract | `update` | Removed stale M6 milestone framing; updated 5-rule lint configuration and `wright-result/v1` envelope contracts. |
+| `docs/embedding.md` | Living Durable Contract | `update` | Removed stale M9 milestone framing; updated `ToolService` operations and session-aware embedding contracts. |
+| `docs/language-services.md` | Living Durable Contract | `update` | Removed stale M10 milestone framing; updated editor-neutral responsiveness and LSP adapter contracts. |
+| `docs/release.md` | Living Durable Contract | `update` | Removed stale M8 framing; documents release automation, checksum verification, and packaging contracts. |
+| `docs/v1-matrix.md` | Living Durable Contract | `update` | Reconciled custom-game-settings support; documents release gates, supported surfaces, and intentional differences. |
+| `docs/agent-team.md` | Living Durable Contract | `update` | Updated links; folded in pilot architectural findings (single-level subagents, non-authoritative router) and spec lifecycle. |
+| `docs/opy/support-matrix.md` | Living Durable Contract | `update` | Removed stale M7 framing; updated native `.opy` parser, settings, and preprocessing supported surfaces. |
+| `docs/workshop/support-matrix.md` | Living Durable Contract | `update` | Removed stale M5 framing; updated evidenced Workshop syntax, enums, and localization contracts. |
+| `docs/workshop/catalog-pipeline.md` | Living Durable Contract | `update` | Removed milestone framing; documents deterministic catalog generation and schema validation pipeline. |
+| `docs/hir/opy-hir-v1.md` | Living Protocol Specification | `update` | Updated relative links to `docs/`; documents Opy HIR v1 JSON protocol schema and versioning. |
+| `docs/specs/SPEC-99-stability-rules.md` (was `docs/m12-issue99-spec.md`) | Active Feature Specification | `move` + `update` | Moved into dedicated `docs/specs/` directory; updated relative links; active spec for issue #99. |
+| `docs/adr/README.md` | Architecture Decision Index | `update` | Updated relative links to `docs/architecture.md` and `docs/compatibility.md`; indexes ADR 0000–0008. |
+| `docs/adr/0000-template.md` | Architecture Decision Record | `keep` | Standard ADR template for proposing new architectural decisions. |
+| `docs/adr/0001-project-scope.md` | Architecture Decision Record | `update` | Updated link to `docs/compatibility.md`; recorded as superseded by ADR-0008. |
+| `docs/adr/0002-compatibility-strategy.md` | Architecture Decision Record | `update` | Updated link to `docs/compatibility.md`; records S/D/N/E strategy (amended by ADR-0008). |
+| `docs/adr/0003-ir-boundary.md` | Architecture Decision Record | `update` | Updated link to `docs/architecture.md`; records two-layer HIR/WIR boundary. |
+| `docs/adr/0004-overpy-licensing-boundary.md` | Architecture Decision Record | `update` | Updated links to `docs/licensing.md` and `docs/compatibility.md`; records clean-room policy. |
+| `docs/adr/0005-opy-hir-v1.md` | Architecture Decision Record | `update` | Updated link to `docs/compatibility.md`; records initial HIR v1 interchange decision. |
+| `docs/adr/0006-rust-ir-core.md` | Architecture Decision Record | `keep` | Records typed IDs, arenas, and two-layer IR model decisions. |
+| `docs/adr/0007-reference-pinning-policy.md` | Architecture Decision Record | `update` | Updated links to `docs/compatibility.md` and issue #82; records version-exact content-pinned oracle policy. |
+| `docs/adr/0008-tooling-first-semantic-platform.md` | Architecture Decision Record | `update` | Updated links to `docs/architecture.md` and `docs/compatibility.md`; establishes tooling-first platform baseline. |
+| `adapter/README.md` | Subsystem Contract | `update` | Updated link to `docs/licensing.md`; documents external OverPy adapter boundary and JSON invocation. |
+| `compatibility/README.md` | Subsystem Contract | `update` | Updated link to `docs/compatibility.md`; documents oracle setup, fixture layout, and differential diff runner. |
+| `crates/wright-analyzer/tests/fixtures/README.md` | Subsystem Contract | `keep` | Documents test fixture provenance and regeneration process for analyzer test fixtures. |
+
+### 2. JSON Schema, Catalogs & Configuration Assets
+
+| Asset Path | Document Class | Action | Description & Rationale |
+| --- | --- | --- | --- |
+| `crates/wright-workshop/src/catalog/data/catalog.json` | Catalog Data Asset | `keep` | Canonical localized Workshop catalog data (actions, values, enums, events, keywords) with recorded provenance. |
+| `compatibility/oracle/oracle-metadata.json` | Reference Metadata Asset | `keep` | Records pinned `overpy@9.7.10` tarball integrity, gitHead commit, registry URL, and license assumption. |
+| `compatibility/oracle/package.json` | Tooling Package Manifest | `keep` | Pinned npm package manifest for installing external OverPy oracle during compatibility evaluation. |
+| `adapter/package.json` | Tooling Package Manifest | `keep` | Pinned npm package manifest for executing the isolated OverPy adapter bridge. |
+| `scripts/corpus-manifest.json` | Provenance Manifest Asset | `keep` | SHA-256 integrity manifest for all real-world corpus projects and full include closures. |
+
+### 3. Fixture, Test & Scenario JSON Assets
+
+| Asset Path | Document Class | Action | Description & Rationale |
+| --- | --- | --- | --- |
+| `compatibility/fixtures/**/fixture.json` (17 files) | Fixture Manifest Asset | `keep` | Metadata manifests (schema v1) for 6 synthetic and 11 real-world compatibility fixtures defining expected compile status and provenance. |
+| `compatibility/fixtures/**/oracle.json` (17 files) | Test Snapshot Asset | `keep` | Normalized reference compiler snapshots from pinned `overpy@9.7.10` for differential output testing. |
+| `adapter/fixtures/**/*.json` (10 files) | Adapter Test Snapshot Asset | `keep` | Pinned Opy HIR v1 protocol snapshots generated by the adapter bridge for differential frontend testing. |
+| `adapter/test/fixtures/*.json` (3 files) | Adapter Test Fixture Asset | `keep` | Unit test expectations for adapter constants, macros, and settings handling. |
+| `crates/wright-analyzer/tests/fixtures/*.json` (8 files) | Analyzer Test Fixture Asset | `keep` | Pinned semantic analysis test payloads for lint rule validation (`duplicate-condition`, `expensive-loop`, `repeated-value-*`, `while-without-wait-*`). |
+| `scenarios/*.json` (7 files) | E-Level Scenario Manifest Asset | `keep` | Executable semantic scenario manifests (`arrays.json`, `control-flow.json`, `events.json`, `loops.json`, `subroutines.json`, `variables.json`, `waits.json`) for `scripts/run-scenarios.py`. |
+
+### 4. Trashed / Deleted Historical Artifacts
+
+These superseded milestone snapshots, completed pilot reports, and intermediate
+verification files were safely removed from `main` using `trash`. Their full
+contents and execution evidence remain permanently preserved in Git history
+and their referenced GitHub issues.
+
+| Previous Asset Path | Document Class | Action | Rationale for Removal from `main` |
+| --- | --- | --- | --- |
+| `docs/agent-team-pilot-80.md` | Completed Pilot Report | `delete` | Grok agent-team pilot execution report; completed and recorded in issue #80. Durable conclusions folded into `docs/agent-team.md`. |
+| `docs/agent-team-pilot-m10-acceptance.md` | Completed Pilot Report | `delete` | OpenCode agent-team pilot acceptance report; completed and recorded in issue #27. Durable conclusions folded into `docs/agent-team.md`. |
+| `docs/m12-issue98-verification.md` | Completed QA Report | `delete` | Point-in-time QA verification report for issue #98 (`wright lint`); completed and permanently recorded in GitHub issue #98. |
+| `docs/m12-issue99-evidence-review.md` | Point-in-Time Evidence Review | `delete` | Pre-spec evidence review for issue #99; superseded by `docs/specs/SPEC-99-stability-rules.md` and recorded in issue #99. |
+| `docs/opy/m11-gap-inventory.json` | Milestone Snapshot Data | `delete` | Initial M11 parity gap inventory; superseded by ADR-0008 tooling-first rebaseline and `docs/v1-matrix.md`. |
+| `docs/opy/m11-gap-inventory.md` | Milestone Snapshot Document | `delete` | Initial M11 parity gap inventory narrative; superseded by ADR-0008 and `docs/opy/support-matrix.md`. |
+| `docs/opy/m11-inventory-reassessment.md` | Milestone Triage Document | `delete` | Mid-M11 reassessment report; superseded by ADR-0008. |
+| `docs/opy/m11-inventory-rebaseline.md` | Milestone Triage Document | `delete` | Mid-M11 rebaseline proposal; superseded by ADR-0008. |
+| `docs/opy/m11-inventory-post86.md` | Milestone Triage Document | `delete` | Post-issue #86 triage snapshot; superseded by ADR-0008. |
+| `docs/opy/m11-inventory-final.md` | Milestone Triage Document | `delete` | Final M11 triage inventory; conclusions codified in ADR-0008 and `docs/v1-matrix.md`. |
+| `docs/opy/m11-issue86-verification.md` | Completed Verification Report | `delete` | Verification report for settings implementation (issue #86); recorded in issue #86. |
+| `docs/opy/m11-issue87-verification.md` | Completed Verification Report | `delete` | Verification report for arithmetic operators (issue #87); recorded in issue #87. |
+| `docs/opy/m11-oracle-version-investigation.md` | Completed Investigation Report | `delete` | Track B oracle version investigation; conclusions codified in ADR-0007 and issue #82. |
+| `docs/opy/m11-settings-boundary-investigation.md` | Completed Investigation Report | `delete` | Investigation on settings boundary; conclusions codified in issue #86 and `docs/opy/support-matrix.md`. |
+| `docs/opy/m11-settings-design-constraints.md` | Design Investigation Notes | `delete` | Temporary design notes; implemented in `crates/wright-opy` and `docs/opy/support-matrix.md`. |
+| `docs/opy/m11-settings-free-candidates.md` | Point-in-Time Triage Notes | `delete` | Candidate triage list; completed in issue #86. |

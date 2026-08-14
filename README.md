@@ -48,25 +48,50 @@ surfaces alongside compiler code generation.
 
 ---
 
-## Ecosystem Compatibility
+## Ecosystem Compatibility and Conversion
 
-Wright implements native semantic frontends while maintaining compatibility
-with the existing ecosystem:
+Wright is designed as a multi-frontend semantic platform for the Overwatch
+Workshop ecosystem, with Vanilla Workshop text as the canonical
+interoperability boundary.
 
-- **Workshop Target**: Vanilla Overwatch Workshop text is Wright's canonical
-  target and interoperability layer.
-- **`.opy` Frontend**: Native parser and preprocessor supporting includes,
-  defines, macros, enums, custom-game-settings blocks, and language constructs
-  documented in the [OPY Support Matrix](docs/opy/support-matrix.md).
-- **Four-Level Verification**: Compatibility is measured under the S/D/N/E
-  framework:
-  - **S (Syntax)**: Agrees on accepting valid inputs and rejecting unsupported syntax.
-  - **D (Diagnostics)**: Reports structured diagnostics and accurate source spans.
-  - **N (Normalized Output)**: Produces equivalent Workshop output under versioned normalization.
-  - **E (Observable Semantics)**: High-risk runtime semantics are verified against repeatable behavioral scenarios.
-- **Clean-Room Boundary**: Pinned reference oracles (such as OverPy 9.7.10)
-  serve purely as evaluation references and are completely isolated from
-  Wright's runtime code. See [Licensing Policy](docs/licensing.md).
+### High-Level Ecosystem Support
+
+| System | Role in Wright | Current Capabilities | Status & Support Boundary | Authority Contract |
+| --- | --- | --- | --- | --- |
+| **Vanilla Workshop** | Canonical target and interoperability layer | Native parser, localized catalog (`catalog.json`), validation, and deterministic emitter (`wright-workshop`). Supports rules, actions, values, events, enums, variables, subroutines, and custom-game-settings emission. | Supported (`en-US` baseline; data-driven localization extensible) | [`docs/workshop/support-matrix.md`](docs/workshop/support-matrix.md) |
+| **OPY / OverPy** | Native compatible semantic frontend | Native Rust parser (`wright-opy`), preprocessor (`#!include`, `#!define`), macro expansion, declarations, expressions, enums, custom-game-settings (JSONC blocks), lowering to Wright HIR and Workshop IR. Pinned `overpy@9.7.10` acts strictly as an external compatibility oracle under clean-room isolation. | Supported (corpus-evidenced native compiler and tooling) | [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md), [`docs/licensing.md`](docs/licensing.md) |
+| **OSTW (Overwatch Script To Workshop)** | Future first-class compatible semantic frontend | Planned OSTW frontend mapping into Wright HIR/WIR for standalone compilation, linting, analysis, and language services. Upstream OSTW language tools will serve as compatibility references without introducing runtime dependencies. | Planned (introduced via future evidence-backed milestone per ADR-0008) | [`docs/architecture.md`](docs/architecture.md), [`docs/adr/0008-tooling-first-semantic-platform.md`](docs/adr/0008-tooling-first-semantic-platform.md) |
+
+### Conversion Matrix
+
+Workshop is the canonical hub for cross-language conversion. The required
+long-term conversion directions are:
+
+```text
+OPY      → Workshop   (Supported: native wright-opy → HIR → WIR → wright-workshop)
+OSTW     → Workshop   (Planned: future wright-ostw → HIR → WIR → wright-workshop)
+Workshop → OPY        (Planned: decompilation / translation via canonical WIR)
+Workshop → OSTW       (Planned: translation via canonical WIR)
+Workshop → Workshop   (Supported: localized catalog parse → canonical WIR → deterministic emit)
+```
+
+Direct OPY ↔ OSTW source translation is an optional side path and does not
+drive core architecture.
+
+### Four-Level Verification Model
+
+Compiler compatibility is rigorously measured under the S/D/N/E framework:
+
+- **S (Syntax)**: Agrees on accepting valid inputs and rejecting unsupported syntax across the corpus.
+- **D (Diagnostics)**: Reports structured diagnostic categories, codes, and accurate source spans for diagnosed inputs.
+- **N (Normalized Output)**: Produces equivalent Workshop output under versioned normalization.
+- **E (Observable Semantics)**: High-risk runtime semantics are verified against repeatable behavioral scenarios.
+
+> **Semantic Priority ([ADR-0008](docs/adr/0008-tooling-first-semantic-platform.md)):**
+> Observable semantics and valid Workshop syntax outrank byte-identical text formatting:
+> `E (semantics) > D (diagnostics) > S (syntax) > N (text output)`. Clean-room licensing
+> boundaries isolate external evaluation oracles from Wright runtime code
+> ([`docs/licensing.md`](docs/licensing.md)).
 
 ---
 
