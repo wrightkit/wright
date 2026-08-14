@@ -8,6 +8,7 @@
 //! without changing callers. Every workflow returns a typed [`Envelope`]
 //! whose JSON serialization is the machine-readable CLI contract.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use wright_analyzer::registry::LintConfig;
@@ -292,7 +293,8 @@ impl CompilerSession {
             }
         };
         let program = service_response(&service, &Request::Program);
-        let findings = service_response(&service, &Request::GetFindings);
+        let mut findings = service_response(&service, &Request::GetFindings);
+        resolve_finding_span_paths(&mut findings, &loaded);
         self.finish(command, AnalyzeResult { program, findings })
     }
 
@@ -369,7 +371,7 @@ impl CompilerSession {
         let program = service_response(&service, &Request::Program);
         let lint_rules = service_response(&service, &Request::LintRules);
         let mut findings = service_response(&service, &Request::GetFindings);
-        enrich_finding_spans(&mut findings, &loaded);
+        resolve_finding_span_paths(&mut findings, &loaded);
         let (rules, config) = match lint_rules {
             serde_json::Value::Object(mut object) => (
                 object
@@ -497,12 +499,15 @@ fn span_from_json(value: Option<&serde_json::Value>) -> Option<SourceSpan> {
     })
 }
 
-/// Add the resolved `path` to every lint finding span.
+/// Add the resolved `path` to every finding span.
 ///
-/// File 0 is the main input and carries its resolved display path; other
-/// files are named `<file N>` (matching the [`span_from_json`] convention),
-/// so lint output preserves original source identity where available.
-fn enrich_finding_spans(findings: &mut serde_json::Value, loaded: &Loaded) {
+/// File 0 is the main input and resolves root-relative to the include root
+/// (`--root`, defaulting to the input's directory); other files resolve from
+/// the program file registry, joined with the root when the registry path is
+/// relative. `<file N>` is the fallback when no registry entry resolves
+/// (matching the [`span_from_json`] convention), and stdin inputs fall back
+/// to their display identity (`<stdin>`).
+pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loaded: &Loaded) {
     let Some(list) = findings.as_array_mut() else {
         return;
     };
@@ -518,13 +523,48 @@ fn enrich_finding_spans(findings: &mut serde_json::Value, loaded: &Loaded) {
             .and_then(serde_json::Value::as_u64)
             .map(|file| {
                 if file == 0 {
-                    loaded.input.display.clone()
+                    root_relative(loaded.input.path.as_deref(), &loaded.input.root)
+                        .unwrap_or_else(|| loaded.input.display.clone())
                 } else {
-                    format!("<file {file}>")
+                    loaded
+                        .program
+                        .files
+                        .get(wright_ir::source::FileId::from_index(file as usize))
+                        .map(|source_file| {
+                            root_relative(
+                                Some(&loaded.input.root.join(&source_file.path)),
+                                &loaded.input.root,
+                            )
+                            .unwrap_or_else(|| format!("<file {file}>"))
+                        })
+                        .unwrap_or_else(|| format!("<file {file}>"))
                 }
             })
             .unwrap_or_else(|| loaded.input.display.clone());
         span["path"] = serde_json::Value::String(path);
+    }
+}
+
+/// The root-relative form of `path` when it sits under `root`.
+///
+/// `canonicalize` makes both paths absolute and resolves symlinks, so
+/// absolute, relative, and cwd-relative spellings of the same file all
+/// produce the same root-relative result. Returns `None` when there is no
+/// path (stdin) or the path is not under the root.
+fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
+    let path = path?;
+    let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // A single-component relative input (`loop.opy`) has an empty parent, so
+    // the resolved root is the empty path; canonicalizing it fails, so treat
+    // it as the cwd (its directory by definition).
+    let abs_root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(_) if root.as_os_str().is_empty() => std::env::current_dir().ok()?,
+        Err(_) => root.to_path_buf(),
+    };
+    match abs_path.strip_prefix(&abs_root) {
+        Ok(relative) if !relative.as_os_str().is_empty() => Some(relative.display().to_string()),
+        _ => None,
     }
 }
 

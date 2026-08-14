@@ -69,6 +69,31 @@ fn temp_dir() -> PathBuf {
     dir
 }
 
+/// The path of `path` expressed relative to the process cwd, so a test can
+/// address the same file through a relative spelling (as a shell would) and
+/// prove input-spelling independence without changing the cwd.
+fn cwd_relative(path: &Path) -> PathBuf {
+    let cwd = std::env::current_dir().expect("cwd is readable");
+    let mut path_parts = path.components().peekable();
+    let mut cwd_parts = cwd.components().peekable();
+    while let (Some(path_component), Some(cwd_component)) = (path_parts.peek(), cwd_parts.peek()) {
+        if path_component == cwd_component {
+            path_parts.next();
+            cwd_parts.next();
+        } else {
+            break;
+        }
+    }
+    let mut out = PathBuf::new();
+    for _ in cwd_parts {
+        out.push("..");
+    }
+    for component in path_parts {
+        out.push(component);
+    }
+    out
+}
+
 fn workshop_session(text: &str) -> CompilerSession {
     let path = temp_file("program.txt", text);
     CompilerSession::new(SessionConfig::from_path(path)).unwrap()
@@ -173,11 +198,92 @@ fn workshop_lint_reports_structured_findings_rules_and_config() {
     );
     let span = min_wait["span"].as_object().expect("findings carry spans");
     assert_eq!(
-        span["path"],
-        path.display().to_string(),
-        "file-0 spans carry the resolved input display path"
+        span["path"], "flow.txt",
+        "file-0 spans resolve root-relative to the include root, not the display path"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn analyze_findings_carry_the_same_span_path_as_lint() {
+    // The issue's core acceptance (#102): for the same source location,
+    // `analyze` and `lint` findings carry the identical `span.path`.
+    let text = corpus_workshop_text("synthetic/control-flow");
+    let path = temp_file("flow.txt", &text);
+    let mut analyze_session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
+    let analyze = analyze_session.analyze();
+    assert!(analyze.ok, "analyze: {:?}", analyze.diagnostics);
+    let mut lint_session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
+    let lint = lint_session.lint();
+    assert!(lint.ok, "lint: {:?}", lint.diagnostics);
+    let analyze_findings = analyze.result.findings.as_array().unwrap();
+    let lint_findings = lint.result.findings.as_array().unwrap();
+    assert!(
+        !analyze_findings.is_empty(),
+        "control-flow produces findings"
+    );
+    assert_eq!(analyze_findings.len(), lint_findings.len());
+    for (analyzed, linted) in analyze_findings.iter().zip(lint_findings) {
+        assert_eq!(
+            analyzed["span"]["path"], linted["span"]["path"],
+            "analyze and lint must report the same span.path for the same finding"
+        );
+    }
+    assert_eq!(
+        analyze_findings[0]["span"]["path"], "flow.txt",
+        "the shared path is the root-relative file name"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn span_path_is_consistent_across_input_spellings() {
+    // The issue's inconsistency (#102): an absolute input collapsed to the
+    // basename while a relative input kept the path as given. Both spellings
+    // of the same file must resolve to the same root-relative span.path, and
+    // `analyze` must report the same value as `lint` (the issue's `rule
+    // "loop"` repro fires a min-wait-loop finding).
+    let dir = temp_dir();
+    let loop_source =
+        "rule \"loop\":\n    @Event eachPlayer\n    while (true):\n        wait(0.016)\n";
+    std::fs::write(dir.join("loop.opy"), loop_source).unwrap();
+    let absolute = dir.join("loop.opy");
+    let relative = cwd_relative(&absolute);
+
+    let mut abs_session = CompilerSession::new(SessionConfig::from_path(absolute.clone())).unwrap();
+    let abs_lint = abs_session.lint();
+    assert!(abs_lint.ok, "absolute lint: {:?}", abs_lint.diagnostics);
+    let mut rel_session = CompilerSession::new(SessionConfig::from_path(relative.clone())).unwrap();
+    let rel_lint = rel_session.lint();
+    assert!(rel_lint.ok, "relative lint: {:?}", rel_lint.diagnostics);
+    let mut analyze_session = CompilerSession::new(SessionConfig::from_path(absolute)).unwrap();
+    let analyze = analyze_session.analyze();
+    assert!(analyze.ok, "analyze: {:?}", analyze.diagnostics);
+
+    let abs_findings = abs_lint.result.findings.as_array().unwrap();
+    let rel_findings = rel_lint.result.findings.as_array().unwrap();
+    let analyze_findings = analyze.result.findings.as_array().unwrap();
+    assert!(!abs_findings.is_empty(), "loop.opy fires min-wait-loop");
+    assert_eq!(abs_findings.len(), rel_findings.len());
+    assert_eq!(abs_findings.len(), analyze_findings.len());
+    for (a, (b, c)) in abs_findings
+        .iter()
+        .zip(rel_findings.iter().zip(analyze_findings))
+    {
+        assert_eq!(
+            a["span"]["path"], "loop.opy",
+            "the absolute spelling resolves to the root-relative basename"
+        );
+        assert_eq!(
+            a["span"]["path"], b["span"]["path"],
+            "absolute and relative input spellings must agree"
+        );
+        assert_eq!(
+            a["span"]["path"], c["span"]["path"],
+            "lint and analyze must agree on the repro shape"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

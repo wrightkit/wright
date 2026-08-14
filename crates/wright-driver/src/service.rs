@@ -163,9 +163,7 @@ impl<'a> ToolService<'a> {
             ToolRequest::Cfg { rule } => {
                 self.semantic_query(wright_analyzer::service::Request::GetCfg { rule: *rule })
             }
-            ToolRequest::Findings => {
-                self.semantic_query(wright_analyzer::service::Request::GetFindings)
-            }
+            ToolRequest::Findings => self.findings(),
             ToolRequest::Lint => self.lint(),
             ToolRequest::LintRules => self.semantic_query_with_config(
                 wright_analyzer::service::Request::LintRules,
@@ -207,6 +205,22 @@ impl<'a> ToolService<'a> {
                 code: code.to_string(),
                 message,
             },
+        }
+    }
+
+    /// `findings`: every static-analysis finding with resolved span paths.
+    ///
+    /// The tool/agent surface resolves `span.path` exactly like the CLI
+    /// `analyze`/`lint` workflows, so one file identity holds per finding
+    /// across every surface (#102).
+    fn findings(&self) -> ToolResponse {
+        let response = self.semantic_query(wright_analyzer::service::Request::GetFindings);
+        match response {
+            ToolResponse::Ok { mut result } => {
+                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
+                ToolResponse::Ok { result }
+            }
+            other => other,
         }
     }
 
@@ -264,11 +278,12 @@ impl<'a> ToolService<'a> {
                     wright_analyzer::service::Response::Ok { result } => result,
                     wright_analyzer::service::Response::Error { .. } => serde_json::json!({}),
                 };
-                let findings = match service.handle(&wright_analyzer::service::Request::GetFindings)
-                {
-                    wright_analyzer::service::Response::Ok { result } => result,
-                    wright_analyzer::service::Response::Error { .. } => serde_json::json!([]),
-                };
+                let mut findings =
+                    match service.handle(&wright_analyzer::service::Request::GetFindings) {
+                        wright_analyzer::service::Response::Ok { result } => result,
+                        wright_analyzer::service::Response::Error { .. } => serde_json::json!([]),
+                    };
+                crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
                 self.ok(json!({
                     "inputIdentity": self.loaded.input.identity,
                     "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),

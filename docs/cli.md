@@ -155,6 +155,14 @@ Analysis findings (`analyze`, `lint`, and the tool/agent `getFindings`/`lint`
 responses) carry an `evidence` field classifying how strongly the finding is
 supported (`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
 
+Finding spans carry a machine-readable `path` resolved root-relative to the
+input include root (`--root`, defaulting to the input's directory): file 0 is
+the main input, and additional files in a multi-file program resolve from the
+program file registry. The same source location therefore reports the same
+`path` across `analyze`, `lint`, and the tool/agent `Findings`/`Lint` surfaces
+regardless of how the input was spelled (absolute, relative, or
+cwd-relative); stdin inputs report `<stdin>`.
+
 `while-without-wait` findings additionally carry a machine-readable
 `boundedness` field (`obviously-unbounded` | `statically-bounded` | `unknown`)
 classifying the no-yield loop's repetition evidence, and their severity is

@@ -137,3 +137,31 @@ fn invalid_rule_id_returns_structured_error() {
         ToolResponse::Error { error } => assert_eq!(error.code, "invalid-id"),
     }
 }
+
+#[test]
+fn findings_and_lint_requests_resolve_span_paths() {
+    // The tool/agent surfaces resolve finding spans exactly like the CLI
+    // workflows (#102): `Findings` and `Lint` responses carry a non-empty,
+    // root-relative `path` on every finding, and both surfaces agree.
+    let service = service_for("synthetic/control-flow");
+    let findings = handle_ok(&service, &ToolRequest::Findings);
+    let findings_list = findings.as_array().unwrap();
+    assert!(!findings_list.is_empty(), "control-flow produces findings");
+    for finding in findings_list {
+        let path = finding["span"]["path"].as_str().unwrap_or_default();
+        assert!(!path.is_empty(), "Findings spans carry a resolved path");
+        assert_eq!(
+            path, "source.opy",
+            "the path is the root-relative file name"
+        );
+    }
+    let lint = handle_ok(&service, &ToolRequest::Lint);
+    let lint_findings = lint["findings"].as_array().unwrap();
+    assert_eq!(lint_findings.len(), findings_list.len());
+    for (found, linted) in findings_list.iter().zip(lint_findings) {
+        assert_eq!(
+            found["span"]["path"], linted["span"]["path"],
+            "Findings and Lint must agree on span.path"
+        );
+    }
+}

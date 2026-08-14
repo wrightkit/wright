@@ -43,6 +43,18 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
     path
 }
 
+fn temp_dir() -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wright-cli-dir-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 fn run(args: &[&str]) -> std::process::Output {
     Command::new(wright())
         .args(args)
@@ -176,6 +188,10 @@ fn analyze_over_workshop_input_reports_findings_with_spans() {
     );
     for finding in findings {
         assert!(finding["span"].is_object(), "findings carry spans");
+        let path = finding["span"]["path"]
+            .as_str()
+            .expect("findings carry a resolved span path");
+        assert!(!path.is_empty(), "the resolved span path is non-empty");
     }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -242,6 +258,104 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
         5
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn span_path_is_consistent_across_input_spellings() {
+    // The issue's repro (#102): lint resolves the same root-relative
+    // `span.path` for the absolute, bare-name (cwd), and dir-relative
+    // spellings of the same file, and `analyze` reports the identical value.
+    // Each subprocess gets its own cwd, so the bare-name spelling is
+    // exercised end-to-end exactly as in the issue.
+    let dir = temp_dir();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(
+        dir.join("sub").join("loop.opy"),
+        "rule \"loop\":\n    @Event eachPlayer\n    while (true):\n        wait(0.016)\n",
+    )
+    .unwrap();
+
+    let absolute = run(&[
+        "lint",
+        dir.join("sub").join("loop.opy").to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(
+        absolute.status.success(),
+        "{}",
+        String::from_utf8_lossy(&absolute.stderr)
+    );
+    let absolute_path = parse_json(&absolute.stdout)["result"]["findings"][0]["span"]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let bare = Command::new(wright())
+        .args(["lint", "loop.opy", "-f", "json"])
+        .current_dir(dir.join("sub"))
+        .stdin(Stdio::null())
+        .output()
+        .expect("wright runs");
+    assert!(
+        bare.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bare.stderr)
+    );
+    let bare_path = parse_json(&bare.stdout)["result"]["findings"][0]["span"]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let relative = Command::new(wright())
+        .args(["lint", "sub/loop.opy", "-f", "json"])
+        .current_dir(&dir)
+        .stdin(Stdio::null())
+        .output()
+        .expect("wright runs");
+    assert!(
+        relative.status.success(),
+        "{}",
+        String::from_utf8_lossy(&relative.stderr)
+    );
+    let relative_path = parse_json(&relative.stdout)["result"]["findings"][0]["span"]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let analyze = Command::new(wright())
+        .args(["analyze", "loop.opy", "-f", "json"])
+        .current_dir(dir.join("sub"))
+        .stdin(Stdio::null())
+        .output()
+        .expect("wright runs");
+    assert!(
+        analyze.status.success(),
+        "{}",
+        String::from_utf8_lossy(&analyze.stderr)
+    );
+    let analyze_path = parse_json(&analyze.stdout)["result"]["findings"][0]["span"]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        absolute_path, "loop.opy",
+        "the absolute spelling resolves to the root-relative basename"
+    );
+    assert_eq!(
+        bare_path, absolute_path,
+        "the bare-name (cwd) spelling must agree with the absolute spelling"
+    );
+    assert_eq!(
+        relative_path, absolute_path,
+        "the dir-relative spelling must agree with the absolute spelling"
+    );
+    assert_eq!(
+        analyze_path, absolute_path,
+        "analyze must report the same span.path as lint"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
