@@ -226,3 +226,49 @@ Recorded as an **N-level row only** (`target/m11-nlevel.json`:
 native==adapter HIR subtree assertion for pixelart was not verified and is
 not covered by the differential harness — per AC-9 the row stays N-level,
 and no parity count is forced).
+
+---
+
+## #87 final-batch closure record (AC-1..AC-14) at `8182959` — dated 2026-08-14
+
+Final batch `c8e3430` (numeric source-spelling preservation) + `f71bc4a`
+(non-zero numeric initializers) + `1841452` (trailing-if End omission,
+constant-format folding, ws parser acceptance) + `8182959` (corpus count);
+CI run 31770753398 — all six jobs success, no skips, headSha `8182959`.
+All evidence re-derived; the earlier closure section is superseded where
+this section differs.
+
+| AC | Verdict | Evidence (re-derived at 8182959) |
+| --- | --- | --- |
+| AC-1 (string-array Custom String wrapping) | PASS | repro byte-equal; byte-asserted driver test green |
+| AC-2 (pixelart full-program) | PASS | `normalizedEqual: True`, 19,925/19,925; native exit 0 |
+| AC-3 (contexts unchanged) | PASS | v1-gates 6/6; 7 settings sections equal (256/350/511/297/136/144/476); emitter/roundtrip suites green |
+| AC-4 (matrix unchanged) | PASS | 12-program first-failure matrix unchanged; oracle 21/21; adapter 23/23; differential green (PARITY_CASES 8, no pixelart/real-world settings rows); all cargo suites green; clippy 0; fmt clean |
+| AC-5 (inventory) | PASS | this document + `m11-inventory-final.md` |
+| AC-6..AC-10 (split/re-escape/empty-rule/ws roundtrip) | PASS | split basis (125+`{0}`, >128 trigger), re-escape matrix (tab raw), empty-rule drop — all byte-equal, roundtripping |
+| AC-11 (numeric initializers) | PASS | `j = 5` → `Set Global Variable(j, 5)`; `h = 0` dropped; `k = 0.0` → `Set Global Variable(k, 0.0)` (source spelling); `playervar p = 7` → separate player-initialize rule; artifact byte-equal; bare-index form still works; support-matrix claim corrected |
+| AC-12 (trailing-if) | PASS | repros a–d byte-equal; oracle's trailing-If spelling accepted by the native ws parser; roundtrip fixed-point green |
+| AC-13 (format folding) | PASS with residual | constant folding (single/multi-arg, `0.50`/`0.13` toFixed(2) spelling) byte-equal; variable-arg residual below |
+| AC-14 (no new class-3 / final scan) | FAIL | the final scan surfaced the playervar-read divergence (below) |
+
+### Residuals and findings at `8182959`
+
+1. **Variable-arg format placeholder `{}` vs `{0}` (class 3, emission-only,
+   corpus-unexercised)** — native `Custom String("v: {}", Global.x)` vs
+   oracle `Custom String("v: {0}", Global.x)`; HIR carries `{}` in both
+   producers; every corpus `.format` site is HUD-collapsed or in a
+   non-compiling program. Low-to-moderate severity (client behavior on
+   bare `{}` unverifiable).
+2. **Playervar member reads in value positions (class 3, new from the
+   final scan)** — `g = eventPlayer.p` → native `Event Player.p` vs oracle
+   `(Event Player).p`; **both spellings fail the native ws parser**, so the
+   native's own emission does not round-trip for this construct. Zero
+   corpus coverage (no fixture reads a playervar). Pre-existing emission
+   behavior, surfaced by the final scan.
+
+### Pixelart row
+
+N-level row only (`target/m11-nlevel.json`: `nativeExit: 0`,
+`normalizedEqual: true`); no `PARITY_CASES` row; the native==adapter HIR
+subtree assertion for pixelart remains unverified (per AC-9 the row stays
+N-level; no parity count forced).

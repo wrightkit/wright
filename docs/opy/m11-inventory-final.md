@@ -155,3 +155,118 @@ The `for ... in` header remains the only supported `in` form.
    PARITY_CASES rows, all cargo suites green, clippy 0 warnings, fmt
    clean, CI 6/6).
 6. No parity count was forced at any point (AC-8/AC-9 respected).
+
+---
+
+## Final batch verification (AC-11..AC-14) at `8182959` — dated 2026-08-14
+
+Independent verification of the final #87 batch (`c8e3430` + `f71bc4a` +
+`1841452` + `8182959`; CI run 31770753398, six jobs success, headSha
+`8182959`). This section supersedes the "New findings" section above for
+items 1–3 (numeric initializers, trailing-if, format folding are fixed);
+the residual assessment below stands.
+
+### AC-11 — numeric initializers: **PASS**
+
+Repro `globalvar j = 5`, `h = 0`, `k = 0.0`, `playervar p = 7` + one rule,
+**byte-equal** native vs pinned oracle:
+- `j = 5` → `Set Global Variable(j, 5)` in "Initialize global variables";
+- `h = 0` → dropped (integer-0 default);
+- `k = 0.0` → `Set Global Variable(k, 0.0)` — source spelling preserved;
+- `playervar p = 7` → separate "Initialize player variables" rule with
+  `Set Player Variable(Event Player, p, 7)`.
+The bare-index form `globalvar name <index>` still works (byte-equal
+repro). The support-matrix claim is **corrected** (`git diff a87b0ec..HEAD
+-- docs/opy/support-matrix.md`): "integer-`0` literal initializers are
+dropped from HIR (matching the reference adapter); non-zero and
+non-integer numeric initializers are preserved, e.g. `j = 5` and `k = 0.0`
+keep the source spelling through emission". New parity fixture
+`synthetic/declarations-numbers` added.
+
+### AC-12 — trailing-if `End;`: **PASS**
+
+All four repros byte-equal to the oracle: (a) rule-final `if`;
+(b) rule-final `if`/`else`; (c) `if` inside a rule-final `for` and `while`;
+(d) middle-of-rule `if`. The oracle's trailing-`If`-without-`End` spelling
+is now **accepted by the native ws parser** (previously rejected), and the
+roundtrip fixed-point tests are green.
+
+### AC-13 — format constant folding: **PASS with one residual (below)**
+
+- `"value: {0}".format(3)` → `Custom String("value: 3")`;
+- multi-arg `"a{0}b{1}".format(1, 2)` → `Custom String("a1b2")`;
+- `"{0}".format(0.5)` → `Custom String("0.50")` and `.format(0.125)` →
+  `Custom String("0.13")` (JS `toFixed(2)` spelling) — all byte-equal;
+- variable-argument formats: byte-equal in structure but with the
+  placeholder spelling residual below.
+
+### Residual assessment (the Engineer-flagged item, verified)
+
+**Variable-arg format placeholder canonicalization — `{}` vs `{0}`**
+(`"v: {}".format(x)`): native emits `Custom String("v: {}", Global.x)`;
+the oracle rewrites the placeholder to `Custom String("v: {0}", Global.x)`.
+
+- (a) **Classification: class 3** (supported-surface N divergence with a
+  repro). `"text".format(args)` → HIR `Format` is matrix-listed; the
+  oracle success is established; no Wright doc records the `{0}`
+  canonicalization as an intentional difference (not class 5); the
+  evidence is complete (not class 6). Scope: **emission-only** — the HIR
+  format text carries `{}` in both producers (verified in the
+  expressions-values adapter fixture), so the differential is unaffected
+  and the divergence is masked by the v1 normalizer wherever the format
+  lands in a HUD-collapsed position.
+- (b) **Corpus exercise: none in any achieved artifact.** Every `.format`
+  site in the corpus is either in a HUD position (print / createInWorldText
+  / bigMessage / smallMessage / setObjectiveDescription /
+  progressBarHud — collapsed by the v1 normalizer) or in a program that
+  does not compile (parabola 35:37, meipocalypse 223:37, cronch 32:21,
+  broken-weapons 53:55). No gate fixture has a non-HUD format; pixelart
+  has no `.format` at all.
+- (c) Severity: at minimum an N-level spelling divergence; the Workshop
+  client's handling of a bare `{}` placeholder is unverifiable here, and
+  the pinned reference's canonical form is `{0}` — so the severity is
+  low-to-moderate, functionally unproven.
+
+### Final-scan finding (beyond the assessed residual)
+
+The combined supported-surface scan (numeric inits + trailing if + folded
+format + strings + playervar read) surfaced **one additional divergence**:
+**playervar member reads in value positions** — `g = eventPlayer.p` emits
+native `Set Global Variable(g, Event Player.p)` vs oracle
+`Set Global Variable(g, (Event Player).p)`. **Both spellings fail the
+native ws parser** ("expected ')'" for the bare form, "expected an
+identifier" for the parenthesized form), i.e. the native's own emission
+does not round-trip for this construct, and the oracle's canonical spelling
+is likewise unparseable. The construct is matrix-listed
+(`eventPlayer.member` → `PlayerVar`) and has **zero corpus coverage** (no
+fixture reads a playervar in a value position; only the SET form in
+declarations-rules and method calls exist). **Classification: class 3** —
+supported surface, oracle success, emission divergence + self-roundtrip
+breakage, no documented intent, no coverage. Pre-existing (the PlayerVar
+value rendering predates this batch); surfaced by the final scan, not by
+the earlier scans.
+
+### Parity baseline at `8182959`
+
+- v1-gates: 6/6, `FIXTURES` unchanged.
+- `PARITY_CASES`: **8 rows** (5 synthetic + `synthetic/settings` +
+  `synthetic/declarations-numbers` + real-world/overpy-cake); no pixelart
+  row, no real-world settings row.
+- Oracle corpus: 21/21 (declarations-numbers added); adapter suite 23/23.
+- Pixelart: full-program **N-level row** (`normalizedEqual: true`,
+  19,925/19,925) — re-verified at `8182959`.
+
+### Gate readiness after the final batch
+
+- **Fixed by this batch**: numeric initializers (AC-11), trailing-if
+  `End;` (AC-12), format constant folding (AC-13); the support-matrix
+  claim corrected; the 12-program first-failure matrix unchanged; all
+  suites green (oracle 21/21, adapter 23/23, differential green, all
+  cargo suites, clippy 0, fmt clean).
+- **Still open (class 3)**: (1) variable-arg format placeholder
+  canonicalization `{}`→`{0}` (emission-only, corpus-unexercised);
+  (2) playervar member reads in value positions (emission divergence +
+  native self-roundtrip breakage, corpus-unexercised). Both need a
+  remediation decision (or a documented intentional difference) before
+  the #82 final gate; neither changes the first-failure matrix or the
+  parity rows.
