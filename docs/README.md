@@ -38,8 +38,9 @@ feature or contract evolves, its living document is updated directly:
 - **Release & Distribution**: [`release.md`](release.md) — Binary packaging, checksum verification, GitHub Releases automation.
 - **Agent Team Coordination**: [`agent-team.md`](agent-team.md) — Multi-role governance, authority ordering, and blocked states.
 - **Compatibility Planning & Reference**:
-  - [Upstream / Reference Inventory](compatibility/upstream-references.md) — Centralized pinned-reference provenance (OverPy 9.7.10 now, OSTW later).
+  - [Upstream / Reference Inventory](compatibility/upstream-references.md) — Centralized pinned-reference provenance (OverPy 9.7.10, OSTW v3.4.0 proposed).
   - [Proactive OPY Compatibility Baseline](opy/compatibility-baseline.md) — Tiered inventory of the OPY surface by semantic category and support dimension.
+  - [Proactive OSTW Compatibility Baseline](ostw/compatibility-baseline.md) — OSTW reference/corpus/support investigation (#113): tiered inventory, corpus plan, oracle feasibility, reuse findings, proposed M13 decomposition.
   - [OPY Semantic Compatibility Manifest Spec](opy/compat-manifest-spec.md) — Machine-readable compatibility contract for builtins, signatures, enums, aliases.
 - **Language Support Matrices**:
   - [`.opy` Support Matrix](opy/support-matrix.md) — Supported syntax, declarations, expressions, settings, diagnostics.
@@ -123,7 +124,8 @@ JSON document asset, and historical artifact across the repository.
 | `docs/opy/support-matrix.md` | Living Durable Contract | `update` | Removed stale M7 framing; updated native `.opy` parser, settings, and preprocessing supported surfaces. |
 | `docs/workshop/support-matrix.md` | Living Durable Contract | `update` | Removed stale M5 framing; updated evidenced Workshop syntax, enums, and localization contracts. |
 | `docs/workshop/catalog-pipeline.md` | Living Durable Contract | `update` | Removed milestone framing; documents deterministic catalog generation and schema validation pipeline. |
-| `docs/compatibility/upstream-references.md` | Living Durable Contract | `new` | Centralized upstream/reference inventory per #106: pinned OverPy 9.7.10 identity, license/provenance, oracle role, reference limitations; OSTW extension point. |
+| `docs/compatibility/upstream-references.md` | Living Durable Contract | `update` | Centralized upstream/reference inventory per #106/#113: pinned OverPy 9.7.10 identity and durable OSTW reference entry (repository, proposed `v3.4.0` pin, unlicensed-compiler/MIT-extension license facts, oracle paths, limitations). |
+| `docs/ostw/compatibility-baseline.md` | Living Durable Contract | `new` | OSTW reference/corpus/support investigation per #113: upstream architecture map, tiered semantic category inventory, corpus/acquisition plan (MOBAwatch, protect-ban), oracle feasibility report, architecture reuse/boundary findings, proposed bounded M13 decomposition pending PM review. |
 | `docs/opy/compatibility-baseline.md` | Living Durable Contract | `new` | Tiered proactive OPY compatibility baseline per #106: semantic-category inventory, support dimensions, classified #104/#105 residual evidence. |
 | `docs/opy/compat-manifest-spec.md` | Living Durable Contract | `new` | Specification for the machine-readable Wright-owned OPY semantic compatibility manifest (builtins, signatures, enum domains, aliases); implementation deferred to a bounded child issue. |
 | `docs/hir/opy-hir-v1.md` | Living Protocol Specification | `update` | Updated relative links to `docs/`; documents Opy HIR v1 JSON protocol schema and versioning. |
