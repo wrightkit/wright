@@ -17,11 +17,11 @@ agents.
 
 Creating and maintaining complex Overwatch Workshop scripts requires reliable
 compilation, semantic validation, and modern developer tooling. Wright delivers
-an independent, standalone toolchain that does not rely on Node.js or Python
-runtimes for core compilation and analysis.
+an independent, standalone Rust toolchain with zero runtime dependencies (requiring
+neither Node.js, .NET, nor external interpreters) for core compilation and analysis.
 
-Wright treats developer tooling — linting, diagnostics, semantic queries,
-editor assistance, and safe source transformations — as first-class product
+Wright treats developer tooling (linting, diagnostics, semantic queries,
+editor assistance, and safe source transformations) as first-class product
 surfaces alongside compiler code generation.
 
 ---
@@ -199,22 +199,22 @@ Full architectural specifications, API references, and policy contracts are
 indexed in [`docs/README.md`](docs/README.md):
 
 - **Architecture & Design**:
-  - [System Architecture](docs/architecture.md) — Module boundaries, responsibilities, and data flow.
-  - [Architecture Decision Records (ADRs)](docs/adr/README.md) — Recorded architectural decisions and historical context.
+  - [System Architecture](docs/architecture.md): Module boundaries, responsibilities, and data flow.
+  - [Architecture Decision Records (ADRs)](docs/adr/README.md): Recorded architectural decisions and historical context.
 - **Contracts & Interfaces**:
-  - [CLI & Driver Contract](docs/cli.md) — Command interface, exit codes, and JSON result envelope.
-  - [Embedding & Tool API](docs/embedding.md) — Programmatic Rust API and session tool service.
-  - [Language Services & LSP](docs/language-services.md) — Editor language features and transport specifications.
-  - [Opy HIR v1 Protocol](docs/hir/opy-hir-v1.md) — Frontend interchange protocol.
+  - [CLI & Driver Contract](docs/cli.md): Command interface, exit codes, and JSON result envelope.
+  - [Embedding & Tool API](docs/embedding.md): Programmatic Rust API and session tool service.
+  - [Language Services & LSP](docs/language-services.md): Editor language features and transport specifications.
+  - [Opy HIR v1 Protocol](docs/hir/opy-hir-v1.md): Frontend interchange protocol.
 - **Compatibility & Standards**:
-  - [Compatibility Policy](docs/compatibility.md) — S/D/N/E verification methodology and release gates.
-  - [Compatibility Matrix](docs/v1-matrix.md) — Declared surfaces and release gate status.
-  - [OPY Support Matrix](docs/opy/support-matrix.md) — Supported `.opy` syntax and feature boundary.
-  - [Workshop Support Matrix](docs/workshop/support-matrix.md) — Evidenced Workshop actions, values, and enums.
+  - [Compatibility Policy](docs/compatibility.md): S/D/N/E verification methodology and release gates.
+  - [Compatibility Matrix](docs/v1-matrix.md): Declared surfaces and release gate status.
+  - [OPY Support Matrix](docs/opy/support-matrix.md): Supported `.opy` syntax and feature boundary.
+  - [Workshop Support Matrix](docs/workshop/support-matrix.md): Evidenced Workshop actions, values, and enums.
 - **Engineering & Operations**:
-  - [Licensing & Clean-Room Policy](docs/licensing.md) — Intellectual property boundary and clean-room development rules.
-  - [Release Process](docs/release.md) — Versioning scheme, CI packaging, and distribution gates.
-  - [Agent Team Contract](docs/agent-team.md) — Multi-agent collaboration protocol and decision governance.
+  - [Licensing & Clean-Room Policy](docs/licensing.md): Intellectual property boundary and clean-room development rules.
+  - [Release Process](docs/release.md): Versioning scheme, CI packaging, and distribution gates.
+  - [Agent Team Contract](docs/agent-team.md): Multi-agent collaboration protocol and decision governance.
 
 ---
 
