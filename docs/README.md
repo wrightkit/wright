@@ -37,6 +37,10 @@ feature or contract evolves, its living document is updated directly:
 - **Language Services & LSP**: [`language-services.md`](language-services.md) — Editor-neutral analysis, responsiveness contract, `wright-lsp`.
 - **Release & Distribution**: [`release.md`](release.md) — Binary packaging, checksum verification, GitHub Releases automation.
 - **Agent Team Coordination**: [`agent-team.md`](agent-team.md) — Multi-role governance, authority ordering, and blocked states.
+- **Compatibility Planning & Reference**:
+  - [Upstream / Reference Inventory](compatibility/upstream-references.md) — Centralized pinned-reference provenance (OverPy 9.7.10 now, OSTW later).
+  - [Proactive OPY Compatibility Baseline](opy/compatibility-baseline.md) — Tiered inventory of the OPY surface by semantic category and support dimension.
+  - [OPY Semantic Compatibility Manifest Spec](opy/compat-manifest-spec.md) — Machine-readable compatibility contract for builtins, signatures, enums, aliases.
 - **Language Support Matrices**:
   - [`.opy` Support Matrix](opy/support-matrix.md) — Supported syntax, declarations, expressions, settings, diagnostics.
   - [Workshop Support Matrix](workshop/support-matrix.md) — Evidenced actions, values, events, enums, localized catalog.
@@ -76,6 +80,7 @@ documents in `main`.
 | --- | --- | --- |
 | **System Architecture** | [`architecture.md`](architecture.md) | Component responsibilities, dependency direction, semantic model boundaries. |
 | **Compatibility Framework** | [`compatibility.md`](compatibility.md) | S/D/N/E levels, evaluation methodology, oracle boundaries. |
+| **Upstream References** | [`compatibility/upstream-references.md`](compatibility/upstream-references.md) | Pinned reference identity, license/provenance, oracle role, reference limitations. |
 | **Licensing Policy** | [`licensing.md`](licensing.md) | Clean-room development boundaries, third-party reference isolation. |
 | **CLI & Driver API** | [`cli.md`](cli.md) | Command syntax, exit codes, machine-readable JSON envelopes. |
 | **Library Embedding** | [`embedding.md`](embedding.md) | Rust embedding API, session-aware query service, AST-safe refactoring. |
@@ -83,6 +88,8 @@ documents in `main`.
 | **Release & Packaging** | [`release.md`](release.md) | Platform targets, packaging scripts, automated release validation. |
 | **Governance & Process** | [`agent-team.md`](agent-team.md) | Role authority (PM / Architect / Engineer / QA), spec schemas, blocked routes. |
 | **OPY Language** | [`opy/support-matrix.md`](opy/support-matrix.md) | Native Rust `.opy` frontend syntax, preprocessing, resolution, settings. |
+| **OPY Baseline** | [`opy/compatibility-baseline.md`](opy/compatibility-baseline.md) | Tiered forward-looking OPY compatibility inventory and residual evidence. |
+| **OPY Manifest** | [`opy/compat-manifest-spec.md`](opy/compat-manifest-spec.md) | Machine-readable OPY semantic compatibility manifest specification. |
 | **Workshop Language** | [`workshop/support-matrix.md`](workshop/support-matrix.md) | Workshop text parsing, catalog-backed emission, localized enums. |
 | **HIR Protocol** | [`hir/opy-hir-v1.md`](hir/opy-hir-v1.md) | Typed JSON AST/HIR representation for `.opy` programs. |
 | **Catalog Pipeline** | [`workshop/catalog-pipeline.md`](workshop/catalog-pipeline.md) | Canonical localization data compilation and schema validation. |
@@ -116,6 +123,9 @@ JSON document asset, and historical artifact across the repository.
 | `docs/opy/support-matrix.md` | Living Durable Contract | `update` | Removed stale M7 framing; updated native `.opy` parser, settings, and preprocessing supported surfaces. |
 | `docs/workshop/support-matrix.md` | Living Durable Contract | `update` | Removed stale M5 framing; updated evidenced Workshop syntax, enums, and localization contracts. |
 | `docs/workshop/catalog-pipeline.md` | Living Durable Contract | `update` | Removed milestone framing; documents deterministic catalog generation and schema validation pipeline. |
+| `docs/compatibility/upstream-references.md` | Living Durable Contract | `new` | Centralized upstream/reference inventory per #106: pinned OverPy 9.7.10 identity, license/provenance, oracle role, reference limitations; OSTW extension point. |
+| `docs/opy/compatibility-baseline.md` | Living Durable Contract | `new` | Tiered proactive OPY compatibility baseline per #106: semantic-category inventory, support dimensions, classified #104/#105 residual evidence. |
+| `docs/opy/compat-manifest-spec.md` | Living Durable Contract | `new` | Specification for the machine-readable Wright-owned OPY semantic compatibility manifest (builtins, signatures, enum domains, aliases); implementation deferred to a bounded child issue. |
 | `docs/hir/opy-hir-v1.md` | Living Protocol Specification | `update` | Updated relative links to `docs/`; documents Opy HIR v1 JSON protocol schema and versioning. |
 | `docs/specs/SPEC-99-stability-rules.md` (was `docs/m12-issue99-spec.md`) | Active Feature Specification | `move` + `update` | Moved into dedicated `docs/specs/` directory; updated relative links; active spec for issue #99. |
 | `docs/adr/README.md` | Architecture Decision Index | `update` | Updated relative links to `docs/architecture.md` and `docs/compatibility.md`; indexes ADR 0000–0008. |

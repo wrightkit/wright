@@ -5,6 +5,13 @@ Scope: the `.opy` source-language surface Wright's native frontend supports,
 with production/corpus evidence for each feature and explicitly deferred
 constructs
 
+This matrix records the **corpus-evidenced current surface**. The
+forward-looking, tiered baseline (what is planned, evidence-prioritized, or
+demand-driven) lives in
+[`compatibility-baseline.md`](compatibility-baseline.md), and the pinned
+reference identity behind both is recorded centrally in
+[`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md).
+
 Every claimed feature is backed by the compatibility corpus
 (`compatibility/fixtures/**/source.opy` and pinned adapter HIR fixtures) or
 marked as investigation. The architecture is `lexer → preprocess → CST/parser →

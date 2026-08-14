@@ -15,6 +15,14 @@ and OSTW compilers and language services are compatibility oracles, behavior
 references, and test inputs for supported surface claims. They are not
 production runtime dependencies for supported standalone workflows.
 
+Project-level provenance for every upstream implementation Wright studies or
+derives compatibility knowledge from is recorded once, centrally, in
+[`compatibility/upstream-references.md`](compatibility/upstream-references.md)
+(pinned OverPy identity, license assumption, oracle role, reference-vs-Wright
+architecture boundary, and durable reference limitations; OSTW is added there
+when M13 begins). Implementation issues and compatibility entries reference
+that document instead of repeating provenance notes.
+
 The reference for every compatibility result must record:
 
 * the OverPy version or immutable source revision;
@@ -153,7 +161,11 @@ acquisition instruction instead of shipping the content.
 
 The following remain unresolved until the relevant implementation exists:
 
-* the supported OverPy version range and extension policy;
+* the supported OverPy version range and extension policy — resolved by
+  [ADR-0007](adr/0007-reference-pinning-policy.md) (version-exact,
+  content-pinned, changed only on demonstrated behavioral need); the
+  centralized upstream-reference record is
+  [`compatibility/upstream-references.md`](compatibility/upstream-references.md);
 * the machine-readable diagnostic schema and stable code registry;
 * the canonical Workshop output normalizer and its versioning policy;
 * the target/runtime used for semantic scenarios; and
