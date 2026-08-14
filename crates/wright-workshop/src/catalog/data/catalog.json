@@ -33,6 +33,96 @@
         "en-US": "Play Effect"
       },
       "id": "playEffect"
+    },
+    {
+      "aliases": {
+        "en-US": "Set Aim Speed"
+      },
+      "id": "setAimSpeed",
+      "params": [
+        "player",
+        "turnSpeedPercent"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Damage Dealt"
+      },
+      "id": "setDamageDealt",
+      "params": [
+        "player",
+        "damageDealtPercent"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Damage Received"
+      },
+      "id": "setDamageReceived",
+      "params": [
+        "player",
+        "damageReceivedPercent"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Gravity"
+      },
+      "id": "setGravity",
+      "params": [
+        "player",
+        "gravityPercent"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Player Health"
+      },
+      "id": "setHealth",
+      "params": [
+        "player",
+        "amount"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Max Health"
+      },
+      "id": "setMaxHealth",
+      "params": [
+        "player",
+        "healthPercent"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Move Speed"
+      },
+      "id": "setMoveSpeed",
+      "params": [
+        "player",
+        "moveSpeedPercent"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Ultimate Charge"
+      },
+      "id": "setUltCharge",
+      "params": [
+        "player",
+        "chargePercent"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Teleport"
+      },
+      "id": "teleport",
+      "params": [
+        "player",
+        "position"
+      ]
     }
   ],
   "enums": [
@@ -286,7 +376,7 @@
     "generatorVersion": "0.1.0",
     "license": "AGPL-3.0-or-later",
     "reviewed": true,
-    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt()"
+    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt(); receiver-call action/value spellings (setMoveSpeed, isAlive, getPosition, getHealth, teleport, setMaxHealth, setHealth, setAimSpeed, setGravity, setDamageDealt, setDamageReceived, setUltCharge) from the pinned OverPy 9.7.10 en-US emission surface for .opy eventPlayer.<method>(...) forms, evidenced by the synthetic/receiver-calls corpus fixture"
   },
   "schemaVersion": 1,
   "structural": [
@@ -566,6 +656,33 @@
       "id": "squareRoot",
       "params": [
         "value"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Health"
+      },
+      "id": "getHealth",
+      "params": [
+        "player"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Position Of"
+      },
+      "id": "getPosition",
+      "params": [
+        "player"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Is Alive"
+      },
+      "id": "isAlive",
+      "params": [
+        "player"
       ]
     }
   ]

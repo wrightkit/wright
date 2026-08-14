@@ -59,6 +59,7 @@ fn every_corpus_program_round_trips_to_equivalent_wir() {
         "synthetic/declarations-rules",
         "synthetic/expressions-values",
         "synthetic/preprocessing",
+        "synthetic/receiver-calls",
         "real-world/overpy-cake",
     ] {
         let program = parser::parse(&corpus_text(fixture_id), &catalog(), &en())
@@ -934,5 +935,58 @@ fn playervar_reads_parenthesize_the_receiver() {
     assert_eq!(
         emitted, reemitted,
         "playervar reads must be a byte-identical fixed point"
+    );
+}
+
+#[test]
+fn receiver_call_actions_and_values_emit_catalog_spellings() {
+    // Issue #104: `.opy` receiver calls lower to `Action::Call`/`Value::Call`
+    // whose `name` is the receiver method; emission resolves those names
+    // through the catalog (general path, no per-name special cases).
+    let mut program = wir::Program::default();
+    program
+        .files
+        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+    let player = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::EventPlayer,
+        None,
+    ));
+    let percent = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Number {
+            value: 100.0,
+            text: "100".to_string(),
+        },
+        None,
+    ));
+    let alive = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Call {
+            name: "isAlive".to_string(),
+            args: vec![player],
+        },
+        None,
+    ));
+    let move_speed = program.actions.push(wir::Action::Call {
+        name: "setMoveSpeed".to_string(),
+        args: vec![player, percent],
+        span: None,
+    });
+    program.rules.push(wir::Rule {
+        name: "r".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::EachPlayer,
+        conditions: vec![alive],
+        actions: vec![move_speed],
+    });
+
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        emitted.contains("Is Alive(Event Player) == True;"),
+        "receiver value calls resolve through the catalog: {emitted}"
+    );
+    assert!(
+        emitted.contains("Set Move Speed(Event Player, 100);"),
+        "receiver action calls resolve through the catalog: {emitted}"
     );
 }
