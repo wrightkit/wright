@@ -1226,4 +1226,82 @@ mod tests {
         assert_eq!(inner, "*");
         assert!(matches!(left.as_ref(), Expr::Number { .. }));
     }
+
+    #[test]
+    fn parses_receiver_calls() {
+        // `eventPlayer.setMoveSpeed(100)` is a receiver call: postfix `.`
+        // member access followed by call arguments (#104).
+        let program =
+            parse_ok("rule \"r\":\n    @Event eachPlayer\n    eventPlayer.setMoveSpeed(100)\n");
+        let RuleEntry::Rule(rule) = &program.rules[0] else {
+            panic!("expected rule");
+        };
+        let Stmt::Expr { expr, .. } = &rule.actions[0] else {
+            panic!("expected expression statement, got {:?}", rule.actions[0]);
+        };
+        let Expr::ReceiverCall {
+            receiver,
+            name,
+            args,
+            ..
+        } = &expr
+        else {
+            panic!("expected receiver call, got {expr:?}");
+        };
+        assert_eq!(name, "setMoveSpeed");
+        assert!(
+            matches!(receiver.as_ref(), Expr::Name { name, .. } if name == "eventPlayer"),
+            "receiver must be the eventPlayer name"
+        );
+        assert_eq!(args.len(), 1);
+        assert!(matches!(&args[0], Expr::Number { .. }));
+    }
+
+    #[test]
+    fn parses_member_call_on_call_result() {
+        // `getPlayersInRadius(...).setStatusEffect(...)`: member access
+        // followed by call arguments on a call result stays a receiver call.
+        let program = parse_ok(
+            "rule \"r\":\n    @Event eachPlayer\n    getPlayersInRadius(eventPlayer, 10).setStatusEffect(eventPlayer, 30)\n",
+        );
+        let RuleEntry::Rule(rule) = &program.rules[0] else {
+            panic!("expected rule");
+        };
+        let Stmt::Expr { expr, .. } = &rule.actions[0] else {
+            panic!("expected expression statement");
+        };
+        let Expr::ReceiverCall {
+            receiver,
+            name,
+            args,
+            ..
+        } = &expr
+        else {
+            panic!("expected receiver call, got {expr:?}");
+        };
+        assert_eq!(name, "setStatusEffect");
+        assert!(
+            matches!(receiver.as_ref(), Expr::Call { name, .. } if name == "getPlayersInRadius"),
+            "receiver must be the preceding call"
+        );
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn member_without_call_is_not_a_call() {
+        // `eventPlayer.moveSpeed` alone (no parentheses) stays a member
+        // access; only a following `(` turns it into a receiver call.
+        let program =
+            parse_ok("rule \"r\":\n    @Event eachPlayer\n    x = eventPlayer.moveSpeed\n");
+        let RuleEntry::Rule(rule) = &program.rules[0] else {
+            panic!("expected rule");
+        };
+        let Stmt::Assign { value, .. } = &rule.actions[0] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(
+            &value,
+            Expr::Member { member, .. } if member == "moveSpeed"
+        ));
+    }
 }

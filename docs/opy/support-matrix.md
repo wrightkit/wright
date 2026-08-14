@@ -76,6 +76,16 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   `random.choice` → `random.<name>` calls; `eventPlayer.member` →
   `PlayerVar`/receiver call on `EventPlayer`; variable receivers
   (`points.append`, `candlePos[i2]`) → `ReceiverCall`/`Index`.
+- Receiver/member calls (`eventPlayer.setMoveSpeed(100)`,
+  `eventPlayer.teleport(eventPlayer.getPosition())`,
+  `target.setMoveSpeed(50)` on a player-valued global) lower to
+  `ReceiverCall` and resolve at emission through the Workshop catalog
+  (`crates/wright-workshop/src/catalog/data/catalog.json`); the
+  corpus-evidenced receiver methods are the `synthetic/receiver-calls`
+  fixture methods (en-US spellings per
+  [`docs/workshop/support-matrix.md`](../workshop/support-matrix.md)).
+  Method names outside the catalog fail with structured
+  `unknown-action`/`unknown-value` diagnostics, never silent acceptance.
 - Builtin Workshop enums from the corpus: `Beam.{GOOD,GRAPPLE}`,
   `Color.{YELLOW,WHITE,RED,…}`, `DynamicEffect.{BAD_EXPLOSION,…}`,
   `EffectReeval.VISIBILITY`, `Wait.IGNORE_CONDITION`. Enum members outside the

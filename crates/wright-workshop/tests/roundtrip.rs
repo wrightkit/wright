@@ -38,6 +38,7 @@ fn every_corpus_fixture_round_trips_with_full_evidence() {
         "synthetic/declarations-rules",
         "synthetic/expressions-values",
         "synthetic/preprocessing",
+        "synthetic/receiver-calls",
         "real-world/overpy-cake",
     ] {
         let record = roundtrip::round_trip(&corpus_text(fixture_id), &catalog(), &en());
@@ -66,6 +67,7 @@ fn same_locale_round_trip_is_a_release_gate() {
         "synthetic/declarations-rules",
         "synthetic/expressions-values",
         "synthetic/preprocessing",
+        "synthetic/receiver-calls",
         "real-world/overpy-cake",
     ]
     .iter()

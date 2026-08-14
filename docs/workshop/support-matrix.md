@@ -48,14 +48,22 @@ Sections list the surface observed in the en-US corpus Workshop text.
 Disable Inspector Recording, Set Global Variable, Modify Global Variable,
 Set Player Variable, Call Subroutine, If, Else If, Else, End, For Global
 Variable, While, Wait, Create Beam Effect, Create HUD Text, Play Effect.
+Receiver-call actions (emitted for native `.opy` `eventPlayer.<method>(...)` /
+player-receiver forms, `synthetic/receiver-calls` fixture): Set Move Speed,
+Set Max Health, Set Player Health, Teleport, Set Aim Speed, Set Gravity,
+Set Damage Dealt, Set Damage Received, Set Ultimate Charge.
 
 ### Values
 Add, Subtract, Multiply, Divide, Compare (with inline operators `==`, `>`,
 `<`, `<=`, `>=`, `!=`), And, Or, Not, Count Of, Absolute Value, Array,
 Vector, Custom String, Value In Array, Mapped Array, First Of, String
 Replace, String Slice, String Split, All Players, Random Real, Random Value
-In Array, Has Spawned. Literals: numbers (signed), strings (escaped),
-`True`/`False`, `Global.<name>` references, `Event Player`.
+In Array, Has Spawned.
+Receiver-call values (emitted for native `.opy` receiver-method forms in
+conditions and arguments, `synthetic/receiver-calls` fixture): Is Alive,
+Position Of, Health.
+Literals: numbers (signed), strings (escaped), `True`/`False`,
+`Global.<name>` references, `Event Player`.
 
 ### Enums and constants
 - Color: `Color(Yellow)`, `Color(White)`, `Color(Red)`, `Color(Orange)`.

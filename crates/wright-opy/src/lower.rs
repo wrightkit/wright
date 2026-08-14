@@ -727,3 +727,134 @@ impl From<&Span> for HirSpan {
         (*span).into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::{LexInput, lex};
+    use crate::parser::parse;
+    use wright_core::hir::types::{Expr as HirExpr, RuleEntry as HirRuleEntry, Stmt as HirStmt};
+
+    fn lower_ok(text: &str) -> HirProgram {
+        let tokens = lex(LexInput { file_id: 0, text }).expect("lexes");
+        let output = parse(&tokens);
+        assert!(
+            output.errors.is_empty(),
+            "unexpected parse errors: {:?}",
+            output.errors
+        );
+        let program = output.program.expect("parse produces a program");
+        lower(&program, vec![], vec![]).expect("lowers without errors")
+    }
+
+    fn rule_conditions_and_actions(hir: &HirProgram) -> (&Vec<HirExpr>, &Vec<HirStmt>) {
+        let HirRuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        (&rule.conditions, &rule.actions)
+    }
+
+    #[test]
+    fn receiver_calls_lower_to_receiver_call_hir() {
+        // `eventPlayer.setMoveSpeed(100)` lowers to a ReceiverCall on the
+        // event player, and `target.setMoveSpeed(50)` to a ReceiverCall on a
+        // global-variable receiver (#104).
+        let hir = lower_ok(
+            "globalvar target\nrule \"r\":\n    @Event eachPlayer\n    eventPlayer.setMoveSpeed(100)\n    target.setMoveSpeed(50)\n",
+        );
+        let (_, actions) = rule_conditions_and_actions(&hir);
+        assert_eq!(actions.len(), 2);
+
+        let HirStmt::Expr { expr, .. } = &actions[0] else {
+            panic!("expected expression statement");
+        };
+        let HirExpr::ReceiverCall {
+            receiver,
+            name,
+            args,
+            ..
+        } = expr.as_ref()
+        else {
+            panic!("expected receiver call, got {expr:?}");
+        };
+        assert_eq!(name, "setMoveSpeed");
+        assert!(matches!(receiver.as_ref(), HirExpr::EventPlayer { .. }));
+        assert_eq!(args.len(), 1);
+        assert!(matches!(&args[0], HirExpr::Number { .. }));
+
+        let HirStmt::Expr { expr, .. } = &actions[1] else {
+            panic!("expected expression statement");
+        };
+        let HirExpr::ReceiverCall { receiver, name, .. } = expr.as_ref() else {
+            panic!("expected receiver call, got {expr:?}");
+        };
+        assert_eq!(name, "setMoveSpeed");
+        assert!(
+            matches!(receiver.as_ref(), HirExpr::GlobalVar { name, .. } if name == "target"),
+            "globalvar receiver must resolve to a GlobalVar"
+        );
+    }
+
+    #[test]
+    fn receiver_call_values_lower_in_conditions() {
+        // `@Condition eventPlayer.isAlive()` lowers to a ReceiverCall value;
+        // `eventPlayer.teleport(eventPlayer.getPosition())` nests a receiver
+        // call inside another receiver call's arguments (#104).
+        let hir = lower_ok(
+            "rule \"r\":\n    @Event eachPlayer\n    @Condition eventPlayer.isAlive()\n    eventPlayer.teleport(eventPlayer.getPosition())\n",
+        );
+        let (conditions, actions) = rule_conditions_and_actions(&hir);
+        assert_eq!(conditions.len(), 1);
+        let HirExpr::ReceiverCall { name, args, .. } = &conditions[0] else {
+            panic!("expected receiver call condition, got {:?}", conditions[0]);
+        };
+        assert_eq!(name, "isAlive");
+        assert_eq!(args.len(), 0);
+
+        let HirStmt::Expr { expr, .. } = &actions[0] else {
+            panic!("expected expression statement");
+        };
+        let HirExpr::ReceiverCall {
+            name,
+            args,
+            receiver,
+            ..
+        } = expr.as_ref()
+        else {
+            panic!("expected receiver call, got {expr:?}");
+        };
+        assert_eq!(name, "teleport");
+        assert!(matches!(receiver.as_ref(), HirExpr::EventPlayer { .. }));
+        assert_eq!(args.len(), 1);
+        assert!(matches!(
+            &args[0],
+            HirExpr::ReceiverCall { name, .. } if name == "getPosition"
+        ));
+    }
+
+    #[test]
+    fn format_string_receiver_stays_a_format_node() {
+        // `.format()` on a string receiver is unaffected by the receiver-call
+        // path (existing supported form).
+        let hir = lower_ok(
+            "rule \"r\":\n    @Event global\n    print(\"{} points\".format(len([1, 2])))\n",
+        );
+        let (_, actions) = rule_conditions_and_actions(&hir);
+        let HirStmt::Expr { expr, .. } = &actions[0] else {
+            panic!("expected expression statement");
+        };
+        assert!(
+            has_format(expr),
+            "string `.format()` must lower to a Format node"
+        );
+    }
+
+    fn has_format(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Format { .. } => true,
+            HirExpr::Call { args, .. } => args.iter().any(has_format),
+            HirExpr::ReceiverCall { args, .. } => args.iter().any(has_format),
+            _ => false,
+        }
+    }
+}
