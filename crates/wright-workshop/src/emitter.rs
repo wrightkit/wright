@@ -790,29 +790,7 @@ impl Emitter<'_> {
             })?
             .to_string();
         let segments = split_string(value);
-        self.emit_string_chain(&spelling, &segments, out)
-    }
-
-    /// Emit the nested continuation chain
-    /// `Custom String(seg0, Custom String(seg1, ...))`; segment texts are
-    /// pre-escaped, non-final segments carry the `{0}` placeholder.
-    fn emit_string_chain(
-        &mut self,
-        spelling: &str,
-        segments: &[String],
-        out: &mut String,
-    ) -> Result<()> {
-        let Some((first, rest)) = segments.split_first() else {
-            return Ok(());
-        };
-        out.push_str(spelling);
-        out.push('(');
-        write!(out, "\"{first}\"").unwrap();
-        if !rest.is_empty() {
-            out.push_str(", ");
-            self.emit_string_chain(spelling, rest, out)?;
-        }
-        out.push(')');
+        emit_string_chain(&spelling, &segments, out);
         Ok(())
     }
 
@@ -991,6 +969,29 @@ fn escape_settings_string(value: &str) -> String {
         }
     }
     out
+}
+
+/// Emit the nested continuation chain
+/// `Custom String(seg0, Custom String(seg1, ...))`; segment texts are
+/// pre-escaped, non-final segments carry the `{0}` placeholder. Iterative:
+/// every segment except the first opens a `Custom String` level, then all
+/// levels close.
+fn emit_string_chain(spelling: &str, segments: &[String], out: &mut String) {
+    let Some((first, rest)) = segments.split_first() else {
+        return;
+    };
+    out.push_str(spelling);
+    out.push('(');
+    write!(out, "\"{first}\"").unwrap();
+    for segment in rest {
+        out.push_str(", ");
+        out.push_str(spelling);
+        out.push('(');
+        write!(out, "\"{segment}\"").unwrap();
+    }
+    for _ in 0..=rest.len() {
+        out.push(')');
+    }
 }
 
 #[cfg(test)]
