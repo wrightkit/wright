@@ -569,7 +569,14 @@ impl Emitter<'_> {
             wir::Value::Number(value) => {
                 out.push_str(&format_number(*value));
             }
-            wir::Value::String(value) => write!(out, "\"{}\"", escape_string(value)).unwrap(),
+            wir::Value::String(value) => {
+                // Value-position strings wrap in `Custom String("...")`, the
+                // pinned oracle's spelling (evidence: array elements,
+                // initializers, assignments, call arguments, comparisons —
+                // #87). The only bare string value is the `Custom String`
+                // text argument, handled in the call arm below.
+                write!(out, "Custom String(\"{}\")", escape_string(value)).unwrap();
+            }
             wir::Value::Bool(true) => out.push_str("True"),
             wir::Value::Bool(false) => out.push_str("False"),
             wir::Value::Null => out.push_str("Null"),
@@ -696,9 +703,24 @@ impl Emitter<'_> {
                         })?
                         .to_string()
                 };
+                // `format` (frontend) and `customString` (parsed ws text) are
+                // the same node.
+                let is_custom_string = canonical == Some("customString") || name == "customString";
                 if args.is_empty() {
                     // Constants (e.g. Empty Array) emit as bare spellings.
                     out.push_str(&spelling);
+                } else if is_custom_string {
+                    // The `Custom String` text argument stays bare (the
+                    // oracle spelling); the remaining arguments are values
+                    // and wrap (#87).
+                    out.push_str(&spelling);
+                    out.push('(');
+                    self.bare_string_value(args[0], out)?;
+                    if args.len() > 1 {
+                        out.push_str(", ");
+                    }
+                    self.args(&args[1..], out)?;
+                    out.push(')');
                 } else {
                     out.push_str(&spelling);
                     out.push('(');
@@ -721,6 +743,22 @@ impl Emitter<'_> {
             wir::ModifyOp::AppendToArray => "Append To Array",
             wir::ModifyOp::RemoveFromArray => "Remove From Array",
         })
+    }
+
+    /// Render a value that must stay a bare string (the `Custom String` text
+    /// argument). Any non-string value falls back to the normal renderer.
+    fn bare_string_value(&mut self, id: wir::ValueId, out: &mut String) -> Result<()> {
+        let Some(node) = self.program.values.get(id) else {
+            return Err(WorkshopError::Malformed {
+                message: format!("dangling value {id}"),
+                span: None,
+            });
+        };
+        if let wir::Value::String(value) = &node.value {
+            write!(out, "\"{}\"", escape_string(value)).unwrap();
+            return Ok(());
+        }
+        self.value(id, out)
     }
 
     fn global_name(&self, id: wir::GlobalVarId) -> Result<String> {

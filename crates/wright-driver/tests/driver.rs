@@ -383,6 +383,66 @@ fn opy_unknown_settings_key_fails_check_and_compile_identically() {
 }
 
 #[test]
+fn opy_string_array_initializer_emits_custom_string_elements() {
+    // Class-3 remediation (#87): string values in value positions render as
+    // `Custom String("...")`, the pinned oracle's spelling. The minimal
+    // repro `globalvar x = ["a", "b"]` must emit the oracle-verified
+    // `Array(Custom String("a"), Custom String("b"))` form byte-for-byte.
+    let dir = temp_dir();
+    let main = dir.join("array.opy");
+    std::fs::write(
+        &main,
+        "globalvar x = [\"a\", \"b\"]\n\nrule \"r\":\n    @Event global\n    pass\n",
+    )
+    .unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(main),
+        root: Some(dir.clone()),
+        profile: wright_transform::Profile::Compat,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let envelope = session.compile();
+    assert!(
+        envelope.ok,
+        "repro must compile: {:?}",
+        envelope.diagnostics
+    );
+    let text = envelope.result.output.expect("output").text;
+    assert!(
+        text.contains("Set Global Variable(x, Array(Custom String(\"a\"), Custom String(\"b\")));"),
+        "string array elements must wrap in Custom String (oracle spelling):\n{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
+    // Class-3 remediation (#87): pixelart's string-array initializer renders
+    // with Custom String-wrapped elements like the oracle (the residual
+    // divergence, if any, is the reference's long-string splitting).
+    let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(root.join("pixelart.opy")),
+        root: Some(root.clone()),
+        profile: wright_transform::Profile::Compat,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let envelope = session.compile();
+    assert!(
+        envelope.ok,
+        "pixelart must compile: {:?}",
+        envelope.diagnostics
+    );
+    let text = envelope.result.output.expect("output").text;
+    assert!(
+        text.contains("Set Global Variable(owo, Array(Custom String(\" \u{2001}"),
+        "the first string element must wrap like the oracle:\n{text}"
+    );
+}
+
+#[test]
 fn opy_inputhud_settings_section_matches_the_oracle() {
     // inputhud's rules do not compile natively (later expression surface),
     // so the settings section is exercised with the source's real settings
