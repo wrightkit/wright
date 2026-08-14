@@ -125,20 +125,14 @@ impl LintConfig {
     ///
     /// Has no effect on other rules. Silently accepted for unknown IDs.
     pub fn disable(&mut self, rule_id: &str) {
-        self.rules
-            .entry(rule_id.to_string())
-            .or_default()
-            .enabled = false;
+        self.rules.entry(rule_id.to_string()).or_default().enabled = false;
     }
 
     /// Enable a rule by its stable ID.
     ///
     /// Silently accepted for unknown IDs.
     pub fn enable(&mut self, rule_id: &str) {
-        self.rules
-            .entry(rule_id.to_string())
-            .or_default()
-            .enabled = true;
+        self.rules.entry(rule_id.to_string()).or_default().enabled = true;
     }
 
     /// Override the severity for a rule by its stable ID.

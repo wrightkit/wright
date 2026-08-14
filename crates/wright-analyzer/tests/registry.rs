@@ -47,8 +47,14 @@ fn registry_has_three_first_party_rules_with_stable_ids() {
     let ids: Vec<&str> = registry.rules().map(|meta| meta.id).collect();
     assert_eq!(ids.len(), 3, "exactly three first-party rules in M12");
     assert!(ids.contains(&"min-wait-loop"), "min-wait-loop present");
-    assert!(ids.contains(&"duplicate-condition"), "duplicate-condition present");
-    assert!(ids.contains(&"expensive-loop-check"), "expensive-loop-check present");
+    assert!(
+        ids.contains(&"duplicate-condition"),
+        "duplicate-condition present"
+    );
+    assert!(
+        ids.contains(&"expensive-loop-check"),
+        "expensive-loop-check present"
+    );
 }
 
 #[test]
@@ -56,7 +62,11 @@ fn rule_metadata_fields_are_non_empty() {
     let registry = LintRegistry::default();
     for meta in registry.rules() {
         assert!(!meta.id.is_empty(), "{}: id must be non-empty", meta.id);
-        assert!(!meta.summary.is_empty(), "{}: summary must be non-empty", meta.id);
+        assert!(
+            !meta.summary.is_empty(),
+            "{}: summary must be non-empty",
+            meta.id
+        );
         assert!(
             !meta.documentation.is_empty(),
             "{}: documentation must be non-empty",
@@ -92,7 +102,10 @@ fn rule_default_severities_match_known_values() {
         .rules()
         .map(|meta| (meta.id, meta.default_severity))
         .collect();
-    let min_wait = severities.iter().find(|(id, _)| *id == "min-wait-loop").unwrap();
+    let min_wait = severities
+        .iter()
+        .find(|(id, _)| *id == "min-wait-loop")
+        .unwrap();
     assert_eq!(min_wait.1, Severity::Warning);
 
     let dup_cond = severities
@@ -113,7 +126,11 @@ fn rule_default_severities_match_known_values() {
 #[test]
 fn default_config_enables_all_rules() {
     let config = LintConfig::default();
-    for id in &["min-wait-loop", "duplicate-condition", "expensive-loop-check"] {
+    for id in &[
+        "min-wait-loop",
+        "duplicate-condition",
+        "expensive-loop-check",
+    ] {
         assert!(
             config.is_enabled(id),
             "rule {id} must be enabled by default"
