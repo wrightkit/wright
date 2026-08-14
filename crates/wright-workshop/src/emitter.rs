@@ -656,7 +656,11 @@ impl Emitter<'_> {
                 write!(out, "Global.{name}").unwrap();
             }
             wir::Value::PlayerVariable { player, variable } => {
+                // The oracle's spelling parenthesizes the receiver:
+                // `Set Global Variable(g, (Event Player).p)` (#87).
+                out.push('(');
                 self.value(*player, out)?;
+                out.push(')');
                 let name = self.player_name(*variable)?;
                 write!(out, ".{name}").unwrap();
             }
@@ -736,24 +740,41 @@ impl Emitter<'_> {
                     // Constants (e.g. Empty Array) emit as bare spellings.
                     out.push_str(&spelling);
                 } else if is_custom_string {
-                    // Constant `.format()` calls fold to the substituted
-                    // text (the oracle spelling: `"value: {0}".format(3)` ->
-                    // `Custom String("value: 3")`, #87); the folded text
-                    // feeds the value-string path (re-escaping/splitting).
-                    if let Some(folded) = self.fold_format_call(args)? {
-                        self.emit_string_value(&folded, out)?;
-                    } else {
-                        // The `Custom String` text argument stays bare (the
-                        // oracle spelling); the remaining arguments are
-                        // values and wrap (#87).
-                        out.push_str(&spelling);
-                        out.push('(');
-                        self.bare_string_value(args[0], out)?;
-                        if args.len() > 1 {
-                            out.push_str(", ");
+                    // `.format()` calls canonicalize: constant numeric
+                    // arguments fold into the substituted text, implicit
+                    // `{}` placeholders renumber to the oracle's explicit
+                    // form, and remaining variable arguments wrap (the
+                    // oracle spelling, #87). The canonical text feeds the
+                    // value-string path (re-escaping/splitting) when no
+                    // arguments remain.
+                    match self.canonicalize_format_call(args)? {
+                        Some((text, variable_args)) => {
+                            if variable_args.is_empty() {
+                                self.emit_string_value(&text, out)?;
+                            } else {
+                                out.push_str(&spelling);
+                                out.push('(');
+                                write!(out, "\"{}\"", escape_value_string(&text)).unwrap();
+                                if !variable_args.is_empty() {
+                                    out.push_str(", ");
+                                }
+                                self.args(&variable_args, out)?;
+                                out.push(')');
+                            }
                         }
-                        self.args(&args[1..], out)?;
-                        out.push(')');
+                        None => {
+                            // The `Custom String` text argument stays bare
+                            // (the oracle spelling); the remaining arguments
+                            // are values and wrap (#87).
+                            out.push_str(&spelling);
+                            out.push('(');
+                            self.bare_string_value(args[0], out)?;
+                            if args.len() > 1 {
+                                out.push_str(", ");
+                            }
+                            self.args(&args[1..], out)?;
+                            out.push(')');
+                        }
                     }
                 } else {
                     out.push_str(&spelling);
@@ -768,9 +789,18 @@ impl Emitter<'_> {
 
     /// Fold a `Custom String` call whose text argument and constant numeric
     /// arguments are all literals into the substituted text (the oracle's
-    /// constant `.format()` folding, #87). Returns `None` when the call has
-    /// a variable argument or no numeric arguments (rendered unchanged).
-    fn fold_format_call(&self, args: &[wir::ValueId]) -> Result<Option<String>> {
+    /// Canonicalize a `Custom String`/`.format()` call (#87): constant
+    /// numeric arguments fold into the substituted text (the oracle's
+    /// spelling), implicit `{}` placeholders renumber positionally to the
+    /// explicit `{N}` form, and the remaining variable arguments are
+    /// returned in placeholder order. Returns `None` (rendered unchanged)
+    /// when nothing canonicalizes: explicit-only texts without constants,
+    /// texts mixing implicit and explicit placeholders (the oracle rejects
+    /// those), out-of-range placeholders, or non-String text arguments.
+    fn canonicalize_format_call(
+        &self,
+        args: &[wir::ValueId],
+    ) -> Result<Option<(String, Vec<wir::ValueId>)>> {
         if args.len() < 2 {
             return Ok(None);
         }
@@ -780,17 +810,117 @@ impl Emitter<'_> {
         let wir::Value::String(text) = &text.value else {
             return Ok(None);
         };
-        let mut values = Vec::with_capacity(args.len() - 1);
-        for id in &args[1..] {
+        let format_args = &args[1..];
+        // Classify the placeholders: implicit `{}` consumes the next
+        // argument, explicit `{N}` references argument N.
+        let mut has_implicit = false;
+        let mut has_explicit = false;
+        let mut out_of_range = false;
+        let mut cursor = 0usize;
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '{' {
+                let mut inner = String::new();
+                let mut closed = false;
+                for next in chars.by_ref() {
+                    if next == '}' {
+                        closed = true;
+                        break;
+                    }
+                    inner.push(next);
+                }
+                if !closed {
+                    break; // unterminated brace: literal text
+                }
+                if inner.is_empty() {
+                    if cursor >= format_args.len() {
+                        out_of_range = true;
+                    }
+                    cursor += 1;
+                    has_implicit = true;
+                } else if inner.chars().all(|c| c.is_ascii_digit()) {
+                    match inner.parse::<usize>() {
+                        Ok(index) if index < format_args.len() => has_explicit = true,
+                        _ => out_of_range = true,
+                    }
+                } else {
+                    out_of_range = true;
+                }
+            }
+        }
+        if out_of_range || (has_implicit && has_explicit) {
+            return Ok(None);
+        }
+        let mut any_constant = false;
+        for id in format_args {
             let Some(node) = self.program.values.get(*id) else {
                 return Ok(None);
             };
-            match &node.value {
-                wir::Value::Number { value, .. } => values.push(*value),
-                _ => return Ok(None),
+            if matches!(node.value, wir::Value::Number { .. }) {
+                any_constant = true;
             }
         }
-        Ok(Some(fold_format(text, &values)))
+        if !has_implicit && !any_constant {
+            return Ok(None);
+        }
+        // Canonicalize: fold constants inline at their placeholder, renumber
+        // variable placeholders positionally, keep variable arguments in
+        // placeholder order.
+        let mut canonical = String::with_capacity(text.len());
+        let mut variable_args = Vec::new();
+        let mut variable_index = 0usize;
+        let mut cursor = 0usize;
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '{' {
+                let mut inner = String::new();
+                let mut closed = false;
+                for next in chars.by_ref() {
+                    if next == '}' {
+                        closed = true;
+                        break;
+                    }
+                    inner.push(next);
+                }
+                if !closed {
+                    canonical.push('{');
+                    canonical.push_str(&inner);
+                    break;
+                }
+                let index = if inner.is_empty() {
+                    let index = cursor;
+                    cursor += 1;
+                    index
+                } else {
+                    match inner.parse::<usize>() {
+                        Ok(index) => index,
+                        Err(_) => {
+                            canonical.push('{');
+                            canonical.push_str(&inner);
+                            canonical.push('}');
+                            continue;
+                        }
+                    }
+                };
+                let Some(arg) = format_args.get(index).copied() else {
+                    canonical.push('{');
+                    canonical.push_str(&inner);
+                    canonical.push('}');
+                    continue;
+                };
+                let node = self.program.values.get(arg);
+                if let Some(wir::Value::Number { value, .. }) = node.map(|node| &node.value) {
+                    canonical.push_str(&fold_number(*value));
+                } else {
+                    write!(canonical, "{{{variable_index}}}").unwrap();
+                    variable_index += 1;
+                    variable_args.push(arg);
+                }
+            } else {
+                canonical.push(ch);
+            }
+        }
+        Ok(Some((canonical, variable_args)))
     }
 
     fn modify_op_spelling(&self, op: wir::ModifyOp) -> Result<&'static str> {
@@ -975,48 +1105,6 @@ fn emit_string_chain(spelling: &str, segments: &[String], out: &mut String) {
     for _ in 0..=rest.len() {
         out.push(')');
     }
-}
-
-/// Substitute `{0}`/`{1}`-style and implicit `{}` placeholders with the
-/// constant arguments, the oracle's constant-`.format()` folding (#87).
-fn fold_format(text: &str, args: &[f64]) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    let mut implicit_index = 0usize;
-    while let Some(ch) = chars.next() {
-        if ch == '{' {
-            let mut inner = String::new();
-            let mut closed = false;
-            for next in chars.by_ref() {
-                if next == '}' {
-                    closed = true;
-                    break;
-                }
-                inner.push(next);
-            }
-            let index: Option<usize> = if inner.is_empty() {
-                let index = implicit_index;
-                implicit_index += 1;
-                Some(index)
-            } else {
-                inner.parse::<usize>().ok()
-            };
-            match index.and_then(|index| args.get(index)) {
-                Some(value) => out.push_str(&fold_number(*value)),
-                None => {
-                    out.push('{');
-                    out.push_str(&inner);
-                    out.push('}');
-                }
-            }
-            if !closed {
-                break;
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 /// Render a constant format argument the way the oracle folds it: integers

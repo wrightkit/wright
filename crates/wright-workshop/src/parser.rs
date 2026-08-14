@@ -832,6 +832,34 @@ impl Parser<'_> {
                     .values
                     .push(ValueNode::new(Value::GlobalVariable(variable), span)))
             }
+            Some(Token {
+                kind: TokenKind::LParen,
+                ..
+            }) => {
+                // The oracle's playervar-read spelling parenthesizes the
+                // receiver: `(Event Player).p` (#87).
+                self.pos += 1;
+                let inner = self.value()?;
+                self.expect(TokenKind::RParen, "expected ')' after parenthesized value")?;
+                if let Some(Token {
+                    kind: TokenKind::Dot,
+                    ..
+                }) = self.peek()
+                {
+                    self.pos += 1;
+                    let (name, _, _) = self.phrase()?;
+                    let variable = self.player_by_name(&name)?;
+                    Ok(self.target.values.push(ValueNode::new(
+                        Value::PlayerVariable {
+                            player: inner,
+                            variable,
+                        },
+                        None,
+                    )))
+                } else {
+                    Ok(inner)
+                }
+            }
             _ => {
                 let (phrase, start, end) = self.phrase()?;
                 match phrase.as_str() {

@@ -735,3 +735,204 @@ fn split_and_reescaped_value_strings_round_trip_byte_identically() {
         "split and re-escaped spellings must be a byte-identical fixed point"
     );
 }
+
+#[test]
+fn implicit_format_placeholders_renumber_to_the_oracle_form() {
+    // Amended AC-15: implicit `{}` placeholders renumber positionally to the
+    // oracle's explicit form (`"v: {}".format(x)` -> `Custom String("v:
+    // {0}", Global.x)`), and constant arguments fold into the text with the
+    // remaining placeholders renumbered (`"{} {}".format(3, x)` ->
+    // `Custom String("3 {0}", Global.x)`). Both byte-quoted oracle pins.
+    let mut program = wir::Program::default();
+    let file = program
+        .files
+        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::String("v: {}".to_string()),
+        None,
+    ));
+    let variable = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::GlobalVariable(wright_ir::ids::Id::from_index(0)),
+        None,
+    ));
+    let call = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Call {
+            name: "format".to_string(),
+            args: vec![text, variable],
+        },
+        None,
+    ));
+    let action = program.actions.push(wir::Action::SetGlobalVariable {
+        variable: wright_ir::ids::Id::from_index(1),
+        value: call,
+        span: None,
+        target_span: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "x".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "z".into(),
+        index: 1,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.rules.push(wir::Rule {
+        name: "r".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::Global,
+        conditions: vec![],
+        actions: vec![action],
+    });
+    let _ = file;
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        emitted.contains("Set Global Variable(z, Custom String(\"v: {0}\", Global.x));"),
+        "implicit placeholders renumber to the oracle form: {emitted}"
+    );
+    let reparsed = parser::parse(&emitted, &catalog(), &en()).expect("reparses");
+    let reemitted = emitter::emit(&reparsed, &catalog(), &en()).expect("re-emits");
+    assert_eq!(
+        emitted, reemitted,
+        "renumbered format must be a byte-identical fixed point"
+    );
+}
+
+#[test]
+fn partial_constant_format_folds_and_renumbers() {
+    // The oracle folds the constant into the text and renumbers the
+    // remaining placeholder: `"{} {}".format(3, x)` ->
+    // `Custom String("3 {0}", Global.x)` (byte-quoted pin).
+    let mut program = wir::Program::default();
+    let file = program
+        .files
+        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::String("{} {}".to_string()),
+        None,
+    ));
+    let three = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Number {
+            value: 3.0,
+            text: "3".to_string(),
+        },
+        None,
+    ));
+    let variable = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::GlobalVariable(wright_ir::ids::Id::from_index(0)),
+        None,
+    ));
+    let call = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::Call {
+            name: "format".to_string(),
+            args: vec![text, three, variable],
+        },
+        None,
+    ));
+    let action = program.actions.push(wir::Action::SetGlobalVariable {
+        variable: wright_ir::ids::Id::from_index(1),
+        value: call,
+        span: None,
+        target_span: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "x".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "z".into(),
+        index: 1,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.rules.push(wir::Rule {
+        name: "r".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::Global,
+        conditions: vec![],
+        actions: vec![action],
+    });
+    let _ = file;
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        emitted.contains("Set Global Variable(z, Custom String(\"3 {0}\", Global.x));"),
+        "the constant folds and the variable placeholder renumbers: {emitted}"
+    );
+}
+
+#[test]
+fn playervar_reads_parenthesize_the_receiver() {
+    // Amended AC-16: `g = eventPlayer.p` emits `Set Global Variable(g,
+    // (Event Player).p)` (byte-quoted oracle pin) and the spelling
+    // round-trips through the ws parser.
+    let mut program = wir::Program::default();
+    let file = program
+        .files
+        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+    let player = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::EventPlayer,
+        None,
+    ));
+    let read = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::PlayerVariable {
+            player,
+            variable: wright_ir::ids::Id::from_index(0),
+        },
+        None,
+    ));
+    let action = program.actions.push(wir::Action::SetGlobalVariable {
+        variable: wright_ir::ids::Id::from_index(0),
+        value: read,
+        span: None,
+        target_span: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "g".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.player_variables.push(wir::WorkshopVariable {
+        name: "p".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.rules.push(wir::Rule {
+        name: "r".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::Global,
+        conditions: vec![],
+        actions: vec![action],
+    });
+    let _ = file;
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        emitted.contains("Set Global Variable(g, (Event Player).p);"),
+        "playervar reads parenthesize the receiver: {emitted}"
+    );
+    let reparsed =
+        parser::parse(&emitted, &catalog(), &en()).expect("the oracle spelling reparses");
+    let reemitted = emitter::emit(&reparsed, &catalog(), &en()).expect("re-emits");
+    assert_eq!(
+        emitted, reemitted,
+        "playervar reads must be a byte-identical fixed point"
+    );
+}
