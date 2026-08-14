@@ -173,3 +173,56 @@ resolved (or documented as intentional differences).
      reclassification.
   4. CI run for `dbd342e` (not yet executed at write time) plus the
      re-confirmed suites from this report.
+
+---
+
+## #87 closure record (`b5b0578` + `6d1417b`, verified at `6d1417b`)
+
+Re-verification after the value-string emission fix commit `b5b0578`
+(lint-only `6d1417b` on top; CI run 31767535944, all six jobs green, no
+skips). All evidence independently re-derived; the residual divergence
+record from the previous section is superseded where this section differs.
+
+### AC verdicts at `6d1417b`
+
+- **AC-1 (minimal repro parity): PASS.** `globalvar x = ["a","b"]` +
+  one rule → `Array(Custom String("a"), Custom String("b"))`, byte-equal
+  to the pinned oracle; byte-asserted driver test green.
+- **AC-2 (pixelart full-program equality): PASS.** Normalized equality
+  (v1 normalizer) **holds: `normalizedEqual: True`**, 19,925/19,925
+  chars; `byteEqual: false` (whitespace-only); native exit 0.
+- **AC-3 (contexts unchanged): PASS.** v1-gates 6/6 (`FIXTURES`
+  unchanged); all 7 settings sections whitespace-collapsed-equal
+  (256/350/511/297/136/144/476); emitter 17/17; driver integration 18/18;
+  split and re-escaped spellings round-trip through the ws parser
+  (`longstr1000` and `esc` oracle artifacts parse OK).
+- **AC-4 (no new class-3 / everything green): PASS with findings.** The
+  12-program first-failure matrix is unchanged (all positions
+  re-verified). All suites green (oracle 20/20, adapter 22/22,
+  differential green, PARITY_CASES 7 with no pixelart row, all cargo
+  suites, clippy 0 warnings, fmt clean). **However** the supported-
+  surface emission scan surfaced three previously unrecorded class-3
+  emission divergences (trailing-if `End;` omission incl. a ws-parser
+  asymmetry on the oracle's own spelling; `.format()` constant folding;
+  non-default numeric globalvar initializer drop, which also refutes the
+  support-matrix's "matching the reference adapter" claim). Recorded in
+  `m11-inventory-final.md`; they do not alter the first-failure matrix.
+- **AC-5 (inventory): PASS** — `m11-inventory-final.md` records the
+  resolved class-3 family, the pixelart N-level row, and the three new
+  findings.
+- **AC-6..AC-10 (emission contract detail): PASS.** Split basis verified
+  (decoded >128 triggers; non-final segments exactly 125 decoded + `{0}`
+  = 128 text; final = remainder; 128→1 segment, 129→2 segments (128+4),
+  300→3 (128+128+50), 1000→8 (7×[125+{0}]+125)); re-escape matrix
+  byte-equal (`\n`/`\r`/`\\`/`"` re-escaped, tab raw 0x09); empty-rule
+  drop byte-equal (pass-only and condition-without-actions); artifacts
+  end with the oracle's trailing newline; ws lexer decode round-trips the
+  emitted spellings.
+
+### Pixelart full-program row at `6d1417b`
+
+Recorded as an **N-level row only** (`target/m11-nlevel.json`:
+`nativeExit: 0`, `normalizedEqual: true`); no `PARITY_CASES` row (the
+native==adapter HIR subtree assertion for pixelart was not verified and is
+not covered by the differential harness — per AC-9 the row stays N-level,
+and no parity count is forced).
