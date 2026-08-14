@@ -150,9 +150,7 @@ impl LintConfig {
     ///
     /// Returns `true` for unknown IDs (no config entry = enabled by default).
     pub fn is_enabled(&self, rule_id: &str) -> bool {
-        self.rules
-            .get(rule_id)
-            .is_none_or(|config| config.enabled)
+        self.rules.get(rule_id).is_none_or(|config| config.enabled)
     }
 
     /// Effective severity for a rule given its metadata and this config.
