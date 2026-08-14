@@ -424,28 +424,26 @@ impl LanguageService {
         let member = member_receiver(&document.text, position);
 
         if let Some(receiver) = member {
-            // Member context: enum members when the receiver is a known enum
-            // domain, otherwise the corpus-evidenced receiver methods.
-            let catalog = wright_workshop::catalog::Catalog::builtin().ok();
-            if let Some(domain) = catalog.and_then(|catalog| {
-                catalog
-                    .enum_domains()
-                    .find(|domain| domain.domain == receiver)
-                    .cloned()
-            }) {
+            // Member context: enum members when the receiver is a declared
+            // enum domain, otherwise the manifest-declared receiver members
+            // (the manifest is the authoritative OPY semantic table, #109).
+            if let Some(domain) = wright_opy::manifest::Manifest::builtin()
+                .ok()
+                .and_then(|manifest| manifest.enum_domain(&receiver))
+            {
                 return domain
                     .members
                     .iter()
-                    .filter(|member| member.member.starts_with(&prefix))
+                    .filter(|member| member.starts_with(&prefix))
                     .map(|member| CompletionItem {
-                        label: member.member.clone(),
+                        label: member.clone(),
                         kind: "enumMember".to_string(),
                         detail: Some(domain.domain.clone()),
                     })
                     .collect();
             }
-            return RECEIVER_MEMBERS
-                .iter()
+            return receiver_members()
+                .into_iter()
                 .filter(|member| member.starts_with(&prefix))
                 .map(|member| CompletionItem {
                     label: member.to_string(),
@@ -467,7 +465,7 @@ impl LanguageService {
                 }
             }
         }
-        for builtin in BUILTIN_NAMES {
+        for builtin in builtin_names() {
             if builtin.starts_with(&prefix) {
                 items.push(CompletionItem {
                     label: builtin.to_string(),
@@ -1072,23 +1070,36 @@ fn symbol_kind_name(kind: wright_analyzer::symbols::SymbolKind) -> &'static str 
     }
 }
 
-/// Corpus-evidenced `.opy` builtin names offered by completion.
-const BUILTIN_NAMES: &[&str] = &[
-    "abs",
-    "createBeam",
-    "debug",
-    "disableInspector",
-    "getAllPlayers",
-    "len",
-    "playEffect",
-    "print",
-    "random.choice",
-    "random.uniform",
-    "range",
-    "sqrt",
-    "vect",
-    "wait",
-];
+/// Every manifest-declared generic builtin id (the authoritative builtin
+/// surface, #109); the source for builtin completion and token
+/// classification.
+fn builtin_names() -> Vec<&'static str> {
+    wright_opy::manifest::Manifest::builtin()
+        .map(|manifest| {
+            manifest
+                .functions
+                .iter()
+                .filter(|function| !function.kind.is_member())
+                .map(|function| function.id.as_str())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Every manifest-declared receiver member id (#109); the source for
+/// member-access completion.
+fn receiver_members() -> Vec<&'static str> {
+    wright_opy::manifest::Manifest::builtin()
+        .map(|manifest| {
+            manifest
+                .functions
+                .iter()
+                .filter(|function| function.kind.is_member())
+                .map(|function| function.id.as_str())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// Source keywords offered by completion.
 const KEYWORDS: &[&str] = &[
@@ -1113,9 +1124,6 @@ const KEYWORDS: &[&str] = &[
     "false",
     "None",
 ];
-
-/// Corpus-evidenced receiver members offered in member-access completion.
-const RECEIVER_MEMBERS: &[&str] = &["append", "format", "uniform", "choice", "hasSpawned"];
 
 /// The identifier being typed immediately before a position.
 ///
@@ -1180,7 +1188,7 @@ fn classify_token(token: &wright_opy::lexer::Token, index: Option<&SemanticIndex
                     };
                 }
             }
-            if BUILTIN_NAMES.contains(&token.text.as_str()) {
+            if builtin_names().contains(&token.text.as_str()) {
                 "function".to_string()
             } else {
                 "identifier".to_string()

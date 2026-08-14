@@ -123,6 +123,34 @@
         "player",
         "position"
       ]
+    },
+    {
+      "aliases": {
+        "en-US": "Chase Global Variable Over Time"
+      },
+      "id": "chaseOverTime"
+    },
+    {
+      "aliases": {
+        "en-US": "Set Invisible"
+      },
+      "id": "setInvisibility",
+      "params": [
+        "player",
+        "invisibleTo"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Set Status"
+      },
+      "id": "setStatusEffect",
+      "params": [
+        "player",
+        "assister",
+        "status",
+        "duration"
+      ]
     }
   ],
   "enums": [
@@ -294,6 +322,140 @@
           "id": "ALL"
         }
       ]
+    },
+    {
+      "domain": "Invis",
+      "members": [
+        {
+          "aliases": {
+            "en-US": "All"
+          },
+          "id": "ALL"
+        },
+        {
+          "aliases": {
+            "en-US": "Enemies"
+          },
+          "id": "ENEMIES"
+        },
+        {
+          "aliases": {
+            "en-US": "None"
+          },
+          "id": "NONE"
+        }
+      ]
+    },
+    {
+      "domain": "LosCheck",
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Off"
+          },
+          "id": "OFF"
+        },
+        {
+          "aliases": {
+            "en-US": "Surfaces"
+          },
+          "id": "SURFACES"
+        },
+        {
+          "aliases": {
+            "en-US": "Surfaces And All Barriers"
+          },
+          "id": "SURFACES_AND_ALL_BARRIERS"
+        },
+        {
+          "aliases": {
+            "en-US": "Surfaces And Enemy Barriers"
+          },
+          "id": "SURFACES_AND_ENEMY_BARRIERS"
+        }
+      ]
+    },
+    {
+      "domain": "Status",
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Asleep"
+          },
+          "id": "ASLEEP"
+        },
+        {
+          "aliases": {
+            "en-US": "Burning"
+          },
+          "id": "BURNING"
+        },
+        {
+          "aliases": {
+            "en-US": "Frozen"
+          },
+          "id": "FROZEN"
+        },
+        {
+          "aliases": {
+            "en-US": "Hacked"
+          },
+          "id": "HACKED"
+        },
+        {
+          "aliases": {
+            "en-US": "Invincible"
+          },
+          "id": "INVINCIBLE"
+        },
+        {
+          "aliases": {
+            "en-US": "Knocked Down"
+          },
+          "id": "KNOCKED_DOWN"
+        },
+        {
+          "aliases": {
+            "en-US": "Phased Out"
+          },
+          "id": "PHASED_OUT"
+        },
+        {
+          "aliases": {
+            "en-US": "Rooted"
+          },
+          "id": "ROOTED"
+        },
+        {
+          "aliases": {
+            "en-US": "Stunned"
+          },
+          "id": "STUNNED"
+        },
+        {
+          "aliases": {
+            "en-US": "Unkillable"
+          },
+          "id": "UNKILLABLE"
+        }
+      ]
+    },
+    {
+      "domain": "Transform",
+      "members": [
+        {
+          "aliases": {
+            "en-US": "Rotation"
+          },
+          "id": "ROTATION"
+        },
+        {
+          "aliases": {
+            "en-US": "Rotation And Translation"
+          },
+          "id": "ROTATION_AND_TRANSLATION"
+        }
+      ]
     }
   ],
   "events": [
@@ -410,7 +572,7 @@
     "generatorVersion": "0.1.0",
     "license": "AGPL-3.0-or-later",
     "reviewed": true,
-    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt(); receiver-call action/value spellings (setMoveSpeed, isAlive, getPosition, getHealth, teleport, setMaxHealth, setHealth, setAimSpeed, setGravity, setDamageDealt, setDamageReceived, setUltCharge) from the pinned OverPy 9.7.10 en-US emission surface for .opy eventPlayer.<method>(...) forms, evidenced by the synthetic/receiver-calls corpus fixture (#104); ChaseTimeReeval and ChaseRateReeval member spellings (None, Destination and Duration, Destination and Rate) reference-validated against the pinned OverPy 9.7.10 enum blocks and emission (#105)"
+    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt(); receiver-call action/value spellings (setMoveSpeed, isAlive, getPosition, getHealth, teleport, setMaxHealth, setHealth, setAimSpeed, setGravity, setDamageDealt, setDamageReceived, setUltCharge) from the pinned OverPy 9.7.10 en-US emission surface for .opy eventPlayer.<method>(...) forms, evidenced by the synthetic/receiver-calls corpus fixture (#104); ChaseTimeReeval and ChaseRateReeval member spellings (None, Destination and Duration, Destination and Rate) reference-validated against the pinned OverPy 9.7.10 enum blocks and emission (#105); chaseOverTime (Chase Global Variable Over Time), isGameInProgress (Is Game In Progress), getPlayersInRadius (Players Within Radius), worldVector (World Vector Of), getThrottle (Throttle Of), setInvisibility (Set Invisible) with the Invis domain, setStatusEffect (Set Status) with the Status domain, the Transform domain, and the LosCheck domain transcribed from the pinned OverPy 9.7.10 en-US emission surface for the OPY semantic manifest probes (#109)"
   },
   "schemaVersion": 1,
   "structural": [
@@ -717,6 +879,44 @@
       "id": "isAlive",
       "params": [
         "player"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Throttle Of"
+      },
+      "id": "getThrottle",
+      "params": [
+        "player"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Players Within Radius"
+      },
+      "id": "getPlayersInRadius",
+      "params": [
+        "center",
+        "radius",
+        "team",
+        "losCheck"
+      ]
+    },
+    {
+      "aliases": {
+        "en-US": "Is Game In Progress"
+      },
+      "id": "isGameInProgress"
+    },
+    {
+      "aliases": {
+        "en-US": "World Vector Of"
+      },
+      "id": "worldVector",
+      "params": [
+        "localVector",
+        "relativePlayer",
+        "transformation"
       ]
     }
   ]

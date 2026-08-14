@@ -7,6 +7,13 @@
 //! and subroutine calls become `CallSubroutine` statements. Semantic errors
 //! (unknown identifiers, unknown enum members, invalid `vect` arity) are
 //! structured and source-located.
+//!
+//! Builtin action/value/member identity, action/value position, signatures
+//! and arity, receiver categories, parameter enum domains, and non-contextual
+//! source aliases resolve through the OPY semantic compatibility manifest
+//! ([`crate::manifest`], issue #109) before Workshop emission: unknown or
+//! misplaced builtins fail here with structured, source-located diagnostics
+//! instead of surfacing as emitter catalog misses.
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,67 +25,25 @@ use wright_core::hir::types::{
 
 use crate::cst::{self, Decl, Expr, RuleEntry as CstRuleEntry, Stmt};
 use crate::diag::{FrontendError, FrontendResult, Span};
+use crate::manifest::{
+    Function, FunctionContext, FunctionKind, Manifest, ParamDefault, ReceiverCategory,
+};
 
 /// The protocol envelope this frontend produces.
 const PROTOCOL_NAME: &str = "wright/opy-hir";
 const PROTOCOL_VERSION: &str = "1.1.0";
 
-/// Corpus-evidenced `.opy` enum names that map to Workshop enum domains.
-///
-/// `Wait.IGNORE_CONDITION` is exercised by the corpus (implicit `wait`
-/// default); the remaining entries appear in the corpus `.opy` sources.
-/// `ChaseTimeReeval` and `ChaseRateReeval` are the pinned OverPy 9.7.10
-/// reevaluation domains (#105): both members of each domain are reference-
-/// validated against the oracle enum blocks and emission, and
-/// `ChaseRateReeval.NONE` additionally appears in the real-world
-/// overpy-meipocalypse corpus (as `ChaseReeval.NONE` in `rate=` chase
-/// calls, which the reference resolves to the `ChaseRateReeval` domain).
-/// Additional OverPy enum spellings outside this table fail explicitly.
-const KNOWN_ENUMS: &[(&str, &[&str])] = &[
-    ("Beam", &["GOOD", "GRAPPLE"]),
-    (
-        "Color",
-        &[
-            "YELLOW", "WHITE", "RED", "ORANGE", "GREEN", "BLUE", "BLACK", "PURPLE", "CYAN", "TEAM",
-            "AQUA", "MAGENTA", "SKY", "VIOLET", "ROSE",
-        ],
-    ),
-    (
-        "DynamicEffect",
-        &[
-            "BAD_EXPLOSION",
-            "GOOD_EXPLOSION",
-            "SPARKLES",
-            "RING_EXPLOSION",
-            "GOOD_AURA",
-            "BAD_AURA",
-            "ENERGY_SOUND",
-            "GOOD_PICKUP_SOUND",
-            "BAD_PICKUP_SOUND",
-            "GOOD_PICKUP_EFFECT",
-            "BAD_PICKUP_EFFECT",
-            "BUFF_SOUND",
-            "DEBUFF_SOUND",
-            "BUFF_IMPACT_SOUND",
-            "DEBUFF_IMPACT_SOUND",
-            "REFRESH_SOUND",
-            "DISCORD_SOUND",
-            "AUDIBLE_BEEP",
-            "COLLISION_SOUND",
-            "SMALL_PICKUP_SOUND",
-            "LARGE_PICKUP_SOUND",
-            "SMALL_PICKUP_EFFECT",
-            "LARGE_PICKUP_EFFECT",
-        ],
-    ),
-    (
-        "EffectReeval",
-        &["VISIBILITY", "COLOR", "VISIBILITY_AND_COLOR"],
-    ),
-    ("ChaseTimeReeval", &["NONE", "DESTINATION_AND_DURATION"]),
-    ("ChaseRateReeval", &["NONE", "DESTINATION_AND_RATE"]),
-    ("Wait", &["IGNORE_CONDITION"]),
-];
+/// The call-position context of an expression being lowered; builtin
+/// resolution checks action/value identity against this context.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallPosition {
+    /// A statement position (a bare expression statement).
+    Statement,
+    /// A value position (conditions, assignments, call arguments, …).
+    Value,
+    /// A `for ... in` iterable (only `range` is a valid builtin here).
+    ForIterable,
+}
 
 /// The lowerer's symbol context, built from the CST declarations.
 struct Lowerer {
@@ -87,6 +52,8 @@ struct Lowerer {
     subroutines: HashSet<String>,
     macros: HashSet<String>,
     enums: HashMap<String, Vec<String>>,
+    /// The authoritative builtin semantic table (issue #109).
+    manifest: &'static Manifest,
     errors: Vec<FrontendError>,
 }
 
@@ -96,12 +63,22 @@ pub fn lower(
     files: Vec<SourceFile>,
     defines: Vec<Define>,
 ) -> FrontendResult<HirProgram> {
+    let manifest = match Manifest::builtin() {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return Err(FrontendError::new(
+                "manifest-error",
+                format!("cannot load the OPY semantic compatibility manifest: {error}"),
+            ));
+        }
+    };
     let mut lowerer = Lowerer {
         globals: HashSet::new(),
         players: HashSet::new(),
         subroutines: HashSet::new(),
         macros: HashSet::new(),
         enums: HashMap::new(),
+        manifest,
         errors: Vec::new(),
     };
     lowerer.collect_symbols(program);
@@ -298,7 +275,7 @@ impl Lowerer {
     /// carries `j = 5` and `k = 0.0`); other initializers are kept.
     fn initializer(&mut self, initializer: Option<&Expr>) -> Option<Box<HirExpr>> {
         let initializer = initializer?;
-        let lowered = self.lower_expr(initializer, &[]);
+        let lowered = self.lower_expr(initializer, &[], CallPosition::Value);
         match &lowered {
             HirExpr::Number { text, .. } if text == "0" => None,
             other => Some(Box::new(other.clone())),
@@ -309,7 +286,7 @@ impl Lowerer {
         let conditions = rule
             .conditions
             .iter()
-            .map(|condition| self.lower_expr(condition, &[]))
+            .map(|condition| self.lower_expr(condition, &[], CallPosition::Value))
             .collect();
         let actions = self.lower_block(&rule.actions, &[]);
         Rule {
@@ -323,7 +300,7 @@ impl Lowerer {
                     .event
                     .args
                     .iter()
-                    .map(|arg| self.lower_expr(arg, &[]))
+                    .map(|arg| self.lower_expr(arg, &[], CallPosition::Value))
                     .collect(),
                 span: Some(rule.event.span.into()),
             },
@@ -353,8 +330,10 @@ impl Lowerer {
                         };
                     }
                 }
+                // Statement-position builtin resolution (action/value
+                // identity, unknown names) happens inside `lower_expr`.
                 HirStmt::Expr {
-                    expr: Box::new(self.lower_expr(expr, macro_params)),
+                    expr: Box::new(self.lower_expr(expr, macro_params, CallPosition::Statement)),
                     span: Some(span.into()),
                 }
             }
@@ -363,8 +342,8 @@ impl Lowerer {
                 value,
                 span,
             } => HirStmt::Assign {
-                target: Box::new(self.lower_expr(target, macro_params)),
-                value: Box::new(self.lower_expr(value, macro_params)),
+                target: Box::new(self.lower_expr(target, macro_params, CallPosition::Value)),
+                value: Box::new(self.lower_expr(value, macro_params, CallPosition::Value)),
                 span: Some(span.into()),
             },
             Stmt::If {
@@ -375,7 +354,11 @@ impl Lowerer {
                 branches: branches
                     .iter()
                     .map(|branch| IfBranch {
-                        condition: Box::new(self.lower_expr(&branch.condition, macro_params)),
+                        condition: Box::new(self.lower_expr(
+                            &branch.condition,
+                            macro_params,
+                            CallPosition::Value,
+                        )),
                         body: self.lower_block(&branch.body, macro_params),
                     })
                     .collect(),
@@ -389,18 +372,38 @@ impl Lowerer {
                 iterable,
                 body,
                 span,
-            } => HirStmt::For {
-                variable: Box::new(self.lower_expr(variable, macro_params)),
-                iterable: Box::new(self.lower_expr(iterable, macro_params)),
-                body: self.lower_block(body, macro_params),
-                span: Some(span.into()),
-            },
+            } => {
+                // The reference accepts only `range(...)` as a `for ... in`
+                // iterable; other iterables are an explicit frontend error
+                // (recovered by lowering in value position).
+                let iterable_position = if matches!(iterable, Expr::Call { name, .. } if name == "range")
+                {
+                    CallPosition::ForIterable
+                } else {
+                    self.error_at(
+                        "invalid-iterable",
+                        "for-loop iterable must be a range(...) call".to_string(),
+                        iterable.span(),
+                    );
+                    CallPosition::Value
+                };
+                HirStmt::For {
+                    variable: Box::new(self.lower_expr(
+                        variable,
+                        macro_params,
+                        CallPosition::Value,
+                    )),
+                    iterable: Box::new(self.lower_expr(iterable, macro_params, iterable_position)),
+                    body: self.lower_block(body, macro_params),
+                    span: Some(span.into()),
+                }
+            }
             Stmt::While {
                 condition,
                 body,
                 span,
             } => HirStmt::While {
-                condition: Box::new(self.lower_expr(condition, macro_params)),
+                condition: Box::new(self.lower_expr(condition, macro_params, CallPosition::Value)),
                 body: self.lower_block(body, macro_params),
                 span: Some(span.into()),
             },
@@ -414,7 +417,12 @@ impl Lowerer {
         self.lower_block(body, params)
     }
 
-    fn lower_expr(&mut self, expr: &Expr, macro_params: &[String]) -> HirExpr {
+    fn lower_expr(
+        &mut self,
+        expr: &Expr,
+        macro_params: &[String],
+        position: CallPosition,
+    ) -> HirExpr {
         match expr {
             Expr::Number { value, text, span } => HirExpr::Number {
                 value: *value,
@@ -435,7 +443,7 @@ impl Lowerer {
             Expr::Array { elements, span } => HirExpr::Array {
                 elements: elements
                     .iter()
-                    .map(|element| self.lower_expr(element, macro_params))
+                    .map(|element| self.lower_expr(element, macro_params, CallPosition::Value))
                     .collect(),
                 span: Some(span.into()),
             },
@@ -446,17 +454,19 @@ impl Lowerer {
                 span,
             } => self.lower_member(receiver, member, *span, macro_params),
             Expr::Index { array, index, span } => HirExpr::Index {
-                array: Box::new(self.lower_expr(array, macro_params)),
-                index: Box::new(self.lower_expr(index, macro_params)),
+                array: Box::new(self.lower_expr(array, macro_params, CallPosition::Value)),
+                index: Box::new(self.lower_expr(index, macro_params, CallPosition::Value)),
                 span: Some(span.into()),
             },
-            Expr::Call { name, args, span } => self.lower_call(name, args, *span, macro_params),
+            Expr::Call { name, args, span } => {
+                self.lower_call(name, args, *span, macro_params, position)
+            }
             Expr::ReceiverCall {
                 receiver,
                 name,
                 args,
                 span,
-            } => self.lower_receiver_call(receiver, name, args, *span, macro_params),
+            } => self.lower_receiver_call(receiver, name, args, *span, macro_params, position),
             Expr::Binary {
                 op,
                 left,
@@ -464,13 +474,13 @@ impl Lowerer {
                 span,
             } => HirExpr::Binary {
                 op: op.clone(),
-                left: Box::new(self.lower_expr(left, macro_params)),
-                right: Box::new(self.lower_expr(right, macro_params)),
+                left: Box::new(self.lower_expr(left, macro_params, CallPosition::Value)),
+                right: Box::new(self.lower_expr(right, macro_params, CallPosition::Value)),
                 span: Some(span.into()),
             },
             Expr::Unary { op, operand, span } => HirExpr::Unary {
                 op: op.clone(),
-                operand: Box::new(self.lower_expr(operand, macro_params)),
+                operand: Box::new(self.lower_expr(operand, macro_params, CallPosition::Value)),
                 span: Some(span.into()),
             },
         }
@@ -541,9 +551,10 @@ impl Lowerer {
                     }
                 };
             }
-            // Builtin Workshop enum.
-            if let Some(members) = KNOWN_ENUMS.iter().find(|(domain, _)| *domain == name) {
-                if members.1.contains(&member) {
+            // Builtin Workshop enum: members resolve through the manifest's
+            // declared enum domains (reference-validated, #109).
+            if let Some(domain) = self.manifest.enum_domain(name) {
+                if domain.members.iter().any(|candidate| candidate == member) {
                     return HirExpr::Enum {
                         value_type: name.clone(),
                         value: member.to_string(),
@@ -589,7 +600,28 @@ impl Lowerer {
         args: &[Expr],
         span: Span,
         macro_params: &[String],
+        position: CallPosition,
     ) -> HirExpr {
+        // Builtin identity and position checks run before the special forms
+        // so that a misplaced `wait`/`vect` still diagnoses its position.
+        if !self.macros.contains(name) && !self.subroutines.contains(name) {
+            match self.manifest.resolve_function(name) {
+                Some(entry) => self.check_call_position(name, entry, position, span),
+                None => {
+                    let (code, message) = match position {
+                        CallPosition::Statement => {
+                            ("unknown-action", format!("unknown action '{name}'"))
+                        }
+                        CallPosition::Value => ("unknown-value", format!("unknown value '{name}'")),
+                        CallPosition::ForIterable => (
+                            "invalid-iterable",
+                            format!("for-loop iterable '{name}' must be a range(...) call"),
+                        ),
+                    };
+                    self.error_at(code, message, span);
+                }
+            }
+        }
         match name {
             "vect" => {
                 if args.len() != 3 {
@@ -604,16 +636,16 @@ impl Lowerer {
                     return HirExpr::Null { span: None };
                 }
                 HirExpr::Vector {
-                    x: Box::new(self.lower_expr(&args[0], macro_params)),
-                    y: Box::new(self.lower_expr(&args[1], macro_params)),
-                    z: Box::new(self.lower_expr(&args[2], macro_params)),
+                    x: Box::new(self.lower_expr(&args[0], macro_params, CallPosition::Value)),
+                    y: Box::new(self.lower_expr(&args[1], macro_params, CallPosition::Value)),
+                    z: Box::new(self.lower_expr(&args[2], macro_params, CallPosition::Value)),
                     span: Some(span.into()),
                 }
             }
-            "wait" => {
+            "wait" if args.len() <= 2 => {
                 let lowered: Vec<HirExpr> = args
                     .iter()
-                    .map(|arg| self.lower_expr(arg, macro_params))
+                    .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
                     .collect();
                 let mut result = lowered;
                 match result.len() {
@@ -645,25 +677,48 @@ impl Lowerer {
                     span: Some(span.into()),
                 }
             }
-            _ if self.macros.contains(name) => {
-                // A declared `macro` invocation is recorded as a macroCall.
-                HirExpr::MacroCall {
-                    name: name.to_string(),
-                    args: args
-                        .iter()
-                        .map(|arg| self.lower_expr(arg, macro_params))
-                        .collect(),
-                    span: Some(span.into()),
+            _ => {
+                if self.macros.contains(name) {
+                    // A declared `macro` invocation is recorded as a macroCall.
+                    return HirExpr::MacroCall {
+                        name: name.to_string(),
+                        args: args
+                            .iter()
+                            .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
+                            .collect(),
+                        span: Some(span.into()),
+                    };
+                }
+                let lowered: Vec<HirExpr> = args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
+                    .collect();
+                match self.manifest.resolve_function(name) {
+                    Some(entry) => {
+                        // Declared subroutines with arguments stay generic
+                        // calls; builtins get arity/domain/default handling.
+                        if self.subroutines.contains(name) {
+                            return HirExpr::Call {
+                                name: name.to_string(),
+                                args: lowered,
+                                span: Some(span.into()),
+                            };
+                        }
+                        self.check_arity(entry, args.len(), span);
+                        self.check_enum_domains(entry, args, &lowered);
+                        HirExpr::Call {
+                            name: entry.id.clone(),
+                            args: self.fill_enum_defaults(entry, lowered, span),
+                            span: Some(span.into()),
+                        }
+                    }
+                    None => HirExpr::Call {
+                        name: name.to_string(),
+                        args: lowered,
+                        span: Some(span.into()),
+                    },
                 }
             }
-            _ => HirExpr::Call {
-                name: name.to_string(),
-                args: args
-                    .iter()
-                    .map(|arg| self.lower_expr(arg, macro_params))
-                    .collect(),
-                span: Some(span.into()),
-            },
         }
     }
 
@@ -674,43 +729,269 @@ impl Lowerer {
         args: &[Expr],
         span: Span,
         macro_params: &[String],
+        position: CallPosition,
     ) -> HirExpr {
-        let lowered_args: Vec<HirExpr> = args
-            .iter()
-            .map(|arg| self.lower_expr(arg, macro_params))
-            .collect();
-        match receiver {
-            // `random.uniform(...)` → dotted call name.
-            Expr::Name { name: root, .. } if root == "random" => HirExpr::Call {
-                name: format!("random.{name}"),
-                args: lowered_args,
-                span: Some(span.into()),
-            },
-            // `"text".format(...)` → format node.
-            Expr::String { value, .. } if name == "format" => HirExpr::Format {
-                text: value.clone(),
-                args: lowered_args,
-                span: Some(span.into()),
-            },
-            // `eventPlayer.hasSpawned()` → receiver call on the event player.
-            Expr::Name { name: root, .. } if root == "eventPlayer" => HirExpr::ReceiverCall {
-                receiver: Box::new(HirExpr::EventPlayer { span: None }),
-                name: name.to_string(),
-                args: lowered_args,
-                span: Some(span.into()),
-            },
-            // Any other receiver: resolve it and keep the receiver call.
-            other => HirExpr::ReceiverCall {
-                receiver: Box::new(self.lower_expr(other, macro_params)),
-                name: name.to_string(),
-                args: lowered_args,
-                span: Some(span.into()),
-            },
+        // `random.uniform(...)` etc. are dotted generic calls.
+        if let Expr::Name { name: root, .. } = receiver {
+            if root == "random" {
+                return self.lower_call(
+                    &format!("random.{name}"),
+                    args,
+                    span,
+                    macro_params,
+                    position,
+                );
+            }
         }
+        // `.format` on a string literal is the format special form; it is
+        // also a declared member value (receiver category `String`), so
+        // position misuse diagnoses here.
+        if let Expr::String { value, .. } = receiver {
+            if name == "format" {
+                let lowered: Vec<HirExpr> = args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
+                    .collect();
+                if let Some(entry) = self.manifest.resolve_member("format") {
+                    self.check_call_position("format", entry, position, span);
+                    self.check_enum_domains(entry, args, &lowered);
+                }
+                return HirExpr::Format {
+                    text: value.clone(),
+                    args: lowered,
+                    span: Some(span.into()),
+                };
+            }
+        }
+        // Member calls resolve through the manifest (receiver category,
+        // explicit-argument arity, parameter enum domains).
+        let lowered: Vec<HirExpr> = args
+            .iter()
+            .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
+            .collect();
+        let member_name = match self.manifest.resolve_member(name) {
+            Some(entry) => {
+                self.check_call_position(name, entry, position, span);
+                if let Some(category) = entry.receiver {
+                    self.check_receiver(receiver, category, entry, span);
+                }
+                self.check_arity(entry, args.len(), span);
+                self.check_enum_domains(entry, args, &lowered);
+                entry.id.clone()
+            }
+            None => {
+                self.error_at("unknown-member", format!("unknown member '{name}'"), span);
+                name.to_string()
+            }
+        };
+        // `eventPlayer.member(...)` → receiver call on the event player.
+        if let Expr::Name { name: root, .. } = receiver {
+            if root == "eventPlayer" {
+                return HirExpr::ReceiverCall {
+                    receiver: Box::new(HirExpr::EventPlayer { span: None }),
+                    name: member_name,
+                    args: lowered,
+                    span: Some(span.into()),
+                };
+            }
+        }
+        // Any other receiver: resolve it and keep the receiver call.
+        HirExpr::ReceiverCall {
+            receiver: Box::new(self.lower_expr(receiver, macro_params, CallPosition::Value)),
+            name: member_name,
+            args: lowered,
+            span: Some(span.into()),
+        }
+    }
+
+    /// Check a builtin entry against its call position: action/value
+    /// identity and for-iterable context.
+    fn check_call_position(
+        &mut self,
+        name: &str,
+        entry: &Function,
+        position: CallPosition,
+        span: Span,
+    ) {
+        match position {
+            CallPosition::Statement => {
+                if entry.context == Some(FunctionContext::ForIterable) {
+                    self.error_at(
+                        "invalid-call-context",
+                        format!("'{name}' is only valid as a for-loop iterable"),
+                        span,
+                    );
+                } else if entry.kind.is_value() {
+                    self.error_at(
+                        "value-in-action-position",
+                        format!("value function '{name}' cannot be used as an action"),
+                        span,
+                    );
+                }
+            }
+            CallPosition::Value => {
+                if entry.kind.is_action() {
+                    self.error_at(
+                        "action-in-value-position",
+                        format!("action function '{name}' cannot be used as a value"),
+                        span,
+                    );
+                } else if entry.context == Some(FunctionContext::ForIterable) {
+                    self.error_at(
+                        "invalid-call-context",
+                        format!("'{name}' is only valid as a for-loop iterable"),
+                        span,
+                    );
+                }
+            }
+            CallPosition::ForIterable => {
+                if entry.context != Some(FunctionContext::ForIterable) {
+                    self.error_at(
+                        "invalid-iterable",
+                        format!("for-loop iterable '{name}' must be a range(...) call"),
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Check a member call's receiver against its declared category. Only
+    /// the reference-enforced categories reject: `.append` requires an
+    /// assignable receiver and `.format` a string literal; player-oriented
+    /// members accept any receiver (the pinned reference does not type-check
+    /// them).
+    fn check_receiver(
+        &mut self,
+        receiver: &Expr,
+        category: ReceiverCategory,
+        entry: &Function,
+        span: Span,
+    ) {
+        let mismatch = match category {
+            ReceiverCategory::String => !matches!(receiver, Expr::String { .. }),
+            ReceiverCategory::Variable => !assignable_receiver(receiver),
+            ReceiverCategory::Player | ReceiverCategory::Any => false,
+        };
+        if mismatch {
+            self.error_at(
+                "invalid-receiver",
+                format!(
+                    "member '{}' requires {} as its receiver",
+                    entry.id,
+                    category.describe()
+                ),
+                span,
+            );
+        }
+    }
+
+    /// Check a builtin call's argument count against its declared arity.
+    fn check_arity(&mut self, entry: &Function, got: usize, span: Span) {
+        let (min, max) = entry.arity_bounds();
+        let valid = got >= min && max.is_none_or(|max| got <= max);
+        if !valid {
+            let expects = match max {
+                Some(max) if min == max => format!("exactly {min}"),
+                Some(max) => format!("{min} to {max}"),
+                None => format!("at least {min}"),
+            };
+            let role = match entry.kind {
+                FunctionKind::Action => "action",
+                FunctionKind::Value => "value",
+                FunctionKind::MemberAction => "member action",
+                FunctionKind::MemberValue => "member value",
+            };
+            self.error_at(
+                "invalid-arity",
+                format!(
+                    "{role} '{}' expects {expects} arguments but got {got}",
+                    entry.id
+                ),
+                span,
+            );
+        }
+    }
+
+    /// Check each argument that has a declared enum domain: the pinned
+    /// reference requires an enum member of that domain (variables and other
+    /// values are rejected), so any mismatch is a structured diagnostic at
+    /// the argument's span.
+    fn check_enum_domains(&mut self, entry: &Function, args: &[Expr], lowered: &[HirExpr]) {
+        for (index, param) in entry.params.iter().enumerate() {
+            let Some(domain) = param.domain.as_deref() else {
+                continue;
+            };
+            let (Some(arg), Some(lowered_arg)) = (args.get(index), lowered.get(index)) else {
+                continue;
+            };
+            match lowered_arg {
+                HirExpr::Enum { value_type, .. } if value_type == domain => {}
+                HirExpr::Enum { value_type, .. } => self.error_at(
+                    "enum-domain-mismatch",
+                    format!(
+                        "argument {} of '{}' expects enum domain '{}', found '{}'",
+                        index + 1,
+                        entry.id,
+                        domain,
+                        value_type
+                    ),
+                    arg.span(),
+                ),
+                _ => self.error_at(
+                    "enum-domain-mismatch",
+                    format!(
+                        "argument {} of '{}' expects an enum value of domain '{}'",
+                        index + 1,
+                        entry.id,
+                        domain
+                    ),
+                    arg.span(),
+                ),
+            }
+        }
+    }
+
+    /// Fill declared enum-domain defaults for omitted trailing arguments
+    /// (the reference emits the default member, e.g. `chaseOverTime(g, 10,
+    /// 3)` → `…, Destination and Duration`). Non-enum defaults are never
+    /// expanded here (`wait` handles its own defaults in its special form).
+    fn fill_enum_defaults(
+        &mut self,
+        entry: &Function,
+        mut args: Vec<HirExpr>,
+        span: Span,
+    ) -> Vec<HirExpr> {
+        for index in args.len()..entry.params.len() {
+            match &entry.params[index].default {
+                Some(ParamDefault::EnumMember(member)) => {
+                    let domain = entry.params[index].domain.clone().unwrap_or_default();
+                    args.push(HirExpr::Enum {
+                        value_type: domain,
+                        value: member.clone(),
+                        span: Some(span.into()),
+                    });
+                }
+                _ => break,
+            }
+        }
+        args
     }
 
     fn error_at(&mut self, code: &str, message: String, span: Span) {
         self.errors.push(FrontendError::at(code, message, span));
+    }
+}
+
+/// Whether a CST receiver is assignable (the `.append` receiver rule): a
+/// variable name (including macro parameters), an array literal, or an index
+/// expression — matching the pinned reference, which rejects constant and
+/// function receivers ("Cannot modify or assign to …").
+fn assignable_receiver(receiver: &Expr) -> bool {
+    match receiver {
+        Expr::Name { name, .. } => name != "eventPlayer",
+        Expr::Array { .. } | Expr::Index { .. } => true,
+        _ => false,
     }
 }
 
@@ -943,5 +1224,344 @@ mod tests {
         assert_eq!(error.code, "unsupported-member");
         let span = error.span.expect("the error is source-located");
         assert_eq!(span.start.line, 4);
+    }
+
+    // --- Builtin semantic manifest coverage (#109) ---
+
+    /// Assert a compile failure has the given code at the given line.
+    fn compile_error(source: &str, line: u32) -> FrontendError {
+        let error = crate::compile(source, "test.opy", std::path::Path::new(""))
+            .expect_err("expected a compile failure");
+        let span = error.span.expect("the error is source-located");
+        assert_eq!(span.start.line, line, "code '{}'", error.code);
+        error
+    }
+
+    fn action_source(statement: &str) -> String {
+        format!("globalvar g\nrule \"r\":\n    @Event global\n    {statement}\n")
+    }
+
+    #[test]
+    fn chase_over_time_resolves_and_compiles_with_reference_signatures() {
+        // 4-argument form with an explicit reevaluation member (#106).
+        let hir = crate::compile(
+            &action_source("chaseOverTime(g, 10, 3, ChaseTimeReeval.NONE)"),
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect("reference-supported chaseOverTime compiles");
+        let RuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        let HirStmt::Expr { expr, .. } = &rule.actions[0] else {
+            panic!("expected expression statement");
+        };
+        let HirExpr::Call { name, args, .. } = expr.as_ref() else {
+            panic!("expected a call, got {expr:?}");
+        };
+        assert_eq!(name, "chaseOverTime");
+        assert_eq!(args.len(), 4);
+        assert!(matches!(
+            &args[3],
+            HirExpr::Enum { value_type, value, .. }
+                if value_type == "ChaseTimeReeval" && value == "NONE"
+        ));
+
+        // 3-argument form fills the reference default member.
+        let hir = crate::compile(
+            &action_source("chaseOverTime(g, 10, 3)"),
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect("default-reevaluation chaseOverTime compiles");
+        let RuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        let HirStmt::Expr { expr, .. } = &rule.actions[0] else {
+            panic!("expected expression statement");
+        };
+        let HirExpr::Call { args, .. } = expr.as_ref() else {
+            panic!("expected a call");
+        };
+        assert_eq!(args.len(), 4);
+        assert!(matches!(
+            &args[3],
+            HirExpr::Enum { value_type, value, .. }
+                if value_type == "ChaseTimeReeval" && value == "DESTINATION_AND_DURATION"
+        ));
+    }
+
+    #[test]
+    fn is_game_in_progress_resolves_as_a_builtin_value() {
+        // Generic value gap from #106: `isGameInProgress()` in a condition.
+        let hir = crate::compile(
+            &action_source("@Condition isGameInProgress() == true"),
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect("reference-supported isGameInProgress compiles");
+        let RuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        assert!(matches!(&rule.conditions[0], HirExpr::Binary { .. }));
+    }
+
+    #[test]
+    fn enum_gated_members_resolve_through_the_manifest() {
+        // Enum-gated members from #106: setInvisibility (Invis), getThrottle
+        // (member value), worldVector (Transform arg), setStatusEffect
+        // (Status arg).
+        let source = "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
+            @Condition eventPlayer.getThrottle() != vect(0, 0, 0)\n    \
+            @Condition worldVector(vect(1, 2, 3), eventPlayer, Transform.ROTATION) != vect(0, 0, 0)\n    \
+            eventPlayer.setInvisibility(Invis.ALL)\n    \
+            eventPlayer.setStatusEffect(eventPlayer, Status.ROOTED, 2)\n";
+        let hir = crate::compile(source, "test.opy", std::path::Path::new(""))
+            .expect("enum-gated members compile");
+        let RuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        assert_eq!(rule.actions.len(), 2);
+    }
+
+    #[test]
+    fn get_players_in_radius_fills_reference_enum_defaults() {
+        // 2-argument form fills Team.ALL and LosCheck.OFF (reference
+        // emission: `Players Within Radius(..., All Teams, Off)`).
+        let hir = crate::compile(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
+             @Condition len(getPlayersInRadius(eventPlayer.getPosition(), 10)) > 0\n    \
+             disableInspector()\n",
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect("getPlayersInRadius with defaults compiles");
+        let RuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        let HirExpr::Binary { left, .. } = &rule.conditions[0] else {
+            panic!("expected a comparison");
+        };
+        let HirExpr::Call { name, args, .. } = left.as_ref() else {
+            panic!("expected len call");
+        };
+        assert_eq!(name, "len");
+        let HirExpr::Call { name, args, .. } = &args[0] else {
+            panic!("expected getPlayersInRadius call");
+        };
+        assert_eq!(name, "getPlayersInRadius");
+        assert_eq!(args.len(), 4);
+        assert!(matches!(
+            &args[2],
+            HirExpr::Enum { value_type, value, .. }
+                if value_type == "Team" && value == "ALL"
+        ));
+        assert!(matches!(
+            &args[3],
+            HirExpr::Enum { value_type, value, .. }
+                if value_type == "LosCheck" && value == "OFF"
+        ));
+    }
+
+    #[test]
+    fn value_call_in_action_position_is_rejected() {
+        let error = compile_error(&action_source("isGameInProgress()"), 4);
+        assert_eq!(error.code, "value-in-action-position");
+    }
+
+    #[test]
+    fn value_member_in_action_position_is_rejected() {
+        // The #106 baseline records the oracle rejecting `B.isAlive()` as a
+        // statement; the manifest enforces that contract (#109).
+        let error = compile_error(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    eventPlayer.isAlive()\n",
+            4,
+        );
+        assert_eq!(error.code, "value-in-action-position");
+    }
+
+    #[test]
+    fn action_call_in_value_position_is_rejected() {
+        let error = compile_error(&action_source("g = wait(1)"), 4);
+        assert_eq!(error.code, "action-in-value-position");
+    }
+
+    #[test]
+    fn invalid_arity_is_a_source_located_diagnostic() {
+        let error = compile_error(&action_source("chaseOverTime(g, 10)"), 4);
+        assert_eq!(error.code, "invalid-arity");
+        assert!(error.message.contains("3 to 4 arguments"));
+    }
+
+    #[test]
+    fn invalid_member_arity_is_a_source_located_diagnostic() {
+        // #106 evidence: `getPlayersInRadius(...).setStatusEffect(eventPlayer,
+        // 30)` must reject exactly like the oracle (arity: assister, status,
+        // duration are all required).
+        let error = compile_error(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
+             getPlayersInRadius(eventPlayer.getPosition(), 10).setStatusEffect(eventPlayer, 30)\n",
+            4,
+        );
+        assert_eq!(error.code, "invalid-arity");
+        assert!(error.message.contains("member action 'setStatusEffect'"));
+    }
+
+    #[test]
+    fn invalid_receiver_categories_are_rejected() {
+        // `.append` requires an assignable receiver; `.format` a string
+        // literal (both reference-enforced categories).
+        let error = compile_error(&action_source("3.append(1)"), 4);
+        assert_eq!(error.code, "invalid-receiver");
+        assert!(error.message.contains("append"));
+
+        let error = compile_error(&action_source("print(3.format(\"{}\"))"), 4);
+        assert_eq!(error.code, "invalid-receiver");
+        assert!(error.message.contains("format"));
+    }
+
+    #[test]
+    fn enum_domain_mismatch_is_a_source_located_diagnostic() {
+        // Wrong enum domain for a parameter (#106): the oracle rejects
+        // `chaseOverTime(..., Invis.ALL)` and
+        // `eventPlayer.setInvisibility(ChaseTimeReeval.NONE)`.
+        let error = compile_error(&action_source("chaseOverTime(g, 10, 3, Invis.ALL)"), 4);
+        assert_eq!(error.code, "enum-domain-mismatch");
+        assert!(error.message.contains("ChaseTimeReeval"));
+
+        let error = compile_error(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
+             eventPlayer.setInvisibility(ChaseTimeReeval.NONE)\n",
+            4,
+        );
+        assert_eq!(error.code, "enum-domain-mismatch");
+        assert!(error.message.contains("Invis"));
+    }
+
+    #[test]
+    fn non_enum_arguments_for_enum_parameters_are_rejected() {
+        // The reference requires an enum member for enum-domain parameters;
+        // numbers, strings, and even variables are rejected.
+        let error = compile_error(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
+             eventPlayer.setInvisibility(g)\n",
+            4,
+        );
+        assert_eq!(error.code, "enum-domain-mismatch");
+
+        let error = compile_error(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
+             eventPlayer.setInvisibility(3)\n",
+            4,
+        );
+        assert_eq!(error.code, "enum-domain-mismatch");
+    }
+
+    #[test]
+    fn unknown_builtins_fail_at_resolution_not_emission() {
+        let error = compile_error(&action_source("frobnicate()"), 4);
+        assert_eq!(error.code, "unknown-action");
+
+        let error = compile_error(&action_source("g = frobnicate()"), 4);
+        assert_eq!(error.code, "unknown-value");
+
+        let error = compile_error(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    eventPlayer.frobnicate()\n",
+            4,
+        );
+        assert_eq!(error.code, "unknown-member");
+    }
+
+    #[test]
+    fn wright_only_catalog_names_are_rejected() {
+        // `createHudText` and `squareRoot` are Workshop emission spellings,
+        // not OPY source functions; the pinned reference rejects them, so
+        // the manifest does not preserve the accidental acceptance.
+        let error = compile_error(&action_source("createHudText(1)"), 4);
+        assert_eq!(error.code, "unknown-action");
+
+        let error = compile_error(&action_source("g = squareRoot(9)"), 4);
+        assert_eq!(error.code, "unknown-value");
+    }
+
+    #[test]
+    fn generic_member_only_actions_are_rejected() {
+        // `setMoveSpeed(eventPlayer, 100)` is not an OPY function: the
+        // member form is the reference surface.
+        let error = compile_error(&action_source("setMoveSpeed(eventPlayer, 100)"), 4);
+        assert_eq!(error.code, "unknown-action");
+    }
+
+    #[test]
+    fn range_is_for_iterables_only() {
+        // Standalone `range(...)` is rejected by the reference; the
+        // for-header form keeps 1-3 arguments.
+        let error = compile_error(&action_source("@Condition len(range(1, 5, 1)) > 0"), 4);
+        assert_eq!(error.code, "invalid-call-context");
+
+        let error = compile_error(&action_source("for g in [1, 2]:\n        debug(g)"), 4);
+        assert_eq!(error.code, "invalid-iterable");
+
+        crate::compile(
+            &action_source("for g in range(3):\n        debug(g)"),
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect("the for-header range form compiles");
+    }
+
+    #[test]
+    fn source_aliases_resolve_to_canonical_names() {
+        // Non-contextual aliases rewrite to the canonical entry so identity,
+        // position, and emission use the target name.
+        let hir = crate::compile(
+            &action_source("stopChasingVariable(g)"),
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect("the alias target compiles");
+        let RuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        let HirStmt::Expr { expr, .. } = &rule.actions[0] else {
+            panic!("expected expression statement");
+        };
+        let HirExpr::Call { name, .. } = expr.as_ref() else {
+            panic!("expected a call");
+        };
+        assert_eq!(name, "stopChasing");
+
+        let hir = crate::compile(
+            "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
+             @Condition eventPlayer.getCurrentHero() != null\n    \
+             @Condition eventPlayer.hasStatusEffect(Status.BURNING) == false\n    \
+             disableInspector()\n",
+            "test.opy",
+            std::path::Path::new(""),
+        )
+        .expect("member aliases compile");
+        let RuleEntry::Rule(rule) = &hir.rules[0] else {
+            panic!("expected a rule");
+        };
+        let HirExpr::Binary { left, .. } = &rule.conditions[0] else {
+            panic!("expected a comparison");
+        };
+        let HirExpr::ReceiverCall { name, .. } = left.as_ref() else {
+            panic!("expected a receiver call");
+        };
+        assert_eq!(name, "getHero");
+    }
+
+    #[test]
+    fn reference_rejected_enum_members_are_rejected() {
+        // The KNOWN_ENUMS table previously accepted Color.CYAN and
+        // DynamicEffect.SPARKLES; the pinned reference rejects those
+        // spellings, so the manifest's reference-validated member lists do
+        // not preserve them (#109).
+        let error = compile_error(&action_source("g = Color.CYAN"), 4);
+        assert_eq!(error.code, "unknown-enum-member");
+
+        let error = compile_error(&action_source("g = DynamicEffect.SPARKLES"), 4);
+        assert_eq!(error.code, "unknown-enum-member");
     }
 }

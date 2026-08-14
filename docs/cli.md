@@ -237,6 +237,13 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `stdin-*` (discovery), `output-io` (emission), analysis findings reuse the
 analyzer's codes, and `*-internal` / `*-unavailable` (internal).
 
+The native `.opy` frontend's builtin-resolution stage adds the stable codes
+`unknown-action`, `unknown-value`, `unknown-member`, `invalid-arity`,
+`invalid-receiver`, `enum-domain-mismatch`, `action-in-value-position`,
+`value-in-action-position`, `invalid-call-context`, and `invalid-iterable`
+(semantic resolution against the OPY compatibility manifest, #109; all
+source-located).
+
 ## Determinism
 
 For identical inputs and configuration, JSON output is byte-deterministic

@@ -1,0 +1,699 @@
+//! The OPY semantic compatibility manifest (issue #109).
+//!
+//! This module owns the Wright-authored, reference-validated semantic table
+//! that the native `.opy` frontend resolves builtin names, member functions,
+//! receiver categories, signatures/arity, parameter enum domains, enum
+//! members, and non-contextual source aliases against — the authoritative
+//! replacement for the hardcoded `KNOWN_ENUMS` table and the semantic
+//! catalog-coverage gap behind `unknown-action`/`unknown-value`/
+//! `unsupported-member` emission failures.
+//!
+//! * The data lives in [`data/manifest.json`](data/manifest.json) (schema
+//!   v1, per `docs/opy/compat-manifest-spec.md`).
+//! * Every entry records the pinned-oracle probe that validates it
+//!   (`probes/probes.json`); `probes/validate.py` runs each probe against the
+//!   pinned OverPy 9.7.10 oracle and verifies accept/reject, emission hash,
+//!   and diagnostic category deterministically.
+//! * `catalogId` links each entry to the Workshop emission catalog
+//!   (`crates/wright-workshop/src/catalog/data/catalog.json`) by canonical
+//!   identity without duplicating localization/output spelling data; a
+//!   cross-check test verifies every declared id exists with the matching
+//!   kind.
+//!
+//! The manifest is language-compatibility metadata, not runtime content data
+//! (issue #96 stays deferred), and it is Wright-authored data validated
+//! against observed oracle behavior — never a mechanical conversion of
+//! OverPy's GPL-3.0 data files (ADR-0004, `docs/licensing.md`).
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use serde::{Deserialize, Serialize};
+
+/// The embedded schema-v1 manifest data.
+pub const MANIFEST_DATA: &str = include_str!("data/manifest.json");
+
+/// The embedded probe evidence record for the manifest data.
+pub const PROBES_DATA: &str = include_str!("probes/probes.json");
+
+/// The pinned reference identity the manifest data is validated against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reference {
+    pub name: String,
+    pub version: String,
+    #[serde(rename = "contentCommit")]
+    pub content_commit: String,
+    pub integrity: String,
+}
+
+/// Provenance of the manifest data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Provenance {
+    pub generator: String,
+    pub license: String,
+    pub reviewed: bool,
+}
+
+/// The kind of a builtin function entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FunctionKind {
+    /// A generic action (`chaseOverTime(...)` as a statement).
+    Action,
+    /// A generic value (`isGameInProgress()` in an expression).
+    Value,
+    /// An action called on a receiver (`eventPlayer.setMoveSpeed(100)`).
+    MemberAction,
+    /// A value called on a receiver (`eventPlayer.isAlive()`).
+    MemberValue,
+}
+
+impl FunctionKind {
+    /// Whether this kind is an action (statement-position builtin).
+    pub fn is_action(self) -> bool {
+        matches!(self, FunctionKind::Action | FunctionKind::MemberAction)
+    }
+
+    /// Whether this kind is a value (expression-position builtin).
+    pub fn is_value(self) -> bool {
+        matches!(self, FunctionKind::Value | FunctionKind::MemberValue)
+    }
+
+    /// Whether this kind is a receiver member function.
+    pub fn is_member(self) -> bool {
+        matches!(self, FunctionKind::MemberAction | FunctionKind::MemberValue)
+    }
+}
+
+/// The declared receiver category of a member function.
+///
+/// `Player` is the metadata category for player-oriented members (the pinned
+/// reference does not type-check those receivers, so the frontend does not
+/// reject them); `Variable` and `String` are enforced where the reference
+/// semantics are clear (`.append` requires an assignable receiver, `.format`
+/// requires a string literal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum ReceiverCategory {
+    Player,
+    Variable,
+    String,
+    Any,
+}
+
+impl ReceiverCategory {
+    /// A human-readable description of the category for diagnostics.
+    pub fn describe(self) -> &'static str {
+        match self {
+            ReceiverCategory::Player => "a player-valued expression",
+            ReceiverCategory::Variable => "an assignable variable",
+            ReceiverCategory::String => "a string literal",
+            ReceiverCategory::Any => "any expression",
+        }
+    }
+}
+
+/// A parameter default that the frontend expands: an enum member
+/// (`"MEMBER"`) or a scalar (`0.016`). Only enum-member defaults are
+/// expanded at lowering (matching the reference emission); scalar defaults
+/// are declared data (the `wait` special form fills its own).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ParamDefault {
+    EnumMember(String),
+    Number(f64),
+}
+
+/// One ordered parameter of a function entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Param {
+    pub name: String,
+    /// The enum domain this parameter requires, when it is an enum argument.
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// An explicit default the frontend may expand; see [`ParamDefault`].
+    #[serde(default)]
+    pub default: Option<ParamDefault>,
+    /// Whether the argument is omittable without an emitted expansion
+    /// (`"optional": true`; the reference accepts the short form).
+    #[serde(default)]
+    pub optional: bool,
+}
+
+/// A call-context restriction on a function entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FunctionContext {
+    /// Only valid as a `for ... in` iterable (`range`; the pinned reference
+    /// rejects standalone `range` calls).
+    ForIterable,
+}
+
+/// One builtin function entry (generic action/value or member function).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Function {
+    pub id: String,
+    pub kind: FunctionKind,
+    /// The receiver category of member functions.
+    #[serde(default)]
+    pub receiver: Option<ReceiverCategory>,
+    #[serde(default)]
+    pub params: Vec<Param>,
+    /// Whether the argument count is unbounded (`.format` placeholders).
+    #[serde(default)]
+    pub unbounded: bool,
+    #[serde(default)]
+    pub context: Option<FunctionContext>,
+    /// The canonical Workshop catalog id this entry emits through; absent
+    /// when emission is special-cased or not yet catalog-covered.
+    #[serde(default)]
+    #[serde(rename = "catalogId")]
+    pub catalog_id: Option<String>,
+    /// The probe ids that validate this entry against the pinned oracle.
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+impl Function {
+    /// The (minimum, maximum) argument count: the first parameter with a
+    /// default makes every following parameter optional; `unbounded` entries
+    /// accept any count.
+    pub fn arity_bounds(&self) -> (usize, Option<usize>) {
+        if self.unbounded {
+            return (0, None);
+        }
+        let first_default = self
+            .params
+            .iter()
+            .position(|param| param.default.is_some() || param.optional);
+        let min = first_default.unwrap_or(self.params.len());
+        (min, Some(self.params.len()))
+    }
+}
+
+/// One enum value domain (`Invis`, `Transform`, `ChaseTimeReeval`, …).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnumDomain {
+    pub domain: String,
+    pub members: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+/// A non-contextual source alias: a pure name rewrite to a declared entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Alias {
+    pub source: String,
+    pub target: String,
+    pub kind: AliasKind,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+/// The alias target class; `functionAlias` targets a generic function,
+/// `memberAlias` a member function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AliasKind {
+    FunctionAlias,
+    MemberAlias,
+}
+
+/// One recorded probe in the embedded evidence record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Probe {
+    pub id: String,
+    pub source: String,
+    pub sha256: String,
+    pub expect: String,
+    #[serde(default)]
+    pub output_sha256: Option<String>,
+    #[serde(default)]
+    pub diagnostic_contains: Option<String>,
+}
+
+/// A validation failure while loading the manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestError(pub String);
+
+impl std::fmt::Display for ManifestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ManifestError {}
+
+/// The validated OPY semantic compatibility manifest.
+#[derive(Debug, Clone)]
+pub struct Manifest {
+    pub schema_version: u32,
+    pub reference: Reference,
+    pub functions: Vec<Function>,
+    pub enum_domains: Vec<EnumDomain>,
+    pub aliases: Vec<Alias>,
+    pub provenance: Provenance,
+    /// The recorded probe evidence (`probes/probes.json`).
+    pub probes: Vec<Probe>,
+    by_function: HashMap<String, usize>,
+    by_member: HashMap<String, usize>,
+    by_domain: HashMap<String, usize>,
+    alias_by_source: HashMap<String, usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestFile {
+    schema_version: u32,
+    reference: Reference,
+    #[serde(default)]
+    functions: Vec<Function>,
+    #[serde(default)]
+    enum_domains: Vec<EnumDomain>,
+    #[serde(default)]
+    aliases: Vec<Alias>,
+    provenance: Provenance,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProbesFile {
+    schema_version: u32,
+    #[serde(default)]
+    probes: Vec<Probe>,
+}
+
+impl Manifest {
+    /// Parse and validate manifest data plus its probe evidence record.
+    pub fn load(manifest_json: &str, probes_json: &str) -> Result<Manifest, ManifestError> {
+        let file: ManifestFile = serde_json::from_str(manifest_json)
+            .map_err(|error| ManifestError(format!("manifest data: {error}")))?;
+        if file.schema_version != 1 {
+            return Err(ManifestError(format!(
+                "unsupported manifest schemaVersion {}",
+                file.schema_version
+            )));
+        }
+        let probes_file: ProbesFile = serde_json::from_str(probes_json)
+            .map_err(|error| ManifestError(format!("probes data: {error}")))?;
+        if probes_file.schema_version != 1 {
+            return Err(ManifestError(format!(
+                "unsupported probes schemaVersion {}",
+                probes_file.schema_version
+            )));
+        }
+        let mut manifest = Manifest {
+            schema_version: file.schema_version,
+            reference: file.reference.clone(),
+            functions: Vec::new(),
+            enum_domains: Vec::new(),
+            aliases: Vec::new(),
+            provenance: file.provenance.clone(),
+            probes: probes_file.probes,
+            by_function: HashMap::new(),
+            by_member: HashMap::new(),
+            by_domain: HashMap::new(),
+            alias_by_source: HashMap::new(),
+        };
+        manifest.validate(file)?;
+        Ok(manifest)
+    }
+
+    fn validate(&mut self, file: ManifestFile) -> Result<(), ManifestError> {
+        // Probe ids must be unique and must record the accept probes the
+        // entries reference.
+        let mut probes: HashMap<&str, &Probe> = HashMap::new();
+        for probe in &self.probes {
+            if probes.insert(&probe.id, probe).is_some() {
+                return Err(ManifestError(format!("duplicate probe id '{}'", probe.id)));
+            }
+        }
+
+        // Enum domains: unique, non-empty, distinct members.
+        for domain in &file.enum_domains {
+            if self.by_domain.contains_key(&domain.domain) {
+                return Err(ManifestError(format!(
+                    "duplicate enum domain '{}'",
+                    domain.domain
+                )));
+            }
+            if domain.members.is_empty() {
+                return Err(ManifestError(format!(
+                    "enum domain '{}' declares no members",
+                    domain.domain
+                )));
+            }
+            let mut members = std::collections::HashSet::new();
+            for member in &domain.members {
+                if !members.insert(member) {
+                    return Err(ManifestError(format!(
+                        "enum domain '{}' repeats member '{}'",
+                        domain.domain, member
+                    )));
+                }
+            }
+            self.by_domain
+                .insert(domain.domain.clone(), self.enum_domains.len());
+            self.enum_domains.push(domain.clone());
+        }
+
+        // Functions: unique ids, member-only receiver/kind combinations,
+        // declared enum domains, declared enum-default members, and probe
+        // evidence that records acceptance.
+        for function in &file.functions {
+            if self.by_function.contains_key(&function.id) {
+                return Err(ManifestError(format!(
+                    "duplicate function id '{}'",
+                    function.id
+                )));
+            }
+            match function.kind {
+                FunctionKind::MemberAction | FunctionKind::MemberValue => {
+                    if function.receiver.is_none() {
+                        return Err(ManifestError(format!(
+                            "member function '{}' declares no receiver category",
+                            function.id
+                        )));
+                    }
+                }
+                FunctionKind::Action | FunctionKind::Value => {
+                    if function.receiver.is_some() {
+                        return Err(ManifestError(format!(
+                            "non-member function '{}' declares a receiver category",
+                            function.id
+                        )));
+                    }
+                }
+            }
+            for param in function.params.iter() {
+                if let Some(domain) = &param.domain {
+                    let declared = self.enum_domain(domain).ok_or_else(|| {
+                        ManifestError(format!(
+                            "function '{}' parameter '{}' references undeclared enum \
+                                 domain '{}'",
+                            function.id, param.name, domain
+                        ))
+                    })?;
+                    if let Some(ParamDefault::EnumMember(member)) = &param.default {
+                        if !declared.members.contains(member) {
+                            return Err(ManifestError(format!(
+                                "function '{}' parameter '{}' default '{}' is not a member \
+                                 of enum domain '{}'",
+                                function.id, param.name, member, domain
+                            )));
+                        }
+                    }
+                } else if matches!(param.default, Some(ParamDefault::EnumMember(_))) {
+                    return Err(ManifestError(format!(
+                        "function '{}' parameter '{}' has an enum-member default but no \
+                         declared domain",
+                        function.id, param.name
+                    )));
+                }
+            }
+            self.check_evidence(&function.id, &function.evidence, &probes)?;
+            if function.kind.is_member() {
+                self.by_member
+                    .insert(function.id.clone(), self.functions.len());
+            } else {
+                self.by_function
+                    .insert(function.id.clone(), self.functions.len());
+            }
+            self.functions.push(function.clone());
+        }
+
+        // Aliases: unique sources, declared targets of the matching class,
+        // no collision with declared function ids.
+        for alias in &file.aliases {
+            if self.alias_by_source.contains_key(&alias.source) {
+                return Err(ManifestError(format!(
+                    "duplicate alias source '{}'",
+                    alias.source
+                )));
+            }
+            if self.by_function.contains_key(&alias.source)
+                || self.by_member.contains_key(&alias.source)
+            {
+                return Err(ManifestError(format!(
+                    "alias source '{}' collides with a declared function",
+                    alias.source
+                )));
+            }
+            match alias.kind {
+                AliasKind::FunctionAlias => {
+                    if self.function(&alias.target).is_none() {
+                        return Err(ManifestError(format!(
+                            "alias '{}' targets '{}' which is not a generic function",
+                            alias.source, alias.target
+                        )));
+                    }
+                }
+                AliasKind::MemberAlias => {
+                    if self.member(&alias.target).is_none() {
+                        return Err(ManifestError(format!(
+                            "alias '{}' targets '{}' which is not a member function",
+                            alias.source, alias.target
+                        )));
+                    }
+                }
+            }
+            self.check_evidence(&alias.source, &alias.evidence, &probes)?;
+            self.alias_by_source
+                .insert(alias.source.clone(), self.aliases.len());
+            self.aliases.push(alias.clone());
+        }
+
+        // Enum-domain evidence records acceptance probes too.
+        for domain in &file.enum_domains {
+            self.check_evidence(&domain.domain, &domain.evidence, &probes)?;
+        }
+        Ok(())
+    }
+
+    fn check_evidence(
+        &self,
+        owner: &str,
+        evidence: &[String],
+        probes: &HashMap<&str, &Probe>,
+    ) -> Result<(), ManifestError> {
+        if evidence.is_empty() {
+            return Err(ManifestError(format!(
+                "entry '{owner}' records no oracle probe evidence"
+            )));
+        }
+        for probe_id in evidence {
+            let probe = probes.get(probe_id.as_str()).ok_or_else(|| {
+                ManifestError(format!(
+                    "entry '{owner}' references undeclared probe '{probe_id}'"
+                ))
+            })?;
+            if probe.expect != "success" {
+                return Err(ManifestError(format!(
+                    "entry '{owner}' references probe '{probe_id}' which does not record \
+                     oracle acceptance"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// The built-in manifest, loaded once from the embedded data.
+    pub fn builtin() -> Result<&'static Manifest, ManifestError> {
+        static MANIFEST: OnceLock<Result<Manifest, ManifestError>> = OnceLock::new();
+        MANIFEST
+            .get_or_init(|| Manifest::load(MANIFEST_DATA, PROBES_DATA))
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    /// A generic (non-member) function by source name, alias-aware.
+    pub fn resolve_function(&self, name: &str) -> Option<&Function> {
+        self.function(name).or_else(|| {
+            let alias = self.alias_by_source.get(name)?;
+            let alias = &self.aliases[*alias];
+            (alias.kind == AliasKind::FunctionAlias)
+                .then(|| self.function(&alias.target))
+                .flatten()
+        })
+    }
+
+    /// A member function by source name, alias-aware.
+    pub fn resolve_member(&self, name: &str) -> Option<&Function> {
+        self.member(name).or_else(|| {
+            let alias = self.alias_by_source.get(name)?;
+            let alias = &self.aliases[*alias];
+            (alias.kind == AliasKind::MemberAlias)
+                .then(|| self.member(&alias.target))
+                .flatten()
+        })
+    }
+
+    /// The function entry with the given id, if declared.
+    pub fn function(&self, id: &str) -> Option<&Function> {
+        self.by_function.get(id).map(|i| &self.functions[*i])
+    }
+
+    /// The member function entry with the given id, if declared.
+    pub fn member(&self, id: &str) -> Option<&Function> {
+        self.by_member.get(id).map(|i| &self.functions[*i])
+    }
+
+    /// The enum domain with the given name, if declared.
+    pub fn enum_domain(&self, domain: &str) -> Option<&EnumDomain> {
+        self.by_domain.get(domain).map(|i| &self.enum_domains[*i])
+    }
+}
+
+/// Canonicalize manifest data: parse, validate, and re-serialize
+/// deterministically (object keys sorted, stable formatting). Re-running on
+/// the same input produces byte-identical output, so the data is
+/// reproducible and the committed file must equal its canonical form.
+pub fn canonicalize(manifest_json: &str, probes_json: &str) -> Result<String, ManifestError> {
+    Manifest::load(manifest_json, probes_json)?;
+    let value: serde_json::Value = serde_json::from_str(manifest_json)
+        .map_err(|error| ManifestError(format!("manifest data: {error}")))?;
+    serde_json::to_string_pretty(&value)
+        .map(|mut out| {
+            out.push('\n');
+            out
+        })
+        .map_err(|error| ManifestError(format!("cannot serialize manifest: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_manifest_loads_and_validates() {
+        let manifest = Manifest::builtin().expect("embedded manifest must validate");
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.reference.name, "overpy");
+        assert_eq!(manifest.reference.version, "9.7.10");
+        assert!(!manifest.functions.is_empty());
+        assert!(!manifest.enum_domains.is_empty());
+        assert!(!manifest.aliases.is_empty());
+        // Every member entry declares a receiver; every entry has evidence.
+        for function in &manifest.functions {
+            assert!(!function.evidence.is_empty(), "{}", function.id);
+            if function.kind.is_member() {
+                assert!(function.receiver.is_some(), "{}", function.id);
+            }
+        }
+        for domain in &manifest.enum_domains {
+            assert!(!domain.evidence.is_empty(), "{}", domain.domain);
+        }
+    }
+
+    #[test]
+    fn manifest_data_is_canonical() {
+        // The committed data file must equal its deterministic canonical
+        // rewrite (the `build` path), so the data pipeline is reproducible.
+        let canonical = canonicalize(MANIFEST_DATA, PROBES_DATA).expect("canonicalizes");
+        assert_eq!(canonical, MANIFEST_DATA, "manifest.json must be canonical");
+        // Idempotency: re-canonicalizing the canonical form is byte-stable.
+        assert_eq!(
+            canonicalize(&canonical, PROBES_DATA).expect("re-canonicalizes"),
+            canonical
+        );
+    }
+
+    #[test]
+    fn validation_rejects_duplicates_and_undeclared_domains() {
+        fn mutate(mutate: impl FnOnce(&mut ManifestFile)) -> Result<Manifest, ManifestError> {
+            let mut file: ManifestFile = serde_json::from_str(MANIFEST_DATA).unwrap();
+            mutate(&mut file);
+            Manifest::load(&serde_json::to_string(&file).unwrap(), PROBES_DATA)
+        }
+        // duplicate function id
+        let error = mutate(|file| file.functions.push(file.functions[0].clone()))
+            .expect_err("duplicate function id must fail");
+        assert!(error.0.contains("duplicate function id"));
+        // undeclared enum domain
+        let error = mutate(|file| {
+            file.functions[0].params.push(Param {
+                name: "bad".to_string(),
+                domain: Some("NotADomain".to_string()),
+                default: None,
+                optional: false,
+            })
+        })
+        .expect_err("undeclared domain must fail");
+        assert!(error.0.contains("undeclared enum domain"));
+        // entry without evidence
+        let error = mutate(|file| file.functions[0].evidence.clear())
+            .expect_err("missing evidence must fail");
+        assert!(error.0.contains("no oracle probe evidence"));
+    }
+
+    #[test]
+    fn arity_bounds_follow_defaults_and_unbounded() {
+        let manifest = Manifest::builtin().expect("builtin");
+        let chase = manifest.function("chaseOverTime").expect("entry");
+        assert_eq!(chase.arity_bounds(), (3, Some(4)));
+        let radius = manifest.function("getPlayersInRadius").expect("entry");
+        assert_eq!(radius.arity_bounds(), (2, Some(4)));
+        let status = manifest.member("setStatusEffect").expect("entry");
+        assert_eq!(status.arity_bounds(), (3, Some(3)));
+        let format = manifest.member("format").expect("entry");
+        assert_eq!(format.arity_bounds(), (0, None));
+        let range = manifest.function("range").expect("entry");
+        assert_eq!(range.arity_bounds(), (1, Some(3)));
+        assert_eq!(range.context, Some(FunctionContext::ForIterable));
+    }
+
+    #[test]
+    fn aliases_resolve_to_declared_targets() {
+        let manifest = Manifest::builtin().expect("builtin");
+        let alias = manifest
+            .resolve_function("stopChasingVariable")
+            .expect("alias");
+        assert_eq!(alias.id, "stopChasing");
+        assert!(alias.kind.is_action());
+        let member = manifest.resolve_member("getCurrentHero").expect("alias");
+        assert_eq!(member.id, "getHero");
+        assert!(member.kind.is_value());
+        // Unknown names stay unresolved.
+        assert!(manifest.resolve_function("frobnicate").is_none());
+        assert!(manifest.resolve_member("frobnicate").is_none());
+    }
+
+    #[test]
+    fn catalog_ids_link_to_the_workshop_emission_catalog() {
+        // Every declared `catalogId` must exist in the Workshop emission
+        // catalog (`crates/wright-workshop/src/catalog/data/catalog.json`)
+        // under the matching kind, so manifest entries never surface as
+        // accidental emitter catalog misses. Entries without a `catalogId`
+        // (special emission forms like `debug`/`print`, or emission surfaces
+        // not yet catalog-covered like the alias targets) are exempt by
+        // design.
+        let manifest = Manifest::builtin().expect("builtin");
+        let catalog_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("wright-workshop")
+            .join("src/catalog/data/catalog.json");
+        let catalog: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&catalog_path).unwrap()).unwrap();
+        for function in &manifest.functions {
+            let Some(catalog_id) = &function.catalog_id else {
+                continue;
+            };
+            let section = match function.kind {
+                FunctionKind::Action | FunctionKind::MemberAction => "actions",
+                FunctionKind::Value | FunctionKind::MemberValue => "values",
+            };
+            let found = catalog[section]
+                .as_array()
+                .expect("catalog section")
+                .iter()
+                .any(|entry| entry["id"] == serde_json::Value::String(catalog_id.clone()));
+            assert!(
+                found,
+                "catalogId '{}' of '{}' is missing from the Workshop emission catalog",
+                catalog_id, function.id
+            );
+        }
+    }
+}

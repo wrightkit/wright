@@ -767,9 +767,10 @@ fn lsp_utf16_positions_account_for_non_bmp_characters() {
         }),
     );
     client.notify("initialized", serde_json::json!({}));
-    // `score` starts at char column 16 but UTF-16 column 17.
-    let source =
-        "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", score)\n";
+    // `score` starts at char column 24 but UTF-16 column 25 (the 🎯 counts
+    // as two units). The document stays valid OPY (the semantic manifest
+    // rejects misplaced builtins, #109).
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(score))\n";
     client.notify("textDocument/didOpen", serde_json::json!({
         "textDocument": { "uri": uri_for("u.opy"), "languageId": "opy", "version": 1, "text": source },
     }));
@@ -780,7 +781,7 @@ fn lsp_utf16_positions_account_for_non_bmp_characters() {
         "textDocument/hover",
         serde_json::json!({
             "textDocument": { "uri": uri_for("u.opy") },
-            "position": { "line": 4, "character": 16 },
+            "position": { "line": 4, "character": 25 },
         }),
     );
     assert!(
@@ -795,12 +796,12 @@ fn lsp_utf16_positions_account_for_non_bmp_characters() {
         "textDocument/hover",
         serde_json::json!({
             "textDocument": { "uri": uri_for("u.opy") },
-            "position": { "line": 4, "character": 15 },
+            "position": { "line": 4, "character": 12 },
         }),
     );
     assert!(
         miss["result"].is_null(),
-        "the character offset resolves no symbol: {miss}"
+        "the offset inside the surrogate pair resolves no symbol: {miss}"
     );
 
     client.request(4, "shutdown", serde_json::json!(null));

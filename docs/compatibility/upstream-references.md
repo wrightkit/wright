@@ -57,7 +57,7 @@ artifacts. Concretely, it serves as:
 | `wright-opy` native frontend | Differential HIR parity, accept/reject agreement, structured diagnostics |
 | `wright-workshop` catalog/emission | Canonical en-US spelling validation against oracle-emitted Workshop text; receiver-method and enum emission evidence |
 | `compatibility/` harness | Fixture snapshots, oracle identity blocks, S/D/N gate evidence |
-| Systematic baseline (planned) | Reference-validated probes for builtin action/value/member/enum/signature metadata |
+| Systematic baseline | Reference-validated probes for builtin action/value/member/enum/signature metadata — implemented as the OPY semantic compatibility manifest (`crates/wright-opy/src/manifest/`): every entry records the probe that validates it, and `probes/validate.py` runs the full probe set against the pinned oracle (accept/reject, normalized emission hash, diagnostic category; wired into `compatibility/tests`) |
 
 ### Reference semantics vs Wright-owned architecture
 

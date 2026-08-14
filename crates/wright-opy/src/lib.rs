@@ -15,6 +15,7 @@ pub mod cst;
 pub mod diag;
 pub mod lexer;
 pub mod lower;
+pub mod manifest;
 pub mod parser;
 pub mod preprocess;
 pub mod settings;

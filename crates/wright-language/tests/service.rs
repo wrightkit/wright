@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use wright_language::LanguageService;
 use wright_language::document::{Document, Position};
+use wright_opy::manifest;
 
 const CORPUS: &str = "synthetic/declarations-rules";
 
@@ -111,10 +112,9 @@ fn hover_and_definition_resolve_symbols() {
 #[test]
 fn utf16_positions_resolve_symbols_after_non_bmp_text() {
     // 🎯 is U+1F3AF: one char column in the compiler, two UTF-16 code units
-    // in the editor. `score` starts at char column 16 (0-based 15) and
-    // UTF-16 column 17 (0-based 16).
-    let source =
-        "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", score)\n";
+    // in the editor. `score` starts at char column 24 and UTF-16 column 25
+    // (the 🎯 before it counts as two units).
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(score))\n";
     let document = Document::new("file:///u.opy", source, workspace_root());
     let (service, uri) = service_with(document);
 
@@ -123,7 +123,7 @@ fn utf16_positions_resolve_symbols_after_non_bmp_text() {
             &uri,
             Position {
                 line: 4,
-                character: 16,
+                character: 25,
             },
         )
         .expect("hover resolves at the UTF-16 offset");
@@ -134,53 +134,53 @@ fn utf16_positions_resolve_symbols_after_non_bmp_text() {
                 &uri,
                 Position {
                     line: 4,
-                    character: 15
+                    character: 12
                 }
             )
             .is_none(),
-        "the character offset (inside the surrogate pair) resolves no symbol"
+        "the UTF-16 offset inside the surrogate pair resolves no symbol"
     );
 }
 
 #[test]
 fn completion_and_member_context_use_utf16_offsets_after_non_bmp_text() {
     // Non-BMP text before the cursor must not shift UTF-16 offsets onto
-    // byte/char boundaries used for slicing.
-    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", points.append(points))\n";
+    // byte/char boundaries used for slicing. Both lines must stay valid OPY
+    // (the semantic manifest rejects misplaced/undeclared builtins, #109).
+    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(points))\n    points.append(points)\n";
     let document = Document::new("file:///u16.opy", source, workspace_root());
     let (service, uri) = service_with(document);
-    let line = "    debug(\"🎯\", points.append(points))";
+    let line = "    debug(\"🎯 {}\".format(points))";
+    let member_line = "    points.append(points)";
 
     // The editor cursor is a UTF-16 offset; compute it from the character
     // position, not the byte position (the 🎯 shifts the two apart).
-    let utf16_at = |byte_index: usize| -> u32 {
+    let utf16_at = |line: &str, byte_index: usize| -> u32 {
         let char_count = line[..byte_index].chars().count();
         wright_language::document::char_offset_to_utf16(line, char_count) as u32
     };
 
     // Member context: cursor right after the dot in `points.append`.
-    let dot_byte = line.find(".append").unwrap();
+    let dot_byte = member_line.find(".append").unwrap();
     let items = service.completion(
         &uri,
         Position {
-            line: 4,
-            character: utf16_at(dot_byte + 1),
+            line: 5,
+            character: utf16_at(member_line, dot_byte + 1),
         },
     );
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-    assert!(
-        labels.contains(&"append"),
-        "member completion after non-BMP text: {labels:?}"
-    );
+    assert!(labels.contains(&"append"), "member completion: {labels:?}");
 
     // Declared-symbol completion with the cursor after the `po` prefix of the
-    // argument `points` (a valid document, so the semantic index exists).
+    // argument `points` (a valid document, so the semantic index exists;
+    // non-BMP text before the cursor shifts the UTF-16 offset).
     let typed_byte = line.find("po").unwrap() + "po".len();
     let items = service.completion(
         &uri,
         Position {
             line: 4,
-            character: utf16_at(typed_byte),
+            character: utf16_at(line, typed_byte),
         },
     );
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
@@ -192,13 +192,12 @@ fn completion_and_member_context_use_utf16_offsets_after_non_bmp_text() {
 
 #[test]
 fn semantic_tokens_emit_utf16_offsets_after_non_bmp_text() {
-    let source =
-        "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯\", score)\n";
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(score))\n";
     let document = Document::new("file:///st.opy", source, workspace_root());
     let (service, uri) = service_with(document);
     let tokens = service.semantic_tokens(&uri);
 
-    // The reference on line 4 (0-based) starts at UTF-16 offset 16 (the 🎯
+    // The reference on line 4 (0-based) starts at UTF-16 offset 25 (the 🎯
     // before it counts as two units) and is 5 UTF-16 units long.
     let line_tokens: Vec<_> = tokens
         .iter()
@@ -207,7 +206,7 @@ fn semantic_tokens_emit_utf16_offsets_after_non_bmp_text() {
     assert_eq!(line_tokens.len(), 1, "one variable reference on line 4");
     let score_token = line_tokens[0];
     assert_eq!(
-        score_token.character, 16,
+        score_token.character, 25,
         "score reference starts at the UTF-16 offset: {score_token:?}"
     );
     assert_eq!(
@@ -266,9 +265,16 @@ fn completion_uses_position_and_context() {
     );
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
     assert!(labels.contains(&"append"), "member completion: {labels:?}");
+    let manifest_members: Vec<&str> = manifest::Manifest::builtin()
+        .expect("manifest")
+        .functions
+        .iter()
+        .filter(|function| function.kind.is_member())
+        .map(|function| function.id.as_str())
+        .collect();
     assert!(
-        labels.iter().all(|label| RECEIVER_MEMBERS.contains(label)),
-        "member context is member-only: {labels:?}"
+        labels.iter().all(|label| manifest_members.contains(label)),
+        "member context offers only manifest-declared members: {labels:?}"
     );
 
     // At a declaration/statement position, completion offers symbols,
@@ -306,8 +312,6 @@ fn completion_uses_position_and_context() {
         "enum member completion: {labels:?}"
     );
 }
-
-const RECEIVER_MEMBERS: &[&str] = &["append", "format", "uniform", "choice", "hasSpawned"];
 
 #[test]
 fn semantic_tokens_follow_semantic_identity_not_name_membership() {

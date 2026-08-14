@@ -1,12 +1,12 @@
 # OPY Semantic Compatibility Manifest — Specification
 
-Status: accepted specification (planning) — machine-readable compatibility
-contract for the proactive OPY baseline (#106)
-Scope: the smallest useful Wright-owned representation for builtin
-actions/values, member functions, signatures, parameter enum domains, enum
-members, and source aliases; reference-validated and consumed by the native
-frontend. This document specifies the manifest; the generator/ingestion
-implementation is a separate bounded child issue and is not implemented here.
+Status: accepted specification — implemented (#109)
+Scope: the Wright-owned representation for builtin actions/values, member
+functions, signatures, parameter enum domains, enum members, and source
+aliases; reference-validated and consumed by the native frontend. The
+implementation lives in `crates/wright-opy/src/manifest/` (data in
+`data/manifest.json`, probe evidence in `probes/`); this document is the
+schema and boundary contract for that data.
 
 ## Purpose and boundary
 
@@ -23,19 +23,19 @@ reference-validated source for:
 * signatures, argument names/order, and defaults;
 * parameter enum domains (`Invis`, `Status`, `Transform`, `Throttle`, …);
 * enum members per domain;
-* source aliases (old function names, contextual aliases such as
-  `ChaseReeval`).
+* source aliases (non-contextual rewrites such as `stopChasingVariable`).
 
 It is **language-compatibility metadata**, distinct from:
 
 * `crates/wright-workshop/src/catalog/data/catalog.json` — the Workshop
   emission/localization layer (en-US spellings, emitter output); the manifest
-  links to it by canonical id rather than duplicating spellings; and
+  links to it by canonical id (`catalogId`) rather than duplicating spellings;
+  and
 * issue #96's runtime content registry (heroes/maps/abilities content data,
   extension boundaries, independent version identities) — deferred; this
   investigation found no architecture trigger that requires reopening #96.
 
-## Data model (schema v1 sketch)
+## Data model (schema v1, implemented)
 
 ```jsonc
 {
@@ -48,36 +48,63 @@ It is **language-compatibility metadata**, distinct from:
   },
   "functions": [
     {
-      "id": "chaseOverTime",              // manifest id; Wright-owned spelling
-      "kind": "action",                   // action | value | memberAction | memberValue
+      "id": "chaseOverTime",          // manifest id; Wright-owned spelling
+      "kind": "action",               // action | value | memberAction | memberValue
+      "receiver": "Player",           // members only: Player | Variable | String | Any
       "params": [
-        { "name": "variable", "type": "Variable" },
-        { "name": "destination", "type": ["float", "Vector"] },
-        { "name": "duration", "type": "float", "default": null },
-        { "name": "reevaluation", "type": "enum", "domain": "ChaseTimeReeval" }
+        { "name": "variable" },
+        { "name": "destination" },
+        { "name": "duration" },
+        { "name": "reevaluation", "domain": "ChaseTimeReeval",
+          "default": "DESTINATION_AND_DURATION" }
       ],
-      "catalogId": "chaseOverTime"        // link to workshop catalog.json when emission is supported
+      "catalogId": "chaseOverTime",   // link to the Workshop emission catalog id
+      "evidence": ["chase-over-time"] // oracle probes validating this entry
     }
   ],
   "enumDomains": [
     {
       "domain": "ChaseTimeReeval",
       "members": ["NONE", "DESTINATION_AND_DURATION"],
-      "emission": { "catalogDomain": "ChaseTimeReeval", "memberSpelling": "upstream-canonical" }
+      "evidence": ["builtin-enums", "chase-over-time"]
     }
   ],
   "aliases": [
-    { "source": "stopChasingVariable", "target": "stopChasing", "kind": "functionAlias" },
-    { "source": "ChaseReeval", "target": "contextual", "kind": "callContextAlias",
-      "context": { "call": "chase", "arg": "reevaluation", "rate": "ChaseRateReeval", "duration": "ChaseTimeReeval" } }
+    { "source": "stopChasingVariable", "target": "stopChasing",
+      "kind": "functionAlias", "evidence": ["aliases"] }
   ],
   "provenance": {
-    "generator": "wright-opy-catalog-gen",   // planned; not yet implemented
+    "generator": "wright-opy semantic compatibility manifest v1 (Wright-authored; probe-validated against the pinned OverPy 9.7.10 oracle)",
     "reviewed": true,
     "license": "AGPL-3.0-or-later"
   }
 }
 ```
+
+Entry semantics:
+
+* `kind` — `action`/`value` are generic builtins; `memberAction`/`memberValue`
+  are receiver methods whose `params` are the **explicit** arguments (the
+  receiver is separate). The frontend enforces action/value position
+  (`value-in-action-position`, `action-in-value-position`).
+* `receiver` — the declared receiver category. `Player` is metadata for
+  player-oriented members (the pinned reference does not type-check those
+  receivers, so the frontend accepts any receiver); `Variable` and `String`
+  are enforced where the reference semantics are clear (`.append` requires an
+  assignable receiver, `.format` a string literal).
+* `params` — ordered arguments. Arity is `(first defaulted/optional param
+  index, params.len())`; `"optional": true` marks an omittable argument
+  without an emitted expansion, `"default"` an expansion value. Only
+  enum-member defaults are expanded at lowering (e.g. `chaseOverTime(g, 10,
+  3)` fills `DESTINATION_AND_DURATION`, matching the reference emission).
+  `"unbounded": true` (`.format` placeholders) accepts any argument count.
+* `context` — a call-context restriction; `"forIterable"` (`range`) is only
+  valid as a `for ... in` iterable.
+* `catalogId` — the canonical Workshop emission catalog id; absent for
+  special emission forms (`debug`/`print`, `append` via Modify) or emission
+  surfaces not yet catalog-covered (documented gaps).
+* `evidence` — every entry must reference at least one probe recording
+  oracle acceptance (deterministic `check` failure otherwise).
 
 Entries carry the minimal semantic data the frontend needs to resolve names,
 check arity, resolve enum domains, and lower; they deliberately omit upstream
@@ -91,34 +118,44 @@ behavior** — the same path used by the existing chase-enums fixtures and the
 converting OverPy's GPL-3.0 TypeScript data files (`src/data/*.ts`) into the
 manifest: ADR-0004 and `docs/licensing.md` forbid importing OverPy
 implementation details into the core, and observed behavior through documented
-compatibility tests is the permitted input. Every entry (or generated batch)
-records the reference probe fixture/hash that validates it.
+compatibility tests is the permitted input. Every entry records the reference
+probe that validates it (`probes/probes.json` carries the probe source hash,
+expected oracle status, normalized emission hash, and — for rejections — the
+diagnostic category fragment).
 
-## Validation rules (planned pipeline)
+## Validation rules (implemented pipeline)
 
-* `check` — schema validation, duplicate/colliding ids, colliding or missing
-  aliases, undeclared enum members, and entries lacking oracle evidence all
-  fail deterministically (mirroring `wright-catalog-gen`).
-* `build` — deterministic canonical rewrite; re-running is byte-idempotent.
-* Reference validation — systematic probe inputs run against the pinned
-  oracle record accept/reject, normalized emission, and diagnostics; Wright
-  runs the same probes and compares at the S/D level (see the validation
-  strategy in the #106 planning comment).
+* `Manifest::load` (`crates/wright-opy/src/manifest`) — schema validation,
+  duplicate/colliding ids, colliding or missing aliases, undeclared enum
+  domains, undeclared enum-default members, and entries lacking oracle
+  evidence all fail deterministically (mirroring `wright-catalog-gen`); a
+  canonical-rewrite test pins the data file to its byte-canonical form, and a
+  cross-check test pins every `catalogId` to the Workshop emission catalog.
+* `probes/validate.py` — reference validation: every probe runs against the
+  pinned oracle and must match its recorded accept/reject, normalized
+  emission hash, and diagnostic category (S/D level, see the #106 planning
+  comment); wired into the compatibility harness test suite
+  (`compatibility/tests/test_manifest_probes.py`).
+* The frontend consumes the manifest in `lower.rs`: unknown names, wrong
+  action/value position, invalid arity, invalid receiver category, and
+  enum-domain mismatches produce structured, source-located frontend
+  diagnostics before Workshop emission.
 
 ## Consumers
 
 * `wright-opy` — name/member/enum resolution, arity and signature checks,
   `KNOWN_ENUMS` absorption, earlier resolution of unknown-action/value errors
   (addressing the diagnostic-provenance limitation);
-* `wright-workshop` — canonical-id linkage to the emission catalog;
-* differential and systematic reference tests;
+* `wright-workshop` — canonical-id linkage to the emission catalog (validated
+  by the cross-check test);
+* differential and systematic reference tests (the probe validator);
 * documentation, agents, and future release metadata can consume the same
   declared boundary.
 
 ## Non-goals
 
-* Implementing the generator/ingestion pipeline in this issue (bounded child
-  issue, pending PM review).
 * A runtime-downloadable or hot-updating content registry (#96).
 * Workshop content data (heroes/abilities/maps) as manifest entries.
+* Contextual aliases (`ChaseReeval`), named arguments, and contextual
+  raw-Workshop enum resolution — tracked after this manifest foundation.
 * Preserving upstream implementation structure for its own sake.

@@ -79,7 +79,9 @@ suppression is the authoritative contract.
   are resolved against their own source text, not the requesting document.
 * **Hover** — symbol name/kind and usage summary (reads/writes/calls/rules).
 * **Definition / References** — via the semantic index over source spans.
-* **Completion** — declared symbols, corpus-evidenced builtins, keywords.
+* **Completion** — declared symbols, manifest-declared builtins and receiver
+  members, keywords (the OPY semantic manifest is the authoritative builtin
+  surface, #109).
 * **Rename** — project-wide identifier-exact rename: resolves the symbol
   through the semantic index, unions its exact declaration/definition/reference
   identifier spans across every open root whose project includes the

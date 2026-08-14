@@ -17,7 +17,10 @@ fn main_text() -> String {
 
 const SHARED_GOOD: &str = "subroutine showStatus\n\n# showStatus is an unsaved overlay\n\ndef showStatus():\n    print(\"overlay\")\n";
 const SHARED_BROKEN: &str = "this is not valid opy\n";
-const SHARED_HOT: &str = "rule \"hot\":\n    @Event global\n    while true:\n        wait()\n";
+// The overlay must stay valid OPY: `showStatus()` in main.opy needs the
+// declaration (the semantic manifest rejects undeclared call names, #109).
+const SHARED_HOT: &str =
+    "rule \"hot\":\n    @Event global\n    while true:\n        wait()\nsubroutine showStatus\n";
 
 #[test]
 fn open_unsaved_include_participates_in_resolution() {

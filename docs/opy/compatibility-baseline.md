@@ -15,7 +15,9 @@ compilation, tooling/analysis, and reference coverage separately.
 The reference identity is the pinned OverPy 9.7.10 content (`889d974`); see
 [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md)
 for provenance. Evidence claims in this document were verified against the
-pinned oracle and Wright `main` @ `582c269` (post-#104/#105).
+pinned oracle and Wright `main` @ `582c269` (post-#104/#105); the category-6/7/8/9
+rows and the residual-evidence table below were refreshed by the #109
+manifest implementation.
 
 ## Tier taxonomy
 
@@ -53,10 +55,10 @@ For each category the following dimensions are distinguished:
 | 4a | `@Team`/`@Slot` with arguments, `@Name`, `@Hero`, `@Disabled`, `@Delimiter`, `@NewPage`, `@SuppressWarnings` | `evidence-prioritized` | ❌ | ❌ | ❌ | ❌ | ✅ oracle probes |
 | 5 | **Preprocessing/include/macro** — `#!include`, `#!define` (object- and function-like), `#!undef`, include cycle detection | `baseline-supported` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 5a | `#!mainFile`, `#!allowMacroRedeclaration`, `#!optimize*`/`#!replace0By*` family, `#!translations`, `#!rulePrefix*`, `__script__` JS hooks | `legacy-quirk/demand-driven` | ❌ | ❌ | ❌ | ❌ | partial |
-| 6 | **Builtin actions & values (generic)** — the 225 action / 267 value Workshop surface | `baseline-planned` (currently corpus-limited: generic calls parse and lower but fail at emission with `unknown-action`/`unknown-value`) | ✅ | partial | ❌ **catalog gap** | ❌ | ✅ probes |
-| 7 | **Receiver/member functions** — `eventPlayer.setMoveSpeed(100)`, `eventPlayer.isAlive()`, variable receivers | `baseline-supported` for the 12 corpus-evidenced methods; **`baseline-planned`** for the full member surface | ✅ | ✅ | ✅ (catalog subset) | ✅ | ✅ |
-| 8 | **Builtin enum/constant domains** — 46 upstream domains (incl. `Hero`/`Map`/`Gamemode` literals) | `baseline-supported` for the 8-domain `KNOWN_ENUMS` subset; **`baseline-planned`** (systematic) for the full surface | ✅ (subset) | ✅ (subset) | partial | partial | ✅ reference-validated |
-| 9 | **Aliases** — old function names (`stopChasingVariable`→`stopChasing`, `getCurrentHero`→`getHero`, `hasStatusEffect`→`hasStatus`, …), hero renames (`MCCREE`→`CASSIDY`), `ChaseReeval` contextual alias | `legacy-quirk/demand-driven` (function aliases); `evidence-prioritized` (`ChaseReeval`, blocked on named-argument `chase`) | ❌/partial | ❌ | ❌ | ❌ | ✅ |
+| 6 | **Builtin actions & values (generic)** — the 225 action / 267 value Workshop surface | `baseline-supported` for the manifest-declared evidence surface (chaseOverTime, isGameInProgress, getPlayersInRadius, worldVector, the corpus call surface); the full surface stays **`baseline-planned`** | ✅ | ✅ | ✅ (catalog subset) | ✅ | ✅ probes |
+| 7 | **Receiver/member functions** — `eventPlayer.setMoveSpeed(100)`, `eventPlayer.isAlive()`, variable receivers | `baseline-supported` for the manifest-declared member surface (receiver categories, explicit-arg signatures); **`baseline-planned`** for the full member surface | ✅ | ✅ | ✅ (catalog subset) | ✅ | ✅ |
+| 8 | **Builtin enum/constant domains** — 46 upstream domains (incl. `Hero`/`Map`/`Gamemode` literals) | `baseline-supported` for the manifest-declared domains (reference-validated member lists; replaces the former `KNOWN_ENUMS` subset); **`baseline-planned`** (systematic) for the full surface | ✅ (declared domains) | ✅ | partial | partial | ✅ probes |
+| 9 | **Aliases** — old function names (`stopChasingVariable`→`stopChasing`, `getCurrentHero`→`getHero`, `hasStatusEffect`→`hasStatus`, …), hero renames (`MCCREE`→`CASSIDY`), `ChaseReeval` contextual alias | `baseline-supported` for the three manifest-declared non-contextual aliases; the remaining alias surface stays `legacy-quirk/demand-driven`; `ChaseReeval` stays `evidence-prioritized` (blocked on named-argument `chase`) | ✅ (declared) | ✅ | ❌ (emission spellings not catalog-covered) | ✅ | ✅ |
 | 10 | **Modules** — `random.{randint,uniform,choice,shuffle}` | `baseline-supported` (corpus: `random.uniform`, `random.choice`) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 11 | **Named/keyword arguments** — `chase(A, B, rate=30, …)`, macro defaults, `raycast` `include=`/`exclude=` forms | `evidence-prioritized` | ❌ | ❌ | ❌ | ❌ | ✅ |
 | 12 | **Settings/content metadata** — `settings { … }` blocks | `baseline-supported` (JSONC subset + emission table) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -67,20 +69,21 @@ For each category the following dimensions are distinguished:
 
 Verified against the pinned oracle and Wright `main` @ `582c269`. Each item is
 classified with the tier it belongs to; none is a per-symbol implementation
-request.
+request. Items marked **implemented (#109)** now resolve through the OPY
+semantic compatibility manifest (`crates/wright-opy/src/manifest`).
 
 | Evidence | Oracle 9.7.10 | Wright (`582c269`) | Classification |
 | --- | --- | --- | --- |
-| **Bare playervar receiver** — `A = B.C` (declared playervar member on a player-valued receiver) | accept (`__playerVar__`) | reject `unsupported-member` | `baseline-planned` (receiver/member semantics + playervar member resolution, category 7) |
-| **Value member as statement** — `B.isAlive()` on its own line | **reject** ("Expected an action, but got … a value") | accept | intentional-divergence candidate: Wright accepts where the oracle rejects; must be recorded as a reviewed difference (ADR-0008) rather than chased |
-| **Generic action gap** — `chaseOverTime(A, 0, 30, ChaseTimeReeval.NONE)` | accept (warning recorded) | check ✅; **compile rejects** `unknown-action 'chaseOverTime'` | `baseline-planned` (category 6 manifest; residual of #105 already tracked by `synthetic/chase-condition-agentlab`) |
-| **Generic value gap** — `@Condition isGameInProgress() == true` | accept | check ✅; **compile rejects** `unknown-value 'isGameInProgress'` | `baseline-planned` (category 6 manifest) |
-| **Member value/signature gap** — `getPlayersInRadius(...).setStatusEffect(eventPlayer, 30)` | **reject** (arity: `.setStatusEffect` needs `player, assister, status, duration`) | parse ✅; compile rejects | `baseline-planned` — signature metadata (category 6/7) must encode arity so Wright rejects exactly like the oracle |
-| **Enum-gated members** — `eventPlayer.setInvisibility(Invis.ALL)`, `eventPlayer.getThrottle()`, `worldVector(...)` (args typed `Invis`/`Transform`) | accept | reject `unsupported-member`/`unknown-value` | `baseline-planned` — member metadata + enum domains (`Invis`, `Status`, `Transform`, `Throttle`, …) |
-| **Named arguments / `ChaseReeval` alias** — `chase(A, 10, rate=2, ChaseReeval.NONE)` | accept (contextual alias resolution) | reject (named args unsupported) | `evidence-prioritized` (category 11); `ChaseReeval` stays out of the enum table until keyword-argument `chase` exists |
-| **Ambiguous Workshop enum spelling** — `ChaseTimeReeval.NONE` and `ChaseRateReeval.NONE` both emit as bare `None` | — | workshop parser fails with structured `Unsupported` ambiguity (`bare_chase_reevaluation_none_is_ambiguous_across_domains`) | `reference-limited` (round-trip boundary; emitted semantic value is reference-equivalent, documented in `docs/workshop/support-matrix.md`) |
-| **Constant-0 canonicalization** — `globalvar A = 0` drops the initializer; `= 5`/`= 0.0` preserved via the Initialize rule; `globalvar A 0` is an explicit index | canonical | canonical under every profile (`off`/`compat`/`aggressive`); initializer synthesis is owned by the profile-independent HIR → WIR lowering (#112), so no profile drops initializer semantics | resolved by #112: source-semantic initialization moved out of optimization-only passes |
-| **Diagnostic provenance limitation** — generic unresolved action/value errors surface at emission (`unknown-action`/`unknown-value`, frontend stage) rather than at semantic resolution | — | — | tooling limitation: diagnostics are correct and structured but the catalog gap makes them emission-time; the manifest moves resolution earlier. Recorded here as a separate tooling limitation, not a per-symbol bug |
+| **Bare playervar receiver** — `A = B.C` (declared playervar member on a player-valued receiver) | accept (`__playerVar__`) | reject `unsupported-member` | `baseline-planned` (receiver/member semantics + playervar member resolution, category 7) — unchanged |
+| **Value member as statement** — `B.isAlive()` on its own line | **reject** ("Expected an action, but got … a value") | accept | **implemented (#109)**: rejected with `value-in-action-position` (the #109 contract supersedes the earlier intentional-divergence candidate note; recorded as a reviewed difference in the manifest probe set) |
+| **Generic action gap** — `chaseOverTime(A, 0, 30, ChaseTimeReeval.NONE)` | accept (warning recorded) | check ✅; **compile rejects** `unknown-action 'chaseOverTime'` | **implemented (#109)**: resolves through the manifest and compiles (catalog spelling `Chase Global Variable Over Time`); regression: `synthetic/chase-condition-agentlab` + probe `chase-over-time` |
+| **Generic value gap** — `@Condition isGameInProgress() == true` | accept | check ✅; **compile rejects** `unknown-value 'isGameInProgress'` | **implemented (#109)**: resolves through the manifest and compiles (catalog spelling `Is Game In Progress`); probe `is-game-in-progress` |
+| **Member value/signature gap** — `getPlayersInRadius(...).setStatusEffect(eventPlayer, 30)` | **reject** (arity: `.setStatusEffect` needs `player, assister, status, duration`) | parse ✅; compile rejects | **implemented (#109)**: rejected at resolution with `invalid-arity` (member signatures in the manifest); probe `invalid-arity-member` |
+| **Enum-gated members** — `eventPlayer.setInvisibility(Invis.ALL)`, `eventPlayer.getThrottle()`, `worldVector(...)` (args typed `Invis`/`Transform`) | accept | reject `unsupported-member`/`unknown-value` | **implemented (#109)**: member entries + enum domains (`Invis`, `Status`, `Transform`) in the manifest, compiled via new catalog spellings; probes `enum-gated-members`, `builtin-enums` |
+| **Named arguments / `ChaseReeval` alias** — `chase(A, 10, rate=2, ChaseReeval.NONE)` | accept (contextual alias resolution) | reject (named args unsupported) | `evidence-prioritized` (category 11); `ChaseReeval` stays out of the enum table until keyword-argument `chase` exists — unchanged |
+| **Ambiguous Workshop enum spelling** — `ChaseTimeReeval.NONE` and `ChaseRateReeval.NONE` both emit as bare `None` | — | workshop parser fails with structured `Unsupported` ambiguity (`bare_chase_reevaluation_none_is_ambiguous_across_domains`) | `reference-limited` (round-trip boundary; emitted semantic value is reference-equivalent, documented in `docs/workshop/support-matrix.md`) — unchanged |
+| **Constant-0 canonicalization** — `globalvar A = 0` drops the initializer; `= 5`/`= 0.0` preserved via the Initialize rule; `globalvar A 0` is an explicit index | canonical | identical **only with `--profile compat`** (default `off` drops initializers) | intentional profile difference; pending PM decision on the default compile profile — unchanged |
+| **Diagnostic provenance limitation** — generic unresolved action/value errors surface at emission (`unknown-action`/`unknown-value`, frontend stage) rather than at semantic resolution | — | — | **implemented (#109)**: identity, position, arity, receiver-category, and enum-domain errors surface during semantic resolution with source locations (`unknown-action`, `unknown-value`, `unknown-member`, `invalid-arity`, `invalid-receiver`, `enum-domain-mismatch`, `action-in-value-position`, `value-in-action-position`, `invalid-call-context`, `invalid-iterable`) |
 
 ## Boundaries
 
@@ -100,6 +103,6 @@ request.
 
 * [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md) — pinned reference identity and provenance
 * [`support-matrix.md`](support-matrix.md) — corpus-evidenced current support
-* [`compat-manifest-spec.md`](compat-manifest-spec.md) — machine-readable manifest specification
+* [`compat-manifest-spec.md`](compat-manifest-spec.md) — machine-readable manifest specification (implemented, #109; data in `crates/wright-opy/src/manifest/`)
 * [`docs/compatibility.md`](../compatibility.md) — S/D/N/E framework
 * [ADR-0007](../adr/0007-reference-pinning-policy.md), [ADR-0004](../adr/0004-overpy-licensing-boundary.md)

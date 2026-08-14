@@ -85,29 +85,64 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   `random.choice` → `random.<name>` calls; `eventPlayer.member` →
   `PlayerVar`/receiver call on `EventPlayer`; variable receivers
   (`points.append`, `candlePos[i2]`) → `ReceiverCall`/`Index`.
+- Builtin action/value/member identity, signatures, receiver categories,
+  parameter enum domains, and non-contextual aliases resolve through the OPY
+  semantic compatibility manifest
+  (`crates/wright-opy/src/manifest/data/manifest.json`, schema v1; spec in
+  [`compat-manifest-spec.md`](compat-manifest-spec.md), issue #109) — the
+  single authoritative semantic table, replacing the former `KNOWN_ENUMS`
+  hardcoded subset. Every manifest entry is probe-validated against the
+  pinned OverPy 9.7.10 oracle (`crates/wright-opy/src/manifest/probes/`).
+  Unknown or misplaced builtins fail at semantic resolution with structured,
+  source-located diagnostics (`unknown-action`, `unknown-value`,
+  `unknown-member`, `invalid-arity`, `invalid-receiver`,
+  `enum-domain-mismatch`, `action-in-value-position`,
+  `value-in-action-position`, `invalid-call-context`, `invalid-iterable`),
+  never as emitter catalog misses.
+- Reference-validated evidence surface: `chaseOverTime(...)` (action;
+  3–4 arguments, reevaluation defaults to `DESTINATION_AND_DURATION`),
+  `isGameInProgress()` (value), `getPlayersInRadius(...)` (value; team
+  `Team.ALL` and `LosCheck.OFF` defaults fill), `worldVector(...)` (value,
+  `Transform` argument), and the enum-gated members
+  `eventPlayer.setInvisibility(Invis.X)`,
+  `eventPlayer.setStatusEffect(..., Status.X, ...)`, `eventPlayer.getThrottle()`.
 - Receiver/member calls (`eventPlayer.setMoveSpeed(100)`,
   `eventPlayer.teleport(eventPlayer.getPosition())`,
   `target.setMoveSpeed(50)` on a player-valued global) lower to
   `ReceiverCall` and resolve at emission through the Workshop catalog
   (`crates/wright-workshop/src/catalog/data/catalog.json`); the
   corpus-evidenced receiver methods are the `synthetic/receiver-calls`
-  fixture methods (en-US spellings per
-  [`docs/workshop/support-matrix.md`](../workshop/support-matrix.md)).
-  Method names outside the catalog fail with structured
-  `unknown-action`/`unknown-value` diagnostics, never silent acceptance.
-- Builtin Workshop enums from the corpus: `Beam.{GOOD,GRAPPLE}`,
-  `Color.{YELLOW,WHITE,RED,…}`, `DynamicEffect.{BAD_EXPLOSION,…}`,
-  `EffectReeval.VISIBILITY`, `Wait.IGNORE_CONDITION`,
+  fixture methods plus the #106 enum-gated members (en-US spellings per
+  [`docs/workshop/support-matrix.md`](../workshop/support-matrix.md),
+  oracle-transcribed with provenance in the catalog).
+- Non-contextual source aliases resolve to their canonical names
+  (`stopChasingVariable` → `stopChasing`; member aliases `getCurrentHero` →
+  `getHero`, `hasStatusEffect` → `hasStatus`); their emission spellings are
+  not yet catalog-covered (documented emission gap). The `ChaseReeval`
+  contextual alias stays out of the alias table until the `chase`
+  keyword-argument call surface is supported (#110).
+- Builtin Workshop enums from the manifest's reference-validated domains:
+  `Beam.{GOOD,GRAPPLE}`, `Color.{YELLOW,WHITE,RED,ORANGE,GREEN,BLUE,BLACK,
+  PURPLE,AQUA,VIOLET,ROSE}`, `DynamicEffect.{BAD_EXPLOSION,GOOD_EXPLOSION,
+  RING_EXPLOSION,GOOD_PICKUP_EFFECT,BAD_PICKUP_EFFECT,BUFF_IMPACT_SOUND,
+  DEBUFF_IMPACT_SOUND}`, `EffectReeval.{VISIBILITY,COLOR,VISIBILITY_AND_COLOR}`,
+  `Wait.IGNORE_CONDITION`,
   `ChaseTimeReeval.{NONE,DESTINATION_AND_DURATION}` (reference-validated
   against the pinned OverPy 9.7.10 enum block and emission, #105),
   `ChaseRateReeval.{NONE,DESTINATION_AND_RATE}` (`NONE` additionally
   corpus-evidenced by the real-world overpy-meipocalypse `ChaseReeval.NONE`
   rate-chase calls, which the reference resolves to the `ChaseRateReeval`
-  domain). The `ChaseReeval` source alias is a reference function-level
-  construct resolved by the `chase` call context (`rate=` vs `duration=`),
-  so it stays out of the enum table until the `chase` keyword-argument call
-  surface is supported. Enum members outside the
-  table fail explicitly (`unknown-enum-member`).
+  domain), plus the evidence domains `Invis.{ALL,ENEMIES,NONE}`,
+  `Transform.{ROTATION,ROTATION_AND_TRANSLATION}`,
+  `Status.{ASLEEP,BURNING,FROZEN,HACKED,INVINCIBLE,KNOCKED_DOWN,PHASED_OUT,
+  ROOTED,STUNNED,UNKILLABLE}`, `LosCheck.{OFF,SURFACES,
+  SURFACES_AND_ALL_BARRIERS,SURFACES_AND_ENEMY_BARRIERS}`,
+  `Team.ALL`. Members outside the declared domains (including spellings the
+  pinned reference rejects, such as `Color.CYAN` or `DynamicEffect.SPARKLES`)
+  fail explicitly (`unknown-enum-member`). Enum domains/members beyond the
+  declared baseline remain `baseline-planned`; emission coverage stays
+  corpus-scoped (a manifest-valid member can still hit a catalog miss at
+  emission when no spelling is catalogged).
 - `wait()` / `wait(duration)` default-argument filling: the reference appends
   `Wait.IGNORE_CONDITION` (and `0.016` for the no-argument form); native
   matches.
@@ -146,7 +181,12 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
 
 - `.opy` reconstruction from Workshop text; decompiler architecture.
 - Macro/`#!define` values that require runtime evaluation (no scripting).
-- Additional OverPy enum spellings beyond the corpus table (a data change).
+- OverPy enum domains/members beyond the manifest's declared baseline (a
+  data change, `baseline-planned` in the compatibility baseline).
+- Emission spellings for manifest-valid entries not yet catalog-covered
+  (alias targets `stopChasing`/`getHero`/`hasStatus`, and enum members
+  without a catalogged spelling); these fail at emission with catalog
+  diagnostics, never silently.
 - Rule `disabled` markers (no corpus evidence for the source annotation).
 - Expression-level `in`/`not in` membership operators — rejected at parsing
   (`for ... in` headers are supported).
@@ -155,10 +195,15 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
 - Postfix increment/decrement (`++`/`--`) — rejected at parsing.
 - Dict literals (`{...}`) — rejected at lexing.
 - Triple-quoted strings / docstrings (`"""`) — rejected at lexing.
-- Subroutine parameters, default `@Team`/`@Slot` overrides, named arguments.
+- Subroutine parameters, default `@Team`/`@Slot` overrides, named arguments
+  (`ChaseReeval` contextual alias, #110).
 - Full OverPy formatting semantics: `debug()`/`print()` emission
   (`Create HUD Text` etc.) follows the simplified semantic formatting documented
   in [`v1-matrix.md`](../v1-matrix.md).
+- Emission presentation: variable references emit as `Global.<name>` (the
+  native Workshop parser's canonical spelling) where the reference emits the
+  bare variable name; observable semantics and round-trip validity are
+  unchanged.
 
 ## Boundary contract
 

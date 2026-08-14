@@ -1080,25 +1080,6 @@ impl Parser<'_> {
     }
 }
 
-impl Expr {
-    fn span(&self) -> Span {
-        match self {
-            Expr::Number { span, .. }
-            | Expr::String { span, .. }
-            | Expr::Bool { span, .. }
-            | Expr::Null { span }
-            | Expr::Array { span, .. }
-            | Expr::Call { span, .. }
-            | Expr::ReceiverCall { span, .. }
-            | Expr::Name { span, .. }
-            | Expr::Member { span, .. }
-            | Expr::Index { span, .. }
-            | Expr::Binary { span, .. }
-            | Expr::Unary { span, .. } => *span,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
