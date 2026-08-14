@@ -363,3 +363,77 @@ re-verified. The only outstanding note is the support-matrix `//=` lexing
 listing accuracy (a doc claim; both engines reject the construct — not a
 class-3 finding). With the CI evidence and all suites green, the #87
 acceptance record is complete.
+
+---
+
+## #87 independent QA closure record (AC-1..AC-18) at `b9a2309` — dated 2026-08-14
+
+Independent re-verification of the **complete** #87 scope (AC-1..AC-18,
+all four PM amendments) at the current checkout: HEAD
+`b9a230931895bbc0618ce671497ee5c6454960a1` ("docs: record AC-18 augmented
+playervar verification"), working tree clean, no local changes. All
+evidence re-derived from the working tree and the pinned oracle 9.7.10;
+nothing taken from the Engineer records on trust. Report only — no code
+changes.
+
+### AC-by-AC verdicts (all evidence re-derived at `b9a2309`)
+
+| AC | Verdict | Independently re-derived evidence |
+| --- | --- | --- |
+| AC-1 (Custom String array elements) | **PASS** | driver `opy_string_array_initializer_emits_custom_string_elements` green — byte-asserted vs `ORACLE_AC1` (`Array(Custom String("a"), Custom String("b"))`, real `disableInspector()` action body, no `pass`) |
+| AC-2 (pixelart full-program) | **PASS** | `python3 scripts/m11-inventory.py` at HEAD → pixelart `nativeExit: 0`, **`normalizedEqual: True`**, `byteEqual: false` (whitespace-only); report regenerated at `target/m11-nlevel.json` (wright.commit = b9a2309) |
+| AC-3 (contexts unchanged) | **PASS** | v1-gates 6/6 (`FIXTURES` untouched — `scripts/v1-gates.py` absent from the `1cd07ab..HEAD` diff); 7 settings sections whitespace-collapsed-equal re-derived via settings-only compile (pixelart 256, santa 350, broken-weapons 511, client-to-server 297, parabola 136, crosshair 144, inputhud 476 — exact lengths match the record); emitter 24/24, roundtrip 6/6, driver 23/23 |
+| AC-4 (no new class-3 / matrix) | **PASS** | 12-program first-failure matrix re-derived line:col-exact (below); oracle 21/21; adapter 23/23; differential green (PARITY_CASES 8 + diagnostics row); all cargo suites green; clippy 0; fmt clean; six CI jobs green at HEAD |
+| AC-5 (empty-rule drop) | **PASS** | driver `opy_empty_rules_are_dropped_like_the_oracle` green — pass-only → `""`, condition-without-actions → `ORACLE_AC5_COND`, both byte-asserted |
+| AC-6 (split/re-escape roundtrip) | **PASS** | driver `opy_long_string_initializers_split_like_the_oracle` (300→3 segments, 1000→8 segments byte-asserted) and `opy_escaped_value_strings_round_trip_the_oracle_spelling` green; ws-parser fixed-point covered by roundtrip 6/6 and closure scan |
+| AC-7 (previously-passing contexts) | **PASS** | same evidence as AC-3; `scripts/v1-gates.py` FIXTURES list byte-identical to `1cd07ab` |
+| AC-8 (matrix/parity/CI) | **PASS** | matrix unchanged; oracle 21/21; adapter 23/23; PARITY_CASES 8 (no pixelart row — differential report: 8 parity rows + synthetic/diagnostics); all cargo suites green; clippy/fmt clean; six CI jobs green |
+| AC-9 (pixelart row status) | **PASS** | pixelart remains an **N-level row only** (no PARITY_CASES row; no native==adapter HIR subtree assertion was committed) |
+| AC-10 (inventory) | **PASS** | this document + `m11-inventory-final.md` (class-3 A/B/C resolved; pixelart row status) |
+| AC-11 (numeric initializers) | **PASS** | driver `opy_numeric_initializers_match_the_oracle_artifact` green (byte-asserted `j = 5` → `Set Global Variable(j, 5)`, `h = 0` dropped, `k = 0.0` source spelling, `playervar p = 7` player-init rule); support-matrix claim corrected in `docs/opy/support-matrix.md` |
+| AC-12 (trailing-if) | **PASS** | closure `if_final`/`if_else` families assert the oracle spelling (`If(…)` rule-final without trailing `End;`) is a byte-identical ws-parser fixed point; emitter implements the rule-final omission (`emitter.rs`); parser accepts the oracle spelling |
+| AC-13 (format folding) | **PASS** | closure `format_fold`/`format_partial` families byte-fixed-point (`Custom String("v: 3")`, `Custom String("3 {0}", Global.x)`); pipeline `fold-constants` pass green; variable-arg `format_var` unchanged byte-equal |
+| AC-14 (no regression) | **PASS** | same evidence as AC-3/4/8/9; no new class-3 anywhere |
+| AC-15 (placeholder numbering) | **PASS** | emitter `implicit_format_placeholders_renumber_to_the_oracle_form` + `partial_constant_format_folds_and_renumbers` green (byte-quoted oracle pins, fixed-point asserted); HIR format text untouched (differential green) |
+| AC-16 (playervar reads) | **PASS** | emitter `playervar_reads_parenthesize_the_receiver` green — `Set Global Variable(g, (Event Player).p)` byte-quoted pin, ws parser accepts, fixed point asserted |
+| AC-17 (closure scan) | **PASS** | `cargo test -p wright-workshop --test closure` green (18 families); enum/define/indexed-read probes byte-equal; `getCurrentHero()` closed as outside-surface |
+| AC-18 (playervar augmented) | **PASS** | driver `opy_playervar_augmented_assignments_match_the_oracle_artifacts` green — `+= -= *= /= %=` each byte-equal to the pinned `Modify Player Variable(Event Player, p, Add|Subtract|Multiply|Divide|Modulo, 2)` artifact; `//=` rejected by both frontends (asserted in the test); `git show da38f57` touches only `crates/wright-ir/src/lower.rs` (+77), the driver test, and one closure family |
+
+### Commands re-run at `b9a2309` (all green unless noted)
+
+- `cargo test -p wright-driver --test driver` → 23/23
+- `python3 scripts/v1-gates.py` → `{"passed": 6, "total": 6}`, report written to `target/v1-gates-report.json` (commit b9a2309)
+- `python3 scripts/m11-inventory.py` → 14 fixtures; pixelart `nativeExit 0` + `normalizedEqual True`; `target/m11-nlevel.json` + `target/m11-gap-inventory.json` regenerated at HEAD
+- 12-program first-failure matrix (re-derived, line:col): pixelart exit 0; santa 192:99; meipocalypse 223:37; zencopter 38:22; cronch 32:21; broken-weapons 53:55; client-to-server 55:53; parabola 35:37; crosshair 31:36; inputhud 41:63; ow1 `common/env.opy:7:66`; 6v6 `constants/adj_constants.opy:8:85` — **identical to the record**
+- `cargo test -p wright-opy --test differential` → 1 passed (PARITY_CASES 8 + diagnostics); `target/wright-differential-report.json` regenerated (9 rows, all parity)
+- `cargo test -p wright-workshop --test closure` → 1 passed (18 families)
+- `cargo test -p wright-workshop --test roundtrip` → 6/6; `--test emitter` → 24/24
+- `python3 -m unittest discover -s compatibility/tests` → 10/10 OK
+- `python3 compatibility/run_oracle.py` → **21/21 PASS** (exit 0)
+- `pnpm test` (adapter) → **23/23 pass**
+- `cargo test --workspace --all-targets --all-features` (stable 1.94.0) → all `test result: ok`, 0 failures
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` → 0 warnings
+- `cargo fmt --all -- --check` → clean
+- `cargo +1.85.0 clippy ... -D warnings` → 0 warnings; `cargo +1.85.0 test --workspace --all-targets --all-features` → 45 `ok` result blocks, 0 failures (MSRV)
+
+### CI evidence (GitHub Actions)
+
+- HEAD `b9a2309` → run **31774516439** (push), all six jobs **success**: Rust quality (stable), Rust quality (1.85.0), v1 release gates, OverPy compatibility oracle, OverPy-to-HIR adapter, Native-vs-reference frontend differential.
+- Batch commits' recorded runs confirmed: `da38f57` → 31773787648 success; `4c6a490` → 31772287928 success; `8182959` → 31770753398 success; `6d1417b` → 31767535944 success; `4f41cdf` → 31766165957 success.
+- Two transient intermediate failures confirmed with causes and fixes, neither affecting the batch/closure commits: `b5b0578` → 31767226870 failed **Rust quality (1.85.0)** clippy (only-used-in-recursion lint; fixed by `6d1417b`); `1841452` → 31770506972 failed **OverPy compatibility oracle** (`test_repository_fixture_metadata_and_snapshots_are_valid`, fixture count 21 vs expected 20 — the declarations-numbers fixture landed before the test update; fixed by `8182959`).
+
+### Doc-accuracy notes (not class-3 findings)
+
+1. **Closure-scan family count**: the AC-18 record says "19 asserted families"; the actual count at `b9a2309` is **18** (`pvmod` was the only family added between AC-17's 17 and AC-18 — `git diff 4c6a490..da38f57` shows only the `PVMOD` addition). The scan's pass status is unaffected.
+2. **Support-matrix `//=` lexing listing**: pre-existing note carried forward — the matrix lists `//=` but the native lexer never produces a `DoubleSlashAssign` token (`lexer.rs` returns `DoubleSlash` on `/`); both engines reject `//=` in practice, consistent with the driver test.
+
+### Verdict
+
+The full #87 acceptance record (AC-1..AC-18 across all four PM
+amendments) is independently verified **complete** at `b9a2309` with
+no open class-3 finding on the enumerated matrix-listed emission
+surface. The pixelart N-level row (`normalizedEqual: true`) stands; no
+PARITY_CASES row was added or forced; v1-gates 6/6 with `FIXTURES`
+unchanged; the settings emission path is untouched (7/7 sections
+equal); all cargo suites, clippy, fmt (stable + MSRV 1.85.0), oracle,
+adapter, and differential are green; six CI jobs green at HEAD.
