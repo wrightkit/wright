@@ -152,11 +152,25 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
                 let mut closed = false;
                 while index < chars.len() {
                     let c = chars[index];
-                    if c == '\\' && index + 1 < chars.len() && chars[index + 1] == '"' {
-                        advance(&mut index, &mut line, &mut col, &chars);
-                        advance(&mut index, &mut line, &mut col, &chars);
-                        content.push('"');
-                        continue;
+                    // Decode the escape spellings the emitter produces so a
+                    // settings/value string round-trips byte-identically
+                    // (`\"`, `\\`, `\n`, `\r`, `\t`; #87).
+                    if c == '\\' && index + 1 < chars.len() {
+                        let escaped = chars[index + 1];
+                        let decoded = match escaped {
+                            '"' => Some('"'),
+                            '\\' => Some('\\'),
+                            'n' => Some('\n'),
+                            'r' => Some('\r'),
+                            't' => Some('\t'),
+                            _ => None,
+                        };
+                        if let Some(decoded) = decoded {
+                            advance(&mut index, &mut line, &mut col, &chars);
+                            advance(&mut index, &mut line, &mut col, &chars);
+                            content.push(decoded);
+                            continue;
+                        }
                     }
                     if c == '"' {
                         advance(&mut index, &mut line, &mut col, &chars);

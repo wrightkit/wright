@@ -481,3 +481,73 @@ fn settings_strings_re_escape_decoded_escapes() {
         "no raw newline byte inside the settings string: {section}"
     );
 }
+
+#[test]
+fn split_and_reescaped_value_strings_round_trip_byte_identically() {
+    // Amended AC-6: a long string (split continuation chain) and an escaped
+    // string parse and re-emit byte-identically through the ws parser.
+    let mut program = wir::Program::default();
+    let file = program
+        .files
+        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+    let long = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::String("B".repeat(300)),
+        None,
+    ));
+    let escaped = program.values.push(wright_ir::wir::ValueNode::new(
+        wright_ir::wir::Value::String("a\nb\"c\\d\te".to_string()),
+        None,
+    ));
+    let first = program.actions.push(wir::Action::SetGlobalVariable {
+        variable: wright_ir::ids::Id::from_index(0),
+        value: long,
+        span: None,
+        target_span: None,
+    });
+    let second = program.actions.push(wir::Action::SetGlobalVariable {
+        variable: wright_ir::ids::Id::from_index(1),
+        value: escaped,
+        span: None,
+        target_span: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "x".into(),
+        index: 0,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.global_variables.push(wir::WorkshopVariable {
+        name: "y".into(),
+        index: 1,
+        span: None,
+        name_span: None,
+        initializer: None,
+    });
+    program.rules.push(wir::Rule {
+        name: "r".into(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: wir::Event::Global,
+        conditions: vec![],
+        actions: vec![first, second],
+    });
+    let _ = file;
+    let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
+    assert!(
+        emitted.contains("Custom String(\"B",),
+        "the long string splits into a continuation chain: {emitted}"
+    );
+    assert!(
+        emitted.contains("Custom String(\"a\\nb\\\"c\\\\d\te\")"),
+        "escapes re-emit in the oracle spelling: {emitted}"
+    );
+    let reparsed = parser::parse(&emitted, &catalog(), &en())
+        .expect("the split chain and escaped string must reparse");
+    let reemitted = emitter::emit(&reparsed, &catalog(), &en()).expect("re-emits");
+    assert_eq!(
+        emitted, reemitted,
+        "split and re-escaped spellings must be a byte-identical fixed point"
+    );
+}

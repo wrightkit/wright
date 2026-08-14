@@ -386,15 +386,61 @@ fn opy_unknown_settings_key_fails_check_and_compile_identically() {
 fn opy_string_array_initializer_emits_custom_string_elements() {
     // Class-3 remediation (#87): string values in value positions render as
     // `Custom String("...")`, the pinned oracle's spelling. The minimal
-    // repro `globalvar x = ["a", "b"]` must emit the oracle-verified
-    // `Array(Custom String("a"), Custom String("b"))` form byte-for-byte.
+    // repro with a real action body must be byte-identical to the pinned
+    // oracle artifact (amended AC-1).
+    assert_byte_artifact(
+        "globalvar x = [\"a\", \"b\"]\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
+        ORACLE_AC1,
+    );
+}
+
+#[test]
+fn opy_long_string_initializers_split_like_the_oracle() {
+    // Amended AC-3: 300 decoded chars split 125+{0}, 125+{0}, 50; 1000 chars
+    // split into 8 segments — byte-equal to the pinned oracle artifacts.
+    assert_byte_artifact(
+        &format!(
+            "globalvar x = \"{}\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
+            "A".repeat(300)
+        ),
+        ORACLE_AC3_300,
+    );
+    assert_byte_artifact(
+        &format!(
+            "globalvar x = \"{}\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
+            "A".repeat(1000)
+        ),
+        ORACLE_AC3_1000,
+    );
+}
+
+#[test]
+fn opy_escaped_value_strings_round_trip_the_oracle_spelling() {
+    // Amended AC-4: a decoded newline re-escapes to the literal two-character
+    // `\n` (0x5C 0x6E), byte-equal to the pinned oracle artifact.
+    assert_byte_artifact(
+        "globalvar x = \"a\\nb\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
+        ORACLE_AC4,
+    );
+}
+
+#[test]
+fn opy_empty_rules_are_dropped_like_the_oracle() {
+    // Amended AC-5: pass-only and condition-without-actions rules emit
+    // nothing, byte-equal to the pinned oracle artifacts.
+    assert_byte_artifact("rule \"r\":\n    @Event global\n    pass\n", "");
+    assert_byte_artifact(
+        "globalvar q\n\nrule \"r\":\n    @Event global\n    @Condition q == 1\n",
+        ORACLE_AC5_COND,
+    );
+}
+
+/// Compile `.opy` source with the compat profile and assert the emitted
+/// artifact is byte-identical to the quoted pinned-oracle artifact.
+fn assert_byte_artifact(source: &str, artifact: &str) {
     let dir = temp_dir();
-    let main = dir.join("array.opy");
-    std::fs::write(
-        &main,
-        "globalvar x = [\"a\", \"b\"]\n\nrule \"r\":\n    @Event global\n    pass\n",
-    )
-    .unwrap();
+    let main = dir.join("repro.opy");
+    std::fs::write(&main, source).unwrap();
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(main),
         root: Some(dir.clone()),
@@ -409,12 +455,23 @@ fn opy_string_array_initializer_emits_custom_string_elements() {
         envelope.diagnostics
     );
     let text = envelope.result.output.expect("output").text;
-    assert!(
-        text.contains("Set Global Variable(x, Array(Custom String(\"a\"), Custom String(\"b\")));"),
-        "string array elements must wrap in Custom String (oracle spelling):\n{text}"
+    assert_eq!(
+        text, artifact,
+        "artifact must be byte-identical to the oracle"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// Byte-quoted pinned-oracle artifacts (overpy 9.7.10, raw CLI output).
+const ORACLE_AC1: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Array(Custom String(\"a\"), Custom String(\"b\")));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
+
+const ORACLE_AC3_300: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"))));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
+
+const ORACLE_AC3_1000: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\")))))))));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
+
+const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"a\\nb\"));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
+
+const ORACLE_AC5_COND: &str = "variables {\n    global:\n        0: q\n}\n\n";
 
 #[test]
 fn opy_pixelart_array_strings_match_the_oracle_wrapping() {

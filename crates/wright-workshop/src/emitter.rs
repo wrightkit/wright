@@ -68,11 +68,24 @@ impl Emitter<'_> {
             self.line(0, "}")?;
             self.out.push('\n');
         }
-        for (index, rule) in self.program.rules.iter().enumerate() {
-            if index > 0 {
+        // Rules with no actions are dropped, matching the pinned oracle
+        // (pass-only and condition-without-actions rules emit nothing, #87).
+        let mut emitted_rules = 0;
+        for rule in self.program.rules.iter() {
+            if rule.actions.is_empty() {
+                continue;
+            }
+            if emitted_rules > 0 {
                 self.out.push('\n');
             }
             self.rule(rule)?;
+            emitted_rules += 1;
+        }
+        // The oracle's raw artifact ends with a trailing blank line (the
+        // committed snapshots strip it via the acquisition normalizer; the
+        // pinned oracle's own output keeps it, #87).
+        if !self.out.is_empty() && !self.out.ends_with("\n\n") {
+            self.out.push('\n');
         }
         Ok(self.out)
     }
@@ -570,12 +583,13 @@ impl Emitter<'_> {
                 out.push_str(&format_number(*value));
             }
             wir::Value::String(value) => {
-                // Value-position strings wrap in `Custom String("...")`, the
-                // pinned oracle's spelling (evidence: array elements,
-                // initializers, assignments, call arguments, comparisons —
-                // #87). The only bare string value is the `Custom String`
-                // text argument, handled in the call arm below.
-                write!(out, "Custom String(\"{}\")", escape_string(value)).unwrap();
+                // Value-position strings wrap in `Custom String("...")` with
+                // re-escaped content and long-string splitting, the pinned
+                // oracle's spelling (evidence: array elements, initializers,
+                // assignments, call arguments, comparisons — #87). The only
+                // bare string value is the `Custom String` text argument,
+                // handled in the call arm below.
+                self.emit_string_value(value, out)?;
             }
             wir::Value::Bool(true) => out.push_str("True"),
             wir::Value::Bool(false) => out.push_str("False"),
@@ -755,10 +769,51 @@ impl Emitter<'_> {
             });
         };
         if let wir::Value::String(value) = &node.value {
-            write!(out, "\"{}\"", escape_string(value)).unwrap();
+            write!(out, "\"{}\"", escape_value_string(value)).unwrap();
             return Ok(());
         }
         self.value(id, out)
+    }
+
+    /// Emit a value-position string as `Custom String("...")`, splitting it
+    /// into a continuation chain when it exceeds the Workshop 128-char limit
+    /// (#87).
+    fn emit_string_value(&mut self, value: &str, out: &mut String) -> Result<()> {
+        let spelling = self
+            .catalog
+            .spelling(Kind::Value, &self.locale, "customString")
+            .ok_or_else(|| WorkshopError::Unknown {
+                kind: "value",
+                spelling: "customString".to_string(),
+                locale: self.locale.clone(),
+                span: None,
+            })?
+            .to_string();
+        let segments = split_string(value);
+        self.emit_string_chain(&spelling, &segments, out)
+    }
+
+    /// Emit the nested continuation chain
+    /// `Custom String(seg0, Custom String(seg1, ...))`; segment texts are
+    /// pre-escaped, non-final segments carry the `{0}` placeholder.
+    fn emit_string_chain(
+        &mut self,
+        spelling: &str,
+        segments: &[String],
+        out: &mut String,
+    ) -> Result<()> {
+        let Some((first, rest)) = segments.split_first() else {
+            return Ok(());
+        };
+        out.push_str(spelling);
+        out.push('(');
+        write!(out, "\"{first}\"").unwrap();
+        if !rest.is_empty() {
+            out.push_str(", ");
+            self.emit_string_chain(spelling, rest, out)?;
+        }
+        out.push(')');
+        Ok(())
     }
 
     fn global_name(&self, id: wir::GlobalVarId) -> Result<String> {
@@ -871,6 +926,51 @@ fn is_comparison_operator(name: &str) -> bool {
 
 fn escape_string(value: &str) -> String {
     value.replace('"', "\\\"")
+}
+
+/// Re-escape a decoded value string the way the pinned oracle does (#87):
+/// `\`, `"`, newline, and carriage return re-escape; tabs pass through raw
+/// (byte-measured oracle behavior: `a\tb` emits a real tab, `a\nb` emits the
+/// literal two-character `\n`).
+fn escape_value_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Split a decoded string per the oracle's long-string rule (#87): when the
+/// decoded length exceeds the Workshop 128-char limit, non-final segments
+/// hold exactly 125 decoded chars and are emitted with a `{0}` continuation
+/// placeholder (128 total text chars), chained as nested `Custom String`
+/// arguments; the final segment holds the remainder without a placeholder.
+/// Segment texts are re-escaped. Byte-measured basis: chunk sizes are
+/// counted on the decoded string (70 escaped newlines — 140 escaped chars,
+/// 70 decoded — emit unsplit; 129 decoded newlines split at 125 decoded).
+fn split_string(value: &str) -> Vec<String> {
+    if value.chars().count() <= 128 {
+        return vec![escape_value_string(value)];
+    }
+    let mut segments = Vec::new();
+    let mut rest = value;
+    while rest.chars().count() > 125 {
+        let chunk: String = rest.chars().take(125).collect();
+        let mut text = escape_value_string(&chunk);
+        text.push_str("{0}");
+        segments.push(text);
+        rest = &rest[chunk.len()..];
+    }
+    if !rest.is_empty() {
+        segments.push(escape_value_string(rest));
+    }
+    segments
 }
 
 /// Escape a settings string value the way the pinned oracle does: every
