@@ -28,7 +28,7 @@ pub use preprocess::{preprocess, preprocess_with_overlay};
 
 /// The frontend's supported protocol identity for generated HIR.
 pub const FRONTEND_NAME: &str = "wright/opy-native";
-pub const FRONTEND_VERSION: &str = "0.1.0";
+pub const FRONTEND_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Compile one `.opy` source end-to-end into the Opy HIR contract:
 /// preprocess (includes/defines) → parse (CST) → lower (HIR).

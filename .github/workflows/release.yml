@@ -1,0 +1,182 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-gates:
+    name: Release gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+          rustflags: ""
+
+      - name: Verify tag version matches the workspace implementation version
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | \
+            python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "wright-cli"))')"
+          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "tag v$VERSION does not match the workspace implementation version $PACKAGE_VERSION"
+            exit 1
+          fi
+          echo "workspace version $PACKAGE_VERSION matches tag $GITHUB_REF_NAME"
+
+      - name: Run release gates (fmt, clippy, tests, v1 gates, scenarios, benchmarks, standalone proof)
+        run: scripts/release.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Upload gate reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-gate-reports
+          path: |
+            target/v1-gates-report.json
+            target/scenarios-report.json
+            target/wright-bench-report.json
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: release-gates
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: tar.gz
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            ext: tar.gz
+          - os: macos-15
+            target: aarch64-apple-darwin
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: zip
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      EXT: ${{ matrix.ext }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          rustflags: ""
+
+      - name: Add cross-compile target
+        run: rustup target add "$TARGET"
+
+      - name: Build release binaries
+        run: cargo build --release -p wright-cli -p wright-lsp --target "$TARGET"
+
+      - name: Package archive with version stamp
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PAYLOAD="wright-$VERSION-$TARGET"
+          mkdir -p "dist/$PAYLOAD"
+          scripts/make-version-stamp.sh "$VERSION" "dist/$PAYLOAD/version.json"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then EXE=".exe"; else EXE=""; fi
+          cp "target/$TARGET/release/wright$EXE" "dist/$PAYLOAD/"
+          cp "target/$TARGET/release/wright-lsp$EXE" "dist/$PAYLOAD/"
+          if [[ "$EXT" == "zip" ]]; then
+            (cd dist && tar -a -cf "$PAYLOAD.zip" "$PAYLOAD")
+          else
+            (cd dist && tar -czf "$PAYLOAD.tar.gz" "$PAYLOAD")
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "$PAYLOAD.$EXT" > "$PAYLOAD.$EXT.sha256")
+          else
+            (cd dist && shasum -a 256 "$PAYLOAD.$EXT" > "$PAYLOAD.$EXT.sha256")
+          fi
+          ls -l dist/
+
+      - name: Smoke test the packaged archive
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PAYLOAD="wright-$VERSION-$TARGET"
+          EXTRACT="$(mktemp -d)"
+          tar -xf "dist/$PAYLOAD.$EXT" -C "$EXTRACT"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then EXE=".exe"; else EXE=""; fi
+          WRIGHT="$EXTRACT/$PAYLOAD/wright$EXE"
+          LSP="$EXTRACT/$PAYLOAD/wright-lsp$EXE"
+          test -f "$WRIGHT" || { echo "missing $WRIGHT"; exit 1; }
+          test -f "$LSP" || { echo "missing $LSP"; exit 1; }
+          "$WRIGHT" --version | grep -F "$VERSION" || { echo "wright does not report $VERSION"; exit 1; }
+          "$LSP" --version | grep -F "$VERSION" || { echo "wright-lsp does not report $VERSION"; exit 1; }
+          "$WRIGHT" compile compatibility/fixtures/synthetic/basic-rule/source.opy \
+            --profile compat >/dev/null
+          "$WRIGHT" check scenarios/loops.opy --profile compat >/dev/null
+          echo "packaged $PAYLOAD executes and reports $VERSION"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: wright-${{ matrix.target }}
+          path: |
+            dist/wright-*.tar.gz
+            dist/wright-*.tar.gz.sha256
+            dist/wright-*.zip
+            dist/wright-*.zip.sha256
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: wright-*
+          path: artifacts
+
+      - name: Verify the complete artifact set
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          for triple in x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
+            ext="tar.gz"
+            [[ "$triple" == "x86_64-pc-windows-msvc" ]] && ext="zip"
+            archive="wright-$VERSION-$triple.$ext"
+            test -f "artifacts/wright-$triple/$archive" || { echo "missing $archive"; exit 1; }
+            test -f "artifacts/wright-$triple/$archive.sha256" || { echo "missing $archive.sha256"; exit 1; }
+            cp "artifacts/wright-$triple/$archive" "release/"
+            cp "artifacts/wright-$triple/$archive.sha256" "release/"
+          done
+          (cd release && sha256sum wright-*.tar.gz wright-*.zip > SHA256SUMS)
+          ls -l release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/wright-*.tar.gz
+            release/wright-*.tar.gz.sha256
+            release/wright-*.zip
+            release/wright-*.zip.sha256
+            release/SHA256SUMS

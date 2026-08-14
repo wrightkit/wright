@@ -190,6 +190,28 @@ fn uri_for(name: &str) -> String {
 }
 
 #[test]
+fn lsp_binary_reports_the_implementation_version_non_interactively() {
+    let output = Command::new(env!("CARGO_BIN_EXE_wright-lsp"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let banner = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        banner.trim().starts_with("wright-lsp "),
+        "unexpected banner: {banner}"
+    );
+    assert!(
+        banner.contains(env!("CARGO_PKG_VERSION")),
+        "banner does not report the implementation version: {banner}"
+    );
+}
+
+#[test]
 fn lsp_negotiates_capabilities_and_serves_workflows() {
     let root = workspace_root();
     let mut client = LspClient::spawn(&root);
@@ -206,6 +228,11 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
     );
     let capabilities = &init["result"]["capabilities"];
     assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
+    assert_eq!(
+        init["result"]["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION"),
+        "the LSP reports the workspace implementation version"
+    );
     assert!(capabilities["hoverProvider"].as_bool() == Some(true));
     assert!(capabilities["definitionProvider"].as_bool() == Some(true));
     assert!(capabilities["referencesProvider"].as_bool() == Some(true));

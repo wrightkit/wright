@@ -21,7 +21,7 @@ use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
-pub const SERVICE_VERSION: &str = "0.1.0";
+pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// A tool request: the owned query surface plus agent-oriented operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

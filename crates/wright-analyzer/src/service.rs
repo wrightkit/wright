@@ -71,7 +71,7 @@ pub struct ErrorInfo {
 
 /// The tool/service version and capabilities.
 pub const SERVICE_NAME: &str = "wright-tool";
-pub const SERVICE_VERSION: &str = "0.1.0";
+pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The origin of a compiled program, carried in tool responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -41,6 +41,11 @@ result.
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
 | `wright inspect [INPUT]` | Parse, lower, inspect structure | rules, symbols, references summary |
 
+`wright version` and `wright --version` print the implementation version
+banner (`wright <version> (wright-driver <version>)`); the version is the
+single authoritative workspace implementation version (issue #101) and is
+also reported inside every `wright-result/v1` envelope.
+
 All commands accept a file path or `-`/omitted for stdin. Input kind is
 detected from the extension (`.opy`, `.json`, `.txt`/`.ws`) or stdin content
 (protocol JSON starts with `{`, otherwise Workshop text) and can be overridden

@@ -427,6 +427,16 @@ fn version_and_help_are_documented_contract_surfaces() {
     assert!(output.status.success());
     let banner = String::from_utf8_lossy(&output.stdout);
     assert!(banner.starts_with("wright "), "{banner}");
+    assert!(
+        banner.contains(env!("CARGO_PKG_VERSION")),
+        "banner does not report the implementation version: {banner}"
+    );
+    assert!(banner.contains("wright-driver"), "{banner}");
+
+    let output = run(&["--version"]);
+    assert!(output.status.success());
+    let flag_banner = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(flag_banner, banner, "--version matches `version`");
 
     let output = run(&["--help"]);
     assert!(output.status.success());

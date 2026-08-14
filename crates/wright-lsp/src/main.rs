@@ -43,6 +43,13 @@ use wright_language::{LanguageService, SemanticToken as WtToken};
 type PublicationOwnership = BTreeMap<String, BTreeSet<String>>;
 
 fn main() {
+    // Non-interactive version probe (#101): `wright-lsp --version` prints the
+    // implementation version and exits without entering the stdio loop, so
+    // scripts and release smoke tests can identify the executable.
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        println!("wright-lsp {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     if let Err(message) = run() {
         eprintln!("wright-lsp: {message}");
         std::process::exit(1);

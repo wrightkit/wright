@@ -23,6 +23,26 @@ see [`docs/v1-matrix.md`](docs/v1-matrix.md),
 [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md), and
 [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
+## Install
+
+Pinned binary releases are published as GitHub Releases from `v*` tags
+(issue #101). Download a platform archive and its checksum, verify, and add
+`wright`/`wright-lsp` to `PATH`:
+
+```sh
+VERSION=0.1.0
+TARGET=x86_64-unknown-linux-gnu   # or aarch64-apple-darwin / x86_64-apple-darwin / x86_64-pc-windows-msvc
+BASE="https://github.com/wrightkit/wright/releases/download/v$VERSION"
+curl -fsSL -O "$BASE/wright-$VERSION-$TARGET.tar.gz"
+curl -fsSL -O "$BASE/wright-$VERSION-$TARGET.tar.gz.sha256"
+shasum -a 256 -c "wright-$VERSION-$TARGET.tar.gz.sha256"
+tar -xzf "wright-$VERSION-$TARGET.tar.gz"
+export PATH="$PWD/wright-$VERSION-$TARGET:$PATH"
+```
+
+Windows uses `wright-<version>-x86_64-pc-windows-msvc.zip`. See
+[`docs/release.md`](docs/release.md) for the full distribution contract.
+
 ## CLI
 
 Build the CLI from the workspace:
