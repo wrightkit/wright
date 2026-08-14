@@ -17,8 +17,9 @@ use wright_ir::error::IrError;
 use wright_ir::source::Span;
 use wright_ir::wir;
 
-use crate::analysis::{self, Finding};
+use crate::analysis::{Finding, Severity};
 use crate::cfg::Cfg;
+use crate::registry::{LintConfig, LintRegistry};
 use crate::symbols::{ReferenceKind, SemanticIndex, SymbolId, SymbolKind};
 
 /// A semantic query request.
@@ -127,14 +128,29 @@ impl<'a> SemanticService<'a> {
         )
     }
 
-    /// Build the service over a compiled program with explicit origin
-    /// metadata.
+    /// Build the service over a compiled program with explicit origin metadata.
+    ///
+    /// All rules in the default [`LintRegistry`] are run with the default
+    /// [`LintConfig`] (all rules enabled, no severity overrides).
     pub fn with_origin(
         program: &'a wir::Program,
         origin: Origin,
     ) -> Result<SemanticService<'a>, IrError> {
+        Self::with_origin_and_config(program, origin, LintConfig::default())
+    }
+
+    /// Build the service with explicit origin metadata and a custom lint
+    /// configuration.
+    ///
+    /// `config` controls which rules run and at what severity; callers that
+    /// only need the default behavior should use [`SemanticService::with_origin`].
+    pub fn with_origin_and_config(
+        program: &'a wir::Program,
+        origin: Origin,
+        config: LintConfig,
+    ) -> Result<SemanticService<'a>, IrError> {
         let index = SemanticIndex::build(program)?;
-        let findings = analysis::analyze(program);
+        let findings = LintRegistry::default().run(program, &config);
         Ok(SemanticService {
             program,
             index,
@@ -384,10 +400,10 @@ fn reference_kind_name(kind: ReferenceKind) -> &'static str {
     }
 }
 
-fn severity_name(severity: analysis::Severity) -> &'static str {
+fn severity_name(severity: Severity) -> &'static str {
     match severity {
-        analysis::Severity::Warning => "warning",
-        analysis::Severity::Info => "info",
+        Severity::Warning => "warning",
+        Severity::Info => "info",
     }
 }
 

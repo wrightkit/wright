@@ -16,13 +16,16 @@
 //! structural (arena-id-independent) and rule-local; the expensive-call list
 //! is a heuristic that may miss or over-flag exotic predicates.
 
+use serde::{Deserialize, Serialize};
 use wright_ir::source::Span;
 use wright_ir::wir::{self, Action, ActionId, RuleId, Value, ValueId};
 
 use crate::cfg::Cfg;
+use crate::registry::{LintConfig, LintRegistry};
 
 /// The severity of a finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Warning,
     Info,
@@ -50,19 +53,13 @@ pub trait Analysis {
 }
 
 /// Run every shipped analysis over every rule and return all findings.
+///
+/// This is a convenience wrapper over [`LintRegistry::default`] with the
+/// default [`LintConfig`] (all rules enabled, no severity overrides). Callers
+/// that need selective enabling/disabling or severity control should call
+/// [`LintRegistry::run`] directly with an explicit [`LintConfig`].
 pub fn analyze(program: &wir::Program) -> Vec<Finding> {
-    let analyses: [&dyn Analysis; 3] = [&MinWaitLoop, &DuplicateCondition, &ExpensiveLoopCheck];
-    let mut findings = Vec::new();
-    for (index, _) in program.rules.iter().enumerate() {
-        let rule = RuleId::from_index(index);
-        let Ok(cfg) = Cfg::build(program, rule) else {
-            continue; // an invalid rule cannot be analyzed
-        };
-        for analysis in &analyses {
-            findings.extend(analysis.run(program, rule, &cfg));
-        }
-    }
-    findings
+    LintRegistry::default().run(program, &LintConfig::default())
 }
 
 /// A loop whose body waits at the workshop minimum rate.
