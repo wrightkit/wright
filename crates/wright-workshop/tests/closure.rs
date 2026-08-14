@@ -51,11 +51,14 @@ const MACRO: &str = "variables {\n    global:\n        0: g\n}\n\nrule (\"r\") {
 const PLAYERVAR_READ: &str = "variables {\n    global:\n        0: g\n    player:\n        0: p\n        1: q\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Global Variable(g, (Event Player).p);\n        If(Compare(Add((Event Player).p, (Event Player).q), >, 1));\n            Disable Inspector Recording;\n    }\n}\n\n";
 const SUBROUTINE: &str = "subroutines {\n    0: foo\n    1: bar\n}\n\nrule (\"Subroutine bar\") {\n    event {\n        Subroutine;\n        bar;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Call Subroutine(foo);\n    }\n}\n\n";
 
+const PVMOD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Add, 2);\n        Modify Player Variable(Event Player, p, Subtract, 1);\n        Modify Player Variable(Event Player, p, Multiply, 3);\n        Modify Player Variable(Event Player, p, Divide, 2);\n        Modify Player Variable(Event Player, p, Modulo, 5);\n    }\n}\n\n";
+
 #[test]
 fn emitted_spellings_self_round_trip_across_the_matrix_surface() {
     assert_closure("assign_aug", ASSIGN_AUG);
     assert_closure("calls", CALLS);
     assert_closure("conditions", CONDITIONS);
+    assert_closure("pvmod", PVMOD);
     assert_closure("decl_index", DECL_INDEX);
     assert_closure("decl_nums", DECL_NUMS);
     assert_closure("expr_escapes", EXPR_ESCAPES);

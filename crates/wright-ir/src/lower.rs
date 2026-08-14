@@ -508,18 +508,72 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Detect `x = x <op> rhs` (or `x = rhs <op> x`) for a player target.
+    ///
+    /// The target and the binary's operand are distinct HIR nodes (the
+    /// frontend clones the target for the augmented-assignment value), so
+    /// the player expression is compared structurally, not by node id
+    /// (the oracle renders playervar augmented assignments as
+    /// `Modify Player Variable(Event Player, p, <op>, value)`, #87).
     fn player_modify(
         &mut self,
         value: &ExprId,
         player: ExprId,
         variable: PlayerVarId,
     ) -> Result<Option<(ModifyOp, ValueId)>, IrError> {
-        self.modify_pattern(value, |other| {
-            matches!(
-                other,
-                Expr::PlayerVar { player: p, variable: v, .. } if *p == player && *v == variable
-            )
-        })
+        let target_player = self
+            .hir
+            .exprs
+            .get(player)
+            .cloned()
+            .ok_or_else(|| dangling("expression", player))?;
+        let expression = self
+            .hir
+            .exprs
+            .get(*value)
+            .ok_or_else(|| dangling("expression", *value))?
+            .clone();
+        let Expr::Binary {
+            op, left, right, ..
+        } = &expression
+        else {
+            return Ok(None);
+        };
+        let Some(op) = modify_op(*op) else {
+            return Ok(None);
+        };
+        let left_is_target = self.player_operand_is_target(*left, &target_player, variable)?;
+        let right_is_target = self.player_operand_is_target(*right, &target_player, variable)?;
+        match (left_is_target, right_is_target) {
+            (true, _) => Ok(Some((op, self.lower_value(*right)?))),
+            (false, true) => Ok(Some((op, self.lower_value(*left)?))),
+            (false, false) => Ok(None),
+        }
+    }
+
+    /// Whether a binary operand is a read of the given player variable on the
+    /// given player expression (compared structurally, #87).
+    fn player_operand_is_target(
+        &self,
+        operand: ExprId,
+        target_player: &Expr,
+        variable: PlayerVarId,
+    ) -> Result<bool, IrError> {
+        let node = self
+            .hir
+            .exprs
+            .get(operand)
+            .ok_or_else(|| dangling("expression", operand))?;
+        match node {
+            Expr::PlayerVar {
+                player: p,
+                variable: v,
+                ..
+            } if *v == variable => match self.hir.exprs.get(*p) {
+                Some(player_expr) => Ok(player_exprs_equal(player_expr, target_player)),
+                None => Err(dangling("expression", *p)),
+            },
+            _ => Ok(false),
+        }
     }
 
     fn modify_pattern(
@@ -888,6 +942,17 @@ fn modify_op(op: BinaryOp) -> Option<ModifyOp> {
         BinaryOp::Power => ModifyOp::RaiseToPower,
         _ => return None,
     })
+}
+
+/// Structural equality of two player expressions (the augmented-assignment
+/// target and the binary's operand are distinct nodes, #87). The producible
+/// receivers are `eventPlayer` (the surface form) and global references.
+fn player_exprs_equal(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::EventPlayer { .. }, Expr::EventPlayer { .. }) => true,
+        (Expr::GlobalVar { variable: x, .. }, Expr::GlobalVar { variable: y, .. }) => x == y,
+        _ => false,
+    }
 }
 
 /// All arena indices of a given type in `0..len`.

@@ -425,6 +425,49 @@ fn opy_escaped_value_strings_round_trip_the_oracle_spelling() {
 }
 
 #[test]
+fn opy_playervar_augmented_assignments_match_the_oracle_artifacts() {
+    // Amended AC-18: playervar augmented assignments lower to
+    // `Modify Player Variable(Event Player, p, <op>, 2)` for the oracle's
+    // evidenced operator set (+= -= *= /= %=), byte-equal to the pinned
+    // oracle artifacts. `//=` is a parse error in both frontends (not an
+    // OverPy operator).
+    for (op, artifact) in [
+        ("+=", ORACLE_PV_ADD),
+        ("-=", ORACLE_PV_SUB),
+        ("*=", ORACLE_PV_MUL),
+        ("/=", ORACLE_PV_DIV),
+        ("%=", ORACLE_PV_MOD),
+    ] {
+        assert_byte_artifact(
+            &format!(
+                "playervar p\n\nrule \"r\":\n    @Event eachPlayer\n    eventPlayer.p {op} 2\n"
+            ),
+            artifact,
+        );
+    }
+    let dir = temp_dir();
+    let main = dir.join("fdiv.opy");
+    std::fs::write(
+        &main,
+        "playervar p\n\nrule \"r\":\n    @Event eachPlayer\n    eventPlayer.p //= 2\n",
+    )
+    .unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(main),
+        root: Some(dir.clone()),
+        profile: wright_transform::Profile::Compat,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let envelope = session.compile();
+    assert!(
+        !envelope.ok,
+        "//= is rejected like the pinned oracle (not an OverPy operator)"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn opy_numeric_initializers_match_the_oracle_artifact() {
     // Amended AC-11: non-zero and non-integer numeric initializers are
     // preserved (`j = 5`, `k = 0.0` with the source spelling, `playervar
@@ -486,6 +529,17 @@ const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"I
 const ORACLE_AC5_COND: &str = "variables {\n    global:\n        0: q\n}\n\n";
 
 const ORACLE_AC11: &str = "variables {\n    global:\n        0: j\n        1: h\n        2: k\n    player:\n        0: p\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(j, 5);\n        Set Global Variable(k, 0.0);\n    }\n}\n\nrule (\"Initialize player variables\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, p, 7);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
+
+// Pinned oracle artifacts for playervar augmented assignments (AC-18).
+const ORACLE_PV_ADD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Add, 2);\n    }\n}\n\n";
+
+const ORACLE_PV_SUB: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Subtract, 2);\n    }\n}\n\n";
+
+const ORACLE_PV_MUL: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Multiply, 2);\n    }\n}\n\n";
+
+const ORACLE_PV_DIV: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Divide, 2);\n    }\n}\n\n";
+
+const ORACLE_PV_MOD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Modulo, 2);\n    }\n}\n\n";
 
 #[test]
 fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
