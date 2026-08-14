@@ -31,6 +31,7 @@ const UPDATE = process.env.UPDATE_FIXTURES === "1";
 const SUCCESS_FIXTURES = [
   "synthetic/basic-rule",
   "synthetic/control-flow",
+  "synthetic/declarations-numbers",
   "synthetic/declarations-rules",
   "synthetic/expressions-values",
   "synthetic/preprocessing",

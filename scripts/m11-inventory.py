@@ -36,6 +36,7 @@ GAP_REPORT = ROOT / "target" / "m11-gap-inventory.json"
 
 FIXTURES = [
     "synthetic/settings",
+    "synthetic/declarations-numbers",
     "real-world/overpy-pixelart",
     "real-world/overpy-santa",
     "real-world/overpy-meipocalypse",

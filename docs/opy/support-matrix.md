@@ -36,9 +36,10 @@ architecture is `lexer → preprocess → CST/parser → resolve/lower → Opy H
 ### Declarations
 - `globalvar name` / `globalvar name = expr` / `globalvar name <index>`
   (the bare-integer form is an explicit Workshop variable index, matching the
-  reference; literal-number `=` initializers are dropped from HIR, matching
-  the reference adapter — non-trivial initializers such as arrays and `vect`
-  calls are preserved).
+  reference; integer-`0` literal initializers are dropped from HIR (matching
+  the reference adapter); non-zero and non-integer numeric initializers are
+  preserved, e.g. `j = 5` and `k = 0.0` keep the source spelling through
+  emission).
 - `playervar name` (same forms).
 - `subroutine name`.
 - `def name():` subroutine bodies (parameters are outside the declared

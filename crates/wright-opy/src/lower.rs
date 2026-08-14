@@ -285,13 +285,14 @@ impl Lowerer {
         }
     }
 
-    /// A declaration initializer: literal-number initializers are dropped
-    /// (reference adapter behavior; non-trivial initializers are kept).
+    /// A declaration initializer: integer-`0` literal initializers are
+    /// dropped (matching the reference adapter, which drops `h = 0` but
+    /// carries `j = 5` and `k = 0.0`); other initializers are kept.
     fn initializer(&mut self, initializer: Option<&Expr>) -> Option<Box<HirExpr>> {
         let initializer = initializer?;
         let lowered = self.lower_expr(initializer, &[]);
         match &lowered {
-            HirExpr::Number { .. } => None,
+            HirExpr::Number { text, .. } if text == "0" => None,
             other => Some(Box::new(other.clone())),
         }
     }

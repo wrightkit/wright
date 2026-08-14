@@ -425,6 +425,18 @@ fn opy_escaped_value_strings_round_trip_the_oracle_spelling() {
 }
 
 #[test]
+fn opy_numeric_initializers_match_the_oracle_artifact() {
+    // Amended AC-11: non-zero and non-integer numeric initializers are
+    // preserved (`j = 5`, `k = 0.0` with the source spelling, `playervar
+    // p = 7` in the player Initialize rule); integer-`0` (`h = 0`) is
+    // dropped. Byte-equal to the pinned oracle artifact.
+    assert_byte_artifact(
+        "globalvar j = 5\nglobalvar h = 0\nglobalvar k = 0.0\nplayervar p = 7\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
+        ORACLE_AC11,
+    );
+}
+
+#[test]
 fn opy_empty_rules_are_dropped_like_the_oracle() {
     // Amended AC-5: pass-only and condition-without-actions rules emit
     // nothing, byte-equal to the pinned oracle artifacts.
@@ -472,6 +484,8 @@ const ORACLE_AC3_1000: &str = "variables {\n    global:\n        0: x\n}\n\nrule
 const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"a\\nb\"));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
 const ORACLE_AC5_COND: &str = "variables {\n    global:\n        0: q\n}\n\n";
+
+const ORACLE_AC11: &str = "variables {\n    global:\n        0: j\n        1: h\n        2: k\n    player:\n        0: p\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(j, 5);\n        Set Global Variable(k, 0.0);\n    }\n}\n\nrule (\"Initialize player variables\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, p, 7);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
 #[test]
 fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
