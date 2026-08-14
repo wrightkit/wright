@@ -2,7 +2,7 @@
 kind: wright-spec/v1
 id: SPEC-99-stability-rules
 title: Bounded evidence-backed Workshop stability rule set (M12)
-status: in-progress
+status: accepted
 related_issue: "#99"
 owner: PM
 freshness: live
