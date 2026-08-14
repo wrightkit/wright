@@ -791,7 +791,9 @@ fn action_has_unprovable_loop(program: &wir::Program, id: ActionId) -> bool {
         // classification is `StaticallyBounded` (reused verbatim: a nested
         // `while true:` classifies `ObviouslyUnbounded`, so the outer loop
         // cannot be proven to complete an iteration).
-        Action::While { condition, body, .. } => {
+        Action::While {
+            condition, body, ..
+        } => {
             boundedness_of(program, *condition, body) != Boundedness::StaticallyBounded
                 || subtree_has_unprovable_loop(program, body)
         }
@@ -851,7 +853,9 @@ fn subtree_has_unprovable_loop(program: &wir::Program, actions: &[ActionId]) -> 
 /// workshop function.
 fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -> bool {
     match action {
-        Action::SetGlobalVariable { variable: target, .. } => {
+        Action::SetGlobalVariable {
+            variable: target, ..
+        } => {
             matches!(variable, Variable::Global(v) if *target == *v)
         }
         Action::SetPlayerVariable {
@@ -860,7 +864,9 @@ fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -
             ..
         } => matches!(variable, Variable::Player(condition_player, v)
             if *target == *v && structurally_equal(program, *condition_player, *player)),
-        Action::ModifyGlobalVariable { variable: target, .. } => {
+        Action::ModifyGlobalVariable {
+            variable: target, ..
+        } => {
             matches!(variable, Variable::Global(v) if *target == *v)
         }
         Action::ModifyPlayerVariable {
@@ -884,9 +890,9 @@ fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -
                     .body
                     .iter()
                     .any(|id| subtree_writes(program, *id, variable))
-            }) || else_body.as_ref().is_some_and(|body| {
-                body.iter().any(|id| subtree_writes(program, *id, variable))
-            })
+            }) || else_body
+                .as_ref()
+                .is_some_and(|body| body.iter().any(|id| subtree_writes(program, *id, variable)))
         }
         Action::While { body, .. } | Action::ForGlobalVariable { body, .. } => {
             body.iter().any(|id| subtree_writes(program, *id, variable))
@@ -915,10 +921,7 @@ fn counter_comparison(program: &wir::Program, condition: ValueId) -> Option<(Var
     if args.len() != 2 {
         return None;
     }
-    let (left, right) = (
-        program.values.get(args[0])?,
-        program.values.get(args[1])?,
-    );
+    let (left, right) = (program.values.get(args[0])?, program.values.get(args[1])?);
     let variable_left = variable_of(&left.value);
     let literal_left = matches!(&left.value, Value::Number { .. });
     let variable_right = variable_of(&right.value);
