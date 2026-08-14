@@ -18,6 +18,7 @@ WORK="$(mktemp -d)"
 PORT=18765
 PASS=0
 FAIL=0
+INSTALL_OUTPUT="$WORK/wright-install.out"
 
 cleanup() {
   [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
@@ -50,6 +51,18 @@ make_archive() {
   rm -rf "$dir"
 }
 
+wait_for_server() {
+  local base_url="$1"
+  for _ in $(seq 1 50); do
+    if curl -fsS "$base_url/" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "mock release server did not become ready: $base_url" >&2
+  return 1
+}
+
 for triple in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
   make_archive "$WORK/mock" "$triple"
 done
@@ -61,13 +74,9 @@ EOF
 
 python3 -m http.server "$PORT" --directory "$WORK/mock" >/dev/null 2>&1 &
 SERVER_PID=$!
-for _ in $(seq 1 50); do
-  curl -fsS "http://127.0.0.1:$PORT/x" >/dev/null 2>&1 && break
-  sleep 0.1
-done
-
 BASE_URL="http://127.0.0.1:$PORT"
 API_URL="$BASE_URL/repos/wrightkit/wright/releases/latest"
+wait_for_server "$BASE_URL"
 
 # --- helpers -----------------------------------------------------------------
 
@@ -102,13 +111,13 @@ expect_success() {
 
 expect_failure() {
   local name="$1" pattern="$2" dir="$3"; shift 3
-  if run_install --dir "$dir" "$@" >/tmp/wright-install.out 2>&1; then
+  if run_install --dir "$dir" "$@" >"$INSTALL_OUTPUT" 2>&1; then
     report "$name" fail
-  elif grep -Fq "$pattern" /tmp/wright-install.out; then
+  elif grep -Fq "$pattern" "$INSTALL_OUTPUT"; then
     report "$name" ok
   else
     report "$name" fail
-    sed 's/^/    /' /tmp/wright-install.out >&2
+    sed 's/^/    /' "$INSTALL_OUTPUT" >&2
   fi
 }
 
@@ -122,10 +131,10 @@ printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' 
   "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
   > "$WORK/mock/v$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
-   run_install --dir "$WORK/d3" --version "$VERSION" >/tmp/wright-install.out 2>&1; then
+   run_install --dir "$WORK/d3" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "checksum mismatch is rejected before install" fail
 else
-  grep -Fq "checksum verification failed" /tmp/wright-install.out \
+  grep -Fq "checksum verification failed" "$INSTALL_OUTPUT" \
     && report "checksum mismatch is rejected before install" ok \
     || report "checksum mismatch is rejected before install" fail
 fi
@@ -136,10 +145,10 @@ test ! -e "$WORK/d3/wright" \
 printf 'not-a-hash  %s\n' "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
   > "$WORK/mock/v$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
-   run_install --dir "$WORK/d3b" --version "$VERSION" >/tmp/wright-install.out 2>&1; then
+   run_install --dir "$WORK/d3b" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "malformed checksum file is rejected" fail
 else
-  grep -Fq "invalid checksum" /tmp/wright-install.out \
+  grep -Fq "invalid checksum" "$INSTALL_OUTPUT" \
     && report "malformed checksum file is rejected" ok \
     || report "malformed checksum file is rejected" fail
 fi
@@ -151,19 +160,19 @@ expect_failure "unknown version fails with an actionable error" "does release" "
   --version 0.0.0
 
 if WRIGHT_INSTALL_OS=windows run_install --dir "$WORK/d5" --version "$VERSION" \
-   >/tmp/wright-install.out 2>&1; then
+   >"$INSTALL_OUTPUT" 2>&1; then
   report "unsupported OS fails explicitly" fail
 else
-  grep -Fq "unsupported" /tmp/wright-install.out \
+  grep -Fq "unsupported" "$INSTALL_OUTPUT" \
     && report "unsupported OS fails explicitly" ok \
     || report "unsupported OS fails explicitly" fail
 fi
 
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=arm64 \
-   run_install --dir "$WORK/d6" --version "$VERSION" >/tmp/wright-install.out 2>&1; then
+   run_install --dir "$WORK/d6" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "linux/arm64 fails explicitly" fail
 else
-  grep -Fq "unsupported" /tmp/wright-install.out \
+  grep -Fq "unsupported" "$INSTALL_OUTPUT" \
     && report "linux/arm64 fails explicitly" ok \
     || report "linux/arm64 fails explicitly" fail
 fi
@@ -214,13 +223,14 @@ tar -czf "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" -C "$release
 rm -rf "$dir"
 python3 -m http.server $((PORT + 1)) --directory "$WORK/mock-broken" >/dev/null 2>&1 &
 BROKEN_PID=$!
-sleep 0.5
+BROKEN_BASE_URL="http://127.0.0.1:$((PORT + 1))"
+wait_for_server "$BROKEN_BASE_URL"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
-   WRIGHT_INSTALL_BASE_URL="http://127.0.0.1:$((PORT + 1))" WRIGHT_API_URL="$API_URL" \
-   "$INSTALLER" --dir "$WORK/d9" --version "$VERSION" >/tmp/wright-install.out 2>&1; then
+   WRIGHT_INSTALL_BASE_URL="$BROKEN_BASE_URL" WRIGHT_API_URL="$API_URL" \
+   "$INSTALLER" --dir "$WORK/d9" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "archive missing wright-lsp fails cleanly" fail
 else
-  grep -Fq "archive layout" /tmp/wright-install.out \
+  grep -Fq "archive layout" "$INSTALL_OUTPUT" \
     && report "archive missing wright-lsp fails cleanly" ok \
     || report "archive missing wright-lsp fails cleanly" fail
 fi
