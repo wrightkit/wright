@@ -18,6 +18,7 @@ wright-core = { path = "../wright-core" }
 wright-driver = { path = "../wright-driver" }
 wright-ir = { path = "../wright-ir" }
 wright-opy = { path = "../wright-opy" }
+wright-ostw = { path = "../wright-ostw" }
 
 [dev-dependencies]
 libc = "0.2"

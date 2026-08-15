@@ -95,6 +95,29 @@ suppression is the authoritative contract.
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.
 
+## OSTW documents (#120)
+
+`.ostw`/`.del` documents route through the same editor-neutral services with
+no OSTW-specific analysis stack: the native OSTW frontend loads the `ds.toml`
+project closure and resolves the #118 semantic HIR, which is lowered through
+the shared HIR→WIR path; diagnostics, findings, hover, definition,
+references, completion, and semantic tokens then come from the shared
+analyzer/semantic index exactly as for OPY/Workshop inputs. Project-level and
+#118 semantic boundary diagnostics (missing imports, Math/Cursor/class
+surfaces) surface as source-aware errors with project-relative paths.
+
+Operations that stay unsupported for OSTW are **explicitly refused or
+documented, never emulated through upstream calls**:
+
+- **Rename / safe source edits** — a whole-source OSTW regeneration/emitter is
+  a declared non-goal (#120); rename would rewrite entire OSTW files, so it is
+  not offered for OSTW documents.
+- **Whole-source pretty-printing / comment-preserving regeneration** — not
+  implemented; diagnostics and navigation are source-preserving.
+- Upstream OSTW LSP parity, classes/generics/lambdas/pattern matching beyond
+  the accepted corpus boundary, and Workshop→OSTW reconstruction remain out of
+  scope (the corpus boundary defines what resolves).
+
 ## LSP adapter
 
 `wright-lsp` (stdio, Content-Length framing) implements: initialize

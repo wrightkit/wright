@@ -38,3 +38,5 @@ compatibility/**/__pycache__/
 
 # Adapter dependencies
 adapter/node_modules/
+
+.agents/

@@ -135,8 +135,13 @@ impl LanguageService {
 
     /// Analyze one document: preprocess → parse → lower → semantic index.
     /// Open-document overlays (unsaved editor buffers) participate in include
-    /// resolution before the filesystem.
+    /// resolution before the filesystem. OSTW documents (`.ostw`/`.del`)
+    /// route through the same shared lower/analyze/index path over the #118
+    /// semantic HIR instead of a separate tool stack.
     pub fn analyze(&self, document: &Document) -> Analysis {
+        if is_ostw_document(&document.uri) {
+            return self.analyze_ostw(document);
+        }
         let overlay = self.store.overlay(&self.root);
         let wright_opy::CompileOutcome { hir, error, files } =
             wright_opy::compile_with_overlay_outcome(
@@ -168,6 +173,62 @@ impl LanguageService {
             index,
             findings,
             parse_errors: Vec::new(),
+            files,
+        }
+    }
+
+    /// Analyze an OSTW document through the shared services: the native
+    /// frontend loads the project and resolves the #118 semantic HIR, which
+    /// is lowered through the shared HIR→WIR path; diagnostics and the
+    /// semantic index then come from the same shared code OPY/Workshop use.
+    fn analyze_ostw(&self, document: &Document) -> Analysis {
+        let relative = crate::document::uri_to_path(&document.uri).and_then(|path| {
+            path.strip_prefix(&self.root)
+                .ok()
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        });
+        let (outcome, semantic) =
+            wright_ostw::compile_with_semantics(&document.text, relative.as_deref(), &self.root);
+        let files: Vec<FileRecord> = outcome
+            .project
+            .as_ref()
+            .map(|project| {
+                project
+                    .files
+                    .iter()
+                    .map(|file| FileRecord {
+                        id: file.id,
+                        path: file.path.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut parse_errors: Vec<wright_opy::FrontendError> =
+            outcome.diagnostics.iter().map(ostw_error_to_opy).collect();
+        parse_errors.extend(semantic.diagnostics.iter().map(ostw_error_to_opy));
+        let Some(hir) = semantic.hir else {
+            return Analysis {
+                program: wir::Program::default(),
+                index: None,
+                findings: Vec::new(),
+                parse_errors,
+                files,
+            };
+        };
+        let mut findings = Vec::new();
+        let mut program = wir::Program::default();
+        if let Ok(lowered) = wright_ir::lower::lower(&hir) {
+            if lowered.validate().is_ok() {
+                program = lowered;
+                findings = analysis::analyze(&program);
+            }
+        }
+        let index = SemanticIndex::build(&program).ok();
+        Analysis {
+            program,
+            index,
+            findings,
+            parse_errors,
             files,
         }
     }
@@ -505,9 +566,7 @@ impl LanguageService {
                 document_version: 0,
                 ok: false,
                 edits: Vec::new(),
-                diagnostics: vec![
-                    "rename-invalid-name: the new name must not be empty".to_string(),
-                ],
+                diagnostics: vec!["rename-invalid-name: the new name must not be empty".to_string()],
             };
         }
         let Some(requesting) = self.store.document(uri) else {
@@ -824,6 +883,9 @@ impl LanguageService {
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
         };
+        if is_ostw_document(uri) {
+            return self.semantic_tokens_ostw(document);
+        }
         let analysis = self.analyze(document);
         // Token classification needs the raw lexer stream plus the semantic
         // index for symbol identity (never name-string membership alone).
@@ -840,6 +902,44 @@ impl LanguageService {
                 continue;
             }
             let token_type = classify_token(token, analysis.index.as_ref());
+            if token_type.is_empty() {
+                continue;
+            }
+            result.push(SemanticToken {
+                line: token.span.start.line.saturating_sub(1),
+                character: crate::document::char_offset_to_utf16(
+                    document
+                        .text
+                        .lines()
+                        .nth(token.span.start.line.saturating_sub(1) as usize)
+                        .unwrap_or_default(),
+                    token.span.start.col.saturating_sub(1) as usize,
+                ) as u32,
+                length: crate::document::utf16_len(&token.text).max(1) as u32,
+                token_type,
+            });
+        }
+        result
+    }
+
+    /// Semantic tokens for an OSTW document: the OSTW frontend lexer
+    /// supplies the token stream; symbol classification goes through the
+    /// shared semantic index over the lowered program, exactly like OPY.
+    fn semantic_tokens_ostw(&self, document: &Document) -> Vec<SemanticToken> {
+        let analysis = self.analyze(document);
+        let tokens = match wright_ostw::lexer::lex(wright_ostw::lexer::LexInput {
+            file_id: wright_ir::ids::Id::from_index(0),
+            text: &document.text,
+        }) {
+            Ok(tokens) => tokens,
+            Err(_) => return Vec::new(),
+        };
+        let mut result = Vec::new();
+        for token in &tokens {
+            if token.kind == wright_ostw::lexer::TokenKind::Eof {
+                continue;
+            }
+            let token_type = classify_ostw_token(token, analysis.index.as_ref());
             if token_type.is_empty() {
                 continue;
             }
@@ -934,6 +1034,38 @@ fn ir_span(span: &wright_opy::diag::Span) -> wright_ir::source::Span {
         wright_ir::source::Position::new(span.start.line, span.start.col),
         wright_ir::source::Position::new(span.end.line, span.end.col),
     )
+}
+
+/// Whether a document URI names an OSTW source (`.ostw`/`.del`), mirroring
+/// the driver's extension detection.
+fn is_ostw_document(uri: &str) -> bool {
+    crate::document::uri_to_path(uri)
+        .and_then(|path| {
+            path.extension()
+                .map(|ext| ext.to_string_lossy().to_lowercase())
+        })
+        .map(|extension| extension == "ostw" || extension == "del")
+        .unwrap_or(false)
+}
+
+/// Map an OSTW frontend error into the shared language-service error shape
+/// (same code/message/span contract; the registry ids are project ids).
+fn ostw_error_to_opy(error: &wright_ostw::FrontendError) -> wright_opy::FrontendError {
+    wright_opy::FrontendError {
+        code: error.code.clone(),
+        message: error.message.clone(),
+        span: error.span.map(opy_span),
+    }
+}
+
+/// Convert a shared `wright_ir` span into the language service's frontend
+/// span shape.
+fn opy_span(span: wright_ir::source::Span) -> wright_opy::diag::Span {
+    wright_opy::diag::Span {
+        file: span.file.index() as u32,
+        start: wright_opy::diag::Position::new(span.start.line, span.start.col),
+        end: wright_opy::diag::Position::new(span.end.line, span.end.col),
+    }
 }
 
 fn span_contains(span: wright_ir::source::Span, line: u32, col: u32) -> bool {
@@ -1199,6 +1331,44 @@ fn classify_token(token: &wright_opy::lexer::Token, index: Option<&SemanticIndex
         TokenKind::Directive => "macro".to_string(),
         TokenKind::At => "attribute".to_string(),
         TokenKind::Newline | TokenKind::Indent(_) => String::new(),
+        _ => "operator".to_string(),
+    }
+}
+
+/// Classify one OSTW lexer token through the shared semantic index: the
+/// identifier/keyword/builtin logic is identical to the OPY path, only the
+/// token-kind surface differs (each frontend owns its lexer).
+fn classify_ostw_token(token: &wright_ostw::lexer::Token, index: Option<&SemanticIndex>) -> String {
+    use wright_ostw::lexer::TokenKind;
+    match token.kind {
+        TokenKind::Ident => {
+            if KEYWORDS.contains(&token.text.as_str()) {
+                return "keyword".to_string();
+            }
+            if let Some(index) = index {
+                if let Some(kind) =
+                    symbol_kind_at(index, token.span.start.line, token.span.start.col)
+                {
+                    return match kind {
+                        wright_analyzer::symbols::SymbolKind::GlobalVariable
+                        | wright_analyzer::symbols::SymbolKind::PlayerVariable => {
+                            "variable".to_string()
+                        }
+                        wright_analyzer::symbols::SymbolKind::Subroutine => "function".to_string(),
+                        wright_analyzer::symbols::SymbolKind::Rule => "class".to_string(),
+                    };
+                }
+            }
+            if builtin_names().contains(&token.text.as_str()) {
+                "function".to_string()
+            } else {
+                "identifier".to_string()
+            }
+        }
+        TokenKind::Number => "number".to_string(),
+        TokenKind::String | TokenKind::VerbatimString => "string".to_string(),
+        TokenKind::At => "attribute".to_string(),
+        TokenKind::Eof => String::new(),
         _ => "operator".to_string(),
     }
 }

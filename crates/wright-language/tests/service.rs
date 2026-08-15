@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use wright_language::LanguageService;
 use wright_language::document::{Document, Position};
+use wright_language::LanguageService;
 use wright_opy::manifest;
 
 const CORPUS: &str = "synthetic/declarations-rules";
@@ -1093,5 +1093,48 @@ fn stale_results_are_detected_by_version() {
     assert!(
         updated.iter().all(|d| d.document_version == 1),
         "stale results (version 0) are replaced by version-1 results"
+    );
+}
+
+#[test]
+fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
+    // #120: an OSTW document routes through the shared language services —
+    // frontend project + #118 semantic boundary diagnostics surface as
+    // source-aware diagnostics, and semantic tokens classify symbols through
+    // the shared semantic index over the lowered program.
+    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+    let main = std::fs::read_to_string(root.join("main.ostw")).unwrap();
+    let uri = format!("file://{}", root.join("main.ostw").display());
+    let document = Document::new(&uri, main, root.clone());
+    let mut service = LanguageService::new(root);
+    service.store.open(document);
+
+    let diagnostics = service.diagnostics(&uri);
+    assert!(
+        !diagnostics.is_empty(),
+        "OSTW documents produce diagnostics"
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.code == "ostw-unsupported"),
+        "the #118 semantic boundary diagnostics surface"
+    );
+    assert!(
+        diagnostics.iter().any(|d| {
+            d.source == uri || d.source.contains("interface/") || d.source.contains("main.ostw")
+        }),
+        "source identities resolve to the document or project-relative paths: {:?}",
+        diagnostics
+            .iter()
+            .map(|d| d.source.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    let tokens = service.semantic_tokens(&uri);
+    assert!(!tokens.is_empty(), "semantic tokens classify OSTW symbols");
+    assert!(
+        tokens
+            .iter()
+            .any(|t| t.token_type == "variable" || t.token_type == "class"),
+        "symbol classification through the shared index"
     );
 }
