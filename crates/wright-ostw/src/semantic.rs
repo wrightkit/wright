@@ -483,28 +483,32 @@ impl<'a> Resolver<'a> {
                         }
                     }
                     cst::Item::Function(decl) => {
-                        if decl.rule_name.is_none() {
-                            if let Some(id) = self.function_ids.get(&decl.name).copied() {
-                                let mut hir_params = Vec::new();
-                                for param in &decl.params {
-                                    let default =
-                                        param.default.as_ref().map(|expr| self.resolve_expr(expr));
-                                    hir_params.push(hir::Param {
-                                        type_name: param.type_name.as_ref().map(cst_type_to_hir),
-                                        name: param.name.clone(),
-                                        default,
-                                        span: Some(param.span),
-                                    });
-                                }
-                                if let Some(function) = self.hir.functions.get_mut(id) {
-                                    function.params = hir_params;
-                                }
-                                specs.push((
-                                    id,
-                                    decl.params.clone(),
-                                    FunctionBodySpec::Statements(decl.body.clone()),
-                                ));
+                        // Non-rule-named void functions are user functions.
+                        let id = if decl.rule_name.is_none() {
+                            self.function_ids.get(&decl.name).copied()
+                        } else {
+                            None
+                        };
+                        if let Some(id) = id {
+                            let mut hir_params = Vec::new();
+                            for param in &decl.params {
+                                let default =
+                                    param.default.as_ref().map(|expr| self.resolve_expr(expr));
+                                hir_params.push(hir::Param {
+                                    type_name: param.type_name.as_ref().map(cst_type_to_hir),
+                                    name: param.name.clone(),
+                                    default,
+                                    span: Some(param.span),
+                                });
                             }
+                            if let Some(function) = self.hir.functions.get_mut(id) {
+                                function.params = hir_params;
+                            }
+                            specs.push((
+                                id,
+                                decl.params.clone(),
+                                FunctionBodySpec::Statements(decl.body.clone()),
+                            ));
                         }
                     }
                     _ => {}
