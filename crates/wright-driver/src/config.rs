@@ -18,6 +18,8 @@ pub enum SourceKind {
     Auto,
     /// `.opy` source through the adapter bridge (native frontend lands in M7).
     Opy,
+    /// `.ostw` / `.del` source through the native OSTW frontend (M13, #117).
+    Ostw,
     /// Localized vanilla Workshop text (native frontend).
     Workshop,
     /// An Opy HIR v1 protocol payload (JSON).
@@ -30,6 +32,7 @@ impl SourceKind {
         match self {
             SourceKind::Auto => "auto",
             SourceKind::Opy => "opy",
+            SourceKind::Ostw => "ostw",
             SourceKind::Workshop => "workshop",
             SourceKind::Protocol => "protocol",
         }
@@ -40,6 +43,7 @@ impl SourceKind {
         Some(match name {
             "auto" => SourceKind::Auto,
             "opy" => SourceKind::Opy,
+            "ostw" => SourceKind::Ostw,
             "workshop" | "ws" => SourceKind::Workshop,
             "protocol" | "hir" | "json" => SourceKind::Protocol,
             _ => return None,

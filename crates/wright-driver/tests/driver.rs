@@ -945,3 +945,115 @@ fn settings_section(text: &str) -> String {
 fn collapse_whitespace(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }
+
+// -- OSTW (#117) --------------------------------------------------------------
+
+#[test]
+fn ostw_projects_load_through_the_shared_session_path() {
+    // `.ostw` extension detection maps to SourceKind::Ostw and the shared
+    // CompilerSession load path invokes the native OSTW frontend, carrying
+    // the multi-file registry/provenance into the check result.
+    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+    let mut session = CompilerSession::new(SessionConfig::from_path(root.join("main.ostw")))
+        .expect("session builds");
+    let envelope = session.check();
+    let project = envelope
+        .result
+        .ostw
+        .expect("check carries the OSTW project summary");
+    assert_eq!(project.entry, "main.ostw", "ds.toml entry_point");
+    let sources: Vec<_> = project.files.iter().filter(|file| file.source).collect();
+    assert_eq!(
+        sources.len(),
+        16,
+        "the committed protect-ban source closure is 16 files"
+    );
+    assert!(
+        sources.iter().all(|file| file.parsed),
+        "every in-closure source file parses"
+    );
+    // The 4 out-of-closure imports are structured, source-located diagnostics.
+    assert_eq!(envelope.diagnostics.len(), 4);
+    for diagnostic in &envelope.diagnostics {
+        assert_eq!(diagnostic.code, "ostw-missing-import");
+        assert!(diagnostic.span.is_some(), "missing imports carry spans");
+    }
+    // Provenance: each missing-import span resolves to the right corpus file.
+    let paths: std::collections::BTreeSet<_> = envelope
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic.span.as_ref().map(|span| span.path.clone()))
+        .collect();
+    assert_eq!(
+        paths,
+        std::collections::BTreeSet::from([
+            "interface/HeroSelect.del".to_string(),
+            "protectBanFull.ostw".to_string(),
+        ])
+    );
+}
+
+#[test]
+fn ostw_extension_detection_maps_to_source_kind_ostw() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("main.ostw"), "rule: \"r\" {}\n").unwrap();
+    let config = SessionConfig::from_path(dir.join("main.ostw"));
+    let resolved = wright_driver::input::resolve(&config).expect("resolves");
+    assert_eq!(resolved.kind, SourceKind::Ostw);
+    std::fs::write(dir.join("helper.del"), "Number x: 1;\n").unwrap();
+    let config = SessionConfig::from_path(dir.join("helper.del"));
+    let resolved = wright_driver::input::resolve(&config).expect("resolves");
+    assert_eq!(resolved.kind, SourceKind::Ostw, ".del also maps to Ostw");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ostw_compile_and_semantics_are_unsupported_in_this_milestone() {
+    // Syntax/project infrastructure only: emission and semantic analysis are
+    // not implemented for OSTW yet and fail with a structured diagnostic.
+    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+    let mut compile_session =
+        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+    let envelope = compile_session.compile();
+    assert!(!envelope.ok);
+    assert_eq!(envelope.exit, exit::UNSUPPORTED);
+    assert!(
+        envelope
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ostw-unsupported")
+    );
+
+    let mut analyze_session =
+        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+    let envelope = analyze_session.analyze();
+    assert!(!envelope.ok);
+    assert!(
+        envelope
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ostw-unsupported")
+    );
+}
+
+#[test]
+fn ostw_negative_project_fails_through_the_shared_path() {
+    // A malformed project fails with a structured, source-located frontend
+    // diagnostic through the shared session path.
+    let dir = temp_dir();
+    std::fs::write(dir.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    std::fs::write(dir.join("main.ostw"), "globalvar Number x = ;\n").unwrap();
+    let mut session =
+        CompilerSession::new(SessionConfig::from_path(dir.join("main.ostw"))).unwrap();
+    let envelope = session.check();
+    assert!(!envelope.ok);
+    let parse = envelope
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "ostw-parse-error")
+        .expect("malformed syntax yields ostw-parse-error");
+    let span = parse.span.as_ref().expect("parse error carries a span");
+    assert_eq!(span.path, "main.ostw");
+    assert_eq!(span.start.line, 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

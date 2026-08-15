@@ -20,15 +20,19 @@ use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
 use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, Envelope, InspectResult, LintResult,
-    exit_code_from, version_info,
+    OstwFileSummary, OstwProjectSummary, exit_code_from, version_info,
 };
 use crate::{input_identity, opy};
 
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
 pub struct Loaded {
-    /// The validated Workshop IR program.
+    /// The validated Workshop IR program. Empty (and unused) for OSTW loads,
+    /// which carry their frontend outcome in [`Loaded::ostw`] instead.
     pub program: Arc<wir::Program>,
+    /// The native OSTW frontend outcome, present only for `.ostw`/`.del`
+    /// inputs (#117).
+    pub ostw: Option<Arc<wright_ostw::OstwOutcome>>,
     /// Origin metadata carried into diagnostics and results.
     pub origin: Origin,
     /// The resolved input.
@@ -72,6 +76,9 @@ impl CompilerSession {
             return Ok(loaded.clone());
         }
         let mut resolved = input::resolve(&self.config)?;
+        if resolved.kind == SourceKind::Ostw {
+            return self.load_ostw(&mut resolved);
+        }
         let mut program = match resolved.kind {
             SourceKind::Workshop => {
                 let (program, locale) = self.load_workshop(&resolved)?;
@@ -112,9 +119,10 @@ impl CompilerSession {
                 return Err(Diagnostic::error(
                     "input-kind-unknown",
                     Stage::Discovery,
-                    "input kind could not be detected; pass `--kind opy|workshop|protocol`",
+                    "input kind could not be detected; pass `--kind opy|ostw|workshop|protocol`",
                 ));
             }
+            SourceKind::Ostw => unreachable!("OSTW dispatches to load_ostw above"),
         };
         // Apply the selected transformation profile (validated before/after).
         if self.config.profile != wright_transform::Profile::Off {
@@ -128,8 +136,33 @@ impl CompilerSession {
         }
         let loaded = Loaded {
             program: Arc::new(program),
+            ostw: None,
             origin: resolved.origin.clone(),
             input: resolved,
+        };
+        self.loaded = Some(loaded.clone());
+        Ok(loaded)
+    }
+
+    /// Load an OSTW project through the shared session path: the native
+    /// frontend parses the `ds.toml` project closure and resolves imports;
+    /// the outcome (file registry + diagnostics) is retained on the session.
+    /// No WIR program or emission exists in this milestone (#117).
+    fn load_ostw(&mut self, resolved: &mut ResolvedInput) -> Result<Loaded, Diagnostic> {
+        let relative = resolved
+            .path
+            .as_ref()
+            .and_then(|path| path.strip_prefix(&resolved.root).ok())
+            .map(|relative| relative.to_string_lossy().replace('\\', "/"));
+        let outcome = wright_ostw::compile(&resolved.text, relative.as_deref(), &resolved.root);
+        if let Some(error) = &outcome.error {
+            return Err(ostw_diag(error.clone(), &outcome, resolved));
+        }
+        let loaded = Loaded {
+            program: Arc::new(wir::Program::default()),
+            ostw: Some(Arc::new(outcome)),
+            origin: resolved.origin.clone(),
+            input: resolved.clone(),
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -259,6 +292,14 @@ impl CompilerSession {
 
     fn compile_output(&mut self) -> Result<CompiledOutput, Diagnostic> {
         let loaded = self.load()?;
+        if loaded.ostw.is_some() {
+            return Err(Diagnostic::error(
+                "ostw-unsupported",
+                Stage::Emission,
+                "Workshop emission is not implemented for OSTW in this milestone; \
+                 use `wright check` to parse and validate the project",
+            ));
+        }
         let locale = loaded
             .origin
             .locale
@@ -284,11 +325,26 @@ impl CompilerSession {
             Ok(loaded) => loaded,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
-                return self.finish(command, CheckResult {});
+                return self.finish(command, CheckResult { ostw: None });
             }
         };
+        if let Some(outcome) = &loaded.ostw {
+            // OSTW: report the frontend parse/project outcome through the
+            // shared diagnostics contract (#117).
+            for diagnostic in &outcome.diagnostics {
+                self.diagnostics
+                    .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
+            }
+            let summary = ostw_project_summary(outcome);
+            return self.finish(
+                command,
+                CheckResult {
+                    ostw: Some(summary),
+                },
+            );
+        }
         self.attach_analysis(&loaded);
-        self.finish(command, CheckResult {})
+        self.finish(command, CheckResult { ostw: None })
     }
 
     /// `analyze`: load and produce the semantic summary and findings.
@@ -301,6 +357,9 @@ impl CompilerSession {
                 return self.finish(command, AnalyzeResult::default());
             }
         };
+        if let Some(outcome) = &loaded.ostw {
+            return self.finish_unsupported(command, outcome, &loaded);
+        }
         let service = match self.service(&loaded) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -324,6 +383,9 @@ impl CompilerSession {
                 return self.finish(command, InspectResult::default());
             }
         };
+        if let Some(outcome) = &loaded.ostw {
+            return self.finish_unsupported(command, outcome, &loaded);
+        }
         let service = match self.service(&loaded) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -377,6 +439,9 @@ impl CompilerSession {
                 return self.finish(command, LintResult::default());
             }
         };
+        if let Some(outcome) = &loaded.ostw {
+            return self.finish_unsupported(command, outcome, &loaded);
+        }
         let service = match self.service_with(&loaded, self.config.lint.clone()) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -484,6 +549,30 @@ impl CompilerSession {
             diagnostics,
             result,
         }
+    }
+
+    /// Complete a workflow that is not implemented for OSTW inputs yet:
+    /// report the frontend diagnostics plus a structured
+    /// `ostw-unsupported` diagnostic through the shared contract.
+    fn finish_unsupported<T: serde::Serialize + Default>(
+        &mut self,
+        command: &str,
+        outcome: &wright_ostw::OstwOutcome,
+        loaded: &Loaded,
+    ) -> Envelope<T> {
+        for diagnostic in &outcome.diagnostics {
+            self.diagnostics
+                .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
+        }
+        self.diagnostics.push(Diagnostic::error(
+            "ostw-unsupported",
+            Stage::Analysis,
+            format!(
+                "'{command}' is not implemented for OSTW in this milestone; \
+                 use `wright check` to parse and validate the project"
+            ),
+        ));
+        self.finish(command, T::default())
     }
 }
 
@@ -685,6 +774,80 @@ fn opy_diag(
         message: error.message,
         span,
         source: Some(resolved.origin.clone()),
+    }
+}
+
+/// Map a native OSTW frontend error to a driver diagnostic.
+///
+/// Span paths resolve through the OSTW project registry, so a failure inside
+/// an imported file names that file with its project-relative path.
+fn ostw_diag(
+    error: wright_ostw::FrontendError,
+    outcome: &wright_ostw::OstwOutcome,
+    resolved: &ResolvedInput,
+) -> Diagnostic {
+    let span = error.span.map(|span| SourceSpan {
+        file: span.file.index(),
+        path: outcome
+            .project
+            .as_ref()
+            .and_then(|project| project.files.get(span.file.index()))
+            .map(|file| file.path.clone())
+            .unwrap_or_else(|| resolved.display.clone()),
+        start: Position {
+            line: span.start.line,
+            col: span.start.col,
+        },
+        end: Position {
+            line: span.end.line,
+            col: span.end.col,
+        },
+    });
+    Diagnostic {
+        code: error.code,
+        stage: Stage::Frontend,
+        severity: crate::diag::Severity::Error,
+        message: error.message,
+        span,
+        source: Some(resolved.origin.clone()),
+    }
+}
+
+/// The `check`-result summary of an OSTW project outcome.
+fn ostw_project_summary(outcome: &wright_ostw::OstwOutcome) -> OstwProjectSummary {
+    let Some(project) = &outcome.project else {
+        return OstwProjectSummary {
+            entry: String::new(),
+            files: Vec::new(),
+        };
+    };
+    let path_by_id: std::collections::BTreeMap<u32, String> = project
+        .files
+        .iter()
+        .map(|file| (file.id, file.path.clone()))
+        .collect();
+    let files = project
+        .files
+        .iter()
+        .map(|file| OstwFileSummary {
+            path: file.path.clone(),
+            id: file.id,
+            source: file.source,
+            parsed: file.parsed,
+            imports: file
+                .imports
+                .iter()
+                .filter_map(|import| {
+                    import
+                        .target
+                        .and_then(|target| path_by_id.get(&target).cloned())
+                })
+                .collect(),
+        })
+        .collect();
+    OstwProjectSummary {
+        entry: project.entry.clone(),
+        files,
     }
 }
 

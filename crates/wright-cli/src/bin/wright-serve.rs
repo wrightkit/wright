@@ -21,7 +21,7 @@ use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::service::{ToolRequest, ToolService};
 
 fn usage() -> &'static str {
-    "usage: wright-serve --transport stdio|jsonrpc [--kind opy|workshop|protocol] [--locale LOC] [--profile off|compat|aggressive] [INPUT]\n\
+    "usage: wright-serve --transport stdio|jsonrpc [--kind opy|ostw|workshop|protocol] [--locale LOC] [--profile off|compat|aggressive] [INPUT]\n\
      \n\
      Serves the Wright tool service over stdin/stdout. With no INPUT, reads a\n\
      protocol payload or Workshop text from stdin (auto-detected)."

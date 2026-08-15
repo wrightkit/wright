@@ -38,13 +38,13 @@ COMMANDS:
 
 INPUT:
     A file path, or `-`/omitted to read from standard input.
-    Input kind is detected from the extension (.opy, .json, .txt/.ws) or
-    stdin content; pass --kind to override.
+    Input kind is detected from the extension (.opy, .ostw/.del, .json,
+    .txt/.ws) or stdin content; pass --kind to override.
 
 OPTIONS:
-    --kind <KIND>       Input frontend: auto|opy|workshop|protocol
+    --kind <KIND>       Input frontend: auto|opy|ostw|workshop|protocol
     --locale <LOCALE>   Workshop client locale override (e.g. en-US)
-    --root <DIR>        Include root for .opy input (default: input directory)
+    --root <DIR>        Include/project root for .opy/.ostw input (default: input directory)
     --profile <PROFILE> WIR transformation policy: off|compat|aggressive (default: off)
     -o, --output <PATH> Write compiled output to PATH (compile only)
     -f, --format <FMT>  Output format: text|json (default: text)
@@ -172,7 +172,7 @@ fn run() -> Result<u8, String> {
                 let value = take_value(&mut args, &arg)?;
                 config.kind = SourceKind::parse(&value).ok_or_else(|| {
                     format!(
-                        "wright: unknown input kind '{value}' (expected auto|opy|workshop|protocol)"
+                        "wright: unknown input kind '{value}' (expected auto|opy|ostw|workshop|protocol)"
                     )
                 })?;
             }

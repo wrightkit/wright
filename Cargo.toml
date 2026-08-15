@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/wright-core", "crates/wright-ir", "crates/wright-analyzer", "crates/wright-workshop", "crates/wright-driver", "crates/wright-cli", "crates/wright-opy", "crates/wright-transform", "crates/wright-bench", "crates/wright-consumer", "crates/wright-language", "crates/wright-lsp"]
+members = ["crates/wright-core", "crates/wright-ir", "crates/wright-analyzer", "crates/wright-workshop", "crates/wright-driver", "crates/wright-cli", "crates/wright-opy", "crates/wright-ostw", "crates/wright-transform", "crates/wright-bench", "crates/wright-consumer", "crates/wright-language", "crates/wright-lsp"]
 resolver = "3"
 
 [workspace.package]

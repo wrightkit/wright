@@ -48,11 +48,15 @@ single authoritative workspace implementation version and is also reported
 inside every `wright-result/v1` envelope.
 
 All commands accept a file path or `-`/omitted for stdin. Input kind is
-detected from the extension (`.opy`, `.json`, `.txt`/`.ws`) or stdin content
-(protocol JSON starts with `{`, otherwise Workshop text) and can be overridden
-with `--kind auto|opy|workshop|protocol`. `--locale` overrides Workshop
-client-locale detection; `--root` sets the `.opy` include root; `-o/--output`
-writes compiled output to a file.
+detected from the extension (`.opy`, `.ostw`/`.del`, `.json`, `.txt`/`.ws`) or
+stdin content (protocol JSON starts with `{`, otherwise Workshop text) and can
+be overridden with `--kind auto|opy|ostw|workshop|protocol`. `--locale`
+overrides Workshop client-locale detection; `--root` sets the include/project
+root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
+are parsed by the native OSTW frontend (`wright-ostw`, M13 #117), which loads
+the `ds.toml` project closure and reports the parse/project outcome through
+`wright check`; emission and semantic analysis for OSTW are not implemented
+yet and fail with a structured `ostw-unsupported` diagnostic.
 
 ## `wright lint` and the lint configuration
 

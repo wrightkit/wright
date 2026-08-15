@@ -26,6 +26,9 @@ fn render_text<T: serde::Serialize>(envelope: &Envelope<T>) {
     for diagnostic in &envelope.diagnostics {
         render_diagnostic(diagnostic);
     }
+    if envelope.command == "check" {
+        render_ostw_summary(envelope);
+    }
     if !envelope.ok {
         if envelope.diagnostics.is_empty() {
             eprintln!("{}: failed", envelope.command);
@@ -40,6 +43,71 @@ fn render_text<T: serde::Serialize>(envelope: &Envelope<T>) {
         "lint" => render_lint(envelope),
         "inspect" => render_inspect(envelope),
         other => println!("{other}: ok"),
+    }
+}
+
+/// Print the OSTW project outcome carried by a `check` result (#117): the
+/// entry point and the per-file parse status. Rendered even when diagnostics
+/// are present, so a partially-failing project still reports what parsed.
+fn render_ostw_summary<T: serde::Serialize>(envelope: &Envelope<T>) {
+    let Ok(value) = serde_json::to_value(envelope) else {
+        return;
+    };
+    let Some(ostw) = value.pointer("/result/ostw") else {
+        return;
+    };
+    let entry = ostw
+        .get("entry")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let files = ostw
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let sources: Vec<_> = files
+        .iter()
+        .filter(|file| {
+            file.get("source")
+                .and_then(|s| s.as_bool())
+                .unwrap_or(false)
+        })
+        .collect();
+    let parsed = sources
+        .iter()
+        .filter(|file| {
+            file.get("parsed")
+                .and_then(|p| p.as_bool())
+                .unwrap_or(false)
+        })
+        .count();
+    println!(
+        "ostw project: entry {entry}, {parsed}/{} source files parsed",
+        sources.len()
+    );
+    for file in &files {
+        let path = file
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let source = file
+            .get("source")
+            .and_then(|s| s.as_bool())
+            .unwrap_or(false);
+        if !source {
+            println!("  {path} (project file)");
+        } else {
+            let status = if file
+                .get("parsed")
+                .and_then(|p| p.as_bool())
+                .unwrap_or(false)
+            {
+                "parsed"
+            } else {
+                "parse-error"
+            };
+            println!("  {path} {status}");
+        }
     }
 }
 

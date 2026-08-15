@@ -17,5 +17,6 @@ wright-analyzer = { path = "../wright-analyzer" }
 wright-core = { path = "../wright-core" }
 wright-ir = { path = "../wright-ir" }
 wright-opy = { path = "../wright-opy" }
+wright-ostw = { path = "../wright-ostw" }
 wright-transform = { path = "../wright-transform" }
 wright-workshop = { path = "../wright-workshop" }

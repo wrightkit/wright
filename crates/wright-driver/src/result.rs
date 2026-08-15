@@ -71,6 +71,9 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if diagnostic.code == "adapter-stdin-unsupported" {
             return exit::UNSUPPORTED;
         }
+        if diagnostic.code == "ostw-unsupported" {
+            return exit::UNSUPPORTED;
+        }
         has_source_error = true;
     }
     if has_source_error {
@@ -104,8 +107,38 @@ pub struct CompileResult {
 
 /// The result of a `check` run (the envelope's `ok` and `diagnostics` carry
 /// the verdict).
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-pub struct CheckResult {}
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CheckResult {
+    /// The OSTW project outcome summary, present only for `.ostw`/`.del`
+    /// inputs (#117). Syntax/project infrastructure only: no semantic or
+    /// emission claim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ostw: Option<OstwProjectSummary>,
+}
+
+/// The OSTW frontend/project outcome reported by `check`.
+#[derive(Debug, Clone, Serialize)]
+pub struct OstwProjectSummary {
+    /// The `ds.toml` `entry_point` value.
+    pub entry: String,
+    /// Every project file: `ds.toml` (id 0) then the source closure.
+    pub files: Vec<OstwFileSummary>,
+}
+
+/// One project file's parse outcome.
+#[derive(Debug, Clone, Serialize)]
+pub struct OstwFileSummary {
+    /// The project-relative path.
+    pub path: String,
+    /// The registry id used by span provenance.
+    pub id: u32,
+    /// Whether this is a source file (`.ostw`/`.del`); `false` for `ds.toml`.
+    pub source: bool,
+    /// Whether the source file parsed cleanly.
+    pub parsed: bool,
+    /// Resolved in-closure import targets (project-relative paths).
+    pub imports: Vec<String>,
+}
 
 /// The result of an `analyze` run: program summary and semantic findings.
 #[derive(Debug, Clone, Default, Serialize)]

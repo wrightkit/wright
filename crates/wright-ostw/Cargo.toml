@@ -1,0 +1,13 @@
+[package]
+name = "wright-ostw"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wright's native OSTW frontend: lexer, CST/parser, and ds.toml project model (syntax/project infrastructure only)."
+
+[lints]
+workspace = true
+
+[dependencies]
+wright-ir = { path = "../wright-ir" }

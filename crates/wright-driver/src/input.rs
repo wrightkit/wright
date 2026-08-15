@@ -132,13 +132,14 @@ fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
             Stage::Discovery,
             format!(
                 "cannot detect the input kind of '{}' (no extension); \
-                 pass `--kind opy|workshop|protocol` to override",
+                 pass `--kind opy|ostw|workshop|protocol` to override",
                 path.display()
             ),
         ));
     };
     match extension.to_ascii_lowercase().as_str() {
         "opy" => Ok(SourceKind::Opy),
+        "ostw" | "del" => Ok(SourceKind::Ostw),
         "json" => Ok(SourceKind::Protocol),
         "txt" | "ws" | "workshop" => Ok(SourceKind::Workshop),
         other => Err(Diagnostic::error(
@@ -146,7 +147,7 @@ fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
             Stage::Discovery,
             format!(
                 "cannot detect the input kind of '{}' (unknown extension '.{other}'); \
-                 pass `--kind opy|workshop|protocol` to override",
+                 pass `--kind opy|ostw|workshop|protocol` to override",
                 path.display()
             ),
         )),
@@ -188,6 +189,10 @@ fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
     match kind {
         SourceKind::Opy => Origin {
             kind: "opy".to_string(),
+            locale: None,
+        },
+        SourceKind::Ostw => Origin {
+            kind: "ostw".to_string(),
             locale: None,
         },
         SourceKind::Workshop => Origin {
