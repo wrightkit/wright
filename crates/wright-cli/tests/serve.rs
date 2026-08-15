@@ -138,3 +138,96 @@ fn capability_negotiation_is_preserved() {
             .starts_with("wright-result/")
     );
 }
+
+#[test]
+fn stdio_transport_serves_mutation_operations() {
+    // M14 #130: the stdio adapter exposes the shared mutation operations as
+    // thin mappings — validated edit preview and semantic rename — with the
+    // same structured all-or-nothing results as in-process consumers.
+    let input = corpus_opy("synthetic/declarations-rules");
+    let source = std::fs::read_to_string(&input).unwrap();
+    let identity = wright_driver::input_identity(&source);
+    let line_count = source.lines().count().max(1) as u32;
+    let end_col = source
+        .lines()
+        .last()
+        .map(|line| line.chars().count() as u32 + 1)
+        .unwrap_or(1);
+    let request = serde_json::json!({
+        "op": "validateEditTransaction",
+        "sources": { input.to_string_lossy().into_owned(): source.clone() },
+        "transaction": {
+            "edits": [{
+                "kind": "rename",
+                "source": input.to_string_lossy().into_owned(),
+                "source_identity": identity,
+                "range": {
+                    "start_line": 1, "start_col": 1,
+                    "end_line": line_count, "end_col": end_col,
+                },
+                "new_text": source.replace("score", "total")
+            }]
+        }
+    });
+    let responses = run_lines(
+        "stdio",
+        &input,
+        &[&serde_json::to_string(&request).unwrap()],
+    );
+    assert_eq!(responses[0]["result"]["ok"], true, "{responses:?}");
+    let previews = responses[0]["result"]["preview"].as_array().unwrap();
+    assert!(
+        previews[0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("globalvar total = 0"),
+        "the preview carries the validated edited text: {responses:?}"
+    );
+
+    // Semantic rename through the same transport.
+    let rename = serde_json::json!({
+        "op": "semanticRename",
+        "sources": {
+            input.to_string_lossy().into_owned():
+                std::fs::read_to_string(&input).unwrap()
+        },
+        "target": { "source": input.to_string_lossy().into_owned(), "line": 1, "col": 11, "to": "total" }
+    });
+    let responses = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
+    assert_eq!(responses[0]["result"]["ok"], true, "{responses:?}");
+    assert_eq!(
+        responses[0]["result"]["transaction"]["edits"][0]["new_text"],
+        "total"
+    );
+    assert!(
+        responses[0]["result"]["preview"][0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("globalvar total")
+    );
+}
+
+#[test]
+fn transports_are_equivalent_for_mutation_operations() {
+    // M14 #130: stdio and JSON-RPC map the same mutation request to the same
+    // in-process behavior.
+    let input = corpus_opy("synthetic/declarations-rules");
+    let rename = serde_json::json!({
+        "op": "semanticRename",
+        "sources": {
+            input.to_string_lossy().into_owned():
+                std::fs::read_to_string(&input).unwrap()
+        },
+        "target": { "source": input.to_string_lossy().into_owned(), "line": 1, "col": 11, "to": "total" }
+    });
+    let stdio = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
+    let jsonrpc_request = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "request", "params": rename
+    });
+    let jsonrpc = run_lines(
+        "jsonrpc",
+        &input,
+        &[&serde_json::to_string(&jsonrpc_request).unwrap()],
+    );
+    assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]["result"]);
+}

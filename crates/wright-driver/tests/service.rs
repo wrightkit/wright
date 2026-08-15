@@ -287,3 +287,217 @@ fn cross_language_shared_service_behavior_is_frontend_neutral() {
     assert_shared_service_surface(&workshop_service());
     assert_shared_service_surface(&ostw_service());
 }
+
+// -- M14 #130: validated mutation through the shared tool API ------------------
+
+fn corpus_source(id: &str) -> String {
+    std::fs::read_to_string(
+        workspace_root()
+            .join("compatibility/fixtures")
+            .join(id)
+            .join("source.opy"),
+    )
+    .unwrap()
+}
+
+#[test]
+fn tool_service_validates_and_previews_a_source_edit_transaction() {
+    // #130: agents request edit validation/preview through the shared tool
+    // API; the response carries the source identities, ranges, previews, and
+    // structured diagnostics for safe caller-side application.
+    let service = service_for("synthetic/declarations-rules");
+    let main = service.loaded().input.display.clone();
+    let source = corpus_source("synthetic/declarations-rules");
+    let identity = wright_driver::input_identity(&source);
+    let line_count = source.lines().count().max(1) as u32;
+    let end_col = source
+        .lines()
+        .last()
+        .map(|line| line.chars().count() as u32 + 1)
+        .unwrap_or(1);
+    let transaction =
+        wright_driver::edit::EditTransaction::new(vec![wright_driver::edit::SourceEdit {
+            edit_kind: "rename".to_string(),
+            source: main.clone(),
+            source_identity: identity,
+            range: wright_driver::edit::EditRange {
+                start_line: 1,
+                start_col: 1,
+                end_line: line_count,
+                end_col,
+            },
+            new_text: source.replace("score", "total"),
+        }])
+        .unwrap();
+    let response = service.handle(&ToolRequest::ValidateEdit {
+        sources: std::collections::BTreeMap::from([(main, source)]),
+        transaction,
+    });
+    let ToolResponse::Ok { result } = response else {
+        panic!("validateEditTransaction must return a structured result");
+    };
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["diagnostics"].as_array().unwrap().len(), 0);
+    let previews = result["preview"].as_array().unwrap();
+    assert_eq!(previews.len(), 1, "one affected source previewed");
+    assert!(
+        previews[0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("globalvar total"),
+        "the preview carries the edited text"
+    );
+    assert!(
+        previews[0]["source_identity"].as_str().unwrap().len() == 64,
+        "the preview carries the new-source identity"
+    );
+}
+
+#[test]
+fn tool_service_semantic_rename_returns_the_validated_transaction() {
+    // #130: semantic rename through the shared tool API returns the same
+    // exact-range transaction an in-process consumer gets, with no partial
+    // result on refusal.
+    let service = service_for("synthetic/declarations-rules");
+    let main = service.loaded().input.display.clone();
+    let source = corpus_source("synthetic/declarations-rules");
+    let sources = std::collections::BTreeMap::from([(main.clone(), source)]);
+    let response = service.handle(&ToolRequest::SemanticRename {
+        sources,
+        target: wright_driver::edit::RenameTarget {
+            source: main,
+            line: 1,
+            col: 11,
+            to: "total".to_string(),
+        },
+    });
+    let ToolResponse::Ok { result } = response else {
+        panic!("semanticRename must return a structured result");
+    };
+    assert_eq!(result["ok"], true, "{result}");
+    let transaction = result["transaction"]
+        .as_object()
+        .expect("transaction present");
+    let edits = transaction["edits"].as_array().unwrap();
+    assert!(
+        edits.iter().all(|edit| edit["new_text"] == "total"),
+        "every edit is an exact occurrence replacement"
+    );
+    let previews = result["preview"].as_array().unwrap();
+    assert_eq!(previews.len(), 1);
+    assert!(
+        previews[0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("globalvar total")
+    );
+
+    // Unsupported/unsafe requests return structured refusals, never a
+    // partially applicable edit set.
+    let service = service_for("synthetic/declarations-rules");
+    let main = service.loaded().input.display.clone();
+    let source = corpus_source("synthetic/declarations-rules");
+    let response = service.handle(&ToolRequest::SemanticRename {
+        sources: std::collections::BTreeMap::from([(main.clone(), source)]),
+        target: wright_driver::edit::RenameTarget {
+            source: main,
+            line: 1,
+            col: 11,
+            to: "showStatus".to_string(),
+        },
+    });
+    let ToolResponse::Ok { result } = response else {
+        panic!("refusals are structured results");
+    };
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["transaction"], serde_json::Value::Null);
+    assert!(
+        result["diagnostics"][0]["code"] == "rename-collision",
+        "the refusal names the cause: {result}"
+    );
+}
+
+#[test]
+fn tool_service_mutation_capabilities_advertise_the_support_boundary() {
+    let service = service_for("synthetic/declarations-rules");
+    let capabilities = handle_ok(&service, &ToolRequest::Capabilities);
+    let operations = capabilities["operations"].as_array().unwrap();
+    assert!(
+        operations.iter().any(|op| op == "validateEditTransaction"),
+        "validateEditTransaction advertised: {operations:?}"
+    );
+    assert!(
+        operations.iter().any(|op| op == "semanticRename"),
+        "semanticRename advertised: {operations:?}"
+    );
+}
+
+#[test]
+fn tool_service_ostw_mutation_uses_the_ostw_project_frontend() {
+    // #130: an OSTW session serves validated edit previews and semantic
+    // rename through the same tool operations, validated by the native OSTW
+    // project frontend (equivalent to the in-process contract).
+    //
+    // A clean temp project is used because a project with pre-existing
+    // boundary diagnostics (like the protect-ban corpus) cannot pass edit
+    // validation — consistent with `check` failing on those diagnostics.
+    let root = std::env::temp_dir().join(format!("wright-tool-ostw-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    std::fs::write(
+        root.join("main.ostw"),
+        "import \"lib.del\";\nrule: \"main\" {}\nglobalvar Number score = 5;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib.del"),
+        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n}\n",
+    )
+    .unwrap();
+    let main_path = root.join("main.ostw");
+    let main = main_path.to_string_lossy().into_owned();
+    let config = SessionConfig {
+        input: InputSpec::Path(main_path),
+        kind: SourceKind::Ostw,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::new(config).unwrap();
+    let _ = session.load().unwrap();
+    let session = Box::leak(Box::new(session));
+    let service = ToolService::new(session).unwrap();
+    let source = std::fs::read_to_string(root.join("main.ostw")).unwrap();
+    let lib_source = std::fs::read_to_string(root.join("lib.del")).unwrap();
+    let sources = std::collections::BTreeMap::from([
+        (main.clone(), source),
+        (
+            root.join("lib.del").to_string_lossy().into_owned(),
+            lib_source,
+        ),
+    ]);
+
+    // Semantic rename of the `score` global: the declaration is on line 3 of
+    // main.ostw, name starts at column 18.
+    let response = service.handle(&ToolRequest::SemanticRename {
+        sources,
+        target: wright_driver::edit::RenameTarget {
+            source: main,
+            line: 3,
+            col: 18,
+            to: "total".to_string(),
+        },
+    });
+    let ToolResponse::Ok { result } = response else {
+        panic!("OSTW semanticRename must return a structured result");
+    };
+    assert_eq!(result["ok"], true, "OSTW rename resolves: {result}");
+    let previews = result["preview"].as_array().unwrap();
+    assert_eq!(previews.len(), 2, "both project files previewed");
+    assert!(
+        previews.iter().any(|preview| preview["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("globalvar Number total = 5;")),
+        "the OSTW declaration is renamed in the preview: {result}"
+    );
+}

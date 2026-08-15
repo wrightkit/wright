@@ -146,11 +146,17 @@ fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
         let params = value.get("params").cloned();
         let result = match method {
             "request" => {
-                let request_line = params
-                    .as_ref()
-                    .and_then(|p| p.get("op"))
-                    .map(|op| format!("{{\"op\":{op}}}"))
-                    .unwrap_or_else(|| "{}".to_string());
+                // The full params object is forwarded verbatim (op plus any
+                // operation arguments, e.g. mutation sources/targets, M14
+                // #130) so the JSON-RPC adapter maps the same request shape
+                // as the stdio adapter; a params object without `op` is a
+                // malformed request rather than a silently empty one.
+                let request_line = match params {
+                    Some(params) if params.get("op").is_some() => {
+                        serde_json::to_string(&params).expect("params serialize")
+                    }
+                    _ => "{}".to_string(),
+                };
                 dispatch(service, &request_line)
             }
             "compile" | "check" | "analyze" | "inspect" => {

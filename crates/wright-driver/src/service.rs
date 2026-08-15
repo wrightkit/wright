@@ -56,6 +56,26 @@ pub enum ToolRequest {
     CostEstimate,
     /// Target/catalog metadata (actions, values, events, enum domains).
     TargetMetadata,
+    /// Validate and preview a caller-supplied source-edit transaction
+    /// against the session's project (M14, #130): atomic all-or-nothing
+    /// semantics, structured refusal diagnostics, no filesystem writes.
+    #[serde(rename = "validateEditTransaction")]
+    ValidateEdit {
+        /// The current text of every source the transaction touches, keyed
+        /// by the same source identities the edits carry.
+        sources: std::collections::BTreeMap<String, String>,
+        transaction: crate::edit::EditTransaction,
+    },
+    /// Request a semantic rename through the shared refactoring contract
+    /// (M14, #129/#130): returns the validated exact-range transaction or
+    /// structured refusal diagnostics. Wright proposes/validates; applying
+    /// edits to disk is an explicit consumer responsibility.
+    SemanticRename {
+        /// The current text of every source the rename may edit, keyed by
+        /// the same source identities the target names.
+        sources: std::collections::BTreeMap<String, String>,
+        target: crate::edit::RenameTarget,
+    },
 }
 
 /// A tool response: a structured owned result or a structured error.
@@ -126,6 +146,8 @@ impl<'a> ToolService<'a> {
                 "check",
                 "analyze",
                 "inspect",
+                "validateEditTransaction",
+                "semanticRename",
             ]
             .into_iter()
             .map(str::to_string)
@@ -176,6 +198,19 @@ impl<'a> ToolService<'a> {
             ToolRequest::CallGraph => self.ok(self.call_graph()),
             ToolRequest::CostEstimate => self.ok(self.cost_estimate()),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
+            ToolRequest::ValidateEdit {
+                sources,
+                transaction,
+            } => self.ok(serde_json::to_value(crate::edit::validate_transaction(
+                &self.session.config,
+                sources,
+                transaction,
+            ))
+            .expect("edit validation serializes")),
+            ToolRequest::SemanticRename { sources, target } => self.ok(serde_json::to_value(
+                crate::edit::semantic_rename(&self.session.config, sources, target),
+            )
+            .expect("semantic rename serializes")),
         }
     }
 
