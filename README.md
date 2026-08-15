@@ -116,13 +116,13 @@ brew install wrightkit/tap/wright
 Alternatively, use the Unix installer:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/wrightkit/wright/main/install.sh | bash
+curl -fsSL https://wrightkit.dev/install.sh | bash
 ```
 
 ### Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/wrightkit/wright/main/install.sh | bash
+curl -fsSL https://wrightkit.dev/install.sh | bash
 ```
 
 The installer detects your platform, downloads the matching release archive,
@@ -152,7 +152,7 @@ Both WinGet and Scoop consume the same Windows release ZIP.
 Pin an exact version non-interactively for deterministic installs:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/wrightkit/wright/main/install.sh | bash -s -- --version 0.1.0
+curl -fsSL https://wrightkit.dev/install.sh | bash -s -- --version 0.1.0
 ```
 
 or consume the release archives directly (see below). Installer options:
