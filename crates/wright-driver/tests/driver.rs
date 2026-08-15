@@ -4,9 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_driver::CompilerSession;
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::result::exit;
+use wright_driver::CompilerSession;
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
@@ -1033,7 +1033,10 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
     let mut compile_session =
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
     let envelope = compile_session.compile();
-    assert!(!envelope.ok, "the entry graph rejects on its missing imports");
+    assert!(
+        !envelope.ok,
+        "the entry graph rejects on its missing imports"
+    );
     assert!(
         envelope
             .diagnostics
@@ -1049,8 +1052,7 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
         "compile is no longer refused outright"
     );
 
-    let target = workspace_root()
-        .join("compatibility/ostw/probes/p5-functions-control");
+    let target = workspace_root().join("compatibility/ostw/probes/p5-functions-control");
     let mut target_session = CompilerSession::new(SessionConfig {
         input: wright_driver::InputSpec::Path(target.join("main.ostw")),
         ..SessionConfig::default()
@@ -1063,7 +1065,10 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
         envelope.diagnostics
     );
     let output = envelope.result.output.expect("compile output");
-    assert!(output.text.contains("For Global Variable"), "lowered loop emission");
+    assert!(
+        output.text.contains("For Global Variable"),
+        "lowered loop emission"
+    );
     assert!(output.text.contains("Abort;"), "return lowers to Abort");
 
     let mut analyze_session =
@@ -1125,7 +1130,11 @@ fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
     let analyze = analyze_session.analyze();
     assert!(
-        analyze.result.findings.as_array().is_some_and(|f| !f.is_empty()),
+        analyze
+            .result
+            .findings
+            .as_array()
+            .is_some_and(|f| !f.is_empty()),
         "analyze returns shared-analysis findings"
     );
 
@@ -1159,7 +1168,10 @@ fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
     let lint = lint_session.lint();
     assert!(
-        lint.result.rules.as_array().is_some_and(|rules| !rules.is_empty()),
+        lint.result
+            .rules
+            .as_array()
+            .is_some_and(|rules| !rules.is_empty()),
         "lint returns registered rule metadata from the shared registry"
     );
     assert!(
@@ -1212,10 +1224,7 @@ fn ostw_multi_file_provenance_survives_through_shared_workflows() {
     for finding in findings {
         if let Some(span) = finding.get("span") {
             let path = span.get("path").and_then(serde_json::Value::as_str);
-            assert!(
-                path.is_some(),
-                "every finding span carries a resolved path"
-            );
+            assert!(path.is_some(), "every finding span carries a resolved path");
         }
     }
 }

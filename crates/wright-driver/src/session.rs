@@ -19,8 +19,8 @@ use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
 use crate::result::{
-    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, Envelope, InspectResult, LintResult,
-    OstwFileSummary, OstwProjectSummary, exit_code_from, version_info,
+    exit_code_from, version_info, AnalyzeResult, CheckResult, CompileResult, CompiledOutput,
+    Envelope, InspectResult, LintResult, OstwFileSummary, OstwProjectSummary,
 };
 use crate::{input_identity, opy};
 
@@ -161,8 +161,11 @@ impl CompilerSession {
             .as_ref()
             .and_then(|path| path.strip_prefix(&resolved.root).ok())
             .map(|relative| relative.to_string_lossy().replace('\\', "/"));
-        let (outcome, semantic) =
-            wright_ostw::compile_with_semantics(&resolved.text, relative.as_deref(), &resolved.root);
+        let (outcome, semantic) = wright_ostw::compile_with_semantics(
+            &resolved.text,
+            relative.as_deref(),
+            &resolved.root,
+        );
         if let Some(error) = &outcome.error {
             return Err(ostw_diag(error.clone(), &outcome, resolved));
         }

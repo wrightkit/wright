@@ -35,7 +35,7 @@
 
 use std::collections::HashMap;
 
-use crate::error::{IrError, unsupported};
+use crate::error::{unsupported, IrError};
 use crate::hir::{
     self, BinaryOp, Expr, ExprId, GlobalVarId, MacroId, PlayerVarId, Stmt, StmtId, SubroutineId,
 };
@@ -236,11 +236,7 @@ impl<'a> Lowerer<'a> {
         if !global_initializers.is_empty() {
             let mut actions = Vec::new();
             for (id, initializer) in global_initializers {
-                let value = self.lower_value_with(
-                    initializer,
-                    &HashMap::new(),
-                    &mut actions,
-                )?;
+                let value = self.lower_value_with(initializer, &HashMap::new(), &mut actions)?;
                 actions.push(self.target.actions.push(Action::SetGlobalVariable {
                     variable: self.globals[&id],
                     value,
@@ -266,8 +262,7 @@ impl<'a> Lowerer<'a> {
         if !player_initializers.is_empty() {
             let mut actions = Vec::new();
             for (id, initializer) in player_initializers {
-                let value = self
-                    .lower_value_with(initializer, &HashMap::new(), &mut actions)?;
+                let value = self.lower_value_with(initializer, &HashMap::new(), &mut actions)?;
                 let player = self
                     .target
                     .values
@@ -444,7 +439,9 @@ impl<'a> Lowerer<'a> {
                 // further to push.
                 None => return Ok(()),
             },
-            Stmt::Assign { target, value, .. } => self.lower_assign_with(target, value, span, out, params)?,
+            Stmt::Assign { target, value, .. } => {
+                self.lower_assign_with(target, value, span, out, params)?
+            }
             Stmt::If {
                 branches,
                 else_body,
@@ -473,7 +470,15 @@ impl<'a> Lowerer<'a> {
                 body,
                 variable_span,
                 ..
-            } => self.lower_for_with(*variable, *iterable, body, span, *variable_span, out, params)?,
+            } => self.lower_for_with(
+                *variable,
+                *iterable,
+                body,
+                span,
+                *variable_span,
+                out,
+                params,
+            )?,
             Stmt::While {
                 condition, body, ..
             } => Action::While {
@@ -509,7 +514,9 @@ impl<'a> Lowerer<'a> {
                 step,
                 body,
                 ..
-            } => self.lower_c_for(*variable, *start, *condition, *step, body, span, out, params)?,
+            } => self.lower_c_for(
+                *variable, *start, *condition, *step, body, span, out, params,
+            )?,
             Stmt::Switch { value, cases, .. } => {
                 // Pushes the dispatch and every case body into `out`.
                 return self.lower_switch(*value, cases, span, out, params);
@@ -603,18 +610,14 @@ impl<'a> Lowerer<'a> {
             }
         }
         let action = match expression {
-            Expr::Call { name, args, .. } if name == "debug" && args.len() == 1 => {
-                Action::Debug {
-                    value: self.lower_value_with(args[0], params, out)?,
-                    span,
-                }
-            }
-            Expr::Call { name, args, .. } if name == "print" && args.len() == 1 => {
-                Action::Print {
-                    message: self.lower_value_with(args[0], params, out)?,
-                    span,
-                }
-            }
+            Expr::Call { name, args, .. } if name == "debug" && args.len() == 1 => Action::Debug {
+                value: self.lower_value_with(args[0], params, out)?,
+                span,
+            },
+            Expr::Call { name, args, .. } if name == "print" && args.len() == 1 => Action::Print {
+                message: self.lower_value_with(args[0], params, out)?,
+                span,
+            },
             Expr::ReceiverCall {
                 receiver,
                 name,
@@ -688,8 +691,7 @@ impl<'a> Lowerer<'a> {
                     format!(
                         "function '{}' is missing an argument for parameter '{}' \
                          (defaults are resolved by the frontend)",
-                        function.name,
-                        param.name
+                        function.name, param.name
                     ),
                     param.span,
                 )
@@ -738,8 +740,7 @@ impl<'a> Lowerer<'a> {
                     format!(
                         "function '{}' is missing an argument for parameter '{}' \
                          (defaults are resolved by the frontend)",
-                        function.name,
-                        param.name
+                        function.name, param.name
                     ),
                     param.span,
                 )
@@ -1274,10 +1275,10 @@ impl<'a> Lowerer<'a> {
             },
             None,
         ));
-        let true_value = self.target.values.push(ValueNode::new(
-            Value::Bool(true),
-            None,
-        ));
+        let true_value = self
+            .target
+            .values
+            .push(ValueNode::new(Value::Bool(true), None));
         let start = match start {
             Some(start) => self.lower_value_with(start, params, out)?,
             None => zero,
@@ -1356,13 +1357,11 @@ impl<'a> Lowerer<'a> {
                     },
                     span,
                 ));
-                bodies[index]
-                    .0
-                    .push(self.target.actions.push(Action::Call {
-                        name: "skip".to_string(),
-                        args: vec![skip],
-                        span,
-                    }));
+                bodies[index].0.push(self.target.actions.push(Action::Call {
+                    name: "skip".to_string(),
+                    args: vec![skip],
+                    span,
+                }));
                 tail += 1;
             }
             tail += bodies[index].0.len();
@@ -1402,14 +1401,14 @@ impl<'a> Lowerer<'a> {
                 span,
             )));
         }
-        let table_array = self.target.values.push(ValueNode::new(
-            Value::Array(table),
-            span,
-        ));
-        let constants_array = self.target.values.push(ValueNode::new(
-            Value::Array(case_constants),
-            span,
-        ));
+        let table_array = self
+            .target
+            .values
+            .push(ValueNode::new(Value::Array(table), span));
+        let constants_array = self
+            .target
+            .values
+            .push(ValueNode::new(Value::Array(case_constants), span));
         let index = self.target.values.push(ValueNode::new(
             Value::Call {
                 name: "indexOfArrayValue".to_string(),
@@ -1609,11 +1608,10 @@ impl<'a> Lowerer<'a> {
                 span,
             ),
             Expr::Format { text, args, .. } => {
-                let mut lowered = vec![
-                    self.target
-                        .values
-                        .push(ValueNode::new(Value::String(text.clone()), span)),
-                ];
+                let mut lowered = vec![self
+                    .target
+                    .values
+                    .push(ValueNode::new(Value::String(text.clone()), span))];
                 lowered.extend(self.lower_values_with(args, params, out)?);
                 ValueNode::new(
                     Value::Call {
@@ -1648,7 +1646,9 @@ impl<'a> Lowerer<'a> {
             // functions hoist their side effects and inline the terminal
             // return value, ternaries lower to `If-Then-Else`, and casts are
             // emission pass-throughs (P4 evidence).
-            Expr::UserEnum { enum_id, member, .. } => {
+            Expr::UserEnum {
+                enum_id, member, ..
+            } => {
                 let enum_ = self
                     .hir
                     .enums
@@ -1660,10 +1660,7 @@ impl<'a> Lowerer<'a> {
                     .position(|candidate| &candidate.name == member)
                     .ok_or_else(|| {
                         unsupported(
-                            format!(
-                                "member '{}' is not in user enum '{}'",
-                                member, enum_.name
-                            ),
+                            format!("member '{}' is not in user enum '{}'", member, enum_.name),
                             span,
                         )
                     })?;
@@ -1723,8 +1720,7 @@ impl<'a> Lowerer<'a> {
                                         statement_span,
                                     )
                                 })?;
-                                let result =
-                                    self.lower_value_with(value, &bound, &mut body_out)?;
+                                let result = self.lower_value_with(value, &bound, &mut body_out)?;
                                 out.extend(body_out);
                                 return Ok(result);
                             }
@@ -1881,7 +1877,6 @@ impl<'a> Lowerer<'a> {
             .ok_or_else(|| dangling("subroutine", id))
     }
 }
-
 
 /// The kind of an indexed-assignment target array.
 enum IndexedArrayKind {

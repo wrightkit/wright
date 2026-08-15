@@ -50,7 +50,8 @@ const TARGETS: &[&str] = &[
 ];
 
 fn read(path: &Path) -> String {
-    std::fs::read_to_string(path).unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
 }
 
 fn compile_semantic(root: &Path, main_rel: &str) -> wright_ostw::SemanticOutcome {
@@ -68,8 +69,8 @@ fn compile_semantic(root: &Path, main_rel: &str) -> wright_ostw::SemanticOutcome
 /// Parse Workshop text through the shared parser with the canonical
 /// signature context (the same path the driver uses).
 fn parse(catalog: &wright_workshop::catalog::Catalog, text: &str) -> wir::Program {
-    let manifest = wright_opy::manifest::Manifest::builtin()
-        .expect("the OPY manifest is embedded and valid");
+    let manifest =
+        wright_opy::manifest::Manifest::builtin().expect("the OPY manifest is embedded and valid");
     let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, catalog);
     let program = wright_workshop::parser::parse_with_context(
         text,
@@ -121,10 +122,7 @@ fn qualify_ambiguous_members(catalog: &wright_workshop::catalog::Catalog, text: 
             let mut rest = out.as_str();
             while let Some(index) = rest.find(&spelling) {
                 replaced.push_str(&rest[..index]);
-                let before = rest[..index]
-                    .chars()
-                    .rev()
-                    .find(|c| !c.is_whitespace());
+                let before = rest[..index].chars().rev().find(|c| !c.is_whitespace());
                 if before == Some('(') {
                     // Already inside a constructor form (`Team(Team 2)`).
                     replaced.push_str(&spelling);
@@ -203,9 +201,11 @@ fn inline_write_once_player_vars(program: &mut wir::Program) {
         let values_len = program.values.len();
         for index in 0..values_len {
             let id = wright_ir::ids::Id::from_index(index);
-            let node = program.values.get(id).cloned().unwrap_or_else(|| {
-                wright_ir::wir::ValueNode::new(wir::Value::Null, None)
-            });
+            let node = program
+                .values
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| wright_ir::wir::ValueNode::new(wir::Value::Null, None));
             let replacement = match &node.value {
                 Value::PlayerVariable { player, variable }
                     if matches!(
@@ -265,9 +265,11 @@ fn foreach_globalize(program: &mut wir::Program) {
         id: wir::ValueId,
         rewrites: &HashMap<u32, wir::GlobalVarId>,
     ) {
-        let node = program.values.get(id).cloned().unwrap_or_else(|| {
-            wright_ir::wir::ValueNode::new(wir::Value::Null, None)
-        });
+        let node = program
+            .values
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| wright_ir::wir::ValueNode::new(wir::Value::Null, None));
         let children: Vec<wir::ValueId> = match &node.value {
             Value::Array(elements) => elements.clone(),
             Value::Vector { x, y, z } => vec![*x, *y, *z],
@@ -307,7 +309,11 @@ fn foreach_globalize(program: &mut wir::Program) {
                 Action::SetPlayerVariable { player, value, .. }
                 | Action::ModifyPlayerVariable { player, value, .. } => vec![*player, *value],
                 Action::CallSubroutine { .. } => Vec::new(),
-                Action::If { branches, else_body, .. } => {
+                Action::If {
+                    branches,
+                    else_body,
+                    ..
+                } => {
                     let mut out = Vec::new();
                     for branch in branches {
                         out.push(branch.condition);
@@ -322,15 +328,25 @@ fn foreach_globalize(program: &mut wir::Program) {
                     }
                     out
                 }
-                Action::While { condition, body, .. } => {
+                Action::While {
+                    condition, body, ..
+                } => {
                     rewrite_actions(program, body, rewrites);
                     vec![*condition]
                 }
                 Action::ForGlobalVariable {
-                    start, stop, step, body, ..
+                    start,
+                    stop,
+                    step,
+                    body,
+                    ..
                 }
                 | Action::ForPlayerVariable {
-                    start, stop, step, body, ..
+                    start,
+                    stop,
+                    step,
+                    body,
+                    ..
                 } => {
                     rewrite_actions(program, body, rewrites);
                     vec![*start, *stop, *step]
@@ -365,8 +381,7 @@ fn foreach_globalize(program: &mut wir::Program) {
             .collect();
         let mut local_rewrites = rewrites.clone();
         for (action, player_index, name) in player_loops {
-            let global =
-                global_for(program, &name, &mut local_rewrites, player_index);
+            let global = global_for(program, &name, &mut local_rewrites, player_index);
             let loop_body = {
                 let Some(Action::ForPlayerVariable { body, .. }) = program.actions.get(action)
                 else {
@@ -377,10 +392,7 @@ fn foreach_globalize(program: &mut wir::Program) {
             rewrite_actions(program, &loop_body, &local_rewrites);
             let (start, stop, step) = {
                 let Some(Action::ForPlayerVariable {
-                    start,
-                    stop,
-                    step,
-                    ..
+                    start, stop, step, ..
                 }) = program.actions.get(action)
                 else {
                     continue;
@@ -388,15 +400,16 @@ fn foreach_globalize(program: &mut wir::Program) {
                 (*start, *stop, *step)
             };
             let span = program.actions.get(action).and_then(|action| action.span());
-            *program.actions.get_mut(action).expect("action in range") = Action::ForGlobalVariable {
-                variable: global,
-                start,
-                stop,
-                step,
-                body: loop_body,
-                span,
-                target_span: None,
-            };
+            *program.actions.get_mut(action).expect("action in range") =
+                Action::ForGlobalVariable {
+                    variable: global,
+                    start,
+                    stop,
+                    step,
+                    body: loop_body,
+                    span,
+                    target_span: None,
+                };
         }
         for (player_index, global) in local_rewrites {
             rewrites.entry(player_index).or_insert(global);
@@ -434,8 +447,7 @@ fn fold_placeholders(program: &mut wir::Program) {
     }
     for (index, text) in texts {
         let id = wright_ir::ids::Id::from_index(index);
-        program.values.get_mut(id).expect("id in range").value =
-            Value::String(text);
+        program.values.get_mut(id).expect("id in range").value = Value::String(text);
     }
 }
 
@@ -491,10 +503,13 @@ fn vector_idioms(program: &mut wir::Program) {
                 },
             ));
         } else if x == 1.0 && y == 0.0 && z == 0.0 {
-            rewrites.push((index, Value::Enum {
-                value_type: "HudPosition".to_string(),
-                value: "LEFT".to_string(),
-            }));
+            rewrites.push((
+                index,
+                Value::Enum {
+                    value_type: "HudPosition".to_string(),
+                    value: "LEFT".to_string(),
+                },
+            ));
         }
     }
     for (index, value) in rewrites {
@@ -569,7 +584,9 @@ fn compare(actual: &wir::Program, expected: &wir::Program) -> Result<(), String>
                     .map(|s| s.name.clone())
                     .unwrap_or_default();
                 if name_a != name_b {
-                    return Err(format!("rule {index} subroutine differs: {name_a} vs {name_b}"));
+                    return Err(format!(
+                        "rule {index} subroutine differs: {name_a} vs {name_b}"
+                    ));
                 }
             }
             (a, b) => {
@@ -608,10 +625,7 @@ fn compare_action(
     action_a: wir::ActionId,
     action_b: wir::ActionId,
 ) -> Result<(), String> {
-    let (Some(a), Some(b)) = (
-        actual.actions.get(action_a),
-        expected.actions.get(action_b),
-    ) else {
+    let (Some(a), Some(b)) = (actual.actions.get(action_a), expected.actions.get(action_b)) else {
         return Err("dangling action".to_string());
     };
     let span_text = |program: &wir::Program, action: &Action| match action {
@@ -622,7 +636,11 @@ fn compare_action(
         Action::SetPlayerVariable { player, value, .. }
         | Action::ModifyPlayerVariable { player, value, .. } => vec![*player, *value],
         Action::CallSubroutine { .. } => Vec::new(),
-        Action::If { branches, else_body, .. } => {
+        Action::If {
+            branches,
+            else_body,
+            ..
+        } => {
             let mut out = Vec::new();
             for branch in branches {
                 out.push(branch.condition);
@@ -908,10 +926,8 @@ fn compare_value(
     value_a: wir::ValueId,
     value_b: wir::ValueId,
 ) -> Result<(), String> {
-    let (Some(node_a), Some(node_b)) = (
-        actual.values.get(value_a),
-        expected.values.get(value_b),
-    ) else {
+    let (Some(node_a), Some(node_b)) = (actual.values.get(value_a), expected.values.get(value_b))
+    else {
         return Err("dangling value".to_string());
     };
     match (&node_a.value, &node_b.value) {
@@ -936,11 +952,7 @@ fn compare_value(
         (Value::Null, Value::Null) => Ok(()),
         (Value::Array(x), Value::Array(y)) => {
             if x.len() != y.len() {
-                return Err(format!(
-                    "array length differs: {} vs {}",
-                    x.len(),
-                    y.len()
-                ));
+                return Err(format!("array length differs: {} vs {}", x.len(), y.len()));
             }
             for (a, b) in x.iter().zip(y.iter()) {
                 compare_value(actual, expected, *a, *b)?;
@@ -1105,7 +1117,9 @@ fn accepted_targets_compile_and_match_pinned_reference_semantics() {
     let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
     let mut report = serde_json::Map::new();
     for target in TARGETS {
-        let dir = workspace_root().join("compatibility/ostw/probes").join(target);
+        let dir = workspace_root()
+            .join("compatibility/ostw/probes")
+            .join(target);
         let semantic = compile_semantic(&dir, "main.ostw");
         assert!(
             semantic.diagnostics.is_empty(),
@@ -1143,10 +1157,8 @@ fn accepted_targets_compile_and_match_pinned_reference_semantics() {
         // catalog's OPY-evidenced spelling; apply the emitter's
         // qualification and the declared spelling normalization so both
         // sides parse deterministically.
-        let reference_text = reference_text.replace(
-            "Visible To And String",
-            "Visible To and String",
-        );
+        let reference_text =
+            reference_text.replace("Visible To And String", "Visible To and String");
         let reference_text = qualify_ambiguous_members(&catalog, &reference_text);
         let mut reference = parse(&catalog, &reference_text);
 
@@ -1187,7 +1199,8 @@ fn accepted_targets_compile_and_match_pinned_reference_semantics() {
     std::fs::create_dir_all(parent).expect("create target dir");
     std::fs::write(
         &report_path,
-        serde_json::to_string_pretty(&serde_json::Value::Object(report)).expect("report serializes"),
+        serde_json::to_string_pretty(&serde_json::Value::Object(report))
+            .expect("report serializes"),
     )
     .expect("write differential report");
 }

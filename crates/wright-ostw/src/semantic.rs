@@ -1269,9 +1269,7 @@ impl<'a> Resolver<'a> {
                     // (#119); only genuinely OSTW-specific source names stay
                     // in `signature.rs`.
                     let entry = catalog().entry(kind, id);
-                    let params = entry
-                        .map(|entry| entry.params.clone())
-                        .unwrap_or_default();
+                    let params = entry.map(|entry| entry.params.clone()).unwrap_or_default();
                     let defaults = entry
                         .map(|entry| entry.param_defaults.clone())
                         .unwrap_or_default();
