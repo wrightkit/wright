@@ -39,10 +39,9 @@ def acquire(reference, root):
     return executable
 
 def command(executable):
-    # Linux self-contained asset needs an amd64 Linux executor on macOS/arm64.
-    if sys.platform == "linux": return [str(executable)]
     if shutil.which("docker"):
         return ["docker", "run", "--rm", "-i", "--platform", "linux/amd64", "-v", f"{executable.parent}:/ostw:ro", "-v", f"{ROOT}:/workspace:ro", "-w", "/workspace", "mcr.microsoft.com/dotnet/runtime:8.0", "/ostw/Deltinteger"]
+    if sys.platform == "linux": return [str(executable)]
     raise OracleError("OSTW_REFERENCE_MISSING: linux-x64 oracle needs Docker on this host")
 
 def ping(executable, reference):
@@ -70,7 +69,7 @@ def run_project(executable, reference, project):
     root = ROOT / project["path"]; entry = root / project["entry"]
     if not entry.is_file(): raise OracleError(f"missing corpus entry: {project['id']}")
     proc = subprocess.Popen(command(executable)+["--langserver"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if sys.platform == "linux":
+    if not shutil.which("docker") and sys.platform == "linux":
         root_uri = root.resolve().as_uri()
         uri_for = lambda path: path.resolve().as_uri()
     else:
