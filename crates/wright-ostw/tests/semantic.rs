@@ -235,3 +235,52 @@ fn every_ostw_binding_resolves_through_the_canonical_catalog() {
         }
     }
 }
+
+#[test]
+fn builtins_and_enum_domains_resolve_through_the_canonical_catalog() {
+    // Representative resolutions through the shipped semantic path: an action
+    // (BigMessage), a value (AllPlayers), and a builtin enum domain
+    // (Color.White) resolve to HIR through the canonical Workshop catalog.
+    let dir = std::env::temp_dir().join(format!("wright-ostw-sem-cat-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    std::fs::write(
+        dir.join("main.ostw"),
+        "rule: \"r\" Event.OngoingPlayer {\n  BigMessage(AllPlayers(), \"hi\");\n  BigMessage(AllPlayers(), Color.White);\n}\n",
+    )
+    .unwrap();
+    let (_, semantic) = compile_semantic(&dir, "main.ostw");
+    assert!(
+        semantic.diagnostics.is_empty(),
+        "the exercised surface resolves cleanly: {:?}",
+        semantic.diagnostics
+    );
+    let hir = semantic.hir.as_ref().expect("HIR produced");
+
+    let calls: Vec<&str> = hir
+        .exprs
+        .iter()
+        .filter_map(|expr| match expr {
+            wright_ir::hir::Expr::Call { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(calls.contains(&"BigMessage"), "action resolves: {calls:?}");
+    assert!(calls.contains(&"AllPlayers"), "value resolves: {calls:?}");
+
+    let enums: Vec<(&str, &str)> = hir
+        .exprs
+        .iter()
+        .filter_map(|expr| match expr {
+            wright_ir::hir::Expr::Enum {
+                value_type, value, ..
+            } => Some((value_type.as_str(), value.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        enums.contains(&("Color", "White")),
+        "enum domain resolves: {enums:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
