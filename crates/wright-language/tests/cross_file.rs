@@ -14,7 +14,13 @@ fn fixtures() -> PathBuf {
 fn main_document() -> Document {
     let root = fixtures();
     let text = std::fs::read_to_string(root.join("main.opy")).unwrap();
-    Document::new("file:///project/main.opy", text, root)
+    // The document identity is the real file URI (the M14 shared contract
+    // validates against path-based project identities, #128/#129).
+    Document::new(
+        format!("file://{}", root.join("main.opy").display()),
+        text,
+        root,
+    )
 }
 
 fn broken_include_fixtures() -> PathBuf {
@@ -226,7 +232,7 @@ fn cross_file_rename_edits_only_semantic_occurrences_in_the_affected_source() {
     // edited — choosing the correct affected source is not sufficient.
     let root = fixtures();
     let mut service = LanguageService::new(root.clone());
-    let main_uri = "file:///project/main.opy".to_string();
+    let main_uri = format!("file://{}", root.join("main.opy").display());
     let shared_uri = format!("file://{}", root.join("shared.opy").display());
     service.store.open(Document::new(
         main_uri.clone(),

@@ -91,10 +91,13 @@ suppression is the authoritative contract.
   source identity, and failed validation refuse explicitly. Edits are
   Wright-owned (`RenameEdit`/`TargetSpan` in `wright-language`) and carry the
   SHA-256 source identity computed through `wright_driver::input_identity`.
-  Edited-project validation routes through the shared M14 driver transaction
-  contract (`wright_driver::edit::validate_transaction`, #128) — one
-  validated transaction per affected root with the same overlay semantics the
-  session uses; no duplicate edit-validation semantics live here.
+  Rename delegates target resolution, edit generation, and validation to the
+  shared M14 driver refactoring contract
+  (`wright_driver::edit::semantic_rename`, #129): every affected root
+  resolves through its original native frontend, the unioned exact-range
+  transaction is validated through the shared #128 transaction boundary
+  (`wright_driver::edit::validate_transaction`), and no duplicate
+  edit-validation or span-collection semantics live here.
 * **Semantic tokens** — classified by the native lexer/parser identity
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.
@@ -113,9 +116,16 @@ surfaces) surface as source-aware errors with project-relative paths.
 Operations that stay unsupported for OSTW are **explicitly refused or
 documented, never emulated through upstream calls**:
 
-- **Rename / safe source edits** — a whole-source OSTW regeneration/emitter is
-  a declared non-goal (#120); rename would rewrite entire OSTW files, so it is
-  not offered for OSTW documents.
+- **Semantic rename** — offered for OSTW symbols on the declared semantic
+  surface (globals, player variables, subroutines/functions) through the
+  shared M14 refactoring contract (#129): resolution runs over the shared
+  semantic index of the `ds.toml` project graph, edited transactions validate
+  through the native OSTW frontend, and targets without an exact identifier
+  span (e.g. typed constants and other provenance-limited forms) refuse
+  explicitly instead of broadening to a statement span. Whole-source OSTW
+  regeneration/emitters remain a declared non-goal (#120) — rename edits
+  original OSTW source with exact identifier ranges, never reconstructed
+  text.
 - **Whole-source pretty-printing / comment-preserving regeneration** — not
   implemented; diagnostics and navigation are source-preserving.
 - Upstream OSTW LSP parity, classes/generics/lambdas/pattern matching beyond

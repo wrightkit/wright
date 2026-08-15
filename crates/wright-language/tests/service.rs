@@ -1138,3 +1138,169 @@ fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
         "symbol classification through the shared index"
     );
 }
+
+// -- M14 #129: OSTW semantic rename through the shared contract -----------------
+
+fn ostw_project_documents() -> (LanguageService, String, String, String) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "wright-lang-ostw-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    std::fs::write(
+        root.join("main.ostw"),
+        "import \"lib.del\";\nrule: \"main\" {}\nglobalvar Number score = 5;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib.del"),
+        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n}\n",
+    )
+    .unwrap();
+    let main_uri = format!("file://{}", root.join("main.ostw").display());
+    let lib_uri = format!("file://{}", root.join("lib.del").display());
+    let mut service = LanguageService::new(root);
+    service.store.open(Document::new(
+        &main_uri,
+        std::fs::read_to_string(service.root.join("main.ostw")).unwrap(),
+        service.root.clone(),
+    ));
+    service.store.open(Document::new(
+        &lib_uri,
+        std::fs::read_to_string(service.root.join("lib.del")).unwrap(),
+        service.root.clone(),
+    ));
+    let main_text = service.store.document(&main_uri).unwrap().text.clone();
+    (service, main_uri, lib_uri, main_text)
+}
+
+#[test]
+fn ostw_rename_edits_occurrences_across_project_files() {
+    // #129: OSTW rename resolves through the shared semantic index and
+    // validates through the native OSTW project frontend; the declaration in
+    // main.ostw and the reference in lib.del belong to the same identity.
+    let (service, main_uri, _lib_uri, main_text) = ostw_project_documents();
+    // Position on the `score` declaration (line 3, col 18 of main.ostw).
+    let result = service.rename(
+        &main_uri,
+        Position {
+            line: 2,
+            character: 17,
+        },
+        "total",
+    );
+    assert!(result.ok, "OSTW rename resolves: {:?}", result.diagnostics);
+    assert_eq!(result.edits.len(), 2, "both project files are edited");
+    let main_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("main.ostw"))
+        .expect("main.ostw edit");
+    assert!(
+        main_edit.new_text.contains("globalvar Number total = 5;"),
+        "declaration renamed: {}",
+        main_edit.new_text
+    );
+    let lib_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("lib.del"))
+        .expect("lib.del edit");
+    assert!(
+        lib_edit.new_text.contains("total = 1;"),
+        "cross-file reference renamed: {}",
+        lib_edit.new_text
+    );
+    // The edits carry the identity of the text they were computed from, and
+    // applying them reproduces the validated preview.
+    assert_eq!(
+        main_edit.source_identity,
+        wright_driver::input_identity(&main_text),
+        "the edit precondition is the original source identity"
+    );
+}
+
+#[test]
+fn ostw_rename_refuses_unsafe_targets_explicitly() {
+    let (service, main_uri, _, _) = ostw_project_documents();
+
+    // A collision with an already-declared name refuses with no edits.
+    let collision = service.rename(
+        &main_uri,
+        Position {
+            line: 2,
+            character: 17,
+        },
+        "count",
+    );
+    assert!(!collision.ok, "a colliding OSTW rename refuses");
+    assert!(collision.edits.is_empty(), "no partial edits");
+    assert!(
+        collision
+            .diagnostics
+            .iter()
+            .any(|d| d.starts_with("rename-collision")),
+        "collision diagnostics: {:?}",
+        collision.diagnostics
+    );
+
+    // A position with no symbol (the import statement) refuses explicitly.
+    let unresolved = service.rename(
+        &main_uri,
+        Position {
+            line: 0,
+            character: 0,
+        },
+        "x",
+    );
+    assert!(!unresolved.ok);
+    assert!(
+        unresolved
+            .diagnostics
+            .iter()
+            .any(|d| d.starts_with("rename-unresolved")),
+        "unresolved diagnostics: {:?}",
+        unresolved.diagnostics
+    );
+}
+
+#[test]
+fn ostw_rename_includes_open_overlay_references() {
+    // #129: open unsaved overlays take precedence; a reference that only
+    // exists in the overlay participates in the rename and its edited text is
+    // validated through the project frontend.
+    let (mut service, main_uri, lib_uri, _) = ostw_project_documents();
+    let overlaid =
+        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n    score = 2;\n}\n";
+    service
+        .store
+        .open(Document::new(&lib_uri, overlaid, service.root.clone()));
+    let result = service.rename(
+        &main_uri,
+        Position {
+            line: 2,
+            character: 17,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "overlay rename validates: {:?}",
+        result.diagnostics
+    );
+    let lib_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("lib.del"))
+        .expect("lib.del edit");
+    assert!(
+        lib_edit.new_text.contains("total = 1;") && lib_edit.new_text.contains("total = 2;"),
+        "both overlay references renamed: {}",
+        lib_edit.new_text
+    );
+}

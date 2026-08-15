@@ -14,7 +14,7 @@
 //! followed by a type then `>` is a cast (`<Type>expr`); in binary position
 //! `<`/`<=` are comparisons. Every node carries its exact source span.
 
-use wright_ir::source::Span;
+use wright_ir::source::{Position, Span};
 
 use crate::cst::*;
 use crate::diag::{FrontendError, FrontendResult};
@@ -187,7 +187,10 @@ impl Parser {
         } else {
             None
         };
+        // The exact declared-identifier occurrence (the rename target, #129).
+        let name_token = self.peek().clone();
         let name = self.expect_ident("a variable name")?;
+        let name_span = name_token.span;
         let mut index = None;
         let mut value = None;
         if self.eat(TokenKind::Assign) {
@@ -204,6 +207,7 @@ impl Parser {
             index,
             value,
             span,
+            name_span,
         })
     }
 
@@ -251,7 +255,10 @@ impl Parser {
     fn parse_typed_or_function(&mut self) -> FrontendResult<Item> {
         let start = self.peek().span;
         let type_name = self.parse_type_ref()?;
+        // The exact declared-identifier occurrence (the rename target, #129).
+        let name_token = self.peek().clone();
         let name = self.expect_ident("a declaration name")?;
+        let name_span = name_token.span;
         if self.at(TokenKind::Colon) {
             // Expression-bodied declaration.
             self.advance();
@@ -297,6 +304,7 @@ impl Parser {
             rule_name,
             body,
             span,
+            name_span,
         }))
     }
 
@@ -375,11 +383,28 @@ impl Parser {
         let start = self.advance().span; // `rule`
         self.expect(TokenKind::Colon, "':' after rule")?;
         let mut name = None;
+        let mut name_span = None;
         let mut priority = None;
         let mut event = None;
         let mut conditions = Vec::new();
         if self.at(TokenKind::String) || self.at(TokenKind::VerbatimString) {
-            name = Some(self.advance().text);
+            let name_token = self.advance();
+            name = Some(name_token.text);
+            // The exact rule-name occurrence is the string content between
+            // the quotes (the token itself spans the quotes).
+            name_span = Some(Span::new(
+                name_token.span.file,
+                Position::new(name_token.span.start.line, name_token.span.start.col + 1),
+                Position::new(
+                    name_token.span.end.line,
+                    name_token
+                        .span
+                        .end
+                        .col
+                        .saturating_sub(1)
+                        .max(name_token.span.start.col + 1),
+                ),
+            ));
         }
         loop {
             if self.at(TokenKind::LBrace) {
@@ -413,6 +438,7 @@ impl Parser {
         Ok(RuleDecl {
             disabled,
             name,
+            name_span,
             priority,
             event,
             conditions,

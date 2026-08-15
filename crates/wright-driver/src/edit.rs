@@ -20,7 +20,7 @@
 //! which proposes an edit carrying the source identity precondition; callers
 //! validate it inside a transaction with [`validate_transaction`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -260,21 +260,25 @@ pub fn validate_transaction(
 
     // Edited non-main sources become in-memory overlays keyed for the native
     // frontend of the project's original source kind.
-    let overlay = build_overlay(kind, &root, &main_path, &previews);
-    let resolved = ResolvedInput {
+    let overlay = build_overlay(
         kind,
-        text: main_text.clone(),
-        path: Some(main_path.clone()),
-        root: root.clone(),
-        display: crate::input::display_path(&main_path),
-        identity: crate::input_identity(&main_text),
-        origin: origin_for(kind, config.locale.as_deref()),
-    };
+        &root,
+        &main_path,
+        previews
+            .iter()
+            .map(|preview| (preview.source.as_str(), preview.new_text.as_str())),
+    );
+    let resolved = resolved_input(
+        kind,
+        &main_path,
+        &root,
+        &main_text,
+        config.locale.as_deref(),
+    );
 
-    match kind {
-        SourceKind::Opy => validate_opy(&resolved, &overlay, config, &mut diagnostics),
-        SourceKind::Ostw => validate_ostw(&resolved, &overlay, &mut diagnostics),
-        _ => unreachable!("resolve_kind never returns Workshop/Protocol/Auto"),
+    match compile_project(kind, &resolved, &overlay, config.profile) {
+        Ok(_) => {}
+        Err(errors) => diagnostics.extend(errors),
     }
 
     EditValidation {
@@ -295,6 +299,372 @@ fn refusal(diagnostics: Vec<Diagnostic>) -> EditValidation {
     }
 }
 
+/// A semantic rename target: the exact identifier occurrence at a 1-based
+/// line/column in one source of the project (M14, #129).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenameTarget {
+    /// The source identity the position names (a key of the current-sources
+    /// map, or a path spelling of the main source).
+    pub source: String,
+    /// The 1-based line of the identifier.
+    pub line: u32,
+    /// The 1-based column of the identifier.
+    pub col: u32,
+    /// The new name.
+    pub to: String,
+}
+
+/// The outcome of a semantic rename: a validated multi-source transaction or
+/// structured refusal diagnostics (M14, #129).
+///
+/// The transaction edits exactly the resolved semantic identity's occurrence
+/// ranges — never a whole-word scan or whole-document replacement — and is
+/// validated through the shared [`validate_transaction`] boundary before
+/// success is reported. The contract carries no LSP protocol types and
+/// exposes no mutable IR.
+#[derive(Debug, Clone, Serialize)]
+pub struct SemanticRename {
+    /// Whether the rename is safe to apply.
+    pub ok: bool,
+    /// The validated exact-range transaction, when the rename resolved.
+    pub transaction: Option<EditTransaction>,
+    /// Structured refusal/validation diagnostics.
+    pub diagnostics: Vec<Diagnostic>,
+    /// The per-source previews of the validated transaction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Vec<SourcePreview>>,
+}
+
+/// Rename the symbol whose declaration or reference occurrence sits at a
+/// position in one source of a project (M14, #129).
+///
+/// `config` and `sources` are the project and current-source snapshot of the
+/// *unmodified* code, exactly as [`validate_transaction`] takes them. The
+/// target symbol is resolved through the shared semantic index of the
+/// project compiled through its original native frontend; only occurrences
+/// belonging to that resolved semantic identity (the declaration identifier,
+/// the definition identifier, and every reference identifier) are edited,
+/// each as an exact-range edit carrying the source's identity precondition.
+/// Ambiguous positions, target-name collisions, occurrences without an exact
+/// identifier span, sources without a current text, and edited projects that
+/// fail validation refuse with deterministic structured diagnostics and no
+/// transaction.
+pub fn semantic_rename(
+    config: &SessionConfig,
+    sources: &BTreeMap<String, String>,
+    target: &RenameTarget,
+) -> SemanticRename {
+    let refuse = |diagnostics: Vec<Diagnostic>| SemanticRename {
+        ok: false,
+        transaction: None,
+        diagnostics,
+        preview: None,
+    };
+
+    if target.to.is_empty() {
+        return refuse(vec![Diagnostic::error(
+            "rename-invalid-name",
+            Stage::Discovery,
+            "rename requires a non-empty new name",
+        )]);
+    }
+    let Some(main_path) = config.input.path().cloned() else {
+        return refuse(vec![Diagnostic::error(
+            "edit-input-stdin",
+            Stage::Discovery,
+            "semantic rename requires a path-based input so the project's \
+             main source identity is established; stdin has no project identity",
+        )]);
+    };
+    let kind = match resolve_kind(config, &main_path) {
+        Ok(kind) => kind,
+        Err(diagnostic) => return refuse(vec![diagnostic]),
+    };
+    let root = config.root.clone().unwrap_or_else(|| {
+        main_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    });
+
+    // The current project state: the main text from the caller's snapshot
+    // (or the filesystem), every other source as an in-memory overlay.
+    let main_text = match sources.get(&main_path.to_string_lossy().into_owned()) {
+        Some(text) => text.clone(),
+        None => match std::fs::read_to_string(&main_path) {
+            Ok(text) => text,
+            Err(error) => {
+                return refuse(vec![Diagnostic::error(
+                    "input-io",
+                    Stage::Discovery,
+                    format!("cannot read input '{}': {error}", main_path.display()),
+                )]);
+            }
+        },
+    };
+    let overlay = build_overlay(
+        kind,
+        &root,
+        &main_path,
+        sources
+            .iter()
+            .map(|(source, text)| (source.as_str(), text.as_str())),
+    );
+    let resolved = resolved_input(
+        kind,
+        &main_path,
+        &root,
+        &main_text,
+        config.locale.as_deref(),
+    );
+
+    let program = match compile_project(kind, &resolved, &overlay, config.profile) {
+        Ok(program) => program,
+        Err(diagnostics) => return refuse(diagnostics),
+    };
+    let index = match wright_analyzer::symbols::SemanticIndex::build(&program) {
+        Ok(index) => index,
+        Err(error) => {
+            return refuse(vec![Diagnostic::error(
+                "analysis-error",
+                Stage::Analysis,
+                format!("cannot build the semantic index for rename: {error}"),
+            )]);
+        }
+    };
+
+    // The position names one file of the compiled project; refuse when the
+    // source is not part of it (e.g. an include outside the project closure).
+    let Some(file_id) = file_id_for_source(&program, &root, &target.source) else {
+        return refuse(vec![Diagnostic::error(
+            "rename-unresolved",
+            Stage::Discovery,
+            format!(
+                "'{}' is not part of the compiled project; the rename position \
+                 must name a project source",
+                target.source
+            ),
+        )]);
+    };
+    let Some(symbol) = symbol_at(&index, file_id, target.line, target.col) else {
+        return refuse(vec![Diagnostic::error(
+            "rename-unresolved",
+            Stage::Discovery,
+            format!(
+                "no symbol is resolvable at {}:{}:{}",
+                target.source, target.line, target.col
+            ),
+        )]);
+    };
+
+    // A same-spelled symbol in a different namespace is not a collision (the
+    // semantic index distinguishes identities by symbol id); only a genuine
+    // target-name conflict with another declared symbol refuses.
+    if index
+        .symbols()
+        .any(|other| other.id != symbol.id && other.name == target.to)
+    {
+        return refuse(vec![Diagnostic::error(
+            "rename-collision",
+            Stage::Discovery,
+            format!(
+                "'{}' is already declared; the new name would collide",
+                target.to
+            ),
+        )]);
+    }
+
+    // Collect the exact occurrence spans of the resolved semantic identity.
+    let mut occurrences = Vec::new();
+    if let Some(occurrence) = symbol.occurrence {
+        occurrences.push(occurrence);
+    }
+    for reference in index.references(symbol.id) {
+        match (reference.occurrence, reference.span) {
+            (Some(occurrence), _) => occurrences.push(occurrence),
+            (None, Some(span)) => {
+                // A reference with a source location but no exact identifier
+                // occurrence: an exact target cannot be established, so the
+                // rename refuses rather than broadening to a statement span.
+                let path = program
+                    .files
+                    .get(span.file)
+                    .map(|file| file.path.clone())
+                    .unwrap_or_else(|| target.source.clone());
+                return refuse(vec![Diagnostic::error(
+                    "rename-unresolved-target",
+                    Stage::Discovery,
+                    format!(
+                        "a semantic occurrence in {path} has no exact identifier span; \
+                         refusing the rename rather than broadening to a statement span"
+                    ),
+                )]);
+            }
+            (None, None) => {}
+        }
+    }
+
+    // One exact-range edit per occurrence, carrying the current text's
+    // identity precondition; the transaction orders and overlap-checks them.
+    let mut edits: BTreeMap<String, BTreeSet<(u32, u32, u32, u32)>> = BTreeMap::new();
+    for occurrence in occurrences {
+        let file = occurrence.file.index();
+        let Some(source) = source_key_for_file(&program, &root, &main_path, sources, file) else {
+            return refuse(vec![Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                "no current text was provided for a source the rename would edit; \
+                 supply the current text of every project source",
+            )]);
+        };
+        edits.entry(source).or_default().insert((
+            occurrence.start.line,
+            occurrence.start.col,
+            occurrence.end.line,
+            occurrence.end.col,
+        ));
+    }
+    let mut source_edits = Vec::new();
+    for (source, ranges) in edits {
+        let current = sources
+            .get(&source)
+            .cloned()
+            .unwrap_or_else(|| main_text.clone());
+        let identity = crate::input_identity(&current);
+        for (start_line, start_col, end_line, end_col) in ranges {
+            source_edits.push(SourceEdit {
+                edit_kind: "rename".to_string(),
+                source: source.clone(),
+                source_identity: identity.clone(),
+                range: EditRange {
+                    start_line,
+                    start_col,
+                    end_line,
+                    end_col,
+                },
+                new_text: target.to.clone(),
+            });
+        }
+    }
+    let transaction = match EditTransaction::new(source_edits) {
+        Ok(transaction) => transaction,
+        Err(diagnostic) => return refuse(vec![diagnostic]),
+    };
+
+    // Validate the resulting transaction through #128 before success; an
+    // unvalidated transaction is never returned.
+    let validation = validate_transaction(config, sources, &transaction);
+    if validation.ok {
+        SemanticRename {
+            ok: true,
+            transaction: Some(transaction),
+            diagnostics: validation.diagnostics,
+            preview: validation.preview,
+        }
+    } else {
+        SemanticRename {
+            ok: false,
+            transaction: None,
+            diagnostics: validation.diagnostics,
+            preview: None,
+        }
+    }
+}
+
+/// The program file id whose registry path matches a caller source identity.
+///
+/// Matching walks the program file registry (never assuming the main source
+/// is file 0 — the OSTW project registry reserves file 0 for `ds.toml`) and
+/// tries the registry path as given, root-joined, and canonicalized, so
+/// display-relative spellings (e.g. the driver's cwd-relative display paths)
+/// and project-relative spellings both match.
+fn file_id_for_source(
+    program: &wright_ir::wir::Program,
+    root: &Path,
+    source: &str,
+) -> Option<usize> {
+    program
+        .files
+        .iter()
+        .enumerate()
+        .find_map(|(index, file)| registry_path_matches(source, root, &file.path).then_some(index))
+}
+
+/// Whether a source identity names the same file as a registry path
+/// spelling: exact equality, the root-joined spelling, or the spelling as
+/// given (resolved against the working directory).
+fn registry_path_matches(source: &str, root: &Path, registry_path: &str) -> bool {
+    let path = Path::new(registry_path);
+    if same_file(source, path) {
+        return true;
+    }
+    if path.is_relative() {
+        return same_file(source, &root.join(path));
+    }
+    false
+}
+
+/// The caller's source identity (a `sources` key) for a program file id,
+/// matching file registry paths against the provided current texts.
+fn source_key_for_file(
+    program: &wright_ir::wir::Program,
+    root: &Path,
+    main_path: &Path,
+    sources: &BTreeMap<String, String>,
+    file: usize,
+) -> Option<String> {
+    if file == 0 {
+        return sources
+            .keys()
+            .find(|key| same_file(key, main_path))
+            .cloned()
+            .or_else(|| Some(main_path.to_string_lossy().into_owned()));
+    }
+    let registry_path = program
+        .files
+        .get(wright_ir::source::FileId::from_index(file))
+        .map(|source_file| &source_file.path)?;
+    sources
+        .keys()
+        .find(|key| registry_path_matches(key, root, registry_path))
+        .cloned()
+}
+
+/// The symbol whose declaration or reference occurrence span in `file_id`
+/// contains a 1-based line/column; spans in other files are never considered.
+fn symbol_at(
+    index: &wright_analyzer::symbols::SemanticIndex,
+    file_id: usize,
+    line: u32,
+    col: u32,
+) -> Option<wright_analyzer::symbols::Symbol> {
+    for symbol in index.symbols() {
+        let symbol_id = symbol.id;
+        if let Some(span) = symbol.span {
+            if span.file.index() == file_id && span_contains(span, line, col) {
+                return Some(symbol.clone());
+            }
+        }
+        for reference in index.references(symbol_id) {
+            if let Some(span) = reference.span {
+                if span.file.index() == file_id && span_contains(span, line, col) {
+                    return Some(symbol.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn span_contains(span: wright_ir::source::Span, line: u32, col: u32) -> bool {
+    (span.start.line, span.start.col) <= (line, col)
+        && (line, col)
+            <= (
+                span.end.line,
+                span.end.col.saturating_sub(1).max(span.start.col),
+            )
+}
+
 fn has_error(diagnostics: &[Diagnostic]) -> bool {
     diagnostics
         .iter()
@@ -309,107 +679,150 @@ fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
     }
 }
 
-/// Validate an edited OPY project through the native OPY frontend with the
-/// edited files as include overlays, then the shared HIR→IR→lower→validate
-/// chain and the session's transformation profile.
-fn validate_opy(
-    resolved: &ResolvedInput,
-    overlay: &BTreeMap<String, String>,
-    config: &SessionConfig,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let outcome = wright_opy::compile_with_overlay_outcome(
-        &resolved.text,
-        &resolved.display,
-        &resolved.root,
-        overlay,
-    );
-    let Some(program) = outcome.hir else {
-        diagnostics.push(session::opy_diag(
-            outcome
-                .error
-                .expect("a failed compile outcome always carries an error"),
-            &outcome.files,
-            resolved,
-        ));
-        return;
-    };
-    if let Err(error) = program.validate() {
-        diagnostics.push(session::hir_diag(error, resolved));
-        return;
-    }
-    let model = match program.to_ir() {
-        Ok(model) => model,
-        Err(error) => {
-            diagnostics.push(session::ir_diag(
-                "convert-error",
-                crate::diag::Stage::Lowering,
-                error,
-                resolved,
-            ));
-            return;
-        }
-    };
-    let mut program = match wright_ir::lower::lower(&model) {
-        Ok(program) => program,
-        Err(error) => {
-            diagnostics.push(session::ir_diag(
-                "lower-error",
-                crate::diag::Stage::Lowering,
-                error,
-                resolved,
-            ));
-            return;
-        }
-    };
-    if let Err(error) = program.validate() {
-        diagnostics.push(session::ir_diag(
-            "validation-error",
-            crate::diag::Stage::Validation,
-            error,
-            resolved,
-        ));
-        return;
-    }
-    if config.profile != crate::Profile::Off {
-        if let Err(error) = wright_transform::run(&mut program, config.profile) {
-            diagnostics.push(Diagnostic::error(
-                "transform-error",
-                crate::diag::Stage::Internal,
-                format!("WIR transformation failed: {error}"),
-            ));
-        }
+/// The resolved-input snapshot a validation/rename compile runs against.
+fn resolved_input(
+    kind: SourceKind,
+    main_path: &Path,
+    root: &Path,
+    main_text: &str,
+    locale: Option<&str>,
+) -> ResolvedInput {
+    ResolvedInput {
+        kind,
+        text: main_text.to_string(),
+        path: Some(main_path.to_path_buf()),
+        root: root.to_path_buf(),
+        display: crate::input::display_path(main_path),
+        identity: crate::input_identity(main_text),
+        origin: origin_for(kind, locale),
     }
 }
 
-/// Validate an edited OSTW project through the native OSTW frontend: the
-/// `ds.toml` project graph loads with the edited files as overlays, and the
-/// frontend plus #118 semantic boundary diagnostics decide the outcome
-/// exactly as the shared session path does.
-fn validate_ostw(
+/// Compile a project through its original native frontend (OPY with include
+/// overlays, OSTW with the `ds.toml` project graph and overlays) and the
+/// shared HIR→IR→lower→validate chain, applying the session's transformation
+/// profile for OPY exactly as `CompilerSession::load` does. Returns the
+/// validated WIR program or every structured source-located diagnostic.
+fn compile_project(
+    kind: SourceKind,
     resolved: &ResolvedInput,
     overlay: &BTreeMap<String, String>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let relative = resolved
-        .path
-        .as_ref()
-        .and_then(|path| path.strip_prefix(&resolved.root).ok())
-        .map(|relative| relative.to_string_lossy().replace('\\', "/"));
-    let (outcome, semantic) = wright_ostw::compile_with_semantics_overlay(
-        &resolved.text,
-        relative.as_deref(),
-        &resolved.root,
-        overlay,
-    );
-    if let Some(error) = &outcome.error {
-        diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
-    }
-    for error in &outcome.diagnostics {
-        diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
-    }
-    for error in &semantic.diagnostics {
-        diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
+    profile: crate::Profile,
+) -> Result<wright_ir::wir::Program, Vec<Diagnostic>> {
+    match kind {
+        SourceKind::Opy => {
+            let outcome = wright_opy::compile_with_overlay_outcome(
+                &resolved.text,
+                &resolved.display,
+                &resolved.root,
+                overlay,
+            );
+            let Some(program) = outcome.hir else {
+                return Err(vec![session::opy_diag(
+                    outcome
+                        .error
+                        .expect("a failed compile outcome always carries an error"),
+                    &outcome.files,
+                    resolved,
+                )]);
+            };
+            if let Err(error) = program.validate() {
+                return Err(vec![session::hir_diag(error, resolved)]);
+            }
+            let model = match program.to_ir() {
+                Ok(model) => model,
+                Err(error) => {
+                    return Err(vec![session::ir_diag(
+                        "convert-error",
+                        crate::diag::Stage::Lowering,
+                        error,
+                        resolved,
+                    )]);
+                }
+            };
+            let mut program = match wright_ir::lower::lower(&model) {
+                Ok(program) => program,
+                Err(error) => {
+                    return Err(vec![session::ir_diag(
+                        "lower-error",
+                        crate::diag::Stage::Lowering,
+                        error,
+                        resolved,
+                    )]);
+                }
+            };
+            if let Err(error) = program.validate() {
+                return Err(vec![session::ir_diag(
+                    "validation-error",
+                    crate::diag::Stage::Validation,
+                    error,
+                    resolved,
+                )]);
+            }
+            if profile != crate::Profile::Off {
+                if let Err(error) = wright_transform::run(&mut program, profile) {
+                    return Err(vec![Diagnostic::error(
+                        "transform-error",
+                        crate::diag::Stage::Internal,
+                        format!("WIR transformation failed: {error}"),
+                    )]);
+                }
+            }
+            Ok(program)
+        }
+        SourceKind::Ostw => {
+            let relative = resolved
+                .path
+                .as_ref()
+                .and_then(|path| path.strip_prefix(&resolved.root).ok())
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"));
+            let (outcome, semantic) = wright_ostw::compile_with_semantics_overlay(
+                &resolved.text,
+                relative.as_deref(),
+                &resolved.root,
+                overlay,
+            );
+            let mut diagnostics = Vec::new();
+            if let Some(error) = &outcome.error {
+                diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
+            }
+            for error in &outcome.diagnostics {
+                diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
+            }
+            for error in &semantic.diagnostics {
+                diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
+            }
+            if has_error(&diagnostics) {
+                return Err(diagnostics);
+            }
+            let Some(hir) = semantic.hir else {
+                // The frontend outcome carries no reachable semantic HIR and
+                // no diagnostics: the session path treats this as an empty
+                // program (check succeeds), so rename finds no symbols.
+                return Ok(wright_ir::wir::Program::default());
+            };
+            let program = match wright_ir::lower::lower(&hir) {
+                Ok(program) => program,
+                Err(error) => {
+                    return Err(vec![session::ir_diag(
+                        "lower-error",
+                        crate::diag::Stage::Lowering,
+                        error,
+                        resolved,
+                    )]);
+                }
+            };
+            if let Err(error) = program.validate() {
+                return Err(vec![session::ir_diag(
+                    "validation-error",
+                    crate::diag::Stage::Validation,
+                    error,
+                    resolved,
+                )]);
+            }
+            Ok(program)
+        }
+        _ => unreachable!("compile_project only runs for OPY/OSTW"),
     }
 }
 
@@ -471,57 +884,47 @@ fn same_file(a: &str, b: &Path) -> bool {
     }
 }
 
-/// Build the in-memory overlay of edited non-main sources, keyed for the
-/// project's native frontend.
+/// Build the in-memory overlay of non-main sources, keyed for the project's
+/// native frontend.
 ///
 /// OPY includes resolve against the include root by include string and by
 /// canonical path; the overlay carries the as-given, canonical, root-relative,
 /// and basename spellings (the same spellings the language service overlays
 /// use). OSTW sources resolve by normalized project-relative path; the
-/// overlay carries the as-given and root-relative normalized spellings.
-fn build_overlay(
+/// overlay carries the as-given and root-relative normalized spellings. The
+/// main source is never overlaid (its text is passed to the frontend
+/// directly).
+fn build_overlay<'a>(
     kind: SourceKind,
     root: &Path,
     main_path: &Path,
-    previews: &[SourcePreview],
+    entries: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> BTreeMap<String, String> {
     let mut overlay = BTreeMap::new();
-    for preview in previews {
-        if same_file(&preview.source, main_path) {
+    for (source, text) in entries {
+        if same_file(source, main_path) {
             continue;
         }
         match kind {
             SourceKind::Opy => {
-                let path = PathBuf::from(&preview.source);
-                overlay.insert(
-                    path.to_string_lossy().into_owned(),
-                    preview.new_text.clone(),
-                );
+                let path = PathBuf::from(source);
+                overlay.insert(path.to_string_lossy().into_owned(), text.to_string());
                 if let Ok(canonical) = path.canonicalize() {
-                    overlay.insert(
-                        canonical.to_string_lossy().into_owned(),
-                        preview.new_text.clone(),
-                    );
+                    overlay.insert(canonical.to_string_lossy().into_owned(), text.to_string());
                 }
                 if let Ok(relative) = path.strip_prefix(root) {
-                    overlay.insert(
-                        relative.to_string_lossy().into_owned(),
-                        preview.new_text.clone(),
-                    );
+                    overlay.insert(relative.to_string_lossy().into_owned(), text.to_string());
                 }
                 if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                    overlay.insert(name.to_string(), preview.new_text.clone());
+                    overlay.insert(name.to_string(), text.to_string());
                 }
             }
             SourceKind::Ostw => {
-                overlay.insert(
-                    normalize_relative(&preview.source),
-                    preview.new_text.clone(),
-                );
-                if let Ok(relative) = Path::new(&preview.source).strip_prefix(root) {
+                overlay.insert(normalize_relative(source), text.to_string());
+                if let Ok(relative) = Path::new(source).strip_prefix(root) {
                     overlay.insert(
                         relative.to_string_lossy().replace('\\', "/"),
-                        preview.new_text.clone(),
+                        text.to_string(),
                     );
                 }
             }
