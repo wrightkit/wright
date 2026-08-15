@@ -1,6 +1,6 @@
 # Wright Compatibility Matrix and Release Gates
 
-Status: accepted baseline — release gates and compatibility matrix (ADR-0008)
+Status: accepted baseline (release gates and compatibility matrix, ADR-0008)
 Scope: frozen input surfaces, target/runtime claims, S/D/N/E gate
 thresholds, unsupported constructs, and intentional differences
 
@@ -21,10 +21,10 @@ oracle, en-US locale (additional locales are a data change).
 
 | Gate | Claim | Evidence set | Status |
 | --- | --- | --- | --- |
-| S — syntax | Native and reference agree on accept/reject for the corpus; accepted inputs classify into the same supported subset | `crates/wright-opy/tests/differential.rs` (HIR parity, full corpus) | PASS |
-| D — diagnostics | Malformed inputs produce the same diagnostic category and source region | Diagnostics fixture (`synthetic/diagnostics`) both reject with a parse error at the same line; structured `wright-result/v1` diagnostics | PASS |
-| N — normalized output | Compiled Workshop text equals the reference after the documented normalizer | `scripts/v1-gates.py` report (`target/v1-gates-report.json`); `compat` profile | PASS with documented debug/print differences (below) |
-| E — semantic | High-risk behaviors have repeatable scenario evidence | `scripts/run-scenarios.py` (`target/scenarios-report.json`) | PASS (compile-time WIR evidence; client execution is out of scope) |
+| S: syntax | Native and reference agree on accept/reject for the corpus; accepted inputs classify into the same supported subset | `crates/wright-opy/tests/differential.rs` (HIR parity, full corpus) | PASS |
+| D: diagnostics | Malformed inputs produce the same diagnostic category and source region | Diagnostics fixture (`synthetic/diagnostics`) both reject with a parse error at the same line; structured `wright-result/v1` diagnostics | PASS |
+| N: normalized output | Compiled Workshop text equals the reference after the documented normalizer | `scripts/v1-gates.py` report (`target/v1-gates-report.json`); `compat` profile | PASS with documented debug/print differences (below) |
+| E: semantic | High-risk behaviors have repeatable scenario evidence | `scripts/run-scenarios.py` (`target/scenarios-report.json`) | PASS (compile-time WIR evidence; client execution is out of scope) |
 
 The compatibility contract does **not** claim:
 * compatibility outside the declared corpus surface;

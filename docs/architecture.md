@@ -1,6 +1,6 @@
 # Wright Architecture
 
-Status: accepted baseline — tooling-first semantic platform (ADR-0008)
+Status: accepted baseline (tooling-first semantic platform, ADR-0008)
 Scope: the Wright tooling and compiler core, its semantic frontends, and
 compatibility boundaries
 
@@ -33,10 +33,10 @@ and long-term ecosystem independence.
 
 Current ownership:
 
-- **Vanilla Workshop** — Wright-owned canonical model, parser, emitter, and
+- **Vanilla Workshop**: Wright-owned canonical model, parser, emitter, and
   target semantics (`wright-workshop`);
-- **OPY** — Wright-owned compatible semantic frontend (`wright-opy`);
-- **OSTW** — Wright-owned compatible semantic frontend (`wright-ostw`),
+- **OPY**: Wright-owned compatible semantic frontend (`wright-opy`);
+- **OSTW**: Wright-owned compatible semantic frontend (`wright-ostw`),
   introduced under M13 per ADR-0008; native syntax/project frontend and HIR
   lowering for the declared reachable corpus slice.
 
@@ -90,20 +90,20 @@ source-language parsing, preprocessing, syntax rules, and producing typed
 Wright data at the HIR boundary. Frontends never expose external AST types
 through Wright APIs.
 
-**`wright-opy`** — the native Rust OPY frontend: lexer → preprocessing
-(includes/defines) → CST/parser → semantic resolution → Opy HIR. The supported
+**`wright-opy`**: the native Rust OPY frontend (lexer → preprocessing
+includes/defines → CST/parser → semantic resolution → Opy HIR). The supported
 surface is declared in [`docs/opy/support-matrix.md`](opy/support-matrix.md)
 and verified at the HIR boundary by the differential suite. The pinned OverPy
 adapter remains the compatibility oracle.
 
-**`wright-ostw`** — the native Rust OSTW frontend: lexer → CST/parser → project
-settings (`ds.toml`) → reachable import-closure resolution → semantic lowering
-to Wright HIR. The supported baseline is documented in
+**`wright-ostw`**: the native Rust OSTW frontend (lexer → CST/parser → project
+settings `ds.toml` → reachable import-closure resolution → semantic lowering
+to Wright HIR). The supported baseline is documented in
 [`docs/ostw/compatibility-baseline.md`](ostw/compatibility-baseline.md). Pinned
 OSTW (`v3.4.0`) serves as the compatibility oracle.
 
-**`wright-workshop`** — the native Workshop frontend and emitter: localized
-catalog, lexer, parser, validation, and emitter. Workshop is the canonical
+**`wright-workshop`**: the native Workshop frontend and emitter (localized
+catalog, lexer, parser, validation, and emitter). Workshop is the canonical
 target for all frontends.
 
 ### Adapter and bridge
@@ -279,6 +279,6 @@ Decisions that answer or materially revise these questions belong in an ADR.
 * [ADR-0003: IR boundary](adr/0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](adr/0004-overpy-licensing-boundary.md)
 * [ADR-0005: Opy HIR v1 frontend protocol](adr/0005-opy-hir-v1.md)
-* [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](adr/0006-rust-ir-core.md)
+* [ADR-0006: Rust IR core: typed IDs, arenas, and two-layer models](adr/0006-rust-ir-core.md)
 * [ADR-0007: OverPy reference pinning policy](adr/0007-reference-pinning-policy.md)
 * [ADR-0008: Tooling-first semantic platform rebaseline](adr/0008-tooling-first-semantic-platform.md)

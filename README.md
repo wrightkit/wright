@@ -214,7 +214,7 @@ wright update --version 0.2.0  # install an exact version
 
 `wright update` downloads the same checksum-verified release archives as the
 installer, replaces both binaries atomically, and never touches
-package-manager-managed installations — Homebrew, Scoop, and WinGet installs
+package-manager-managed installations; Homebrew, Scoop, and WinGet installs
 should upgrade through their own channel (`brew upgrade wrightkit/tap/wright`,
 `scoop update wright`, `winget upgrade WrightKit.Wright`).
 

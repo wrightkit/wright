@@ -1,6 +1,6 @@
 # Wright Compatibility Contract
 
-Status: accepted baseline — semantic compatibility priority (ADR-0008)
+Status: accepted baseline (semantic compatibility priority, ADR-0008)
 Scope: measurable compatibility claims for the Wright tooling and compiler core
 
 Compatibility is a claim about a named input corpus, reference version,
@@ -40,7 +40,7 @@ The levels below measure different contracts. They are cumulative for a single
 claim only when the evidence explicitly covers the same corpus and supported
 subset; passing a lower level never implies passing a higher one.
 
-### S — syntax compatibility
+### S: syntax compatibility
 
 Wright and the reference agree on whether each corpus input is accepted by the
 supported frontend boundary, and accepted inputs are classified into the same
@@ -55,7 +55,7 @@ Minimum evidence:
 S-level evidence does not prove that accepted programs have the same meaning
 or output.
 
-### D — diagnostic compatibility
+### D: diagnostic compatibility
 
 For inputs that are rejected or otherwise diagnosed, Wright reports the same
 documented diagnostic category and relevant source region as the reference, or
@@ -66,7 +66,7 @@ byte identical unless a fixture explicitly says so.
 Minimum evidence includes structured diagnostic comparisons and malformed or
 unsupported-input cases, not only successful examples.
 
-### N — normalized-output compatibility
+### N: normalized-output compatibility
 
 For accepted inputs, Wright's produced artifact is compared after applying a
 versioned normalization procedure that removes only documented presentation or
@@ -78,7 +78,7 @@ canonical artifact hash or a reviewable diff. Exact source-text equality is
 neither required nor sufficient unless the output contract specifically makes
 it normative.
 
-### E — semantic compatibility
+### E: semantic compatibility
 
 Wright and the reference exhibit equivalent observable behavior for a defined
 scenario set, target/runtime, and execution environment. The scenario set must
@@ -163,11 +163,11 @@ acquisition instruction instead of shipping the content.
 
 The following remain unresolved until the relevant implementation exists:
 
-* the supported OverPy version range and extension policy — resolved by
-  [ADR-0007](adr/0007-reference-pinning-policy.md) (version-exact,
-  content-pinned, changed only on demonstrated behavioral need); the
+* the supported OverPy version range and extension policy (resolved by
+  [ADR-0007](adr/0007-reference-pinning-policy.md): version-exact,
+  content-pinned, changed only on demonstrated behavioral need; the
   centralized upstream-reference record is
-  [`compatibility/upstream-references.md`](compatibility/upstream-references.md);
+  [`compatibility/upstream-references.md`](compatibility/upstream-references.md));
 * the machine-readable diagnostic schema and stable code registry;
 * the canonical Workshop output normalizer and its versioning policy;
 * the target/runtime used for semantic scenarios; and

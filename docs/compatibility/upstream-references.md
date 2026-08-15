@@ -1,6 +1,6 @@
 # Centralized Upstream / Reference Inventory
 
-Status: accepted baseline — centralized upstream-reference documentation (#106,
+Status: accepted baseline (centralized upstream-reference documentation, #106,
 extended with the OSTW reference by the M13 investigation, #113)
 Scope: project-level provenance for every upstream implementation Wright studies
 or derives compatibility knowledge from; the durable record that lets Wright
@@ -20,13 +20,13 @@ repeating provenance notes.
 
 | Field | Value |
 | --- | --- |
-| Project | OverPy — high-level language for the Overwatch Workshop |
+| Project | OverPy: high-level language for the Overwatch Workshop |
 | Repository | <https://github.com/Zezombye/overpy> |
 | Pinned reference | npm `overpy@9.7.10` |
 | Content commit | `889d974` (byte-verified; `git describe --tags --exact-match` == `v9.7.10`) |
 | Registry integrity | `sha512-oX17nauJcPTaKIrRFY/rD0Rl8atqFUVv9Hg2TKH+A68/fC8+ZO344Mkd1A/Y0oOVp1hr5tktMBjzMEDDnMEYUw==` |
-| Recorded `gitHead` | `1e268895` — lags tarball content by one release (it is the `v9.7.9` tag commit); do not treat it as the content commit |
-| License assumption | GPL-3.0-only (recorded in `compatibility/oracle/oracle-metadata.json`; an engineering assumption, not a legal conclusion — see [`docs/licensing.md`](../licensing.md)) |
+| Recorded `gitHead` | `1e268895` (lags tarball content by one release; it is the `v9.7.9` tag commit; do not treat it as the content commit) |
+| License assumption | GPL-3.0-only (recorded in `compatibility/oracle/oracle-metadata.json`; an engineering assumption, not a legal conclusion; see [`docs/licensing.md`](../licensing.md)) |
 | Language | en-US (Workshop locale for reference evidence) |
 
 The integrity hash in `oracle-metadata.json` pins the content; reproduction
@@ -105,15 +105,15 @@ exercised by the oracle harness (`compatibility/ostw/run_oracle.py`).
 
 | Field | Value |
 | --- | --- |
-| Project | OSTW — Overwatch Script To Workshop (a.k.a. Deltin's Script To Workshop) |
+| Project | OSTW: Overwatch Script To Workshop (a.k.a. Deltin's Script To Workshop) |
 | Repository | <https://github.com/ItsDeltin/Overwatch-Script-To-Workshop> |
 | Compiler | C# / .NET 8.0, project `Deltinteger` (namespace `Deltin`), executable `Deltinteger` |
 | Default branch | `master`; investigation HEAD `817c1db4` (2026-08-08); 2351 commits, active (≈28 commits in the prior two months) |
 | Stable release tags | `v3.4.0` (2026-05-18), `v3.3.1`, `v3.3.0`, `v3.2.3`, `v3.2.2`, `v3.2.1`, `v3.2.0`, `v3.1.1`, `v3.1.0`, … |
-| Rolling tag | `latest` — a prerelease "Master Build" rebuilt on every `master` push (win-x64/win-x86/linux-x64 self-contained zips); **never a content pin** |
+| Rolling tag | `latest` (a prerelease "Master Build" rebuilt on every `master` push: win-x64/win-x86/linux-x64 self-contained zips; **never a content pin**) |
 | Version constant | `Program.VERSION == "v3.4.0"` still at master HEAD (lags master content; master is ≈2 months ahead of tag `v3.4.0`) |
-| Pinned reference | stable tag `v3.4.0` (content-pinned: git tag plus release-asset hashes), consistent with ADR-0007 — version-exact, content-pinned, changed only on demonstrated behavioral need; `latest`/master are not pins |
-| License assumption | Compiler and wiki: **no license file and none in git history** (GitHub API `license: null`) — treated as unlicensed / all-rights-reserved for source copying; the extension subdirectory (`overwatch-script-to-workshop/LICENSE`) is MIT (Copyright 2026 ItsDeltin). Engineering assumption, not a legal conclusion — see [`docs/licensing.md`](../licensing.md) |
+| Pinned reference | stable tag `v3.4.0` (content-pinned: git tag plus release-asset hashes), consistent with ADR-0007 (version-exact, content-pinned, changed only on demonstrated behavioral need; `latest`/master are not pins) |
+| License assumption | Compiler and wiki: **no license file and none in git history** (GitHub API `license: null`); treated as unlicensed / all-rights-reserved for source copying; the extension subdirectory (`overwatch-script-to-workshop/LICENSE`) is MIT (Copyright 2026 ItsDeltin). Engineering assumption, not a legal conclusion; see [`docs/licensing.md`](../licensing.md) |
 | Workshop-data provenance | `Elements.json` (265 values, 224 actions, 51 enumerators), `LobbySettings.json`, `Maps.json` are generated from a local Overwatch install via the in-repo `DataTool`; Blizzard-IP-adjacent, not to be imported into Wright's catalog |
 | Output languages | en-US default; 13 Workshop locales (`enUS` + 12) via `Elements/OutputLanguage` and `Languages/i18n-*.xml` |
 
@@ -131,8 +131,8 @@ release artifacts. Concretely it serves as:
 * the reference for the Workshop → OSTW reconstruction surface: the upstream
   `Decompiler` (`TextToElement` workshop-text parser + `ElementToCode`
   `WorkshopDecompiler`) defines the reconstructible surface and its idiomatic
-  OSTW naming, compared under a versioned normalizer — never byte-identical
-  output;
+  OSTW naming, compared under a versioned normalizer (never byte-identical
+  output);
 * the source of behavior probes for the OSTW compatibility baseline
   ([`docs/ostw/compatibility-baseline.md`](../ostw/compatibility-baseline.md)).
 
@@ -205,7 +205,7 @@ mechanically extracted from OSTW source or data files.
 * [ADR-0007: OverPy reference pinning policy](../adr/0007-reference-pinning-policy.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](../adr/0004-overpy-licensing-boundary.md)
 * [ADR-0002: Compatibility strategy](../adr/0002-compatibility-strategy.md)
-* [`docs/compatibility.md`](../compatibility.md) — S/D/N/E framework and reference boundary
-* [`docs/licensing.md`](../licensing.md) — component policy and permitted inputs
-* [`docs/opy/compatibility-baseline.md`](../opy/compatibility-baseline.md) — tiered baseline built on this reference
-* [`docs/opy/compat-manifest-spec.md`](../opy/compat-manifest-spec.md) — machine-readable manifest specification
+* [`docs/compatibility.md`](../compatibility.md): S/D/N/E framework and reference boundary
+* [`docs/licensing.md`](../licensing.md): component policy and permitted inputs
+* [`docs/opy/compatibility-baseline.md`](../opy/compatibility-baseline.md): tiered baseline built on this reference
+* [`docs/opy/compat-manifest-spec.md`](../opy/compat-manifest-spec.md): machine-readable manifest specification

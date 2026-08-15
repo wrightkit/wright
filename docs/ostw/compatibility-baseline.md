@@ -1,8 +1,6 @@
 # OSTW Compatibility Baseline and M13 Investigation
 
-Status: accepted baseline (M13 in progress) — OSTW reference/corpus/support
-investigation (#113), baseline pinned (#115), native syntax/project frontend
-foundation (#117), and protect-ban HIR lowering (#118)
+Status: accepted baseline (M13 in progress: OSTW reference/corpus/support investigation #113, baseline pinned #115, native syntax/project frontend foundation #117, and protect-ban HIR lowering #118)
 Status note: Native AST/parser, project settings (`ds.toml`), import-closure
 resolution, and protect-ban HIR lowering are implemented in `crates/wright-ostw`.
 Emission (OSTW → Workshop) and language services remain in progress.
@@ -27,15 +25,15 @@ server:
 
 | Component | Location in `Deltinteger/` | Relevance to Wright |
 | --- | --- | --- |
-| Frontend — hand-written recursive-descent parser, custom lexer with incremental lex/parse, operator-stack expression parsing (C-style + vanilla operators), CST | `Compiler/Parse/` (`Parser.cs`, `Lexer/`), `Compiler/Syntax Tree/` | Defines the grammar surface Wright's OSTW frontend must match for S-level claims |
-| Semantic/type layer — scopes (global/player/rule), `ScriptTypes` type provider, classes (heap, ≤999 instances, inheritance, virtual/override, constructors), structs (value types, `in`/`ref`), enums + pattern matching, generics, lambdas/first-class functions, variables (chasing, extended collection), subroutines, macros, `import`/JSON import, Vanilla Workshop superset with variable/subroutine linking, `ds.toml` project settings | `Parse/` (`Translate.cs` driver, `Types/`, `Variables/`, `Functions/`, `Loops.cs`, `Switch.cs`, `Lambda/`, `PatternMatching/`, `Import/`, `Vanilla/`, `Settings/`) | The semantic surface: categories 2–10 below |
-| Rule/event model — 11 events (table in the wiki "Rules" page), rule priority ordering, synthesized `Initial Global`/`Initial Player` rules | `Parse/RuleAction.cs`, `Parse/TranslateRule.cs` | Shared with Wright's HIR rule model |
-| Emission — Workshop elements (`IWorkshopTree`), rule/variable/subroutine serialization, 13 locales, old vs `c_style_workshop_output` syntax, optimizer (per-function constant folding, default on), element counts, optional comments | `Elements/` (`WorkshopConverter/`, `Optimize.cs`, `OutputLanguage.cs`, `Variables.cs`) | N-level comparisons; optimizer parity is explicitly not a goal |
-| Decompiler — Workshop text → element tree (`TextToElement`) → OSTW code (`ElementToCode`, function mapping table) | `Decompiler/` | Workshop → OSTW reconstruction reference |
-| Emulator — ticks Workshop rules with players/variables/arrays; upstream's own behavioral oracle in `Deltinteger.Tests` (`EmulateTick`, `AtomizeAndReconstruct`) | `Emulator/` | Candidate E-level reference within its documented subset |
-| Language server — full LSP stdio server: completion, signature, hover, definition, references, rename, code lens, color, document symbols, semantic tokens, configuration; custom `workshopCode`/`elementCount`/`serverError` notifications; custom `decompile.insert`/`decompile.file` requests | `Language Server/` | The headless oracle execution path (see oracle report) |
-| WASM interop — `OstwJavascript` exports (`AddModelAsync`, `UpdateModelAsync`, `SetCompiledWorkshopCode`, …) | `Web/Javascript.cs` | Secondary oracle path; built only via `dotnet publish -r browser-wasm` (not shipped in release assets) |
-| CLI — `--ping`, `--langserver`, `--schema`, `--editor`, `--decompile-clipboard <file>`, default compile (interactive, clipboard-bound) | `Program.cs` | Default compile is not headless-friendly; `--langserver` is |
+| Frontend: hand-written recursive-descent parser, custom lexer with incremental lex/parse, operator-stack expression parsing (C-style + vanilla operators), CST | `Compiler/Parse/` (`Parser.cs`, `Lexer/`), `Compiler/Syntax Tree/` | Defines the grammar surface Wright's OSTW frontend must match for S-level claims |
+| Semantic/type layer: scopes (global/player/rule), `ScriptTypes` type provider, classes (heap, ≤999 instances, inheritance, virtual/override, constructors), structs (value types, `in`/`ref`), enums + pattern matching, generics, lambdas/first-class functions, variables (chasing, extended collection), subroutines, macros, `import`/JSON import, Vanilla Workshop superset with variable/subroutine linking, `ds.toml` project settings | `Parse/` (`Translate.cs` driver, `Types/`, `Variables/`, `Functions/`, `Loops.cs`, `Switch.cs`, `Lambda/`, `PatternMatching/`, `Import/`, `Vanilla/`, `Settings/`) | The semantic surface: categories 2–10 below |
+| Rule/event model: 11 events (table in the wiki "Rules" page), rule priority ordering, synthesized `Initial Global`/`Initial Player` rules | `Parse/RuleAction.cs`, `Parse/TranslateRule.cs` | Shared with Wright's HIR rule model |
+| Emission: Workshop elements (`IWorkshopTree`), rule/variable/subroutine serialization, 13 locales, old vs `c_style_workshop_output` syntax, optimizer (per-function constant folding, default on), element counts, optional comments | `Elements/` (`WorkshopConverter/`, `Optimize.cs`, `OutputLanguage.cs`, `Variables.cs`) | N-level comparisons; optimizer parity is explicitly not a goal |
+| Decompiler: Workshop text → element tree (`TextToElement`) → OSTW code (`ElementToCode`, function mapping table) | `Decompiler/` | Workshop → OSTW reconstruction reference |
+| Emulator: ticks Workshop rules with players/variables/arrays; upstream's own behavioral oracle in `Deltinteger.Tests` (`EmulateTick`, `AtomizeAndReconstruct`) | `Emulator/` | Candidate E-level reference within its documented subset |
+| Language server: full LSP stdio server (completion, signature, hover, definition, references, rename, code lens, color, document symbols, semantic tokens, configuration; custom `workshopCode`/`elementCount`/`serverError` notifications; custom `decompile.insert`/`decompile.file` requests) | `Language Server/` | The headless oracle execution path (see oracle report) |
+| WASM interop: `OstwJavascript` exports (`AddModelAsync`, `UpdateModelAsync`, `SetCompiledWorkshopCode`, …) | `Web/Javascript.cs` | Secondary oracle path; built only via `dotnet publish -r browser-wasm` (not shipped in release assets) |
+| CLI: `--ping`, `--langserver`, `--schema`, `--editor`, `--decompile-clipboard <file>`, default compile (interactive, clipboard-bound) | `Program.cs` | Default compile is not headless-friendly; `--langserver` is |
 
 ## Tier taxonomy
 
@@ -63,36 +61,36 @@ nothing is implemented.
 
 | # | Category | Tier | Parse | Sem | Comp | Tooling | Ref |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | **Lexing/grammar core** — C#-style tokens, `//`/`/* */` comments, braces, literals (Number/String/Boolean/Vector/Any), operators incl. `??`/`?.`/`++`/`--`/compound assignment, `.del`/`.ostw`/`.workshop` inputs | `baseline-planned` (core subset) | ✅ planned | ✅ | ✅ | ✅ | ✅ probes |
-| 1a | Vanilla Workshop superset inside OSTW files (`variables { … }`, `rule("…") { event/actions }`, variable/subroutine linking) | `evidence-prioritized` (needed for Workshop → OSTW round-trip and mixed files) | — | — | — | — | ✅ upstream parses it |
-| 2 | **Rules** — `rule: "name"` (+ optional sort order), 11 events, rule-level `if` conditions, rule/event context (global vs player), synthesized initial rules | `baseline-planned` (core) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 3 | **Variables & scopes** — `globalvar`/`playervar`/`define`/`static`, typed, rule-level and block scope, chasing/modifying, player-variable receiver semantics, explicit IDs, extended collection | `baseline-planned` (core subset) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 4 | **Control flow** — if/else if/else, `for`/`foreach`/`while`, `continue`/`break`, `switch` (fallthrough), ternary, `Root` keyword | `baseline-planned` (core subset) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 5 | **Values & workshop-function calls** — `SmallMessage`, `Kill`, `Wait`, `HostPlayer`, … resolved through Wright's Workshop catalog (not OSTW's game-derived data); receiver/member access (`EventPlayer().x`, `AllPlayers().isBoss = …`), string concat/format | `baseline-planned` (generic surface; catalog-bound like OPY category 6/7) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 6 | **Types** — Number/String/Boolean/Player/Vector/Any, arrays (literal/index/append/remove/Length), structs (value semantics, `in`/`ref`), enums (basic members), casts (`<T>expr`) | `baseline-planned` (core); class/generic/lambda surface below | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 7 | **Functions/macros/subroutines** — user functions with params/return, `in`/`ref` params, macros (compile-time, no actions), subroutines (incl. linking), bounded recursion, `recursive` keyword | `baseline-planned` (core) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 8 | **Classes** — heap allocation (≤999 instances), inheritance, virtual/override, constructors, `delete`, pointer/reference semantics, reference validation (inline/subroutine), class generations | `evidence-prioritized` | — | — | — | — | ✅ upstream tests |
-| 9 | **Generics / lambdas / pattern matching** — generic classes/functions, `Func`/function types, expanded enum pattern matching | `evidence-prioritized` | — | — | — | — | ✅ upstream tests |
-| 10 | **Project settings (`ds.toml`)** — `entry_point`, `out_file`, `optimize_output`, `c_style_workshop_output`, variable/subroutine prefixes, `reset_nonpersistent`/`__loadPersist`, validation toggles | `baseline-planned` (the settings subset the corpus uses) | ✅ | ✅ | — | ✅ | ✅ probes |
-| 11 | **OSTW → Workshop emission** — en-US, both output syntaxes, default-argument filling, element counts | `baseline-planned` | — | — | ✅ | — | ✅ normalized |
-| 12 | **Workshop → OSTW reconstruction** — rules/actions/conditions/values via Wright's Workshop parser → WIR → a Wright-owned OSTW emitter; `import "settings.json"` handling | `baseline-planned` (declared surface); quality criteria defined before implementation | — | — | ✅ | — | ✅ reference decompiler |
-| 13 | **Tooling/language services** — OSTW documents in `check`/`lint`/`analyze`/`inspect`, editor-neutral language services, LSP mapping, source provenance and structured diagnostics through `wright-result/v1` | `baseline-planned` | — | — | — | ✅ | — |
-| 14 | **Emission extras** — multi-locale output (12 non-en-US), optimizer-equivalent transforms, `use_tabs_in_workshop_output`, `compile_miscellaneous_comments` | `legacy-quirk/demand-driven` (en-US is the corpus default) | — | — | — | — | partial |
-| 15 | **Specialized subsystems** — pathfinding (`.pathmap`/`.csv`), asset/model import, JSON import, debugger protocol, lobby-settings authoring schema, save/load (`reset_nonpersistent`) | `evidence-prioritized` (lobby settings if corpus needs it) / `reference-limited` (debugger requires a live game) | — | — | — | — | partial |
-| 16 | **Reference quirks** — interactive/clipboard-bound default CLI, `xclip` dependency headless, `gitHead`-style tag drift (`Program.VERSION` lags master), rolling `latest` tag, emulator `Wait` unimplemented, optimizer output identity | `reference-limited/inconclusive` | — | — | — | — | documented |
+| 1 | **Lexing/grammar core**: C#-style tokens, `//`/`/* */` comments, braces, literals (Number/String/Boolean/Vector/Any), operators incl. `??`/`?.`/`++`/`--`/compound assignment, `.del`/`.ostw`/`.workshop` inputs | `baseline-planned` (core subset) | ✅ planned | ✅ | ✅ | ✅ | ✅ probes |
+| 1a | Vanilla Workshop superset inside OSTW files (`variables { … }`, `rule("…") { event/actions }`, variable/subroutine linking) | `evidence-prioritized` (needed for Workshop → OSTW round-trip and mixed files) | - | - | - | - | ✅ upstream parses it |
+| 2 | **Rules**: `rule: "name"` (+ optional sort order), 11 events, rule-level `if` conditions, rule/event context (global vs player), synthesized initial rules | `baseline-planned` (core) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 3 | **Variables & scopes**: `globalvar`/`playervar`/`define`/`static`, typed, rule-level and block scope, chasing/modifying, player-variable receiver semantics, explicit IDs, extended collection | `baseline-planned` (core subset) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 4 | **Control flow**: if/else if/else, `for`/`foreach`/`while`, `continue`/`break`, `switch` (fallthrough), ternary, `Root` keyword | `baseline-planned` (core subset) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 5 | **Values & workshop-function calls**: `SmallMessage`, `Kill`, `Wait`, `HostPlayer`, … resolved through Wright's Workshop catalog (not OSTW's game-derived data); receiver/member access (`EventPlayer().x`, `AllPlayers().isBoss = …`), string concat/format | `baseline-planned` (generic surface; catalog-bound like OPY category 6/7) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 6 | **Types**: Number/String/Boolean/Player/Vector/Any, arrays (literal/index/append/remove/Length), structs (value semantics, `in`/`ref`), enums (basic members), casts (`<T>expr`) | `baseline-planned` (core); class/generic/lambda surface below | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 7 | **Functions/macros/subroutines**: user functions with params/return, `in`/`ref` params, macros (compile-time, no actions), subroutines (incl. linking), bounded recursion, `recursive` keyword | `baseline-planned` (core) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 8 | **Classes**: heap allocation (≤999 instances), inheritance, virtual/override, constructors, `delete`, pointer/reference semantics, reference validation (inline/subroutine), class generations | `evidence-prioritized` | - | - | - | - | ✅ upstream tests |
+| 9 | **Generics / lambdas / pattern matching**: generic classes/functions, `Func`/function types, expanded enum pattern matching | `evidence-prioritized` | - | - | - | - | ✅ upstream tests |
+| 10 | **Project settings (`ds.toml`)**: `entry_point`, `out_file`, `optimize_output`, `c_style_workshop_output`, variable/subroutine prefixes, `reset_nonpersistent`/`__loadPersist`, validation toggles | `baseline-planned` (the settings subset the corpus uses) | ✅ | ✅ | - | ✅ | ✅ probes |
+| 11 | **OSTW → Workshop emission**: en-US, both output syntaxes, default-argument filling, element counts | `baseline-planned` | - | - | ✅ | - | ✅ normalized |
+| 12 | **Workshop → OSTW reconstruction**: rules/actions/conditions/values via Wright's Workshop parser → WIR → a Wright-owned OSTW emitter; `import "settings.json"` handling | `baseline-planned` (declared surface; quality criteria defined before implementation) | - | - | ✅ | - | ✅ reference decompiler |
+| 13 | **Tooling/language services**: OSTW documents in `check`/`lint`/`analyze`/`inspect`, editor-neutral language services, LSP mapping, source provenance and structured diagnostics through `wright-result/v1` | `baseline-planned` | - | - | - | ✅ | - |
+| 14 | **Emission extras**: multi-locale output (12 non-en-US), optimizer-equivalent transforms, `use_tabs_in_workshop_output`, `compile_miscellaneous_comments` | `legacy-quirk/demand-driven` (en-US is the corpus default) | - | - | - | - | partial |
+| 15 | **Specialized subsystems**: pathfinding (`.pathmap`/`.csv`), asset/model import, JSON import, debugger protocol, lobby-settings authoring schema, save/load (`reset_nonpersistent`) | `evidence-prioritized` (lobby settings if corpus needs it) / `reference-limited` (debugger requires a live game) | - | - | - | - | partial |
+| 16 | **Reference quirks**: interactive/clipboard-bound default CLI, `xclip` dependency headless, `gitHead`-style tag drift (`Program.VERSION` lags master), rolling `latest` tag, emulator `Wait` unimplemented, optimizer output identity | `reference-limited/inconclusive` | - | - | - | - | documented |
 
 ## Corpus inventory and acquisition plan
 
-Policy: the corpus follows `compatibility/README.md` — fixtures from a project
+Policy: the corpus follows `compatibility/README.md`: fixtures from a project
 without an explicit redistribution license stay out until resolved. Acquisition
-reuses `scripts/acquire-corpus.py` + `scripts/corpus-manifest.json` (immutable
+reuses `scripts/acquire-corpus.py` and `scripts/corpus-manifest.json` (immutable
 commits, per-file SHA-256, license fields, full include closures).
 
 | Candidate | Provenance | Verdict |
 | --- | --- | --- |
-| `ItsDeltin/Lava` — the official OSTW example collection (minigames, maze, dodgeball, …), ≈25 `.del` files | No license file (GitHub API `license: null`), last pushed 2021 | **Excluded until licensing resolves**; can be a local reference read for behavior |
-| `pharingWell/MOBAwatch` — "A MOBA made in Overwatch", 69 `.ostw`/`.del` files (35 `.ostw` + 34 `.del`) across `Header Files/`/`Source Files/`, `c_style_workshop_output = true`, `ds.toml` present | BSD-2-Clause, last pushed 2025-02-21, `release` default branch | **Primary corpus candidate** — large, active-format, BSD-redistributable |
-| `GrandeurHammers/protect-ban` — `main.ostw` + `interface/`/`utils/` `.del` modules, `ds.toml` present | MIT, last pushed 2025-07-19 | **Secondary corpus candidate** — small, clean project layout |
+| `ItsDeltin/Lava`: official OSTW example collection (minigames, maze, dodgeball, …), ≈25 `.del` files | No license file (GitHub API `license: null`), last pushed 2021 | **Excluded until licensing resolves**; can be a local reference read for behavior |
+| `pharingWell/MOBAwatch`: "A MOBA made in Overwatch", 69 `.ostw`/`.del` files (35 `.ostw` + 34 `.del`) across `Header Files/`/`Source Files/`, `c_style_workshop_output = true`, `ds.toml` present | BSD-2-Clause, last pushed 2025-02-21, `release` default branch | **Primary corpus candidate** (large, active-format, BSD-redistributable) |
+| `GrandeurHammers/protect-ban`: `main.ostw` + `interface/`/`utils/` `.del` modules, `ds.toml` present | MIT, last pushed 2025-07-19 | **Secondary corpus candidate** (small, clean project layout) |
 | Upstream `Deltinteger.Tests` sources | Part of the unlicensed compiler repo | Not redistributable; behavior may inform the baseline as observed evidence only |
 | OSTW wiki examples | Wiki repo, no license | Not redistributable wholesale; short snippets under fair-use review before any commit |
 
@@ -150,7 +148,7 @@ an automatic first implementation requirement. Measured observations:
 Verified on 2026-08-15 (linux-x64 self-contained build under linux/amd64
 container emulation on an arm64 macOS host):
 
-* **`--ping` works** — prints `Hello!` and exits 0. Cheapest CI smoke check.
+* **`--ping` works**: prints `Hello!` and exits 0. Cheapest CI smoke check.
 * **Default CLI compile is not headless.** It prints "Press enter to copy code
   to clipboard", blocks on stdin, and fails when clipboard tooling (`xclip`)
   is absent. `out_file` in `ds.toml` is honored only on the workspace/LSP path
@@ -159,14 +157,14 @@ container emulation on an arm64 macOS host):
 * **Viable oracle path: the stdio language server (`--langserver`).** Standard
   LSP `initialize` + `textDocument/didOpen` triggers a workspace-aware compile
   that honors `ds.toml`; results arrive as `textDocument/publishDiagnostics`
-  plus the custom `workshopCode` (string) and `elementCount` notifications —
-  the same protocol the VS Code extension consumes. Output language is
+  plus the custom `workshopCode` (string) and `elementCount` notifications
+  (the same protocol the VS Code extension consumes). Output language is
   configurable. This is a deterministic, clipboard-free, non-interactive
   oracle.
 * **Secondary path: browser-WASM interop (`OstwJavascript`).** Exposes
   `AddModelAsync`/`UpdateModelAsync` and `SetCompiledWorkshopCode`, but the
   WASM AppBundle is not shipped in release assets; it requires building with
-  `dotnet publish -r browser-wasm` (needs a .NET 8 SDK) — heavier and deferred.
+  `dotnet publish -r browser-wasm` (needs a .NET 8 SDK), which is heavier and deferred.
 * **Platform constraint.** Release assets are x64-only (win-x64/win-x86/
   linux-x64 self-contained; framework-dependent zips need the .NET 8 runtime).
   No macOS/arm64 builds. On arm64 hosts, a linux/amd64 container (verified via
@@ -186,38 +184,38 @@ container emulation on an arm64 macOS host):
 Reusable Wright-owned contracts (issue #90's "converge on canonical Workshop
 semantics/WIR" requirement):
 
-* **Session/driver** (`wright-driver` `CompilerSession`, `SourceKind`) — add
+* **Session/driver** (`wright-driver` `CompilerSession`, `SourceKind`): add
   `SourceKind::Ostw`; input resolution, file registry, provenance, diagnostics
   envelope, profile application, and result rendering are frontend-neutral.
-* **HIR/WIR/lowering** (`wright-core`, `wright-ir`) — the OSTW frontend lowers
+* **HIR/WIR/lowering** (`wright-core`, `wright-ir`): the OSTW frontend lowers
   to Wright HIR; workshop-function calls resolve through the existing
   catalog/WIR path exactly like the OPY receiver-call surface
   (`crates/wright-workshop/src/catalog/`).
-* **Workshop parser/emitter/round-trip** (`wright-workshop`) — Workshop stays
+* **Workshop parser/emitter/round-trip** (`wright-workshop`): Workshop stays
   the interoperability hub; OSTW → Workshop emission reuses the emitter, and
   Workshop → OSTW reconstruction reuses the Workshop parser and WIR, adding
   only a Wright-owned OSTW emitter.
 * **Analyzer/language services/LSP** (`wright-analyzer`, `wright-language`,
-  `wright-lsp`) — symbols, references, CFG, hover/definition/references/rename/
+  `wright-lsp`): symbols, references, CFG, hover/definition/references/rename/
   semantic tokens are language-neutral once the frontend produces HIR with
   provenance.
-* **Compatibility harness and corpus tooling** — fixture schema, oracle
+* **Compatibility harness and corpus tooling**: fixture schema, oracle
   identity blocks, S/D/N gates, `diff.py` producer contract, and
   `acquire-corpus.py`/`corpus-manifest.json` extend unchanged.
 
 OSTW-frontend-specific (must remain frontend-specific):
 
-* **Lexer/parser/CST** for the C#-style syntax plus the Vanilla superset —
+* **Lexer/parser/CST** for the C#-style syntax plus the Vanilla superset:
   a new `wright-ostw` crate (or frontend module), mirroring `wright-opy`.
 * **Type/name-resolution semantics** unique to OSTW: classes (heap, ≤999,
   inheritance), structs with `in`/`ref`, enums/pattern matching, generics,
   lambdas, macros (compile-time), `ds.toml` project model. Some values (arrays,
   strings, variables, enums) reuse HIR/WIR shapes; class/generic/lambda
   semantics are OSTW-specific.
-* **OSTW emission naming for reconstruction** — the decompiler's function
+* **OSTW emission naming for reconstruction**: the decompiler's function
   mapping is OSTW-idiomatic; Wright must own its mapping rather than import
   the upstream table (unlicensed source).
-* **Oracle driver** — the LSP-stdio client is reference infrastructure in the
+* **Oracle driver**: the LSP-stdio client is reference infrastructure in the
   harness, never a core dependency.
 
 Directional evidence requirement (issue #90): OSTW → Workshop and Workshop →
@@ -238,7 +236,7 @@ is A+B+C scoped to the MOBAwatch/protect-ban corpus.
 | D | Workshop → OSTW reconstruction | Wright-owned OSTW emitter for the declared Workshop surface; reconstruction quality criteria (semantics + useful structure, no formatting/comments/macro recovery); round-trip tests | Reconstruction recompiles to equivalent WIR under the declared boundary |
 | E | Tooling & language services | OSTW in `check`/`lint`/`analyze`/`inspect`; editor-neutral language services; LSP mapping; session/CI integration | Cross-input workflows without language-specific semantic forks |
 | Later | Evidence-prioritized | Classes/generics/lambdas/pattern matching (category 8–9) if the corpus demands them; lobby-settings authoring; multi-locale | Corpus or PM evidence |
-| Explicitly deferred | — | Direct OPY ↔ OSTW; debugger protocol; optimizer parity; perfect reconstruction; E-level timing scenarios | — |
+| Explicitly deferred | - | Direct OPY ↔ OSTW; debugger protocol; optimizer parity; perfect reconstruction; E-level timing scenarios | - |
 
 ## Open questions
 
@@ -252,8 +250,8 @@ is A+B+C scoped to the MOBAwatch/protect-ban corpus.
 
 ## Related documents
 
-* [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md) — pinned OSTW reference identity and provenance
-* [`docs/compatibility.md`](../compatibility.md) — S/D/N/E framework
-* [`docs/opy/compatibility-baseline.md`](../opy/compatibility-baseline.md) — the OPY counterpart this baseline mirrors
+* [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md): pinned OSTW reference identity and provenance
+* [`docs/compatibility.md`](../compatibility.md): S/D/N/E framework
+* [`docs/opy/compatibility-baseline.md`](../opy/compatibility-baseline.md): the OPY counterpart this baseline mirrors
 * [`docs/licensing.md`](../licensing.md), [ADR-0004](../adr/0004-overpy-licensing-boundary.md), [ADR-0007](../adr/0007-reference-pinning-policy.md)
 * [Issue #90](https://github.com/wrightkit/wright/issues/90), [Issue #113](https://github.com/wrightkit/wright/issues/113)

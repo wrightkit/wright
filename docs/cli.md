@@ -1,6 +1,6 @@
 # Wright CLI and Driver Contract
 
-Status: accepted baseline — living driver and CLI contract
+Status: accepted baseline (living driver and CLI contract)
 Scope: `wright` executable, `wright-driver` crate, and their machine-readable
 contracts
 
@@ -54,9 +54,9 @@ be overridden with `--kind auto|opy|ostw|workshop|protocol`. `--locale`
 overrides Workshop client-locale detection; `--root` sets the include/project
 root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
 are parsed and lowered to Wright HIR by the native OSTW frontend
-(`wright-ostw`, M13 #117, #118), which loads the `ds.toml` project closure and
-resolves reachable imports; standalone emission to Workshop text and full
-language services remain in progress.
+(`wright-ostw`), which loads the `ds.toml` project closure and resolves
+reachable imports; standalone emission to Workshop text and full language
+services remain in progress.
 
 ## `wright lint` and the lint configuration
 
@@ -69,10 +69,10 @@ configuration is deterministic and identical across CLI and programmatic
 
 Two lint-only flags configure the registry; both are repeatable:
 
-* `--disable-rule <ID>` — disable a rule by stable ID (`min-wait-loop`,
+* `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
   `while-without-wait`).
-* `--rule-severity <ID>:<warning|info>` — override a rule's severity.
+* `--rule-severity <ID>:<warning|info>`: override a rule's severity.
 
 These flags are usage errors on every other command (exit 2).
 
@@ -202,18 +202,18 @@ infer them from process state alone.
 
 `wright update` upgrades a **standalone** installation (one created by
 `install.sh` or by unpacking a release archive manually) from the canonical
-GitHub Release artifacts — the same archives and checksums the installer and
-the package-manager manifests consume. It is not a compiler workflow, so it
+GitHub Release artifacts (the same archives and checksums the installer and
+the package-manager manifests consume). It is not a compiler workflow, so it
 is text-only and produces no `wright-result/v1` envelope.
 
-* `wright update` — resolve the latest stable release, download the platform
+* `wright update`: resolve the latest stable release, download the platform
   archive and its published SHA-256 checksum, verify the checksum before
   touching anything, extract, and atomically replace `wright` and
   `wright-lsp` in the running executable's directory, then smoke-check both
   binaries report the new version.
-* `wright update --check` — resolve and report whether an update is
+* `wright update --check`: resolve and report whether an update is
   available without modifying the installation.
-* `wright update --version <VERSION>` — install an exact version instead of
+* `wright update --version <VERSION>`: install an exact version instead of
   the latest stable release. Refuses a downgrade (the installed version is
   newer) with exit 1.
 
@@ -230,9 +230,9 @@ unwritable installation directory, fails with reinstall guidance (exit 4).
 
 Environment overrides (test/advanced hooks, matching `install.sh`):
 
-* `WRIGHT_INSTALL_BASE_URL` — base URL of release artifacts
-* `WRIGHT_API_URL` — URL used to resolve the latest release
-* `WRIGHT_INSTALL_OS` / `WRIGHT_INSTALL_ARCH` — override platform detection
+* `WRIGHT_INSTALL_BASE_URL`: base URL of release artifacts
+* `WRIGHT_API_URL`: URL used to resolve the latest release
+* `WRIGHT_INSTALL_OS` / `WRIGHT_INSTALL_ARCH`: override platform detection
 
 ## stdout / stderr ownership
 

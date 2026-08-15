@@ -19,35 +19,35 @@ Authority Hierarchy:
 ```
 
 ### 1. Repository Entry Points
-Root-level files provide concise, standard navigation entry points:
-- [`README.md`](../README.md) — Public product overview, feature summary, ecosystem table, and quick start.
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — Contributor onboarding, toolchain policy, and check workflows.
-- [`AGENTS.md`](../AGENTS.md) — Agent routing rules, architectural boundaries, and task protocols.
-- [`LICENSE`](../LICENSE) — Canonical GNU AGPL v3.0 license text.
+Root-level files provide concise navigation entry points:
+- [`README.md`](../README.md): Public product overview, feature summary, ecosystem table, and quick start.
+- [`CONTRIBUTING.md`](../CONTRIBUTING.md): Contributor onboarding, toolchain policy, and check workflows.
+- [`AGENTS.md`](../AGENTS.md): Agent routing rules, architectural boundaries, and task protocols.
+- [`LICENSE`](../LICENSE): Canonical GNU AGPL v3.0 license text.
 
 ### 2. Living Durable Contracts & Reference Docs
 Maintained specifications describing Wright as it currently exists. When a
 feature or contract evolves, its living document is updated directly:
-- **Architecture**: [`architecture.md`](architecture.md) — Component responsibilities, IR boundaries, dependency rules.
-- **Compatibility**: [`compatibility.md`](compatibility.md) — S/D/N/E compatibility levels, gate criteria, priority order.
-- **Compatibility Matrix**: [`v1-matrix.md`](v1-matrix.md) — Frozen input surfaces, release gate definitions, intentional differences.
-- **Licensing & Clean-Room Boundary**: [`licensing.md`](licensing.md) — Independent implementation policy and external reference isolation.
-- **CLI & Driver Contract**: [`cli.md`](cli.md) — Commands, exit codes, stdio ownership, `wright-result/v1` envelope.
-- **Embedding & Tool API**: [`embedding.md`](embedding.md) — Programmatic session API, `ToolService`, safe source refactoring.
-- **Language Services & LSP**: [`language-services.md`](language-services.md) — Editor-neutral analysis, responsiveness contract, `wright-lsp`.
-- **Release & Distribution**: [`release.md`](release.md) — Binary packaging, checksum verification, GitHub Releases automation.
-- **Agent Team Coordination**: [`agent-team.md`](agent-team.md) — Multi-role governance, authority ordering, and blocked states.
+- **Architecture**: [`architecture.md`](architecture.md): Component responsibilities, IR boundaries, dependency rules.
+- **Compatibility**: [`compatibility.md`](compatibility.md): S/D/N/E compatibility levels, gate criteria, priority order.
+- **Compatibility Matrix**: [`v1-matrix.md`](v1-matrix.md): Frozen input surfaces, release gate definitions, intentional differences.
+- **Licensing & Clean-Room Boundary**: [`licensing.md`](licensing.md): Independent implementation policy and external reference isolation.
+- **CLI & Driver Contract**: [`cli.md`](cli.md): Commands, exit codes, stdio ownership, `wright-result/v1` envelope.
+- **Embedding & Tool API**: [`embedding.md`](embedding.md): Programmatic session API, `ToolService`, safe source refactoring.
+- **Language Services & LSP**: [`language-services.md`](language-services.md): Editor-neutral analysis, responsiveness contract, `wright-lsp`.
+- **Release & Distribution**: [`release.md`](release.md): Binary packaging, checksum verification, GitHub Releases automation.
+- **Agent Team Coordination**: [`agent-team.md`](agent-team.md): Multi-role governance, authority ordering, and blocked states.
 - **Compatibility Planning & Reference**:
-  - [Upstream / Reference Inventory](compatibility/upstream-references.md) — Centralized pinned-reference provenance (OverPy 9.7.10, OSTW v3.4.0).
-  - [Proactive OPY Compatibility Baseline](opy/compatibility-baseline.md) — Tiered inventory of the OPY surface by semantic category and support dimension.
-  - [Proactive OSTW Compatibility Baseline](ostw/compatibility-baseline.md) — OSTW reference/corpus/support investigation (#113): tiered inventory, corpus plan, oracle feasibility, reuse findings, proposed M13 decomposition.
-  - [OPY Semantic Compatibility Manifest Spec](opy/compat-manifest-spec.md) — Machine-readable compatibility contract for builtins, signatures, enums, aliases.
+  - [Upstream / Reference Inventory](compatibility/upstream-references.md): Centralized pinned-reference provenance (OverPy 9.7.10, OSTW v3.4.0).
+  - [Proactive OPY Compatibility Baseline](opy/compatibility-baseline.md): Tiered inventory of the OPY surface by semantic category and support dimension.
+  - [Proactive OSTW Compatibility Baseline](ostw/compatibility-baseline.md): OSTW reference inventory, tiered surface, corpus plan, and M13 milestones.
+  - [OPY Semantic Compatibility Manifest Spec](opy/compat-manifest-spec.md): Machine-readable compatibility contract for builtins, signatures, enums, aliases.
 - **Language Support Matrices**:
-  - [`.opy` Support Matrix](opy/support-matrix.md) — Supported syntax, declarations, expressions, settings, diagnostics.
-  - [Workshop Support Matrix](workshop/support-matrix.md) — Evidenced actions, values, events, enums, localized catalog.
+  - [`.opy` Support Matrix](opy/support-matrix.md): Supported syntax, declarations, expressions, settings, diagnostics.
+  - [Workshop Support Matrix](workshop/support-matrix.md): Evidenced actions, values, events, enums, localized catalog.
 - **Protocol & Pipeline Specifications**:
-  - [Opy HIR v1 Protocol](hir/opy-hir-v1.md) — JSON schema for the `.opy` frontend HIR interchange boundary.
-  - [Workshop Catalog Data Pipeline](workshop/catalog-pipeline.md) — Canonical catalog generation, localization data, validation.
+  - [Opy HIR v1 Protocol](hir/opy-hir-v1.md): JSON schema for the `.opy` frontend HIR interchange boundary.
+  - [Workshop Catalog Data Pipeline](workshop/catalog-pipeline.md): Canonical catalog generation, localization data, validation.
 
 ### 3. Architecture Decision Records (ADRs)
 [`docs/adr/`](adr/README.md) captures point-in-time architecture decisions, their
