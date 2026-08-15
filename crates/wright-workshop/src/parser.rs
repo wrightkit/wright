@@ -14,7 +14,7 @@ use wright_ir::wir::{self, Action, Event, ModifyOp, Value, ValueNode};
 
 use crate::catalog::{Catalog, Kind, Locale};
 use crate::error::{Result, WorkshopError};
-use crate::lexer::{tokenize, Token, TokenKind};
+use crate::lexer::{Token, TokenKind, tokenize};
 
 /// Where action parsing stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

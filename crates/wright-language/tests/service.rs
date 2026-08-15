@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use wright_language::document::{Document, Position};
 use wright_language::LanguageService;
+use wright_language::document::{Document, Position};
 use wright_opy::manifest;
 
 const CORPUS: &str = "synthetic/declarations-rules";

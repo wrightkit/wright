@@ -4,9 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
+use wright_driver::CompilerSession;
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::result::exit;
-use wright_driver::CompilerSession;
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")

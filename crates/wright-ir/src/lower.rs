@@ -35,7 +35,7 @@
 
 use std::collections::HashMap;
 
-use crate::error::{unsupported, IrError};
+use crate::error::{IrError, unsupported};
 use crate::hir::{
     self, BinaryOp, Expr, ExprId, GlobalVarId, MacroId, PlayerVarId, Stmt, StmtId, SubroutineId,
 };
@@ -1608,10 +1608,11 @@ impl<'a> Lowerer<'a> {
                 span,
             ),
             Expr::Format { text, args, .. } => {
-                let mut lowered = vec![self
-                    .target
-                    .values
-                    .push(ValueNode::new(Value::String(text.clone()), span))];
+                let mut lowered = vec![
+                    self.target
+                        .values
+                        .push(ValueNode::new(Value::String(text.clone()), span)),
+                ];
                 lowered.extend(self.lower_values_with(args, params, out)?);
                 ValueNode::new(
                     Value::Call {
