@@ -19,7 +19,8 @@ CompilerSession (wright-driver)
     ├─ validation (WIR)
     ├─ lowering (HIR → WIR)
     ├─ analysis (SemanticService: findings, symbols, references, CFG)
-    └─ emission (Workshop text)
+    ├─ emission (Workshop text)
+    └─ reconstruction (WIR → canonical OPY/OSTW source, #126)
             ↓
    Envelope<T> (typed result + diagnostics + exit code)
             ↓
@@ -36,6 +37,7 @@ result.
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
+| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, analyze | `check: ok` (or nothing on failure) |
 | `wright analyze [INPUT]` | Parse, lower, analyze | findings and summary |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
@@ -65,6 +67,44 @@ with structured, source-located diagnostics when the reachable surface is
 outside the declared support matrix (see
 [`docs/ostw/support-matrix.md`](ostw/support-matrix.md)) or the project
 boundary is unresolved (e.g. missing imports).
+
+## `wright convert` and the reconstruction surface (#126)
+
+`wright convert [INPUT] --target opy|ostw` reconstructs **validated Workshop
+input** as canonical source for the selected target through the shared
+driver/session conversion operation (`CompilerSession::convert`). The CLI is
+a thin passthrough: it parses argv, builds the session, calls the driver
+workflow, and renders the envelope — no reconstruction logic lives in the CLI
+layer. The driver reuses its own `load()` path (kind detection, Workshop
+parsing, WIR validation) and delegates per target to the language-owned
+reconstructors, `wright_opy::reconstruct::reconstruct` and
+`wright_ostw::reconstruct::reconstruct`, unchanged.
+
+* The target flag is **required and explicit** (`--target opy|ostw`); a
+  missing or unknown target is a usage error (exit 2), and `--target` on any
+  other command is a usage error too.
+* Only Workshop input is accepted: the declared conversion surface is
+  Workshop → OPY and Workshop → OSTW, with **no direct OPY ↔ OSTW path**.
+  A non-Workshop input fails with the structured `convert-input-kind`
+  diagnostic (exit 1).
+* The result is **canonical reconstructed source** for the selected target
+  (`result.text`) plus its deterministic SHA-256 (`result.sha256`) and the
+  target (`result.target`). Reconstruction is semantic, not original-source
+  recovery: comments, formatting, macros, functions, and source abstractions
+  are not recovered (see the support matrices for the exact reconstructed and
+  rejected surfaces).
+* Non-representable constructs fail deterministically with the
+  reconstructor's stable structured diagnostics (stage `reconstruction`,
+  exit code 3) and **never carry partial source**. The supported directions
+  and their limits are documented in
+  [`docs/opy/support-matrix.md`](opy/support-matrix.md) and
+  [`docs/ostw/support-matrix.md`](ostw/support-matrix.md).
+
+The cross-format round-trip acceptance suite lives in
+`crates/wright-driver/tests/convert.rs` and writes the machine-readable
+report `target/wright-convert-report.json` (one entry per committed fixture:
+`Workshop → convert → native frontend → HIR → WIR → Workshop` for both
+targets, plus the deterministic rejection entries).
 
 ## `wright lint` and the lint configuration
 
@@ -196,10 +236,10 @@ Non-`while-without-wait` findings carry `"boundedness": null`.
 
 | Code | Meaning | Examples |
 | --- | --- | --- |
-| 0 | success | clean check, compiled artifact produced |
-| 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade |
-| 2 | usage error | unknown command/flag, missing option value |
-| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation, unsupported platform for `update` |
+| 0 | success | clean check, compiled artifact produced, reconstructed source produced |
+| 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade, non-Workshop `convert` input |
+| 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target` |
+| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation, unsupported platform for `update`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface) |
 | 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure |
 
 Exit codes are deterministic for identical inputs and configuration and are
@@ -284,7 +324,13 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/
 `lower-error` (lowering), `validation-error` (validation), `input-*`/
 `stdin-*` (discovery), `output-io` (emission), analysis findings reuse the
-analyzer's codes, and `*-internal` / `*-unavailable` (internal).
+analyzer's codes, and `*-internal` / `*-unavailable` (internal). A `convert`
+reconstruction rejection carries the language-owned reconstructor's stable
+code (e.g. `unsupported-per-player-loop` from `wright-opy`,
+`reconstruct-unsupported-action` from `wright-ostw`) with stage
+`reconstruction`; `convert-input-kind` (discovery) rejects non-Workshop
+`convert` input, and `manifest-error`/`catalog-error` from a reconstructor
+map to the internal stage.
 
 The native `.opy` frontend's builtin-resolution stage adds the stable codes
 `unknown-action`, `unknown-value`, `unknown-member`, `invalid-arity`,
@@ -315,8 +361,8 @@ declared in [`opy/support-matrix.md`](opy/support-matrix.md).
 ## Library reuse
 
 External Rust consumers depend on `wright-driver` (never the CLI) and drive
-`CompilerSession::new(config)` → `compile`/`check`/`analyze`/`inspect`/`lint`,
-each returning a typed `Envelope<T>`. Loading is idempotent (`Session::load`),
-and the driver exposes the resolved locale, input identity, and origin
-metadata. See `crates/wright-driver/tests/driver.rs` for the reusable test
-surface.
+`CompilerSession::new(config)` → `compile`/`check`/`analyze`/`inspect`/`lint`
+or `convert(ConvertTarget)`, each returning a typed `Envelope<T>`. Loading is
+idempotent (`Session::load`), and the driver exposes the resolved locale,
+input identity, and origin metadata. See `crates/wright-driver/tests/driver.rs`
+and `crates/wright-driver/tests/convert.rs` for the reusable test surface.

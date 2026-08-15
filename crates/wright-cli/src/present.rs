@@ -38,6 +38,7 @@ fn render_text<T: serde::Serialize>(envelope: &Envelope<T>) {
 
     match envelope.command.as_str() {
         "compile" => render_compile(envelope),
+        "convert" => render_convert(envelope),
         "check" => println!("check: ok"),
         "analyze" => render_analyze(envelope),
         "lint" => render_lint(envelope),
@@ -127,6 +128,23 @@ fn render_compile<T: serde::Serialize>(envelope: &Envelope<T>) {
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     // The compiled artifact is the command result: write it verbatim.
+    print!("{text}");
+    if !text.ends_with('\n') {
+        println!();
+    }
+}
+
+fn render_convert<T: serde::Serialize>(envelope: &Envelope<T>) {
+    let value = serde_json::to_value(envelope).expect("envelope serializes");
+    let Some(result) = value.pointer("/result") else {
+        eprintln!("convert: failed (no source produced)");
+        return;
+    };
+    let text = result
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    // The reconstructed source is the command result: write it verbatim.
     print!("{text}");
     if !text.ends_with('\n') {
         println!();

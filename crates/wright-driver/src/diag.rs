@@ -36,6 +36,8 @@ pub enum Stage {
     Emission,
     /// Semantic analysis.
     Analysis,
+    /// Source reconstruction (Workshop → OPY/OSTW, #126).
+    Reconstruction,
     /// Driver/CLI internal or environment failures.
     Internal,
 }
@@ -49,6 +51,7 @@ impl Stage {
             Stage::Validation => "validation",
             Stage::Emission => "emission",
             Stage::Analysis => "analysis",
+            Stage::Reconstruction => "reconstruction",
             Stage::Internal => "internal",
         }
     }

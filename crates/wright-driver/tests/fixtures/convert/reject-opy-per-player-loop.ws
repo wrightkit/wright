@@ -1,0 +1,21 @@
+variables
+{
+    global:
+        0: g
+    player:
+        0: p
+}
+
+rule("Per-player loop")
+{
+    event
+    {
+        Ongoing - Global;
+    }
+    actions
+    {
+        For Player Variable(Event Player, p, 0, 5, 1);
+            Set Global Variable(g, Add(Global Variable(g), 1));
+        End;
+    }
+}

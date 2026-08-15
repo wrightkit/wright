@@ -25,8 +25,8 @@ pub use config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind}
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 pub use input::{ResolvedInput, sha256_hex};
 pub use result::{
-    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, Envelope, InspectResult, LintResult,
-    RESULT_CONTRACT,
+    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
+    Envelope, InspectResult, LintResult, RESULT_CONTRACT,
 };
 pub use session::{CompilerSession, Loaded};
 pub use wright_transform::Profile;

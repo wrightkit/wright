@@ -128,5 +128,10 @@ locale. Cross-locale behavior is not inferred from English-only fixtures.
   deterministic en-US emission, same-locale round-trip, and analyzer integration.
 - **Deferred (data/licensing gated):** additional client locales,
   cross-locale equivalence, additional events.
-- **Explicitly out of scope:** `.opy` reconstruction from Workshop text,
-  OverPy decompiler architecture, editor/browser integrations.
+- **Explicitly out of scope:** original-source recovery (comments/formatting)
+  in the Workshop emitter; reconstruction directions are owned by the
+  language frontends (`wright-opy`/`wright-ostw`) through the shared driver
+  conversion operation (see
+  [`../opy/support-matrix.md`](../opy/support-matrix.md) and
+  [`../ostw/support-matrix.md`](../ostw/support-matrix.md)); OverPy
+  decompiler architecture, editor/browser integrations.

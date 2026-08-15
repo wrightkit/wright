@@ -120,7 +120,8 @@ arithmetic (the fold pass restores it on the Wright side).
 - **Not claimed**: `protect-ban` entry-project compilation (its entry graph
   rejects at the three missing `../OSTWUtils/…` imports under the pinned
   reference too — #122), classes/generics/lambdas, multi-locale output,
-  optimizer/output parity, Workshop → OSTW reconstruction (#119 non-goals).
+  optimizer/output parity, and original-source recovery in reconstruction
+  (#125 is semantic reconstruction, never comments/formatting/macros recovery).
 - The `Event Player` restricted-value diagnostic for direct uses in global
   rules remains deferred; the accepted targets use `Event Player` only in
   Ongoing Player rules.
@@ -170,7 +171,25 @@ byte-identically). The suite is `crates/wright-ostw/tests/reconstruct.rs`,
 writing `target/wright-ostw-reconstruct-report.json`; the boundary conformance
 test checks the manifest, the shipped classification API, and fixture
 coverage against each other. A `ds.toml` project root (`entry_point`) is
-generated in-test; no CLI/driver integration is added by #125.
+generated in-test.
+
+### Shared conversion path (#126)
+
+The reconstructor is exposed end-to-end through one shared driver/session
+conversion operation: `wright convert --target ostw <workshop-input>` (CLI)
+and `CompilerSession::convert(ConvertTarget::Ostw)` (library) load validated
+Workshop input through the driver's own `load()` path and call
+`wright_ostw::reconstruct::reconstruct` unchanged. The reconstructed source is
+the `result.text` of the `wright-result/v1` envelope; a construct outside the
+declared surface fails with the reconstructor's stable diagnostics (stage
+`reconstruction`, exit code 3) and no partial source. The operation is
+Workshop → OSTW only: non-Workshop inputs are rejected explicitly, and there
+is no direct OPY ↔ OSTW path. The cross-format suite
+(`crates/wright-driver/tests/convert.rs`) proves the full loop
+`Workshop → convert(ostw) → native frontend → HIR → WIR → Workshop` for the
+`surface-*` fixtures (equivalence under the declared #119 normalization plus
+the round-trip fixed point) and the deterministic `reject/` entries, and
+writes `target/wright-convert-report.json`.
 
 ## Evidence
 

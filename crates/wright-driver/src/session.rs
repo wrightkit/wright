@@ -19,8 +19,9 @@ use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
 use crate::result::{
-    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, Envelope, InspectResult, LintResult,
-    OstwFileSummary, OstwProjectSummary, exit_code_from, version_info,
+    AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
+    Envelope, InspectResult, LintResult, OstwFileSummary, OstwProjectSummary, exit_code_from,
+    version_info,
 };
 use crate::{input_identity, opy};
 
@@ -532,6 +533,98 @@ impl CompilerSession {
         )
     }
 
+    /// `convert`: load validated Workshop input and reconstruct canonical
+    /// source for an explicit target (`opy` | `ostw`) through the
+    /// language-owned reconstructors (#126).
+    ///
+    /// The operation is the shared driver/session conversion contract: it
+    /// reuses the [`CompilerSession::load`] path to obtain the validated
+    /// Workshop WIR program and delegates per target to
+    /// `wright_opy::reconstruct::reconstruct` /
+    /// `wright_ostw::reconstruct::reconstruct` — no reconstruction logic
+    /// lives in the driver, and there is no generic transpiler matrix or
+    /// direct OPY ↔ OSTW path. Non-representable constructs fail
+    /// deterministically with the reconstructor's stable structured
+    /// diagnostics (stage `reconstruction`, unsupported exit code 3) and
+    /// never produce partial source. Non-Workshop inputs are rejected
+    /// explicitly: the operation is declared over Workshop input only.
+    pub fn convert(&mut self, target: ConvertTarget) -> Envelope<ConvertResult> {
+        let command = "convert";
+        let loaded = match self.load() {
+            Ok(loaded) => loaded,
+            Err(diagnostic) => {
+                self.diagnostics.push(diagnostic);
+                return self.finish(command, ConvertResult::default());
+            }
+        };
+        if loaded.input.kind != SourceKind::Workshop {
+            self.diagnostics.push(Diagnostic::error(
+                "convert-input-kind",
+                Stage::Discovery,
+                format!(
+                    "convert reconstructs Workshop input; got '{}' input (the declared \
+                     conversion surface has no direct OPY ↔ OSTW path)",
+                    loaded.input.kind.as_str()
+                ),
+            ));
+            return self.finish(command, ConvertResult::default());
+        }
+        let text = match target {
+            ConvertTarget::Opy => self.convert_opy(&loaded),
+            ConvertTarget::Ostw => self.convert_ostw(&loaded),
+        };
+        match text {
+            Ok(text) => {
+                let sha256 = input_identity(&text);
+                self.finish(
+                    command,
+                    ConvertResult {
+                        target,
+                        text,
+                        sha256,
+                    },
+                )
+            }
+            Err(()) => self.finish(command, ConvertResult::default()),
+        }
+    }
+
+    /// Reconstruct canonical OPY source for a loaded Workshop program.
+    fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
+        match wright_opy::reconstruct::reconstruct(&loaded.program) {
+            Ok(text) => Ok(text),
+            Err(error) => {
+                for issue in &error.issues {
+                    self.diagnostics.push(reconstruct_diag(
+                        issue.code,
+                        &issue.message,
+                        issue.span,
+                        loaded,
+                    ));
+                }
+                Err(())
+            }
+        }
+    }
+
+    /// Reconstruct canonical OSTW source for a loaded Workshop program.
+    fn convert_ostw(&mut self, loaded: &Loaded) -> Result<String, ()> {
+        match wright_ostw::reconstruct::reconstruct(&loaded.program, &self.catalog) {
+            Ok(text) => Ok(text),
+            Err(errors) => {
+                for error in &errors {
+                    self.diagnostics.push(reconstruct_diag(
+                        error.code,
+                        &error.message,
+                        error.span,
+                        loaded,
+                    ));
+                }
+                Err(())
+            }
+        }
+    }
+
     /// Build the semantic service over a loaded program.
     fn service<'a>(&self, loaded: &'a Loaded) -> Result<SemanticService<'a>, Diagnostic> {
         self.service_with(loaded, LintConfig::default())
@@ -862,6 +955,52 @@ fn ostw_diag(
         message: error.message,
         span,
         source: Some(resolved.origin.clone()),
+    }
+}
+
+/// Map a reconstructor rejection (shared shape: stable code, message,
+/// optional WIR span) into the driver diagnostic contract (#126).
+///
+/// The reconstructor's stable code is preserved verbatim; the stage is
+/// `reconstruction` (the "recognized but unsupported" class, exit code 3).
+/// A manifest/catalog load failure is an environment failure, not a
+/// reconstruction rejection, so it maps to the internal stage. Span paths
+/// resolve through the program file registry, falling back to the input
+/// display path.
+fn reconstruct_diag(
+    code: &str,
+    message: &str,
+    span: Option<wright_ir::source::Span>,
+    loaded: &Loaded,
+) -> Diagnostic {
+    let stage = match code {
+        "manifest-error" | "catalog-error" => Stage::Internal,
+        _ => Stage::Reconstruction,
+    };
+    let span = span.map(|span| SourceSpan {
+        file: span.file.index(),
+        path: loaded
+            .program
+            .files
+            .get(span.file)
+            .map(|file| file.path.clone())
+            .unwrap_or_else(|| loaded.input.display.clone()),
+        start: Position {
+            line: span.start.line,
+            col: span.start.col,
+        },
+        end: Position {
+            line: span.end.line,
+            col: span.end.col,
+        },
+    });
+    Diagnostic {
+        code: code.to_string(),
+        stage,
+        severity: crate::diag::Severity::Error,
+        message: message.to_string(),
+        span,
+        source: Some(loaded.origin.clone()),
     }
 }
 

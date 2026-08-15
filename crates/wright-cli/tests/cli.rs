@@ -555,7 +555,7 @@ fn version_and_help_are_documented_contract_surfaces() {
     let output = run(&["--help"]);
     assert!(output.status.success());
     let help = String::from_utf8_lossy(&output.stdout);
-    for command in ["compile", "check", "analyze", "lint", "inspect"] {
+    for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
         assert!(help.contains(command), "help documents {command}");
     }
     assert!(help.contains("EXIT CODES"));
@@ -665,6 +665,213 @@ fn opy_unknown_enum_member_is_a_deterministic_frontend_diagnostic() {
     assert!(
         diagnostic["span"].is_object(),
         "the diagnostic is source-located"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// ── Convert (#126) ───────────────────────────────────────────────────────────
+
+fn workspace_fixture(relative: &str) -> String {
+    workspace_root().join(relative).display().to_string()
+}
+
+#[test]
+fn convert_workshop_input_to_opy_reconstructs_source() {
+    // `wright convert --target opy` over a committed Workshop fixture writes
+    // the reconstructed OPY source (not a success banner) to stdout.
+    let fixture =
+        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
+    let output = run(&["convert", "--target", "opy", &fixture]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for anchor in ["globalvar", "playervar", "rule \"", "@Event"] {
+        assert!(
+            stdout.contains(anchor),
+            "missing OPY anchor {anchor:?}:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn convert_workshop_input_to_ostw_reconstructs_source() {
+    // `wright convert --target ostw` writes the reconstructed OSTW source.
+    let fixture = workspace_fixture("compatibility/ostw/reconstruction/surface-basic/workshop.txt");
+    let output = run(&["convert", "--target", "ostw", &fixture]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for anchor in ["globalvar Any", "playervar Any", "rule: \"", "void "] {
+        assert!(
+            stdout.contains(anchor),
+            "missing OSTW anchor {anchor:?}:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn convert_json_envelope_reports_command_result_and_target() {
+    let fixture =
+        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
+    let output = run(&["convert", "--target", "opy", &fixture, "-f", "json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["exit"], 0);
+    assert_eq!(envelope["command"], "convert");
+    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
+    assert_eq!(envelope["result"]["target"], "opy");
+    let text = envelope["result"]["text"].as_str().unwrap();
+    assert!(
+        text.contains("rule \"") && text.contains("@Event"),
+        "{text}"
+    );
+    assert_eq!(
+        envelope["result"]["sha256"].as_str().unwrap().len(),
+        64,
+        "the reconstructed source carries its SHA-256"
+    );
+    // The envelope text is exactly the reconstructed source.
+    assert!(text.starts_with("globalvar "), "{text}");
+}
+
+#[test]
+fn convert_is_byte_deterministic_across_runs() {
+    for (target, fixture) in [
+        (
+            "opy",
+            "crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws",
+        ),
+        (
+            "ostw",
+            "compatibility/ostw/reconstruction/surface-basic/workshop.txt",
+        ),
+    ] {
+        let fixture = workspace_fixture(fixture);
+        let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
+        let second = run(&["convert", "--target", target, &fixture, "-f", "json"]);
+        assert_eq!(
+            first.stdout, second.stdout,
+            "convert --target {target} must be byte-deterministic"
+        );
+        assert!(!first.stdout.is_empty());
+    }
+}
+
+#[test]
+fn convert_rejects_unsupported_constructs_with_exit_three() {
+    // Non-representable Workshop constructs fail deterministically with the
+    // reconstructor's stable code, the documented unsupported exit code (3),
+    // and no partial source — identically on every run.
+    for (target, fixture, expected_code) in [
+        (
+            "ostw",
+            "compatibility/ostw/reconstruction/reject/for-player-variable/workshop.txt",
+            "reconstruct-unsupported-action",
+        ),
+        (
+            "opy",
+            "crates/wright-driver/tests/fixtures/convert/reject-opy-per-player-loop.ws",
+            "unsupported-per-player-loop",
+        ),
+    ] {
+        let fixture = workspace_fixture(fixture);
+        let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
+        let second = run(&["convert", "--target", target, &fixture, "-f", "json"]);
+        assert_eq!(
+            first.stdout, second.stdout,
+            "convert --target {target} rejection must be deterministic"
+        );
+        for output in [&first, &second] {
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "--target {target}: recognized-but-unsupported must exit 3"
+            );
+            assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
+            let envelope = parse_json(&output.stdout);
+            assert_eq!(envelope["ok"], false);
+            assert_eq!(envelope["exit"], 3);
+            assert_eq!(envelope["command"], "convert");
+            let codes: Vec<&str> = envelope["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|diagnostic| diagnostic["code"].as_str().unwrap())
+                .collect();
+            assert!(
+                codes.contains(&expected_code),
+                "--target {target}: expected code {expected_code} in {codes:?}"
+            );
+            assert!(
+                envelope["diagnostics"][0]["stage"] == "reconstruction",
+                "rejections carry the reconstruction stage"
+            );
+            assert!(
+                envelope["result"]["text"].as_str().unwrap().is_empty(),
+                "a rejection must never carry partial source"
+            );
+        }
+    }
+}
+
+#[test]
+fn convert_requires_an_explicit_target_flag() {
+    // Missing or unknown --target is a usage error (exit 2); --target on
+    // another command is a usage error too.
+    let fixture =
+        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
+    let output = run(&["convert", &fixture]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty(), "usage errors write stderr only");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--target"));
+
+    let output = run(&["convert", "--target", "nope", &fixture]);
+    assert_eq!(output.status.code(), Some(2));
+
+    let output = run(&["check", "--target", "opy", &fixture]);
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn convert_rejects_non_workshop_input() {
+    // The conversion surface is declared over Workshop input only; an `.opy`
+    // input fails with the structured convert-input-kind diagnostic (exit 1),
+    // not a direct OPY ↔ OSTW conversion.
+    let source = std::fs::read_to_string(
+        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
+    )
+    .unwrap();
+    let path = temp_file("basic-rule.opy", &source);
+    let output = run(&[
+        "convert",
+        "--target",
+        "ostw",
+        path.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["diagnostics"][0]["code"], "convert-input-kind");
+    assert!(
+        envelope["result"]["text"].as_str().unwrap().is_empty(),
+        "no source on a rejected input kind"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

@@ -28,6 +28,7 @@ USAGE:
 
 COMMANDS:
     compile    Parse, lower, and emit Workshop text for the input
+    convert    Reconstruct validated Workshop input as canonical OPY or OSTW source
     check      Parse, validate, and analyze the input; report diagnostics
     analyze    Parse, lower, and run semantic analysis; report findings
     lint       Parse, lower, and lint the input; report findings
@@ -43,6 +44,7 @@ INPUT:
 
 OPTIONS:
     --kind <KIND>       Input frontend: auto|opy|ostw|workshop|protocol
+    --target <TARGET>   Reconstruction target for `convert`: opy|ostw (required)
     --locale <LOCALE>   Workshop client locale override (e.g. en-US)
     --root <DIR>        Include/project root for .opy/.ostw input (default: input directory)
     --profile <PROFILE> WIR transformation policy: off|compat|aggressive (default: off)
@@ -62,19 +64,23 @@ EXIT CODES:
     0  success
     1  source/user error (parse, validation, ambiguous input)
     2  usage error (unknown command, flag, or value)
-    3  recognized but unsupported input or operation
+    3  recognized but unsupported input or operation (convert rejection)
     4  internal/environment failure
 
 OUTPUT CONTRACT:
     Text mode writes the command result to stdout and diagnostics to stderr.
     JSON mode writes one `wright-result/v1` envelope to stdout and keeps
     stderr empty on success. Exit codes and the envelope shape are stable;
-    human-readable wording is not part of the machine contract. `lint`
-    reports findings through the same envelope with rule metadata and the
-    effective configuration (M12, #97/#98). `update` is text-only and
-    outside the `wright-result/v1` envelope: it updates standalone
-    `wright`/`wright-lsp` installs from the canonical GitHub Release
-    archives and refuses to overwrite package-manager-managed binaries.
+    human-readable wording is not part of the machine contract. `convert`
+    writes the reconstructed source for the selected `--target` (canonical
+    OPY or OSTW; semantic reconstruction, not original-source recovery) and
+    reports the reconstructed text plus its SHA-256 in the `result` envelope
+    in JSON mode. `lint` reports findings through the same envelope with rule
+    metadata and the effective configuration (M12, #97/#98). `update` is
+    text-only and outside the `wright-result/v1` envelope: it updates
+    standalone `wright`/`wright-lsp` installs from the canonical GitHub
+    Release archives and refuses to overwrite package-manager-managed
+    binaries.
 ";
 
 fn main() -> ExitCode {
@@ -90,6 +96,7 @@ fn main() -> ExitCode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Command {
     Compile,
+    Convert,
     Check,
     Analyze,
     Lint,
@@ -101,6 +108,7 @@ impl Command {
     fn as_str(self) -> &'static str {
         match self {
             Command::Compile => "compile",
+            Command::Convert => "convert",
             Command::Check => "check",
             Command::Analyze => "analyze",
             Command::Lint => "lint",
@@ -112,6 +120,7 @@ impl Command {
     fn parse(name: &str) -> Option<Command> {
         Some(match name {
             "compile" => Command::Compile,
+            "convert" => Command::Convert,
             "check" => Command::Check,
             "analyze" => Command::Analyze,
             "lint" => Command::Lint,
@@ -155,12 +164,26 @@ fn run() -> Result<u8, String> {
     let mut config = SessionConfig::default();
     let mut help = false;
     let mut positional: Option<PathBuf> = None;
+    let mut convert_target: Option<wright_driver::ConvertTarget> = None;
 
     while let Some(arg) = args.first().cloned() {
         match arg.as_str() {
             "-h" | "--help" => {
                 help = true;
                 args.remove(0);
+            }
+            "--target" => {
+                if command != Command::Convert {
+                    return Err(format!(
+                        "wright: --target is only valid for `convert` (not `{}`)",
+                        command.as_str()
+                    ));
+                }
+                let value = take_value(&mut args, &arg)?;
+                convert_target =
+                    Some(wright_driver::ConvertTarget::parse(&value).ok_or_else(|| {
+                        format!("wright: unknown conversion target '{value}' (expected opy|ostw)")
+                    })?);
             }
             "-f" | "--format" => {
                 let value = take_value(&mut args, &arg)?;
@@ -255,6 +278,12 @@ fn run() -> Result<u8, String> {
         return Ok(0);
     }
 
+    if command == Command::Convert && convert_target.is_none() {
+        return Err(format!(
+            "wright: `convert` requires --target opy|ostw\n\n{HELP}"
+        ));
+    }
+
     config.input = match positional {
         Some(path) => InputSpec::Path(path),
         None => InputSpec::Stdin,
@@ -269,6 +298,13 @@ fn run() -> Result<u8, String> {
         Command::Analyze => run_command(&mut session, wright_driver::CompilerSession::analyze),
         Command::Lint => run_command(&mut session, wright_driver::CompilerSession::lint),
         Command::Inspect => run_command(&mut session, wright_driver::CompilerSession::inspect),
+        Command::Convert => {
+            let target = convert_target.expect("validated above");
+            let envelope = session.convert(target);
+            let code = envelope.exit;
+            present::render(&envelope, session.config.format);
+            code
+        }
         // `update` returns before a session is constructed (see above).
         Command::Update => unreachable!("update is dispatched before session setup"),
     };

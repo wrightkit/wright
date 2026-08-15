@@ -235,7 +235,9 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
 
 ## Deferred / out of scope
 
-- `.opy` reconstruction from Workshop text; decompiler architecture.
+- A full decompiler architecture (comment/formatting-preserving
+  reconstruction of arbitrary Workshop text); the declared reconstruction
+  surface above is semantic reconstruction, not original-source recovery.
 - Macro/`#!define` values that require runtime evaluation (no scripting).
 - OverPy enum domains/members beyond the manifest's declared baseline (a
   data change, `baseline-planned` in the compatibility baseline).
@@ -325,6 +327,22 @@ initializer-bearing globals whose slot differs from the lowest free slot).
 
 Reconstructed OPY is simple low-level valid OPY: comments, macros, functions,
 settings blocks, and source abstractions are not recovered.
+
+### Shared conversion path (#126)
+
+The reconstructor is exposed end-to-end through one shared driver/session
+conversion operation: `wright convert --target opy <workshop-input>` (CLI) and
+`CompilerSession::convert(ConvertTarget::Opy)` (library) load validated
+Workshop input through the driver's own `load()` path and call
+`wright_opy::reconstruct::reconstruct` unchanged. The reconstructed source is
+the `result.text` of the `wright-result/v1` envelope; a construct outside the
+declared surface fails with the reconstructor's stable diagnostics (stage
+`reconstruction`, exit code 3) and no partial source. The operation is
+Workshop → OPY only: non-Workshop inputs are rejected explicitly, and there is
+no direct OPY ↔ OSTW path. The cross-format suite
+(`crates/wright-driver/tests/convert.rs`) proves the full loop
+`Workshop → convert(opy) → native frontend → HIR → WIR → Workshop` for the
+fixtures above and writes `target/wright-convert-report.json`.
 
 ## Boundary contract
 

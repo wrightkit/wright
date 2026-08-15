@@ -48,15 +48,28 @@ Workshop is the canonical interoperability and target boundary. The required
 long-term conversion directions are:
 
 ```text
-OPY      → Workshop
-OSTW     → Workshop
-Workshop → OPY
-Workshop → OSTW
+OPY      → Workshop   (implemented: wright-opy + shared compile pipeline)
+OSTW     → Workshop   (implemented: wright-ostw + shared compile pipeline, #119)
+Workshop → OPY        (implemented: wright_opy::reconstruct via the shared
+                        driver/session conversion operation, #124/#126)
+Workshop → OSTW       (implemented: wright_ostw::reconstruct via the shared
+                        driver/session conversion operation, #125/#126)
 Workshop → Workshop
 ```
 
+The reverse directions (Workshop → OPY, Workshop → OSTW) are **semantic
+reconstruction**: the language-owned reconstructors convert validated
+Wright-owned WIR back into canonical source for their language, driven through
+one shared `CompilerSession::convert` operation with explicit `opy`/`ostw`
+target selection (M13 phase D). Reconstruction does not recover
+comments/formatting/macros/functions/source abstractions and is never
+original-source recovery. A generic transpiler matrix is an explicit
+non-goal: each reverse direction is owned by its language frontend crate.
+
 Direct OPY ↔ OSTW source conversion is optional and must not drive the core
-architecture prematurely.
+architecture prematurely; it remains explicitly deferred (M13 records the
+deferral pending PM reassessment, see
+[`docs/ostw/compatibility-baseline.md`](ostw/compatibility-baseline.md)).
 
 The intended primary flow is:
 
@@ -154,10 +167,17 @@ compiler internals as part of normal compilation.
 
 The compiler/session driver (`wright-driver`) is the single orchestration path
 shared by the CLI, library consumers, and tool/LSP adapters: input discovery →
-frontend selection → validation → lowering → analysis → emission. The `wright`
-CLI (`wright-cli`) is a thin argv/presentation layer; human text and
-machine-readable JSON (`wright-result/v1`) are two renderings of the same typed
-result envelope. The normative contract is [`docs/cli.md`](cli.md).
+frontend selection → validation → lowering → analysis → emission. It also owns
+the shared conversion operation ([`CompilerSession::convert`], target `opy` |
+`ostw`), which reuses the load path and delegates per target to the
+language-owned reconstructors (`wright_opy::reconstruct`,
+`wright_ostw::reconstruct`) — the driver maps their structured rejections
+into the shared `Diagnostic` contract (stable codes preserved, stage
+`reconstruction`) and never carries reconstruction logic itself (M13 phase D,
+#126). The `wright` CLI (`wright-cli`) is a thin argv/presentation layer;
+human text and machine-readable JSON (`wright-result/v1`) are two renderings
+of the same typed result envelope. The normative contract is
+[`docs/cli.md`](cli.md).
 
 ### Semantic analysis and tooling
 

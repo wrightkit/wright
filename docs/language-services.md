@@ -115,8 +115,11 @@ documented, never emulated through upstream calls**:
 - **Whole-source pretty-printing / comment-preserving regeneration** — not
   implemented; diagnostics and navigation are source-preserving.
 - Upstream OSTW LSP parity, classes/generics/lambdas/pattern matching beyond
-  the accepted corpus boundary, and Workshop→OSTW reconstruction remain out of
-  scope (the corpus boundary defines what resolves).
+  the accepted corpus boundary, and whole-source regeneration remain out of
+  scope for the language service (the corpus boundary defines what resolves).
+  Workshop → OPY/OSTW semantic reconstruction is available through the CLI
+  and driver conversion command (`wright convert --target opy|ostw`, #126),
+  not through the language-service surface.
 
 ## LSP adapter
 

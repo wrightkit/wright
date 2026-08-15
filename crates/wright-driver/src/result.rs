@@ -57,7 +57,9 @@ pub struct Envelope<T: Serialize> {
 ///
 /// * `4` — internal/environment failures (stage `internal`);
 /// * `3` — recognized but unsupported input/operation (adapter-fallback
-///   stdin, when the explicit fallback is requested);
+///   stdin, when the explicit fallback is requested; reconstruction
+///   rejections from the language-owned reconstructors, stage
+///   `reconstruction`);
 /// * `1` — everything else that blocks the workflow (source errors).
 pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
     let mut has_source_error = false;
@@ -67,6 +69,9 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         }
         if diagnostic.stage == crate::diag::Stage::Internal {
             return exit::INTERNAL;
+        }
+        if diagnostic.stage == crate::diag::Stage::Reconstruction {
+            return exit::UNSUPPORTED;
         }
         if diagnostic.code == "adapter-stdin-unsupported" {
             return exit::UNSUPPORTED;
@@ -177,6 +182,51 @@ pub struct LintResult {
     /// Lint findings, each carrying a stable code, severity, evidence class,
     /// message, and source span (from the `getFindings` request).
     pub findings: serde_json::Value,
+}
+
+/// The reconstruction target of a `convert` run (#126): which language-owned
+/// reconstructor turns the validated Workshop program back into source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConvertTarget {
+    /// Reconstruct canonical OPY source (`wright_opy::reconstruct`).
+    #[default]
+    Opy,
+    /// Reconstruct canonical OSTW source (`wright_ostw::reconstruct`).
+    Ostw,
+}
+
+impl ConvertTarget {
+    /// The canonical name used in CLI arguments, docs, and diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConvertTarget::Opy => "opy",
+            ConvertTarget::Ostw => "ostw",
+        }
+    }
+
+    /// Parse a CLI spelling into a conversion target (`None` for unknown
+    /// names).
+    pub fn parse(name: &str) -> Option<ConvertTarget> {
+        Some(match name {
+            "opy" => ConvertTarget::Opy,
+            "ostw" => ConvertTarget::Ostw,
+            _ => return None,
+        })
+    }
+}
+
+/// The result of a `convert` run: the canonical reconstructed source for the
+/// selected target plus its deterministic SHA-256.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConvertResult {
+    /// The reconstruction target (`opy` or `ostw`).
+    pub target: ConvertTarget,
+    /// The canonical reconstructed source for the target. Empty when the
+    /// reconstruction rejected: a rejection never carries partial source.
+    pub text: String,
+    /// SHA-256 of the reconstructed source.
+    pub sha256: String,
 }
 
 /// Build the envelope metadata block for a command.
