@@ -14,6 +14,8 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+use wright_core::signatures::ExpectedDomain;
+
 use crate::error::{CatalogError, Result};
 
 /// The embedded v0.2 catalog data.
@@ -81,6 +83,10 @@ pub struct CatalogEntry {
     pub kind: Kind,
     /// Parameter names, when the catalog documents them.
     pub params: Vec<String>,
+    /// The canonical enum domain expected at each parameter position, when
+    /// the parameter takes an enumerated value (parallel to `params`).
+    /// `None` for non-enum parameters and for undocumented parameters.
+    pub param_domains: Vec<Option<String>>,
     aliases: HashMap<Locale, String>,
 }
 
@@ -170,11 +176,16 @@ struct CatalogFile {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct EntryFile {
     id: String,
     aliases: HashMap<String, String>,
     #[serde(default)]
     params: Vec<String>,
+    /// Canonical enum domain per parameter position (parallel to `params`);
+    /// empty when no parameter domains are documented.
+    #[serde(default)]
+    param_domains: Vec<Option<String>>,
 }
 
 #[derive(Deserialize)]
@@ -235,6 +246,7 @@ impl Catalog {
         for domain in file.enums {
             catalog.insert_enum(domain)?;
         }
+        catalog.validate_param_domains()?;
         Ok(catalog)
     }
 
@@ -390,8 +402,32 @@ impl Catalog {
             id: item.id,
             kind,
             params: item.params,
+            param_domains: item.param_domains,
             aliases,
         });
+        Ok(())
+    }
+
+    /// Every declared `paramDomains` domain must name a declared enum domain.
+    fn validate_param_domains(&self) -> Result<()> {
+        for entry in &self.entries {
+            if entry.param_domains.len() > entry.params.len() {
+                return Err(CatalogError::validation(format!(
+                    "{} '{}' declares more param domains than params",
+                    entry.kind.as_str(),
+                    entry.id
+                )));
+            }
+            for domain in entry.param_domains.iter().flatten() {
+                if !self.enum_by_domain.contains_key(domain) {
+                    return Err(CatalogError::validation(format!(
+                        "{} '{}' declares undeclared enum domain '{domain}'",
+                        entry.kind.as_str(),
+                        entry.id
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -445,6 +481,29 @@ impl Catalog {
             members,
         });
         Ok(())
+    }
+}
+
+/// The catalog is the canonical source of expected enum domains for the
+/// Workshop surface it documents: `expected_domain(catalog_id, arg_index)`
+/// answers the domain declared for that parameter position (e.g. `createHudText`
+/// argument 9 is `HudReeval`), so the Workshop parser can resolve bare enum
+/// members that are ambiguous across domains (e.g. `Visible To and String`,
+/// #118). Positions without a documented domain answer `None`.
+impl ExpectedDomain for Catalog {
+    fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
+        for kind in [Kind::Action, Kind::Value] {
+            if let Some(entry) = self.entry(kind, catalog_id) {
+                if let Some(domain) = entry
+                    .param_domains
+                    .get(arg_index)
+                    .and_then(Option::as_deref)
+                {
+                    return Some(domain);
+                }
+            }
+        }
+        None
     }
 }
 

@@ -622,11 +622,15 @@ impl Emitter<'_> {
         } else {
             self.value(value, &mut body)?;
         }
-        // Create HUD Text(All Players(All Teams), header, body, icon, ...).
+        // Create HUD Text(All Players(All Teams), header, body, text,
+        // location, sort order, header color, subheader color, text color,
+        // reevaluation, spectators) — the canonical catalog layout (probe P6
+        // emission), so the emitted text reparses against the catalog's
+        // expected enum domains at the canonical positions.
         self.line(
             level,
             &format!(
-                "Create HUD Text(All Players(All Teams), Null, {body}, Null, Null, Left, -9999, Color(White), Null, Null, Visible To and String, Null, Null);"
+                "Create HUD Text(All Players(All Teams), Null, {body}, Null, Left, -9999, Color(White), Color(White), Color(White), Visible To and String, Visible Always);"
             ),
         )?;
         Ok(())

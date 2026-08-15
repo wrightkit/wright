@@ -1,1200 +1,495 @@
-//! Wright-owned OSTW builtin signature data (#118).
+//! OSTW source bindings to the canonical Wright Workshop catalog (#118).
 //!
-//! This module owns the exact exercised Workshop action/value/enum surface of
-//! the pinned protect-ban entry-point reachable graph, resolved through
-//! Wright-authored data with pinned-reference provenance. It mirrors the OPY
-//! semantic-manifest pattern (`wright-opy/src/manifest`): the canonical id is
-//! the OSTW source name, and the en-US Workshop spelling is recorded for
-//! downstream emission (#119). No OSTW `Elements.json` or upstream compiler
-//! table is copied; every entry is exercised by the reachable corpus or a
+//! This module owns ONLY genuinely OSTW-specific source binding/alias
+//! metadata: the OSTW source name -> canonical catalog identity mapping for
+//! the exercised builtin surface, and the OSTW source member name -> canonical
+//! catalog member id mapping per exercised enum domain. All canonical
+//! Workshop parameter/spelling and enum domain/member data lives in the
+//! Wright-owned catalog (`wright-workshop/src/catalog`); the semantic phase
+//! resolves builtins and enum domains through that catalog at the consume
+//! sites. No OSTW `Elements.json` or upstream compiler table is copied;
+//! every binding is exercised by the protect-ban reachable closure or a
 //! committed pinned-reference probe under `compatibility/ostw/probes/`.
-//!
-//! Param order for the named-argument calls comes from the reference's
-//! canonical emitted argument order (probes P6/P6b) or, where the corpus
-//! calls a function positionally, the source order is preserved.
 
-/// Whether a builtin is a Workshop action or a value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinKind {
-    Action,
-    Value,
-}
+use wright_workshop::catalog::Kind;
 
-/// One exercised Workshop builtin.
-#[derive(Debug, Clone, Copy)]
-pub struct Builtin {
-    pub kind: BuiltinKind,
-    /// Canonical parameter names, in emitted order (used for named-argument
-    /// binding). Empty for positional passthrough.
-    pub params: &'static [&'static str],
-    /// The en-US Workshop spelling (pinned-reference probe evidence).
-    pub spelling: &'static str,
-}
-
-/// Resolve an exercised Workshop builtin by its OSTW source name.
-pub fn builtin(name: &str) -> Option<&'static Builtin> {
-    BUILTINS.iter().find(|(id, _)| *id == name).map(|(_, b)| b)
-}
-
-/// An exercised builtin enum domain and its members.
-#[derive(Debug, Clone, Copy)]
-pub struct EnumDomain {
-    /// The en-US Workshop spelling of the domain.
-    pub spelling: &'static str,
-    pub members: &'static [&'static str],
-}
-
-/// Resolve an exercised builtin enum domain by its OSTW source name.
-pub fn enum_domain(name: &str) -> Option<&'static EnumDomain> {
-    ENUM_DOMAINS
-        .iter()
-        .find(|(id, _)| *id == name)
-        .map(|(_, domain)| domain)
-}
-
-/// `name -> Builtin`. Provenance: protect-ban reachable corpus usage and the
-/// pinned-reference probes P6/P6b (canonical emitted argument order).
-const BUILTINS: &[(&str, Builtin)] = &[
-    // --- settings / combo values ------------------------------------------
+/// One exercised builtin binding: OSTW source name -> (kind, canonical catalog id).
+pub const BUILTIN_BINDINGS: &[(&str, (Kind, &str))] = &[
     (
         "WorkshopSettingInteger",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[
-                "Category",
-                "Name",
-                "Default",
-                "MinValue",
-                "MaxValue",
-                "SortOrder",
-            ],
-            spelling: "Workshop Setting Integer",
-        },
+        (Kind::Value, "workshopSettingInteger"),
     ),
     (
         "WorkshopSettingToggle",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Category", "Name", "Default", "SortOrder"],
-            spelling: "Workshop Setting Toggle",
-        },
+        (Kind::Value, "workshopSettingToggle"),
     ),
     (
         "WorkshopSettingCombo",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Category", "Name", "Default", "Options", "SortOrder"],
-            spelling: "Workshop Setting Combo",
-        },
+        (Kind::Value, "workshopSettingCombo"),
     ),
-    // --- player/hero/team collections --------------------------------------
-    (
-        "AllPlayers",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Team"],
-            spelling: "All Players",
-        },
-    ),
-    (
-        "AllHeroes",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "All Heroes",
-        },
-    ),
-    (
-        "AllTankHeroes",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "All Tank Heroes",
-        },
-    ),
-    (
-        "AllDamageHeroes",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "All Damage Heroes",
-        },
-    ),
-    (
-        "AllSupportHeroes",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "All Support Heroes",
-        },
-    ),
-    (
-        "AllowedHeroes",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Player"],
-            spelling: "Allowed Heroes",
-        },
-    ),
-    (
-        "EventPlayer",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Event Player",
-        },
-    ),
-    (
-        "LocalPlayer",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Local Player",
-        },
-    ),
-    (
-        "TeamOf",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Player"],
-            spelling: "Team Of",
-        },
-    ),
-    (
-        "OppositeTeamOf",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Team"],
-            spelling: "Opposite Team Of",
-        },
-    ),
-    (
-        "NumberOfPlayers",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Team"],
-            spelling: "Number Of Players",
-        },
-    ),
-    // --- arrays -------------------------------------------------------------
-    (
-        "ArrayContains",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Value"],
-            spelling: "Array Contains",
-        },
-    ),
-    (
-        "ArrayElement",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Array Element",
-        },
-    ),
-    (
-        "CurrentArrayIndex",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Current Array Index",
-        },
-    ),
-    (
-        "CountOf",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array"],
-            spelling: "Count Of",
-        },
-    ),
-    (
-        "IndexOfArrayValue",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Value"],
-            spelling: "Index Of Array Value",
-        },
-    ),
-    (
-        "RandomValueInArray",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array"],
-            spelling: "Random Value In Array",
-        },
-    ),
-    (
-        "MappedArray",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Map"],
-            spelling: "Mapped Array",
-        },
-    ),
-    (
-        "FilteredArray",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Condition"],
-            spelling: "Filtered Array",
-        },
-    ),
-    (
-        "SortedArray",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Sort"],
-            spelling: "Sorted Array",
-        },
-    ),
-    (
-        "LastOf",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array"],
-            spelling: "Last Of",
-        },
-    ),
-    (
-        "EmptyArray",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Empty Array",
-        },
-    ),
-    (
-        "RemoveFromArray",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Value"],
-            spelling: "Remove From Array",
-        },
-    ),
-    (
-        "Append",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Value"],
-            spelling: "Append",
-        },
-    ),
-    // --- math / vector ------------------------------------------------------
-    (
-        "Max",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Value", "Value"],
-            spelling: "Max",
-        },
-    ),
-    (
-        "Min",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Value", "Value"],
-            spelling: "Min",
-        },
-    ),
-    (
-        "RoundToInteger",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Value", "Rounding"],
-            spelling: "Round To Integer",
-        },
-    ),
-    (
-        "Vector",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["X", "Y", "Z"],
-            spelling: "Vector",
-        },
-    ),
-    (
-        "CrossProduct",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Vector", "Vector"],
-            spelling: "Cross Product",
-        },
-    ),
-    (
-        "DirectionFromAngles",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["HorizontalAngle", "VerticalAngle"],
-            spelling: "Direction From Angles",
-        },
-    ),
+    ("AllPlayers", (Kind::Value, "allPlayers")),
+    ("AllHeroes", (Kind::Value, "allHeroes")),
+    ("AllTankHeroes", (Kind::Value, "allTankHeroes")),
+    ("AllDamageHeroes", (Kind::Value, "allDamageHeroes")),
+    ("AllSupportHeroes", (Kind::Value, "allSupportHeroes")),
+    ("AllowedHeroes", (Kind::Value, "allowedHeroes")),
+    ("EventPlayer", (Kind::Value, "eventPlayer")),
+    ("LocalPlayer", (Kind::Value, "localPlayer")),
+    ("TeamOf", (Kind::Value, "teamOf")),
+    ("OppositeTeamOf", (Kind::Value, "oppositeTeamOf")),
+    ("NumberOfPlayers", (Kind::Value, "numberOfPlayers")),
+    ("ArrayContains", (Kind::Value, "arrayContains")),
+    ("ArrayElement", (Kind::Value, "arrayElement")),
+    ("CurrentArrayIndex", (Kind::Value, "currentArrayIndex")),
+    ("CountOf", (Kind::Value, "countOf")),
+    ("IndexOfArrayValue", (Kind::Value, "indexOfArrayValue")),
+    ("RandomValueInArray", (Kind::Value, "randomValueInArray")),
+    ("MappedArray", (Kind::Value, "mappedArray")),
+    ("FilteredArray", (Kind::Value, "filteredArray")),
+    ("SortedArray", (Kind::Value, "sortedArray")),
+    ("LastOf", (Kind::Value, "lastOf")),
+    ("EmptyArray", (Kind::Value, "emptyArray")),
+    ("RemoveFromArray", (Kind::Value, "removeFromArray")),
+    ("Append", (Kind::Value, "appendToArray")),
+    ("Max", (Kind::Value, "max")),
+    ("Min", (Kind::Value, "min")),
+    ("RoundToInteger", (Kind::Value, "roundToInteger")),
+    ("Vector", (Kind::Value, "vector")),
+    ("CrossProduct", (Kind::Value, "crossProduct")),
+    ("DirectionFromAngles", (Kind::Value, "directionFromAngles")),
     (
         "HorizontalAngleFromDirection",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Direction"],
-            spelling: "Horizontal Angle From Direction",
-        },
+        (Kind::Value, "horizontalAngleFromDirection"),
     ),
     (
         "VerticalAngleFromDirection",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Direction"],
-            spelling: "Vertical Angle From Direction",
-        },
+        (Kind::Value, "verticalAngleFromDirection"),
     ),
-    (
-        "Forward",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Forward",
-        },
-    ),
-    (
-        "CustomColor",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Red", "Green", "Blue", "Alpha"],
-            spelling: "Custom Color",
-        },
-    ),
-    // --- state / query values ----------------------------------------------
-    (
-        "HasSpawned",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Player"],
-            spelling: "Has Spawned",
-        },
-    ),
-    (
-        "IsButtonHeld",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Player", "Button"],
-            spelling: "Is Button Held",
-        },
-    ),
-    (
-        "IsInSpawnRoom",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Player"],
-            spelling: "Is In Spawn Room",
-        },
-    ),
-    (
-        "IsTrueForAll",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Array", "Condition"],
-            spelling: "Is True For All",
-        },
-    ),
-    (
-        "IsWaitingForPlayers",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Is Waiting For Players",
-        },
-    ),
-    (
-        "CurrentMap",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Current Map",
-        },
-    ),
-    (
-        "EvaluateOnce",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Value"],
-            spelling: "Evaluate Once",
-        },
-    ),
-    (
-        "UpdateEveryFrame",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Value"],
-            spelling: "Update Every Frame",
-        },
-    ),
-    (
-        "LastCreatedEntity",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Last Created Entity",
-        },
-    ),
-    (
-        "LastTextID",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &[],
-            spelling: "Last Text ID",
-        },
-    ),
-    // --- icon / string helpers ----------------------------------------------
-    (
-        "HeroIconString",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Hero"],
-            spelling: "Hero Icon String",
-        },
-    ),
-    (
-        "AbilityIconString",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Hero", "Button"],
-            spelling: "Ability Icon String",
-        },
-    ),
-    (
-        "IconString",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Icon"],
-            spelling: "Icon String",
-        },
-    ),
-    (
-        "InputBindingString",
-        Builtin {
-            kind: BuiltinKind::Value,
-            params: &["Button"],
-            spelling: "Input Binding String",
-        },
-    ),
-    // --- actions ------------------------------------------------------------
-    (
-        "BigMessage",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["VisibleTo", "Header"],
-            spelling: "Big Message",
-        },
-    ),
-    (
-        "SmallMessage",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["VisibleTo", "Header"],
-            spelling: "Small Message",
-        },
-    ),
-    (
-        "Wait",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Duration", "WaitBehavior"],
-            spelling: "Wait",
-        },
-    ),
-    (
-        "WaitUntil",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Condition", "Timeout"],
-            spelling: "Wait Until",
-        },
-    ),
-    (
-        "MinWait",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Wait",
-        },
-    ),
-    (
-        "Skip",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Value"],
-            spelling: "Skip",
-        },
-    ),
+    ("Forward", (Kind::Value, "forward")),
+    ("CustomColor", (Kind::Value, "customColor")),
+    ("HasSpawned", (Kind::Value, "hasSpawned")),
+    ("IsButtonHeld", (Kind::Value, "isButtonHeld")),
+    ("IsInSpawnRoom", (Kind::Value, "isInSpawnRoom")),
+    ("IsTrueForAll", (Kind::Value, "isTrueForAll")),
+    ("IsWaitingForPlayers", (Kind::Value, "isWaitingForPlayers")),
+    ("CurrentMap", (Kind::Value, "currentMap")),
+    ("EvaluateOnce", (Kind::Value, "evaluateOnce")),
+    ("UpdateEveryFrame", (Kind::Value, "updateEveryFrame")),
+    ("LastCreatedEntity", (Kind::Value, "lastCreatedEntity")),
+    ("LastTextID", (Kind::Value, "lastTextId")),
+    ("HeroIconString", (Kind::Value, "heroIconString")),
+    ("AbilityIconString", (Kind::Value, "abilityIconString")),
+    ("IconString", (Kind::Value, "iconString")),
+    ("InputBindingString", (Kind::Value, "inputBindingString")),
+    ("BigMessage", (Kind::Action, "bigMessage")),
+    ("SmallMessage", (Kind::Action, "smallMessage")),
+    ("Wait", (Kind::Action, "wait")),
+    ("WaitUntil", (Kind::Action, "waitUntil")),
+    ("MinWait", (Kind::Action, "wait")),
+    ("Skip", (Kind::Action, "skip")),
     (
         "LoopIfConditionIsTrue",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Loop If Condition Is True",
-        },
+        (Kind::Action, "loopIfConditionIsTrue"),
     ),
-    (
-        "AbortIf",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Condition"],
-            spelling: "Abort If",
-        },
-    ),
-    (
-        "ModifyVariable",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Variable", "Operation", "Value"],
-            spelling: "Modify Global Variable",
-        },
-    ),
-    (
-        "CreateEffect",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[
-                "VisibleTo",
-                "Type",
-                "Color",
-                "Position",
-                "Radius",
-                "Reevaluation",
-            ],
-            spelling: "Create Effect",
-        },
-    ),
-    (
-        "CreateInWorldText",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[
-                "VisibleTo",
-                "Header",
-                "Position",
-                "Scale",
-                "Clipping",
-                "Reevaluation",
-                "TextColor",
-                "Spectators",
-            ],
-            spelling: "Create In-World Text",
-        },
-    ),
+    ("AbortIf", (Kind::Action, "abortIf")),
+    ("ModifyVariable", (Kind::Action, "modifyGlobalVariable")),
+    ("CreateEffect", (Kind::Action, "createEffect")),
+    ("CreateInWorldText", (Kind::Action, "createInWorldText")),
     (
         "CreateProgressBarInWorldText",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[
-                "VisibleTo",
-                "Value",
-                "Text",
-                "Position",
-                "Scale",
-                "Clipping",
-                "HeaderColor",
-                "TextColor",
-                "Reevaluation",
-                "NonteamSpectators",
-            ],
-            spelling: "Create Progress Bar In-World Text",
-        },
+        (Kind::Action, "createProgressBarInWorldText"),
     ),
-    (
-        "CreateHudText",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[
-                "VisibleTo",
-                "Header",
-                "Subheader",
-                "Text",
-                "Location",
-                "SortOrder",
-                "HeaderColor",
-                "SubheaderColor",
-                "TextColor",
-                "Reevaluation",
-                "Spectators",
-            ],
-            spelling: "Create HUD Text",
-        },
-    ),
-    (
-        "PlayEffect",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["VisibleTo", "Type", "Color", "Position", "Radius"],
-            spelling: "Play Effect",
-        },
-    ),
-    (
-        "StartCamera",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "EyePosition", "LookAtPosition", "Facing"],
-            spelling: "Start Camera",
-        },
-    ),
-    (
-        "StopCamera",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Stop Camera",
-        },
-    ),
-    (
-        "StartGameMode",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Start Game Mode",
-        },
-    ),
-    (
-        "SetInvisible",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "InvisibleTo"],
-            spelling: "Set Invisible",
-        },
-    ),
-    (
-        "SetGravity",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "Gravity"],
-            spelling: "Set Gravity",
-        },
-    ),
-    (
-        "SetAllowedHeroes",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "Heroes"],
-            spelling: "Set Allowed Heroes",
-        },
-    ),
-    (
-        "ForcePlayerHero",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "Hero"],
-            spelling: "Force Player Hero",
-        },
-    ),
-    (
-        "StopForcingHero",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Stop Forcing Hero",
-        },
-    ),
-    (
-        "ForceThrottle",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[
-                "Player",
-                "MoveSpeed",
-                "InAirSpeed",
-                "SpectatorSpeed",
-                "GrappleBoost",
-                "JumpPower",
-                "MoveSpeed",
-            ],
-            spelling: "Force Throttle",
-        },
-    ),
-    (
-        "StopForcingThrottle",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Stop Forcing Throttle",
-        },
-    ),
-    (
-        "DisableGameModeHud",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Disable Game Mode HUD",
-        },
-    ),
+    ("CreateHudText", (Kind::Action, "createHudText")),
+    ("PlayEffect", (Kind::Action, "playEffect")),
+    ("StartCamera", (Kind::Action, "startCamera")),
+    ("StopCamera", (Kind::Action, "stopCamera")),
+    ("StartGameMode", (Kind::Action, "startGameMode")),
+    ("SetInvisible", (Kind::Action, "setInvisibility")),
+    ("SetGravity", (Kind::Action, "setGravity")),
+    ("SetAllowedHeroes", (Kind::Action, "setAllowedHeroes")),
+    ("ForcePlayerHero", (Kind::Action, "forcePlayerHero")),
+    ("StopForcingHero", (Kind::Action, "stopForcingHero")),
+    ("ForceThrottle", (Kind::Action, "forceThrottle")),
+    ("StopForcingThrottle", (Kind::Action, "stopForcingThrottle")),
+    ("DisableGameModeHud", (Kind::Action, "disableGameModeHud")),
     (
         "DisableGameModeInworldUI",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Disable Game Mode In-World UI",
-        },
+        (Kind::Action, "disableGameModeInworldUI"),
     ),
-    (
-        "DisableHeroHud",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Disable Hero HUD",
-        },
-    ),
-    (
-        "DisableScoreboard",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Disable Scoreboard",
-        },
-    ),
+    ("DisableHeroHud", (Kind::Action, "disableHeroHud")),
+    ("DisableScoreboard", (Kind::Action, "disableScoreboard")),
     (
         "DisableInspectorRecording",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Disable Inspector Recording",
-        },
+        (Kind::Action, "disableInspector"),
     ),
-    (
-        "EnableGameModeHud",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Enable Game Mode HUD",
-        },
-    ),
+    ("EnableGameModeHud", (Kind::Action, "enableGameModeHud")),
     (
         "EnableGameModeInworldUI",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Enable Game Mode In-World UI",
-        },
+        (Kind::Action, "enableGameModeInworldUI"),
     ),
-    (
-        "EnableHeroHud",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Enable Hero HUD",
-        },
-    ),
-    (
-        "EnableScoreboard",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Enable Scoreboard",
-        },
-    ),
+    ("EnableHeroHud", (Kind::Action, "enableHeroHud")),
+    ("EnableScoreboard", (Kind::Action, "enableScoreboard")),
     (
         "EnableInspectorRecording",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Enable Inspector Recording",
-        },
+        (Kind::Action, "enableInspectorRecording"),
     ),
     (
         "DisableMovementCollisionWithEnvironment",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "IncludeFloors"],
-            spelling: "Disable Movement Collision With Environment",
-        },
+        (Kind::Action, "disableMovementCollisionWithEnvironment"),
     ),
     (
         "DisableMovementCollisionWithPlayers",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Disable Movement Collision With Players",
-        },
+        (Kind::Action, "disableMovementCollisionWithPlayers"),
     ),
     (
         "EnableMovementCollisionWithEnvironment",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Enable Movement Collision With Environment",
-        },
+        (Kind::Action, "enableMovementCollisionWithEnvironment"),
     ),
     (
         "EnableMovementCollisionWithPlayers",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player"],
-            spelling: "Enable Movement Collision With Players",
-        },
+        (Kind::Action, "enableMovementCollisionWithPlayers"),
     ),
-    (
-        "DisallowButton",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "Button"],
-            spelling: "Disallow Button",
-        },
-    ),
-    (
-        "AllowButton",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "Button"],
-            spelling: "Allow Button",
-        },
-    ),
-    (
-        "DestroyHudText",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["TextId"],
-            spelling: "Destroy HUD Text",
-        },
-    ),
-    (
-        "DestroyInWorldText",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["TextId"],
-            spelling: "Destroy In-World Text",
-        },
-    ),
-    (
-        "DestroyEffect",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["EffectId"],
-            spelling: "Destroy Effect",
-        },
-    ),
+    ("DisallowButton", (Kind::Action, "disallowButton")),
+    ("AllowButton", (Kind::Action, "allowButton")),
+    ("DestroyHudText", (Kind::Action, "destroyHudText")),
+    ("DestroyInWorldText", (Kind::Action, "destroyInWorldText")),
+    ("DestroyEffect", (Kind::Action, "destroyEffect")),
     (
         "DestroyAllProgressBarHudText",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Destroy All Progress Bar HUD Text",
-        },
+        (Kind::Action, "destroyAllProgressBarHudText"),
     ),
     (
         "DestroyAllProgressBarInWorldText",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Destroy All Progress Bar In-World Text",
-        },
+        (Kind::Action, "destroyAllProgressBarInWorldText"),
     ),
-    (
-        "DeleteAllClasses",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &[],
-            spelling: "Delete All Classes",
-        },
-    ),
-    (
-        "StopChasingVariable",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Variable"],
-            spelling: "Stop Chasing Variable",
-        },
-    ),
-    (
-        "ChaseVariableAtRate",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Variable", "Destination", "Rate", "Reevaluation"],
-            spelling: "Chase Variable At Rate",
-        },
-    ),
-    (
-        "Teleport",
-        Builtin {
-            kind: BuiltinKind::Action,
-            params: &["Player", "Position"],
-            spelling: "Teleport",
-        },
-    ),
+    ("DeleteAllClasses", (Kind::Action, "deleteAllClasses")),
+    ("StopChasingVariable", (Kind::Action, "stopChasingVariable")),
+    ("ChaseVariableAtRate", (Kind::Action, "chaseVariableAtRate")),
+    ("Teleport", (Kind::Action, "teleport")),
 ];
 
-/// `domain -> EnumDomain`. Members from the reachable corpus usage; the en-US
-/// spelling from the pinned-reference probe emissions.
-const ENUM_DOMAINS: &[(&str, EnumDomain)] = &[
+/// Resolve an exercised Workshop builtin by its OSTW source name.
+pub fn builtin(name: &str) -> Option<(Kind, &'static str)> {
+    BUILTIN_BINDINGS
+        .iter()
+        .find(|(source, _)| *source == name)
+        .map(|(_, binding)| *binding)
+}
+
+/// One exercised enum domain binding: the canonical catalog domain plus the
+/// OSTW source member name -> canonical catalog member id mapping.
+pub struct EnumDomainBinding {
+    /// The canonical catalog domain name.
+    pub domain: &'static str,
+    /// OSTW source member name -> canonical catalog member id.
+    pub members: &'static [(&'static str, &'static str)],
+}
+
+pub const ENUM_DOMAIN_BINDINGS: &[(&str, EnumDomainBinding)] = &[
     (
         "Team",
-        EnumDomain {
-            spelling: "Team",
-            members: &["All", "Team1", "Team2"],
+        EnumDomainBinding {
+            domain: "Team",
+            members: &[("All", "ALL"), ("Team1", "TEAM_1"), ("Team2", "TEAM_2")],
         },
     ),
     (
         "Button",
-        EnumDomain {
-            spelling: "Button",
+        EnumDomainBinding {
+            domain: "Button",
             members: &[
-                "PrimaryFire",
-                "SecondaryFire",
-                "Ability1",
-                "Ability2",
-                "Ultimate",
-                "Crouch",
-                "Interact",
-                "Jump",
-                "Melee",
-                "Reload",
+                ("PrimaryFire", "PRIMARY_FIRE"),
+                ("SecondaryFire", "SECONDARY_FIRE"),
+                ("Ability1", "ABILITY_1"),
+                ("Ability2", "ABILITY_2"),
+                ("Ultimate", "ULTIMATE"),
+                ("Crouch", "CROUCH"),
+                ("Interact", "INTERACT"),
+                ("Jump", "JUMP"),
+                ("Melee", "MELEE"),
+                ("Reload", "RELOAD"),
             ],
         },
     ),
     (
         "Clipping",
-        EnumDomain {
-            spelling: "Clipping",
-            members: &["DoNotClip", "ClipAgainstSurfaces"],
+        EnumDomainBinding {
+            domain: "Clipping",
+            members: &[
+                ("DoNotClip", "DO_NOT_CLIP"),
+                ("ClipAgainstSurfaces", "CLIP_AGAINST_SURFACES"),
+            ],
         },
     ),
     (
         "Color",
-        EnumDomain {
-            spelling: "Color",
+        EnumDomainBinding {
+            domain: "Color",
             members: &[
-                "White",
-                "Yellow",
-                "Green",
-                "Purple",
-                "Red",
-                "Blue",
-                "Aqua",
-                "Orange",
-                "SkyBlue",
-                "Turquoise",
-                "LimeGreen",
-                "Gray",
-                "Violet",
-                "Rose",
-                "Black",
-                "Team1",
-                "Team2",
+                ("White", "WHITE"),
+                ("Yellow", "YELLOW"),
+                ("Green", "GREEN"),
+                ("Purple", "PURPLE"),
+                ("Red", "RED"),
+                ("Blue", "BLUE"),
+                ("Aqua", "AQUA"),
+                ("Orange", "ORANGE"),
+                ("SkyBlue", "SKY_BLUE"),
+                ("Turquoise", "TURQUOISE"),
+                ("LimeGreen", "LIME_GREEN"),
+                ("Gray", "GRAY"),
+                ("Violet", "VIOLET"),
+                ("Rose", "ROSE"),
+                ("Black", "BLACK"),
+                ("Team1", "TEAM_1"),
+                ("Team2", "TEAM_2"),
             ],
         },
     ),
     (
         "Effect",
-        EnumDomain {
-            spelling: "Effect",
-            members: &["Orb"],
+        EnumDomainBinding {
+            domain: "Effect",
+            members: &[("Orb", "ORB")],
         },
     ),
     (
         "EffectRev",
-        EnumDomain {
-            spelling: "Effect Reevaluation",
-            members: &["VisibleToPositionAndRadius"],
+        EnumDomainBinding {
+            domain: "EffectReeval",
+            members: &[(
+                "VisibleToPositionAndRadius",
+                "VISIBLE_TO_POSITION_AND_RADIUS",
+            )],
         },
     ),
     (
         "Hero",
-        EnumDomain {
-            spelling: "Hero",
+        EnumDomainBinding {
+            domain: "Hero",
             members: &[
-                "Dva",
-                "Orisa",
-                "Reinhardt",
-                "Roadhog",
-                "Sigma",
-                "WreckingBall",
-                "Winston",
-                "Zarya",
-                "Ashe",
-                "Bastion",
-                "Cassidy",
-                "Doomfist",
-                "Echo",
-                "Genji",
-                "Hanzo",
-                "Junkrat",
-                "Mei",
-                "Pharah",
-                "Reaper",
-                "Soldier76",
-                "Symmetra",
-                "Sombra",
-                "Tracer",
-                "Torbjorn",
-                "Widowmaker",
-                "Ana",
-                "Brigitte",
-                "Baptiste",
-                "Lucio",
-                "Moira",
-                "Mercy",
-                "Zenyatta",
+                ("Dva", "DVA"),
+                ("Orisa", "ORISA"),
+                ("Reinhardt", "REINHARDT"),
+                ("Roadhog", "ROADHOG"),
+                ("Sigma", "SIGMA"),
+                ("WreckingBall", "WRECKING_BALL"),
+                ("Winston", "WINSTON"),
+                ("Zarya", "ZARYA"),
+                ("Ashe", "ASHE"),
+                ("Bastion", "BASTION"),
+                ("Cassidy", "CASSIDY"),
+                ("Doomfist", "DOOMFIST"),
+                ("Echo", "ECHO"),
+                ("Genji", "GENJI"),
+                ("Hanzo", "HANZO"),
+                ("Junkrat", "JUNKRAT"),
+                ("Mei", "MEI"),
+                ("Pharah", "PHARAH"),
+                ("Reaper", "REAPER"),
+                ("Soldier76", "SOLDIER_76"),
+                ("Symmetra", "SYMMETRA"),
+                ("Sombra", "SOMBRA"),
+                ("Tracer", "TRACER"),
+                ("Torbjorn", "TORBJORN"),
+                ("Widowmaker", "WIDOWMAKER"),
+                ("Ana", "ANA"),
+                ("Brigitte", "BRIGITTE"),
+                ("Baptiste", "BAPTISTE"),
+                ("Lucio", "LUCIO"),
+                ("Moira", "MOIRA"),
+                ("Mercy", "MERCY"),
+                ("Zenyatta", "ZENYATTA"),
             ],
         },
     ),
     (
         "HudTextRev",
-        EnumDomain {
-            spelling: "HUD Text Reevaluation",
+        EnumDomainBinding {
+            domain: "HudReeval",
             members: &[
-                "VisibleTo",
-                "VisibleToAndString",
-                "VisibleToStringAndColor",
-                "VisibleToAndColor",
+                ("VisibleTo", "VISIBILITY"),
+                ("VisibleToAndString", "VISIBILITY_AND_STRING"),
+                ("VisibleToStringAndColor", "VISIBLE_TO_STRING_AND_COLOR"),
+                ("VisibleToAndColor", "VISIBLE_TO_AND_COLOR"),
             ],
         },
     ),
     (
         "Icon",
-        EnumDomain {
-            spelling: "Icon",
-            members: &["No", "QuestionMark", "Skull", "Checkmark", "RingThin"],
+        EnumDomainBinding {
+            domain: "Icon",
+            members: &[
+                ("No", "NO"),
+                ("QuestionMark", "QUESTION_MARK"),
+                ("Skull", "SKULL"),
+                ("Checkmark", "CHECKMARK"),
+                ("RingThin", "RING_THIN"),
+            ],
         },
     ),
     (
         "InvisibleTo",
-        EnumDomain {
-            spelling: "Invisibility",
-            members: &["All", "None"],
+        EnumDomainBinding {
+            domain: "Invis",
+            members: &[("All", "ALL"), ("None", "NONE")],
         },
     ),
     (
         "Map",
-        EnumDomain {
-            spelling: "Map",
+        EnumDomainBinding {
+            domain: "Map",
             members: &[
-                "Hanamura",
-                "Hanamura_Winter",
-                "Horizon_Lunar_Colony",
-                "Paris",
-                "Temple_of_Anubis",
-                "Volskaya_Industries",
-                "Hanaoka",
-                "Throne_of_Anubis",
-                "Antarctic_Peninsula",
-                "Busan",
-                "Ilios",
-                "Lijiang_Tower",
-                "Lijiang_Tower_Lunar",
-                "Nepal",
-                "Oasis",
-                "Samoa",
-                "Circuit_Royal",
-                "Dorado",
-                "Havana",
-                "Junkertown",
-                "Rialto",
-                "Route_66",
-                "Shambali_Monastery",
-                "Watchpoint_Gibraltar",
-                "Aatlis",
-                "New_Junk_City",
-                "Suravasa",
-                "Blizzard_World",
-                "Blizzard_World_Winter",
-                "Eichenwalde",
-                "Eichenwalde_Halloween",
-                "Hollywood",
-                "Hollywood_Halloween",
-                "Kings_Row",
-                "Kings_Row_Winter",
-                "Midtown",
-                "Numbani",
-                "Paraiso",
-                "Colosseo",
-                "Esperanca",
-                "New_Queen_Street",
-                "Runasapi",
+                ("Hanamura", "HANAMURA"),
+                ("Hanamura_Winter", "HANAMURA_WINTER"),
+                ("Horizon_Lunar_Colony", "HORIZON_LUNAR_COLONY"),
+                ("Paris", "PARIS"),
+                ("Temple_of_Anubis", "TEMPLE_OF_ANUBIS"),
+                ("Volskaya_Industries", "VOLSKAYA_INDUSTRIES"),
+                ("Hanaoka", "HANAOKA"),
+                ("Throne_of_Anubis", "THRONE_OF_ANUBIS"),
+                ("Antarctic_Peninsula", "ANTARCTIC_PENINSULA"),
+                ("Busan", "BUSAN"),
+                ("Ilios", "ILIOS"),
+                ("Lijiang_Tower", "LIJIANG_TOWER"),
+                ("Lijiang_Tower_Lunar", "LIJIANG_TOWER_LUNAR"),
+                ("Nepal", "NEPAL"),
+                ("Oasis", "OASIS"),
+                ("Samoa", "SAMOA"),
+                ("Circuit_Royal", "CIRCUIT_ROYAL"),
+                ("Dorado", "DORADO"),
+                ("Havana", "HAVANA"),
+                ("Junkertown", "JUNKERTOWN"),
+                ("Rialto", "RIALTO"),
+                ("Route_66", "ROUTE_66"),
+                ("Shambali_Monastery", "SHAMBALI_MONASTERY"),
+                ("Watchpoint_Gibraltar", "WATCHPOINT_GIBRALTAR"),
+                ("Aatlis", "AATLIS"),
+                ("New_Junk_City", "NEW_JUNK_CITY"),
+                ("Suravasa", "SURAVASA"),
+                ("Blizzard_World", "BLIZZARD_WORLD"),
+                ("Blizzard_World_Winter", "BLIZZARD_WORLD_WINTER"),
+                ("Eichenwalde", "EICHENWALDE"),
+                ("Eichenwalde_Halloween", "EICHENWALDE_HALLOWEEN"),
+                ("Hollywood", "HOLLYWOOD"),
+                ("Hollywood_Halloween", "HOLLYWOOD_HALLOWEEN"),
+                ("Kings_Row", "KINGS_ROW"),
+                ("Kings_Row_Winter", "KINGS_ROW_WINTER"),
+                ("Midtown", "MIDTOWN"),
+                ("Numbani", "NUMBANI"),
+                ("Paraiso", "PARAISO"),
+                ("Colosseo", "COLOSSEO"),
+                ("Esperanca", "ESPERANCA"),
+                ("New_Queen_Street", "NEW_QUEEN_STREET"),
+                ("Runasapi", "RUNASAPI"),
             ],
         },
     ),
     (
         "InworldTextRev",
-        EnumDomain {
-            spelling: "In-World Text Reevaluation",
+        EnumDomainBinding {
+            domain: "InworldTextReeval",
             members: &[
-                "VisibleTo",
-                "VisibleToAndColor",
-                "VisibleToAndPosition",
-                "VisibleToAndString",
-                "VisibleToPositionAndColor",
-                "VisibleToPositionAndString",
-                "VisibleToPositionStringAndColor",
-                "VisibleToStringAndColor",
-                "String",
+                ("VisibleTo", "VISIBLE_TO"),
+                ("VisibleToAndColor", "VISIBLE_TO_AND_COLOR"),
+                ("VisibleToAndPosition", "VISIBLE_TO_AND_POSITION"),
+                ("VisibleToAndString", "VISIBLE_TO_AND_STRING"),
+                ("VisibleToPositionAndColor", "VISIBLE_TO_POSITION_AND_COLOR"),
+                (
+                    "VisibleToPositionAndString",
+                    "VISIBLE_TO_POSITION_AND_STRING",
+                ),
+                (
+                    "VisibleToPositionStringAndColor",
+                    "VISIBLE_TO_POSITION_STRING_AND_COLOR",
+                ),
+                ("VisibleToStringAndColor", "VISIBLE_TO_STRING_AND_COLOR"),
+                ("String", "STRING"),
             ],
         },
     ),
     (
         "Location",
-        EnumDomain {
-            spelling: "Location",
-            members: &["Left", "Right"],
+        EnumDomainBinding {
+            domain: "HudPosition",
+            members: &[("Left", "LEFT"), ("Right", "RIGHT")],
         },
     ),
     (
         "Operation",
-        EnumDomain {
-            spelling: "Operation",
+        EnumDomainBinding {
+            domain: "Operation",
             members: &[
-                "AppendToArray",
-                "RemoveFromArrayByValue",
-                "RemoveFromArrayByIndex",
+                ("AppendToArray", "APPEND_TO_ARRAY"),
+                ("RemoveFromArrayByValue", "REMOVE_FROM_ARRAY_BY_VALUE"),
+                ("RemoveFromArrayByIndex", "REMOVE_FROM_ARRAY_BY_INDEX"),
             ],
         },
     ),
     (
         "PlayEffect",
-        EnumDomain {
-            spelling: "Play Effect",
+        EnumDomainBinding {
+            domain: "DynamicEffect",
             members: &[
-                "BuffImpactSound",
-                "DebuffImpactSound",
-                "BuffExplosionSound",
-                "ExplosionSound",
-                "RingExplosionSound",
+                ("BuffImpactSound", "BUFF_IMPACT_SOUND"),
+                ("DebuffImpactSound", "DEBUFF_IMPACT_SOUND"),
+                ("BuffExplosionSound", "BUFF_EXPLOSION_SOUND"),
+                ("ExplosionSound", "EXPLOSION_SOUND"),
+                ("RingExplosionSound", "RING_EXPLOSION"),
             ],
         },
     ),
     (
         "ProgressBarWorldEvaluation",
-        EnumDomain {
-            spelling: "Progress Bar In-World Text Reevaluation",
-            members: &["VisibleToAndValues"],
+        EnumDomainBinding {
+            domain: "ProgressBarWorldReeval",
+            members: &[("VisibleToAndValues", "VISIBLE_TO_AND_VALUES")],
         },
     ),
     (
         "RateChaseReevaluation",
-        EnumDomain {
-            spelling: "Rate Chase Reevaluation",
-            members: &["None", "DestinationAndRate"],
+        EnumDomainBinding {
+            domain: "ChaseRateReeval",
+            members: &[
+                ("None", "NONE"),
+                ("DestinationAndRate", "DESTINATION_AND_RATE"),
+            ],
         },
     ),
     (
         "Rounding",
-        EnumDomain {
-            spelling: "Rounding",
-            members: &["Up", "Down", "Nearest"],
+        EnumDomainBinding {
+            domain: "Rounding",
+            members: &[("Up", "UP"), ("Down", "DOWN"), ("Nearest", "NEAREST")],
         },
     ),
     (
         "Spectators",
-        EnumDomain {
-            spelling: "Spectators",
-            members: &["DefaultVisibility", "VisibleAlways", "VisibleNever"],
+        EnumDomainBinding {
+            domain: "SpecVisibility",
+            members: &[
+                ("DefaultVisibility", "DEFAULT"),
+                ("VisibleAlways", "VISIBLE_ALWAYS"),
+                ("VisibleNever", "VISIBLE_NEVER"),
+            ],
         },
     ),
     (
         "WaitBehavior",
-        EnumDomain {
-            spelling: "Wait Behavior",
-            members: &["AbortWhenFalse", "IgnoreCondition"],
+        EnumDomainBinding {
+            domain: "Wait",
+            members: &[
+                ("AbortWhenFalse", "ABORT_WHEN_FALSE"),
+                ("IgnoreCondition", "IGNORE_CONDITION"),
+            ],
         },
     ),
 ];
 
-/// The builtin enums whose members the reachable graph reads with `Type.Member`
-/// qualified names (used by the resolver to accept `Enum` expressions).
-pub fn is_known_domain(name: &str) -> bool {
-    ENUM_DOMAINS.iter().any(|(id, _)| *id == name)
+/// Resolve an exercised builtin enum domain by its OSTW source name.
+pub fn enum_domain(name: &str) -> Option<&'static EnumDomainBinding> {
+    ENUM_DOMAIN_BINDINGS
+        .iter()
+        .find(|(source, _)| *source == name)
+        .map(|(_, binding)| binding)
 }

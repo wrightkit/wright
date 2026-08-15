@@ -197,3 +197,41 @@ fn reachable_unsupported_form_surfaces_structured_diagnostic() {
     assert!(unsupported.span.is_some(), "diagnostic is source-located");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn every_ostw_binding_resolves_through_the_canonical_catalog() {
+    // Catalog-ownership invariant (#118 AC): wright-ostw ships only OSTW
+    // source-name bindings, and every binding resolves to real canonical
+    // catalog data (kind/id for builtins; domain + member ids for enums).
+    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let en = wright_workshop::catalog::Locale::new("en-US");
+
+    for (source, (kind, id)) in wright_ostw::signature::BUILTIN_BINDINGS {
+        let entry = catalog
+            .entry(*kind, id)
+            .unwrap_or_else(|| panic!("builtin '{source}' -> {id:?} has no catalog entry"));
+        assert!(
+            entry.spelling(&en).is_some(),
+            "builtin '{source}' entry '{id}' has no en-US spelling"
+        );
+    }
+
+    for (source, binding) in wright_ostw::signature::ENUM_DOMAIN_BINDINGS {
+        let domain = catalog.enum_domain(binding.domain).unwrap_or_else(|| {
+            panic!(
+                "enum domain '{source}' -> '{}' has no catalog domain",
+                binding.domain
+            )
+        });
+        for (member_source, canonical) in binding.members {
+            assert!(
+                domain
+                    .members
+                    .iter()
+                    .any(|member| &member.member == canonical),
+                "domain '{source}': member '{member_source}' -> '{canonical}' is not in the catalog domain '{}'",
+                binding.domain
+            );
+        }
+    }
+}

@@ -35,3 +35,32 @@ impl ExpectedDomain for NoExpectedDomain {
         None
     }
 }
+
+/// A context chain: consult `first`, then fall back to `second`.
+///
+/// The OPY parse path consults the #109 manifest for OPY-signature domains
+/// and then the canonical Workshop catalog for the Workshop surface the
+/// manifest does not document (e.g. Create HUD Text's `HudReeval`
+/// reevaluation argument, #118). Neither is authoritative alone; the chain
+/// preserves the manifest's OPY-specific pins while letting the catalog
+/// resolve the remaining canonical Workshop domains.
+#[derive(Clone, Copy)]
+pub struct ChainedExpectedDomain<'a, 'b> {
+    first: &'a dyn ExpectedDomain,
+    second: &'b dyn ExpectedDomain,
+}
+
+impl<'a, 'b> ChainedExpectedDomain<'a, 'b> {
+    /// Chain two contexts, consulting `first` before `second`.
+    pub fn new(first: &'a dyn ExpectedDomain, second: &'b dyn ExpectedDomain) -> Self {
+        ChainedExpectedDomain { first, second }
+    }
+}
+
+impl ExpectedDomain for ChainedExpectedDomain<'_, '_> {
+    fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
+        self.first
+            .expected_domain(catalog_id, arg_index)
+            .or_else(|| self.second.expected_domain(catalog_id, arg_index))
+    }
+}

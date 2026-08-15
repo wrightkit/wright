@@ -53,6 +53,13 @@ fn emission_is_byte_stable_and_a_fixed_point() {
 
 #[test]
 fn every_corpus_program_round_trips_to_equivalent_wir() {
+    // Corpus text parses against the catalog context (expected enum domains
+    // come from the canonical catalog signatures). `real-world/overpy-cake`
+    // is the documented exception: its bare `Up` (OverPy folds the vector-up
+    // constant inside `Add(...)`) is genuinely ambiguous between the `Vector`
+    // and `Rounding` enum domains and no enclosing signature pins it, so the
+    // parser rejects it deterministically (#111).
+    let documented_ambiguities = [("real-world/overpy-cake", "ambiguous enum member 'Up'")];
     for fixture_id in [
         "synthetic/basic-rule",
         "synthetic/control-flow",
@@ -62,13 +69,30 @@ fn every_corpus_program_round_trips_to_equivalent_wir() {
         "synthetic/receiver-calls",
         "real-world/overpy-cake",
     ] {
-        let program = parser::parse(&corpus_text(fixture_id), &catalog(), &en())
-            .unwrap_or_else(|error| panic!("{fixture_id} must parse: {error}"));
-        let emitted = emitter::emit(&program, &catalog(), &en())
+        let catalog = catalog();
+        let program =
+            match parser::parse_with_context(&corpus_text(fixture_id), &catalog, &en(), &catalog) {
+                Ok(program) => program,
+                Err(error) => {
+                    let Some((_, message)) = documented_ambiguities
+                        .iter()
+                        .find(|(id, _)| **id == *fixture_id)
+                    else {
+                        panic!("{fixture_id} must parse: {error}");
+                    };
+                    assert!(
+                        error.to_string().contains(message),
+                        "{fixture_id} fails only with the documented ambiguity, got: {error}"
+                    );
+                    continue;
+                }
+            };
+        let emitted = emitter::emit(&program, &catalog, &en())
             .unwrap_or_else(|error| panic!("{fixture_id} must emit: {error}"));
-        let reparsed = parser::parse(&emitted, &catalog(), &en()).unwrap_or_else(|error| {
-            panic!("{fixture_id} emitted text must reparse:\n{error}\n{emitted}")
-        });
+        let reparsed = parser::parse_with_context(&emitted, &catalog, &en(), &catalog)
+            .unwrap_or_else(|error| {
+                panic!("{fixture_id} emitted text must reparse:\n{error}\n{emitted}")
+            });
         let original = without_spans(&program.dump());
         let round_tripped = without_spans(&reparsed.dump());
         assert_eq!(
@@ -91,13 +115,15 @@ fn emitted_text_is_recognizably_workshop() {
 
 #[test]
 fn emitted_condition_matches_reference_infix_form() {
-    let program = parser::parse(
+    let catalog = catalog();
+    let program = parser::parse_with_context(
         &corpus_text("synthetic/declarations-rules"),
-        &catalog(),
+        &catalog,
         &en(),
+        &catalog,
     )
     .unwrap();
-    let emitted = emitter::emit(&program, &catalog(), &en()).unwrap();
+    let emitted = emitter::emit(&program, &catalog, &en()).unwrap();
     assert!(
         emitted.contains("Has Spawned(Event Player) == True"),
         "non-comparison conditions emit in reference infix form:\n{emitted}"
@@ -139,7 +165,9 @@ fn debug_actions_emit_hud_text() {
         "debug emits the value as HUD text:\n{emitted}"
     );
     // The emitted text reparses to a createHudText action call.
-    let reparsed = wright_workshop::parser::parse(&emitted, &catalog(), &en()).unwrap();
+    let catalog = catalog();
+    let reparsed =
+        wright_workshop::parser::parse_with_context(&emitted, &catalog, &en(), &catalog).unwrap();
     assert_eq!(reparsed.rules.len(), 1);
 }
 

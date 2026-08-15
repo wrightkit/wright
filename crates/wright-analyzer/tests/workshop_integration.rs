@@ -29,10 +29,13 @@ fn corpus_text(fixture_id: &str) -> String {
 
 fn workshop_service(fixture_id: &str) -> SemanticService<'static> {
     // SAFETY-free approach: the service borrows the program; keep both in a
-    // leaked box for the test scope.
+    // leaked box for the test scope. The catalog supplies the canonical
+    // expected enum domains (e.g. Create HUD Text's Reevaluation argument is
+    // HudReeval), resolving bare members that are ambiguous across the
+    // catalog's enum domains (#118).
     let text = corpus_text(fixture_id);
     let catalog = Catalog::builtin().unwrap();
-    let program = parser::parse(&text, &catalog, &Locale::new("en-US"))
+    let program = parser::parse_with_context(&text, &catalog, &Locale::new("en-US"), &catalog)
         .unwrap_or_else(|error| panic!("{fixture_id} must parse: {error}"));
     let program = Box::leak(Box::new(program));
     SemanticService::from_workshop(program, "en-US").unwrap()

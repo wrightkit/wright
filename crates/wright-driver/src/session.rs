@@ -199,7 +199,10 @@ impl CompilerSession {
         // Context-sensitive bare-enum resolution (#111): the #109 canonical
         // signature metadata pins the expected domain for call arguments, so
         // emitter-produced text like `Chase Global Variable Over Time(...,
-        // None)` reparses instead of failing on the ambiguous `None`.
+        // None)` reparses instead of failing on the ambiguous `None`. The
+        // canonical Workshop catalog supplies the remaining domains the
+        // manifest does not document (e.g. Create HUD Text's `HudReeval`
+        // reevaluation argument, #118).
         let manifest = wright_opy::manifest::Manifest::builtin().map_err(|error| {
             Diagnostic::error(
                 "manifest-error",
@@ -207,11 +210,12 @@ impl CompilerSession {
                 format!("cannot load the OPY semantic compatibility manifest: {error}"),
             )
         })?;
+        let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, &self.catalog);
         let program = wright_workshop::parser::parse_with_context(
             &resolved.text,
             &self.catalog,
             &locale,
-            manifest,
+            &context,
         )
         .map_err(|error| workshop_diag(error, resolved))?;
         program

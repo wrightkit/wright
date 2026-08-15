@@ -43,37 +43,72 @@ const CORPUS_FIXTURES: &[&str] = &[
 
 #[test]
 fn every_corpus_workshop_text_parses_to_valid_wir() {
+    // The corpus Workshop text parses directly against the catalog context,
+    // which pins the expected enum domains from the canonical catalog
+    // signatures (e.g. Create HUD Text's Reevaluation argument is `HudReeval`,
+    // Create Beam Effect's is `EffectReeval`), resolving bare members that
+    // are ambiguous across the catalog's enum domains (e.g.
+    // `Visible To and String`).
+    //
+    // One documented exception: `real-world/overpy-cake`'s bare `Up` (OverPy
+    // folds the vector-up constant into the bare member inside `Add(...)`) is
+    // genuinely ambiguous between the `Vector` and `Rounding` enum domains and
+    // no enclosing signature pins it, so the parser rejects it deterministically
+    // rather than guessing (#111). The assertion below pins that this is the
+    // ONLY way the fixture fails.
+    let documented_ambiguities = [("real-world/overpy-cake", "ambiguous enum member 'Up'")];
     for fixture_id in CORPUS_FIXTURES {
         let text = corpus_workshop_text(fixture_id);
-        let program = parser::parse(&text, &catalog(), &Locale::new("en-US"))
-            .unwrap_or_else(|error| panic!("{fixture_id} must parse:\n{error}"));
-        program
-            .validate()
-            .unwrap_or_else(|error| panic!("{fixture_id} WIR must validate: {error}"));
-        validate::validate_canonical_ids(&program, &catalog())
-            .unwrap_or_else(|error| panic!("{fixture_id} canonical ids must resolve: {error}"));
-        assert!(!program.rules.is_empty(), "{fixture_id} must produce rules");
-        assert!(
-            !program.dump().is_empty(),
-            "{fixture_id} dump must not be empty"
-        );
+        let catalog = catalog();
+        match parser::parse_with_context(&text, &catalog, &Locale::new("en-US"), &catalog) {
+            Ok(program) => {
+                program
+                    .validate()
+                    .unwrap_or_else(|error| panic!("{fixture_id} WIR must validate: {error}"));
+                validate::validate_canonical_ids(&program, &catalog).unwrap_or_else(|error| {
+                    panic!("{fixture_id} canonical ids must resolve: {error}")
+                });
+                assert!(!program.rules.is_empty(), "{fixture_id} must produce rules");
+                assert!(
+                    !program.dump().is_empty(),
+                    "{fixture_id} dump must not be empty"
+                );
+            }
+            Err(error) => {
+                let Some((_, message)) = documented_ambiguities
+                    .iter()
+                    .find(|(id, _)| *id == *fixture_id)
+                else {
+                    panic!("{fixture_id} must parse:\n{error}");
+                };
+                assert!(
+                    error.to_string().contains(message),
+                    "{fixture_id} fails only with the documented ambiguity, got: {error}"
+                );
+            }
+        }
     }
 }
 
 #[test]
 fn parsing_is_deterministic() {
     let text = corpus_workshop_text("synthetic/control-flow");
-    let first = parser::parse(&text, &catalog(), &Locale::new("en-US")).unwrap();
-    let second = parser::parse(&text, &catalog(), &Locale::new("en-US")).unwrap();
+    let catalog = catalog();
+    let first =
+        parser::parse_with_context(&text, &catalog, &Locale::new("en-US"), &catalog).unwrap();
+    let second =
+        parser::parse_with_context(&text, &catalog, &Locale::new("en-US"), &catalog).unwrap();
     assert_eq!(first.dump(), second.dump());
 }
 
 #[test]
 fn parsed_variables_and_subroutines_carry_indexes() {
-    let program = parser::parse(
+    let catalog = catalog();
+    let program = parser::parse_with_context(
         &corpus_workshop_text("synthetic/declarations-rules"),
-        &catalog(),
+        &catalog,
         &Locale::new("en-US"),
+        &catalog,
     )
     .unwrap();
     let globals: Vec<_> = program
@@ -98,10 +133,12 @@ fn parsed_variables_and_subroutines_carry_indexes() {
 
 #[test]
 fn parsed_events_are_canonical() {
-    let program = parser::parse(
+    let catalog = catalog();
+    let program = parser::parse_with_context(
         &corpus_workshop_text("synthetic/declarations-rules"),
-        &catalog(),
+        &catalog,
         &Locale::new("en-US"),
+        &catalog,
     )
     .unwrap();
     let events: Vec<String> = program
@@ -127,10 +164,12 @@ fn parsed_events_are_canonical() {
 
 #[test]
 fn parsed_conditions_resolve_infix_operators() {
-    let program = parser::parse(
+    let catalog = catalog();
+    let program = parser::parse_with_context(
         &corpus_workshop_text("synthetic/declarations-rules"),
-        &catalog(),
+        &catalog,
         &Locale::new("en-US"),
+        &catalog,
     )
     .unwrap();
     let rule = program
@@ -351,14 +390,52 @@ fn cross_domain_member_spelling_collisions_are_the_documented_inventory() {
         .collect();
     assert_eq!(
         collisions,
-        vec![(
-            "None".to_string(),
-            vec![
-                "ChaseTimeReeval".to_string(),
-                "ChaseRateReeval".to_string(),
-                "Invis".to_string()
-            ]
-        )],
+        vec![
+            (
+                "None".to_string(),
+                vec![
+                    "ChaseTimeReeval".to_string(),
+                    "ChaseRateReeval".to_string(),
+                    "Invis".to_string()
+                ]
+            ),
+            (
+                "Team 1".to_string(),
+                vec!["Color".to_string(), "Team".to_string()]
+            ),
+            (
+                "Team 2".to_string(),
+                vec!["Color".to_string(), "Team".to_string()]
+            ),
+            (
+                "Up".to_string(),
+                vec!["Vector".to_string(), "Rounding".to_string()]
+            ),
+            (
+                "Visible To".to_string(),
+                vec![
+                    "HudReeval".to_string(),
+                    "EffectReeval".to_string(),
+                    "InworldTextReeval".to_string()
+                ]
+            ),
+            (
+                "Visible To String and Color".to_string(),
+                vec!["HudReeval".to_string(), "InworldTextReeval".to_string()]
+            ),
+            (
+                "Visible To and Color".to_string(),
+                vec![
+                    "HudReeval".to_string(),
+                    "EffectReeval".to_string(),
+                    "InworldTextReeval".to_string()
+                ]
+            ),
+            (
+                "Visible To and String".to_string(),
+                vec!["HudReeval".to_string(), "InworldTextReeval".to_string()]
+            ),
+        ],
         "the declared catalog's cross-domain member-spelling collisions"
     );
 }

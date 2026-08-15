@@ -7,7 +7,8 @@
 //! user enums, typed functions/parameters, rule priority, ternary/cast, and
 //! switch/return/break/foreach/for-loop forms evidenced by the pinned
 //! reference probes). Workshop actions/values/enums resolve through the
-//! Wright-owned [`crate::signature`] data — no OSTW game-derived table.
+//! canonical Wright-owned Workshop catalog (via the OSTW-only source bindings
+//! in [`crate::signature`]) — no OSTW game-derived table.
 //!
 //! Unsupported reachable boundaries (classes/`new`, `define` function
 //! macros, the missing `../OSTWUtils`/`Cursor`/`Math` surfaces) fail during
@@ -19,11 +20,22 @@ use std::collections::HashMap;
 
 use wright_ir::hir::{self, ExprId, FunctionId, GlobalVarId, PlayerVarId, StmtId, SubroutineId};
 
+use wright_workshop::catalog::Catalog;
+
 use crate::cst;
 use crate::diag::FrontendError;
 use crate::project::Project;
 use crate::signature;
 use wright_ir::source::Span;
+
+/// The canonical Wright Workshop catalog, loaded once. Workshop builtins and
+/// enum domains resolve through it at the consume sites; wright-ostw ships
+/// only OSTW source-name bindings ([`crate::signature`]).
+fn catalog() -> &'static Catalog {
+    static CATALOG: std::sync::OnceLock<Catalog> = std::sync::OnceLock::new();
+    CATALOG
+        .get_or_init(|| Catalog::builtin().expect("the embedded Wright Workshop catalog validates"))
+}
 
 /// The outcome of the semantic phase: validated HIR plus diagnostics.
 #[derive(Debug, Clone)]
@@ -1121,8 +1133,22 @@ impl<'a> Resolver<'a> {
             ..
         } = receiver
         {
-            if let Some(domain) = signature::enum_domain(receiver_name) {
-                if !domain.members.contains(&name) {
+            if let Some(binding) = signature::enum_domain(receiver_name) {
+                // The OSTW binding maps the source member name to its canonical
+                // catalog member id; the catalog is the authority on existence.
+                let known_member = binding
+                    .members
+                    .iter()
+                    .find(|(source, _)| *source == name)
+                    .is_some_and(|(_, canonical)| {
+                        catalog().enum_domain(binding.domain).is_some_and(|domain| {
+                            domain
+                                .members
+                                .iter()
+                                .any(|member| member.member == *canonical)
+                        })
+                    });
+                if !known_member {
                     self.diagnostics.push(FrontendError::at(
                         "ostw-unknown-enum-member",
                         format!("'{receiver_name}' has no member '{name}'"),
@@ -1231,8 +1257,14 @@ impl<'a> Resolver<'a> {
                         span: Some(span),
                     });
                 }
-                if let Some(builtin) = signature::builtin(name) {
-                    let ordered = self.bind_builtin_args(name, builtin, args, span);
+                if let Some((kind, id)) = signature::builtin(name) {
+                    // Canonical param order/spellings come from the catalog;
+                    // the binding only supplies the OSTW source identity.
+                    let params = catalog()
+                        .entry(kind, id)
+                        .map(|entry| entry.params.clone())
+                        .unwrap_or_default();
+                    let ordered = self.bind_builtin_args(name, &params, args, span);
                     return self.hir.exprs.push(hir::Expr::Call {
                         name: name.clone(),
                         args: ordered,
@@ -1331,17 +1363,17 @@ impl<'a> Resolver<'a> {
     }
 
     /// Bind positional + named arguments against a builtin's canonical param
-    /// order (probe evidence P6/P6b): named args reorder to the canonical
-    /// order and omitted gaps are filled with the zero literal (#119 refines
-    /// the reference defaults).
+    /// order (the catalog owns the canonical param names; probe evidence
+    /// P6/P6b): named args reorder to the canonical order and omitted gaps
+    /// are filled with the zero literal (#119 refines the reference defaults).
     fn bind_builtin_args(
         &mut self,
         name: &str,
-        builtin: &signature::Builtin,
+        params: &[String],
         args: &[cst::CallArg],
         span: Span,
     ) -> Vec<ExprId> {
-        let mut slots: Vec<Option<ExprId>> = vec![None; builtin.params.len()];
+        let mut slots: Vec<Option<ExprId>> = vec![None; params.len()];
         let mut positional_index = 0usize;
         for arg in args {
             match arg {
@@ -1363,7 +1395,7 @@ impl<'a> Resolver<'a> {
                     value,
                     ..
                 } => {
-                    let Some(slot) = builtin.params.iter().position(|param| *param == arg_name)
+                    let Some(slot) = params.iter().position(|param| param.as_str() == arg_name)
                     else {
                         let _ = self.resolve_expr(value);
                         self.diagnostics.push(FrontendError::at(

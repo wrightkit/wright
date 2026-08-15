@@ -5,9 +5,10 @@
 //! model (`entry_point`) with quoted-import resolution (#117), and a
 //! semantic phase that resolves the entry-point reachable graph into
 //! frontend-neutral Wright HIR (#118). Workshop actions/values/enums resolve
-//! through Wright-owned catalog/signature data; no OSTW game-derived table
-//! is imported. Upstream .NET/OSTW remains a reference-only oracle and never
-//! enters the production dependency graph.
+//! through the canonical Wright-owned Workshop catalog
+//! (`wright-workshop`'s `catalog`), with only OSTW source-name bindings kept
+//! here; no OSTW game-derived table is imported. Upstream .NET/OSTW remains a
+//! reference-only oracle and never enters the production dependency graph.
 //!
 //! Pipeline: [`lexer::lex`] → [`parser::parse`] → [`project::compile`] →
 //! [`semantic::compile`].

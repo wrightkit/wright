@@ -148,3 +148,119 @@ fn undeclared_locale_fails_validation() {
     let error = Catalog::load(bad).expect_err("undeclared locale must fail");
     assert!(error.to_string().contains("undeclared locale"));
 }
+
+#[test]
+fn ostw_exercised_builtin_surface_resolves_with_canonical_params_and_spellings() {
+    // The #118 OSTW frontend resolves Workshop builtins through the catalog:
+    // canonical param order (named-arg binding, probes P6/P6b) and en-US
+    // spellings are catalog-owned.
+    let catalog = builtin();
+
+    // Action with a full canonical param list.
+    let effect = catalog
+        .entry(Kind::Action, "createEffect")
+        .expect("createEffect is in the catalog");
+    assert_eq!(
+        effect.params,
+        vec![
+            "VisibleTo",
+            "Type",
+            "Color",
+            "Position",
+            "Radius",
+            "Reevaluation"
+        ]
+    );
+    assert_eq!(
+        catalog.spelling(Kind::Action, &en(), "createEffect"),
+        Some("Create Effect")
+    );
+
+    // Value with no params.
+    let event_player = catalog
+        .entry(Kind::Value, "eventPlayer")
+        .expect("eventPlayer is in the catalog");
+    assert!(event_player.params.is_empty());
+    assert_eq!(
+        catalog.spelling(Kind::Value, &en(), "eventPlayer"),
+        Some("Event Player")
+    );
+
+    // A shared canonical identity: OSTW `Wait`/`MinWait` both bind to `wait`.
+    assert_eq!(
+        catalog
+            .entry(Kind::Action, "wait")
+            .map(|e| e.params.clone()),
+        Some(vec!["Duration".to_string(), "WaitBehavior".to_string()])
+    );
+
+    // The exercised param surface resolves by en-US spelling too.
+    assert!(
+        catalog
+            .resolve(
+                Kind::Action,
+                &en(),
+                "Disable Movement Collision With Environment"
+            )
+            .is_some()
+    );
+    assert!(
+        catalog
+            .resolve(Kind::Value, &en(), "Workshop Setting Combo")
+            .is_some()
+    );
+}
+
+#[test]
+fn ostw_exercised_enum_domains_resolve_members_to_canonical_identity() {
+    let catalog = builtin();
+
+    // Hero members resolve with their canonical ids and en-US spellings.
+    assert_eq!(
+        catalog.resolve_enum_member("Hero", &en(), "D.Va"),
+        Some(("Hero".to_string(), "DVA".to_string()))
+    );
+    assert_eq!(
+        catalog.enum_spelling("Hero", &en(), "WRECKING_BALL"),
+        Some("Wrecking Ball")
+    );
+
+    // Button, Team, Color, and the reevaluation domains exercised by the
+    // protect-ban closure.
+    assert_eq!(
+        catalog.resolve_enum_member("Button", &en(), "Ability 2"),
+        Some(("Button".to_string(), "ABILITY_2".to_string()))
+    );
+    assert_eq!(
+        catalog.resolve_enum_member("Team", &en(), "Team 1"),
+        Some(("Team".to_string(), "TEAM_1".to_string()))
+    );
+    assert_eq!(
+        catalog.resolve_enum_member("Color", &en(), "Sky Blue"),
+        Some(("Color".to_string(), "SKY_BLUE".to_string()))
+    );
+    assert_eq!(
+        catalog.resolve_enum_member("EffectReeval", &en(), "Visible To Position and Radius"),
+        Some((
+            "EffectReeval".to_string(),
+            "VISIBLE_TO_POSITION_AND_RADIUS".to_string()
+        ))
+    );
+    assert_eq!(
+        catalog.resolve_enum_member(
+            "InworldTextReeval",
+            &en(),
+            "Visible To Position String and Color"
+        ),
+        Some((
+            "InworldTextReeval".to_string(),
+            "VISIBLE_TO_POSITION_STRING_AND_COLOR".to_string()
+        ))
+    );
+
+    // Map members resolve (exercised by the protect-ban MapData surface).
+    assert_eq!(
+        catalog.resolve_enum_member("Map", &en(), "Watchpoint: Gibraltar"),
+        Some(("Map".to_string(), "WATCHPOINT_GIBRALTAR".to_string()))
+    );
+}
