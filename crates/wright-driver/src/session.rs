@@ -331,17 +331,13 @@ impl CompilerSession {
 
     fn compile_output(&mut self) -> Result<CompiledOutput, Diagnostic> {
         let loaded = self.load()?;
-        if loaded.ostw.is_some() {
+        if let Some(outcome) = &loaded.ostw {
             // OSTW (#119): the load lowered the semantic HIR into the
             // session program. Project-boundary diagnostics (missing
             // imports) and semantic-boundary diagnostics are errors — an
             // unsupported or unresolved reachable form fails compilation
             // with a deterministic, structured, source-located diagnostic
             // instead of being deferred to emission.
-            let outcome = loaded
-                .ostw
-                .as_ref()
-                .expect("an OSTW load always carries its frontend outcome");
             let semantic = loaded.ostw_semantic.as_ref();
             let error = outcome
                 .diagnostics

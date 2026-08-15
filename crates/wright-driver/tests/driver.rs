@@ -1087,7 +1087,7 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
             .result
             .program
             .as_object()
-            .is_some_and(|program| program.len() > 0),
+            .is_some_and(|program| !program.is_empty()),
         "analyze carries the shared program summary"
     );
     assert!(

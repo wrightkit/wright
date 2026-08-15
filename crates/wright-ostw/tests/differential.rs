@@ -171,11 +171,10 @@ fn inline_write_once_player_vars(program: &mut wir::Program) {
                 continue;
             }
             let var_index = variable.index() as u32;
-            if writers.contains_key(&var_index) {
-                writers.insert(var_index, (usize::MAX, *value)); // written again
-            } else {
-                writers.insert(var_index, (index, *value));
-            }
+            writers
+                .entry(var_index)
+                .and_modify(|slot| *slot = (usize::MAX, *value)) // written again
+                .or_insert((index, *value));
         }
         // Remove the single-writer Sets and substitute reads that follow
         // the write (replacing the value nodes in the arena).
@@ -427,7 +426,7 @@ fn fold_placeholders(program: &mut wir::Program) {
             continue;
         };
         if let Value::Call { name, args } = &node.value {
-            if name == "customString" && args.len() >= 1 {
+            if name == "customString" && !args.is_empty() {
                 let text_id = args[0];
                 if let Some(Value::String(text)) = program.values.get(text_id).map(|n| &n.value) {
                     let normalized: String = text
@@ -628,7 +627,7 @@ fn compare_action(
     let (Some(a), Some(b)) = (actual.actions.get(action_a), expected.actions.get(action_b)) else {
         return Err("dangling action".to_string());
     };
-    let span_text = |program: &wir::Program, action: &Action| match action {
+    let span_text = |_program: &wir::Program, action: &Action| match action {
         Action::SetGlobalVariable { value, .. }
         | Action::ModifyGlobalVariable { value, .. }
         | Action::Debug { value, .. }
@@ -992,10 +991,8 @@ fn compare_value(
                 (t1.as_str(), t2.as_str()),
                 ("Color", "Team") | ("Team", "Color")
             ) && v1 == v2;
-            if t1 != t2 || v1 != v2 {
-                if !team_equivalent {
-                    return Err(format!("enum differs: {t1}.{v1} vs {t2}.{v2}"));
-                }
+            if (t1 != t2 || v1 != v2) && !team_equivalent {
+                return Err(format!("enum differs: {t1}.{v1} vs {t2}.{v2}"));
             }
             Ok(())
         }
@@ -1127,7 +1124,7 @@ fn accepted_targets_compile_and_match_pinned_reference_semantics() {
             semantic.diagnostics
         );
         let hir = semantic.hir.as_ref().expect("HIR produced");
-        let mut program = wright_ir::lower::lower(hir).expect("lowering succeeds");
+        let program = wright_ir::lower::lower(hir).expect("lowering succeeds");
         program.validate().expect("lowered program validates");
 
         let emitted = wright_workshop::emitter::emit(

@@ -936,7 +936,7 @@ impl<'a> Lowerer<'a> {
                 let index_value = self.lower_value_with(*index, params, out)?;
                 let value = self.lower_value_with(*value, params, out)?;
                 let array_value = self.lower_value_with(*array, params, out)?;
-                match indexed_array_kind(array, &self.hir) {
+                match indexed_array_kind(array, self.hir) {
                     IndexedArrayKind::Global => Ok(Action::Call {
                         name: "setGlobalVariableAtIndex".to_string(),
                         args: vec![array_value, index_value, value],
@@ -947,12 +947,10 @@ impl<'a> Lowerer<'a> {
                         args: vec![array_value, index_value, value],
                         span,
                     }),
-                    IndexedArrayKind::Other => {
-                        return Err(unsupported(
-                            "indexed assignment requires a global or player array target",
-                            span,
-                        ));
-                    }
+                    IndexedArrayKind::Other => Err(unsupported(
+                        "indexed assignment requires a global or player array target",
+                        span,
+                    )),
                 }
             }
             other => Err(unsupported(
@@ -1120,6 +1118,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lower_for_with(
         &mut self,
         variable: GlobalVarId,
@@ -1250,6 +1249,7 @@ impl<'a> Lowerer<'a> {
 
     /// Lower a C-style `for (init; condition; step)` loop: the reference
     /// emits `For Global Variable(variable, start, condition, step)` (P5).
+    #[allow(clippy::too_many_arguments)]
     fn lower_c_for(
         &mut self,
         variable: GlobalVarId,
