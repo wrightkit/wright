@@ -163,8 +163,24 @@ impl CompilerSession {
             override_locale.as_ref(),
         )
         .map_err(|error| workshop_diag(error, resolved))?;
-        let program = wright_workshop::parser::parse(&resolved.text, &self.catalog, &locale)
-            .map_err(|error| workshop_diag(error, resolved))?;
+        // Context-sensitive bare-enum resolution (#111): the #109 canonical
+        // signature metadata pins the expected domain for call arguments, so
+        // emitter-produced text like `Chase Global Variable Over Time(...,
+        // None)` reparses instead of failing on the ambiguous `None`.
+        let manifest = wright_opy::manifest::Manifest::builtin().map_err(|error| {
+            Diagnostic::error(
+                "manifest-error",
+                Stage::Frontend,
+                format!("cannot load the OPY semantic compatibility manifest: {error}"),
+            )
+        })?;
+        let program = wright_workshop::parser::parse_with_context(
+            &resolved.text,
+            &self.catalog,
+            &locale,
+            manifest,
+        )
+        .map_err(|error| workshop_diag(error, resolved))?;
         program
             .validate()
             .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;

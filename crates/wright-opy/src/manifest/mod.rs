@@ -562,6 +562,28 @@ pub fn canonicalize(manifest_json: &str, probes_json: &str) -> Result<String, Ma
         .map_err(|error| ManifestError(format!("cannot serialize manifest: {error}")))
 }
 
+/// Adapt the manifest to the Workshop parse context (#111): the expected
+/// enum domain for a Workshop call argument, taken solely from the manifest's
+/// canonical `catalogId` → parameter-domain data.
+///
+/// Workshop text lays member-kind functions (receiver methods) out with the
+/// receiver as argument 0, so the manifest's parameter indexes shift by one
+/// for those entries. The manifest remains the single source of expected
+/// domains; this impl is the bridge mapping them onto Workshop argument
+/// positions.
+impl wright_core::signatures::ExpectedDomain for Manifest {
+    fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
+        let entry = self.functions.iter().find(|f| {
+            f.catalog_id
+                .as_deref()
+                .is_some_and(|catalog_id_of| catalog_id_of == catalog_id)
+        })?;
+        let offset = usize::from(entry.kind.is_member());
+        let param = entry.params.get(arg_index.checked_sub(offset)?)?;
+        param.domain.as_deref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

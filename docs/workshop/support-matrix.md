@@ -79,12 +79,18 @@ Literals: numbers (signed), strings (escaped), `True`/`False`,
 - Spec Visibility: `Default Visibility`.
 - Team: `All Teams` (inside `All Players(All Teams)`).
 
-The Chase reevaluation `None` member spelling is shared by both reference
-domains (`ChaseTimeReeval.NONE` and `ChaseRateReeval.NONE` emit the same
-`None` text). The flat Workshop parser cannot disambiguate that bare spelling
-across domains, so emitted text containing a bare `None` member is a
-documented round-trip exception until context-sensitive enum resolution
-exists; the emitted semantic value itself is reference-equivalent.
+The bare `None` member spelling is shared by three enum domains
+(`ChaseTimeReeval.NONE`, `ChaseRateReeval.NONE`, and `Invis.NONE` all emit
+`None`). The Workshop parser resolves that ambiguity context-sensitively from
+the canonical signature metadata (#109/#111): when the enclosing call's
+signature pins exactly one expected domain, the bare spelling resolves to that
+domain — `Chase Global Variable Over Time(..., None)` reparses to
+`ChaseTimeReeval.NONE` and `Set Invisible(..., None)` to `Invis.NONE`.
+`ChaseRateReeval` has no emitting signature in the supported surface, so its
+bare `None` stays unpinned. Context-free or wrong-context `None` (e.g.
+`Set Global Variable(g, None)`) still fails deterministically with the
+`ambiguous enum member 'None'` diagnostic — no global spelling heuristics and
+no arbitrary domain precedence.
 
 ### Settings and extensions
 - Emitted from native `.opy` `settings { ... }` blocks into the top-of-file

@@ -202,3 +202,72 @@ fn unknown_builtin_fails_at_emit_stage() {
         wright_workshop::emitter::emit(&program, &catalog(), &en()).expect_err("unknown id");
     assert!(error.to_string().contains("notACatalogId"));
 }
+
+/// The canonical signature context from the #109 manifest, as the shipped
+/// driver wires it into the Workshop parse path (#111).
+fn manifest_context() -> &'static dyn wright_core::signatures::ExpectedDomain {
+    wright_opy::manifest::Manifest::builtin().expect("builtin manifest")
+}
+
+#[test]
+fn emitter_chase_none_round_trips_through_the_shipped_path() {
+    // #111: emitter-produced `Chase Global Variable Over Time(..., None)`
+    // (bare `None` shared by ChaseTimeReeval/ChaseRateReeval/Invis) reparses
+    // to ChaseTimeReeval.NONE through the shipped parse+emit path, and the
+    // round-tripped WIR is equivalent to the input WIR.
+    let text = "variables { global: 0: g }\nrule (\"chase\") { event { Ongoing - Global; } actions { Chase Global Variable Over Time(Global.g, 0, 30, None); } }";
+    let record = roundtrip::round_trip_with_context(text, &catalog(), &en(), manifest_context());
+    assert!(
+        record.error.is_none(),
+        "the pinned Chase None must round-trip: {:?}",
+        record.error
+    );
+    assert!(record.parse_ok && record.emit_ok && record.reparse_ok && record.equivalent);
+}
+
+#[test]
+fn emitter_set_invisible_none_round_trips_through_the_shipped_path() {
+    // #111: `Set Invisible(Event Player, None)` reparses to Invis.NONE via
+    // the member-function receiver offset and round-trips to equivalent WIR.
+    let text = "rule (\"inv\") { event { Ongoing - Each Player; } actions { Set Invisible(Event Player, None); } }";
+    let record = roundtrip::round_trip_with_context(text, &catalog(), &en(), manifest_context());
+    assert!(
+        record.error.is_none(),
+        "the pinned Invis None must round-trip: {:?}",
+        record.error
+    );
+    assert!(record.parse_ok && record.emit_ok && record.reparse_ok && record.equivalent);
+}
+
+#[test]
+fn context_free_chase_none_stays_a_documented_exception() {
+    // Without a signature pin the ambiguity stays rejected: the same input
+    // through the plain (context-free) round-trip fails at parse, keeping the
+    // pre-#111 boundary deterministic.
+    let text = "variables { global: 0: g }\nrule (\"chase\") { event { Ongoing - Global; } actions { Chase Global Variable Over Time(Global.g, 0, 30, None); } }";
+    let record = roundtrip::round_trip(text, &catalog(), &en());
+    assert!(!record.parse_ok, "context-free None must stay rejected");
+    let error = record.error.expect("a parse failure is recorded");
+    assert!(error.contains("ambiguous enum member 'None'"), "{error}");
+}
+
+#[test]
+fn context_chase_none_emission_is_a_fixed_point() {
+    // Parse the emitted form with context, emit, reparse with context, and
+    // emit again: the text is a fixed point.
+    let text = "variables { global: 0: g }\nrule (\"chase\") { event { Ongoing - Global; } actions { Chase Global Variable Over Time(Global.g, 0, 30, None); } }";
+    let catalog = catalog();
+    let first =
+        wright_workshop::parser::parse_with_context(text, &catalog, &en(), manifest_context())
+            .expect("pinned Chase None parses");
+    let emitted = wright_workshop::emitter::emit(&first, &catalog, &en()).expect("emits");
+    assert!(
+        emitted.contains("Chase Global Variable Over Time(Global.g, 0, 30, None)"),
+        "emission preserves the bare None spelling:\n{emitted}"
+    );
+    let reparsed =
+        wright_workshop::parser::parse_with_context(&emitted, &catalog, &en(), manifest_context())
+            .expect("emitted text reparses with context");
+    let reemitted = wright_workshop::emitter::emit(&reparsed, &catalog, &en()).expect("re-emits");
+    assert_eq!(emitted, reemitted, "emission must be a fixed point");
+}

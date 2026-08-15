@@ -15,6 +15,7 @@ use wright_ir::wir;
 use crate::catalog::{Catalog, Locale};
 use crate::emitter;
 use crate::parser;
+use wright_core::signatures::{ExpectedDomain, NoExpectedDomain};
 
 /// A recorded round-trip result with the evidence needed for a compatibility
 /// report.
@@ -40,7 +41,21 @@ pub struct RoundTripRecord {
 
 /// Run `Workshop -> WIR -> Workshop -> WIR` and record the evidence. The
 /// record is always produced; failures are captured in its `error` field.
+/// Ambiguous bare enum members stay rejected (no signature context).
 pub fn round_trip(input: &str, catalog: &Catalog, locale: &Locale) -> RoundTripRecord {
+    round_trip_with_context(input, catalog, locale, &NoExpectedDomain)
+}
+
+/// The context-sensitive form of [`round_trip`] (#111): reparsing the emitted
+/// text uses the supplied canonical signature context so an ambiguous bare
+/// enum member that the emitter produced (e.g. `Chase Global Variable Over
+/// Time(..., None)`) resolves to the domain the signature pins.
+pub fn round_trip_with_context(
+    input: &str,
+    catalog: &Catalog,
+    locale: &Locale,
+    context: &dyn ExpectedDomain,
+) -> RoundTripRecord {
     let input_identity = sha256(input);
     let mut record = RoundTripRecord {
         input_identity,
@@ -52,7 +67,7 @@ pub fn round_trip(input: &str, catalog: &Catalog, locale: &Locale) -> RoundTripR
         equivalent: false,
         error: None,
     };
-    let first = match parser::parse(input, catalog, locale) {
+    let first = match parser::parse_with_context(input, catalog, locale, context) {
         Ok(program) => program,
         Err(error) => {
             record.error = Some(error.to_string());
@@ -68,7 +83,7 @@ pub fn round_trip(input: &str, catalog: &Catalog, locale: &Locale) -> RoundTripR
         }
     };
     record.emit_ok = true;
-    let second = match parser::parse(&emitted, catalog, locale) {
+    let second = match parser::parse_with_context(&emitted, catalog, locale, context) {
         Ok(program) => program,
         Err(error) => {
             record.error = Some(error.to_string());

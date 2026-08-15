@@ -230,3 +230,135 @@ fn explicit_locale_is_honored() {
     let dump = program.dump();
     assert!(!dump.is_empty());
 }
+
+/// The canonical signature context from the #109 manifest, as the shipped
+/// driver wires it into the Workshop parse path (#111).
+fn manifest_context() -> &'static dyn wright_core::signatures::ExpectedDomain {
+    wright_opy::manifest::Manifest::builtin().expect("builtin manifest")
+}
+
+/// The last argument value of the first call action of a parsed program.
+fn enum_value_of_first_action(program: &wir::Program, action_index: usize) -> &wir::Value {
+    let action = program.actions.iter().nth(action_index).expect("action");
+    let wir::Action::Call { args, .. } = action else {
+        panic!("expected a call action, got {action:?}");
+    };
+    let last = args.last().expect("call has an argument");
+    let wir::ValueNode { value, .. } = program.values.get(*last).expect("value");
+    value
+}
+
+#[test]
+fn context_pinned_ambiguous_none_resolves_via_canonical_signature() {
+    // #111: emitter-produced `Chase Global Variable Over Time(..., None)`
+    // reparses to ChaseTimeReeval.NONE because the canonical chaseOverTime
+    // signature pins argument 3 to the ChaseTimeReeval domain.
+    let text = "variables { global: 0: g }\nrule (\"x\") { event { Ongoing - Global; } actions { Chase Global Variable Over Time(Global.g, 0, 30, None); } }";
+    let program =
+        parser::parse_with_context(text, &catalog(), &Locale::new("en-US"), manifest_context())
+            .expect("the pinned Chase None must resolve");
+    let value = enum_value_of_first_action(&program, 0);
+    assert!(
+        matches!(value, wir::Value::Enum { value_type, value }
+            if value_type == "ChaseTimeReeval" && value == "NONE"),
+        "the bare None resolves to ChaseTimeReeval.NONE, got {value:?}"
+    );
+}
+
+#[test]
+fn context_pinned_ambiguous_none_resolves_for_set_invisible() {
+    // #111: `Set Invisible(Event Player, None)` reparses to Invis.NONE. The
+    // manifest's setInvisibility is a member action, so Workshop text places
+    // the receiver as argument 0 and the signature-pinned parameter at
+    // argument 1.
+    let text = "rule (\"x\") { event { Ongoing - Each Player; } actions { Set Invisible(Event Player, None); } }";
+    let program =
+        parser::parse_with_context(text, &catalog(), &Locale::new("en-US"), manifest_context())
+            .expect("the pinned Invis None must resolve");
+    let value = enum_value_of_first_action(&program, 0);
+    assert!(
+        matches!(value, wir::Value::Enum { value_type, value }
+            if value_type == "Invis" && value == "NONE"),
+        "the bare None resolves to Invis.NONE, got {value:?}"
+    );
+}
+
+#[test]
+fn wrong_domain_context_keeps_the_ambiguity_rejected() {
+    // A signature pinning a *different* domain than the ambiguous member's
+    // candidates must not resolve it: `Wait(...)` expects `Wait` (which has
+    // no `None` member), so the bare `None` stays ambiguous — no guessing,
+    // no arbitrary precedence.
+    let text = "rule (\"x\") { event { Ongoing - Global; } actions { Wait(0.016, None); } }";
+    let error =
+        parser::parse_with_context(text, &catalog(), &Locale::new("en-US"), manifest_context())
+            .expect_err("a non-matching expected domain must keep the ambiguity");
+    assert!(
+        matches!(error, wright_workshop::WorkshopError::Unsupported { .. }),
+        "expected a structured ambiguity: {error}"
+    );
+    assert!(error.to_string().contains("ambiguous enum member 'None'"));
+}
+
+#[test]
+fn expected_domain_resolution_tracks_the_manifest_declared_domains() {
+    // Behavioral check that resolution consumes the #109 manifest as the
+    // single source of expected domains: the adapter answers exactly the
+    // manifest's declared parameter domains, including the receiver-offset
+    // rule for member-kind functions.
+    let manifest = wright_opy::manifest::Manifest::builtin().expect("builtin manifest");
+    use wright_core::signatures::ExpectedDomain;
+    // chaseOverTime: params [variable, destination, duration, reevaluation].
+    assert_eq!(
+        manifest.expected_domain("chaseOverTime", 3),
+        Some("ChaseTimeReeval")
+    );
+    assert_eq!(manifest.expected_domain("chaseOverTime", 2), None);
+    // setInvisibility: member action; Workshop arg 1 is the pinned param.
+    assert_eq!(manifest.expected_domain("setInvisibility", 0), None);
+    assert_eq!(
+        manifest.expected_domain("setInvisibility", 1),
+        Some("Invis")
+    );
+    // Unknown catalog ids and out-of-range indexes answer None.
+    assert_eq!(manifest.expected_domain("noSuchAction", 0), None);
+    assert_eq!(manifest.expected_domain("chaseOverTime", 4), None);
+}
+
+#[test]
+fn cross_domain_member_spelling_collisions_are_the_documented_inventory() {
+    // Systematic collision check (#111): scan the declared catalog for member
+    // spellings shared by more than one enum domain (en-US) and assert the
+    // inventory is exactly the documented one. A new collision fails this
+    // test, forcing an explicit resolution decision for it.
+    use std::collections::BTreeMap;
+    let mut spelling_to_domains: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for domain in catalog().enum_domains() {
+        for member in &domain.members {
+            let spelling = member
+                .spelling(&Locale::new("en-US"))
+                .expect("en-US member spelling")
+                .to_string();
+            spelling_to_domains
+                .entry(spelling)
+                .or_default()
+                .push(domain.domain.clone());
+        }
+    }
+    let collisions: Vec<(String, Vec<String>)> = spelling_to_domains
+        .into_iter()
+        .filter(|(_, domains)| domains.len() > 1)
+        .collect();
+    assert_eq!(
+        collisions,
+        vec![(
+            "None".to_string(),
+            vec![
+                "ChaseTimeReeval".to_string(),
+                "ChaseRateReeval".to_string(),
+                "Invis".to_string()
+            ]
+        )],
+        "the declared catalog's cross-domain member-spelling collisions"
+    );
+}

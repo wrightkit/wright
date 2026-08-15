@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use wright_core::signatures::{ExpectedDomain, NoExpectedDomain};
 use wright_ir::source::{Position, SourceFile, Span};
 use wright_ir::wir::{self, Action, Event, ModifyOp, Value, ValueNode};
 
@@ -28,8 +29,27 @@ enum Stop {
     Else,
 }
 
-/// Parse localized Workshop text into Workshop IR.
+/// Parse localized Workshop text into Workshop IR with no signature context:
+/// ambiguous bare enum members (e.g. the `None` shared by several domains)
+/// stay rejected. See [`parse_with_context`] for the context-sensitive form.
 pub fn parse(input: &str, catalog: &Catalog, locale: &Locale) -> Result<wir::Program> {
+    parse_with_context(input, catalog, locale, &NoExpectedDomain)
+}
+
+/// Parse localized Workshop text into Workshop IR, resolving ambiguous bare
+/// enum members from the enclosing call's canonical signature context (#111).
+///
+/// When a bare member spelling matches several enum domains, the parser asks
+/// [`ExpectedDomain::expected_domain`] for the domain the enclosing call's
+/// signature expects at that argument position; the member resolves only when
+/// that expected domain is one of the matching domains (i.e. the signature
+/// pins exactly one). Without a pin the ambiguity diagnostic is unchanged.
+pub fn parse_with_context(
+    input: &str,
+    catalog: &Catalog,
+    locale: &Locale,
+    context: &dyn ExpectedDomain,
+) -> Result<wir::Program> {
     let tokens = tokenize(input).map_err(|error| WorkshopError::Malformed {
         message: error.message,
         span: Some(synthetic_span(error.position)),
@@ -39,6 +59,8 @@ pub fn parse(input: &str, catalog: &Catalog, locale: &Locale) -> Result<wir::Pro
         pos: 0,
         catalog,
         locale: locale.clone(),
+        context,
+        expected_domain: None,
         target: wir::Program::default(),
         globals: HashMap::new(),
         players: HashMap::new(),
@@ -57,6 +79,12 @@ struct Parser<'a> {
     pos: usize,
     catalog: &'a Catalog,
     locale: Locale,
+    /// Canonical signature context (#111): supplies the expected enum domain
+    /// for the call argument currently being parsed.
+    context: &'a dyn ExpectedDomain,
+    /// The expected enum domain for the value currently being parsed, set by
+    /// [`Parser::value_args`] from the enclosing call's signature.
+    expected_domain: Option<&'a str>,
     target: wir::Program,
     globals: HashMap<String, wir::GlobalVarId>,
     players: HashMap<String, wir::PlayerVarId>,
@@ -695,7 +723,7 @@ impl Parser<'_> {
                 }) = self.peek()
                 {
                     self.pos += 1;
-                    let args = self.value_args()?;
+                    let args = self.value_args(action.id.as_str())?;
                     self.expect(TokenKind::RParen, "expected ')'")?;
                     args
                 } else {
@@ -900,8 +928,14 @@ impl Parser<'_> {
         if let Some(entry) = self.catalog.resolve(Kind::Value, &self.locale, phrase) {
             self.expect(TokenKind::LParen, "expected '(' after value name")?;
             if entry.id == "compare" {
-                // Compare(a, op, b) -> Call(op, [a, b]).
-                let left = self.value()?;
+                // Compare(a, op, b) -> Call(op, [a, b]). The operands are
+                // value positions, not signature-pinned arguments, so the
+                // enclosing expected domain must not leak in (#111).
+                let saved = self.expected_domain;
+                self.expected_domain = None;
+                let left = self.value();
+                self.expected_domain = saved;
+                let left = left?;
                 self.expect(TokenKind::Comma, "expected ',' after Compare operand")?;
                 let (op, op_start, op_end) = match self.next() {
                     Some(Token {
@@ -921,7 +955,11 @@ impl Parser<'_> {
                     }
                 };
                 self.expect(TokenKind::Comma, "expected ',' after Compare operator")?;
-                let right = self.value()?;
+                let saved = self.expected_domain;
+                self.expected_domain = None;
+                let right = self.value();
+                self.expected_domain = saved;
+                let right = right?;
                 self.expect(TokenKind::RParen, "expected ')'")?;
                 let span = Some(Span::new(self.file(), op_start, op_end));
                 return Ok(self.target.values.push(ValueNode::new(
@@ -932,7 +970,7 @@ impl Parser<'_> {
                     span,
                 )));
             }
-            let args = self.value_args()?;
+            let args = self.value_args(entry.id.as_str())?;
             self.expect(TokenKind::RParen, "expected ')'")?;
             return Ok(self.target.values.push(ValueNode::new(
                 Value::Call {
@@ -989,6 +1027,25 @@ impl Parser<'_> {
             )));
         }
         if matches.len() > 1 {
+            // #111: a bare spelling shared by several enum domains resolves
+            // only when the enclosing call's canonical signature pins exactly
+            // one of the matching domains. No pin keeps the deterministic
+            // ambiguity diagnostic — no guessing, no global precedence.
+            if let Some(expected) = self.expected_domain {
+                let pinned: Vec<&(String, String)> = matches
+                    .iter()
+                    .filter(|(domain, _)| domain == expected)
+                    .collect();
+                if pinned.len() == 1 {
+                    return Ok(self.target.values.push(ValueNode::new(
+                        Value::Enum {
+                            value_type: pinned[0].0.clone(),
+                            value: pinned[0].1.clone(),
+                        },
+                        Some(Span::new(self.file(), start, end)),
+                    )));
+                }
+            }
             return Err(WorkshopError::Unsupported {
                 message: format!("ambiguous enum member '{phrase}' (multiple domains match)"),
                 span: Some(Span::new(self.file(), start, end)),
@@ -1012,7 +1069,7 @@ impl Parser<'_> {
         })
     }
 
-    fn value_args(&mut self) -> Result<Vec<wir::ValueId>> {
+    fn value_args(&mut self, call_id: &str) -> Result<Vec<wir::ValueId>> {
         let mut args = Vec::new();
         if let Some(Token {
             kind: TokenKind::RParen,
@@ -1021,8 +1078,17 @@ impl Parser<'_> {
         {
             return Ok(args);
         }
+        let mut arg_index = 0usize;
         loop {
-            args.push(self.value()?);
+            // Each argument is parsed with the domain its position expects
+            // per the enclosing call's canonical signature (#111); nested
+            // calls override the expectation for their own arguments.
+            let saved = self.expected_domain;
+            self.expected_domain = self.context.expected_domain(call_id, arg_index);
+            let arg = self.value();
+            self.expected_domain = saved;
+            args.push(arg?);
+            arg_index += 1;
             match self.peek() {
                 Some(Token {
                     kind: TokenKind::Comma,
