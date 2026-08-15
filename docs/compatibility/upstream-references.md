@@ -98,9 +98,8 @@ extracted from OverPy's GPL-3.0 data files.
 ## OSTW reference
 
 Facts below were verified against the upstream repository, wiki, and release
-artifacts on 2026-08-15 (investigation #113). The reference is not yet
-exercised by an oracle harness; the pin below is the **proposed** identity that
-the harness must record once it exists.
+artifacts on 2026-08-15 (investigation #113, pinned in #115). The reference is
+exercised by the oracle harness (`compatibility/ostw/run_oracle.py`).
 
 ### Identity
 
@@ -113,35 +112,35 @@ the harness must record once it exists.
 | Stable release tags | `v3.4.0` (2026-05-18), `v3.3.1`, `v3.3.0`, `v3.2.3`, `v3.2.2`, `v3.2.1`, `v3.2.0`, `v3.1.1`, `v3.1.0`, … |
 | Rolling tag | `latest` — a prerelease "Master Build" rebuilt on every `master` push (win-x64/win-x86/linux-x64 self-contained zips); **never a content pin** |
 | Version constant | `Program.VERSION == "v3.4.0"` still at master HEAD (lags master content; master is ≈2 months ahead of tag `v3.4.0`) |
-| Proposed pin | stable tag `v3.4.0` (content-pinned: git tag plus release-asset hashes), consistent with ADR-0007 — version-exact, content-pinned, changed only on demonstrated behavioral need; `latest`/master are not pins |
+| Pinned reference | stable tag `v3.4.0` (content-pinned: git tag plus release-asset hashes), consistent with ADR-0007 — version-exact, content-pinned, changed only on demonstrated behavioral need; `latest`/master are not pins |
 | License assumption | Compiler and wiki: **no license file and none in git history** (GitHub API `license: null`) — treated as unlicensed / all-rights-reserved for source copying; the extension subdirectory (`overwatch-script-to-workshop/LICENSE`) is MIT (Copyright 2026 ItsDeltin). Engineering assumption, not a legal conclusion — see [`docs/licensing.md`](../licensing.md) |
 | Workshop-data provenance | `Elements.json` (265 values, 224 actions, 51 enumerators), `LobbySettings.json`, `Maps.json` are generated from a local Overwatch install via the in-repo `DataTool`; Blizzard-IP-adjacent, not to be imported into Wright's catalog |
 | Output languages | en-US default; 13 Workshop locales (`enUS` + 12) via `Elements/OutputLanguage` and `Languages/i18n-*.xml` |
 
 ### Oracle role
 
-OSTW is the compatibility **oracle and behavior reference** for Wright's future
-OSTW frontend, per [`docs/compatibility.md`](../compatibility.md) and the
+OSTW is the compatibility **oracle and behavior reference** for Wright's
+OSTW frontend (`wright-ostw`), per [`docs/compatibility.md`](../compatibility.md) and the
 extension of ADR-0007 pinning policy to a second reference. It is not a
 production runtime dependency of the Wright core and is never bundled into
 release artifacts. Concretely it serves as:
 
 * the reference for S (syntax), D (diagnostic), and N (normalized-output)
-  evidence for the OSTW corpus (`compatibility/fixtures/**`, once the corpus
-  and an oracle runner exist);
+  evidence for the OSTW corpus (`compatibility/ostw/`, with oracle runner
+  `compatibility/ostw/run_oracle.py`);
 * the reference for the Workshop → OSTW reconstruction surface: the upstream
   `Decompiler` (`TextToElement` workshop-text parser + `ElementToCode`
   `WorkshopDecompiler`) defines the reconstructible surface and its idiomatic
   OSTW naming, compared under a versioned normalizer — never byte-identical
   output;
-* the source of behavior probes for the proposed OSTW compatibility baseline
+* the source of behavior probes for the OSTW compatibility baseline
   ([`docs/ostw/compatibility-baseline.md`](../ostw/compatibility-baseline.md)).
 
 ### Wright surfaces that use it as reference
 
 | Wright surface | Use of the reference |
 | --- | --- |
-| `wright-ostw` frontend (future) | Accept/reject agreement, structured diagnostics, HIR semantic identity for the declared OSTW surface |
+| `wright-ostw` native frontend | Accept/reject agreement, structured diagnostics, HIR semantic identity for the declared OSTW surface |
 | `wright-workshop` emitter/catalog | Canonical en-US emission cross-check against the oracle's `workshopCode` output for shared Workshop surfaces |
 | Workshop → OSTW reconstruction (future) | Reference decompiler output for the declared reconstruction surface and quality criteria |
 | `compatibility/` harness | OSTW fixture snapshots, oracle identity blocks, S/D/N gate evidence |

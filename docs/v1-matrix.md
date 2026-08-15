@@ -9,6 +9,7 @@ thresholds, unsupported constructs, and intentional differences
 | Surface | Owner | Documented by |
 | --- | --- | --- |
 | Native `.opy` (lexer/preprocess/parser/resolve/lower/settings) | `wright-opy` | [`opy/support-matrix.md`](opy/support-matrix.md) |
+| Native OSTW (lexer/parser/CST/project/lower) | `wright-ostw` | [`ostw/compatibility-baseline.md`](ostw/compatibility-baseline.md) |
 | Localized Workshop text (catalog/lexer/parser/emitter) | `wright-workshop` | [`workshop/support-matrix.md`](workshop/support-matrix.md) |
 | Driver/CLI result contract | `wright-driver`/`wright-cli` | [`cli.md`](cli.md) |
 
@@ -55,7 +56,7 @@ The compatibility contract does **not** claim:
 ## Unsupported / deferred
 
 * Rule `disabled` source annotations (no corpus evidence).
-* Subroutine parameters, named arguments, and default `@Team`/`@Slot` parameter overrides.
+* Subroutine parameters and default `@Team`/`@Slot` parameter overrides.
 * Workshop client locales beyond `en-US` (data pipeline ready; requires localization data review).
 * Reparsing emitted `settings` sections in the Workshop frontend (`.ws` decompiler is a non-goal).
 * Client-automation for E-level scenarios (deferred until evidence shows it is required).

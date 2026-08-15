@@ -38,7 +38,7 @@ feature or contract evolves, its living document is updated directly:
 - **Release & Distribution**: [`release.md`](release.md) — Binary packaging, checksum verification, GitHub Releases automation.
 - **Agent Team Coordination**: [`agent-team.md`](agent-team.md) — Multi-role governance, authority ordering, and blocked states.
 - **Compatibility Planning & Reference**:
-  - [Upstream / Reference Inventory](compatibility/upstream-references.md) — Centralized pinned-reference provenance (OverPy 9.7.10, OSTW v3.4.0 proposed).
+  - [Upstream / Reference Inventory](compatibility/upstream-references.md) — Centralized pinned-reference provenance (OverPy 9.7.10, OSTW v3.4.0).
   - [Proactive OPY Compatibility Baseline](opy/compatibility-baseline.md) — Tiered inventory of the OPY surface by semantic category and support dimension.
   - [Proactive OSTW Compatibility Baseline](ostw/compatibility-baseline.md) — OSTW reference/corpus/support investigation (#113): tiered inventory, corpus plan, oracle feasibility, reuse findings, proposed M13 decomposition.
   - [OPY Semantic Compatibility Manifest Spec](opy/compat-manifest-spec.md) — Machine-readable compatibility contract for builtins, signatures, enums, aliases.

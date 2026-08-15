@@ -36,8 +36,9 @@ Current ownership:
 - **Vanilla Workshop** — Wright-owned canonical model, parser, emitter, and
   target semantics (`wright-workshop`);
 - **OPY** — Wright-owned compatible semantic frontend (`wright-opy`);
-- **OSTW** — future first-class compatible semantic frontend, introduced only
-  through an evidence-backed milestone (see [ADR-0008](adr/0008-tooling-first-semantic-platform.md)).
+- **OSTW** — Wright-owned compatible semantic frontend (`wright-ostw`),
+  introduced under M13 per ADR-0008; native syntax/project frontend and HIR
+  lowering for the declared reachable corpus slice.
 
 Upstream compilers and language services (OverPy, OSTW) remain compatibility
 oracles, behavior references, and test inputs. They are **not** production
@@ -94,6 +95,12 @@ through Wright APIs.
 surface is declared in [`docs/opy/support-matrix.md`](opy/support-matrix.md)
 and verified at the HIR boundary by the differential suite. The pinned OverPy
 adapter remains the compatibility oracle.
+
+**`wright-ostw`** — the native Rust OSTW frontend: lexer → CST/parser → project
+settings (`ds.toml`) → reachable import-closure resolution → semantic lowering
+to Wright HIR. The supported baseline is documented in
+[`docs/ostw/compatibility-baseline.md`](ostw/compatibility-baseline.md). Pinned
+OSTW (`v3.4.0`) serves as the compatibility oracle.
 
 **`wright-workshop`** — the native Workshop frontend and emitter: localized
 catalog, lexer, parser, validation, and emitter. Workshop is the canonical
@@ -242,7 +249,7 @@ The following remain outside the current contract:
 * reproducing OverPy internals merely for implementation parity;
 * a full decompiler rewrite without an accepted contract;
 * direct OPY ↔ OSTW source conversion without both frontends and evidence;
-* an OSTW frontend before an evidence-backed milestone; and
+* full OSTW ecosystem parity before evidence-backed milestone completion; and
 * guaranteeing successful execution in every live Overwatch runtime without
   separate runtime evidence.
 

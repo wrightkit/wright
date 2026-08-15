@@ -53,10 +53,10 @@ stdin content (protocol JSON starts with `{`, otherwise Workshop text) and can
 be overridden with `--kind auto|opy|ostw|workshop|protocol`. `--locale`
 overrides Workshop client-locale detection; `--root` sets the include/project
 root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
-are parsed by the native OSTW frontend (`wright-ostw`, M13 #117), which loads
-the `ds.toml` project closure and reports the parse/project outcome through
-`wright check`; emission and semantic analysis for OSTW are not implemented
-yet and fail with a structured `ostw-unsupported` diagnostic.
+are parsed and lowered to Wright HIR by the native OSTW frontend
+(`wright-ostw`, M13 #117, #118), which loads the `ds.toml` project closure and
+resolves reachable imports; standalone emission to Workshop text and full
+language services remain in progress.
 
 ## `wright lint` and the lint configuration
 

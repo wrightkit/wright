@@ -1,14 +1,14 @@
 # OSTW Compatibility Baseline and M13 Investigation
 
-Status: accepted baseline (planning) — OSTW reference/corpus/support
-investigation (#113), the Architect/QA evidence-gathering phase for issue #90
-Status note: read-only investigation. No OSTW parser, type system, emitter, or
-language-service implementation exists yet; the decomposition at the end is a
-PM-ready proposal, not a set of implementation issues.
+Status: accepted baseline (M13 in progress) — OSTW reference/corpus/support
+investigation (#113), baseline pinned (#115), native syntax/project frontend
+foundation (#117), and protect-ban HIR lowering (#118)
+Status note: Native AST/parser, project settings (`ds.toml`), import-closure
+resolution, and protect-ban HIR lowering are implemented in `crates/wright-ostw`.
+Emission (OSTW → Workshop) and language services remain in progress.
 Scope: forward-looking, tiered inventory of the OSTW language surface against
-the proposed pinned reference, the corpus/acquisition plan, the oracle
-feasibility report, and the reuse/boundary findings that issue #90's
-decomposition must respect.
+the pinned reference, the corpus/acquisition plan, the oracle feasibility
+report, and the reuse/boundary findings that M13 milestones respect.
 
 This document is the OSTW counterpart of
 [`docs/opy/compatibility-baseline.md`](../opy/compatibility-baseline.md): the
