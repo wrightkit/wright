@@ -496,6 +496,35 @@ impl Emitter<'_> {
                 }
                 self.line(level, "End;")?;
             }
+            wir::Action::ForPlayerVariable {
+                player,
+                variable,
+                start,
+                stop,
+                step,
+                body,
+                ..
+            } => {
+                let mut player_text = String::new();
+                let mut start_text = String::new();
+                let mut stop_text = String::new();
+                let mut step_text = String::new();
+                self.value(*player, &mut player_text)?;
+                self.value(*start, &mut start_text)?;
+                self.value(*stop, &mut stop_text)?;
+                self.value(*step, &mut step_text)?;
+                let name = self.player_name(*variable)?;
+                self.line(
+                    level,
+                    &format!(
+                        "For Player Variable({player_text}, {name}, {start_text}, {stop_text}, {step_text});"
+                    ),
+                )?;
+                for action in body {
+                    self.action(*action, level + 1, false)?;
+                }
+                self.line(level, "End;")?;
+            }
             wir::Action::Debug { value, .. } => {
                 // `debug(value)` displays the value as HUD text. The
                 // reference formats values with type-aware machinery; Wright
@@ -710,9 +739,15 @@ impl Emitter<'_> {
                         span: None,
                     })?;
                 // Color values use the constructor form; other domains use
-                // bare member spellings (the canonical corpus form).
-                if value_type == "Color" {
-                    write!(out, "Color({spelling})").unwrap();
+                // bare member spellings (the canonical corpus form). The
+                // Team/Color spelling collision (`Team 2` is both a Team and
+                // a Team color) is the one ambiguity unpinned by the
+                // catalog's paramDomains and the OPY manifest's contextual
+                // domains, so Team members qualify with the constructor form
+                // and the emitted text reparses deterministically (#119
+                // round-trip contract; pinned P4 evidence).
+                if value_type == "Color" || value_type == "Team" {
+                    write!(out, "{catalog_domain}({spelling})").unwrap();
                 } else {
                     out.push_str(spelling);
                 }

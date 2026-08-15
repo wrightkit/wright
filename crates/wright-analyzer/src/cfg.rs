@@ -336,6 +336,14 @@ impl<'a> Builder<'a> {
                     step,
                     body,
                     ..
+                }
+                | Action::ForPlayerVariable {
+                    variable,
+                    start,
+                    stop,
+                    step,
+                    body,
+                    ..
                 } => {
                     let header = self.new_block(
                         BlockKind::ForHeader {
@@ -477,6 +485,13 @@ fn action_name(program: &wir::Program, action: ActionId) -> String {
                 .get(*variable)
                 .map_or_else(|| "<dangling>".to_string(), |v| v.name.clone());
             format!("forGlobalVariable {name}")
+        }
+        Some(Action::ForPlayerVariable { variable, .. }) => {
+            let name = program
+                .player_variables
+                .get(*variable)
+                .map_or_else(|| "<dangling>".to_string(), |v| v.name.clone());
+            format!("forPlayerVariable {name}")
         }
         None => format!("<dangling action {action}>"),
     }

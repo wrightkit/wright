@@ -97,6 +97,22 @@ fn fold_one(program: &wir::Program, value: &Value) -> Option<Value> {
                             _ => left || right,
                         }));
                     }
+                    // Domination rules the pinned OSTW reference folds
+                    // (P4 evidence: `selector == 0 || ping()` inlines to
+                    // `Or(Compare(...), True)` and folds to `True`):
+                    // `x || true` → `True`, `x && false` → `False`.
+                    if name == "or"
+                        && (bool_value(program, args[0]) == Some(true)
+                            || bool_value(program, args[1]) == Some(true))
+                    {
+                        return Some(Value::Bool(true));
+                    }
+                    if name == "and"
+                        && (bool_value(program, args[0]) == Some(false)
+                            || bool_value(program, args[1]) == Some(false))
+                    {
+                        return Some(Value::Bool(false));
+                    }
                 }
                 // `cakePos[0]` folds to `First Of(cakePos)` (reference
                 // emission evidence: overpy-cake oracle).

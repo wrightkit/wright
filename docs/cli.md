@@ -53,10 +53,18 @@ stdin content (protocol JSON starts with `{`, otherwise Workshop text) and can
 be overridden with `--kind auto|opy|ostw|workshop|protocol`. `--locale`
 overrides Workshop client-locale detection; `--root` sets the include/project
 root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
-are parsed and lowered to Wright HIR by the native OSTW frontend
-(`wright-ostw`), which loads the `ds.toml` project closure and resolves
-reachable imports; standalone emission to Workshop text and full language
-services remain in progress.
+are parsed by the native OSTW frontend (`wright-ostw`), which loads the
+`ds.toml` project closure, resolves the reachable imports, and lowers the
+#118 semantic HIR through the same validate→lower→validate path as the other
+frontends; `check`, `lint`, `analyze`, and `inspect` then run the shared
+analyzer/semantic services over that program and report project-relative
+multi-file provenance and the #118 boundary diagnostics. `compile` (#119)
+lowers the reachable #118 semantic surface through the shared HIR → WIR →
+Workshop pipeline and emits en-US Workshop text; it fails deterministically
+with structured, source-located diagnostics when the reachable surface is
+outside the declared support matrix (see
+[`docs/ostw/support-matrix.md`](ostw/support-matrix.md)) or the project
+boundary is unresolved (e.g. missing imports).
 
 ## `wright lint` and the lint configuration
 

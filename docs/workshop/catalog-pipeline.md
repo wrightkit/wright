@@ -33,15 +33,27 @@ cargo run -p wright-workshop --bin wright-catalog-gen -- build
 ```
 
 * `check` validates the catalog (schema, duplicate canonical ids, colliding
-  or missing aliases, undeclared locales) without writing.
+  or missing aliases, undeclared locales, param metadata arity) without
+  writing.
 * `build` validates and rewrites the file in canonical deterministic form
   (sorted object keys, stable formatting). Re-running is byte-idempotent, so
   regeneration is reproducible from the documented input (the data file).
 
+## Per-parameter metadata
+
+Entries may carry `paramDomains` (the expected enum domain per parameter
+position, parallel to `params`) and `paramDefaults` (a Wright-owned default
+value per parameter position, resolved when a call omits the argument —
+#119). Default value syntax: `null`, a numeric literal, `Domain.MEMBER` (a
+builtin enum member), or a catalog value id resolved as a zero-argument call
+with its own defaults filled (e.g. `allPlayers` → `All Players(All Teams)`).
+Every default is pinned-reference probe evidence (OSTW P6/P6b), never copied
+from upstream game data; `check` validates the arity of both arrays.
+
 ## Update and review process
 
-1. Edit the data file (add entries, aliases, enum members, or locales) with
-   provenance updated.
+1. Edit the data file (add entries, aliases, enum members, param metadata, or
+   locales) with provenance updated.
 2. Run `check`; it must pass. Colliding, missing, or ambiguous aliases fail
    validation rather than silently selecting a meaning.
 3. Run `build`; review the canonical diff.

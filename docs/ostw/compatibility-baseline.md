@@ -1,11 +1,14 @@
 # OSTW Compatibility Baseline and M13 Investigation
 
-Status: accepted baseline (M13 in progress: OSTW reference/corpus/support investigation #113, baseline pinned #115, native syntax/project frontend foundation #117, protect-ban HIR lowering #118, and explicit compile-root oracle rebaseline #122)
+Status: accepted baseline (M13 in progress: OSTW reference/corpus/support investigation #113, baseline pinned #115, native syntax/project frontend foundation #117, protect-ban HIR lowering #118, explicit compile-root oracle rebaseline #122, and first declared OSTW → Workshop compile surface #119)
 Status note: Native AST/parser, project settings (`ds.toml`), import-closure
 resolution, and protect-ban HIR lowering are implemented in `crates/wright-ostw`.
-Emission (OSTW → Workshop) and language services remain in progress. Since
-#122, every recorded oracle observation names an explicit compile/document
-root; the historical 79-element protect-ban observation is reclassified as the
+The first declared OSTW → Workshop compile surface is implemented (#119) and
+validated against the pinned explicit-root evidence by the CI-protected
+differential suite; the declared surface, normalization contract, and known
+divergences live in [`support-matrix.md`](support-matrix.md). Since #122,
+every recorded oracle observation names an explicit compile/document root;
+the historical 79-element protect-ban observation is reclassified as the
 `utils/ServerLoad.del` document-root compile, not entry-project acceptance.
 Scope: forward-looking, tiered inventory of the OSTW language surface against
 the pinned reference, the corpus/acquisition plan, the oracle feasibility
@@ -57,8 +60,10 @@ For each category: **Parse** (accepted by the future native grammar),
 (standalone compile/emission through the Workshop backend with
 reference-equivalent semantics), **Tooling/analysis** (`check`/`analyze`/
 `lint`/`inspect` and language services), **Reference coverage** (oracle
-probes/fixtures validate the behavior). Every dimension below is **planned**;
-nothing is implemented.
+probes/fixtures validate the behavior). The frontend (categories 1–7, #118)
+and the tooling dimension (category 13, #120) are implemented for the
+protect-ban entry-point reachable graph; the remaining dimensions stay
+planned or evidence-prioritized as marked per row.
 
 ## Category inventory
 
@@ -288,9 +293,9 @@ is A+B+C scoped to the MOBAwatch/protect-ban corpus.
 | --- | --- | --- | --- |
 | A | Reference & corpus baseline | Pin OSTW `v3.4.0` (content-verified); `compatibility/` oracle runner (LSP stdio client + `--ping` smoke); acquire MOBAwatch + protect-ban with manifests; S-level accept/reject record for corpus files | Corpus + oracle runner exist; every fixture records reference identity |
 | B | OSTW frontend core | Lexer/parser/CST → HIR for categories 1–7 (rules, variables/scopes, control flow, values/workshop calls via catalog, core types/structs/enums, functions/macros/subroutines); structured source-located diagnostics | D-level diagnostics + S-level parity on corpus; HIR boundary tests |
-| C | OSTW → Workshop emission | Lower HIR → WIR → Workshop (en-US, both output syntaxes); round-trip validation; normalized N-level comparison against oracle `workshopCode` | N-level normalized comparisons; Workshop round-trip passes |
+| C | OSTW → Workshop emission | Lower HIR → WIR → Workshop (en-US); round-trip validation; normalized differential comparison against pinned explicit-root reference evidence | **Implemented by #119** for the declared accepted surface (the p4/p5/p6 differential targets): shared `wright-ir` lowering + shared Workshop emitter, `wright compile` enabled, round-trip fixed point and normalized differential in `crates/wright-ostw/tests/differential.rs`, CI-protected; see `docs/ostw/support-matrix.md`. Protect-ban entry-project compilation stays unclaimed (missing `../OSTWUtils/…` imports). |
 | D | Workshop → OSTW reconstruction | Wright-owned OSTW emitter for the declared Workshop surface; reconstruction quality criteria (semantics + useful structure, no formatting/comments/macro recovery); round-trip tests | Reconstruction recompiles to equivalent WIR under the declared boundary |
-| E | Tooling & language services | OSTW in `check`/`lint`/`analyze`/`inspect`; editor-neutral language services; LSP mapping; session/CI integration | Cross-input workflows without language-specific semantic forks |
+| E | Tooling & language services | OSTW in `check`/`lint`/`analyze`/`inspect`; editor-neutral language services; LSP mapping; session/CI integration | Cross-input workflows without language-specific semantic forks. **Implemented by #120**: the shared session lowers the #118 semantic HIR through the shared validate→lower→validate path, the four CLI workflows and the tool service run the shared analyzer over it with multi-file provenance, language-service diagnostics/symbol classification work for OSTW documents, and cross-language regressions cover OPY/Workshop/OSTW. |
 | Later | Evidence-prioritized | Classes/generics/lambdas/pattern matching (category 8–9) if the corpus demands them; lobby-settings authoring; multi-locale | Corpus or PM evidence |
 | Explicitly deferred | - | Direct OPY ↔ OSTW; debugger protocol; optimizer parity; perfect reconstruction; E-level timing scenarios | - |
 

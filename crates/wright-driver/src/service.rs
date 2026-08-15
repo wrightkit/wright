@@ -130,7 +130,11 @@ impl<'a> ToolService<'a> {
             .into_iter()
             .map(str::to_string)
             .collect(),
-            languages: vec!["opy".to_string(), "workshop".to_string()],
+            languages: vec![
+                "opy".to_string(),
+                "workshop".to_string(),
+                "ostw".to_string(),
+            ],
             profiles: vec![
                 crate::Profile::Off.as_str().to_string(),
                 crate::Profile::Compat.as_str().to_string(),

@@ -39,7 +39,11 @@ The **target** probes are the pinned-reference-accepted (entry-only) probes
 designated `differential-target` in their manifests: `p4-types-expressions`
 (147 elements), `p5-functions-control` (120 elements), and
 `p6-catalog-signatures` (68 elements). They form the immutable, Wright-owned
-forward-compilation comparison boundary for #119 (see
-[`docs/ostw/compatibility-baseline.md`](../../docs/ostw/compatibility-baseline.md));
+forward-compilation comparison boundary for #119: `wright compile --root
+<probe> <probe>/main.ostw` compiles each one natively, and
+`crates/wright-ostw/tests/differential.rs` (CI) validates semantic
+equivalence against the recorded `workshop.entry-only.txt` reference evidence
+under the declared normalization plus the round-trip fixed-point contract —
+see [`docs/ostw/support-matrix.md`](../../docs/ostw/support-matrix.md).
 `run_oracle.py --probes` aggregates them under `differentialTargets` in
 `results.json` and fails if any target is reference-rejected.

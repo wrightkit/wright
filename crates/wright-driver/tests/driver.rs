@@ -980,14 +980,26 @@ fn ostw_projects_load_through_the_shared_session_path() {
     );
     // The 3 reachable OSTWUtils missing imports are structured,
     // source-located diagnostics; unreachable defects contribute nothing.
-    assert_eq!(envelope.diagnostics.len(), 3);
-    for diagnostic in &envelope.diagnostics {
-        assert_eq!(diagnostic.code, "ostw-missing-import");
+    // The #118 semantic-phase boundary diagnostics (Math/Cursor/class
+    // surfaces) surface through the same contract alongside them (#120).
+    let missing_imports: Vec<_> = envelope
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "ostw-missing-import")
+        .collect();
+    assert_eq!(missing_imports.len(), 3);
+    for diagnostic in &missing_imports {
         assert!(diagnostic.span.is_some(), "missing imports carry spans");
     }
+    assert!(
+        envelope
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ostw-unsupported"),
+        "the semantic-phase Math/Cursor/class boundaries surface"
+    );
     // Provenance: every missing-import span resolves to HeroSelect.del.
-    let paths: std::collections::BTreeSet<_> = envelope
-        .diagnostics
+    let paths: std::collections::BTreeSet<_> = missing_imports
         .iter()
         .filter_map(|diagnostic| diagnostic.span.as_ref().map(|span| span.path.clone()))
         .collect();
@@ -1012,31 +1024,70 @@ fn ostw_extension_detection_maps_to_source_kind_ostw() {
 }
 
 #[test]
-fn ostw_compile_and_semantics_are_unsupported_in_this_milestone() {
-    // Syntax/project infrastructure only: emission and semantic analysis are
-    // not implemented for OSTW yet and fail with a structured diagnostic.
+fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
+    // `compile` (#119) runs the shared HIR → WIR → Workshop pipeline for
+    // OSTW: the protect-ban entry project fails deterministically at the
+    // missing-import boundary, and the accepted differential targets
+    // compile natively.
     let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
     let mut compile_session =
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
     let envelope = compile_session.compile();
-    assert!(!envelope.ok);
-    assert_eq!(envelope.exit, exit::UNSUPPORTED);
+    assert!(!envelope.ok, "the entry graph rejects on its missing imports");
     assert!(
         envelope
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "ostw-unsupported")
+            .any(|diagnostic| diagnostic.code == "ostw-missing-import"),
+        "the missing-import boundary is the structured rejection"
     );
+    assert!(
+        !envelope
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ostw-unsupported"),
+        "compile is no longer refused outright"
+    );
+
+    let target = workspace_root()
+        .join("compatibility/ostw/probes/p5-functions-control");
+    let mut target_session = CompilerSession::new(SessionConfig {
+        input: wright_driver::InputSpec::Path(target.join("main.ostw")),
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let envelope = target_session.compile();
+    assert!(
+        envelope.ok,
+        "the accepted target compiles natively: {:?}",
+        envelope.diagnostics
+    );
+    let output = envelope.result.output.expect("compile output");
+    assert!(output.text.contains("For Global Variable"), "lowered loop emission");
+    assert!(output.text.contains("Abort;"), "return lowers to Abort");
 
     let mut analyze_session =
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
     let envelope = analyze_session.analyze();
-    assert!(!envelope.ok);
+    // The unsupported-operation fork is gone: no workflow-level refusal.
     assert!(
-        envelope
+        !envelope
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "ostw-unsupported")
+            .any(|diagnostic| diagnostic.message.contains("is not implemented for OSTW")),
+        "analyze no longer refuses OSTW"
+    );
+    assert!(
+        envelope
+            .result
+            .program
+            .as_object()
+            .is_some_and(|program| program.len() > 0),
+        "analyze carries the shared program summary"
+    );
+    assert!(
+        envelope.result.findings.as_array().is_some(),
+        "analyze carries the shared findings list"
     );
 }
 
@@ -1060,4 +1111,111 @@ fn ostw_negative_project_fails_through_the_shared_path() {
     assert_eq!(span.path, "main.ostw");
     assert_eq!(span.start.line, 1);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
+    // #120: `analyze`/`lint`/`inspect` over an OSTW project run the same
+    // shared semantic service over the lowered #118 HIR as OPY/Workshop —
+    // no OSTW-specific analysis stack — and return non-trivial results
+    // consistent with the protect-ban reachable graph.
+    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+
+    let mut analyze_session =
+        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+    let analyze = analyze_session.analyze();
+    assert!(
+        analyze.result.findings.as_array().is_some_and(|f| !f.is_empty()),
+        "analyze returns shared-analysis findings"
+    );
+
+    let mut inspect_session =
+        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+    let inspect = inspect_session.inspect();
+    let rules = inspect.result.rules.as_array().expect("rules list");
+    assert!(
+        rules.len() >= 28,
+        "the protect-ban reachable rules surface: {}",
+        rules.len()
+    );
+    assert!(
+        inspect
+            .result
+            .symbols
+            .as_array()
+            .is_some_and(|symbols| !symbols.is_empty()),
+        "shared symbols surface"
+    );
+    assert!(
+        inspect
+            .result
+            .references
+            .as_array()
+            .is_some_and(|references| !references.is_empty()),
+        "shared references surface"
+    );
+
+    let mut lint_session =
+        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+    let lint = lint_session.lint();
+    assert!(
+        lint.result.rules.as_array().is_some_and(|rules| !rules.is_empty()),
+        "lint returns registered rule metadata from the shared registry"
+    );
+    assert!(
+        lint.result.findings.as_array().is_some(),
+        "lint carries the findings list"
+    );
+}
+
+#[test]
+fn ostw_multi_file_provenance_survives_through_shared_workflows() {
+    // #120: diagnostics and finding spans resolve to project-relative source
+    // paths through the same conventions OPY/Workshop use — the main file is
+    // `main.ostw`, imported files keep their project-relative paths.
+    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+    let mut session =
+        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+    let envelope = session.analyze();
+
+    // A semantic-phase boundary diagnostic inside an imported file names that
+    // file with its project-relative path (the Math/Cursor surfaces live in
+    // `interface/`).
+    let imported: Vec<_> = envelope
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .span
+                .as_ref()
+                .is_some_and(|span| span.path.starts_with("interface/"))
+        })
+        .collect();
+    assert!(
+        !imported.is_empty(),
+        "imported-file diagnostics carry project-relative paths"
+    );
+    for diagnostic in &imported {
+        let span = diagnostic.span.as_ref().expect("span");
+        assert!(
+            span.path.starts_with("interface/") || span.path == "main.ostw",
+            "root-relative path, got {}",
+            span.path
+        );
+    }
+
+    // Findings from the shared analyzer resolve to the main file (file 0 in
+    // the shared span convention maps to the input; imported files resolve
+    // through the program file registry).
+    let findings = envelope.result.findings.as_array().expect("findings");
+    assert!(!findings.is_empty(), "shared findings present");
+    for finding in findings {
+        if let Some(span) = finding.get("span") {
+            let path = span.get("path").and_then(serde_json::Value::as_str);
+            assert!(
+                path.is_some(),
+                "every finding span carries a resolved path"
+            );
+        }
+    }
 }

@@ -220,6 +220,30 @@ fn render_action(program: &Program, id: super::ActionId, out: &mut String, level
                 render_action(program, *action, out, level + 1);
             }
         }
+        Action::ForPlayerVariable {
+            player,
+            variable,
+            start,
+            stop,
+            step,
+            body,
+            span,
+        } => {
+            out.push_str(&format!("{}forPlayerVariable ", indent(level)));
+            render_value(program, *player, out);
+            out.push(' ');
+            render_variable_ref(program, *variable, "player", out);
+            out.push_str(" in ");
+            render_value(program, *start, out);
+            out.push_str(", ");
+            render_value(program, *stop, out);
+            out.push_str(", ");
+            render_value(program, *step, out);
+            out.push_str(&format!("{}\n", span_suffix(*span)));
+            for action in body {
+                render_action(program, *action, out, level + 1);
+            }
+        }
         Action::Debug { value, span } => {
             out.push_str(&format!("{}debug ", indent(level)));
             render_value(program, *value, out);

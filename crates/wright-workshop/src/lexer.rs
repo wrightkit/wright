@@ -268,6 +268,15 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
                 }
             }
             '+' | '*' | '/' | '%' => {
+                if ch == '/' && index + 1 < chars.len() && chars[index + 1] == '/' {
+                    // `//` line comments: the reference's Workshop export
+                    // format carries element-count comments between rules
+                    // (#119 differential evidence); skip to end of line.
+                    while index < chars.len() && chars[index] != '\n' {
+                        advance(&mut index, &mut line, &mut col, &chars);
+                    }
+                    continue;
+                }
                 let start = pos!();
                 let op = ch.to_string();
                 advance(&mut index, &mut line, &mut col, &chars);

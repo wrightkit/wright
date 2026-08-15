@@ -239,6 +239,19 @@ pub enum Action {
         /// The exact span of the loop variable identifier.
         target_span: Option<Span>,
     },
+    /// `For Player Variable(player, name, start, stop, step)`: the
+    /// per-player loop form (frontend-neutral; parsed from reference
+    /// evidence, not emitted by Wright's own lowering, which models
+    /// foreach counters as globals under the declared #119 contract).
+    ForPlayerVariable {
+        player: ValueId,
+        variable: PlayerVarId,
+        start: ValueId,
+        stop: ValueId,
+        step: ValueId,
+        body: Vec<ActionId>,
+        span: Option<Span>,
+    },
     /// The `debug(value)` HUD debug effect.
     Debug { value: ValueId, span: Option<Span> },
     /// The `print(message)` HUD message effect.
@@ -266,6 +279,7 @@ impl Action {
             | Action::If { span, .. }
             | Action::While { span, .. }
             | Action::ForGlobalVariable { span, .. }
+            | Action::ForPlayerVariable { span, .. }
             | Action::Debug { span, .. }
             | Action::Print { span, .. }
             | Action::Call { span, .. } => *span,

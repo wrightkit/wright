@@ -87,6 +87,10 @@ pub struct CatalogEntry {
     /// the parameter takes an enumerated value (parallel to `params`).
     /// `None` for non-enum parameters and for undocumented parameters.
     pub param_domains: Vec<Option<String>>,
+    /// Wright-owned default value per parameter position (parallel to
+    /// `params`), resolved when a call omits the argument (#119). See the
+    /// catalog data provenance for the value syntax and evidence.
+    pub param_defaults: Vec<Option<String>>,
     aliases: HashMap<Locale, String>,
 }
 
@@ -186,6 +190,15 @@ struct EntryFile {
     /// empty when no parameter domains are documented.
     #[serde(default)]
     param_domains: Vec<Option<String>>,
+    /// Wright-owned default value per parameter position (parallel to
+    /// `params`), resolved by the OSTW semantic phase when a call omits the
+    /// argument (#119). `None` means no default is declared. Default value
+    /// syntax: `null`, a numeric literal, `Domain.MEMBER` (builtin enum
+    /// member), or a catalog value id resolved as a zero-argument call.
+    /// Every default is pinned-reference probe evidence (P6/P6b), never
+    /// copied from upstream game data.
+    #[serde(default)]
+    param_defaults: Vec<Option<String>>,
 }
 
 #[derive(Deserialize)]
@@ -403,6 +416,7 @@ impl Catalog {
             kind,
             params: item.params,
             param_domains: item.param_domains,
+            param_defaults: item.param_defaults,
             aliases,
         });
         Ok(())
@@ -414,6 +428,13 @@ impl Catalog {
             if entry.param_domains.len() > entry.params.len() {
                 return Err(CatalogError::validation(format!(
                     "{} '{}' declares more param domains than params",
+                    entry.kind.as_str(),
+                    entry.id
+                )));
+            }
+            if entry.param_defaults.len() > entry.params.len() {
+                return Err(CatalogError::validation(format!(
+                    "{} '{}' declares more param defaults than params",
                     entry.kind.as_str(),
                     entry.id
                 )));

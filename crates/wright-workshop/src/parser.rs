@@ -472,6 +472,7 @@ impl Parser<'_> {
                         }
                         "If" => actions.push(self.if_group()?),
                         "For Global Variable" => actions.push(self.for_group()?),
+                        "For Player Variable" => actions.push(self.for_player_group()?),
                         "While" => actions.push(self.while_group()?),
                         _ => actions.push(self.action_call_from_phrase(phrase, start, end)?),
                     }
@@ -595,6 +596,50 @@ impl Parser<'_> {
         let end_span = self.previous_span();
         let action = Action::While {
             condition,
+            body,
+            span: Some(Span::new(self.file(), start, end_span.1)),
+        };
+        Ok(self.target.actions.push(action))
+    }
+
+    /// `For Player Variable(player, name, start, stop, step)` — the
+    /// reference's per-player loop form (parsed from pinned reference
+    /// evidence; the differential gate normalizes it to the declared global
+    /// form, #119).
+    fn for_player_group(&mut self) -> Result<wir::ActionId> {
+        let start = self.previous_span().0;
+        self.expect(
+            TokenKind::LParen,
+            "expected '(' after 'For Player Variable'",
+        )?;
+        let player = self.value()?;
+        self.expect(TokenKind::Comma, "expected ',' after loop player")?;
+        let (name, _, _) = self.phrase()?;
+        let variable = self.player_by_name(&name)?;
+        self.expect(TokenKind::Comma, "expected ',' after loop variable")?;
+        let start_value = self.value()?;
+        self.expect(TokenKind::Comma, "expected ',' after start")?;
+        let stop = self.value()?;
+        self.expect(TokenKind::Comma, "expected ',' after stop")?;
+        let step = self.value()?;
+        self.expect(TokenKind::RParen, "expected ')' after For bounds")?;
+        self.expect(TokenKind::Semi, "expected ';' after For Player Variable")?;
+        let (body, loop_stop) = self.actions_until_end()?;
+        if loop_stop != Stop::End {
+            return Err(self.malformed(
+                "'For Player Variable' requires a matching 'End'",
+                self.previous(),
+            ));
+        }
+        self.consume_phrase("End")?;
+        self.expect(TokenKind::Semi, "expected ';' after 'End'")?;
+        let end_span = self.previous_span();
+        let action = Action::ForPlayerVariable {
+            player,
+            variable,
+            start: start_value,
+            stop,
+            step,
             body,
             span: Some(Span::new(self.file(), start, end_span.1)),
         };
@@ -911,6 +956,27 @@ impl Parser<'_> {
             }) if word == "Global" => {
                 let (start, end) = self.span_here();
                 self.pos += 1;
+                // The reference's value spelling `Global Variable(name)`
+                // (#119 differential evidence); the OPY form `Global.name`
+                // stays supported.
+                if let Some(Token {
+                    kind: TokenKind::Word(next),
+                    ..
+                }) = self.peek()
+                {
+                    if next == "Variable" {
+                        self.pos += 1;
+                        self.expect(TokenKind::LParen, "expected '(' after 'Global Variable'")?;
+                        let (name, _, _) = self.phrase()?;
+                        let variable = self.global_by_name(&name)?;
+                        self.expect(TokenKind::RParen, "expected ')' after Global Variable")?;
+                        let span = Some(Span::new(self.file(), start, end));
+                        return Ok(self
+                            .target
+                            .values
+                            .push(ValueNode::new(Value::GlobalVariable(variable), span)));
+                    }
+                }
                 self.expect(TokenKind::Dot, "expected '.' after 'Global'")?;
                 let (name, _, _) = self.phrase()?;
                 let variable = self.global_by_name(&name)?;
@@ -919,6 +985,33 @@ impl Parser<'_> {
                     .target
                     .values
                     .push(ValueNode::new(Value::GlobalVariable(variable), span)))
+            }
+            Some(Token {
+                kind: TokenKind::Word(word),
+                ..
+            }) if word == "Player" => {
+                // The reference's playervar-read spelling
+                // `Player Variable(player, name)` (#119 differential
+                // evidence).
+                let (start, end) = self.span_here();
+                self.pos += 1;
+                let saved = self.expected_domain;
+                self.expected_domain = None;
+                let result = (|| {
+                    self.consume_phrase("Variable")?;
+                    self.expect(TokenKind::LParen, "expected '(' after 'Player Variable'")?;
+                    let player = self.value()?;
+                    self.expect(TokenKind::Comma, "expected ',' after player")?;
+                    let (name, _, _) = self.phrase()?;
+                    let variable = self.player_by_name(&name)?;
+                    self.expect(TokenKind::RParen, "expected ')' after Player Variable")?;
+                    Ok(self.target.values.push(ValueNode::new(
+                        Value::PlayerVariable { player, variable },
+                        Some(Span::new(self.file(), start, end)),
+                    )))
+                })();
+                self.expected_domain = saved;
+                result
             }
             Some(Token {
                 kind: TokenKind::LParen,
@@ -1223,15 +1316,31 @@ impl Parser<'_> {
             None => return Err(self.malformed("expected an identifier", self.eof())),
         };
         self.pos += 1;
-        while let Some(Token {
-            kind: TokenKind::Word(word),
-            end: word_end,
-            ..
-        }) = self.peek()
-        {
-            words.push(word);
-            end = word_end;
-            self.pos += 1;
+        while let Some(token) = self.peek() {
+            match token {
+                Token {
+                    kind: TokenKind::Word(word),
+                    end: word_end,
+                    ..
+                } => {
+                    words.push(word.clone());
+                    end = word_end;
+                    self.pos += 1;
+                }
+                // Enum members embed numbers (`Team 2`, `Ability 2`); the
+                // lexer splits them from the word, so phrases join Number
+                // tokens too (#119 reference evidence).
+                Token {
+                    kind: TokenKind::Number { text, .. },
+                    end: number_end,
+                    ..
+                } => {
+                    words.push(text.clone());
+                    end = number_end;
+                    self.pos += 1;
+                }
+                _ => break,
+            }
         }
         Ok((words.join(" "), start, end))
     }

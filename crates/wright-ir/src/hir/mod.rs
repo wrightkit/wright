@@ -250,6 +250,11 @@ impl TypeName {
         }
         out
     }
+
+    /// Whether this type is the plain `void` type (no arrays/unions).
+    pub fn is_void(&self) -> bool {
+        self.name == "void" && self.array_depth == 0 && self.unions.is_empty()
+    }
 }
 
 /// A rule with its event, conditions, and actions.

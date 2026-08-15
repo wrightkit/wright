@@ -536,7 +536,9 @@ fn collect_loop_scope_values(
             continue;
         };
         match data {
-            Action::While { .. } | Action::ForGlobalVariable { .. } => {
+            Action::While { .. }
+            | Action::ForGlobalVariable { .. }
+            | Action::ForPlayerVariable { .. } => {
                 // Nested loops are analyzed as their own separate scopes.
             }
             Action::If {
@@ -585,7 +587,9 @@ fn visit_action_value_roots(
                 visit_value_with_parent(program, branch.condition, parents, out);
             }
         }
-        Action::While { .. } | Action::ForGlobalVariable { .. } => {
+        Action::While { .. }
+        | Action::ForGlobalVariable { .. }
+        | Action::ForPlayerVariable { .. } => {
             // Nested loops are excluded from the enclosing loop's scope.
         }
         Action::Call { args, .. } => {
@@ -894,7 +898,9 @@ fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -
                 .as_ref()
                 .is_some_and(|body| body.iter().any(|id| subtree_writes(program, *id, variable)))
         }
-        Action::While { body, .. } | Action::ForGlobalVariable { body, .. } => {
+        Action::While { body, .. }
+        | Action::ForGlobalVariable { body, .. }
+        | Action::ForPlayerVariable { body, .. } => {
             body.iter().any(|id| subtree_writes(program, *id, variable))
         }
         Action::Debug { .. } | Action::Print { .. } => false,
@@ -1061,7 +1067,9 @@ fn visit_actions(
                     visit_actions(program, else_body, f);
                 }
             }
-            Action::While { body, .. } | Action::ForGlobalVariable { body, .. } => {
+            Action::While { body, .. }
+            | Action::ForGlobalVariable { body, .. }
+            | Action::ForPlayerVariable { body, .. } => {
                 visit_actions(program, body, f);
             }
             Action::SetGlobalVariable { .. }
@@ -1096,6 +1104,9 @@ fn visit_values_in_action(program: &wir::Program, action: &Action, f: &mut impl 
         }
         Action::While { condition, .. } => visit_value(program, *condition, f),
         Action::ForGlobalVariable {
+            start, stop, step, ..
+        }
+        | Action::ForPlayerVariable {
             start, stop, step, ..
         } => {
             visit_value(program, *start, f);

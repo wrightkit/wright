@@ -265,8 +265,11 @@ fn builtins_and_enum_domains_resolve_through_the_canonical_catalog() {
             _ => None,
         })
         .collect();
-    assert!(calls.contains(&"BigMessage"), "action resolves: {calls:?}");
-    assert!(calls.contains(&"AllPlayers"), "value resolves: {calls:?}");
+    // #119: bound builtin calls carry the canonical catalog id, so the
+    // shared pipeline resolves presentation spellings purely through the
+    // catalog (the OSTW source identity lives in signature.rs only).
+    assert!(calls.contains(&"bigMessage"), "action resolves: {calls:?}");
+    assert!(calls.contains(&"allPlayers"), "value resolves: {calls:?}");
 
     let enums: Vec<(&str, &str)> = hir
         .exprs
@@ -279,7 +282,7 @@ fn builtins_and_enum_domains_resolve_through_the_canonical_catalog() {
         })
         .collect();
     assert!(
-        enums.contains(&("Color", "White")),
+        enums.contains(&("Color", "WHITE")),
         "enum domain resolves: {enums:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);

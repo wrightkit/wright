@@ -114,6 +114,29 @@ jobs:
           python3 compatibility/ostw/run_oracle.py --acquire --ping
           python3 compatibility/ostw/run_oracle.py
 
+  ostw-compile-differential:
+    name: OSTW compile differential (#119)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          rustflags: ""
+
+      - name: Run OSTW forward-compilation differential suite
+        run: cargo test -p wright-ostw --test differential
+
+      - name: Upload differential report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wright-ostw-differential-report
+          path: target/wright-ostw-differential-report.json
+
   adapter:
     name: OverPy-to-HIR adapter
     runs-on: ubuntu-latest

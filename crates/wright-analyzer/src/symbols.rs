@@ -444,6 +444,29 @@ impl<'a> Builder<'a> {
                 }
                 Ok(())
             }
+            Action::ForPlayerVariable {
+                variable,
+                start,
+                stop,
+                step,
+                body,
+                ..
+            } => {
+                self.write(
+                    self.player_symbol(*variable)?,
+                    span,
+                    None,
+                    rule,
+                    Some(action_id),
+                )?;
+                self.walk_value(*start, rule, Some(action_id))?;
+                self.walk_value(*stop, rule, Some(action_id))?;
+                self.walk_value(*step, rule, Some(action_id))?;
+                for action in body {
+                    self.walk_action(*action, rule)?;
+                }
+                Ok(())
+            }
             Action::Debug { value, .. } => self.walk_value(*value, rule, Some(action_id)),
             Action::Print { message, .. } => self.walk_value(*message, rule, Some(action_id)),
             Action::Call { args, .. } => {

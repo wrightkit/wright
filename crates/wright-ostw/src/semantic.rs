@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 use wright_ir::hir::{self, ExprId, FunctionId, GlobalVarId, PlayerVarId, StmtId, SubroutineId};
 
-use wright_workshop::catalog::Catalog;
+use wright_workshop::catalog::{Catalog, Kind};
 
 use crate::cst;
 use crate::diag::FrontendError;
@@ -189,7 +189,7 @@ impl<'a> Resolver<'a> {
                         } else {
                             self.collect_function(
                                 decl.name.clone(),
-                                None,
+                                decl.return_type.clone(),
                                 decl.params.clone(),
                                 FunctionBodySpec::Statements(decl.body.clone()),
                                 decl.span,
@@ -1136,18 +1136,21 @@ impl<'a> Resolver<'a> {
             if let Some(binding) = signature::enum_domain(receiver_name) {
                 // The OSTW binding maps the source member name to its canonical
                 // catalog member id; the catalog is the authority on existence.
-                let known_member = binding
+                // The HIR carries the canonical domain and member ids (#119),
+                // so emission resolves spellings purely through the catalog.
+                let canonical_member = binding
                     .members
                     .iter()
                     .find(|(source, _)| *source == name)
-                    .is_some_and(|(_, canonical)| {
-                        catalog().enum_domain(binding.domain).is_some_and(|domain| {
-                            domain
-                                .members
-                                .iter()
-                                .any(|member| member.member == *canonical)
-                        })
-                    });
+                    .map(|(_, canonical)| *canonical);
+                let known_member = canonical_member.is_some_and(|canonical| {
+                    catalog().enum_domain(binding.domain).is_some_and(|domain| {
+                        domain
+                            .members
+                            .iter()
+                            .any(|member| member.member == canonical)
+                    })
+                });
                 if !known_member {
                     self.diagnostics.push(FrontendError::at(
                         "ostw-unknown-enum-member",
@@ -1156,8 +1159,8 @@ impl<'a> Resolver<'a> {
                     ));
                 }
                 return self.hir.exprs.push(hir::Expr::Enum {
-                    value_type: receiver_name.clone(),
-                    value: name.to_string(),
+                    value_type: binding.domain.to_string(),
+                    value: canonical_member.unwrap_or(name).to_string(),
                     span: Some(span),
                 });
             }
@@ -1260,13 +1263,21 @@ impl<'a> Resolver<'a> {
                 if let Some((kind, id)) = signature::builtin(name) {
                     // Canonical param order/spellings come from the catalog;
                     // the binding only supplies the OSTW source identity.
-                    let params = catalog()
-                        .entry(kind, id)
+                    // The HIR call name is the canonical catalog id, so the
+                    // shared HIR → WIR → emission pipeline resolves
+                    // presentation spellings purely through the catalog
+                    // (#119); only genuinely OSTW-specific source names stay
+                    // in `signature.rs`.
+                    let entry = catalog().entry(kind, id);
+                    let params = entry
                         .map(|entry| entry.params.clone())
                         .unwrap_or_default();
-                    let ordered = self.bind_builtin_args(name, &params, args, span);
+                    let defaults = entry
+                        .map(|entry| entry.param_defaults.clone())
+                        .unwrap_or_default();
+                    let ordered = self.bind_builtin_args(name, &params, &defaults, args, span);
                     return self.hir.exprs.push(hir::Expr::Call {
-                        name: name.clone(),
+                        name: id.to_string(),
                         args: ordered,
                         span: Some(span),
                     });
@@ -1363,13 +1374,16 @@ impl<'a> Resolver<'a> {
     }
 
     /// Bind positional + named arguments against a builtin's canonical param
-    /// order (the catalog owns the canonical param names; probe evidence
-    /// P6/P6b): named args reorder to the canonical order and omitted gaps
-    /// are filled with the zero literal (#119 refines the reference defaults).
+    /// order (the catalog owns the canonical param names and Wright-owned
+    /// default values; probe evidence P6/P6b): named args reorder to the
+    /// canonical order and omitted gaps resolve the catalog default value
+    /// (`paramDefaults`), matching the reference's call-site default filling
+    /// (#119). Slots without a declared default keep the zero literal.
     fn bind_builtin_args(
         &mut self,
         name: &str,
         params: &[String],
+        defaults: &[Option<String>],
         args: &[cst::CallArg],
         span: Span,
     ) -> Vec<ExprId> {
@@ -1418,8 +1432,66 @@ impl<'a> Resolver<'a> {
         }
         slots
             .into_iter()
-            .map(|slot| slot.unwrap_or_else(|| zero_expr(&mut self.hir)))
+            .enumerate()
+            .map(|(index, slot)| {
+                slot.unwrap_or_else(|| match defaults.get(index).and_then(Option::as_deref) {
+                    Some(default) => self.resolve_catalog_default(name, default, span),
+                    None => zero_expr(&mut self.hir),
+                })
+            })
             .collect()
+    }
+
+    /// Resolve a catalog `paramDefaults` value into HIR: `null`, a numeric
+    /// literal, `Domain.MEMBER` (a builtin enum member through the catalog),
+    /// or a catalog value id resolved as a zero-argument call.
+    fn resolve_catalog_default(&mut self, call_name: &str, default: &str, span: Span) -> ExprId {
+        if default == "null" {
+            return self.hir.exprs.push(hir::Expr::Null { span: Some(span) });
+        }
+        if let Ok(number) = default.parse::<f64>() {
+            return self.hir.exprs.push(hir::Expr::Number {
+                value: number,
+                text: default.to_string(),
+                span: Some(span),
+            });
+        }
+        if let Some((domain, member)) = default.split_once('.') {
+            if catalog().enum_domain(domain).is_some() {
+                return self.hir.exprs.push(hir::Expr::Enum {
+                    value_type: domain.to_string(),
+                    value: member.to_string(),
+                    span: Some(span),
+                });
+            }
+        }
+        if let Some(entry) = catalog().entry(Kind::Value, default) {
+            // A value-id default resolves as a call with the entry's own
+            // defaults filled (e.g. `allPlayers` -> `allPlayers(Team.ALL)`,
+            // matching the reference's call-site filling).
+            let args = entry
+                .param_defaults
+                .iter()
+                .map(|slot| match slot {
+                    Some(slot) => self.resolve_catalog_default(default, slot, span),
+                    None => zero_expr(&mut self.hir),
+                })
+                .collect();
+            return self.hir.exprs.push(hir::Expr::Call {
+                name: default.to_string(),
+                args,
+                span: Some(span),
+            });
+        }
+        self.diagnostics.push(FrontendError::at(
+            "ostw-default",
+            format!(
+                "catalog default '{default}' for '{call_name}' is not resolvable \
+                 (expected null, a number, Domain.MEMBER, or a catalog value id)"
+            ),
+            span,
+        ));
+        zero_expr(&mut self.hir)
     }
 
     /// Bind arguments against a user function's parameters (positional then

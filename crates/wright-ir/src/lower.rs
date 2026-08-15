@@ -56,6 +56,29 @@ struct Lowerer<'a> {
     players: HashMap<PlayerVarId, wir::PlayerVarId>,
     /// HIR subroutine id → WIR subroutine id (table order).
     subroutines: HashMap<SubroutineId, wir::SubroutineId>,
+    /// Per-parameter-name call counter for the reference-shaped
+    /// materialization of void-function arguments into per-call player
+    /// variables (`by`, `by_0`, `by_1`, … in call order, P5 evidence).
+    materialized: HashMap<String, u32>,
+    /// Whether the statement currently being lowered sits inside a `switch`
+    /// case body (any nesting depth). Nested `break` inside a case is the
+    /// declared #118 surface; it is recorded structurally because only
+    /// top-level trailing breaks take part in the reference's Skip dispatch
+    /// (#119).
+    in_switch_case: bool,
+    /// Inlining/expansion recursion depth (bounded recursion, #118
+    /// category 7).
+    depth: u32,
+}
+
+/// How a user-function parameter is bound at a call site.
+#[derive(Clone)]
+enum ParamBinding {
+    /// Substituted directly by the call argument (value functions).
+    Inline(ExprId),
+    /// Materialized into the named per-call player variable (void
+    /// functions, reference shape P5).
+    Var(wir::PlayerVarId),
 }
 
 impl<'a> Lowerer<'a> {
@@ -66,6 +89,9 @@ impl<'a> Lowerer<'a> {
             globals: HashMap::new(),
             players: HashMap::new(),
             subroutines: HashMap::new(),
+            materialized: HashMap::new(),
+            in_switch_case: false,
+            depth: 0,
         }
     }
 
@@ -90,7 +116,7 @@ impl<'a> Lowerer<'a> {
         // the reference. Initializers stay in declaration order regardless
         // of the slot-ordered table, matching the reference's
         // `globalInitDirectives` order.
-        let mut global_initializers: Vec<(GlobalVarId, ValueId)> = Vec::new();
+        let mut global_initializers: Vec<(GlobalVarId, ExprId)> = Vec::new();
         for id in range_ids::<hir::GlobalVar>(self.hir.globals.len()) {
             let initializer = self
                 .hir
@@ -99,7 +125,7 @@ impl<'a> Lowerer<'a> {
                 .ok_or_else(|| dangling("global variable", id))?
                 .initializer;
             if let Some(initializer) = initializer {
-                global_initializers.push((id, self.lower_value(initializer)?));
+                global_initializers.push((id, initializer));
             }
         }
         let mut global_taken: std::collections::HashSet<u32> = std::collections::HashSet::new();
@@ -145,10 +171,6 @@ impl<'a> Lowerer<'a> {
             });
             self.globals.insert(id, wir_id);
         }
-        let global_initializers: Vec<(wir::GlobalVarId, ValueId)> = global_initializers
-            .into_iter()
-            .map(|(id, value)| (self.globals[&id], value))
-            .collect();
         let mut player_initializers = Vec::new();
         for id in range_ids::<hir::PlayerVar>(self.hir.players.len()) {
             let (name, span, name_span, initializer, source_index) = {
@@ -165,10 +187,6 @@ impl<'a> Lowerer<'a> {
                     player.index,
                 )
             };
-            let initializer = match initializer {
-                Some(initializer) => Some(self.lower_value(initializer)?),
-                None => None,
-            };
             let wir_id = self.target.player_variables.push(wir::WorkshopVariable {
                 name,
                 index: source_index.unwrap_or(id.index() as u32),
@@ -176,7 +194,7 @@ impl<'a> Lowerer<'a> {
                 name_span,
             });
             if let Some(initializer) = initializer {
-                player_initializers.push((wir_id, initializer));
+                player_initializers.push((id, initializer));
             }
             self.players.insert(id, wir_id);
         }
@@ -206,60 +224,76 @@ impl<'a> Lowerer<'a> {
         // "Initialize global variables" / "Initialize player variables"
         // rules here, in the profile-independent lowering path, so
         // initialization semantics never depend on an optimization profile
-        // (#112). The initialize rules come first, matching the reference
-        // emission: the expressions-values oracle emits the Initialize rule
-        // before the user rules, and the declarations-numbers oracle emits
-        // the player Initialize rule after the global one. The lowered
-        // initializers are the single source of truth; the variable tables
-        // carry no initializer field.
+        // (#112). The initialize rules have priority 0 like the reference's
+        // synthesized initial rules (P1: a `-1` priority rule sorts before
+        // "Initial Global"); every rule carries its declaration priority and
+        // the emitted table is a stable sort by (priority, declaration
+        // order), matching the reference's rule-priority ordering. The
+        // lowered initializers are the single source of truth; the variable
+        // tables carry no initializer field.
+        let mut rules: Vec<(i32, usize, wir::Rule)> = Vec::new();
+        let mut order = 0usize;
         if !global_initializers.is_empty() {
-            let actions = global_initializers
-                .into_iter()
-                .map(|(variable, value)| {
-                    self.target.actions.push(Action::SetGlobalVariable {
-                        variable,
-                        value,
-                        span: None,
-                        target_span: None,
-                    })
-                })
-                .collect();
-            self.target.rules.push(wir::Rule {
-                name: "Initialize global variables".to_string(),
-                span: None,
-                name_span: None,
-                disabled: false,
-                event: wir::Event::Global,
-                conditions: Vec::new(),
-                actions,
-            });
+            let mut actions = Vec::new();
+            for (id, initializer) in global_initializers {
+                let value = self.lower_value_with(
+                    initializer,
+                    &HashMap::new(),
+                    &mut actions,
+                )?;
+                actions.push(self.target.actions.push(Action::SetGlobalVariable {
+                    variable: self.globals[&id],
+                    value,
+                    span: None,
+                    target_span: None,
+                }));
+            }
+            rules.push((
+                0,
+                order,
+                wir::Rule {
+                    name: "Initialize global variables".to_string(),
+                    span: None,
+                    name_span: None,
+                    disabled: false,
+                    event: wir::Event::Global,
+                    conditions: Vec::new(),
+                    actions,
+                },
+            ));
+            order += 1;
         }
         if !player_initializers.is_empty() {
-            let actions = player_initializers
-                .into_iter()
-                .map(|(variable, value)| {
-                    let player = self
-                        .target
-                        .values
-                        .push(wir::ValueNode::new(wir::Value::EventPlayer, None));
-                    self.target.actions.push(Action::SetPlayerVariable {
-                        player,
-                        variable,
-                        value,
-                        span: None,
-                        target_span: None,
-                    })
-                })
-                .collect();
-            self.target.rules.push(wir::Rule {
-                name: "Initialize player variables".to_string(),
-                span: None,
-                name_span: None,
-                disabled: false,
-                event: wir::Event::EachPlayer,
-                conditions: Vec::new(),
-                actions,
-            });
+            let mut actions = Vec::new();
+            for (id, initializer) in player_initializers {
+                let value = self
+                    .lower_value_with(initializer, &HashMap::new(), &mut actions)?;
+                let player = self
+                    .target
+                    .values
+                    .push(wir::ValueNode::new(wir::Value::EventPlayer, None));
+                actions.push(self.target.actions.push(Action::SetPlayerVariable {
+                    player,
+                    variable: self.players[&id],
+                    value,
+                    span: None,
+                    target_span: None,
+                }));
+            }
+            rules.push((
+                0,
+                order,
+                wir::Rule {
+                    name: "Initialize player variables".to_string(),
+                    span: None,
+                    name_span: None,
+                    disabled: false,
+                    event: wir::Event::EachPlayer,
+                    conditions: Vec::new(),
+                    actions,
+                },
+            ));
+            order += 1;
         }
 
         // Subroutine definition bodies become rules with the Subroutine
@@ -282,25 +316,42 @@ impl<'a> Lowerer<'a> {
                 )
             };
             let actions = self.lower_actions(&statements)?;
-            self.target.rules.push(wir::Rule {
-                name: format!("Subroutine {name}"),
-                span: body_span,
-                name_span: body_name_span,
-                disabled: false,
-                event: wir::Event::Subroutine(self.subroutines[&id]),
-                conditions: Vec::new(),
-                actions,
-            });
+            rules.push((
+                0,
+                order,
+                wir::Rule {
+                    name: format!("Subroutine {name}"),
+                    span: body_span,
+                    name_span: body_name_span,
+                    disabled: false,
+                    event: wir::Event::Subroutine(self.subroutines[&id]),
+                    conditions: Vec::new(),
+                    actions,
+                },
+            ));
+            order += 1;
         }
         let rule_ids = range_ids::<hir::Rule>(self.hir.rules.len());
         for id in rule_ids {
-            self.lower_rule(id)?;
+            let priority = self
+                .hir
+                .rules
+                .get(id)
+                .ok_or_else(|| dangling("rule", id))?
+                .priority;
+            let rule = self.lower_rule(id)?;
+            rules.push((priority.unwrap_or(0), order, rule));
+            order += 1;
+        }
+        rules.sort_by_key(|(priority, order, _)| (*priority, *order));
+        for (_, _, rule) in rules {
+            self.target.rules.push(rule);
         }
 
         Ok(self.target)
     }
 
-    fn lower_rule(&mut self, id: hir::RuleId) -> Result<(), IrError> {
+    fn lower_rule(&mut self, id: hir::RuleId) -> Result<wir::Rule, IrError> {
         let rule = self
             .hir
             .rules
@@ -323,7 +374,7 @@ impl<'a> Lowerer<'a> {
             .map(|condition| self.lower_value(*condition))
             .collect::<Result<Vec<_>, _>>()?;
         let actions = self.lower_actions(&rule.actions)?;
-        self.target.rules.push(wir::Rule {
+        Ok(wir::Rule {
             name: rule.name,
             span: rule.span,
             name_span: rule.name_span,
@@ -331,19 +382,53 @@ impl<'a> Lowerer<'a> {
             event,
             conditions,
             actions,
-        });
-        Ok(())
+        })
     }
 
     fn lower_actions(&mut self, statements: &[StmtId]) -> Result<Vec<wir::ActionId>, IrError> {
+        let empty = HashMap::new();
+        self.lower_actions_with(statements, &empty)
+    }
+
+    /// Lower statements with the enclosing user-function parameter bindings
+    /// (used by the #119 function-inlining path; rules/subroutines pass an
+    /// empty binding map).
+    fn lower_actions_with(
+        &mut self,
+        statements: &[StmtId],
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<Vec<wir::ActionId>, IrError> {
         let mut actions = Vec::new();
         for statement in statements {
-            self.lower_action(*statement, &mut actions)?;
+            self.lower_action_with(*statement, &mut actions, params)?;
         }
         Ok(actions)
     }
 
-    fn lower_action(&mut self, id: StmtId, out: &mut Vec<wir::ActionId>) -> Result<(), IrError> {
+    fn lower_action_with(
+        &mut self,
+        id: StmtId,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<(), IrError> {
+        self.depth += 1;
+        let result = self.lower_action_with_inner(id, out, params);
+        self.depth -= 1;
+        result
+    }
+
+    fn lower_action_with_inner(
+        &mut self,
+        id: StmtId,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<(), IrError> {
+        if self.depth > 256 {
+            return Err(unsupported(
+                "statement inlining exceeded the bounded-recursion limit (256)",
+                self.hir.stmts.get(id).and_then(|s| s.span()),
+            ));
+        }
         let statement = self
             .hir
             .stmts
@@ -352,8 +437,14 @@ impl<'a> Lowerer<'a> {
             .clone();
         let span = statement.span();
         let action = match &statement {
-            Stmt::Expr { expr, .. } => self.lower_expr_stmt(*expr, span)?,
-            Stmt::Assign { target, value, .. } => self.lower_assign(target, value, span)?,
+            Stmt::Expr { expr, .. } => match self.lower_expr_stmt_with(*expr, span, out, params)? {
+                Some(action) => action,
+                // The statement inlined into `out` (void-function call or a
+                // value-function call used for its side effects); nothing
+                // further to push.
+                None => return Ok(()),
+            },
+            Stmt::Assign { target, value, .. } => self.lower_assign_with(target, value, span, out, params)?,
             Stmt::If {
                 branches,
                 else_body,
@@ -362,12 +453,12 @@ impl<'a> Lowerer<'a> {
                 let mut lowered_branches = Vec::with_capacity(branches.len());
                 for branch in branches {
                     lowered_branches.push(wir::IfBranch {
-                        condition: self.lower_value(branch.condition)?,
-                        body: self.lower_actions(&branch.body)?,
+                        condition: self.lower_value_with(branch.condition, params, out)?,
+                        body: self.lower_actions_with(&branch.body, params)?,
                     });
                 }
                 let lowered_else = match else_body {
-                    Some(body) => Some(self.lower_actions(body)?),
+                    Some(body) => Some(self.lower_actions_with(body, params)?),
                     None => None,
                 };
                 Action::If {
@@ -382,12 +473,12 @@ impl<'a> Lowerer<'a> {
                 body,
                 variable_span,
                 ..
-            } => self.lower_for(*variable, *iterable, body, span, *variable_span)?,
+            } => self.lower_for_with(*variable, *iterable, body, span, *variable_span, out, params)?,
             Stmt::While {
                 condition, body, ..
             } => Action::While {
-                condition: self.lower_value(*condition)?,
-                body: self.lower_actions(body)?,
+                condition: self.lower_value_with(*condition, params, out)?,
+                body: self.lower_actions_with(body, params)?,
                 span,
             },
             Stmt::CallSubroutine {
@@ -399,17 +490,73 @@ impl<'a> Lowerer<'a> {
                 span,
                 callee_span: *callee_span,
             },
-            // #118 frontend-neutral extensions: produced only by the OSTW
-            // frontend; their WIR lowering is owned by #119.
-            Stmt::Foreach { .. }
-            | Stmt::CFor { .. }
-            | Stmt::Switch { .. }
-            | Stmt::Return { .. }
-            | Stmt::Break { .. }
-            | Stmt::Continue { .. } => {
-                return Err(unsupported(
-                    "the OSTW-only statement is outside the OPY v0.1 lowering surface (#119)",
+            // #118 frontend-neutral extensions: their faithful Workshop
+            // lowering is #119. `Foreach`/`CFor` lower to the reference's
+            // `For Global Variable` forms; `Switch` lowers to the reference's
+            // Skip-array dispatch with sequential case bodies (fallthrough),
+            // `break` = `Skip` over the remaining bodies, `default` = the
+            // last body; `Return` in a rule lowers to `Abort` (P5 evidence).
+            Stmt::Foreach {
+                variable,
+                iterable,
+                body,
+                ..
+            } => self.lower_foreach(*variable, *iterable, body, span, out, params)?,
+            Stmt::CFor {
+                variable,
+                start,
+                condition,
+                step,
+                body,
+                ..
+            } => self.lower_c_for(*variable, *start, *condition, *step, body, span, out, params)?,
+            Stmt::Switch { value, cases, .. } => {
+                // Pushes the dispatch and every case body into `out`.
+                return self.lower_switch(*value, cases, span, out, params);
+            }
+            Stmt::Return { value, .. } => {
+                // P5: `return;` inside a rule body is `Abort` (early exit).
+                // The return VALUE of a statement-bodied user function is
+                // consumed by the inlining path before this point; a valued
+                // return reaching a rule body has no Workshop meaning beyond
+                // the same early exit (declared #119 contract).
+                if let Some(value) = value {
+                    let _ = self.lower_value_with(*value, params, out)?;
+                }
+                Action::Call {
+                    name: "abort".to_string(),
+                    args: Vec::new(),
                     span,
+                }
+            }
+            // `break` outside a switch case body has no Workshop lowering
+            // (no loop break in the declared surface); `continue` is not in
+            // the declared surface either. Both fail deterministically
+            // instead of deferring to emission.
+            // `break` inside a switch case body (any nesting depth) is the
+            // declared #118 surface; only top-level trailing breaks take
+            // part in the reference's Skip dispatch (#119), so nested breaks
+            // are recorded structurally for the shared analyzer. A `break`
+            // outside a switch has no Workshop lowering and fails
+            // deterministically; `continue` is not in the declared surface.
+            Stmt::Break { span } => {
+                if self.in_switch_case {
+                    Action::Call {
+                        name: "break".to_string(),
+                        args: Vec::new(),
+                        span: *span,
+                    }
+                } else {
+                    return Err(unsupported(
+                        "break is only supported inside a switch case body on the #119 surface",
+                        *span,
+                    ));
+                }
+            }
+            Stmt::Continue { span } => {
+                return Err(unsupported(
+                    "continue is outside the #119 OSTW lowering surface",
+                    *span,
                 ));
             }
             Stmt::Pass { .. } => return Ok(()), // no-op; dropped
@@ -418,68 +565,267 @@ impl<'a> Lowerer<'a> {
         Ok(())
     }
 
-    fn lower_expr_stmt(&mut self, expr: ExprId, span: Option<Span>) -> Result<Action, IrError> {
+    /// Lower an expression statement. A call to a void user function inlines
+    /// its body at the call site (#119, P5 evidence): each argument is
+    /// materialized into a fresh per-call player variable named after the
+    /// parameter (`by`, `by_0`, …), then the body statements are lowered
+    /// with the parameters bound to those variables — the reference's exact
+    /// emission shape. A call to a value function used as a statement lowers
+    /// its body for the side effects and discards the value.
+    fn lower_expr_stmt_with(
+        &mut self,
+        expr: ExprId,
+        span: Option<Span>,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<Option<Action>, IrError> {
         let expression = self
             .hir
             .exprs
             .get(expr)
             .ok_or_else(|| dangling("expression", expr))?;
-        match expression {
+        if let Expr::UserCall { function, args, .. } = expression {
+            let decl = self
+                .hir
+                .functions
+                .get(*function)
+                .ok_or_else(|| dangling("function", *function))?;
+            match &decl.body {
+                hir::FunctionBody::Statements(statements) => {
+                    self.inline_void_call(*function, args, statements, out, params, span)?;
+                    return Ok(None);
+                }
+                hir::FunctionBody::Expression(body) => {
+                    let bound = self.bind_inline_args(decl, args, params)?;
+                    let _ = self.lower_value_with(*body, &bound, out)?;
+                    return Ok(None);
+                }
+            }
+        }
+        let action = match expression {
             Expr::Call { name, args, .. } if name == "debug" && args.len() == 1 => {
-                Ok(Action::Debug {
-                    value: self.lower_value(args[0])?,
+                Action::Debug {
+                    value: self.lower_value_with(args[0], params, out)?,
                     span,
-                })
+                }
             }
             Expr::Call { name, args, .. } if name == "print" && args.len() == 1 => {
-                Ok(Action::Print {
-                    message: self.lower_value(args[0])?,
+                Action::Print {
+                    message: self.lower_value_with(args[0], params, out)?,
                     span,
-                })
+                }
             }
             Expr::ReceiverCall {
                 receiver,
                 name,
                 args,
                 ..
-            } if name == "append" => self.lower_append(receiver, args, span),
-            Expr::Call { name, args, .. } => Ok(Action::Call {
+            } if name == "append" => self.lower_append_with(receiver, args, span, out, params)?,
+            Expr::Call { name, args, .. } => Action::Call {
                 name: name.clone(),
-                args: self.lower_values(args)?,
+                args: self.lower_values_with(args, params, out)?,
                 span,
-            }),
+            },
             Expr::ReceiverCall {
                 receiver,
                 name,
                 args,
                 ..
             } => {
-                let mut lowered = vec![self.lower_value(*receiver)?];
-                lowered.extend(self.lower_values(args)?);
-                Ok(Action::Call {
+                let mut lowered = vec![self.lower_value_with(*receiver, params, out)?];
+                lowered.extend(self.lower_values_with(args, params, out)?);
+                Action::Call {
                     name: name.clone(),
                     args: lowered,
                     span,
-                })
+                }
             }
-            other => Err(unsupported(
-                format!(
-                    "expression statement '{}' is outside the v0.1 lowering surface",
-                    other.kind_name()
-                ),
+            other => {
+                return Err(unsupported(
+                    format!(
+                        "expression statement '{}' is outside the v0.1 lowering surface",
+                        other.kind_name()
+                    ),
+                    span,
+                ));
+            }
+        };
+        Ok(Some(action))
+    }
+
+    /// The per-parameter-name call counter: the reference names materialized
+    /// call variables after the parameter with `_0`, `_1`, … suffixes in
+    /// call order (P5 evidence: `by`, `by_0`, `by_1`, …).
+    fn materialized_var_name(&mut self, param: &str) -> String {
+        let counter = self.materialized.entry(param.to_string()).or_insert(0);
+        let name = if *counter == 0 {
+            param.to_string()
+        } else {
+            format!("{param}_{}", *counter - 1)
+        };
+        *counter += 1;
+        name
+    }
+
+    /// Materialize the call arguments into fresh per-call player variables
+    /// and bind the function parameters to them (reference shape, P5).
+    fn bind_materialized_args(
+        &mut self,
+        function: &hir::Function,
+        args: &[ExprId],
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+        span: Option<Span>,
+    ) -> Result<HashMap<String, ParamBinding>, IrError> {
+        let mut bound = HashMap::with_capacity(function.params.len());
+        let player = self
+            .target
+            .values
+            .push(ValueNode::new(Value::EventPlayer, span));
+        for (index, param) in function.params.iter().enumerate() {
+            let arg = args.get(index).copied().ok_or_else(|| {
+                unsupported(
+                    format!(
+                        "function '{}' is missing an argument for parameter '{}' \
+                         (defaults are resolved by the frontend)",
+                        function.name,
+                        param.name
+                    ),
+                    param.span,
+                )
+            })?;
+            let value = self.lower_value_with(arg, params, out)?;
+            let name = self.materialized_var_name(&param.name);
+            let variable = self.target.player_variables.push(wir::WorkshopVariable {
+                name,
+                index: self.target.player_variables.len() as u32,
+                span: None,
+                name_span: None,
+            });
+            out.push(self.target.actions.push(Action::SetPlayerVariable {
+                player,
+                variable,
+                value,
                 span,
-            )),
+                target_span: None,
+            }));
+            bound.insert(param.name.clone(), ParamBinding::Var(variable));
+        }
+        Ok(bound)
+    }
+
+    /// Bind function parameters to the call arguments for direct value
+    /// substitution (value functions, reference shape P5).
+    ///
+    /// Arguments that are bare `Param` references to an *outer* binding are
+    /// resolved through `outer` at bind time: the inner binding map is
+    /// keyed by name and cannot distinguish scopes, so a shadowed name
+    /// (`shouldAllowSelection(p)` inside a function whose parameter is also
+    /// `p`) would otherwise substitute the inner parameter with itself and
+    /// recurse forever. Outer bindings for non-shadowed names remain visible
+    /// inside the inlined body (like macro expansion), so nested `Param`
+    /// references inside argument expressions still resolve.
+    fn bind_inline_args(
+        &self,
+        function: &hir::Function,
+        args: &[ExprId],
+        outer: &HashMap<String, ParamBinding>,
+    ) -> Result<HashMap<String, ParamBinding>, IrError> {
+        let mut bound = HashMap::with_capacity(function.params.len());
+        for (index, param) in function.params.iter().enumerate() {
+            let arg = args.get(index).copied().ok_or_else(|| {
+                unsupported(
+                    format!(
+                        "function '{}' is missing an argument for parameter '{}' \
+                         (defaults are resolved by the frontend)",
+                        function.name,
+                        param.name
+                    ),
+                    param.span,
+                )
+            })?;
+            bound.insert(param.name.clone(), self.resolve_param_arg(arg, outer, 0)?);
+        }
+        for (name, binding) in outer {
+            bound.entry(name.clone()).or_insert_with(|| binding.clone());
+        }
+        Ok(bound)
+    }
+
+    /// Resolve a call argument through the outer parameter bindings: a bare
+    /// `Param` reference to an outer binding substitutes that binding
+    /// directly; materialized outer parameters propagate as `Var` bindings.
+    fn resolve_param_arg(
+        &self,
+        arg: ExprId,
+        outer: &HashMap<String, ParamBinding>,
+        depth: u32,
+    ) -> Result<ParamBinding, IrError> {
+        if depth > 64 {
+            return Err(unsupported(
+                "parameter bindings exceeded the resolution depth limit",
+                self.hir.exprs.get(arg).and_then(|e| e.span()),
+            ));
+        }
+        match self.hir.exprs.get(arg) {
+            Some(Expr::Param { name, span: _ }) => match outer.get(name) {
+                Some(ParamBinding::Inline(expr)) => self.resolve_param_arg(*expr, outer, depth + 1),
+                Some(ParamBinding::Var(variable)) => Ok(ParamBinding::Var(*variable)),
+                None => Ok(ParamBinding::Inline(arg)),
+            },
+            _ => Ok(ParamBinding::Inline(arg)),
         }
     }
 
-    fn lower_append(
+    /// Inline a void function's statement body at its call site. `return`
+    /// inside a void body has no faithful lowering on the declared surface
+    /// and fails deterministically.
+    fn inline_void_call(
+        &mut self,
+        function_id: hir::FunctionId,
+        args: &[ExprId],
+        statements: &[StmtId],
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+        span: Option<Span>,
+    ) -> Result<(), IrError> {
+        let function = self
+            .hir
+            .functions
+            .get(function_id)
+            .ok_or_else(|| dangling("function", function_id))?;
+        for statement in statements {
+            if matches!(self.hir.stmts.get(*statement), Some(Stmt::Return { .. })) {
+                let statement_span = self
+                    .hir
+                    .stmts
+                    .get(*statement)
+                    .and_then(|statement| statement.span());
+                return Err(unsupported(
+                    format!(
+                        "return inside function '{}' is outside the #119 inlining surface \
+                         (only the terminal return of a value function lowers)",
+                        function.name
+                    ),
+                    statement_span,
+                ));
+            }
+        }
+        let bound = self.bind_materialized_args(function, args, out, params, span)?;
+        out.extend(self.lower_actions_with(statements, &bound)?);
+        Ok(())
+    }
+
+    fn lower_append_with(
         &mut self,
         receiver: &ExprId,
         args: &[ExprId],
         span: Option<Span>,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
     ) -> Result<Action, IrError> {
         let value = match args {
-            [value] => self.lower_value(*value)?,
+            [value] => self.lower_value_with(*value, params, out)?,
             _ => {
                 return Err(unsupported(
                     "append must take exactly one value for the v0.1 lowering surface",
@@ -503,7 +849,7 @@ impl<'a> Lowerer<'a> {
             Expr::PlayerVar {
                 player, variable, ..
             } => {
-                let player = self.lower_value(*player)?;
+                let player = self.lower_value_with(*player, params, out)?;
                 Ok(Action::ModifyPlayerVariable {
                     player,
                     variable: self.player(*variable)?,
@@ -523,11 +869,13 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn lower_assign(
+    fn lower_assign_with(
         &mut self,
         target: &ExprId,
         value: &ExprId,
         span: Option<Span>,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
     ) -> Result<Action, IrError> {
         let target_expr = self
             .hir
@@ -538,7 +886,7 @@ impl<'a> Lowerer<'a> {
             Expr::GlobalVar { variable, .. } => {
                 let global = self.global(*variable)?;
                 let target_span = self.occurrence_span(target_expr);
-                match self.global_modify(value, *variable)? {
+                match self.global_modify_with(value, *variable, out, params)? {
                     Some((op, operand)) => Ok(Action::ModifyGlobalVariable {
                         variable: global,
                         op,
@@ -548,7 +896,7 @@ impl<'a> Lowerer<'a> {
                     }),
                     None => Ok(Action::SetGlobalVariable {
                         variable: global,
-                        value: self.lower_value(*value)?,
+                        value: self.lower_value_with(*value, params, out)?,
                         span,
                         target_span,
                     }),
@@ -557,11 +905,11 @@ impl<'a> Lowerer<'a> {
             Expr::PlayerVar {
                 player, variable, ..
             } => {
-                let player_value = self.lower_value(*player)?;
+                let player_value = self.lower_value_with(*player, params, out)?;
                 let player_id = *player;
                 let player_var = self.player(*variable)?;
                 let target_span = self.occurrence_span(target_expr);
-                match self.player_modify(value, player_id, *variable)? {
+                match self.player_modify_with(value, player_id, *variable, out, params)? {
                     Some((op, operand)) => Ok(Action::ModifyPlayerVariable {
                         player: player_value,
                         variable: player_var,
@@ -573,10 +921,37 @@ impl<'a> Lowerer<'a> {
                     None => Ok(Action::SetPlayerVariable {
                         player: player_value,
                         variable: player_var,
-                        value: self.lower_value(*value)?,
+                        value: self.lower_value_with(*value, params, out)?,
                         span,
                         target_span,
                     }),
+                }
+            }
+            Expr::Index { array, index, .. } => {
+                // Indexed assignment (`arr[i] = v`): the reference emits
+                // `Set/Modify … Variable At Index`. Record it structurally as
+                // a named action so the shared analyzer still sees the
+                // occurrence; faithful emission spelling is #119's concern.
+                let index_value = self.lower_value_with(*index, params, out)?;
+                let value = self.lower_value_with(*value, params, out)?;
+                let array_value = self.lower_value_with(*array, params, out)?;
+                match indexed_array_kind(array, &self.hir) {
+                    IndexedArrayKind::Global => Ok(Action::Call {
+                        name: "setGlobalVariableAtIndex".to_string(),
+                        args: vec![array_value, index_value, value],
+                        span,
+                    }),
+                    IndexedArrayKind::Player => Ok(Action::Call {
+                        name: "setPlayerVariableAtIndex".to_string(),
+                        args: vec![array_value, index_value, value],
+                        span,
+                    }),
+                    IndexedArrayKind::Other => {
+                        return Err(unsupported(
+                            "indexed assignment requires a global or player array target",
+                            span,
+                        ));
+                    }
                 }
             }
             other => Err(unsupported(
@@ -618,14 +993,18 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Detect `x = x <op> rhs` (or `x = rhs <op> x`) for a global target.
-    fn global_modify(
+    fn global_modify_with(
         &mut self,
         value: &ExprId,
         target: GlobalVarId,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
     ) -> Result<Option<(ModifyOp, ValueId)>, IrError> {
-        self.modify_pattern(
+        self.modify_pattern_with(
             value,
             |other| matches!(other, Expr::GlobalVar { variable, .. } if *variable == target),
+            out,
+            params,
         )
     }
 
@@ -636,11 +1015,13 @@ impl<'a> Lowerer<'a> {
     /// the player expression is compared structurally, not by node id
     /// (the oracle renders playervar augmented assignments as
     /// `Modify Player Variable(Event Player, p, <op>, value)`, #87).
-    fn player_modify(
+    fn player_modify_with(
         &mut self,
         value: &ExprId,
         player: ExprId,
         variable: PlayerVarId,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
     ) -> Result<Option<(ModifyOp, ValueId)>, IrError> {
         let target_player = self
             .hir
@@ -666,8 +1047,8 @@ impl<'a> Lowerer<'a> {
         let left_is_target = self.player_operand_is_target(*left, &target_player, variable)?;
         let right_is_target = self.player_operand_is_target(*right, &target_player, variable)?;
         match (left_is_target, right_is_target) {
-            (true, _) => Ok(Some((op, self.lower_value(*right)?))),
-            (false, true) => Ok(Some((op, self.lower_value(*left)?))),
+            (true, _) => Ok(Some((op, self.lower_value_with(*right, params, out)?))),
+            (false, true) => Ok(Some((op, self.lower_value_with(*left, params, out)?))),
             (false, false) => Ok(None),
         }
     }
@@ -698,10 +1079,12 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn modify_pattern(
+    fn modify_pattern_with(
         &mut self,
         value: &ExprId,
         is_target: impl Fn(&Expr) -> bool,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
     ) -> Result<Option<(ModifyOp, ValueId)>, IrError> {
         let expression = self
             .hir
@@ -730,34 +1113,41 @@ impl<'a> Lowerer<'a> {
             is_target(right_expr)
         };
         match (left_is_target, right_is_target) {
-            (true, _) => Ok(Some((op, self.lower_value(*right)?))),
-            (false, true) => Ok(Some((op, self.lower_value(*left)?))),
+            (true, _) => Ok(Some((op, self.lower_value_with(*right, params, out)?))),
+            (false, true) => Ok(Some((op, self.lower_value_with(*left, params, out)?))),
             (false, false) => Ok(None),
         }
     }
 
-    fn lower_for(
+    fn lower_for_with(
         &mut self,
         variable: GlobalVarId,
         iterable: ExprId,
         body: &[StmtId],
         span: Option<Span>,
         variable_span: Option<Span>,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
     ) -> Result<Action, IrError> {
-        let (start, stop, step) = self.range_bounds(iterable)?;
+        let (start, stop, step) = self.range_bounds_with(iterable, out, params)?;
         Ok(Action::ForGlobalVariable {
             variable: self.global(variable)?,
             start,
             stop,
             step,
-            body: self.lower_actions(body)?,
+            body: self.lower_actions_with(body, params)?,
             span,
             target_span: variable_span,
         })
     }
 
     /// Split a `range` iterable into start/stop/step bounds.
-    fn range_bounds(&mut self, iterable: ExprId) -> Result<(ValueId, ValueId, ValueId), IrError> {
+    fn range_bounds_with(
+        &mut self,
+        iterable: ExprId,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<(ValueId, ValueId, ValueId), IrError> {
         let expression = self
             .hir
             .exprs
@@ -790,12 +1180,16 @@ impl<'a> Lowerer<'a> {
             None,
         ));
         match args.as_slice() {
-            [stop] => Ok((zero, self.lower_value(*stop)?, one)),
-            [start, stop] => Ok((self.lower_value(*start)?, self.lower_value(*stop)?, one)),
+            [stop] => Ok((zero, self.lower_value_with(*stop, params, out)?, one)),
+            [start, stop] => Ok((
+                self.lower_value_with(*start, params, out)?,
+                self.lower_value_with(*stop, params, out)?,
+                one,
+            )),
             [start, stop, step] => Ok((
-                self.lower_value(*start)?,
-                self.lower_value(*stop)?,
-                self.lower_value(*step)?,
+                self.lower_value_with(*start, params, out)?,
+                self.lower_value_with(*stop, params, out)?,
+                self.lower_value_with(*step, params, out)?,
             )),
             _ => Err(unsupported(
                 "range() must take 1, 2, or 3 arguments for the v0.1 lowering surface",
@@ -804,18 +1198,299 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn lower_value(&mut self, id: ExprId) -> Result<ValueId, IrError> {
-        let empty = HashMap::new();
-        self.lower_value_with(id, &empty)
+    /// Lower a `foreach (x in arr)` loop: the reference emits
+    /// `For Global Variable(counter, 0, Count Of(arr), 1)`; body references
+    /// to the loop element were already rewritten to `Index(arr, counter)`
+    /// by the frontend. The counter lowers as a global variable under the
+    /// declared #119 contract (the reference places the foreach local in the
+    /// per-player table; Workshop rule execution is atomic, so the loop
+    /// semantics coincide — documented divergence).
+    fn lower_foreach(
+        &mut self,
+        variable: GlobalVarId,
+        iterable: ExprId,
+        body: &[StmtId],
+        span: Option<Span>,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<Action, IrError> {
+        let zero = self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: 0.0,
+                text: "0".to_string(),
+            },
+            None,
+        ));
+        let one = self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: 1.0,
+                text: "1".to_string(),
+            },
+            None,
+        ));
+        let iterable_value = self.lower_value_with(iterable, params, out)?;
+        let count = self.target.values.push(ValueNode::new(
+            Value::Call {
+                name: "countOf".to_string(),
+                args: vec![iterable_value],
+            },
+            span,
+        ));
+        Ok(Action::ForGlobalVariable {
+            variable: self.global(variable)?,
+            start: zero,
+            stop: count,
+            step: one,
+            body: self.lower_actions_with(body, params)?,
+            span,
+            target_span: None,
+        })
     }
 
-    /// Lower an expression, substituting any `MacroParam` references from the
-    /// enclosing macro definition with the bound call arguments.
+    /// Lower a C-style `for (init; condition; step)` loop: the reference
+    /// emits `For Global Variable(variable, start, condition, step)` (P5).
+    fn lower_c_for(
+        &mut self,
+        variable: GlobalVarId,
+        start: Option<ExprId>,
+        condition: Option<ExprId>,
+        step: Option<ExprId>,
+        body: &[StmtId],
+        span: Option<Span>,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<Action, IrError> {
+        let zero = self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: 0.0,
+                text: "0".to_string(),
+            },
+            None,
+        ));
+        let one = self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: 1.0,
+                text: "1".to_string(),
+            },
+            None,
+        ));
+        let true_value = self.target.values.push(ValueNode::new(
+            Value::Bool(true),
+            None,
+        ));
+        let start = match start {
+            Some(start) => self.lower_value_with(start, params, out)?,
+            None => zero,
+        };
+        let stop = match condition {
+            Some(condition) => self.lower_value_with(condition, params, out)?,
+            None => true_value,
+        };
+        let step = match step {
+            Some(step) => self.lower_value_with(step, params, out)?,
+            None => one,
+        };
+        Ok(Action::ForGlobalVariable {
+            variable: self.global(variable)?,
+            start,
+            stop,
+            step,
+            body: self.lower_actions_with(body, params)?,
+            span,
+            target_span: None,
+        })
+    }
+
+    /// Lower a `switch` to the reference's Skip-array dispatch (P5 evidence):
+    /// sequential case bodies in source order (fallthrough = no skip between
+    /// consecutive bodies), `break` = `Skip` over the remaining bodies,
+    /// `default` = the last body, and a non-matching value skips to the
+    /// default (or past everything without one). The dispatch is
+    /// `Skip(Value In Array(jump_table, Add(Index Of Array Value(case
+    /// constants, value), 1)))`; the jump table and break skips are computed
+    /// over the emitted action counts, so the construction is identical to
+    /// the reference's for the same body shape. The dispatch and every case
+    /// body are pushed into `out` in sequence.
+    fn lower_switch(
+        &mut self,
+        value: ExprId,
+        cases: &[crate::hir::SwitchCase],
+        span: Option<Span>,
+        out: &mut Vec<wir::ActionId>,
+        params: &HashMap<String, ParamBinding>,
+    ) -> Result<(), IrError> {
+        let lowered_value = self.lower_value_with(value, params, out)?;
+        let mut case_constants: Vec<ValueId> = Vec::new();
+        let mut bodies: Vec<(Vec<wir::ActionId>, bool)> = Vec::new();
+        for case in cases {
+            let mut body = Vec::new();
+            let mut broke = false;
+            let previous_switch = self.in_switch_case;
+            self.in_switch_case = true;
+            for statement in &case.body {
+                if matches!(self.hir.stmts.get(*statement), Some(Stmt::Break { .. })) {
+                    // The reference emits `Skip(N)` over the remaining
+                    // bodies at the break point; anything after an
+                    // unconditional break is unreachable.
+                    broke = true;
+                    break;
+                }
+                self.lower_action_with(*statement, &mut body, params)?;
+            }
+            self.in_switch_case = previous_switch;
+            if let Some(case_value) = case.value {
+                case_constants.push(self.lower_value_with(case_value, params, out)?);
+            }
+            bodies.push((body, broke));
+        }
+        // Break skips: `Skip(tail)` after a body that ends in `break`,
+        // where tail = actions of every later body plus their break skips
+        // (computed back-to-front).
+        let mut tail = 0usize;
+        for index in (0..bodies.len()).rev() {
+            if bodies[index].1 {
+                let skip = self.target.values.push(ValueNode::new(
+                    Value::Number {
+                        value: tail as f64,
+                        text: tail.to_string(),
+                    },
+                    span,
+                ));
+                bodies[index]
+                    .0
+                    .push(self.target.actions.push(Action::Call {
+                        name: "skip".to_string(),
+                        args: vec![skip],
+                        span,
+                    }));
+                tail += 1;
+            }
+            tail += bodies[index].0.len();
+        }
+        // Jump table: entry 0 = the non-matched skip (to the default body,
+        // or past everything without one), entry i+1 = the actions before
+        // case i's body (0 for the first case). The break skips are already
+        // part of their body's action list at this point.
+        let mut offsets: Vec<usize> = Vec::with_capacity(bodies.len());
+        let mut running = 0usize;
+        for (body, _) in &bodies {
+            offsets.push(running);
+            running += body.len();
+        }
+        let default_index = cases.iter().position(|case| case.value.is_none());
+        let not_matched = default_index.map_or(running, |index| offsets[index]);
+        let mut table = Vec::with_capacity(case_constants.len() + 1);
+        table.push(self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: not_matched as f64,
+                text: not_matched.to_string(),
+            },
+            span,
+        )));
+        // Only the non-default cases get a jump-table entry (the default is
+        // reached through the not-matched entry, matching the reference).
+        for (index, case) in cases.iter().enumerate() {
+            if case.value.is_none() {
+                continue;
+            }
+            let offset = offsets[index];
+            table.push(self.target.values.push(ValueNode::new(
+                Value::Number {
+                    value: offset as f64,
+                    text: offset.to_string(),
+                },
+                span,
+            )));
+        }
+        let table_array = self.target.values.push(ValueNode::new(
+            Value::Array(table),
+            span,
+        ));
+        let constants_array = self.target.values.push(ValueNode::new(
+            Value::Array(case_constants),
+            span,
+        ));
+        let index = self.target.values.push(ValueNode::new(
+            Value::Call {
+                name: "indexOfArrayValue".to_string(),
+                args: vec![constants_array, lowered_value],
+            },
+            span,
+        ));
+        let one = self.target.values.push(ValueNode::new(
+            Value::Number {
+                value: 1.0,
+                text: "1".to_string(),
+            },
+            span,
+        ));
+        let shifted = self.target.values.push(ValueNode::new(
+            Value::Call {
+                name: "add".to_string(),
+                args: vec![index, one],
+            },
+            span,
+        ));
+        let jump = self.target.values.push(ValueNode::new(
+            Value::Call {
+                name: "valueInArray".to_string(),
+                args: vec![table_array, shifted],
+            },
+            span,
+        ));
+        out.push(self.target.actions.push(Action::Call {
+            name: "skip".to_string(),
+            args: vec![jump],
+            span,
+        }));
+        for (body, _) in bodies {
+            out.extend(body);
+        }
+        Ok(())
+    }
+
+    fn lower_value(&mut self, id: ExprId) -> Result<ValueId, IrError> {
+        let mut out = Vec::new();
+        let empty = HashMap::new();
+        let result = self.lower_value_with(id, &empty, &mut out)?;
+        if !out.is_empty() {
+            return Err(unsupported(
+                "a statement-bodied function call escaped the action stream",
+                value_span(self.hir, id),
+            ));
+        }
+        Ok(result)
+    }
+
+    /// Lower an expression with the enclosing bindings: macro parameters
+    /// (`MacroParam`) and inlined user-function parameters (`Param`,
+    /// #119). Statement-bodied user-function calls hoist their side-effect
+    /// statements into `out` before the enclosing action, matching the
+    /// reference's unconditional hoisting (P4 evidence).
     fn lower_value_with(
         &mut self,
         id: ExprId,
-        params: &HashMap<String, ExprId>,
+        params: &HashMap<String, ParamBinding>,
+        out: &mut Vec<wir::ActionId>,
     ) -> Result<ValueId, IrError> {
+        self.depth += 1;
+        let result = self.lower_value_with_inner(id, params, out);
+        self.depth -= 1;
+        result
+    }
+
+    fn lower_value_with_inner(
+        &mut self,
+        id: ExprId,
+        params: &HashMap<String, ParamBinding>,
+        out: &mut Vec<wir::ActionId>,
+    ) -> Result<ValueId, IrError> {
+        if self.depth > 256 {
+            return Err(unsupported(
+                "expression inlining exceeded the bounded-recursion limit (256)",
+                self.hir.exprs.get(id).and_then(|e| e.span()),
+            ));
+        }
         let expression = self
             .hir
             .exprs
@@ -834,14 +1509,14 @@ impl<'a> Lowerer<'a> {
             Expr::Bool { value, .. } => ValueNode::new(Value::Bool(*value), span),
             Expr::Null { .. } => ValueNode::new(Value::Null, span),
             Expr::Array { elements, .. } => ValueNode::new(
-                Value::Array(self.lower_values_with(elements, params)?),
+                Value::Array(self.lower_values_with(elements, params, out)?),
                 span,
             ),
             Expr::Vector { x, y, z, .. } => ValueNode::new(
                 Value::Vector {
-                    x: self.lower_value_with(*x, params)?,
-                    y: self.lower_value_with(*y, params)?,
-                    z: self.lower_value_with(*z, params)?,
+                    x: self.lower_value_with(*x, params, out)?,
+                    y: self.lower_value_with(*y, params, out)?,
+                    z: self.lower_value_with(*z, params, out)?,
                 },
                 span,
             ),
@@ -861,7 +1536,7 @@ impl<'a> Lowerer<'a> {
                 player, variable, ..
             } => ValueNode::new(
                 Value::PlayerVariable {
-                    player: self.lower_value_with(*player, params)?,
+                    player: self.lower_value_with(*player, params, out)?,
                     variable: self.player(*variable)?,
                 },
                 span,
@@ -870,7 +1545,7 @@ impl<'a> Lowerer<'a> {
             Expr::Call { name, args, .. } => ValueNode::new(
                 Value::Call {
                     name: name.clone(),
-                    args: self.lower_values_with(args, params)?,
+                    args: self.lower_values_with(args, params, out)?,
                 },
                 span,
             ),
@@ -880,8 +1555,8 @@ impl<'a> Lowerer<'a> {
                 args,
                 ..
             } => {
-                let mut lowered = vec![self.lower_value_with(*receiver, params)?];
-                lowered.extend(self.lower_values_with(args, params)?);
+                let mut lowered = vec![self.lower_value_with(*receiver, params, out)?];
+                lowered.extend(self.lower_values_with(args, params, out)?);
                 ValueNode::new(
                     Value::Call {
                         name: name.clone(),
@@ -891,11 +1566,13 @@ impl<'a> Lowerer<'a> {
                 )
             }
             Expr::MacroCall { macro_, args, .. } => {
-                return self.expand_macro_call(*macro_, args, params);
+                return self.expand_macro_call(*macro_, args, params, out);
             }
             Expr::MacroParam { name, .. } => match params.get(name) {
-                Some(arg) => return self.lower_value_with(*arg, params),
-                None => {
+                Some(ParamBinding::Inline(arg)) => {
+                    return self.lower_value_with(*arg, params, out);
+                }
+                Some(ParamBinding::Var(_)) | None => {
                     return Err(unsupported(
                         format!("macro parameter '${name}' escaped its macro definition"),
                         expression.span(),
@@ -908,8 +1585,8 @@ impl<'a> Lowerer<'a> {
                 Value::Call {
                     name: op.as_str().to_string(),
                     args: vec![
-                        self.lower_value_with(*left, params)?,
-                        self.lower_value_with(*right, params)?,
+                        self.lower_value_with(*left, params, out)?,
+                        self.lower_value_with(*right, params, out)?,
                     ],
                 },
                 span,
@@ -917,7 +1594,7 @@ impl<'a> Lowerer<'a> {
             Expr::Unary { op, operand, .. } => ValueNode::new(
                 Value::Call {
                     name: op.as_str().to_string(),
-                    args: vec![self.lower_value_with(*operand, params)?],
+                    args: vec![self.lower_value_with(*operand, params, out)?],
                 },
                 span,
             ),
@@ -925,8 +1602,8 @@ impl<'a> Lowerer<'a> {
                 Value::Call {
                     name: "valueInArray".to_string(),
                     args: vec![
-                        self.lower_value_with(*array, params)?,
-                        self.lower_value_with(*index, params)?,
+                        self.lower_value_with(*array, params, out)?,
+                        self.lower_value_with(*index, params, out)?,
                     ],
                 },
                 span,
@@ -937,7 +1614,7 @@ impl<'a> Lowerer<'a> {
                         .values
                         .push(ValueNode::new(Value::String(text.clone()), span)),
                 ];
-                lowered.extend(self.lower_values_with(args, params)?);
+                lowered.extend(self.lower_values_with(args, params, out)?);
                 ValueNode::new(
                     Value::Call {
                         name: "format".to_string(),
@@ -946,24 +1623,167 @@ impl<'a> Lowerer<'a> {
                     span,
                 )
             }
-            Expr::Constant { .. } => {
-                return Err(unsupported(
-                    "constant references are folded by the frontend and are outside the v0.1 lowering surface",
-                    expression.span(),
-                ));
+            Expr::Constant { constant, .. } => {
+                // The #118 semantic phase records constant (`define`)
+                // references by name with a placeholder value; keep the
+                // named reference structurally visible for shared analysis.
+                // Value resolution is #119's emission concern.
+                let name = self
+                    .hir
+                    .constants
+                    .get(*constant)
+                    .map(|constant| constant.name.clone())
+                    .unwrap_or_default();
+                ValueNode::new(
+                    Value::Call {
+                        name,
+                        args: Vec::new(),
+                    },
+                    span,
+                )
             }
-            // #118 frontend-neutral extensions: produced only by the OSTW
-            // frontend; their WIR lowering is owned by #119.
-            Expr::UserEnum { .. }
-            | Expr::UserCall { .. }
-            | Expr::Param { .. }
-            | Expr::Ternary { .. }
-            | Expr::Cast { .. } => {
-                return Err(unsupported(
-                    "the OSTW-only expression is outside the OPY v0.1 lowering surface (#119)",
-                    expression.span(),
-                ));
+            // #118 frontend-neutral extensions with their faithful #119
+            // lowering: user enums are 0-based integers (P4 evidence),
+            // value functions inline as expressions, statement-bodied value
+            // functions hoist their side effects and inline the terminal
+            // return value, ternaries lower to `If-Then-Else`, and casts are
+            // emission pass-throughs (P4 evidence).
+            Expr::UserEnum { enum_id, member, .. } => {
+                let enum_ = self
+                    .hir
+                    .enums
+                    .get(*enum_id)
+                    .ok_or_else(|| dangling("enum", *enum_id))?;
+                let index = enum_
+                    .members
+                    .iter()
+                    .position(|candidate| &candidate.name == member)
+                    .ok_or_else(|| {
+                        unsupported(
+                            format!(
+                                "member '{}' is not in user enum '{}'",
+                                member, enum_.name
+                            ),
+                            span,
+                        )
+                    })?;
+                ValueNode::new(
+                    Value::Number {
+                        value: index as f64,
+                        text: index.to_string(),
+                    },
+                    span,
+                )
             }
+            Expr::UserCall { function, args, .. } => {
+                let function = self
+                    .hir
+                    .functions
+                    .get(*function)
+                    .ok_or_else(|| dangling("function", *function))?;
+                if function
+                    .return_type
+                    .as_ref()
+                    .is_none_or(|type_name| type_name.is_void())
+                {
+                    return Err(unsupported(
+                        format!(
+                            "void function '{}' cannot be used as a value on the #119 surface",
+                            function.name
+                        ),
+                        span,
+                    ));
+                }
+                let bound = self.bind_inline_args(function, args, params)?;
+                match &function.body {
+                    hir::FunctionBody::Expression(body) => {
+                        return self.lower_value_with(*body, &bound, out);
+                    }
+                    hir::FunctionBody::Statements(statements) => {
+                        // Hoist every statement before the terminal return;
+                        // the return value is inlined (reference P4/P5
+                        // shape). Nested statement-bodied calls inside the
+                        // body keep hoisting through the same `out`.
+                        let mut body_out = Vec::new();
+                        for statement in statements {
+                            if let Some(Stmt::Return { value, .. }) = self.hir.stmts.get(*statement)
+                            {
+                                let value = value.ok_or_else(|| {
+                                    let statement_span = self
+                                        .hir
+                                        .stmts
+                                        .get(*statement)
+                                        .and_then(|statement| statement.span());
+                                    unsupported(
+                                        format!(
+                                            "function '{}' must return a value on the #119 \
+                                             surface",
+                                            function.name
+                                        ),
+                                        statement_span,
+                                    )
+                                })?;
+                                let result =
+                                    self.lower_value_with(value, &bound, &mut body_out)?;
+                                out.extend(body_out);
+                                return Ok(result);
+                            }
+                            self.lower_action_with(*statement, &mut body_out, &bound)?;
+                        }
+                        return Err(unsupported(
+                            format!(
+                                "function '{}' has no terminal return on the #119 surface",
+                                function.name
+                            ),
+                            span,
+                        ));
+                    }
+                }
+            }
+            Expr::Ternary {
+                condition,
+                then_value,
+                else_value,
+                ..
+            } => ValueNode::new(
+                Value::Call {
+                    name: "ifThenElse".to_string(),
+                    args: vec![
+                        self.lower_value_with(*condition, params, out)?,
+                        self.lower_value_with(*then_value, params, out)?,
+                        self.lower_value_with(*else_value, params, out)?,
+                    ],
+                },
+                span,
+            ),
+            Expr::Cast { value, .. } => return self.lower_value_with(*value, params, out),
+            Expr::Param { name, .. } => match params.get(name) {
+                Some(ParamBinding::Inline(arg)) => {
+                    return self.lower_value_with(*arg, params, out);
+                }
+                Some(ParamBinding::Var(variable)) => {
+                    let player = self
+                        .target
+                        .values
+                        .push(ValueNode::new(Value::EventPlayer, span));
+                    return Ok(self.target.values.push(ValueNode::new(
+                        Value::PlayerVariable {
+                            player,
+                            variable: *variable,
+                        },
+                        span,
+                    )));
+                }
+                None => {
+                    return Err(unsupported(
+                        format!(
+                            "user-function parameter '{name}' reached lowering outside its \
+                             function body"
+                        ),
+                        expression.span(),
+                    ));
+                }
+            },
         };
         Ok(self.target.values.push(value))
     }
@@ -971,16 +1791,12 @@ impl<'a> Lowerer<'a> {
     fn lower_values_with(
         &mut self,
         ids: &[ExprId],
-        params: &HashMap<String, ExprId>,
+        params: &HashMap<String, ParamBinding>,
+        out: &mut Vec<wir::ActionId>,
     ) -> Result<Vec<ValueId>, IrError> {
         ids.iter()
-            .map(|id| self.lower_value_with(*id, params))
+            .map(|id| self.lower_value_with(*id, params, out))
             .collect()
-    }
-
-    fn lower_values(&mut self, ids: &[ExprId]) -> Result<Vec<ValueId>, IrError> {
-        let empty = HashMap::new();
-        self.lower_values_with(ids, &empty)
     }
 
     /// Expand a source-level macro call: bind the call arguments to the macro
@@ -989,7 +1805,8 @@ impl<'a> Lowerer<'a> {
         &mut self,
         macro_: MacroId,
         args: &[ExprId],
-        outer: &HashMap<String, ExprId>,
+        outer: &HashMap<String, ParamBinding>,
+        out: &mut Vec<wir::ActionId>,
     ) -> Result<ValueId, IrError> {
         let macro_ = self
             .hir
@@ -1031,16 +1848,16 @@ impl<'a> Lowerer<'a> {
                 macro_.span,
             ));
         };
-        let mut bound: HashMap<String, ExprId> = HashMap::with_capacity(macro_.args.len());
+        let mut bound: HashMap<String, ParamBinding> = HashMap::with_capacity(macro_.args.len());
         for (name, arg) in macro_.args.iter().zip(args.iter()) {
-            bound.insert(name.clone(), *arg);
+            bound.insert(name.clone(), ParamBinding::Inline(*arg));
         }
         // Outer parameters remain visible inside the expanded body so nested
         // macro calls keep working.
         for (name, arg) in outer {
-            bound.entry(name.clone()).or_insert(*arg);
+            bound.entry(name.clone()).or_insert_with(|| arg.clone());
         }
-        self.lower_value_with(*expr, &bound)
+        self.lower_value_with(*expr, &bound, out)
     }
 
     fn global(&self, id: GlobalVarId) -> Result<wir::GlobalVarId, IrError> {
@@ -1062,6 +1879,24 @@ impl<'a> Lowerer<'a> {
             .get(&id)
             .copied()
             .ok_or_else(|| dangling("subroutine", id))
+    }
+}
+
+
+/// The kind of an indexed-assignment target array.
+enum IndexedArrayKind {
+    Global,
+    Player,
+    Other,
+}
+
+/// Classify an indexed-assignment array expression: a global array, a player
+/// array (on a player expression), or another target.
+fn indexed_array_kind(array: &ExprId, hir: &hir::Program) -> IndexedArrayKind {
+    match hir.exprs.get(*array) {
+        Some(Expr::GlobalVar { .. }) => IndexedArrayKind::Global,
+        Some(Expr::PlayerVar { .. }) => IndexedArrayKind::Player,
+        _ => IndexedArrayKind::Other,
     }
 }
 
@@ -1099,4 +1934,9 @@ fn dangling(what: &'static str, id: impl crate::ids::IdLike) -> IrError {
         what,
         id: id.index() as u32,
     }
+}
+
+/// The source span of an expression, when the node resolves.
+fn value_span(hir: &hir::Program, id: ExprId) -> Option<Span> {
+    hir.exprs.get(id).and_then(|expr| expr.span())
 }

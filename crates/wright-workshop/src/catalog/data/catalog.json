@@ -12,6 +12,10 @@
         "en-US": "Wait"
       },
       "id": "wait",
+      "paramDefaults": [
+        null,
+        "Wait.IGNORE_CONDITION"
+      ],
       "paramDomains": [
         null,
         "Wait"
@@ -48,6 +52,19 @@
         "en-US": "Create HUD Text"
       },
       "id": "createHudText",
+      "paramDefaults": [
+        null,
+        null,
+        "null",
+        "null",
+        null,
+        null,
+        null,
+        "Color.WHITE",
+        "Color.WHITE",
+        null,
+        null
+      ],
       "paramDomains": [
         null,
         null,
@@ -214,6 +231,10 @@
         "en-US": "Set Invisible"
       },
       "id": "setInvisibility",
+      "paramDefaults": [
+        "eventPlayer",
+        null
+      ],
       "paramDomains": [
         null,
         "Invis"
@@ -240,6 +261,10 @@
         "en-US": "Big Message"
       },
       "id": "bigMessage",
+      "paramDefaults": [
+        "allPlayers",
+        null
+      ],
       "params": [
         "VisibleTo",
         "Header"
@@ -250,6 +275,10 @@
         "en-US": "Small Message"
       },
       "id": "smallMessage",
+      "paramDefaults": [
+        "allPlayers",
+        null
+      ],
       "params": [
         "VisibleTo",
         "Header"
@@ -333,6 +362,16 @@
         "en-US": "Create In-World Text"
       },
       "id": "createInWorldText",
+      "paramDefaults": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "Color.WHITE",
+        null
+      ],
       "paramDomains": [
         null,
         null,
@@ -389,6 +428,12 @@
         "en-US": "Start Camera"
       },
       "id": "startCamera",
+      "paramDefaults": [
+        null,
+        null,
+        null,
+        "0"
+      ],
       "params": [
         "Player",
         "EyePosition",
@@ -681,6 +726,13 @@
         "Rate",
         "Reevaluation"
       ]
+    },
+    {
+      "aliases": {
+        "en-US": "Abort"
+      },
+      "id": "abort",
+      "params": []
     }
   ],
   "enums": [
@@ -2218,6 +2270,9 @@
         "en-US": "All Players"
       },
       "id": "allPlayers",
+      "paramDefaults": [
+        "Team.ALL"
+      ],
       "params": [
         "Team"
       ]
@@ -2635,6 +2690,10 @@
         "en-US": "Is Button Held"
       },
       "id": "isButtonHeld",
+      "paramDefaults": [
+        "eventPlayer",
+        "Button.ABILITY_2"
+      ],
       "paramDomains": [
         null,
         "Button"

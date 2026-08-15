@@ -12,3 +12,10 @@ workspace = true
 [dependencies]
 wright-ir = { path = "../wright-ir" }
 wright-workshop = { path = "../wright-workshop" }
+
+[dev-dependencies]
+serde_json = "1.0"
+sha2 = "0.10"
+wright-core = { path = "../wright-core" }
+wright-opy = { path = "../wright-opy" }
+wright-transform = { path = "../wright-transform" }

@@ -142,6 +142,27 @@ fn check_action(program: &Program, id: super::ActionId) -> Result<(), IrError> {
             }
             Ok(())
         }
+        Action::ForPlayerVariable {
+            player,
+            variable,
+            start,
+            stop,
+            step,
+            body,
+            ..
+        } => {
+            if !program.player_variables.contains(*variable) {
+                return Err(dangling("player variable", variable.index()));
+            }
+            check_value(program, *player)?;
+            check_value(program, *start)?;
+            check_value(program, *stop)?;
+            check_value(program, *step)?;
+            for action in body {
+                check_action(program, *action)?;
+            }
+            Ok(())
+        }
         Action::Debug { value, .. } => check_value(program, *value),
         Action::Print { message, .. } => check_value(program, *message),
         Action::Call { args, .. } => {

@@ -103,6 +103,22 @@ fn validate_action(
                 validate_action(program, catalog, *action, errors);
             }
         }
+        wir::Action::ForPlayerVariable {
+            player,
+            start,
+            stop,
+            step,
+            body,
+            ..
+        } => {
+            validate_value(program, catalog, *player, errors);
+            validate_value(program, catalog, *start, errors);
+            validate_value(program, catalog, *stop, errors);
+            validate_value(program, catalog, *step, errors);
+            for action in body {
+                validate_action(program, catalog, *action, errors);
+            }
+        }
         wir::Action::CallSubroutine { .. } => {}
     }
 }

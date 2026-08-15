@@ -27,12 +27,16 @@ use crate::{input_identity, opy};
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
 pub struct Loaded {
-    /// The validated Workshop IR program. Empty (and unused) for OSTW loads,
-    /// which carry their frontend outcome in [`Loaded::ostw`] instead.
+    /// The validated Workshop IR program. Empty for OSTW loads that did not
+    /// reach a semantic HIR (the frontend outcome is carried in [`Loaded::ostw`]).
     pub program: Arc<wir::Program>,
     /// The native OSTW frontend outcome, present only for `.ostw`/`.del`
     /// inputs (#117).
     pub ostw: Option<Arc<wright_ostw::OstwOutcome>>,
+    /// The #118 semantic-phase outcome (frontend-neutral HIR plus its
+    /// structured boundary diagnostics), present only for OSTW inputs that
+    /// loaded their project.
+    pub ostw_semantic: Option<Arc<wright_ostw::SemanticOutcome>>,
     /// Origin metadata carried into diagnostics and results.
     pub origin: Origin,
     /// The resolved input.
@@ -137,6 +141,7 @@ impl CompilerSession {
         let loaded = Loaded {
             program: Arc::new(program),
             ostw: None,
+            ostw_semantic: None,
             origin: resolved.origin.clone(),
             input: resolved,
         };
@@ -145,27 +150,54 @@ impl CompilerSession {
     }
 
     /// Load an OSTW project through the shared session path: the native
-    /// frontend parses the `ds.toml` project closure and resolves imports;
-    /// the outcome (file registry + diagnostics) is retained on the session.
-    /// No WIR program or emission exists in this milestone (#117).
+    /// frontend parses the `ds.toml` project closure, resolves imports, and
+    /// runs the #118 semantic phase; the resolved HIR is lowered through the
+    /// shared validate→lower→validate path into the session program, and the
+    /// project outcome (file registry + project and semantic diagnostics) is
+    /// retained on the session so spans keep their multi-file provenance.
     fn load_ostw(&mut self, resolved: &mut ResolvedInput) -> Result<Loaded, Diagnostic> {
         let relative = resolved
             .path
             .as_ref()
             .and_then(|path| path.strip_prefix(&resolved.root).ok())
             .map(|relative| relative.to_string_lossy().replace('\\', "/"));
-        let outcome = wright_ostw::compile(&resolved.text, relative.as_deref(), &resolved.root);
+        let (outcome, semantic) =
+            wright_ostw::compile_with_semantics(&resolved.text, relative.as_deref(), &resolved.root);
         if let Some(error) = &outcome.error {
             return Err(ostw_diag(error.clone(), &outcome, resolved));
         }
+        let program = match &semantic.hir {
+            Some(hir) => self.load_ir_model(hir, resolved)?,
+            None => wir::Program::default(),
+        };
         let loaded = Loaded {
-            program: Arc::new(wir::Program::default()),
+            program: Arc::new(program),
             ostw: Some(Arc::new(outcome)),
+            ostw_semantic: Some(Arc::new(semantic)),
             origin: resolved.origin.clone(),
             input: resolved.clone(),
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
+    }
+
+    /// Ingest an already-resolved internal HIR model (e.g. the #118 semantic
+    /// HIR of an OSTW project) through the shared validate→lower→validate
+    /// path shared with the protocol/OPY frontends.
+    fn load_ir_model(
+        &mut self,
+        model: &wright_ir::hir::Program,
+        resolved: &ResolvedInput,
+    ) -> Result<wir::Program, Diagnostic> {
+        model
+            .validate()
+            .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
+        let program = wright_ir::lower::lower(model)
+            .map_err(|error| ir_diag("lower-error", Stage::Lowering, error, resolved))?;
+        program
+            .validate()
+            .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
+        Ok(program)
     }
 
     /// The diagnostics accumulated by the last workflow run.
@@ -297,12 +329,29 @@ impl CompilerSession {
     fn compile_output(&mut self) -> Result<CompiledOutput, Diagnostic> {
         let loaded = self.load()?;
         if loaded.ostw.is_some() {
-            return Err(Diagnostic::error(
-                "ostw-unsupported",
-                Stage::Emission,
-                "Workshop emission is not implemented for OSTW in this milestone; \
-                 use `wright check` to parse and validate the project",
-            ));
+            // OSTW (#119): the load lowered the semantic HIR into the
+            // session program. Project-boundary diagnostics (missing
+            // imports) and semantic-boundary diagnostics are errors — an
+            // unsupported or unresolved reachable form fails compilation
+            // with a deterministic, structured, source-located diagnostic
+            // instead of being deferred to emission.
+            let outcome = loaded
+                .ostw
+                .as_ref()
+                .expect("an OSTW load always carries its frontend outcome");
+            let semantic = loaded.ostw_semantic.as_ref();
+            let error = outcome
+                .diagnostics
+                .iter()
+                .chain(
+                    semantic
+                        .map(|semantic| semantic.diagnostics.as_slice())
+                        .unwrap_or_default(),
+                )
+                .next();
+            if let Some(error) = error {
+                return Err(ostw_diag(error.clone(), outcome, &loaded.input));
+            }
         }
         let locale = loaded
             .origin
@@ -333,12 +382,10 @@ impl CompilerSession {
             }
         };
         if let Some(outcome) = &loaded.ostw {
-            // OSTW: report the frontend parse/project outcome through the
-            // shared diagnostics contract (#117).
-            for diagnostic in &outcome.diagnostics {
-                self.diagnostics
-                    .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
-            }
+            // OSTW: report the frontend project + #118 semantic boundary
+            // diagnostics through the shared diagnostics contract, and carry
+            // the project summary (#117).
+            self.push_ostw_diagnostics(&loaded);
             let summary = ostw_project_summary(outcome);
             return self.finish(
                 command,
@@ -361,8 +408,10 @@ impl CompilerSession {
                 return self.finish(command, AnalyzeResult::default());
             }
         };
-        if let Some(outcome) = &loaded.ostw {
-            return self.finish_unsupported(command, outcome, &loaded);
+        if loaded.ostw.is_some() {
+            // OSTW: surface the frontend + semantic boundary diagnostics,
+            // then run the shared semantic service over the lowered program.
+            self.push_ostw_diagnostics(&loaded);
         }
         let service = match self.service(&loaded) {
             Ok(service) => service,
@@ -387,8 +436,10 @@ impl CompilerSession {
                 return self.finish(command, InspectResult::default());
             }
         };
-        if let Some(outcome) = &loaded.ostw {
-            return self.finish_unsupported(command, outcome, &loaded);
+        if loaded.ostw.is_some() {
+            // OSTW: surface the frontend + semantic boundary diagnostics,
+            // then run the shared semantic service over the lowered program.
+            self.push_ostw_diagnostics(&loaded);
         }
         let service = match self.service(&loaded) {
             Ok(service) => service,
@@ -443,8 +494,10 @@ impl CompilerSession {
                 return self.finish(command, LintResult::default());
             }
         };
-        if let Some(outcome) = &loaded.ostw {
-            return self.finish_unsupported(command, outcome, &loaded);
+        if loaded.ostw.is_some() {
+            // OSTW: surface the frontend + semantic boundary diagnostics,
+            // then run the shared semantic service over the lowered program.
+            self.push_ostw_diagnostics(&loaded);
         }
         let service = match self.service_with(&loaded, self.config.lint.clone()) {
             Ok(service) => service,
@@ -555,28 +608,24 @@ impl CompilerSession {
         }
     }
 
-    /// Complete a workflow that is not implemented for OSTW inputs yet:
-    /// report the frontend diagnostics plus a structured
-    /// `ostw-unsupported` diagnostic through the shared contract.
-    fn finish_unsupported<T: serde::Serialize + Default>(
-        &mut self,
-        command: &str,
-        outcome: &wright_ostw::OstwOutcome,
-        loaded: &Loaded,
-    ) -> Envelope<T> {
+    /// Surface the OSTW frontend project diagnostics plus the #118
+    /// semantic-phase boundary diagnostics through the shared diagnostic
+    /// contract, so every workflow reports the same structured,
+    /// source-located boundary signals as the OPY/Workshop frontends.
+    fn push_ostw_diagnostics(&mut self, loaded: &Loaded) {
+        let Some(outcome) = &loaded.ostw else {
+            return;
+        };
         for diagnostic in &outcome.diagnostics {
             self.diagnostics
                 .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
         }
-        self.diagnostics.push(Diagnostic::error(
-            "ostw-unsupported",
-            Stage::Analysis,
-            format!(
-                "'{command}' is not implemented for OSTW in this milestone; \
-                 use `wright check` to parse and validate the project"
-            ),
-        ));
-        self.finish(command, T::default())
+        if let Some(semantic) = &loaded.ostw_semantic {
+            for diagnostic in &semantic.diagnostics {
+                self.diagnostics
+                    .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
+            }
+        }
     }
 }
 
