@@ -11,7 +11,7 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{CompilerSession, SessionConfig, InputSpec, SourceKind, OutputFormat, Profile}` | **stable** | One driver for compile/check/analyze/inspect/lint; `load()` is idempotent |
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
 | `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) plus validated mutation (`validateEditTransaction`, `semanticRename`, M14 #130) |
-| `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Frontend-neutral source-edit transactions; validated through the correct native frontend/project semantics (M14 #128) |
+| `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Frontend-neutral source-edit transactions; validated through the correct native frontend/project semantics (M14 #128); `EditTransaction::apply` applies ranges against one original source snapshot |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright-serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService`; MCP not implemented (no agent evidence) |
@@ -76,11 +76,18 @@ unchanged (behaviorally equivalent, transport-tested).
 
 Proposed edits are source-oriented ([`SourceEdit`]) and travel as
 [`EditTransaction`]s: one or more file edits with exact source ranges plus
-per-source SHA-256 identity/version preconditions.
+per-source SHA-256 identity/version preconditions. Ranges address one
+original source snapshot — per source, edits apply in descending position
+order, so an earlier replacement's length/newline changes can never shift a
+later range (`EditTransaction::apply` is the mechanical application; columns
+are strict 1-based character columns, `0` or beyond-line columns refuse, and
+order-dependent zero-width combinations at one position are refused as
+`edit-zero-width-conflict`).
 [`validate_transaction`] rejects stale versions, unknown sources,
 overlapping/conflicting edits, invalid ranges, and compiled errors, and
-returns the previewed edited sources — atomically, with no partial preview on
-refusal. Validation runs through the *original* project/session semantics
+returns the previewed edited sources — atomically: any failed validation
+returns `ok = false` and no validated preview. Validation runs through the
+*original* project/session semantics
 (`SessionConfig` kind/root, transformation profile): OPY projects compile
 through the native OPY frontend with edited includes as in-memory overlays,
 and OSTW projects load their `ds.toml` project graph with edited files as

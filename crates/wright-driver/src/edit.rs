@@ -64,7 +64,8 @@ pub struct EditRange {
 /// validated atomically against one project.
 ///
 /// Construction orders the edits deterministically (by source identity, then
-/// position) and rejects overlapping edits within one source up front.
+/// position), rejects overlapping edits within one source, and refuses
+/// order-dependent zero-width combinations at the same position.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditTransaction {
     /// The edits, in deterministic order (source, then position).
@@ -74,8 +75,13 @@ pub struct EditTransaction {
 impl EditTransaction {
     /// Build a transaction from proposed edits.
     ///
-    /// The edits are ordered deterministically and overlapping edits within
-    /// one source are rejected (`edit-overlap`); an empty transaction is
+    /// The edits are ordered deterministically (by source identity, then
+    /// position) and overlapping edits within one source are rejected
+    /// (`edit-overlap`). Order-dependent zero-width combinations are refused
+    /// as conflicts (`edit-zero-width-conflict`): two edits at the same
+    /// position where at least one is a zero-width insertion would apply
+    /// differently depending on their order, so the transaction refuses
+    /// instead of defining an arbitrary result. An empty transaction is
     /// rejected (`edit-empty-transaction`).
     pub fn new(edits: Vec<SourceEdit>) -> Result<EditTransaction, Diagnostic> {
         if edits.is_empty() {
@@ -94,7 +100,10 @@ impl EditTransaction {
         });
         for pair in edits.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
-            if a.source == b.source && start_position(b) < end_position(a) {
+            if a.source != b.source {
+                continue;
+            }
+            if start_position(b) < end_position(a) {
                 return Err(Diagnostic::error(
                     "edit-overlap",
                     Stage::Discovery,
@@ -110,8 +119,35 @@ impl EditTransaction {
                     ),
                 ));
             }
+            if start_position(a) == start_position(b) && (is_zero_width(a) || is_zero_width(b)) {
+                return Err(Diagnostic::error(
+                    "edit-zero-width-conflict",
+                    Stage::Discovery,
+                    format!(
+                        "the transaction carries order-dependent zero-width edits in '{}' at {}:{}; \
+                         refusing rather than defining an arbitrary insertion order",
+                        a.source, a.range.start_line, a.range.start_col
+                    ),
+                ));
+            }
         }
         Ok(EditTransaction { edits })
+    }
+
+    /// Apply the transaction's edits to the caller-provided current texts,
+    /// returning the complete edited text of every affected source.
+    ///
+    /// Every range addresses the same original source snapshot (per source,
+    /// the edits apply in descending position order), so an earlier
+    /// replacement's length or newline changes can never shift a later
+    /// range. Application is mechanical and separate from validation:
+    /// callers validate the result with [`validate_transaction`] before
+    /// applying it to real files. Malformed ranges refuse explicitly.
+    pub fn apply(
+        &self,
+        sources: &BTreeMap<String, String>,
+    ) -> Result<Vec<SourcePreview>, Diagnostic> {
+        apply_transaction(sources, self)
     }
 }
 
@@ -121,6 +157,11 @@ fn start_position(edit: &SourceEdit) -> (u32, u32) {
 
 fn end_position(edit: &SourceEdit) -> (u32, u32) {
     (edit.range.end_line, edit.range.end_col)
+}
+
+/// Whether an edit covers no characters (a pure insertion).
+fn is_zero_width(edit: &SourceEdit) -> bool {
+    start_position(edit) == end_position(edit)
 }
 
 /// The edited text of one source in a validated transaction.
@@ -281,11 +322,15 @@ pub fn validate_transaction(
         Err(errors) => diagnostics.extend(errors),
     }
 
+    // Validation is atomic: a transaction that fails any check — stale
+    // sources, malformed ranges, or compiled errors — returns no validated
+    // preview, never a partial or unvalidated edit set.
+    let ok = !has_error(&diagnostics);
     EditValidation {
-        ok: !has_error(&diagnostics),
+        ok,
         exit: exit_code_from(&diagnostics),
         diagnostics,
-        preview: Some(previews),
+        preview: if ok { Some(previews) } else { None },
     }
 }
 
@@ -943,38 +988,52 @@ fn normalize_relative(path: &str) -> String {
 /// Apply every edit of a transaction to the caller-provided current texts,
 /// returning one complete edited source per affected source.
 ///
-/// The edits are already deterministically ordered by construction; within
-/// one source they apply in order, so exact ranges are consumed and never
-/// shift. Ranges outside the source refuse explicitly.
+/// All ranges address the same original source snapshot: per source, the
+/// edits are already deterministically ordered ascending by position, and
+/// they are applied in descending order, so an earlier replacement's length
+/// or newline changes can never shift a later range. Ranges outside the
+/// source, invalid columns, and other malformed ranges refuse explicitly.
 fn apply_transaction(
     sources: &BTreeMap<String, String>,
     transaction: &EditTransaction,
 ) -> Result<Vec<SourcePreview>, Diagnostic> {
     let mut previews: Vec<SourcePreview> = Vec::new();
-    for edit in &transaction.edits {
-        let current = sources
-            .get(&edit.source)
+    for (source, edits) in group_by_source(&transaction.edits) {
+        let original = sources
+            .get(source)
             .expect("precondition check already verified every edited source");
-        match previews.last_mut() {
-            Some(last) if last.source == edit.source => {
-                last.new_text = apply_edit(&last.new_text, edit)?;
-                last.source_identity = crate::input_identity(&last.new_text);
-            }
-            _ => {
-                let new_text = apply_edit(current, edit)?;
-                previews.push(SourcePreview {
-                    source: edit.source.clone(),
-                    source_identity: crate::input_identity(&new_text),
-                    new_text,
-                });
-            }
+        let mut new_text = original.clone();
+        for edit in edits.iter().rev() {
+            new_text = apply_edit(&new_text, edit)?;
         }
+        previews.push(SourcePreview {
+            source: source.to_string(),
+            source_identity: crate::input_identity(&new_text),
+            new_text,
+        });
     }
     Ok(previews)
 }
 
+/// Group a transaction's edits by source, preserving the deterministic
+/// ascending per-source order established by [`EditTransaction::new`].
+fn group_by_source(edits: &[SourceEdit]) -> BTreeMap<&str, Vec<&SourceEdit>> {
+    let mut grouped: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
+    for edit in edits {
+        grouped.entry(&edit.source).or_default().push(edit);
+    }
+    grouped
+}
+
 /// Apply an edit's replacement text at its range (1-based character columns,
 /// end exclusive).
+///
+/// Columns are validated strictly against the declared 1-based exact-range
+/// contract: every column must be in `1..=char_count + 1` for its line
+/// (`end` is exclusive, so `char_count + 1` is a valid line-end insertion or
+/// full-line replacement point). A column of `0` or a column beyond the line
+/// is rejected (`edit-invalid-range`), never clamped to a different
+/// location.
 fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     let lines: Vec<&str> = source.split('\n').collect();
     if edit.range.start_line < 1
@@ -994,6 +1053,39 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
                 edit.range.end_line,
                 edit.range.end_col,
                 lines.len()
+            ),
+        ));
+    }
+    let start_char_count = char_count(
+        lines
+            .get(edit.range.start_line as usize - 1)
+            .expect("start line validated in range"),
+    ) as u32;
+    let end_char_count = char_count(
+        lines
+            .get(edit.range.end_line as usize - 1)
+            .expect("end line validated in range"),
+    ) as u32;
+    if edit.range.start_col < 1
+        || edit.range.start_col > start_char_count + 1
+        || edit.range.end_col < 1
+        || edit.range.end_col > end_char_count + 1
+    {
+        return Err(Diagnostic::error(
+            "edit-invalid-range",
+            Stage::Discovery,
+            format!(
+                "edit range {}-{}:{}-{} has columns outside the source lines \
+                 (line {} has {} characters, line {} has {}); columns are 1-based \
+                 and may not be 0 or beyond the line end",
+                edit.range.start_line,
+                edit.range.start_col,
+                edit.range.end_line,
+                edit.range.end_col,
+                edit.range.start_line,
+                start_char_count,
+                edit.range.end_line,
+                end_char_count
             ),
         ));
     }
@@ -1029,9 +1121,15 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     Ok(out.join("\n"))
 }
 
-/// Convert a 1-based character column to a byte offset, clamped to the line
-/// length (so a full-line replacement with a character-counted column never
-/// splits a multi-byte character).
+/// The number of characters in a line.
+fn char_count(line: &str) -> usize {
+    line.chars().count()
+}
+
+/// Convert a 1-based character column to a byte offset.
+///
+/// The caller validates the column against the line first; this conversion
+/// never clamps (a column of `0` or beyond the line is a caller bug).
 fn char_col(line: &str, col: u32) -> usize {
     let skip = col.saturating_sub(1) as usize;
     line.char_indices()
