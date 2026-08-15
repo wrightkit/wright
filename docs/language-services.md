@@ -147,10 +147,20 @@ retired with an empty publishDiagnostics unless another open root still owns
 it, so no diagnostic stays stale solely because its source left the analysis,
 dependency-refresh of affected documents on include/overlay changes, hover,
 definition, references, completion, rename (multi-document workspace edit),
-semanticTokens/full, shutdown/exit. The end-to-end
+semanticTokens/full, shutdown/exit.
+
+**Rename is a pure adapter (#131)**: the LSP layer maps the shared #129
+transaction (exact-occurrence editor edits from `wright-language`) directly
+to `WorkspaceEdit` `documentChanges`/`TextDocumentEdit` — one `TextEdit` per
+semantic occurrence, grouped by document, with each open document identified
+at its current version and filesystem-backed sources in the unversioned
+`null` form. No symbol resolution, collision, or stale-state logic exists in
+the protocol layer; unsupported rename targets surface the shared refusal as
+an explicit LSP error, never a textual fallback. The end-to-end
 harness (`wright-lsp/tests/lsp.rs`) drives the real binary and verifies
-capability negotiation, lifecycle, navigation, completion, rename, semantic
-tokens, and stale-version suppression.
+capability negotiation, lifecycle, navigation, completion, rename (OPY
+multi-document and supported OSTW rename, UTF-16/non-BMP ranges, version
+preconditions), semantic tokens, and stale-version suppression.
 
 ## Out of scope (recorded)
 

@@ -72,19 +72,23 @@ pub struct SourceLocation {
     pub range: Range,
 }
 
-/// One source-aware rename edit targeting a full document.
+/// One source-aware rename edit targeting an exact semantic occurrence
+/// (M14, #131).
 ///
-/// Carries the source identity, a 0-based full-document replacement range,
-/// the replacement text, and version/identity preconditions so a client can
-/// apply the edit safely and detect stale state.
+/// Carries the source identity, a 0-based editor-convention range covering
+/// exactly the occurrence's identifier, the replacement text (the new name),
+/// and identity/version preconditions so a client can apply the edit safely
+/// and detect stale state. Multiple edits per source are allowed — this is
+/// the shared #129 transaction mapped to editor conventions, never a
+/// whole-document replacement.
 #[derive(Debug, Clone, Serialize)]
 pub struct RenameEdit {
     /// The source identity: the requesting document URI or a resolved include
     /// path.
     pub source: String,
-    /// The full-document replacement range in the source.
+    /// The 0-based editor range of the exact occurrence (UTF-16 positions).
     pub range: Range,
-    /// The renamed full-document text.
+    /// The replacement text (the new name).
     pub new_text: String,
     /// The SHA-256 identity of the pre-edit source text (stale-state
     /// precondition).
@@ -100,8 +104,11 @@ pub struct RenameResult {
     pub document_version: i32,
     /// Whether the rename validates through the compiler pipeline.
     pub ok: bool,
-    /// The source-aware edits for every semantically affected source.
+    /// The exact-occurrence edits for every semantically affected source.
     pub edits: Vec<RenameEdit>,
+    /// The validated full edited text of every affected source (the #128
+    /// transaction preview).
+    pub previews: Vec<wright_driver::edit::SourcePreview>,
     /// Structured refusal diagnostics when the rename was rejected.
     pub diagnostics: Vec<String>,
 }
@@ -569,6 +576,7 @@ impl LanguageService {
                 document_version: 0,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: vec![
                     "rename-invalid-name: the new name must not be empty".to_string(),
                 ],
@@ -579,6 +587,7 @@ impl LanguageService {
                 document_version: 0,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: vec![format!(
                     "rename-unresolved: no open document for '{uri}'; the source identity cannot be established"
                 )],
@@ -651,6 +660,7 @@ impl LanguageService {
                     document_version: requesting.version,
                     ok: false,
                     edits: Vec::new(),
+                    previews: Vec::new(),
                     diagnostics: rename
                         .diagnostics
                         .iter()
@@ -680,6 +690,7 @@ impl LanguageService {
                 document_version: requesting.version,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: vec![
                     "rename-unresolved: no symbol is resolvable at the requested position"
                         .to_string(),
@@ -694,6 +705,7 @@ impl LanguageService {
                         document_version: requesting.version,
                         ok: false,
                         edits: Vec::new(),
+                        previews: Vec::new(),
                         diagnostics: vec![format!("{}: {}", diagnostic.code, diagnostic.message)],
                     };
                 }
@@ -711,6 +723,7 @@ impl LanguageService {
                     document_version: requesting.version,
                     ok: false,
                     edits: Vec::new(),
+                    previews: Vec::new(),
                     diagnostics: vec![format!(
                         "rename-stale-source: {} changed relative to the validated state; re-fetch the source and retry",
                         edit.source
@@ -727,31 +740,31 @@ impl LanguageService {
                 document_version: requesting.version,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: problems,
             };
         }
 
-        // Materialize the full-document edit contract from the validated
-        // previews (the M10 `RenameEdit` shape; the LSP adapter maps it until
-        // #131 converges the protocol layer onto the shared transaction).
+        // Materialize the shared #129 transaction in editor conventions:
+        // one exact-occurrence edit per semantic occurrence (0-based UTF-16
+        // ranges), plus the validated full edited text of every affected
+        // source. The LSP adapter maps these edits directly to
+        // `WorkspaceEdit` without re-resolving symbols or reimplementing
+        // collision/stale checks (#131).
         let mut edits = Vec::new();
-        for preview in previews {
-            let text = sources.get(&preview.source).cloned().unwrap_or_default();
-            // The precondition is the identity of the pre-edit source text
-            // (the transaction's edits carry it), so a client can detect a
-            // stale buffer before applying.
-            let source_identity = transaction
-                .edits
-                .iter()
-                .find(|edit| edit.source == preview.source)
-                .map(|edit| edit.source_identity.clone())
-                .unwrap_or_else(|| wright_driver::input_identity(&text));
+        for edit in &transaction.edits {
+            let text = sources.get(&edit.source).cloned().unwrap_or_default();
+            let span = wright_ir::source::Span::new(
+                wright_ir::source::FileId::from_index(0),
+                wright_ir::source::Position::new(edit.range.start_line, edit.range.start_col),
+                wright_ir::source::Position::new(edit.range.end_line, edit.range.end_col),
+            );
             edits.push(RenameEdit {
-                source: preview.source.clone(),
-                range: full_document_range(&text),
-                new_text: preview.new_text.clone(),
-                source_identity,
-                source_version: self.source_version(&preview.source, requesting),
+                source: edit.source.clone(),
+                range: crate::document::span_to_range(&span, &text),
+                new_text: edit.new_text.clone(),
+                source_identity: edit.source_identity.clone(),
+                source_version: self.source_version(&edit.source, requesting),
             });
         }
 
@@ -759,6 +772,7 @@ impl LanguageService {
             document_version: requesting.version,
             ok: true,
             edits,
+            previews,
             diagnostics: Vec::new(),
         }
     }
@@ -1041,26 +1055,6 @@ fn empty_range() -> Range {
         end: Position {
             line: 0,
             character: 0,
-        },
-    }
-}
-
-/// A 0-based range covering the entire source text, including any trailing
-/// newline (so a full-document replacement can delete the final line break).
-/// The end character is a UTF-16 code-unit offset, matching the editor
-/// convention used everywhere else at the LSP boundary.
-fn full_document_range(text: &str) -> Range {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let line_count = lines.len().max(1) as u32;
-    let last_line_len = crate::document::utf16_len(lines.last().unwrap_or(&"")) as u32;
-    Range {
-        start: Position {
-            line: 0,
-            character: 0,
-        },
-        end: Position {
-            line: line_count - 1,
-            character: last_line_len,
         },
     }
 }
