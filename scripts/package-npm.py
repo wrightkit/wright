@@ -29,6 +29,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# npm is a .cmd shim on Windows; subprocess needs the explicit extension
+# because CreateProcess does not apply PATHEXT.
+NPM = "npm.cmd" if os.name == "nt" else "npm"
+
 
 def load_update_dist_manifests():
     spec = importlib.util.spec_from_file_location(
@@ -169,7 +173,7 @@ def stage_meta_package(version: str, staging_root: Path) -> Path:
 
 def pack_directory(pkg_dir: Path, out_dir: Path) -> Path:
     result = subprocess.run(
-        ["npm", "pack", "--pack-destination", str(out_dir)],
+        [NPM, "pack", "--pack-destination", str(out_dir)],
         cwd=pkg_dir,
         capture_output=True,
         text=True,

@@ -173,9 +173,15 @@ jobs:
         os:
           - ubuntu-latest
           - macos-15
+          - windows-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -192,10 +198,11 @@ jobs:
         run: cargo build -p wright-cli -p wright-lsp
 
       - name: Validate package-manager metadata and install script
-        run: python3 scripts/verify-dist.py
+        run: python scripts/verify-dist.py
 
       - name: Run installer functional tests
+        if: runner.os != 'Windows'
         run: scripts/test-install.sh
 
       - name: Run npm distribution smoke tests
-        run: python3 scripts/test-npm.py --binaries-dir target/debug
+        run: python scripts/test-npm.py --binaries-dir target/debug

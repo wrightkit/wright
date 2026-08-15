@@ -1,3 +1,9 @@
 # Third-party corpus sources are retained byte-for-byte; their upstream
 # trailing whitespace is covered by per-file SHA-256 inventory instead.
 compatibility/ostw/corpus/** -whitespace
+compatibility/ostw/corpus/** -text
+
+# Force LF in the working tree on every platform: scripts/verify-dist.py
+# compares checked-in dist/ manifests byte-for-byte against regenerated
+# content, which would fail on Windows checkouts with CRLF line endings.
+* text=auto eol=lf

@@ -23,6 +23,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# npm/npx are .cmd shims on Windows; subprocess needs the explicit extension
+# because CreateProcess does not apply PATHEXT.
+NPM = "npm.cmd" if os.name == "nt" else "npm"
+NPX = "npx.cmd" if os.name == "nt" else "npx"
+
 
 def get_workspace_version() -> str:
     metadata = subprocess.run(
@@ -168,7 +173,7 @@ def main() -> None:
 
         # Install platform tarball and meta tarball
         subprocess.run(
-            ["npm", "install", str(platform_tarball), str(meta_tarball)],
+            [NPM, "install", str(platform_tarball), str(meta_tarball)],
             cwd=sandbox_dir,
             check=True,
             capture_output=True,
@@ -180,7 +185,7 @@ def main() -> None:
 
         # Test wright --version
         res = subprocess.run(
-            ["npx", "wright", "--version"],
+            [NPX, "wright", "--version"],
             cwd=sandbox_dir,
             capture_output=True,
             text=True,
@@ -192,7 +197,7 @@ def main() -> None:
 
         # Test wright-lsp --version
         res = subprocess.run(
-            ["npx", "wright-lsp", "--version"],
+            [NPX, "wright-lsp", "--version"],
             cwd=sandbox_dir,
             capture_output=True,
             text=True,
@@ -208,7 +213,7 @@ def main() -> None:
         scenario_file = REPO_ROOT / "scenarios" / "loops.opy"
 
         res = subprocess.run(
-            ["npx", "wright", "compile", str(fixture_file), "--profile", "compat"],
+            [NPX, "wright", "compile", str(fixture_file), "--profile", "compat"],
             cwd=sandbox_dir,
             capture_output=True,
             text=True,
@@ -219,7 +224,7 @@ def main() -> None:
         print("ok: npx wright compile produced Workshop output")
 
         res = subprocess.run(
-            ["npx", "wright", "check", str(scenario_file), "--profile", "compat"],
+            [NPX, "wright", "check", str(scenario_file), "--profile", "compat"],
             cwd=sandbox_dir,
             capture_output=True,
             text=True,
