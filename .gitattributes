@@ -1,0 +1,3 @@
+# Third-party corpus sources are retained byte-for-byte; their upstream
+# trailing whitespace is covered by per-file SHA-256 inventory instead.
+compatibility/ostw/corpus/** -whitespace

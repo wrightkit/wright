@@ -1,0 +1,37 @@
+import "main.ostw";
+
+disabled rule: "[DEBUG] Show some HUDs and stuff"
+{
+    CreateHudText(
+        VisibleTo: AllPlayers(),
+        Header: <"Phase <0>", PhaseName>,
+        Location: Location.Left,
+        Reevaluation: HudTextRev.VisibleToAndString
+    );
+    CreateProgressBarHudText(
+        VisibleTo:      selectTimeRemaining > 0 ? AllPlayers() : null,
+        Value:          selectTimeRemaining / timePerPhase * 100,
+        Text:           <"<0> Selecting", currVotingTeam>,
+        Location:       Location.Left,
+        SortOrder:      1,
+        Reevaluation:   ProgressBarHudEvaluation.VisibleToAndValues
+    );
+}
+
+disabled rule: "[DEBUG] Show amount of texts and effects remaining after Assemble Heroes"
+if (IsAssemblingHeroes())
+{
+    Wait(5);
+    LogToInspector(
+        <"Text: <0> | Eff: <1>", TextCount(), EntityCount()>
+    );
+}
+
+rule: "[DEBUG] Summon dummy bot"
+if (IsWaitingForPlayers())
+{
+    Wait(3);
+    CreateDummyBot(Hero.Zenyatta, Team.Team1, -1, camPos, camFacing);
+    Wait(5);
+    AllPlayers().isReady = true;
+}

@@ -1,0 +1,334 @@
+import "../main.ostw";
+import "HeroSelectConfig.del";
+import "HeroSelectFunctions.del";
+import "../OSTWUtils/OnScreenText.del";
+import "../OSTWUtils/Cursor.del";
+import "../OSTWUtils/StringSorting.del";
+
+/*
+import "../OSTWUtils/Diagnostics.del";
+globalvar Diagnostics disp! = new Diagnostics(
+    ShowServerLoadAverage:  true,
+    ShowServerLoadPeak:     true,
+    ShowTextCount:          true,
+    ShowEntityCount:        true
+);
+//*/
+globalvar Hero[] heroesSorted = [];
+globalvar Number backdropEffect;
+globalvar Number[] textEntities = [];
+
+playervar Boolean isInMenu = false;
+playervar Cursor | Number cursor = -1;
+playervar Number selectionIndex = -1;
+rule: "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒【Hero Select by Josbird】▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒" {}
+rule: "[HeroSelectAnywhere.del] Open hero select"
+Event.OngoingPlayer
+if (isInMenu)
+{
+    DisableHeroHud(EventPlayer());
+    DisableGameModeHud(EventPlayer());
+    StartCamera(
+        Player:         EventPlayer(),
+        EyePosition:    camPos,
+        LookAtPosition: camPos + camFacing,
+    );
+    selectionIndex = RandomValueInArray(MappedArray(AllowedHeroes(EventPlayer()), isHeroSelectable(ArrayElement())));
+    MinWait();
+    cursor = new Cursor(-3.75, 3.75, -2, 2);
+}
+
+rule: "[HeroSelectAnywhere.del] Lower sens"
+Event.OngoingPlayer
+if (isInMenu)
+if (IsButtonHeld(Button: Button.Ability1))
+if (!IsButtonHeld(Button: Button.Ability2))
+{
+    cursor.updateAimSpeed(cursor.getAimSpeed() - 0.1);
+    Wait(0.05, WaitBehavior.AbortWhenFalse);
+    LoopIfConditionIsTrue();
+}
+
+rule: "[HeroSelectAnywhere.del] Raise sens"
+Event.OngoingPlayer
+if (isInMenu)
+if (IsButtonHeld(Button: Button.Ability2))
+if (!IsButtonHeld(Button: Button.Ability1))
+{
+    cursor.updateAimSpeed(cursor.getAimSpeed() + 0.1);
+    Wait(0.05, WaitBehavior.AbortWhenFalse);
+    LoopIfConditionIsTrue();
+}
+
+rule: "[HeroSelectAnywhere.del] Close hero select"
+Event.OngoingPlayer
+if (cursor != -1)
+if (!isInMenu)
+{
+    EnableHeroHud(EventPlayer());
+    EnableGameModeHud(EventPlayer());
+    StopCamera(EventPlayer());
+    cursor.close();
+    cursor = null;
+}
+
+rule: "[HeroSelectAnywhere.del] Teleport out of spawn while in menu"
+Event.OngoingPlayer
+if(isInMenu)
+if(IsInSpawnRoom())
+if(HasSpawned())
+{
+    Teleport(EventPlayer(), camPos - camFacing);
+}
+
+rule: "[HeroSelectAnywhere.del] Click logic"
+Event.OngoingPlayer
+if (isInMenu)
+if (IsButtonHeld(EventPlayer(), Button.PrimaryFire))
+{
+    #Ready button
+    if (cursorOnReadyButton() && shouldShowReadyButton(EventPlayer())) {
+        isReady = !isReady;
+        playButtonSound();
+        return;
+    }
+
+    if (!cursorInHeroArea()) return;
+    if (!shouldAllowSelection(EventPlayer())) return;
+    if (!isHeroSelectable(heroesSorted[cursorHeroIndex(cursor.getX())])) return;
+
+    selectionIndex = cursorHeroIndex(cursor.getX());
+    playButtonSound();
+}
+
+rule: "[HeroSelectAnywhere.del] Deselect disallowed hero"
+Event.OngoingPlayer
+if (isInMenu)
+if (!isHeroSelectable(heroesSorted[selectionIndex]))
+{
+    selectionIndex = RandomValueInArray(MappedArray(heroPool, IndexOfArrayValue(heroesSorted, ArrayElement())));
+}
+
+globalvar Hero[] TankHeroes;
+globalvar Hero[] DamageHeroes;
+globalvar Hero[] SupportHeroes;
+void setupHeroArrays() "[HeroSelectAnywhere.del] (Subroutine) Define hero arrays                              <====== [Change hero roles here]"
+{
+    #Edit these arrays to move heroes between roles
+    TankHeroes = AllTankHeroes();
+    DamageHeroes = AllDamageHeroes();
+    SupportHeroes = AllSupportHeroes();
+}
+
+rule: "[HeroSelectAnywhere.del] Main setup"
+{
+    setupHeroArrays();
+    DisableInspectorRecording();
+    heroesSorted += sortAlphabetically(TankHeroes);
+    heroesSorted += sortAlphabetically(DamageHeroes);
+    heroesSorted += sortAlphabetically(SupportHeroes);
+    if (inspectorEnabled) EnableInspectorRecording();
+    // heroesSorted = [Hero.Dva,Hero.Orisa,Hero.Reinhardt,Hero.Roadhog,Hero.Sigma,Hero.WreckingBall,Hero.Winston,Hero.Zarya,Hero.Ashe,Hero.Bastion,Hero.Cassidy,Hero.Doomfist,Hero.Echo,Hero.Genji,Hero.Hanzo,Hero.Junkrat,Hero.Mei,Hero.Pharah,Hero.Reaper,Hero.Soldier76,Hero.Symmetra,Hero.Sombra,Hero.Tracer,Hero.Torbjorn,Hero.Widowmaker,Hero.Ana,Hero.Brigitte,Hero.Baptiste,Hero.Lucio,Hero.Moira,Hero.Mercy,Hero.Zenyatta];
+    // MinWait();
+    CreateEffect(
+        VisibleTo:      AllPlayers(),
+        Type:           Effect.Orb,
+        Color:          Color.Black,
+        Position:       Math.WorldVectorForPositionWithPitch(Vector(0, 0, -0.31), camPos, camFacing, true),
+        Reevaluation:   EffectRev.VisibleToPositionAndRadius
+    );
+    backdropEffect = LastCreatedEntity();
+    for (i = 0; CountOf(heroesSorted) / 4; 1)
+    {
+        CreateInWorldText(
+            VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+            Header:         <"<0>  <1>  <2>  <3>",
+                heroString(EvaluateOnce(4 * i + 0)),
+                heroString(EvaluateOnce(4 * i + 1)),
+                heroString(EvaluateOnce(4 * i + 2)),
+                heroString(EvaluateOnce(4 * i + 3))>,
+            Position:       screenPos(heroX(4 * i + 1.5), rowY),
+            Scale:          (436.3 - 5.75 * CountOf(heroesSorted)) / 100,
+            TextColor:      Color.White,
+            Clipping:       Clipping.DoNotClip,
+            Reevaluation:   InworldTextRev.VisibleToAndString,
+            Spectators:     Spectators.VisibleAlways
+        );
+        ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    }
+    // for (i = 0; CountOf(heroesSorted); 1)
+    // {
+    //     CreateInWorldText(
+    //         VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+    //         Header:         <"<0>",
+    //             heroString(EvaluateOnce(i))>,
+    //         Position:       screenPos(heroX(i), rowY),
+    //         Scale:          (436.3 - 7.25 * CountOf(heroesSorted)) / 100,
+    //         TextColor:      Color.White,
+    //         Clipping:       Clipping.DoNotClip,
+    //         Reevaluation:   InworldTextRev.VisibleToAndString,
+    //         Spectators:     Spectators.VisibleAlways
+    //     );
+    //     ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    // }
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         shouldAllowSelection() ?
+                            <"┌ ─ ┐\n│<0>│\n└ ─ ┘",
+                            ArrayContains([Hero.Doomfist, Hero.Ashe], heroesSorted[LocalPlayer().selectionIndex]) ?
+                                    <" <0>", HeroIconString(heroesSorted[LocalPlayer().selectionIndex])> :
+                                    <"<0> ", HeroIconString(heroesSorted[LocalPlayer().selectionIndex])>> :
+                            <" \n<0>\n", IconString(Icon.No)>,
+        Position:       screenPos(0, 0),
+        Scale:          4,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleToAndString,
+        Spectators:     Spectators.VisibleNever
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         "│\n│\n│",
+        Position:       screenPos(heroX(-0.5), rowY - 0.01),
+        Scale:          2,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleTo,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         "│\n│\n│",
+        Position:       screenPos(heroX(CountOf(TankHeroes) - 0.5), rowY - 0.01),
+        Scale:          2,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleTo,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         "│\n│\n│",
+        Position:       screenPos(heroX(CountOf(TankHeroes) + CountOf(DamageHeroes) - 0.5), rowY - 0.01),
+        Scale:          2,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleTo,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         "│\n│\n│",
+        Position:       screenPos(heroX(CountOf(heroesSorted) - 0.5), rowY - 0.01),
+        Scale:          2,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleTo,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         <" 【<0>】TANK", AbilityIconString(Hero.Brigitte, Button.SecondaryFire)>,
+        Position:       screenPos(heroX((CountOf(TankHeroes) - 1) / 2), rowY + iconBorderOffset + 0.1),
+        Scale:          2,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleTo,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         <" 【<0>】DAMAGE", IconString(Icon.Skull)>,
+        Position:       screenPos(heroX((CountOf(TankHeroes)) +  CountOf(DamageHeroes) / 2 - 0.5), rowY + iconBorderOffset + 0.1),
+        Scale:          2,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleTo,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         <" 【<0>】SUPPORT", AbilityIconString(Hero.Baptiste, Button.Ability1)>,
+        Position:       screenPos(heroX((CountOf(heroesSorted)) -  CountOf(SupportHeroes) / 2 - 0.5), rowY + iconBorderOffset + 0.1),
+        Scale:          2,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleTo,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    if (cursorBox) {
+        createSelectionBox(
+            VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+            CenterX:        heroX(cursorHeroIndex(LocalPlayer().cursor.getX())),
+            CenterY:        rowY + 0.02,
+            Width:          2 * iconBorderOffset,
+            Height:         2 * iconBorderOffset,
+            TextScale:      selectBoxScale,
+            Color:          cursorInHeroArea(LocalPlayer()) &&
+                cursorHeroIndex(LocalPlayer().cursor.getX()) != LocalPlayer().selectionIndex &&
+                isHeroSelectable(heroesSorted[cursorHeroIndex(LocalPlayer().cursor.getX())], LocalPlayer()) &&
+                shouldAllowSelection() ?
+                Color.White : null,
+            Reevaluation:   InworldTextRev.VisibleToPositionAndColor,
+            Spectators:     Spectators.VisibleNever
+        );
+    }
+    if (selectedBox) {
+        createSelectionBox(
+            VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+            CenterX:        heroX(LocalPlayer().selectionIndex),
+            CenterY:        rowY + 0.02,
+            Width:          2 * iconBorderOffset,
+            Height:         2 * iconBorderOffset,
+            TextScale:      selectBoxScale,
+            Color:          shouldAllowSelection() ? CustomColor(255, 217, 0, 255) : null,
+            Reevaluation:   InworldTextRev.VisibleToPositionAndColor,
+            Spectators:     Spectators.VisibleNever
+        );
+    }
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         "▒▒▒▒▒",
+        Position:       screenPos(readyBtnX, btnsY),
+        Scale:          4,
+        TextColor:      !shouldShowReadyButton() ? null : LocalPlayer().isReady ? CustomColor(0, 162, 255, 255) : CustomColor(255, 153, 0, 255),
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleToAndColor,
+        Spectators:     Spectators.VisibleNever
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         LocalPlayer().isReady ? "Unready" : "Ready",
+        Position:       screenPos(readyBtnX, btnsY - 0.01),
+        Scale:          3,
+        TextColor:      !shouldShowReadyButton() ? null : Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleToStringAndColor,
+        Spectators:     Spectators.VisibleNever
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().cursor != -1),
+        Header:         "▲",
+        Position:       screenPos(LocalPlayer().cursor.getX(), LocalPlayer().cursor.getY()),
+        Scale:          3.5,
+        TextColor:      Color.White,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleToAndPosition,
+        Spectators:     Spectators.VisibleNever
+    );
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+}
+
+rule: "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒a" {}
+

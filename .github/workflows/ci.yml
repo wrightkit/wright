@@ -102,6 +102,18 @@ jobs:
       - name: Run compatibility oracle
         run: python3 compatibility/run_oracle.py
 
+  ostw-reference:
+    name: OSTW reference baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Verify pinned OSTW oracle and corpus evidence
+        run: |
+          python3 compatibility/ostw/run_oracle.py --acquire --ping
+          python3 compatibility/ostw/run_oracle.py
+
   adapter:
     name: OverPy-to-HIR adapter
     runs-on: ubuntu-latest

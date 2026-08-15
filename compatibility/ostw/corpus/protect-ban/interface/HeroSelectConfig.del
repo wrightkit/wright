@@ -1,0 +1,29 @@
+import "HeroSelect.del";
+
+import "MapData.del";
+
+globalvar Vector camPos = ArrayContains(maps, CurrentMap()) ? mapData[IndexOfArrayValue(maps, CurrentMap())][0] : Vector(0, 150, 0);
+globalvar Vector camFacing = ArrayContains(maps, CurrentMap()) ? mapData[IndexOfArrayValue(maps, CurrentMap())][1] : Forward();
+Number rowWidth: 7;
+Number rowY: -1.1;
+Number selectBoxScale: 1.5;
+Number readyBtnX: 0;
+Number btnsY: rowY - 0.6;
+Number readyBtnWidth: 1.1;
+Number readyBtnHeight: 0.3;
+
+// Workshop settings
+
+String InterfaceSettingsCategory: "6. Interface";
+Boolean cursorBox: WorkshopSettingToggle(
+    Category:       InterfaceSettingsCategory,
+    Name:           "Highlight hovered hero (4 texts)",
+    Default:        true,
+    SortOrder:      5
+);
+Boolean selectedBox: WorkshopSettingToggle(
+    Category:       InterfaceSettingsCategory,
+    Name:           "Highlight selected hero (4 texts)",
+    Default:        true,
+    SortOrder:      6
+);

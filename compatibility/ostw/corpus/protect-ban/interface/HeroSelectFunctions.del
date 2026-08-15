@@ -1,0 +1,84 @@
+import "HeroSelectConfig.del";
+import "HeroSelect.del";
+
+globalvar Vector screenOrigin = camPos + 300*camFacing;
+globalvar Vector screenYAxis = DirectionFromAngles(HorizontalAngleFromDirection(camFacing), VerticalAngleFromDirection(camFacing) - 90);
+globalvar Vector screenXAxis = CrossProduct(camFacing, screenYAxis);
+Vector screenPos(Number x, Number y):
+    UpdateEveryFrame(screenOrigin + 100 * (x * screenXAxis + y * screenYAxis));
+    //UpdateEveryFrame(OnScreenText.WorldRender(camPos, camFacing, x, y));
+void createSelectionBox(
+    in Player | Player[] VisibleTo = EventPlayer(),
+    in Number CenterX = 0,
+    in Number CenterY = 0,
+    in Number Width = 0,
+    in Number Height = 0,
+    in Number TextScale = 1,
+    InworldTextRev Reevaluation = InworldTextRev.VisibleToPositionStringAndColor,
+    in Color Color = Color.White,
+    Spectators Spectators = Spectators.DefaultVisibility
+)
+{
+    CreateInWorldText(VisibleTo, "┌", screenPos(CenterX - Width / 2, CenterY + Height / 2),
+        TextScale, Clipping.DoNotClip, Reevaluation, Color, Spectators);
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(VisibleTo, "┐", screenPos(CenterX + Width / 2, CenterY + Height / 2),
+        TextScale, Clipping.DoNotClip, Reevaluation, Color, Spectators);
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(VisibleTo, "└", screenPos(CenterX - Width / 2, CenterY - Height / 2),
+        TextScale, Clipping.DoNotClip, Reevaluation, Color, Spectators);
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(VisibleTo, "┘", screenPos(CenterX + Width / 2, CenterY - Height / 2),
+        TextScale, Clipping.DoNotClip, Reevaluation, Color, Spectators);
+    ModifyVariable(textEntities, Operation.AppendToArray, LastTextID());
+}
+
+Boolean shouldAllowSelection(Player p = LocalPlayer()):
+    (currentPhase > Phase.Waiting && currentPhase < Phase.Gameplay) && currVotingTeam == TeamOf(p) && selectTimeRemaining > 0;
+
+Player visibleIf(Boolean condition):
+    condition ? LocalPlayer() : null;
+Player[] globalVisibleIf(Boolean condition):
+    condition ? AllPlayers() : null;
+String heroString(Number n):
+    Math.IsInRange(n, 0, CountOf(heroesSorted) - 1) ? isHeroSelectable(heroesSorted[n], LocalPlayer()) ?
+        HeroIconString(heroesSorted[n]) : unselectableHeroString(n) : "      ";
+String unselectableHeroString(Number n):
+    ArrayContains(protectedHeroes, heroesSorted[n]) ?
+        AbilityIconString(Hero.Brigitte, Button.SecondaryFire) :
+        ArrayContains(bannedHeroes, heroesSorted[n]) ?
+            IconString(Icon.No) : " -- ";
+Number heroX(Number n):
+    rowWidth / -2 + (rowWidth / CountOf(heroesSorted)) * (n + 0.5);
+Number cursorHeroIndex(Number x):
+    Math.Floor((x / iconBorderOffset + CountOf(heroesSorted)) / 2);
+Boolean isHeroSelectable(Hero h, Player p = EventPlayer()):
+    ArrayContains(heroPool, h);
+Number iconBorderOffset: rowWidth / CountOf(heroesSorted) / 2;
+Boolean cursorInHeroArea(Player p = EventPlayer()):
+    Math.IsInRange(p.cursor.getX(), rowWidth / -2, rowWidth / 2) &&
+    Math.IsInRange(p.cursor.getY(), rowY - iconBorderOffset * 1.5, rowY + iconBorderOffset * 1.5);
+Boolean cursorOnReadyButton(Player p = EventPlayer()):
+    Math.IsInRange(p.cursor.getX(), readyBtnX - readyBtnWidth / 2, readyBtnX + readyBtnWidth / 2) &&
+    Math.IsInRange(p.cursor.getY(), btnsY - readyBtnHeight / 2, btnsY + readyBtnHeight / 2);
+
+Boolean shouldShowReadyButton(Player p = LocalPlayer()):
+    p.isInMenu && (
+        currentPhase == Phase.Waiting ||
+        currentPhase < Phase.Gameplay && shouldAllowSelection(p)
+    );
+void playButtonSound()
+{
+    PlayEffect(
+        VisibleTo:      EventPlayer(),
+        Type:           PlayEffect.BuffImpactSound,
+        Position:       camPos + camFacing,
+        Radius:         75
+    );
+}
+
+void destroyMenu()
+{
+    DestroyEffect(backdropEffect);
+    foreach (Number text in textEntities) { DestroyInWorldText(text); }
+}

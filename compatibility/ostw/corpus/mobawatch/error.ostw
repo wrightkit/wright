@@ -1,0 +1,56 @@
+import "Header Files/state.del";
+import "debug.ostw";
+
+enum EErrorSeverity{
+    WARNING,
+    ERROR,
+    FATAL
+}
+
+struct Error{
+    public String message;
+    public String source;
+    public EErrorSeverity severity;
+}
+
+# Uses Error struct:
+#     String message, String source, EErrorSeverity severity;
+void waitUntil_Verify(Boolean condition, Number timeout, Error e){
+    WaitUntil(condition,timeout);
+    if(!condition){
+        throwError(e);
+    }
+}
+
+globalvar Boolean errorThrown! = false;
+
+# Uses Error struct:
+#     String message, String source, EErrorSeverity severity;
+void throwError(Error e) "throw Error"
+{
+    String s! = "";
+    switch (e.severity){
+        case EErrorSeverity.WARNING:
+            s = "Warning! " + e.source + " threw the following warning:\n " + e.message;
+            break;
+        case EErrorSeverity.ERROR:
+            SmallMessage(HostPlayer(), "Error: " + e.message);
+            CreateHudText(HostPlayer(), $"!Error!: {e.message}  from {e.source}", null, null, Location.Right, 29, Color.White,Color.White, null, HudTextRev.None,Spectators.VisibleNever);
+            s = "!!Error!! " + e.source + " threw the following error:\n " + e.message;
+            errorThrown = true;
+            break;
+        case EErrorSeverity.FATAL:
+            errorThrown = true;
+            WaitUntil(IsTrueForAny(AllPlayers(), HasSpawned(ArrayElement())) == true, 15);
+            Wait(1);
+            CreateHudText(HostPlayer(), $"\n\n\n\n\n\nFATAL: {e.message}  from {e.source} \n\n\n\n\n", null, null, Location.Right, 30, Color.White,Color.White, null, HudTextRev.None,Spectators.VisibleNever);
+            forceLog("FATAL." + e.source + " threw the following error:\n " + e.message);
+            BigMessage(LocalPlayer(), "Fatal Game Error, sending back to lobby in 10 seconds");
+            Wait(11);
+            //WaitUntil(gameState[gamePhase] >= EGamePhase.PREBATTLE && gameState == EPreBattleState.FINISHED, 99);
+            //LogToInspector(toString(MappedArray(AllPlayers(), HasSpawned(ArrayElement()))));
+            ReturnToLobby();
+            return;  
+    }
+    forceLog(s);
+}

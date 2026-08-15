@@ -1,0 +1,9 @@
+globalvar Any credits;
+
+rule: "Create about and credits" -1
+{
+    credits = WorkshopSettingCombo("1. Protect And Ban", "Version", 0, ["2.0.0"], 0);
+    credits = WorkshopSettingCombo("1. Protect And Ban", "Import Code", 0, ["HDVGF"], 1);
+    credits = WorkshopSettingCombo("2. Credits", "Core Logic", 0, ["CactusPuppy"], 1);
+    credits = WorkshopSettingCombo("2. Credits", "User Interface", 0, ["Josbird"], 2);
+}

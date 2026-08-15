@@ -1,0 +1,7 @@
+define Floor(define n): RoundToInteger(n, Rounding.Down);
+define Ceiling(define n): RoundToInteger(n, Rounding.Up);
+define Round(define n, define d = 0): RoundToInteger(n*(10^d), Rounding.Nearest)/(10^d);
+define Quotient(define a, define b): Floor(a/b);
+define Clamp(define n, define min, define max): Max(min, Min(n, max));
+define IsInRangeIncl(define n, define min, define max): n >= min && n <= max;
+define IsInRangeExcl(define n, define min, define max): n > min && n < max;

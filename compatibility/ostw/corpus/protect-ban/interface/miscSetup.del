@@ -1,0 +1,199 @@
+import "../main.ostw";
+
+Number sensPromptCenterX: -2;
+Number sensPromptY: -1.6;
+Number sensPromptOffsetX: 0.4;
+
+String actionName: (currentPhase == Phase.Protect) ? "Protect" : "Ban";
+
+rule: "[miscSetup.del] Create additional on-screen elements"
+{
+    # Center elements
+    CreateProgressBarInWorldText(
+        VisibleTo:          globalVisibleIf(selectTimeRemaining > 0),
+        Value:              selectTimeRemaining / timePerPhase * 100,
+        Text:               <"<0> <1>", currVotingTeam, PhaseName>,
+        Position:           screenPos(0, 1),
+        Scale:              1.5,
+        Clipping:           Clipping.DoNotClip,
+        Reevaluation:       ProgressBarWorldEvaluation.VisibleToAndValues,
+        NonteamSpectators:  Spectators.DefaultVisibility
+    );
+    CreateInWorldText(
+        VisibleTo:          globalVisibleIf(selectTimeRemaining > 0),
+        Header:             RoundToInteger(selectTimeRemaining, Rounding.Up),
+        Position:           screenPos(0, 0.7),
+        Scale:              4,
+        Clipping:           Clipping.DoNotClip,
+        Reevaluation:       InworldTextRev.VisibleToAndString,
+        Spectators:         Spectators.DefaultVisibility
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    # Left-side elements
+    if (numProtects > 0) {
+        CreateInWorldText(
+            VisibleTo:          AllPlayers(),
+            Header:             @"Protected Heroes",
+            Position:           screenPos(-2.5, 1.1),
+            Scale:              3,
+            Clipping:           Clipping.DoNotClip,
+            Reevaluation:       InworldTextRev.VisibleTo,
+            Spectators:         Spectators.VisibleAlways
+        );
+    }
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    for (i = 0; numProtects / 2; 1) {
+        CreateInWorldText(
+            VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+            Header:         <"<0>  <1>  <2>  <3>",
+                protectHeroString(EvaluateOnce(4 * i + 0)),
+                protectHeroString(EvaluateOnce(4 * i + 1)),
+                protectHeroString(EvaluateOnce(4 * i + 2)),
+                protectHeroString(EvaluateOnce(4 * i + 3))>,
+            Position:       screenPos(-2.5, 0.85 - 0.3 * i),
+            Scale:          3,
+            Clipping:       Clipping.DoNotClip,
+            Reevaluation:   InworldTextRev.VisibleToAndString,
+            Spectators:     Spectators.VisibleAlways
+        );
+        ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    }
+    // for (i = 0; numProtects * 2; 1) {
+    //     CreateInWorldText(
+    //         VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+    //         Header:         <"<0>",
+    //             protectHeroString(EvaluateOnce(i))>,
+    //         Position:       screenPos(-3.25 + (i % 4) * 0.5, 0.85 - 0.3 * RoundToInteger(i / 4, Rounding.Down)),
+    //         Scale:          3,
+    //         Clipping:       Clipping.DoNotClip,
+    //         Reevaluation:   InworldTextRev.VisibleToAndString,
+    //         Spectators:     Spectators.VisibleAlways
+    //     );
+    //     ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    // }
+    # Right-side elements
+    CreateInWorldText(
+        VisibleTo:          AllPlayers(),
+        Header:             @"Banned Heroes",
+        Position:           screenPos(2.5, 1.1),
+        Scale:              3,
+        Clipping:           Clipping.DoNotClip,
+        Reevaluation:       InworldTextRev.VisibleTo,
+        Spectators:         Spectators.VisibleAlways
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    for (i = 0; (numBans * 2 + (losingTeam == null ? 0 : losingTeamBans)) / 4; 1) {
+        CreateInWorldText(
+            VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+            Header:         <"<0>  <1>  <2>  <3>",
+                banHeroString(EvaluateOnce(4 * i + 0)),
+                banHeroString(EvaluateOnce(4 * i + 1)),
+                banHeroString(EvaluateOnce(4 * i + 2)),
+                banHeroString(EvaluateOnce(4 * i + 3))>,
+            Position:       screenPos(2.5, 0.85 - 0.3 * i),
+            Scale:          3,
+            Clipping:       Clipping.DoNotClip,
+            Reevaluation:   InworldTextRev.VisibleToAndString,
+            Spectators:     Spectators.VisibleAlways
+        );
+        ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    }
+    // for (i = 0; (numBans * 2 + (losingTeam == null ? 0 : losingTeamBans)); 1) {
+    //     CreateInWorldText(
+    //         VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+    //         Header:         <"<0>",
+    //             banHeroString(EvaluateOnce(i))>,
+    //         Position:       screenPos(1.75 + 0.5 * (i % 4), 0.85 - 0.3 * RoundToInteger(i / 4, Rounding.Down)),
+    //         Scale:          3,
+    //         Clipping:       Clipping.DoNotClip,
+    //         Reevaluation:   InworldTextRev.VisibleToAndString,
+    //         Spectators:     Spectators.VisibleAlways
+    //     );
+    //     ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    // }
+    # Sens elements
+    CreateInWorldText(
+        VisibleTo:          visibleIf(LocalPlayer().isInMenu),
+        Header:             "Sens:",
+        Position:           screenPos(sensPromptCenterX, sensPromptY + 0.2),
+        Scale:              2,
+        Clipping:           Clipping.DoNotClip,
+        Reevaluation:       InworldTextRev.VisibleToAndString,
+        Spectators:         Spectators.VisibleNever
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:          visibleIf(LocalPlayer().isInMenu),
+        Header:             <"-  <0>  +", LocalPlayer().cursor.getAimSpeed()>,
+        Position:           screenPos(sensPromptCenterX, sensPromptY),
+        Scale:              2,
+        Clipping:           Clipping.DoNotClip,
+        Reevaluation:       InworldTextRev.VisibleToAndString,
+        Spectators:         Spectators.VisibleNever
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:          visibleIf(LocalPlayer().isInMenu),
+        Header:             <" \n[<0>]", InputBindingString(Button.Ability1)>,
+        Position:           screenPos(sensPromptCenterX - sensPromptOffsetX, sensPromptY),
+        Scale:              1.2,
+        Clipping:           Clipping.DoNotClip,
+        Reevaluation:       InworldTextRev.VisibleToAndString,
+        Spectators:         Spectators.VisibleNever
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    CreateInWorldText(
+        VisibleTo:          visibleIf(LocalPlayer().isInMenu),
+        Header:             <" \n[<0>]", InputBindingString(Button.Ability2)>,
+        Position:           screenPos(sensPromptCenterX + sensPromptOffsetX, sensPromptY),
+        Scale:              1.2,
+        Clipping:           Clipping.DoNotClip,
+        Reevaluation:       InworldTextRev.VisibleToAndString,
+        Spectators:         Spectators.VisibleNever
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    # Tank role limit indicator
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         <"  <0>/<1> <2>s", tankPicks, maxTankPicks, actionName>,
+        Position:       screenPos(heroX((CountOf(TankHeroes) - 1) / 2), rowY + iconBorderOffset * 2 + 0.2),
+        Scale:          2,
+        TextColor:      (currentPhase > Phase.Waiting && currentPhase < Phase.Gameplay && maxTankPicks != -1) ? Color.White : null,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleToPositionStringAndColor,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    # Damage role limit indicator
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         <"  <0>/<1> <2>s", damagePicks, maxDamagePicks, actionName>,
+        Position:       screenPos(heroX((CountOf(TankHeroes)) +  CountOf(DamageHeroes) / 2 - 0.5), rowY + iconBorderOffset * 2 + 0.2),
+        Scale:          2,
+        TextColor:      (currentPhase > Phase.Waiting && currentPhase < Phase.Gameplay && maxDamagePicks != -1) ? Color.White : null,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleToPositionStringAndColor,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+    # Support role limit indicator
+    CreateInWorldText(
+        VisibleTo:      visibleIf(LocalPlayer().isInMenu),
+        Header:         <"  <0>/<1> <2>s", supportPicks, maxSupportPicks, actionName>,
+        Position:       screenPos(heroX((CountOf(heroesSorted)) -  CountOf(SupportHeroes) / 2 - 0.5), rowY + iconBorderOffset * 2 + 0.2),
+        Scale:          2,
+        TextColor:      (currentPhase > Phase.Waiting && currentPhase < Phase.Gameplay && maxSupportPicks != -1) ? Color.White : null,
+        Clipping:       Clipping.DoNotClip,
+        Reevaluation:   InworldTextRev.VisibleToPositionStringAndColor,
+        Spectators:     Spectators.VisibleAlways
+    );
+    ModifyVariable(globalIWText, Operation.AppendToArray, LastTextID());
+}
+
+String protectHeroString(Number n):
+    Math.IsInRange(n, 0, numProtects * 2 - 1) ? (n < CountOf(protectedHeroes)) ?
+        HeroIconString(protectedHeroes[n]) : IconString(Icon.QuestionMark) + " " : "       ";
+
+String banHeroString(Number n):
+    Math.IsInRange(n, 0, (numBans * 2 + (losingTeam == null ? 0 : losingTeamBans)) - 1) ? (n < CountOf(bannedHeroes)) ?
+        HeroIconString(bannedHeroes[n]) : IconString(Icon.QuestionMark) + " " : "       ";
