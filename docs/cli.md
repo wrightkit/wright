@@ -242,7 +242,10 @@ The native `.opy` frontend's builtin-resolution stage adds the stable codes
 `invalid-receiver`, `enum-domain-mismatch`, `action-in-value-position`,
 `value-in-action-position`, `invalid-call-context`, and `invalid-iterable`
 (semantic resolution against the OPY compatibility manifest, #109; all
-source-located).
+source-located). Named/keyword argument binding adds `unknown-keyword`,
+`duplicate-argument`, `missing-argument`, `positional-after-keyword`,
+`keyword-required`, `keyword-unsupported`, and `invalid-argument`
+(variable-required parameters; #110).
 
 ## Determinism
 

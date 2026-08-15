@@ -717,6 +717,67 @@ impl Parser<'_> {
                         locale: self.locale.clone(),
                         span: Some(Span::new(self.file(), start, end)),
                     })?;
+                // The player-variable chase forms lay the variable out as
+                // `player, name` leading arguments (the pinned oracle's
+                // spelling, #110); the name is not a value, so the action is
+                // parsed like `Set Player Variable` and reconstructed as the
+                // canonical `chaseAtRate`/`chaseOverTime` call with a
+                // player-variable first argument (the shape the emitter
+                // dispatches on).
+                match action.id.as_str() {
+                    "chasePlayerVariableAtRate" | "chasePlayerVariableOverTime" => {
+                        self.expect(TokenKind::LParen, "expected '('")?;
+                        let player = self.value()?;
+                        self.expect(TokenKind::Comma, "expected ',' after player")?;
+                        let (name, _, _) = self.phrase()?;
+                        let variable = self.player_by_name(&name)?;
+                        let mut args = Vec::with_capacity(4);
+                        args.push(self.target.values.push(wir::ValueNode::new(
+                            wir::Value::PlayerVariable { player, variable },
+                            None,
+                        )));
+                        // The remaining arguments sit at overall argument
+                        // indexes 2.. (player and name consumed indexes 0-1),
+                        // so the signature context resolves their expected
+                        // domains at the shifted positions.
+                        let mut arg_index = 2usize;
+                        loop {
+                            match self.peek() {
+                                Some(Token {
+                                    kind: TokenKind::RParen,
+                                    ..
+                                }) => break,
+                                Some(Token {
+                                    kind: TokenKind::Comma,
+                                    ..
+                                }) => {
+                                    self.pos += 1;
+                                }
+                                _ => {}
+                            }
+                            let saved = self.expected_domain;
+                            self.expected_domain =
+                                self.context.expected_domain(action.id.as_str(), arg_index);
+                            let arg = self.value()?;
+                            self.expected_domain = saved;
+                            args.push(arg);
+                            arg_index += 1;
+                        }
+                        self.expect(TokenKind::RParen, "expected ')'")?;
+                        self.expect(TokenKind::Semi, "expected ';' after action")?;
+                        let canonical = if action.id == "chasePlayerVariableAtRate" {
+                            "chaseAtRate"
+                        } else {
+                            "chaseOverTime"
+                        };
+                        return Ok(self.target.actions.push(Action::Call {
+                            name: canonical.to_string(),
+                            args,
+                            span: Some(Span::new(self.file(), start, end)),
+                        }));
+                    }
+                    _ => {}
+                }
                 let args = if let Some(Token {
                     kind: TokenKind::LParen,
                     ..

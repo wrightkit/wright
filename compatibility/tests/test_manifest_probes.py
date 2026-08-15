@@ -32,7 +32,7 @@ class ManifestProbeTests(unittest.TestCase):
             0,
             msg=result.stdout + result.stderr,
         )
-        self.assertIn("all 30 probes match", result.stdout)
+        self.assertIn("all 44 probes match", result.stdout)
 
 
 if __name__ == "__main__":

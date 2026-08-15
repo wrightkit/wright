@@ -189,12 +189,12 @@
       "params": [
         {
           "default": 0.016,
-          "name": "duration"
+          "name": "time"
         },
         {
           "default": "IGNORE_CONDITION",
           "domain": "Wait",
-          "name": "ignoreCondition"
+          "name": "waitBehavior"
         }
       ]
     },
@@ -227,7 +227,7 @@
       "kind": "action",
       "params": [
         {
-          "name": "message"
+          "name": "text"
         }
       ]
     },
@@ -291,6 +291,50 @@
       ]
     },
     {
+      "contextualDomain": {
+        "by": "rate",
+        "domain": "ChaseReeval",
+        "options": {
+          "duration": {
+            "domain": "ChaseTimeReeval",
+            "target": "chaseOverTime"
+          },
+          "rate": {
+            "domain": "ChaseRateReeval",
+            "target": "chaseAtRate"
+          }
+        }
+      },
+      "evidence": [
+        "chase-keywords",
+        "chase-reeval-context"
+      ],
+      "id": "chase",
+      "kind": "action",
+      "params": [
+        {
+          "name": "variable",
+          "positionalOnly": true,
+          "variable": true
+        },
+        {
+          "name": "destination",
+          "positionalOnly": true
+        },
+        {
+          "alternateNames": [
+            "duration"
+          ],
+          "keywordOnly": true,
+          "name": "rate"
+        },
+        {
+          "domain": "ChaseReeval",
+          "name": "reevaluation"
+        }
+      ]
+    },
+    {
       "catalogId": "chaseOverTime",
       "evidence": [
         "chase-over-time",
@@ -300,7 +344,8 @@
       "kind": "action",
       "params": [
         {
-          "name": "variable"
+          "name": "variable",
+          "variable": true
         },
         {
           "name": "destination"
@@ -336,7 +381,7 @@
       "kind": "value",
       "params": [
         {
-          "name": "value"
+          "name": "array"
         }
       ]
     },
@@ -381,6 +426,7 @@
         "generic-builtins"
       ],
       "id": "random.uniform",
+      "keywordArgs": false,
       "kind": "value",
       "params": [
         {
@@ -397,6 +443,7 @@
         "generic-builtins"
       ],
       "id": "random.choice",
+      "keywordArgs": false,
       "kind": "value",
       "params": [
         {
@@ -410,6 +457,7 @@
         "range-for-header"
       ],
       "id": "range",
+      "keywordArgs": false,
       "kind": "value",
       "params": [
         {
@@ -753,6 +801,7 @@
         "generic-builtins"
       ],
       "id": "format",
+      "keywordArgs": false,
       "kind": "memberValue",
       "params": [],
       "receiver": "String",

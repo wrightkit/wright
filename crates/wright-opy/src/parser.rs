@@ -7,7 +7,7 @@
 //! reported. The returned [`ParseOutput`] carries either a complete program
 //! or the collected errors (never both).
 
-use crate::cst::{Decl, Event, Expr, IfBranch, Program, Rule, RuleEntry, Stmt};
+use crate::cst::{CallArg, Decl, Event, Expr, IfBranch, Program, Rule, RuleEntry, Stmt};
 use crate::diag::{FrontendError, Position, Span};
 use crate::lexer::{Token, TokenKind};
 
@@ -440,7 +440,8 @@ impl Parser<'_> {
                     Err(()) => return false,
                 };
                 let mut args = Vec::new();
-                if self.peek_kind() == TokenKind::LParen && self.parse_call_args(&mut args).is_err()
+                if self.peek_kind() == TokenKind::LParen
+                    && self.parse_event_args(&mut args).is_err()
                 {
                     return false;
                 }
@@ -966,7 +967,38 @@ impl Parser<'_> {
         Ok(base)
     }
 
-    fn parse_call_args(&mut self, args: &mut Vec<Expr>) -> Result<(), ()> {
+    /// `@Event name(args)`: positional expressions only (keyword arguments
+    /// are a call-argument form, not an event form).
+    fn parse_event_args(&mut self, args: &mut Vec<Expr>) -> Result<(), ()> {
+        self.expect(TokenKind::LParen, "'('")?;
+        self.skip_newlines();
+        if self.peek_kind() == TokenKind::RParen {
+            self.advance();
+            return Ok(());
+        }
+        loop {
+            let expr = self.parse_expr()?;
+            if self.peek_kind() == TokenKind::Assign {
+                self.error_at_current("keyword arguments are not valid in @Event".to_string());
+                return Err(());
+            }
+            args.push(expr);
+            self.skip_newlines();
+            if self.peek_kind() == TokenKind::Comma {
+                self.advance();
+                self.skip_newlines();
+                if self.peek_kind() == TokenKind::RParen {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        self.expect(TokenKind::RParen, "')'")?;
+        Ok(())
+    }
+
+    fn parse_call_args(&mut self, args: &mut Vec<CallArg>) -> Result<(), ()> {
         self.expect(TokenKind::LParen, "'('")?;
         self.skip_newlines();
         if self.peek_kind() == TokenKind::RParen {
@@ -975,7 +1007,34 @@ impl Parser<'_> {
         }
         loop {
             match self.parse_expr() {
-                Ok(expr) => args.push(expr),
+                Ok(expr) => {
+                    // A keyword argument is `name = expr` (issue #110): a
+                    // bare identifier immediately followed by `=`. Anything
+                    // else (`expr = ...`) is not a call argument form and is
+                    // rejected like the pinned reference rejects it.
+                    if self.peek_kind() == TokenKind::Assign {
+                        let Expr::Name { name, span } = expr else {
+                            self.error_at_current(
+                                "expected a keyword name before '=' in this call".to_string(),
+                            );
+                            return Err(());
+                        };
+                        self.advance();
+                        let value = match self.parse_expr() {
+                            Ok(value) => value,
+                            Err(()) => return Err(()),
+                        };
+                        args.push(CallArg {
+                            keyword: Some((name, span)),
+                            value,
+                        });
+                    } else {
+                        args.push(CallArg {
+                            keyword: None,
+                            value: expr,
+                        });
+                    }
+                }
                 Err(()) => return Err(()),
             }
             self.skip_newlines();
@@ -1235,7 +1294,46 @@ mod tests {
             "receiver must be the eventPlayer name"
         );
         assert_eq!(args.len(), 1);
-        assert!(matches!(&args[0], Expr::Number { .. }));
+        assert!(args[0].keyword.is_none(), "positional argument");
+        assert!(matches!(&args[0].value, Expr::Number { .. }));
+    }
+
+    #[test]
+    fn parses_keyword_arguments_with_name_spans() {
+        // `name = expr` call arguments are keyword arguments carrying the
+        // name token's exact span (issue #110); comparisons stay positional.
+        let program =
+            parse_ok("rule \"r\":\n    @Event global\n    wait(time=1)\n    debug(g == 1)\n");
+        let RuleEntry::Rule(rule) = &program.rules[0] else {
+            panic!("expected rule");
+        };
+        let Stmt::Expr { expr, .. } = &rule.actions[0] else {
+            panic!("expected expression statement");
+        };
+        let Expr::Call { args, .. } = expr else {
+            panic!("expected a call, got {expr:?}");
+        };
+        let (keyword, span) = args[0].keyword.as_ref().expect("keyword argument");
+        assert_eq!(keyword, "time");
+        assert_eq!(span.start.line, 3);
+        assert!(matches!(&args[0].value, Expr::Number { .. }));
+
+        let Stmt::Expr { expr, .. } = &rule.actions[1] else {
+            panic!("expected expression statement");
+        };
+        let Expr::Call { args, .. } = expr else {
+            panic!("expected a call, got {expr:?}");
+        };
+        assert!(args[0].keyword.is_none(), "comparisons are not keywords");
+        assert!(matches!(&args[0].value, Expr::Binary { .. }));
+    }
+
+    #[test]
+    fn non_name_keyword_lhs_is_a_parse_error() {
+        // `f(1 = 2)` is not a call argument form; rejected explicitly.
+        let errors = parse_err("rule \"r\":\n    @Event global\n    debug(1 = 2)\n");
+        assert!(!errors.is_empty());
+        assert_eq!(errors[0].code, "parse-error");
     }
 
     #[test]

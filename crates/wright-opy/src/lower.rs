@@ -24,10 +24,10 @@ use wright_core::hir::types::{
     default_var_index,
 };
 
-use crate::cst::{self, Decl, Expr, RuleEntry as CstRuleEntry, Stmt};
+use crate::cst::{self, CallArg, Decl, Expr, RuleEntry as CstRuleEntry, Stmt};
 use crate::diag::{FrontendError, FrontendResult, Span};
 use crate::manifest::{
-    Function, FunctionContext, FunctionKind, Manifest, ParamDefault, ReceiverCategory,
+    Function, FunctionContext, FunctionKind, Manifest, Param, ParamDefault, ReceiverCategory,
 };
 
 /// The protocol envelope this frontend produces.
@@ -608,7 +608,7 @@ impl Lowerer {
     fn lower_call(
         &mut self,
         name: &str,
-        args: &[Expr],
+        args: &[cst::CallArg],
         span: Span,
         macro_params: &[String],
         position: CallPosition,
@@ -635,7 +635,15 @@ impl Lowerer {
         }
         match name {
             "vect" => {
-                if args.len() != 3 {
+                // `vect` goes through the generic argument binder so its
+                // keyword forms (`vect(x=1, y=2, z=3)`) bind like any other
+                // manifest signature; the result must fill exactly the three
+                // declared parameters (x, y, z).
+                let (bound, _) = match self.manifest.resolve_function(name) {
+                    Some(entry) => self.bind_args(entry, args, macro_params),
+                    None => (self.lower_arg_values(args, macro_params), None),
+                };
+                if bound.len() < 3 {
                     self.error_at(
                         "vect-arity",
                         format!(
@@ -647,85 +655,60 @@ impl Lowerer {
                     return HirExpr::Null { span: None };
                 }
                 HirExpr::Vector {
-                    x: Box::new(self.lower_expr(&args[0], macro_params, CallPosition::Value)),
-                    y: Box::new(self.lower_expr(&args[1], macro_params, CallPosition::Value)),
-                    z: Box::new(self.lower_expr(&args[2], macro_params, CallPosition::Value)),
-                    span: Some(span.into()),
-                }
-            }
-            "wait" if args.len() <= 2 => {
-                let lowered: Vec<HirExpr> = args
-                    .iter()
-                    .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
-                    .collect();
-                let mut result = lowered;
-                match result.len() {
-                    0 => {
-                        // Reference default: wait(0.016, Wait.IGNORE_CONDITION).
-                        result.push(HirExpr::Number {
-                            value: 0.016,
-                            text: "0.016".to_string(),
-                            span: Some(span.into()),
-                        });
-                        result.push(HirExpr::Enum {
-                            value_type: "Wait".to_string(),
-                            value: "IGNORE_CONDITION".to_string(),
-                            span: Some(span.into()),
-                        });
-                    }
-                    1 => {
-                        result.push(HirExpr::Enum {
-                            value_type: "Wait".to_string(),
-                            value: "IGNORE_CONDITION".to_string(),
-                            span: Some(span.into()),
-                        });
-                    }
-                    _ => {}
-                }
-                HirExpr::Call {
-                    name: name.to_string(),
-                    args: result,
+                    x: Box::new(bound[0].clone()),
+                    y: Box::new(bound[1].clone()),
+                    z: Box::new(bound[2].clone()),
                     span: Some(span.into()),
                 }
             }
             _ => {
                 if self.macros.contains(name) {
-                    // A declared `macro` invocation is recorded as a macroCall.
+                    // A declared `macro` invocation is recorded as a macroCall
+                    // (positional-only; keyword arguments are an explicit
+                    // diagnostic).
+                    for arg in args {
+                        if let Some((keyword, span)) = &arg.keyword {
+                            self.error_at(
+                                "keyword-unsupported",
+                                format!(
+                                    "macro '{name}' does not accept keyword \
+                                     arguments ('{keyword}')"
+                                ),
+                                *span,
+                            );
+                        }
+                    }
                     return HirExpr::MacroCall {
                         name: name.to_string(),
-                        args: args
-                            .iter()
-                            .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
-                            .collect(),
+                        args: self.lower_arg_values(args, macro_params),
                         span: Some(span.into()),
                     };
                 }
-                let lowered: Vec<HirExpr> = args
-                    .iter()
-                    .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
-                    .collect();
                 match self.manifest.resolve_function(name) {
                     Some(entry) => {
                         // Declared subroutines with arguments stay generic
-                        // calls; builtins get arity/domain/default handling.
+                        // calls; builtins get keyword binding, arity, and
+                        // domain/default handling.
                         if self.subroutines.contains(name) {
                             return HirExpr::Call {
                                 name: name.to_string(),
-                                args: lowered,
+                                args: self.lower_arg_values(args, macro_params),
                                 span: Some(span.into()),
                             };
                         }
-                        self.check_arity(entry, args.len(), span);
-                        self.check_enum_domains(entry, args, &lowered);
+                        let (bound, selector) = self.bind_args(entry, args, macro_params);
+                        self.check_enum_domains(entry, &bound);
+                        let (call_name, bound) =
+                            self.resolve_contextual_domain(entry, bound, selector.as_deref(), span);
                         HirExpr::Call {
-                            name: entry.id.clone(),
-                            args: self.fill_enum_defaults(entry, lowered, span),
+                            name: call_name,
+                            args: bound,
                             span: Some(span.into()),
                         }
                     }
                     None => HirExpr::Call {
                         name: name.to_string(),
-                        args: lowered,
+                        args: self.lower_arg_values(args, macro_params),
                         span: Some(span.into()),
                     },
                 }
@@ -733,11 +716,369 @@ impl Lowerer {
         }
     }
 
+    /// Lower call arguments to HIR values in source order (used for macro
+    /// calls and unresolved names; keyword values lose their name).
+    fn lower_arg_values(&mut self, args: &[cst::CallArg], macro_params: &[String]) -> Vec<HirExpr> {
+        args.iter()
+            .map(|arg| self.lower_expr(&arg.value, macro_params, CallPosition::Value))
+            .collect()
+    }
+
+    /// Bind positional and keyword arguments against a manifest signature
+    /// (issue #110), producing lowered values in parameter order with
+    /// declared defaults filled. Diagnostics are structured and
+    /// source-located: `unknown-keyword`, `duplicate-argument`,
+    /// `keyword-required`, `positional-after-keyword`, `missing-argument`,
+    /// `keyword-unsupported`, `invalid-arity` (overflow), and
+    /// `invalid-argument` (variable-required parameters).
+    ///
+    /// The returned `selector` is the keyword spelling used to bind the
+    /// entry's contextual-domain selector parameter (the `chase` form's
+    /// `rate`/`duration`), when the entry declares one.
+    fn bind_args(
+        &mut self,
+        entry: &Function,
+        args: &[cst::CallArg],
+        macro_params: &[String],
+    ) -> (Vec<HirExpr>, Option<String>) {
+        let mut slots: Vec<Option<HirExpr>> = vec![None; entry.params.len()];
+        let mut selector = None;
+        let mut has_keyword = false;
+        let mut binding_error = false;
+        let contextual = entry.contextual_domain.as_ref();
+
+        // Keyword spellings resolve through the declared parameter names
+        // (alternate spellings included) — generic binding, no per-spelling
+        // branches.
+        let mut by_spelling: HashMap<&str, usize> = HashMap::new();
+        for (index, param) in entry.params.iter().enumerate() {
+            by_spelling.insert(param.name.as_str(), index);
+            for alternate in &param.alternate_names {
+                by_spelling.insert(alternate.as_str(), index);
+            }
+        }
+
+        for (arg_index, arg) in args.iter().enumerate() {
+            match &arg.keyword {
+                Some((keyword, name_span)) => {
+                    if !entry.keyword_args {
+                        binding_error = true;
+                        self.error_at(
+                            "keyword-unsupported",
+                            format!(
+                                "function '{}' does not accept keyword arguments ('{keyword}')",
+                                entry.id
+                            ),
+                            *name_span,
+                        );
+                        continue;
+                    }
+                    has_keyword = true;
+                    match by_spelling.get(keyword.as_str()) {
+                        None => {
+                            binding_error = true;
+                            self.error_at(
+                                "unknown-keyword",
+                                format!(
+                                    "unknown keyword argument '{keyword}' for function '{}'",
+                                    entry.id
+                                ),
+                                *name_span,
+                            );
+                        }
+                        Some(&index) => {
+                            let param = &entry.params[index];
+                            if param.positional_only {
+                                binding_error = true;
+                                self.error_at(
+                                    "unknown-keyword",
+                                    format!(
+                                        "parameter '{}' of '{}' cannot be bound by keyword",
+                                        param.name, entry.id
+                                    ),
+                                    *name_span,
+                                );
+                            } else if slots[index].is_some() {
+                                binding_error = true;
+                                self.error_at(
+                                    "duplicate-argument",
+                                    format!(
+                                        "argument '{}' of function '{}' is defined twice",
+                                        keyword, entry.id
+                                    ),
+                                    *name_span,
+                                );
+                            } else {
+                                slots[index] = Some(self.lower_call_arg_value(
+                                    entry,
+                                    index,
+                                    arg,
+                                    macro_params,
+                                ));
+                                if contextual.is_some_and(|c| c.by == param.name) {
+                                    selector = Some(keyword.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                None => {
+                    // The reference's generic binder rejects positional
+                    // arguments after keyword arguments; its special forms
+                    // (the contextual-domain entries, e.g. `chase`) bind the
+                    // trailing positionals by slot and skip the ordering
+                    // rule.
+                    if has_keyword && entry.contextual_domain.is_none() {
+                        binding_error = true;
+                        self.error_at(
+                            "positional-after-keyword",
+                            format!(
+                                "cannot use positional arguments after keyword \
+                                 arguments in call to '{}'",
+                                entry.id
+                            ),
+                            arg.value.span(),
+                        );
+                    }
+                    // Positional arguments fill the slot at their argument
+                    // index (keywords occupy their named slots), matching
+                    // the reference binder.
+                    let index = arg_index;
+                    if index < entry.params.len() {
+                        let param = &entry.params[index];
+                        if param.keyword_only {
+                            binding_error = true;
+                            self.error_at(
+                                "keyword-required",
+                                format!(
+                                    "argument {} of '{}' must be passed as a keyword \
+                                     (name = value; accepted names: {})",
+                                    index + 1,
+                                    entry.id,
+                                    keyword_spellings(param).join(", ")
+                                ),
+                                arg.value.span(),
+                            );
+                        }
+                        if slots[index].is_none() {
+                            slots[index] =
+                                Some(self.lower_call_arg_value(entry, index, arg, macro_params));
+                        }
+                    } else {
+                        self.lower_expr(&arg.value, macro_params, CallPosition::Value);
+                    }
+                }
+            }
+        }
+
+        // Positional overflow: the declared arity bounds report the
+        // reference's "takes N arguments, received M" rejection. A binding
+        // error already reported (duplicate keyword, unknown keyword, …)
+        // suppresses the secondary arity noise, matching the reference's
+        // first-error behavior.
+        if !binding_error && args.len() > entry.params.len() {
+            self.check_arity(entry, args.len(), arg_span(args));
+        }
+
+        // Unbound parameters: declared defaults fill; required parameters
+        // without a default are the reference's missing-argument rejection;
+        // `optional` parameters stay omittable without an emitted expansion.
+        let mut bound: Vec<HirExpr> = Vec::with_capacity(entry.params.len());
+        for (index, param) in entry.params.iter().enumerate() {
+            match &slots[index] {
+                Some(value) => bound.push(value.clone()),
+                None => match &param.default {
+                    Some(ParamDefault::EnumMember(member)) => {
+                        let domain = param.domain.clone().unwrap_or_default();
+                        bound.push(HirExpr::Enum {
+                            value_type: domain,
+                            value: member.clone(),
+                            span: None,
+                        });
+                    }
+                    Some(ParamDefault::Number(number)) => {
+                        bound.push(HirExpr::Number {
+                            value: *number,
+                            text: format!("{number}"),
+                            span: None,
+                        });
+                    }
+                    None if param.optional => {
+                        // Omitted entirely (the reference's short forms keep
+                        // the argument list short, e.g. `range(3)`).
+                    }
+                    None => {
+                        self.error_at(
+                            "missing-argument",
+                            format!(
+                                "missing argument '{}' for function '{}'",
+                                param.name, entry.id
+                            ),
+                            arg_span(args),
+                        );
+                        bound.push(HirExpr::Null { span: None });
+                    }
+                },
+            }
+        }
+
+        // Variable-required parameters (the chase family's first argument)
+        // must resolve to a variable reference.
+        for (index, param) in entry.params.iter().enumerate() {
+            if !param.variable {
+                continue;
+            }
+            if let Some(Some(value)) = slots.get(index) {
+                if !matches!(value, HirExpr::GlobalVar { .. } | HirExpr::PlayerVar { .. }) {
+                    self.error_at(
+                        "invalid-argument",
+                        format!(
+                            "argument {} of '{}' must be a variable (globalvar or \
+                             playervar)",
+                            index + 1,
+                            entry.id
+                        ),
+                        arg_span(args),
+                    );
+                }
+            }
+        }
+
+        (bound, selector)
+    }
+
+    /// Lower one call argument's value; the contextual-domain parameter (the
+    /// `chase` form's `ChaseReeval` member) is recorded as a pending enum
+    /// without validating the domain — it resolves only against the concrete
+    /// domain selected by the call's keyword selector (issue #110). Outside
+    /// that signature context `ChaseReeval` never resolves because it is not
+    /// a declared enum domain.
+    fn lower_call_arg_value(
+        &mut self,
+        entry: &Function,
+        param_index: usize,
+        arg: &cst::CallArg,
+        macro_params: &[String],
+    ) -> HirExpr {
+        if let Some(contextual) = &entry.contextual_domain {
+            let is_contextual = entry.params[param_index]
+                .domain
+                .as_deref()
+                .is_some_and(|domain| domain == contextual.domain);
+            if is_contextual {
+                if let Expr::Member {
+                    receiver,
+                    member,
+                    span,
+                } = &arg.value
+                {
+                    if let Expr::Name { name, .. } = receiver.as_ref() {
+                        if name == &contextual.domain {
+                            return HirExpr::Enum {
+                                value_type: contextual.domain.clone(),
+                                value: member.clone(),
+                                span: Some((*span).into()),
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        self.lower_expr(&arg.value, macro_params, CallPosition::Value)
+    }
+
+    /// Resolve a contextual enum-domain parameter (the `chase` form's
+    /// `ChaseReeval` member, issue #110): the keyword spelling bound to the
+    /// selector parameter selects the concrete domain and the function the
+    /// call lowers to. Outside this signature context `ChaseReeval` never
+    /// resolves (it is not a declared enum domain).
+    fn resolve_contextual_domain(
+        &mut self,
+        entry: &Function,
+        mut bound: Vec<HirExpr>,
+        selector: Option<&str>,
+        span: Span,
+    ) -> (String, Vec<HirExpr>) {
+        let Some(contextual) = &entry.contextual_domain else {
+            return (entry.id.clone(), bound);
+        };
+        let Some(contextual_param) = entry
+            .params
+            .iter()
+            .position(|param| param.domain.as_deref() == Some(contextual.domain.as_str()))
+        else {
+            return (entry.id.clone(), bound);
+        };
+        let manifest = self.manifest;
+        let mut mismatch = |message: String| {
+            self.error_at("enum-domain-mismatch", message, span);
+        };
+        let HirExpr::Enum {
+            value_type,
+            value,
+            span: value_span,
+        } = &bound[contextual_param]
+        else {
+            mismatch(format!(
+                "argument {} of '{}' expects an enum value of domain '{}'",
+                contextual_param + 1,
+                entry.id,
+                contextual.domain
+            ));
+            return (entry.id.clone(), bound);
+        };
+        if value_type != &contextual.domain {
+            mismatch(format!(
+                "argument {} of '{}' expects enum domain '{}', found '{}'",
+                contextual_param + 1,
+                entry.id,
+                contextual.domain,
+                value_type
+            ));
+            return (entry.id.clone(), bound);
+        }
+        let Some(keyword) = selector else {
+            mismatch(format!(
+                "argument {} of '{}' cannot resolve the contextual domain '{}' \
+                 without a '{}' keyword selector",
+                contextual_param + 1,
+                entry.id,
+                contextual.domain,
+                contextual.by
+            ));
+            return (entry.id.clone(), bound);
+        };
+        let Some(option) = contextual.options.get(keyword) else {
+            mismatch(format!(
+                "argument {} of '{}' uses the unknown selector keyword '{keyword}'",
+                contextual_param + 1,
+                entry.id
+            ));
+            return (entry.id.clone(), bound);
+        };
+        let Some(declared) = manifest.enum_domain(&option.domain) else {
+            return (entry.id.clone(), bound);
+        };
+        if !declared.members.contains(value) {
+            mismatch(format!(
+                "member '{value}' is not a member of enum domain '{}'",
+                option.domain
+            ));
+            return (entry.id.clone(), bound);
+        }
+        bound[contextual_param] = HirExpr::Enum {
+            value_type: option.domain.clone(),
+            value: value.clone(),
+            span: *value_span,
+        };
+        (option.target.clone(), bound)
+    }
+
     fn lower_receiver_call(
         &mut self,
         receiver: &Expr,
         name: &str,
-        args: &[Expr],
+        args: &[cst::CallArg],
         span: Span,
         macro_params: &[String],
         position: CallPosition,
@@ -759,13 +1100,24 @@ impl Lowerer {
         // position misuse diagnoses here.
         if let Expr::String { value, .. } = receiver {
             if name == "format" {
-                let lowered: Vec<HirExpr> = args
-                    .iter()
-                    .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
-                    .collect();
+                if args.iter().any(|arg| arg.keyword.is_some()) {
+                    for arg in args {
+                        if let Some((keyword, span)) = &arg.keyword {
+                            self.error_at(
+                                "keyword-unsupported",
+                                format!(
+                                    "function 'format' does not accept keyword \
+                                     arguments ('{keyword}')"
+                                ),
+                                *span,
+                            );
+                        }
+                    }
+                }
+                let lowered: Vec<HirExpr> = self.lower_arg_values(args, macro_params);
                 if let Some(entry) = self.manifest.resolve_member("format") {
                     self.check_call_position("format", entry, position, span);
-                    self.check_enum_domains(entry, args, &lowered);
+                    self.check_enum_domains(entry, &lowered);
                 }
                 return HirExpr::Format {
                     text: value.clone(),
@@ -775,24 +1127,20 @@ impl Lowerer {
             }
         }
         // Member calls resolve through the manifest (receiver category,
-        // explicit-argument arity, parameter enum domains).
-        let lowered: Vec<HirExpr> = args
-            .iter()
-            .map(|arg| self.lower_expr(arg, macro_params, CallPosition::Value))
-            .collect();
-        let member_name = match self.manifest.resolve_member(name) {
+        // explicit-argument signatures, keyword binding).
+        let (member_name, lowered) = match self.manifest.resolve_member(name) {
             Some(entry) => {
                 self.check_call_position(name, entry, position, span);
                 if let Some(category) = entry.receiver {
                     self.check_receiver(receiver, category, entry, span);
                 }
-                self.check_arity(entry, args.len(), span);
-                self.check_enum_domains(entry, args, &lowered);
-                entry.id.clone()
+                let (bound, _) = self.bind_args(entry, args, macro_params);
+                self.check_enum_domains(entry, &bound);
+                (entry.id.clone(), bound)
             }
             None => {
                 self.error_at("unknown-member", format!("unknown member '{name}'"), span);
-                name.to_string()
+                (name.to_string(), self.lower_arg_values(args, macro_params))
             }
         };
         // `eventPlayer.member(...)` → receiver call on the event player.
@@ -924,19 +1272,28 @@ impl Lowerer {
         }
     }
 
-    /// Check each argument that has a declared enum domain: the pinned
+    /// Check each bound argument that has a declared enum domain: the pinned
     /// reference requires an enum member of that domain (variables and other
     /// values are rejected), so any mismatch is a structured diagnostic at
-    /// the argument's span.
-    fn check_enum_domains(&mut self, entry: &Function, args: &[Expr], lowered: &[HirExpr]) {
+    /// the argument's span. Contextual domains (the `chase` form) resolve
+    /// separately and are skipped here.
+    fn check_enum_domains(&mut self, entry: &Function, bound: &[HirExpr]) {
         for (index, param) in entry.params.iter().enumerate() {
             let Some(domain) = param.domain.as_deref() else {
                 continue;
             };
-            let (Some(arg), Some(lowered_arg)) = (args.get(index), lowered.get(index)) else {
+            if entry
+                .contextual_domain
+                .as_ref()
+                .is_some_and(|contextual| contextual.domain == domain)
+            {
+                continue;
+            }
+            let Some(bound_arg) = bound.get(index) else {
                 continue;
             };
-            match lowered_arg {
+            let span = hir_span_to_frontend(bound_arg.span());
+            match bound_arg {
                 HirExpr::Enum { value_type, .. } if value_type == domain => {}
                 HirExpr::Enum { value_type, .. } => self.error_at(
                     "enum-domain-mismatch",
@@ -947,7 +1304,7 @@ impl Lowerer {
                         domain,
                         value_type
                     ),
-                    arg.span(),
+                    span,
                 ),
                 _ => self.error_at(
                     "enum-domain-mismatch",
@@ -957,40 +1314,50 @@ impl Lowerer {
                         entry.id,
                         domain
                     ),
-                    arg.span(),
+                    span,
                 ),
             }
         }
     }
 
-    /// Fill declared enum-domain defaults for omitted trailing arguments
-    /// (the reference emits the default member, e.g. `chaseOverTime(g, 10,
-    /// 3)` → `…, Destination and Duration`). Non-enum defaults are never
-    /// expanded here (`wait` handles its own defaults in its special form).
-    fn fill_enum_defaults(
-        &mut self,
-        entry: &Function,
-        mut args: Vec<HirExpr>,
-        span: Span,
-    ) -> Vec<HirExpr> {
-        for index in args.len()..entry.params.len() {
-            match &entry.params[index].default {
-                Some(ParamDefault::EnumMember(member)) => {
-                    let domain = entry.params[index].domain.clone().unwrap_or_default();
-                    args.push(HirExpr::Enum {
-                        value_type: domain,
-                        value: member.clone(),
-                        span: Some(span.into()),
-                    });
-                }
-                _ => break,
-            }
-        }
-        args
-    }
-
     fn error_at(&mut self, code: &str, message: String, span: Span) {
         self.errors.push(FrontendError::at(code, message, span));
+    }
+}
+
+/// The keyword spellings a parameter accepts (its name plus alternates).
+fn keyword_spellings(param: &Param) -> Vec<String> {
+    let mut spellings = vec![param.name.clone()];
+    spellings.extend(param.alternate_names.iter().cloned());
+    spellings
+}
+
+/// The source span covering a call's argument list (the start of the first
+/// argument through the last argument).
+fn arg_span(args: &[CallArg]) -> Span {
+    args.first().map(CallArg::span).unwrap_or_else(|| {
+        Span::new(
+            0,
+            crate::diag::Position::new(1, 1),
+            crate::diag::Position::new(1, 1),
+        )
+    })
+}
+
+/// Recover the frontend span of a lowered expression (HIR spans are the
+/// same source positions, carried through lowering).
+fn hir_span_to_frontend(span: Option<&HirSpan>) -> Span {
+    match span {
+        Some(span) => Span::new(
+            span.file,
+            crate::diag::Position::new(span.start.line, span.start.col),
+            crate::diag::Position::new(span.end.line, span.end.col),
+        ),
+        None => Span::new(
+            0,
+            crate::diag::Position::new(1, 1),
+            crate::diag::Position::new(1, 1),
+        ),
     }
 }
 
@@ -1391,6 +1758,229 @@ mod tests {
         assert_eq!(error.code, "value-in-action-position");
     }
 
+    // --- Named/keyword argument binding and chase call context (#110) ---
+
+    /// Compile a program and return the lowered first action's expression
+    /// (the statement expression, or the value of a leading assignment).
+    fn first_action_expr(source: &str) -> HirExpr {
+        let program = crate::compile(source, "test.opy", std::path::Path::new(""))
+            .unwrap_or_else(|error| panic!("compile failed: {error}"));
+        let RuleEntry::Rule(rule) = &program.rules[0] else {
+            panic!("expected a rule");
+        };
+        match &rule.actions[0] {
+            HirStmt::Expr { expr, .. } => (**expr).clone(),
+            HirStmt::Assign { value, .. } => (**value).clone(),
+            other => panic!("expected an expression or assignment, got {other:?}"),
+        }
+    }
+
+    /// Remove every `span`/`name_span` key from a serialized expression (the
+    /// differential suite's normalization).
+    fn strip_spans(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("span");
+                map.remove("name_span");
+                for nested in map.values_mut() {
+                    strip_spans(nested);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    strip_spans(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn chase_keyword_forms_dispatch_to_the_concrete_chase_functions() {
+        // The reference `chase` form: `rate = …` dispatches to chaseAtRate
+        // with the ChaseRateReeval domain, `duration = …` to chaseOverTime
+        // with the ChaseTimeReeval domain; the `ChaseReeval` member resolves
+        // only through this call context (issue #110).
+        let expr = first_action_expr(&action_source("chase(g, 10, rate=2, ChaseReeval.NONE)"));
+        let HirExpr::Call { name, args, .. } = &expr else {
+            panic!("expected a call, got {expr:?}");
+        };
+        assert_eq!(name, "chaseAtRate");
+        assert!(matches!(
+            &args[3],
+            HirExpr::Enum { value_type, value, .. }
+                if value_type == "ChaseRateReeval" && value == "NONE"
+        ));
+
+        let expr = first_action_expr(&action_source(
+            "chase(g, 10, duration=3, ChaseReeval.DESTINATION_AND_DURATION)",
+        ));
+        let HirExpr::Call { name, args, .. } = &expr else {
+            panic!("expected a call, got {expr:?}");
+        };
+        assert_eq!(name, "chaseOverTime");
+        assert!(matches!(
+            &args[3],
+            HirExpr::Enum { value_type, value, .. }
+                if value_type == "ChaseTimeReeval" && value == "DESTINATION_AND_DURATION"
+        ));
+
+        // Player-variable first arguments resolve too (the emission layer
+        // picks the player form).
+        let expr = first_action_expr(
+            "playervar P\nrule \"r\":\n    @Event eachPlayer\n    \
+             chase(eventPlayer.P, 0, rate=1, ChaseReeval.NONE)\n",
+        );
+        let HirExpr::Call { name, args, .. } = &expr else {
+            panic!("expected a call, got {expr:?}");
+        };
+        assert_eq!(name, "chaseAtRate");
+        assert!(matches!(&args[0], HirExpr::PlayerVar { .. }));
+    }
+
+    #[test]
+    fn chase_reeval_resolves_only_in_the_chase_call_context() {
+        // `ChaseReeval` is not a declared enum domain: a bare member access
+        // outside the chase signature is rejected.
+        let error = compile_error(&action_source("g = ChaseReeval.NONE"), 4);
+        assert_eq!(error.code, "unsupported-member");
+
+        // A member of the wrong concrete domain is rejected through the
+        // selected option (reference: "Unknown chaseratereeval …").
+        let error = compile_error(
+            &action_source("chase(g, 10, rate=2, ChaseReeval.DESTINATION_AND_DURATION)"),
+            4,
+        );
+        assert_eq!(error.code, "enum-domain-mismatch");
+        assert!(error.message.contains("ChaseRateReeval"));
+
+        // A non-enum 4th argument is rejected like the reference's
+        // "Expected a member of the 'ChaseReeval' enum" check.
+        let error = compile_error(&action_source("chase(g, 10, rate=2, 5)"), 4);
+        assert_eq!(error.code, "enum-domain-mismatch");
+    }
+
+    #[test]
+    fn chase_requires_the_keyword_rate_or_duration_third_argument() {
+        let error = compile_error(&action_source("chase(g, 10, 2, ChaseReeval.NONE)"), 4);
+        assert_eq!(error.code, "keyword-required");
+        assert!(error.message.contains("rate"));
+    }
+
+    #[test]
+    fn chase_family_requires_a_variable_first_argument() {
+        // The reference rejects non-variable first arguments for the chase
+        // family ("Expected variable for 1st argument of function
+        // 'chaseOverTime'", issue #110) — the variable kind also selects
+        // the global/player emission form.
+        let error = compile_error(&action_source("chase(10, 10, rate=2, ChaseReeval.NONE)"), 4);
+        assert_eq!(error.code, "invalid-argument");
+
+        let error = compile_error(
+            &action_source("chaseOverTime(10, 0, 30, ChaseTimeReeval.NONE)"),
+            4,
+        );
+        assert_eq!(error.code, "invalid-argument");
+    }
+
+    #[test]
+    fn keyword_binding_matches_positional_binding_in_hir() {
+        // Keyword binding consumes the manifest signatures: the bound HIR is
+        // identical to the positional form's (defaults filled the same way),
+        // modulo source spans (the keyword values sit at different columns).
+        fn without_spans(expr: &HirExpr) -> serde_json::Value {
+            let mut value = serde_json::to_value(expr).unwrap();
+            strip_spans(&mut value);
+            value
+        }
+        let keyword = without_spans(&first_action_expr(&action_source(
+            "chaseOverTime(g, 10, duration=3)",
+        )));
+        let positional = without_spans(&first_action_expr(&action_source(
+            "chaseOverTime(g, 10, 3)",
+        )));
+        assert_eq!(keyword, positional);
+
+        let keyword = without_spans(&first_action_expr(&action_source("wait(time=1)")));
+        let positional = without_spans(&first_action_expr(&action_source("wait(1)")));
+        assert_eq!(keyword, positional);
+
+        // Out-of-order keywords bind by name.
+        let keyword = without_spans(&first_action_expr(&action_source(
+            "wait(waitBehavior=Wait.IGNORE_CONDITION, time=2)",
+        )));
+        let positional = without_spans(&first_action_expr(&action_source("wait(2)")));
+        assert_eq!(keyword, positional);
+
+        let keyword = without_spans(&first_action_expr(&action_source(
+            "g = vect(x=1, y=2, z=3)",
+        )));
+        let positional = without_spans(&first_action_expr(&action_source("g = vect(1, 2, 3)")));
+        assert_eq!(keyword, positional);
+    }
+
+    #[test]
+    fn keyword_binding_diagnostics_are_structured_and_source_located() {
+        // Unknown keyword name.
+        let error = compile_error(&action_source("chaseOverTime(g, 10, bogus=1)"), 4);
+        assert_eq!(error.code, "unknown-keyword");
+        assert!(error.message.contains("bogus"));
+
+        // Duplicate (positional slot filled again by keyword).
+        let error = compile_error(
+            &action_source(
+                "chaseOverTime(g, 10, 3, ChaseTimeReeval.NONE, \
+                 reevaluation=ChaseTimeReeval.NONE)",
+            ),
+            4,
+        );
+        assert_eq!(error.code, "duplicate-argument");
+
+        // Positional after keyword.
+        let error = compile_error(&action_source("chaseOverTime(g, duration=3, 5)"), 4);
+        assert_eq!(error.code, "positional-after-keyword");
+
+        // Missing required argument (reference: "Missing argument 'duration'").
+        let error = compile_error(&action_source("chaseOverTime(g, 10)"), 4);
+        assert_eq!(error.code, "missing-argument");
+
+        // Positional-only parameter bound by keyword (`chase`'s leading
+        // arguments; the reference rejects the keyword form).
+        let error = compile_error(
+            &action_source("chase(variable=g, destination=10, rate=2, ChaseReeval.NONE)"),
+            4,
+        );
+        assert_eq!(error.code, "unknown-keyword");
+    }
+
+    #[test]
+    fn keyword_arguments_are_rejected_for_reference_special_cases() {
+        // The reference routes `range`, `random.*`, and `.format` around its
+        // generic keyword binder; keyword arguments fail deterministically.
+        let error = compile_error(
+            "globalvar g\nrule \"r\":\n    @Event global\n    \
+             for I in range(start=0, stop=3):\n        debug(I)\n",
+            4,
+        );
+        assert_eq!(error.code, "keyword-unsupported");
+
+        let error = compile_error(&action_source("g = random.uniform(min=1, max=2)"), 4);
+        assert_eq!(error.code, "keyword-unsupported");
+
+        let error = compile_error(&action_source("print(\"{} points\".format(value=1))"), 4);
+        assert_eq!(error.code, "keyword-unsupported");
+    }
+
+    #[test]
+    fn wait_uses_the_reference_keyword_names() {
+        // The manifest's `wait` parameter names match the pinned reference
+        // (`time`, `waitBehavior`), so `wait(duration=1)` is an unknown
+        // keyword exactly like the oracle.
+        let error = compile_error(&action_source("wait(duration=1)"), 4);
+        assert_eq!(error.code, "unknown-keyword");
+        assert!(error.message.contains("duration"));
+    }
+
     #[test]
     fn action_call_in_value_position_is_rejected() {
         let error = compile_error(&action_source("g = wait(1)"), 4);
@@ -1398,24 +1988,31 @@ mod tests {
     }
 
     #[test]
-    fn invalid_arity_is_a_source_located_diagnostic() {
+    fn missing_required_argument_is_a_source_located_diagnostic() {
+        // Too-few calls reject with the reference's missing-argument
+        // diagnostic (`chaseOverTime(g, 10)` → "Missing argument 'duration'",
+        // issue #110); positional overflow keeps `invalid-arity`.
         let error = compile_error(&action_source("chaseOverTime(g, 10)"), 4);
+        assert_eq!(error.code, "missing-argument");
+        assert!(error.message.contains("duration"));
+
+        let error = compile_error(&action_source("chaseOverTime(g, 10, 3, 4, 5)"), 4);
         assert_eq!(error.code, "invalid-arity");
-        assert!(error.message.contains("3 to 4 arguments"));
     }
 
     #[test]
-    fn invalid_member_arity_is_a_source_located_diagnostic() {
+    fn missing_member_argument_is_a_source_located_diagnostic() {
         // #106 evidence: `getPlayersInRadius(...).setStatusEffect(eventPlayer,
-        // 30)` must reject exactly like the oracle (arity: assister, status,
-        // duration are all required).
+        // 30)` must reject like the oracle (the `status` argument is
+        // missing; the reference: "Missing argument 'status' for function
+        // '.setStatusEffect'", issue #110).
         let error = compile_error(
             "globalvar g\nrule \"r\":\n    @Event eachPlayer\n    \
              getPlayersInRadius(eventPlayer.getPosition(), 10).setStatusEffect(eventPlayer, 30)\n",
             4,
         );
-        assert_eq!(error.code, "invalid-arity");
-        assert!(error.message.contains("member action 'setStatusEffect'"));
+        assert_eq!(error.code, "missing-argument");
+        assert!(error.message.contains("duration"));
     }
 
     #[test]

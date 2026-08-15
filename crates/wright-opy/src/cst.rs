@@ -176,6 +176,19 @@ pub struct IfBranch {
     pub body: Vec<Stmt>,
 }
 
+/// One call argument: either positional (`expr`) or keyword (`name = expr`,
+/// issue #110). Keyword arguments keep the name token's exact span so binding
+/// diagnostics are source-located on the name (unknown/duplicate keyword) or
+/// the value (enum-domain, arity of the value expression) as appropriate.
+#[derive(Debug, Clone)]
+pub struct CallArg {
+    /// The keyword name and its exact span, when this is a `name = expr`
+    /// argument.
+    pub keyword: Option<(String, Span)>,
+    /// The argument's value expression.
+    pub value: Expr,
+}
+
 /// An expression.
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -202,14 +215,14 @@ pub enum Expr {
     /// A plain function call.
     Call {
         name: String,
-        args: Vec<Expr>,
+        args: Vec<CallArg>,
         span: Span,
     },
     /// A call on a receiver (`x.f(...)`).
     ReceiverCall {
         receiver: Box<Expr>,
         name: String,
-        args: Vec<Expr>,
+        args: Vec<CallArg>,
         span: Span,
     },
     /// An unresolved identifier (resolved during lowering).
@@ -257,6 +270,20 @@ impl Expr {
             | Expr::Index { span, .. }
             | Expr::Binary { span, .. }
             | Expr::Unary { span, .. } => *span,
+        }
+    }
+}
+
+impl CallArg {
+    /// The source span of this argument: the keyword name when keyword, the
+    /// value expression otherwise.
+    pub fn span(&self) -> Span {
+        match &self.keyword {
+            Some((_, name_span)) => {
+                let end = self.value.span().end;
+                Span::new(name_span.file, name_span.start, end)
+            }
+            None => self.value.span(),
         }
     }
 }

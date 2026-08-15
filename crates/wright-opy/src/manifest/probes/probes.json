@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "probes": [
     {
       "diagnosticContains": "Expected a value, but got function 'wait' which is an action",
@@ -29,6 +30,41 @@
       "source": "catalog-only-names.opy"
     },
     {
+      "expect": "failure",
+      "id": "chase-arg3-keyword-required",
+      "sha256": "559e04258c77b4e1794dcf2c0cb7a2a8521c762fb3a3d939aedb33c22902067f",
+      "source": "chase-arg3-keyword-required.opy",
+      "diagnosticContains": "must be 'rate = xxxx' or 'duration = xxxx'"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-duplicate-keyword",
+      "sha256": "44947d3028149f8507fd9ae5e0b193b5707769bb4810eb4bbc25f3c93a847f7d",
+      "source": "chase-duplicate-keyword.opy",
+      "diagnosticContains": "is defined twice"
+    },
+    {
+      "expect": "success",
+      "id": "chase-keyword-binding",
+      "sha256": "ceeb33dca2ae30bdfa7d2b5457f5f17d071b5b4e03910491ce927b3f41308185",
+      "source": "chase-keyword-binding.opy",
+      "outputSha256": "54a1e643ee6235f9f8894bc29409690992c96b8e453f46ae09a26073f0e4bd64"
+    },
+    {
+      "expect": "success",
+      "id": "chase-keywords",
+      "sha256": "4b2e31975709e04d5121cc800bd086baf4b8d9e1e78da6074d91ef7300bea906",
+      "source": "chase-keywords.opy",
+      "outputSha256": "70e4208094e783ac7f674e927a45aadf0f6184d489dd1c152b2ebb0dad74c51c"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-missing-argument",
+      "sha256": "f4b858aed0c77b02c66c1d96bea0c3a64a34cad670d8bf66dd67d807a6d35476",
+      "source": "chase-missing-argument.opy",
+      "diagnosticContains": "Missing argument 'duration'"
+    },
+    {
       "expect": "success",
       "id": "chase-over-time",
       "outputSha256": "1d68ff79d6381ddd8fe81bbc703aa1f1e9df0457b715108d5579fce33c0509c0",
@@ -41,6 +77,55 @@
       "outputSha256": "c09b3417002f90231cff3111d2fd3b038ce999aaab4d2aa62c0bd85762239774",
       "sha256": "bc3129b756a5e63b92e10c08f9cc38dc6ebc51f32116d4860091ac1f1ae89ace",
       "source": "chase-over-time-defaults.opy"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-over-time-variable",
+      "sha256": "932e70be36fdd809801e9dad7d73187b46452da8cfdca79e02c92c911dbaa6ff",
+      "source": "chase-over-time-variable.opy",
+      "diagnosticContains": "Expected variable for 1st argument of function 'chaseOverTime'"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-positional-after-keyword",
+      "sha256": "8da563c09bb5d1da4b7fc32f62189a7cb298bd3d6f10184c9097f754f6f61d14",
+      "source": "chase-positional-after-keyword.opy",
+      "diagnosticContains": "Cannot use positional arguments after keyword arguments"
+    },
+    {
+      "expect": "success",
+      "id": "chase-reeval-context",
+      "sha256": "42998e1212e7b9941dc0e8317ef12489aa9002cdeabbfb75ea102d9349e25e61",
+      "source": "chase-reeval-context.opy",
+      "outputSha256": "24f13ab112521854a5b474fc9e3751b725a93b5ec61309ec90433c1d5a11b532"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-reeval-outside",
+      "sha256": "fc79ad626446c27be49eaf7d950d11c9f6f701d7ddcdf2d74df1b0b79357f17a",
+      "source": "chase-reeval-outside.opy",
+      "diagnosticContains": "Unknown member 'NONE' of 'ChaseReeval'"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-reeval-wrong-domain",
+      "sha256": "4daa766f072ba77902f8f387dfec30ad74591626a73d735aa35f972e8d215cc7",
+      "source": "chase-reeval-wrong-domain.opy",
+      "diagnosticContains": "Unknown chaseratereeval"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-unknown-keyword",
+      "sha256": "6b959459187346932379288b01cb1b915e13901055bd2eee1b3a80f6b018d348",
+      "source": "chase-unknown-keyword.opy",
+      "diagnosticContains": "Unknown keyword argument 'bogus'"
+    },
+    {
+      "expect": "failure",
+      "id": "chase-variable-first-arg",
+      "sha256": "eb8b4348eb425945cbf0499b2cce1a663dec29358fdd2b64c6839c3eae1a7575",
+      "source": "chase-variable-first-arg.opy",
+      "diagnosticContains": "Expected variable for 1st argument of function 'chaseAtRate'"
     },
     {
       "diagnosticContains": "Expected type 'Invis' for the 2nd argument of function '.setInvisibility'",
@@ -141,6 +226,13 @@
       "source": "is-game-in-progress.opy"
     },
     {
+      "expect": "failure",
+      "id": "keyword-arguments-unsupported",
+      "sha256": "2a4b1b11447c4c7be4e02eb39af2e35e9203e2c19cb1e52da6ecc652ee9af88e",
+      "source": "keyword-arguments-unsupported.opy",
+      "diagnosticContains": "Unknown function name 'start'"
+    },
+    {
       "expect": "success",
       "id": "member-aliases",
       "outputSha256": "dd250b6bb625584867937f72f477eda6a25789361cbd761a29c3f731c2990835",
@@ -209,13 +301,13 @@
       "id": "value-in-action-position",
       "sha256": "eae22cf4b2e2190b3deffd9fe9fa57d49d2cf9882b8635cfa0ad324e17521fc6",
       "source": "value-in-action-position.opy"
+    },
+    {
+      "expect": "failure",
+      "id": "wait-keyword-names",
+      "sha256": "275864fc4db1e06955e674ed4656dc8350faf96d3f0877d06d2c9906cfde6ec9",
+      "source": "wait-keyword-names.opy",
+      "diagnosticContains": "Unknown keyword argument 'duration'"
     }
-  ],
-  "reference": {
-    "contentCommit": "889d974",
-    "integrity": "sha512-oX17nauJcPTaKIrRFY/rD0Rl8atqFUVv9Hg2TKH+A68/fC8+ZO344Mkd1A/Y0oOVp1hr5tktMBjzMEDDnMEYUw==",
-    "name": "overpy",
-    "version": "9.7.10"
-  },
-  "schemaVersion": 1
+  ]
 }

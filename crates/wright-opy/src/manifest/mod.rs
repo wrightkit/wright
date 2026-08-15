@@ -126,6 +126,7 @@ pub enum ParamDefault {
 
 /// One ordered parameter of a function entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Param {
     pub name: String,
     /// The enum domain this parameter requires, when it is an enum argument.
@@ -138,6 +139,26 @@ pub struct Param {
     /// (`"optional": true`; the reference accepts the short form).
     #[serde(default)]
     pub optional: bool,
+    /// Whether the argument must be passed as a keyword (`name = expr`):
+    /// the reference `chase` form requires its 3rd argument to be
+    /// `rate = ...` or `duration = ...` (issue #110).
+    #[serde(default)]
+    pub keyword_only: bool,
+    /// Whether the argument can only be passed positionally (keyword
+    /// binding is rejected): the reference `chase` form's leading arguments
+    /// (issue #110).
+    #[serde(default)]
+    pub positional_only: bool,
+    /// Additional accepted keyword spellings for this parameter (the
+    /// reference `chase` form accepts both `rate` and `duration` for its
+    /// 3rd argument).
+    #[serde(default)]
+    pub alternate_names: Vec<String>,
+    /// Whether the argument must be a variable reference (a global variable
+    /// or a player variable); the chase family requires a variable first
+    /// argument to select the global/player emission form.
+    #[serde(default)]
+    pub variable: bool,
 }
 
 /// A call-context restriction on a function entry.
@@ -149,8 +170,38 @@ pub enum FunctionContext {
     ForIterable,
 }
 
+/// One contextual enum-domain selection: the `chase` dispatch (issue #110).
+///
+/// The reference `chase` form binds its 4th argument as a member of a
+/// merged `ChaseReeval` domain that does not exist as a standalone enum:
+/// the keyword name used for the `by` parameter selects the concrete domain
+/// and the function the call lowers to (`rate` → `ChaseRateReeval` /
+/// `chaseAtRate`, `duration` → `ChaseTimeReeval` / `chaseOverTime`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextualDomain {
+    /// The contextual (merged) domain name; never resolvable outside the
+    /// declaring function's signature context.
+    pub domain: String,
+    /// The parameter whose bound keyword name selects the option.
+    pub by: String,
+    /// The options keyed by the accepted keyword spellings of the `by`
+    /// parameter.
+    pub options: std::collections::BTreeMap<String, ContextualDomainOption>,
+}
+
+/// One contextual-domain option: the concrete enum domain and the function
+/// name the call lowers to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextualDomainOption {
+    pub domain: String,
+    pub target: String,
+}
+
 /// One builtin function entry (generic action/value or member function).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Function {
     pub id: String,
     pub kind: FunctionKind,
@@ -162,6 +213,17 @@ pub struct Function {
     /// Whether the argument count is unbounded (`.format` placeholders).
     #[serde(default)]
     pub unbounded: bool,
+    /// Whether keyword arguments are accepted (`name = expr`). Defaults to
+    /// `true` (the reference's `parseArgs` applies to every workshop
+    /// function); entries the reference routes around that mechanism
+    /// (`range`, `random.*`, `.format`) declare `"keywordArgs": false`
+    /// (issue #110).
+    #[serde(default = "default_keyword_args")]
+    pub keyword_args: bool,
+    /// The contextual enum-domain dispatch (the `chase` form), when this
+    /// entry has one.
+    #[serde(default)]
+    pub contextual_domain: Option<ContextualDomain>,
     #[serde(default)]
     pub context: Option<FunctionContext>,
     /// The canonical Workshop catalog id this entry emits through; absent
@@ -189,6 +251,10 @@ impl Function {
         let min = first_default.unwrap_or(self.params.len());
         (min, Some(self.params.len()))
     }
+}
+
+fn default_keyword_args() -> bool {
+    true
 }
 
 /// One enum value domain (`Invis`, `Transform`, `ChaseTimeReeval`, …).
@@ -389,14 +455,28 @@ impl Manifest {
             }
             for param in function.params.iter() {
                 if let Some(domain) = &param.domain {
-                    let declared = self.enum_domain(domain).ok_or_else(|| {
-                        ManifestError(format!(
-                            "function '{}' parameter '{}' references undeclared enum \
-                                 domain '{}'",
-                            function.id, param.name, domain
-                        ))
-                    })?;
-                    if let Some(ParamDefault::EnumMember(member)) = &param.default {
+                    // A parameter may declare the function's own contextual
+                    // domain (`chase`'s `ChaseReeval`): it resolves only in
+                    // this signature's context and has no standalone member
+                    // list.
+                    let is_contextual = function
+                        .contextual_domain
+                        .as_ref()
+                        .is_some_and(|contextual| &contextual.domain == domain);
+                    let declared = if is_contextual {
+                        None
+                    } else {
+                        Some(self.enum_domain(domain).ok_or_else(|| {
+                            ManifestError(format!(
+                                "function '{}' parameter '{}' references undeclared enum \
+                                     domain '{}'",
+                                function.id, param.name, domain
+                            ))
+                        })?)
+                    };
+                    if let (Some(declared), Some(ParamDefault::EnumMember(member))) =
+                        (declared, &param.default)
+                    {
                         if !declared.members.contains(member) {
                             return Err(ManifestError(format!(
                                 "function '{}' parameter '{}' default '{}' is not a member \
@@ -411,6 +491,83 @@ impl Manifest {
                          declared domain",
                         function.id, param.name
                     )));
+                }
+                if param.keyword_only && param.positional_only {
+                    return Err(ManifestError(format!(
+                        "function '{}' parameter '{}' cannot be both keyword-only and \
+                         positional-only",
+                        function.id, param.name
+                    )));
+                }
+                for alternate in &param.alternate_names {
+                    if alternate == &param.name {
+                        return Err(ManifestError(format!(
+                            "function '{}' parameter '{}' repeats its name as an \
+                             alternate keyword spelling",
+                            function.id, param.name
+                        )));
+                    }
+                    if function.params.iter().any(|other| {
+                        !std::ptr::eq(other, param)
+                            && (&other.name == alternate
+                                || other.alternate_names.contains(alternate))
+                    }) {
+                        return Err(ManifestError(format!(
+                            "function '{}' alternate keyword spelling '{alternate}' \
+                             collides with another parameter",
+                            function.id
+                        )));
+                    }
+                }
+            }
+            if let Some(contextual) = &function.contextual_domain {
+                if self.enum_domain(&contextual.domain).is_some() {
+                    return Err(ManifestError(format!(
+                        "function '{}' contextual domain '{}' must not be a declared \
+                         enum domain (it resolves only in this signature's context)",
+                        function.id, contextual.domain
+                    )));
+                }
+                let by_param = function
+                    .params
+                    .iter()
+                    .find(|param| param.name == contextual.by)
+                    .ok_or_else(|| {
+                        ManifestError(format!(
+                            "function '{}' contextual domain '{}' references unknown \
+                             selector parameter '{}'",
+                            function.id, contextual.domain, contextual.by
+                        ))
+                    })?;
+                let contextual_param = function
+                    .params
+                    .iter()
+                    .find(|param| param.domain.as_deref() == Some(contextual.domain.as_str()))
+                    .ok_or_else(|| {
+                        ManifestError(format!(
+                            "function '{}' contextual domain '{}' has no parameter \
+                             declaring that domain",
+                            function.id, contextual.domain
+                        ))
+                    })?;
+                let _ = contextual_param;
+                let mut spellings = vec![by_param.name.clone()];
+                spellings.extend(by_param.alternate_names.iter().cloned());
+                for (keyword, option) in &contextual.options {
+                    if !spellings.contains(keyword) {
+                        return Err(ManifestError(format!(
+                            "function '{}' contextual option '{keyword}' is not a \
+                             keyword spelling of selector parameter '{}'",
+                            function.id, by_param.name
+                        )));
+                    }
+                    self.enum_domain(&option.domain).ok_or_else(|| {
+                        ManifestError(format!(
+                            "function '{}' contextual option '{keyword}' references \
+                             undeclared enum domain '{}'",
+                            function.id, option.domain
+                        ))
+                    })?;
                 }
             }
             self.check_evidence(&function.id, &function.evidence, &probes)?;
@@ -573,14 +730,55 @@ pub fn canonicalize(manifest_json: &str, probes_json: &str) -> Result<String, Ma
 /// positions.
 impl wright_core::signatures::ExpectedDomain for Manifest {
     fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
-        let entry = self.functions.iter().find(|f| {
+        // Entries with a declared `catalogId` map directly.
+        if let Some(entry) = self.functions.iter().find(|f| {
             f.catalog_id
                 .as_deref()
                 .is_some_and(|catalog_id_of| catalog_id_of == catalog_id)
-        })?;
-        let offset = usize::from(entry.kind.is_member());
-        let param = entry.params.get(arg_index.checked_sub(offset)?)?;
-        param.domain.as_deref()
+        }) {
+            let offset = usize::from(entry.kind.is_member());
+            let param = entry.params.get(arg_index.checked_sub(offset)?)?;
+            return param.domain.as_deref();
+        }
+        // The contextual dispatch targets (the `chase` form, #110) select
+        // their expected domain by the catalog id itself: the emitted
+        // `Chase Global Variable At Rate(..., None)` reparses with the
+        // `ChaseRateReeval` domain because the emitter's catalog id for the
+        // rate form is `chaseAtRate` (the same data the frontend used to
+        // select the form). Only the contextual parameter's argument index
+        // pins a domain, mirroring declared entries.
+        for function in &self.functions {
+            let Some(contextual) = &function.contextual_domain else {
+                continue;
+            };
+            let Some(contextual_index) = function
+                .params
+                .iter()
+                .position(|param| param.domain.as_deref() == Some(contextual.domain.as_str()))
+            else {
+                continue;
+            };
+            for option in contextual.options.values() {
+                // The emission layer dispatches the player-variable forms
+                // through their own catalog ids
+                // (`chasePlayerVariableAtRate`/`chasePlayerVariableOverTime`),
+                // which pin the same reevaluation domain as their global
+                // counterparts; their argument list is shifted by one (the
+                // receiver name occupies an extra leading slot).
+                let player_form = catalog_id.strip_prefix("chasePlayerVariable");
+                let matches = catalog_id == option.target
+                    || player_form.is_some_and(|suffix| option.target.ends_with(suffix));
+                let at_contextual = if player_form.is_some() {
+                    arg_index == contextual_index + 1
+                } else {
+                    arg_index == contextual_index
+                };
+                if matches && at_contextual {
+                    return Some(&option.domain);
+                }
+            }
+        }
+        None
     }
 }
 
@@ -640,6 +838,10 @@ mod tests {
                 domain: Some("NotADomain".to_string()),
                 default: None,
                 optional: false,
+                keyword_only: false,
+                positional_only: false,
+                alternate_names: Vec::new(),
+                variable: false,
             })
         })
         .expect_err("undeclared domain must fail");
@@ -716,6 +918,26 @@ mod tests {
                 "catalogId '{}' of '{}' is missing from the Workshop emission catalog",
                 catalog_id, function.id
             );
+            // Contextual dispatch targets (the `chase` form) must exist in
+            // the action catalog too, so a valid contextual call never
+            // surfaces as an accidental emitter catalog miss.
+            if let Some(contextual) = &function.contextual_domain {
+                for (keyword, option) in &contextual.options {
+                    let found = catalog["actions"]
+                        .as_array()
+                        .expect("catalog actions")
+                        .iter()
+                        .any(|entry| {
+                            entry["id"] == serde_json::Value::String(option.target.clone())
+                        });
+                    assert!(
+                        found,
+                        "contextual target '{}' (keyword '{keyword}') of '{}' is missing \
+                         from the Workshop emission catalog",
+                        option.target, function.id
+                    );
+                }
+            }
         }
     }
 }

@@ -36,6 +36,7 @@ const SUCCESS_FIXTURES = [
   "synthetic/declarations-rules",
   "synthetic/expressions-values",
   "synthetic/chase-enums",
+  "synthetic/chase-keywords",
   "synthetic/preprocessing",
   "synthetic/settings",
   "real-world/overpy-cake",

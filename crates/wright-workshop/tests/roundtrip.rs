@@ -240,6 +240,63 @@ fn emitter_set_invisible_none_round_trips_through_the_shipped_path() {
 }
 
 #[test]
+fn emitter_chase_at_rate_none_round_trips_through_the_shipped_path() {
+    // #110: the chase rate form emits `Chase Global Variable At Rate(...,
+    // None)`; the catalog id `chaseAtRate` selects the `ChaseRateReeval`
+    // domain through the manifest's contextual-dispatch data, so the bare
+    // `None` reparses and round-trips to equivalent WIR.
+    let text = "variables { global: 0: g }\nrule (\"chase\") { event { Ongoing - Global; } actions { Chase Global Variable At Rate(Global.g, 10, 2, None); } }";
+    let record = roundtrip::round_trip_with_context(text, &catalog(), &en(), manifest_context());
+    assert!(
+        record.error.is_none(),
+        "the pinned ChaseRateReeval None must round-trip: {:?}",
+        record.error
+    );
+    assert!(record.parse_ok && record.emit_ok && record.reparse_ok && record.equivalent);
+    // The player form follows the same path through its own catalog id.
+    let text = "variables { player: 0: P }\nrule (\"chase\") { event { Ongoing - Each Player; } actions { Chase Player Variable At Rate(Event Player, P, 0, 1, None); } }";
+    let record = roundtrip::round_trip_with_context(text, &catalog(), &en(), manifest_context());
+    assert!(
+        record.error.is_none(),
+        "the pinned player ChaseRateReeval None must round-trip: {:?}",
+        record.error
+    );
+    assert!(record.parse_ok && record.emit_ok && record.reparse_ok && record.equivalent);
+}
+
+#[test]
+fn chase_keyword_fixture_round_trips_through_the_shipped_path() {
+    // The `synthetic/chase-keywords` surface (rate/duration forms, global
+    // and player variables, keyword-bound wait/vect/len/print/
+    // getPlayersInRadius/setStatusEffect) compiles through the native OPY
+    // frontend, emits through the catalog, reparses with the manifest
+    // signature context, and re-emits to a fixed point (#110). The oracle
+    // text itself is not the input: the reference emits bare variable names
+    // where the native Workshop parser's canonical spelling is `Global.g`
+    // (documented N-level presentation difference), so the round-trip uses
+    // the native emission.
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../compatibility/fixtures/synthetic/chase-keywords/source.opy"),
+    )
+    .unwrap();
+    let hir = wright_opy::compile(&source, "source.opy", Path::new(""))
+        .expect("the fixture compiles natively");
+    let model = wright_core::hir::convert::convert(&hir).expect("the HIR converts");
+    let wir = wright_ir::lower::lower(&model).expect("the fixture lowers to WIR");
+    let emitted =
+        wright_workshop::emitter::emit(&wir, &catalog(), &en()).expect("the fixture emits");
+    let record =
+        roundtrip::round_trip_with_context(&emitted, &catalog(), &en(), manifest_context());
+    assert!(
+        record.error.is_none(),
+        "the chase-keywords emission must round-trip: {:?}",
+        record.error
+    );
+    assert!(record.parse_ok && record.emit_ok && record.reparse_ok && record.equivalent);
+}
+
+#[test]
 fn context_free_chase_none_stays_a_documented_exception() {
     // Without a signature pin the ambiguity stays rejected: the same input
     // through the plain (context-free) round-trip fails at parse, keeping the

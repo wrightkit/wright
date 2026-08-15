@@ -507,6 +507,68 @@ impl Emitter<'_> {
                 self.emit_hud_text(*message, level, false)?;
             }
             wir::Action::Call { name, args, .. } => {
+                // The chase family dispatches on the first argument's
+                // variable kind, mirroring the pinned reference: a global
+                // variable emits the global form with the argument list
+                // unchanged; a player variable emits the player form with
+                // the receiver split into `player, name` leading arguments
+                // (the frontend guarantees a variable first argument,
+                // issue #110).
+                if matches!(name.as_str(), "chaseAtRate" | "chaseOverTime") {
+                    let player_var = args.first().and_then(|id| {
+                        self.program
+                            .values
+                            .get(*id)
+                            .and_then(|node| match &node.value {
+                                wir::Value::PlayerVariable { player, variable } => {
+                                    Some((*player, *variable))
+                                }
+                                _ => None,
+                            })
+                    });
+                    let spelling = if let Some((player, variable)) = player_var {
+                        let id = if name == "chaseAtRate" {
+                            "chasePlayerVariableAtRate"
+                        } else {
+                            "chasePlayerVariableOverTime"
+                        };
+                        let spelling = self
+                            .catalog
+                            .spelling(Kind::Action, &self.locale, id)
+                            .ok_or_else(|| WorkshopError::Unknown {
+                                kind: "action",
+                                spelling: id.to_string(),
+                                locale: self.locale.clone(),
+                                span: None,
+                            })?
+                            .to_string();
+                        // `Chase Player Variable At Rate(player, name, …)`:
+                        // the receiver splits into `player, name` leading
+                        // arguments (the pinned oracle's spelling).
+                        let mut text = String::new();
+                        self.value(player, &mut text)?;
+                        let mut parts = vec![text, self.player_name(variable)?];
+                        for arg in args.iter().skip(1) {
+                            let mut part = String::new();
+                            self.value(*arg, &mut part)?;
+                            parts.push(part);
+                        }
+                        return self.line(level, &format!("{spelling}({});", parts.join(", ")));
+                    } else {
+                        self.catalog
+                            .spelling(Kind::Action, &self.locale, name)
+                            .ok_or_else(|| WorkshopError::Unknown {
+                                kind: "action",
+                                spelling: name.clone(),
+                                locale: self.locale.clone(),
+                                span: None,
+                            })?
+                            .to_string()
+                    };
+                    let mut args_text = String::new();
+                    self.args(args, &mut args_text)?;
+                    return self.line(level, &format!("{spelling}({args_text});"));
+                }
                 // Native `.opy` action names map to canonical catalog ids at
                 // emission (presentation concern).
                 let canonical = match name.as_str() {

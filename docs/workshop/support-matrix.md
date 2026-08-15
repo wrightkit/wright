@@ -85,9 +85,10 @@ The bare `None` member spelling is shared by three enum domains
 the canonical signature metadata (#109/#111): when the enclosing call's
 signature pins exactly one expected domain, the bare spelling resolves to that
 domain — `Chase Global Variable Over Time(..., None)` reparses to
-`ChaseTimeReeval.NONE` and `Set Invisible(..., None)` to `Invis.NONE`.
-`ChaseRateReeval` has no emitting signature in the supported surface, so its
-bare `None` stays unpinned. Context-free or wrong-context `None` (e.g.
+`ChaseTimeReeval.NONE`, `Chase Global Variable At Rate(..., None)` and
+`Chase Player Variable At Rate(..., None)` to `ChaseRateReeval.NONE` (the
+`chase` keyword-argument dispatch surface, #110), and `Set Invisible(..., None)`
+to `Invis.NONE`. Context-free or wrong-context `None` (e.g.
 `Set Global Variable(g, None)`) still fails deterministically with the
 `ambiguous enum member 'None'` diagnostic — no global spelling heuristics and
 no arbitrary domain precedence.

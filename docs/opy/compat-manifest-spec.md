@@ -1,6 +1,7 @@
 # OPY Semantic Compatibility Manifest — Specification
 
-Status: accepted specification — implemented (#109)
+Status: accepted specification — implemented (#109), extended for named/keyword
+argument binding (#110)
 Scope: the Wright-owned representation for builtin actions/values, member
 functions, signatures, parameter enum domains, enum members, and source
 aliases; reference-validated and consumed by the native frontend. The
@@ -52,7 +53,7 @@ It is **language-compatibility metadata**, distinct from:
       "kind": "action",               // action | value | memberAction | memberValue
       "receiver": "Player",           // members only: Player | Variable | String | Any
       "params": [
-        { "name": "variable" },
+        { "name": "variable", "variable": true },
         { "name": "destination" },
         { "name": "duration" },
         { "name": "reevaluation", "domain": "ChaseTimeReeval",
@@ -60,6 +61,25 @@ It is **language-compatibility metadata**, distinct from:
       ],
       "catalogId": "chaseOverTime",   // link to the Workshop emission catalog id
       "evidence": ["chase-over-time"] // oracle probes validating this entry
+    },
+    {
+      "id": "chase",                  // the reference's keyword special form (#110)
+      "kind": "action",
+      "params": [
+        { "name": "variable", "positionalOnly": true, "variable": true },
+        { "name": "destination", "positionalOnly": true },
+        { "name": "rate", "keywordOnly": true, "alternateNames": ["duration"] },
+        { "name": "reevaluation", "domain": "ChaseReeval" }
+      ],
+      "contextualDomain": {
+        "domain": "ChaseReeval",      // resolves only in this signature's context
+        "by": "rate",                 // the keyword spelling selects the option
+        "options": {
+          "rate":     { "domain": "ChaseRateReeval", "target": "chaseAtRate" },
+          "duration": { "domain": "ChaseTimeReeval", "target": "chaseOverTime" }
+        }
+      },
+      "evidence": ["chase-keywords", "chase-reeval-context"]
     }
   ],
   "enumDomains": [
@@ -98,6 +118,33 @@ Entry semantics:
   enum-member defaults are expanded at lowering (e.g. `chaseOverTime(g, 10,
   3)` fills `DESTINATION_AND_DURATION`, matching the reference emission).
   `"unbounded": true` (`.format` placeholders) accepts any argument count.
+  Named/keyword argument binding (issue #110) consumes these parameter names
+  directly — they are the reference's declared parameter names (e.g. `wait`
+  binds `time`/`waitBehavior`, `print` binds `text`, `len` binds `array`):
+  * `"keywordOnly": true` — the argument must be passed as `name = expr`
+    (the reference `chase` form requires its 3rd argument to be
+    `rate = ...` or `duration = ...`);
+  * `"positionalOnly": true` — keyword binding is rejected for this
+    parameter (the `chase` form's leading arguments);
+  * `"alternateNames": [...]` — additional accepted keyword spellings
+    (`chase` accepts both `rate` and `duration` for its 3rd parameter);
+  * `"variable": true` — the argument must be a variable reference (a
+    `globalvar` or a `playervar`); the chase family requires a variable
+    first argument to select the global/player emission form.
+* `keywordArgs` — whether the entry accepts keyword arguments at all;
+  defaults to `true` (the pinned reference's generic binder applies to
+  every workshop function). Entries the reference routes around that
+  mechanism declare `"keywordArgs": false` (`range`, `random.*`,
+  `.format`).
+* `contextualDomain` — the `chase` dispatch record: a merged enum domain
+  (`ChaseReeval`) that has no standalone member list and resolves **only**
+  within this entry's signature context, selected by the keyword spelling
+  bound to the `by` parameter. Each option maps a keyword spelling to the
+  concrete enum domain and the function the call lowers to (`rate` →
+  `ChaseRateReeval` / `chaseAtRate`; `duration` → `ChaseTimeReeval` /
+  `chaseOverTime`). The contextual domain is deliberately *not* a declared
+  enum domain: a bare `ChaseReeval.MEMBER` outside the `chase` signature is
+  rejected like the reference rejects it.
 * `context` — a call-context restriction; `"forIterable"` (`range`) is only
   valid as a `for ... in` iterable.
 * `catalogId` — the canonical Workshop emission catalog id; absent for
@@ -127,18 +174,27 @@ diagnostic category fragment).
 
 * `Manifest::load` (`crates/wright-opy/src/manifest`) — schema validation,
   duplicate/colliding ids, colliding or missing aliases, undeclared enum
-  domains, undeclared enum-default members, and entries lacking oracle
-  evidence all fail deterministically (mirroring `wright-catalog-gen`); a
+  domains, undeclared enum-default members, keyword-binding data sanity
+  (`keywordOnly`/`positionalOnly` are mutually exclusive, alternate
+  spellings do not collide with other parameters), contextual-domain
+  integrity (the contextual domain is not a declared enum domain, the
+  selector parameter exists and its keyword spellings cover the options,
+  every option domain is declared), and entries lacking oracle evidence all
+  fail deterministically (mirroring `wright-catalog-gen`); a
   canonical-rewrite test pins the data file to its byte-canonical form, and a
-  cross-check test pins every `catalogId` to the Workshop emission catalog.
+  cross-check test pins every `catalogId` (and contextual option target) to
+  the Workshop emission catalog.
 * `probes/validate.py` — reference validation: every probe runs against the
   pinned oracle and must match its recorded accept/reject, normalized
   emission hash, and diagnostic category (S/D level, see the #106 planning
   comment); wired into the compatibility harness test suite
   (`compatibility/tests/test_manifest_probes.py`).
 * The frontend consumes the manifest in `lower.rs`: unknown names, wrong
-  action/value position, invalid arity, invalid receiver category, and
-  enum-domain mismatches produce structured, source-located frontend
+  action/value position, invalid arity, invalid receiver category,
+  enum-domain mismatches, and named/keyword argument binding
+  (`unknown-keyword`, `duplicate-argument`, `missing-argument`,
+  `positional-after-keyword`, `keyword-required`, `keyword-unsupported`,
+  `invalid-argument`) produce structured, source-located frontend
   diagnostics before Workshop emission.
 
 ## Consumers
@@ -156,6 +212,7 @@ diagnostic category fragment).
 
 * A runtime-downloadable or hot-updating content registry (#96).
 * Workshop content data (heroes/abilities/maps) as manifest entries.
-* Contextual aliases (`ChaseReeval`), named arguments, and contextual
-  raw-Workshop enum resolution — tracked after this manifest foundation.
+* Contextual aliases beyond the manifest's declared data, raw-Workshop enum
+  resolution beyond the declared contextual domains (#111), and further
+  named-argument shapes without reference/corpus evidence.
 * Preserving upstream implementation structure for its own sake.

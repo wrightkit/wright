@@ -126,9 +126,27 @@
     },
     {
       "aliases": {
+        "en-US": "Chase Global Variable At Rate"
+      },
+      "id": "chaseAtRate"
+    },
+    {
+      "aliases": {
         "en-US": "Chase Global Variable Over Time"
       },
       "id": "chaseOverTime"
+    },
+    {
+      "aliases": {
+        "en-US": "Chase Player Variable At Rate"
+      },
+      "id": "chasePlayerVariableAtRate"
+    },
+    {
+      "aliases": {
+        "en-US": "Chase Player Variable Over Time"
+      },
+      "id": "chasePlayerVariableOverTime"
     },
     {
       "aliases": {
@@ -572,7 +590,7 @@
     "generatorVersion": "0.1.0",
     "license": "AGPL-3.0-or-later",
     "reviewed": true,
-    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt(); receiver-call action/value spellings (setMoveSpeed, isAlive, getPosition, getHealth, teleport, setMaxHealth, setHealth, setAimSpeed, setGravity, setDamageDealt, setDamageReceived, setUltCharge) from the pinned OverPy 9.7.10 en-US emission surface for .opy eventPlayer.<method>(...) forms, evidenced by the synthetic/receiver-calls corpus fixture (#104); ChaseTimeReeval and ChaseRateReeval member spellings (None, Destination and Duration, Destination and Rate) reference-validated against the pinned OverPy 9.7.10 enum blocks and emission (#105); chaseOverTime (Chase Global Variable Over Time), isGameInProgress (Is Game In Progress), getPlayersInRadius (Players Within Radius), worldVector (World Vector Of), getThrottle (Throttle Of), setInvisibility (Set Invisible) with the Invis domain, setStatusEffect (Set Status) with the Status domain, the Transform domain, and the LosCheck domain transcribed from the pinned OverPy 9.7.10 en-US emission surface for the OPY semantic manifest probes (#109)"
+    "source": "en-US spellings transcribed from the compatibility corpus workshop snapshots and the M5 support matrix; squareRoot spelling from the OverPy Workshop emission surface for .opy sqrt(); receiver-call action/value spellings (setMoveSpeed, isAlive, getPosition, getHealth, teleport, setMaxHealth, setHealth, setAimSpeed, setGravity, setDamageDealt, setDamageReceived, setUltCharge) from the pinned OverPy 9.7.10 en-US emission surface for .opy eventPlayer.<method>(...) forms, evidenced by the synthetic/receiver-calls corpus fixture (#104); ChaseTimeReeval and ChaseRateReeval member spellings (None, Destination and Duration, Destination and Rate) reference-validated against the pinned OverPy 9.7.10 enum blocks and emission (#105); chaseOverTime (Chase Global Variable Over Time), isGameInProgress (Is Game In Progress), getPlayersInRadius (Players Within Radius), worldVector (World Vector Of), getThrottle (Throttle Of), setInvisibility (Set Invisible) with the Invis domain, setStatusEffect (Set Status) with the Status domain, the Transform domain, and the LosCheck domain transcribed from the pinned OverPy 9.7.10 en-US emission surface for the OPY semantic manifest probes (#109); chaseAtRate (Chase Global Variable At Rate), chasePlayerVariableAtRate (Chase Player Variable At Rate), and chasePlayerVariableOverTime (Chase Player Variable Over Time) transcribed from the pinned OverPy 9.7.10 en-US emission surface for the chase keyword-argument probes (#110)"
   },
   "schemaVersion": 1,
   "structural": [

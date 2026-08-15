@@ -107,7 +107,10 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   source-located diagnostics (`unknown-action`, `unknown-value`,
   `unknown-member`, `invalid-arity`, `invalid-receiver`,
   `enum-domain-mismatch`, `action-in-value-position`,
-  `value-in-action-position`, `invalid-call-context`, `invalid-iterable`),
+  `value-in-action-position`, `invalid-call-context`, `invalid-iterable`,
+  plus the argument-binding codes `unknown-keyword`, `duplicate-argument`,
+  `missing-argument`, `positional-after-keyword`, `keyword-required`,
+  `keyword-unsupported`, `invalid-argument` for #110),
   never as emitter catalog misses.
 - Reference-validated evidence surface: `chaseOverTime(...)` (action;
   3–4 arguments, reevaluation defaults to `DESTINATION_AND_DURATION`),
@@ -129,8 +132,8 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   (`stopChasingVariable` → `stopChasing`; member aliases `getCurrentHero` →
   `getHero`, `hasStatusEffect` → `hasStatus`); their emission spellings are
   not yet catalog-covered (documented emission gap). The `ChaseReeval`
-  contextual alias stays out of the alias table until the `chase`
-  keyword-argument call surface is supported (#110).
+  contextual alias resolves only through the `chase` keyword call context
+  (#110) and stays out of the alias table.
 - Builtin Workshop enums from the manifest's reference-validated domains:
   `Beam.{GOOD,GRAPPLE}`, `Color.{YELLOW,WHITE,RED,ORANGE,GREEN,BLUE,BLACK,
   PURPLE,AQUA,VIOLET,ROSE}`, `DynamicEffect.{BAD_EXPLOSION,GOOD_EXPLOSION,
@@ -153,9 +156,52 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   declared baseline remain `baseline-planned`; emission coverage stays
   corpus-scoped (a manifest-valid member can still hit a catalog miss at
   emission when no spelling is catalogged).
-- `wait()` / `wait(duration)` default-argument filling: the reference appends
+- `wait()` / `wait(time)` default-argument filling: the reference appends
   `Wait.IGNORE_CONDITION` (and `0.016` for the no-argument form); native
   matches.
+- **Named/keyword arguments** (`name = expr` call arguments, #110) bind
+  against the manifest's canonical parameter names — the pinned reference's
+  declared names (`wait(time=1)`, `wait(waitBehavior=Wait.IGNORE_CONDITION,
+  time=2)`, `chaseOverTime(g, 10, duration=3)`,
+  `chaseOverTime(g, 10, 3, reevaluation=ChaseTimeReeval.NONE)`,
+  `vect(x=1, y=2, z=3)`, `getPlayersInRadius(center=…, radius=…,
+  team=Team.ALL)`, `eventPlayer.setStatusEffect(assister=…, status=…,
+  duration=…)`, `print(text="x")`, `len(array=…)`, `debug(value=…)`,
+  `stopChasing(variable=g)`, member forms like
+  `eventPlayer.setMaxHealth(healthPercent=100)`). Keyword arguments may
+  appear in any order before the first positional argument; the reference
+  rejects positional arguments after keyword arguments
+  (`positional-after-keyword`), unknown keyword names (`unknown-keyword`),
+  duplicate bindings (`duplicate-argument`), and missing required arguments
+  (`missing-argument`) — all structured, source-located diagnostics. The
+  reference's generic binder is routed around for `range`, `random.*`, and
+  `.format` (keyword arguments on those fail with `keyword-unsupported`),
+  and for `macro` invocations.
+- **The `chase` keyword form** (#110, reference special form):
+  `chase(variable, destination, rate=…, ChaseReeval.MEMBER)` and
+  `chase(variable, destination, duration=…, ChaseReeval.MEMBER)` — exactly
+  four arguments, the 3rd passed as the `rate`/`duration` keyword and the
+  4th as a bare `ChaseReeval.MEMBER` access. `ChaseReeval` resolves **only**
+  in this call context: `rate=` selects the `ChaseRateReeval` domain and
+  lowers the call to `chaseAtRate`; `duration=` selects `ChaseTimeReeval`
+  and lowers to `chaseOverTime`. Members are checked against the selected
+  domain (`chase(g, 10, rate=2, ChaseReeval.DESTINATION_AND_DURATION)` is
+  rejected with `enum-domain-mismatch`, matching the reference's "Unknown
+  chaseratereeval"). Outside the chase signature `ChaseReeval` never
+  resolves (a bare `g = ChaseReeval.NONE` is rejected like the reference).
+  The first argument must be a variable (`invalid-argument` otherwise);
+  emission dispatches on its kind: a global variable emits
+  `Chase Global Variable At Rate/Over Time`, a player variable emits
+  `Chase Player Variable At Rate/Over Time(player, name, …)` (catalog
+  spellings `chaseAtRate`, `chasePlayerVariableAtRate`,
+  `chasePlayerVariableOverTime`, oracle-transcribed, #110). The
+  parenthesized member form `chase(…, (ChaseReeval.NONE))` is accepted by
+  the native frontend though the reference's raw-token check rejects it
+  (documented presentation-level difference; the parenthesized form is not
+  pinned by probes).
+- `chaseOverTime(...)` requires a variable first argument like the
+  reference (`invalid-argument` for `chaseOverTime(10, …)`), which also
+  selects the global/player emission form.
 - Undeclared identifiers, enum types without members, and unsupported member
   accesses are structured, source-located semantic errors
   (`unknown-identifier`, `enum-type-without-member`, `unsupported-member`).
@@ -205,8 +251,11 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
 - Postfix increment/decrement (`++`/`--`) — rejected at parsing.
 - Dict literals (`{...}`) — rejected at lexing.
 - Triple-quoted strings / docstrings (`"""`) — rejected at lexing.
-- Subroutine parameters, default `@Team`/`@Slot` overrides, named arguments
-  (`ChaseReeval` contextual alias, #110).
+- Subroutine parameters, default `@Team`/`@Slot` overrides, `raycast`
+  `include=`/`exclude=` named-argument forms (no reference/corpus evidence
+  in the declared surface; the reference's `raycast` special form is not
+  manifest-declared), and macro keyword arguments (the reference's macro
+  substitution treats them as raw text; rejected explicitly).
 - Full OverPy formatting semantics: `debug()`/`print()` emission
   (`Create HUD Text` etc.) follows the simplified semantic formatting documented
   in [`v1-matrix.md`](../v1-matrix.md).
