@@ -399,6 +399,19 @@ impl<'a> Lowerer<'a> {
                 span,
                 callee_span: *callee_span,
             },
+            // #118 frontend-neutral extensions: produced only by the OSTW
+            // frontend; their WIR lowering is owned by #119.
+            Stmt::Foreach { .. }
+            | Stmt::CFor { .. }
+            | Stmt::Switch { .. }
+            | Stmt::Return { .. }
+            | Stmt::Break { .. }
+            | Stmt::Continue { .. } => {
+                return Err(unsupported(
+                    "the OSTW-only statement is outside the OPY v0.1 lowering surface (#119)",
+                    span,
+                ));
+            }
             Stmt::Pass { .. } => return Ok(()), // no-op; dropped
         };
         out.push(self.target.actions.push(action));
@@ -936,6 +949,18 @@ impl<'a> Lowerer<'a> {
             Expr::Constant { .. } => {
                 return Err(unsupported(
                     "constant references are folded by the frontend and are outside the v0.1 lowering surface",
+                    expression.span(),
+                ));
+            }
+            // #118 frontend-neutral extensions: produced only by the OSTW
+            // frontend; their WIR lowering is owned by #119.
+            Expr::UserEnum { .. }
+            | Expr::UserCall { .. }
+            | Expr::Param { .. }
+            | Expr::Ternary { .. }
+            | Expr::Cast { .. } => {
+                return Err(unsupported(
+                    "the OSTW-only expression is outside the OPY v0.1 lowering surface (#119)",
                     expression.span(),
                 ));
             }

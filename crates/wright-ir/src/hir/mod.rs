@@ -39,6 +39,10 @@ pub type RuleId = Id<Rule>;
 pub type StmtId = Id<Stmt>;
 /// A typed ID referencing an [`Expr`] in the expression arena.
 pub type ExprId = Id<Expr>;
+/// A typed ID referencing a user [`EnumDecl`].
+pub type EnumId = Id<EnumDecl>;
+/// A typed ID referencing a user [`Function`].
+pub type FunctionId = Id<Function>;
 
 /// The internal Opy HIR program: an arena-backed forest of symbols, rules,
 /// statements, and expressions over one file registry.
@@ -50,6 +54,12 @@ pub struct Program {
     pub subroutines: Arena<Subroutine>,
     pub constants: Arena<Constant>,
     pub macros: Arena<Macro>,
+    /// User-defined enum declarations (frontend-neutral; distinct from the
+    /// builtin Workshop catalog enums).
+    pub enums: Arena<EnumDecl>,
+    /// User-defined value/void functions with parameters (frontend-neutral;
+    /// distinct from Workshop subroutines).
+    pub functions: Arena<Function>,
     pub rules: Arena<Rule>,
     pub stmts: Arena<Stmt>,
     pub exprs: Arena<Expr>,
@@ -67,6 +77,8 @@ impl Default for Program {
             subroutines: Arena::new(),
             constants: Arena::new(),
             macros: Arena::new(),
+            enums: Arena::new(),
+            functions: Arena::new(),
             rules: Arena::new(),
             stmts: Arena::new(),
             exprs: Arena::new(),
@@ -159,6 +171,87 @@ pub struct Macro {
     pub body: Vec<StmtId>,
 }
 
+/// A user-defined enum declaration (frontend-neutral). Built-in Workshop
+/// enums resolve through the catalog instead; this node carries user-defined
+/// enum identity so member references stay type-distinct from numbers.
+#[derive(Debug, Clone)]
+pub struct EnumDecl {
+    pub name: String,
+    pub span: Option<Span>,
+    pub members: Vec<EnumMember>,
+}
+
+/// One member of a user enum declaration.
+#[derive(Debug, Clone)]
+pub struct EnumMember {
+    pub name: String,
+    pub span: Option<Span>,
+}
+
+/// A user-defined function with parameters and an optional return type.
+///
+/// Frontend-neutral: OSTW expression-bodied value functions and
+/// non-subroutine `void` functions are inlined at their call sites by the
+/// reference; this node records the declaration (parameters, defaults,
+/// return type, body) so a call site can be expanded without re-opening
+/// frontend ownership. Workshop subroutines (rule-named `void` functions)
+/// use [`Subroutine`] instead.
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub params: Vec<Param>,
+    /// The declared return type (`None` for `void`).
+    pub return_type: Option<TypeName>,
+    pub body: FunctionBody,
+    pub span: Option<Span>,
+    /// The exact span of the declared identifier token.
+    pub name_span: Option<Span>,
+}
+
+/// The body of a user function: a single expression (value function) or a
+/// statement list (`void` function).
+#[derive(Debug, Clone)]
+pub enum FunctionBody {
+    Expression(ExprId),
+    Statements(Vec<StmtId>),
+}
+
+/// A typed function parameter.
+#[derive(Debug, Clone)]
+pub struct Param {
+    pub type_name: Option<TypeName>,
+    pub name: String,
+    /// The default value expression, when the parameter has one.
+    pub default: Option<ExprId>,
+    pub span: Option<Span>,
+}
+
+/// A frontend-neutral type reference (name, array depth, pipe unions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeName {
+    pub name: String,
+    /// The number of trailing `[]` array markers.
+    pub array_depth: u32,
+    /// Additional union alternatives (`A | B`).
+    pub unions: Vec<TypeName>,
+    pub span: Option<Span>,
+}
+
+impl TypeName {
+    /// The display form of this type (`Hero[]`, `Team | Number`, `Number`).
+    pub fn display(&self) -> String {
+        let mut out = self.name.to_string();
+        for _ in 0..self.array_depth {
+            out.push_str("[]");
+        }
+        for union in &self.unions {
+            out.push_str(" | ");
+            out.push_str(&union.display());
+        }
+        out
+    }
+}
+
 /// A rule with its event, conditions, and actions.
 #[derive(Debug, Clone)]
 pub struct Rule {
@@ -168,6 +261,9 @@ pub struct Rule {
     pub name_span: Option<Span>,
     pub disabled: bool,
     pub event: Event,
+    /// The rule priority (frontend-neutral; the reference orders rules by
+    /// priority, lower first).
+    pub priority: Option<i32>,
     pub conditions: Vec<ExprId>,
     pub actions: Vec<StmtId>,
 }
@@ -191,7 +287,10 @@ pub struct IfBranch {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     /// An expression statement, typically a call with side effects.
-    Expr { expr: ExprId, span: Option<Span> },
+    Expr {
+        expr: ExprId,
+        span: Option<Span>,
+    },
     /// Assignment. Compound assignments were desugared by the frontend.
     Assign {
         target: ExprId,
@@ -213,10 +312,49 @@ pub enum Stmt {
         /// The exact span of the loop variable identifier.
         variable_span: Option<Span>,
     },
+    /// A C-style `for (init; condition; step)` loop binding a global
+    /// variable. Frontend-neutral: the reference emits
+    /// `For Global Variable(variable, start, condition, step)`.
+    CFor {
+        variable: GlobalVarId,
+        start: Option<ExprId>,
+        condition: Option<ExprId>,
+        step: Option<ExprId>,
+        body: Vec<StmtId>,
+        span: Option<Span>,
+    },
+    /// Iteration over an array, binding a global counter variable; body
+    /// references to the loop element lower to `Index(iterable, counter)`.
+    /// (The reference emits `For Global Variable(counter, 0, Count Of(arr), 1)`
+    /// with the element rewritten to `Value In Array(arr, counter)`.)
+    Foreach {
+        variable: GlobalVarId,
+        iterable: ExprId,
+        body: Vec<StmtId>,
+        span: Option<Span>,
+    },
     /// A loop.
     While {
         condition: ExprId,
         body: Vec<StmtId>,
+        span: Option<Span>,
+    },
+    /// A `switch` over a value with case/default arms and explicit
+    /// fallthrough (frontend-neutral; the reference lowers to a jump table).
+    Switch {
+        value: ExprId,
+        cases: Vec<SwitchCase>,
+        span: Option<Span>,
+    },
+    /// Return from a function (`None` value for `return;`).
+    Return {
+        value: Option<ExprId>,
+        span: Option<Span>,
+    },
+    Break {
+        span: Option<Span>,
+    },
+    Continue {
         span: Option<Span>,
     },
     /// Call a subroutine.
@@ -227,7 +365,17 @@ pub enum Stmt {
         callee_span: Option<Span>,
     },
     /// A no-op emitted by the frontend.
-    Pass { span: Option<Span> },
+    Pass {
+        span: Option<Span>,
+    },
+}
+
+/// One `case`/`default` arm of a switch (`None` value for `default`).
+#[derive(Debug, Clone)]
+pub struct SwitchCase {
+    pub value: Option<ExprId>,
+    pub body: Vec<StmtId>,
+    pub span: Option<Span>,
 }
 
 impl Stmt {
@@ -238,7 +386,13 @@ impl Stmt {
             | Stmt::Assign { span, .. }
             | Stmt::If { span, .. }
             | Stmt::For { span, .. }
+            | Stmt::CFor { span, .. }
+            | Stmt::Foreach { span, .. }
             | Stmt::While { span, .. }
+            | Stmt::Switch { span, .. }
+            | Stmt::Return { span, .. }
+            | Stmt::Break { span }
+            | Stmt::Continue { span }
             | Stmt::CallSubroutine { span, .. }
             | Stmt::Pass { span } => *span,
         }
@@ -278,6 +432,13 @@ pub enum Expr {
         value: String,
         span: Option<Span>,
     },
+    /// A member of a user-defined enum (frontend-neutral; builtin enums use
+    /// [`Expr::Enum`] through the catalog).
+    UserEnum {
+        enum_id: EnumId,
+        member: String,
+        span: Option<Span>,
+    },
     /// A reference to a global variable.
     GlobalVar {
         variable: GlobalVarId,
@@ -296,6 +457,15 @@ pub enum Expr {
         constant: ConstantId,
         span: Option<Span>,
     },
+    /// A call to a user function (inlined by the reference at call sites).
+    UserCall {
+        function: FunctionId,
+        args: Vec<ExprId>,
+        span: Option<Span>,
+    },
+    /// A reference to a named parameter of the enclosing user function
+    /// (substituted by name during #119 inlining).
+    Param { name: String, span: Option<Span> },
     /// A function call.
     Call {
         name: String,
@@ -342,6 +512,20 @@ pub enum Expr {
         args: Vec<ExprId>,
         span: Option<Span>,
     },
+    /// A conditional expression `condition ? then_value : else_value`
+    /// (frontend-neutral; the reference emits `If-Then-Else`).
+    Ternary {
+        condition: ExprId,
+        then_value: ExprId,
+        else_value: ExprId,
+        span: Option<Span>,
+    },
+    /// A type cast `<TypeName>value` (frontend-neutral type coercion).
+    Cast {
+        type_name: TypeName,
+        value: ExprId,
+        span: Option<Span>,
+    },
 }
 
 impl Expr {
@@ -355,10 +539,13 @@ impl Expr {
             | Expr::Array { span, .. }
             | Expr::Vector { span, .. }
             | Expr::Enum { span, .. }
+            | Expr::UserEnum { span, .. }
             | Expr::GlobalVar { span, .. }
             | Expr::PlayerVar { span, .. }
             | Expr::EventPlayer { span }
             | Expr::Constant { span, .. }
+            | Expr::UserCall { span, .. }
+            | Expr::Param { span, .. }
             | Expr::Call { span, .. }
             | Expr::ReceiverCall { span, .. }
             | Expr::MacroCall { span, .. }
@@ -366,7 +553,9 @@ impl Expr {
             | Expr::Binary { span, .. }
             | Expr::Unary { span, .. }
             | Expr::Index { span, .. }
-            | Expr::Format { span, .. } => *span,
+            | Expr::Format { span, .. }
+            | Expr::Ternary { span, .. }
+            | Expr::Cast { span, .. } => *span,
         }
     }
 
@@ -380,10 +569,13 @@ impl Expr {
             Expr::Array { .. } => "array",
             Expr::Vector { .. } => "vector",
             Expr::Enum { .. } => "enum",
+            Expr::UserEnum { .. } => "userEnum",
             Expr::GlobalVar { .. } => "globalVar",
             Expr::PlayerVar { .. } => "playerVar",
             Expr::EventPlayer { .. } => "eventPlayer",
             Expr::Constant { .. } => "constant",
+            Expr::UserCall { .. } => "userCall",
+            Expr::Param { .. } => "param",
             Expr::Call { .. } => "call",
             Expr::ReceiverCall { .. } => "receiverCall",
             Expr::MacroCall { .. } => "macroCall",
@@ -392,6 +584,8 @@ impl Expr {
             Expr::Unary { .. } => "unary",
             Expr::Index { .. } => "index",
             Expr::Format { .. } => "format",
+            Expr::Ternary { .. } => "ternary",
+            Expr::Cast { .. } => "cast",
         }
     }
 }

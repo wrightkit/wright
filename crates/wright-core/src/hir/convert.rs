@@ -255,6 +255,8 @@ impl<'a> Builder<'a> {
                     name_span: self.span(rule.name_span)?,
                     disabled: rule.disabled,
                     event,
+                    // The OPY protocol has no rule priority; OSTW sets it.
+                    priority: None,
                     conditions,
                     actions,
                 });

@@ -77,6 +77,7 @@ fn build_hir_program() -> HirProgram {
             args: vec![],
             span: Some(s(1, 1, 2)),
         },
+        priority: None,
         conditions: vec![],
         actions: vec![while_stmt],
     });

@@ -3,7 +3,10 @@
 use crate::error::IrError;
 use crate::source::Span;
 
-use super::{Constant, Expr, GlobalVar, Macro, PlayerVar, Program, Rule, Stmt, Subroutine};
+use super::{
+    Constant, EnumDecl, Expr, Function, GlobalVar, Macro, PlayerVar, Program, Rule, Stmt,
+    Subroutine,
+};
 
 /// Validate every ID resolves and every span is valid, returning the first
 /// violation.
@@ -22,6 +25,12 @@ pub(crate) fn validate(program: &Program) -> Result<(), IrError> {
     }
     for macro_ in program.macros.iter() {
         validate_macro(program, macro_)?;
+    }
+    for enum_ in program.enums.iter() {
+        validate_enum(program, enum_)?;
+    }
+    for function in program.functions.iter() {
+        validate_function(program, function)?;
     }
     for rule in program.rules.iter() {
         validate_rule(program, rule)?;
@@ -67,6 +76,29 @@ fn validate_macro(program: &Program, macro_: &Macro) -> Result<(), IrError> {
         check_stmt(program, *statement)?;
     }
     Ok(())
+}
+
+fn validate_enum(program: &Program, enum_: &EnumDecl) -> Result<(), IrError> {
+    check_span(enum_.span, program)
+}
+
+fn validate_function(program: &Program, function: &Function) -> Result<(), IrError> {
+    check_span(function.span, program)?;
+    for param in &function.params {
+        check_span(param.span, program)?;
+        if let Some(default) = param.default {
+            check_expr(program, default)?;
+        }
+    }
+    match &function.body {
+        super::FunctionBody::Expression(expr) => check_expr(program, *expr),
+        super::FunctionBody::Statements(statements) => {
+            for statement in statements {
+                check_stmt(program, *statement)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn validate_rule(program: &Program, rule: &Rule) -> Result<(), IrError> {
@@ -129,6 +161,46 @@ fn check_stmt(program: &Program, id: super::StmtId) -> Result<(), IrError> {
             }
             Ok(())
         }
+        Stmt::CFor {
+            variable,
+            start,
+            condition,
+            step,
+            body,
+            ..
+        } => {
+            if !program.globals.contains(*variable) {
+                return Err(dangling("global variable", variable.index()));
+            }
+            if let Some(start) = start {
+                check_expr(program, *start)?;
+            }
+            if let Some(condition) = condition {
+                check_expr(program, *condition)?;
+            }
+            if let Some(step) = step {
+                check_expr(program, *step)?;
+            }
+            for statement in body {
+                check_stmt(program, *statement)?;
+            }
+            Ok(())
+        }
+        Stmt::Foreach {
+            variable,
+            iterable,
+            body,
+            ..
+        } => {
+            if !program.globals.contains(*variable) {
+                return Err(dangling("global variable", variable.index()));
+            }
+            check_expr(program, *iterable)?;
+            for statement in body {
+                check_stmt(program, *statement)?;
+            }
+            Ok(())
+        }
         Stmt::While {
             condition, body, ..
         } => {
@@ -138,6 +210,26 @@ fn check_stmt(program: &Program, id: super::StmtId) -> Result<(), IrError> {
             }
             Ok(())
         }
+        Stmt::Switch { value, cases, .. } => {
+            check_expr(program, *value)?;
+            for case in cases {
+                check_span(case.span, program)?;
+                if let Some(case_value) = case.value {
+                    check_expr(program, case_value)?;
+                }
+                for statement in &case.body {
+                    check_stmt(program, *statement)?;
+                }
+            }
+            Ok(())
+        }
+        Stmt::Return { value, .. } => {
+            if let Some(value) = value {
+                check_expr(program, *value)?;
+            }
+            Ok(())
+        }
+        Stmt::Break { .. } | Stmt::Continue { .. } => Ok(()),
         Stmt::CallSubroutine { subroutine, .. } => {
             if !program.subroutines.contains(*subroutine) {
                 return Err(dangling("subroutine", subroutine.index()));
@@ -188,6 +280,35 @@ fn check_expr(program: &Program, id: super::ExprId) -> Result<(), IrError> {
             }
             Ok(())
         }
+        Expr::UserEnum {
+            enum_id, member, ..
+        } => {
+            let Some(enum_) = program.enums.get(*enum_id) else {
+                return Err(dangling("enum", enum_id.index()));
+            };
+            if !enum_
+                .members
+                .iter()
+                .any(|candidate| candidate.name == *member)
+            {
+                return Err(IrError::Invalid {
+                    code: "unknown-enum-member",
+                    message: format!("enum '{}' has no member '{member}'", enum_.name),
+                    span: expression.span(),
+                });
+            }
+            Ok(())
+        }
+        Expr::UserCall { function, args, .. } => {
+            if !program.functions.contains(*function) {
+                return Err(dangling("function", function.index()));
+            }
+            for arg in args {
+                check_expr(program, *arg)?;
+            }
+            Ok(())
+        }
+        Expr::Param { .. } => Ok(()),
         Expr::MacroCall { macro_, args, .. } => {
             if !program.macros.contains(*macro_) {
                 return Err(dangling("macro", macro_.index()));
@@ -222,6 +343,21 @@ fn check_expr(program: &Program, id: super::ExprId) -> Result<(), IrError> {
         Expr::Index { array, index, .. } => {
             check_expr(program, *array)?;
             check_expr(program, *index)?;
+            Ok(())
+        }
+        Expr::Ternary {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            check_expr(program, *condition)?;
+            check_expr(program, *then_value)?;
+            check_expr(program, *else_value)?;
+            Ok(())
+        }
+        Expr::Cast { value, .. } => {
+            check_expr(program, *value)?;
             Ok(())
         }
         Expr::Number { .. }

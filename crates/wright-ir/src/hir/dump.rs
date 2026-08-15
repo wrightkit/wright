@@ -68,6 +68,49 @@ pub(crate) fn dump(program: &Program) -> String {
             render_stmt(program, *statement, &mut out, 2);
         }
     }
+    for (index, enum_) in program.enums.iter().enumerate() {
+        out.push_str(&format!(
+            "  enum {} (id {index}){} = [{}]\n",
+            enum_.name,
+            span_suffix(enum_.span),
+            enum_
+                .members
+                .iter()
+                .map(|member| member.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    for (index, function) in program.functions.iter().enumerate() {
+        let return_type = function
+            .return_type
+            .as_ref()
+            .map(|t| format!(": {}", t.display()))
+            .unwrap_or_default();
+        let params = function
+            .params
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "  function {}({params}){return_type} (id {index}){}\n",
+            function.name,
+            span_suffix(function.span),
+        ));
+        match &function.body {
+            super::FunctionBody::Expression(expr) => {
+                out.push_str("    = ");
+                render_expr(program, *expr, &mut out);
+                out.push('\n');
+            }
+            super::FunctionBody::Statements(statements) => {
+                for statement in statements {
+                    render_stmt(program, *statement, &mut out, 2);
+                }
+            }
+        }
+    }
     out.push_str("rules:\n");
     for (index, rule) in program.rules.iter().enumerate() {
         out.push_str(&format!(
@@ -167,6 +210,52 @@ fn render_stmt(program: &Program, id: super::StmtId, out: &mut String, level: us
                 render_stmt(program, *statement, out, level + 1);
             }
         }
+        Stmt::CFor {
+            variable,
+            start,
+            condition,
+            step,
+            body,
+            span,
+        } => {
+            let variable_name = program.globals.get(*variable).map_or_else(
+                || format!("<dangling {}>", variable.index()),
+                |v| v.name.clone(),
+            );
+            out.push_str(&format!("{}cfor {variable_name} (", indent(level)));
+            if let Some(start) = start {
+                render_expr(program, *start, out);
+            }
+            out.push_str("; ");
+            if let Some(condition) = condition {
+                render_expr(program, *condition, out);
+            }
+            out.push_str("; ");
+            if let Some(step) = step {
+                render_expr(program, *step, out);
+            }
+            out.push_str(&format!("){}\n", span_suffix(*span)));
+            for statement in body {
+                render_stmt(program, *statement, out, level + 1);
+            }
+        }
+        Stmt::Foreach {
+            variable,
+            iterable,
+            body,
+            span,
+        } => {
+            let variable_name = program.globals.get(*variable).map_or_else(
+                || format!("<dangling {}>", variable.index()),
+                |v| v.name.clone(),
+            );
+            out.push_str(&format!("{}foreach {variable_name} in ", indent(level)));
+            render_expr(program, *iterable, out);
+            out.push_str(&format!("{}\n", span_suffix(*span)));
+            for statement in body {
+                render_stmt(program, *statement, out, level + 1);
+            }
+        }
         Stmt::While {
             condition,
             body,
@@ -178,6 +267,43 @@ fn render_stmt(program: &Program, id: super::StmtId, out: &mut String, level: us
             for statement in body {
                 render_stmt(program, *statement, out, level + 1);
             }
+        }
+        Stmt::Switch {
+            value, cases, span, ..
+        } => {
+            out.push_str(&format!("{}switch ", indent(level)));
+            render_expr(program, *value, out);
+            out.push_str(&format!("{}\n", span_suffix(*span)));
+            for case in cases {
+                match &case.value {
+                    Some(value) => {
+                        out.push_str(&format!("{}  case ", indent(level)));
+                        render_expr(program, *value, out);
+                        out.push('\n');
+                    }
+                    None => out.push_str(&format!("{}  default\n", indent(level))),
+                }
+                for statement in &case.body {
+                    render_stmt(program, *statement, out, level + 2);
+                }
+            }
+        }
+        Stmt::Return { value, span } => {
+            out.push_str(&format!("{}return ", indent(level)));
+            if let Some(value) = value {
+                render_expr(program, *value, out);
+            }
+            out.push_str(&format!("{}\n", span_suffix(*span)));
+        }
+        Stmt::Break { span } => {
+            out.push_str(&format!("{}break{}\n", indent(level), span_suffix(*span)));
+        }
+        Stmt::Continue { span } => {
+            out.push_str(&format!(
+                "{}continue{}\n",
+                indent(level),
+                span_suffix(*span)
+            ));
         }
         Stmt::CallSubroutine {
             subroutine, span, ..
@@ -236,6 +362,17 @@ fn render_expr(program: &Program, id: super::ExprId, out: &mut String) {
             out.push('.');
             out.push_str(value);
         }
+        Expr::UserEnum {
+            enum_id, member, ..
+        } => {
+            out.push_str(&symbol_name(
+                program.enums.get(*enum_id).map(|e| e.name.as_str()),
+                "enum",
+                enum_id.index(),
+            ));
+            out.push('.');
+            out.push_str(member);
+        }
         Expr::GlobalVar { variable, .. } => out.push_str(&symbol_name(
             program.globals.get(*variable).map(|g| g.name.as_str()),
             "global",
@@ -258,6 +395,18 @@ fn render_expr(program: &Program, id: super::ExprId, out: &mut String) {
             "constant",
             constant.index(),
         )),
+        Expr::UserCall { function, args, .. } => {
+            out.push_str(&symbol_name(
+                program.functions.get(*function).map(|f| f.name.as_str()),
+                "function",
+                function.index(),
+            ));
+            render_args(program, args, out);
+        }
+        Expr::Param { name, .. } => {
+            out.push('$');
+            out.push_str(name);
+        }
         Expr::Call { name, args, .. } => {
             out.push_str(name);
             render_args(program, args, out);
@@ -314,6 +463,28 @@ fn render_expr(program: &Program, id: super::ExprId, out: &mut String) {
                 render_expr(program, *arg, out);
             }
             out.push(')');
+        }
+        Expr::Ternary {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            out.push('(');
+            render_expr(program, *condition, out);
+            out.push_str(" ? ");
+            render_expr(program, *then_value, out);
+            out.push_str(" : ");
+            render_expr(program, *else_value, out);
+            out.push(')');
+        }
+        Expr::Cast {
+            type_name, value, ..
+        } => {
+            out.push('<');
+            out.push_str(&type_name.display());
+            out.push('>');
+            render_expr(program, *value, out);
         }
     }
 }
