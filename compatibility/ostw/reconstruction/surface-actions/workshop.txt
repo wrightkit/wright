@@ -1,0 +1,62 @@
+variables
+{
+    global:
+        0: g
+        1: toggle
+    player:
+        0: p
+}
+
+rule("Reconstruction surface: action calls")
+{
+    event
+    {
+        Ongoing - Each Player;
+        All;
+        All;
+    }
+    actions
+    {
+        Big Message(All Players(All Teams), Custom String("banner"));
+        Small Message(Event Player, Custom String("p6 done"));
+        Wait(0.05, Abort When False);
+        Wait Until(Compare(Global Variable(g), ==, 1), 5);
+        Loop If Condition Is True;
+        Abort If(Compare(Global Variable(g), ==, 0));
+        Set Invisible(Event Player, All);
+        Set Gravity(Event Player, 1);
+        Set Allowed Heroes(Event Player, Array(Hero(Ana), Hero(Ana)));
+        Force Player Hero(Event Player, Hero(Ana));
+        Stop Forcing Hero(Event Player);
+        Force Throttle(Event Player, 1, 1, 1, 1, 1, 1);
+        Stop Forcing Throttle(Event Player);
+        Teleport(Event Player, Vector(0, 0, 0));
+        Start Camera(Event Player, Vector(0, 0, 0), Vector(1, 0, 0), 0);
+        Stop Camera(Event Player);
+        Disable Game Mode HUD(Event Player);
+        Enable Game Mode HUD(Event Player);
+        Disable Game Mode In-World UI(Event Player);
+        Enable Game Mode In-World UI(Event Player);
+        Disable Hero HUD(Event Player);
+        Enable Hero HUD(Event Player);
+        Disable Scoreboard(Event Player);
+        Enable Scoreboard(Event Player);
+        Disable Movement Collision With Environment(Event Player, 1);
+        Enable Movement Collision With Environment(Event Player);
+        Disable Movement Collision With Players(Event Player);
+        Enable Movement Collision With Players(Event Player);
+        Disallow Button(Event Player, Button(Ability 1));
+        Allow Button(Event Player, Button(Ability 1));
+        Create HUD Text(All Players(All Teams), Custom String("banned"), Null, Null, Left, 1, Color(Red), Color(White), Color(White), Visible To, Visible Always);
+        Create In-World Text(All Players(All Teams), Custom String("banner"), Vector(0, 0, 0), 3, Do Not Clip, Visible To and Color, Color(White), Visible Always);
+        Play Effect(All Players(All Teams), Buff Impact Sound, Color(White), Vector(0, 0, 0), 2);
+        Start Game Mode;
+        Destroy HUD Text(Last Text ID);
+        Destroy In-World Text(Last Text ID);
+        Destroy Effect(Last Created Entity);
+        Destroy All Progress Bar HUD Text;
+        Destroy All Progress Bar In-World Text;
+        Delete All Classes;
+        Stop Chasing Variable(Global Variable(g));
+    }
+}

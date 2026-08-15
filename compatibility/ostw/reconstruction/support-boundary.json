@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "surface": "wright-ostw-reconstruct-v1",
+  "declared": "The fixture-evidenced Workshop surface reconstructed by wright_ostw::reconstruct (#125). The reconstructor converts validated WIR whose constructs lie on this surface into deterministic canonical OSTW that the native wright-ostw frontend accepts; constructs outside the surface fail explicitly with structured diagnostics and no partial output.",
+  "supported": {
+    "valueKinds": [
+      "number", "string", "bool", "null", "array", "vector", "enum",
+      "globalVariable", "playerVariable", "eventPlayer", "call"
+    ],
+    "actionKinds": [
+      "setGlobalVariable", "modifyGlobalVariable", "setPlayerVariable",
+      "modifyPlayerVariable", "callSubroutine", "if", "while",
+      "forGlobalVariable", "call", "return"
+    ],
+    "modifyOps": ["Add", "Subtract", "Multiply", "Divide", "Modulo", "AppendToArray"],
+    "events": ["Global", "EachPlayer", "Subroutine"],
+    "boundValueIds": [
+      "abilityIconString", "allDamageHeroes", "allHeroes", "allPlayers",
+      "allSupportHeroes", "allTankHeroes", "allowedHeroes", "arrayContains",
+      "countOf", "crossProduct", "currentMap", "customColor",
+      "directionFromAngles", "evaluateOnce", "filteredArray",
+      "forward", "hasSpawned", "heroIconString", "horizontalAngleFromDirection",
+      "iconString", "indexOfArrayValue", "inputBindingString", "isButtonHeld",
+      "isInSpawnRoom", "isTrueForAll", "isWaitingForPlayers", "lastCreatedEntity",
+      "lastOf", "lastTextId", "localPlayer", "max", "min",
+      "numberOfPlayers", "oppositeTeamOf", "randomValueInArray",
+      "roundToInteger", "teamOf", "updateEveryFrame",
+      "verticalAngleFromDirection", "workshopSettingCombo",
+      "workshopSettingInteger", "workshopSettingToggle"
+    ],
+    "boundActionIds": [
+      "abortIf", "allowButton", "bigMessage", "createHudText",
+      "createInWorldText", "deleteAllClasses", "destroyAllProgressBarHudText",
+      "destroyAllProgressBarInWorldText", "destroyEffect", "destroyHudText",
+      "destroyInWorldText", "disableGameModeHud", "disableGameModeInworldUI",
+      "disableHeroHud", "disableMovementCollisionWithEnvironment",
+      "disableMovementCollisionWithPlayers", "disableScoreboard",
+      "disallowButton", "enableGameModeHud", "enableGameModeInworldUI",
+      "enableHeroHud", "enableMovementCollisionWithEnvironment",
+      "enableMovementCollisionWithPlayers", "enableScoreboard",
+      "forcePlayerHero", "forceThrottle", "loopIfConditionIsTrue", "playEffect",
+      "setAllowedHeroes", "setGravity", "setInvisibility", "smallMessage",
+      "startCamera", "startGameMode", "stopCamera", "stopChasingVariable",
+      "stopForcingHero", "stopForcingThrottle", "teleport", "wait", "waitUntil"
+    ],
+    "syntaxValueIds": [
+      "==", "!=", "<", "<=", ">", ">=", "and", "or", "not", "add", "subtract",
+      "multiply", "divide", "array", "vector", "valueInArray", "ifThenElse",
+      "customString", "eventPlayer"
+    ],
+    "syntaxActionIds": ["abort"],
+    "enumDomains": [
+      "Button", "Clipping", "Color", "DynamicEffect", "Hero", "HudPosition",
+      "HudReeval", "Icon", "Invis", "InworldTextReeval", "Map", "Rounding",
+      "SpecVisibility", "Team", "Wait"
+    ],
+    "enumMembers": [
+      "Button.ABILITY_1", "Button.ABILITY_2", "Clipping.DO_NOT_CLIP",
+      "Color.RED", "Color.WHITE", "DynamicEffect.BUFF_IMPACT_SOUND",
+      "Hero.ANA", "HudPosition.LEFT", "HudReeval.VISIBILITY", "Icon.SKULL",
+      "Invis.ALL", "InworldTextReeval.VISIBLE_TO_AND_COLOR", "Map.HANAMURA",
+      "Rounding.DOWN", "Rounding.UP", "SpecVisibility.VISIBLE_ALWAYS",
+      "Team.ALL", "Wait.ABORT_WHEN_FALSE", "Wait.IGNORE_CONDITION"
+    ]
+  },
+  "rejected": [
+    { "kind": "forPlayerVariable", "code": "reconstruct-unsupported-action", "reason": "The per-player loop form has no OSTW source form on the declared surface (the frontend lowers loop counters as globals)." },
+    { "kind": "debug", "code": "reconstruct-unsupported-action", "reason": "Wright's dedicated debug action has no OSTW source binding." },
+    { "kind": "print", "code": "reconstruct-unsupported-action", "reason": "Wright's dedicated print action has no OSTW source binding." },
+    { "kind": "settings", "code": "reconstruct-unsupported-program-settings", "reason": "Custom-game settings (Program.settings) have no OSTW source form." },
+    { "kind": "unboundAction", "code": "reconstruct-unbound-call", "reason": "An action call whose catalog id has no OSTW source binding (e.g. createBeamEffect) cannot be emitted." },
+    { "kind": "unboundValue", "code": "reconstruct-unbound-call", "reason": "A value call whose catalog id has no OSTW source binding (e.g. getHealth) cannot be emitted." },
+    { "kind": "unboundEnum", "code": "reconstruct-unbound-enum", "reason": "An enum domain/member with no OSTW source binding cannot be emitted." },
+    { "kind": "modifyOp:RaiseToPower", "code": "reconstruct-unsupported-modify-op", "reason": "Raise To Power has no OSTW augmented-assignment form on the declared surface." },
+    { "kind": "modifyOp:RemoveFromArray", "code": "reconstruct-unsupported-modify-op", "reason": "Remove From Array has no OSTW augmented-assignment form on the declared surface." },
+    { "kind": "condition", "code": "reconstruct-unsupported-condition", "reason": "A rule condition that is not a two-operand comparison call would render as `value == True` in the shared Workshop emitter and cannot round-trip." },
+    { "kind": "arity", "code": "reconstruct-arity", "reason": "A bound call supplying fewer or more arguments than the canonical catalog arity would be re-resolved by the frontend with default filling or rejected; full canonical arity is required for a byte-stable round trip." },
+    { "kind": "nameCollision", "code": "reconstruct-name-collision", "reason": "Variable/subroutine names colliding with builtin source names, enum domain source names, or each other (global vs player) would be shadowed by the frontend's resolution." },
+    { "kind": "emptyName", "code": "reconstruct-name-collision", "reason": "An empty variable/subroutine name is not a valid OSTW identifier." },
+    { "kind": "subroutine", "code": "reconstruct-unsupported-subroutine", "reason": "A subroutine without its single non-empty, condition-free body rule cannot round-trip (the Workshop emitter drops empty-action rules)." },
+    { "kind": "playerModifyReceiver", "code": "reconstruct-unsupported-player-receiver", "reason": "A player-variable modify with a non-Event-Player receiver would lower back as a Set with a binary value, not a Modify." },
+    { "kind": "formatText", "code": "reconstruct-unsupported-format-text", "reason": "A customString/format value whose text argument is not a string literal cannot be emitted as a `<\"...\">` format string." },
+    { "kind": "formatArg", "code": "reconstruct-unsupported-format-arg", "reason": "A strict-greater comparison inside a reconstructed format string would terminate the OSTW `<\"...\"` string." },
+    { "kind": "number", "code": "reconstruct-unsupported-number", "reason": "A number spelling outside the OSTW lexer's `[0-9]+(\\.[0-9]+)?` form cannot round-trip." }
+  ],
+  "fixtures": {
+    "positive": ["surface-basic", "surface-actions", "surface-values"],
+    "reject": ["for-player-variable"]
+  },
+  "notes": [
+    "Variable-table identity (names, slots, player-vs-global placement) is outside the declared semantic comparison (the #119 normalization contract); the reconstructor emits `Any`-typed declarations and never recovers original types, indexes, comments, classes, macros, functions, or project structure. `Any` is the permissive universal OSTW type: the WIR carries no type information, and both the native frontend and the pinned v3.4.0 reference accept it.",
+    "Arithmetic values (catalog ids add/subtract/multiply/divide) are emitted as the real OSTW infix operators `+ - * /` (the reference rejects callable `Add(...)` forms); the shared Workshop emitter canonicalizes them back to the catalog spellings, so the round trip is byte-stable.",
+    "The reconstructed `.append(value)` form for the Workshop Modify-Append-To-Array action is accepted by Wright's native frontend (the declared acceptance bar) but the pinned v3.4.0 reference rejects member-call methods (documented divergence; recorded in the optional oracle cross-check under the reference-only contract).",
+    "The reverse binding table in wright-ostw/src/signature.rs contains additional emittable catalog ids beyond the declared surface (e.g. skip, emptyArray, appendToArray, removeFromArray, arrayElement, currentArrayIndex, chaseVariableAtRate, createEffect, modifyGlobalVariable, mappedArray, sortedArray); they are emittable through the same reverse bindings but are not fixture-evidenced on the reconstruction path and are not part of this declared surface.",
+    "Reconstructed OSTW always targets a single generated project root (ds.toml with entry_point plus main.ostw) inside the native frontend; no CLI/driver integration is added by #125.",
+    "The full loop `Workshop -> WIR -> OSTW -> native frontend -> HIR -> WIR -> Workshop` is proven by the committed fixtures under compatibility/ostw/reconstruction/ and the integration suite in crates/wright-ostw/tests/reconstruct.rs, which writes target/wright-ostw-reconstruct-report.json."
+  ]
+}

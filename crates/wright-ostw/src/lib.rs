@@ -18,6 +18,7 @@ pub mod diag;
 pub mod lexer;
 pub mod parser;
 pub mod project;
+pub mod reconstruct;
 pub mod semantic;
 pub mod signature;
 

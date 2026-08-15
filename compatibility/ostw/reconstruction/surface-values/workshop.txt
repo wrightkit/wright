@@ -1,0 +1,60 @@
+variables
+{
+    global:
+        0: g
+        1: arr
+}
+
+rule("Reconstruction surface: values")
+{
+    event
+    {
+        Ongoing - Global;
+    }
+    actions
+    {
+        Set Global Variable(g, Max(1, 2));
+        Set Global Variable(g, Min(1, 2));
+        Set Global Variable(g, Count Of(Array(1, 2, 3)));
+        Set Global Variable(g, Value In Array(Array(1, 2, 3), 1));
+        Set Global Variable(g, Array Contains(Array(1, 2, 3), 2));
+        Set Global Variable(g, Index Of Array Value(Array(1, 2, 3), 2));
+        Set Global Variable(g, Last Of(Array(1, 2, 3)));
+        Set Global Variable(g, Random Value In Array(Array(1, 2, 3)));
+        Set Global Variable(g, Filtered Array(Array(1, 2, 3), Compare(Global Variable(g), <, 5)));
+        Set Global Variable(g, Is True For All(Array(1, 2, 3), Compare(Global Variable(g), <, 5)));
+        Set Global Variable(g, Team Of(Event Player));
+        Set Global Variable(g, Opposite Team Of(Team(All Teams)));
+        Set Global Variable(g, Number Of Players(Team(All Teams)));
+        Set Global Variable(g, Has Spawned(Event Player));
+        Set Global Variable(g, Is In Spawn Room(Event Player));
+        Set Global Variable(g, Is Waiting For Players);
+        Set Global Variable(g, Is Button Held(Event Player, Button(Ability 2)));
+        Set Global Variable(g, Current Map);
+        Set Global Variable(g, Evaluate Once(Global Variable(g)));
+        Set Global Variable(g, Update Every Frame(Global Variable(g)));
+        Set Global Variable(g, Last Created Entity);
+        Set Global Variable(g, Last Text ID);
+        Set Global Variable(g, Hero Icon String(Hero(Ana)));
+        Set Global Variable(g, Ability Icon String(Hero(Ana), Button(Ability 2)));
+        Set Global Variable(g, Icon String(Icon(Skull)));
+        Set Global Variable(g, Input Binding String(Button(Ability 2)));
+        Set Global Variable(g, Custom Color(255, 0, 0, 255));
+        Set Global Variable(g, Cross Product(Vector(1, 0, 0), Vector(0, 1, 0)));
+        Set Global Variable(g, Direction From Angles(0, 90));
+        Set Global Variable(g, Horizontal Angle From Direction(Vector(1, 0, 0)));
+        Set Global Variable(g, Vertical Angle From Direction(Vector(1, 0, 0)));
+        Set Global Variable(g, Forward);
+        Set Global Variable(g, Map(Hanamura));
+        Set Global Variable(g, All Heroes);
+        Set Global Variable(g, All Tank Heroes);
+        Set Global Variable(g, All Damage Heroes);
+        Set Global Variable(g, All Support Heroes);
+        Set Global Variable(g, Allowed Heroes(Event Player));
+        Set Global Variable(g, Local Player);
+        Set Global Variable(g, Workshop Setting Integer(Custom String("6. Interface"), Custom String("Integer"), 5, 0, 10, 3));
+        Set Global Variable(g, Workshop Setting Toggle(Custom String("6. Interface"), Custom String("Toggle"), True, 5));
+        Set Global Variable(g, Workshop Setting Combo(Custom String("6. Interface"), Custom String("Combo"), 1, Array(Custom String("A"), Custom String("B")), 2));
+        Set Global Variable(g, Round To Integer(3.5, Down));
+    }
+}

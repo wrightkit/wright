@@ -125,6 +125,53 @@ arithmetic (the fold pass restores it on the Wright side).
   rules remains deferred; the accepted targets use `Event Player` only in
   Ongoing Player rules.
 
+## Workshop → OSTW reconstruction surface (#125)
+
+The reverse direction is owned by `crates/wright-ostw/src/reconstruct.rs`:
+`wright_ostw::reconstruct::reconstruct` converts a validated `wir::Program`
+whose constructs lie on the declared reconstruction surface into
+deterministic canonical OSTW source, and **rejects** everything else with
+structured, machine-readable diagnostics and no partial output. The declared
+surface, the machine-readable boundary manifest, and the committed fixtures
+match exactly (`compatibility/ostw/reconstruction/`):
+
+- **Supported**: variables (`globalvar Any`/`playervar Any`, the permissive
+  universal type — the WIR carries no type info and the pinned reference
+  requires a type), rules with Global/Each Player events and comparison
+  conditions, subroutines (`void name() "…" { … }`), set/modify assignments
+  (`=`, `+=`, `-=`, `*=`, `/=`, `%=`, `.append(value)`), `if`/`else if`/
+  `else`, `while`, `for (v = start; stop; step)`, `Call Subroutine`, `return`
+  (rule-level `Abort`), scalar/array/vector/enum values, global/player
+  variable access, `Event Player`, arithmetic (`+ - * /` infix, the real OSTW
+  operator forms — the reference rejects callable `Add(...)`), comparison/
+  logical/ternary/format-string values, and the catalog actions/values named
+  in the manifest (source names reverse the `signature.rs` binding table; the
+  catalog is the identity source).
+- **Rejected** (never misleading output): `For Player Variable`, Wright's
+  `debug`/`print` actions, custom-game `Program.settings`, calls/values/enums
+  with no OSTW source binding, `Raise To Power`/`Remove From Array` modify
+  operations, non-comparison rule conditions, partial-arity bound calls,
+  name collisions, bodiless subroutines, and non-literal format strings
+  (`support-boundary.json` lists every kind with its diagnostic code).
+- **Not recovered** (non-goals): variable types/indexes, original
+  formatting/comments, classes, macros, functions, and project structure.
+  Variable-table identity is outside the declared #119 semantic comparison.
+- **Reference divergence**: the reconstructed `.append(value)` form (from
+  the Workshop Modify-Append-To-Array action) is accepted by Wright's native
+  frontend, but the pinned OSTW v3.4.0 reference rejects member-call methods;
+  the optional oracle cross-check records exactly this one remaining
+  rejection (`target/ostw-reference`, reference-only by contract).
+
+The full loop `Workshop → WIR → OSTW → native frontend → HIR → WIR →
+Workshop` is proven per committed fixture with zero frontend diagnostics, the
+declared #119 normalization applied to both sides, structural equality, and
+the round-trip fixed point (reconstructed Workshop reparses and re-emits
+byte-identically). The suite is `crates/wright-ostw/tests/reconstruct.rs`,
+writing `target/wright-ostw-reconstruct-report.json`; the boundary conformance
+test checks the manifest, the shipped classification API, and fixture
+coverage against each other. A `ds.toml` project root (`entry_point`) is
+generated in-test; no CLI/driver integration is added by #125.
+
 ## Evidence
 
 - `compatibility/ostw/probes/{p4-types-expressions,p5-functions-control,p6-catalog-signatures}/`
@@ -134,6 +181,13 @@ arithmetic (the fold pass restores it on the Wright side).
   `differential-target` designation.
 - `crates/wright-ostw/tests/differential.rs` — the CI-protected
   forward-compilation differential + round-trip fixed-point gate.
+- `compatibility/ostw/reconstruction/` — deterministic reconstruction
+  fixtures (`surface-*` positive Workshop sources, `reject/` rejection
+  sources) and the machine-readable `support-boundary.json` manifest; the
+  #125 reverse-compilation evidence.
+- `crates/wright-ostw/tests/reconstruct.rs` — the CI-protected
+  reconstruction full-loop gate (`target/wright-ostw-reconstruct-report.json`)
+  and the boundary-conformance test.
 - `crates/wright-workshop/src/catalog/data/catalog.json` — canonical catalog
   with `paramDefaults` (probe-evidenced) and the `abort` action.
 - `docs/ostw/compatibility-baseline.md` — the explicit-root evidence model
