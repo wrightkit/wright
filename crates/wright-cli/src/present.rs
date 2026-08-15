@@ -81,8 +81,13 @@ fn render_ostw_summary<T: serde::Serialize>(envelope: &Envelope<T>) {
                 .unwrap_or(false)
         })
         .count();
+    let inventory = ostw
+        .get("inventory")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| list.len())
+        .unwrap_or(0);
     println!(
-        "ostw project: entry {entry}, {parsed}/{} source files parsed",
+        "ostw project: entry {entry}, {parsed}/{} import-reachable sources parsed (inventory {inventory})",
         sources.len()
     );
     for file in &files {

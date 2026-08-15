@@ -1,9 +1,11 @@
 //! Corpus-driven frontend regressions (#117): the real committed protect-ban
-//! closure must load and parse natively, quoted imports resolve with correct
-//! multi-file provenance, and deterministic negative fixtures cover malformed
-//! syntax, missing imports, invalid entry points, and unsupported ds.toml
-//! configuration. Assertions are on observable outcomes, never on hardcoded
-//! parse trees.
+//! project must load with compilation membership equal to the `ds.toml`
+//! entry-point import closure, quoted imports resolve with correct
+//! multi-file provenance, unreachable sources never contribute project
+//! diagnostics, and deterministic negative fixtures cover malformed syntax,
+//! missing imports, invalid entry points, unsupported ds.toml configuration,
+//! reachability flips, and cycle/duplicate determinism. Assertions are on
+//! observable outcomes, never on hardcoded parse trees.
 
 use std::path::{Path, PathBuf};
 
@@ -28,8 +30,8 @@ fn compile_project(root: &Path, main_rel: &str) -> OstwOutcome {
     wright_ostw::compile(&main_text, Some(main_rel), root)
 }
 
-/// The 16 committed protect-ban source files (project-relative).
-const PROTECT_BAN_SOURCES: &[&str] = &[
+/// The 16 committed protect-ban source files in the workspace inventory.
+const PROTECT_BAN_INVENTORY: &[&str] = &[
     "Credits.ostw",
     "coreDebug.ostw",
     "interface/ClickArea.del",
@@ -48,6 +50,17 @@ const PROTECT_BAN_SOURCES: &[&str] = &[
     "utils/ServerLoad.del",
 ];
 
+/// The 7 entry-point import-reachable files of protect-ban (`main.ostw`).
+const PROTECT_BAN_CLOSURE: &[&str] = &[
+    "main.ostw",
+    "Credits.ostw",
+    "interface/HeroSelect.del",
+    "interface/miscSetup.del",
+    "interface/HeroSelectConfig.del",
+    "interface/HeroSelectFunctions.del",
+    "interface/MapData.del",
+];
+
 fn sources(outcome: &OstwOutcome) -> Vec<&FileRecord> {
     outcome
         .project
@@ -60,7 +73,9 @@ fn sources(outcome: &OstwOutcome) -> Vec<&FileRecord> {
 }
 
 #[test]
-fn entire_protect_ban_closure_loads_and_parses() {
+fn protect_ban_compilation_membership_is_the_entry_point_closure() {
+    // Compilation membership = the entry-point import closure: exactly the 7
+    // reachable files parse; unreachable-file defects contribute nothing.
     let outcome = compile_project(&corpus_root(), "main.ostw");
     assert!(
         outcome.error.is_none(),
@@ -71,12 +86,16 @@ fn entire_protect_ban_closure_loads_and_parses() {
     assert_eq!(project.entry, "main.ostw", "ds.toml entry_point");
 
     let files = sources(&outcome);
-    assert_eq!(files.len(), PROTECT_BAN_SOURCES.len());
-    for source in PROTECT_BAN_SOURCES {
+    assert_eq!(
+        files.len(),
+        PROTECT_BAN_CLOSURE.len(),
+        "only the import-reachable closure is compiled"
+    );
+    for source in PROTECT_BAN_CLOSURE {
         let record = files
             .iter()
             .find(|file| file.path == *source)
-            .unwrap_or_else(|| panic!("missing source {source} in the registry"));
+            .unwrap_or_else(|| panic!("missing closure source {source} in the registry"));
         assert!(record.parsed, "{} must parse cleanly", record.path);
         assert!(record.cst.is_some(), "{} must carry its CST", record.path);
     }
@@ -93,9 +112,9 @@ fn entire_protect_ban_closure_loads_and_parses() {
         parse_errors
     );
 
-    // The only diagnostics are the known out-of-closure missing imports.
-    // (HeroSelect.del's `import "../OSTWUtils/Diagnostics.del"` sits inside a
-    // block comment and is correctly not an import.)
+    // Exactly the 3 reachable OSTWUtils missing imports appear. Unreachable
+    // defects (e.g. protectBanFull.ostw's `customGameSettings.lobby` import)
+    // contribute nothing.
     let missing: Vec<_> = outcome
         .diagnostics
         .iter()
@@ -103,15 +122,41 @@ fn entire_protect_ban_closure_loads_and_parses() {
         .collect();
     assert_eq!(
         missing.len(),
-        4,
-        "protect-ban has 4 out-of-closure imports (customGameSettings.lobby + 3 OSTWUtils): {:?}",
+        3,
+        "only reachable missing imports appear: {:?}",
         outcome.diagnostics
     );
-    for diagnostic in missing {
+    for diagnostic in &missing {
         assert!(
             diagnostic.span.is_some(),
             "missing-import diagnostics carry a source location"
         );
+    }
+
+    // The workspace inventory is distinct and retains all 16 sources.
+    assert_eq!(
+        project.inventory, PROTECT_BAN_INVENTORY,
+        "the inventory is the full workspace source list"
+    );
+}
+
+#[test]
+fn protect_ban_inventory_parses_for_robustness_only() {
+    // All-protect-ban-files parser robustness: every inventory source lexes
+    // and parses cleanly through the shipped frontend functions. This is a
+    // parser-robustness check over the inventory, not a compilation-membership
+    // or project-success assertion (unreachable files are not compilation
+    // members).
+    for source in PROTECT_BAN_INVENTORY {
+        let path = corpus_root().join(source);
+        let text = read(&path);
+        let tokens = wright_ostw::lexer::lex(wright_ostw::lexer::LexInput {
+            file_id: FileId::from_index(0),
+            text: &text,
+        })
+        .unwrap_or_else(|error| panic!("{source} must lex: {error}"));
+        wright_ostw::parser::parse(tokens)
+            .unwrap_or_else(|error| panic!("{source} must parse: {error}"));
     }
 }
 
@@ -152,12 +197,10 @@ fn quoted_imports_resolve_relative_to_the_importing_file() {
         "../main.ostw from interface/ resolves to the root main.ostw"
     );
 
-    // `../utils/ScreenToWorld.del` from interface/ClickArea.del.
-    let click_area = by_path("interface/ClickArea.del");
-    let screen_to_world = by_path("utils/ScreenToWorld.del");
-    let edge = &click_area.imports[0];
-    assert_eq!(edge.path, "../utils/ScreenToWorld.del");
-    assert_eq!(edge.target, Some(screen_to_world.id));
+    // The closure contains each file exactly once despite the corpus's
+    // import cycles (main <-> HeroSelect/miscSetup, HeroSelect <->
+    // HeroSelectConfig <-> HeroSelectFunctions).
+    assert_eq!(sources(&outcome).len(), 7, "each file appears once");
 
     // Out-of-closure imports resolve to None (missing). The
     // `../OSTWUtils/Diagnostics.del` import in HeroSelect.del is inside a
@@ -176,7 +219,6 @@ fn quoted_imports_resolve_relative_to_the_importing_file() {
             "../OSTWUtils/OnScreenText.del".to_string(),
             "../OSTWUtils/Cursor.del".to_string(),
             "../OSTWUtils/StringSorting.del".to_string(),
-            "customGameSettings.lobby".to_string(),
         ]
     );
 }
@@ -236,6 +278,19 @@ fn temp_project(content: Vec<(String, String)>) -> PathBuf {
 fn compile_temp(root: &Path, main_rel: &str) -> OstwOutcome {
     let main_text = read(&root.join(main_rel));
     wright_ostw::compile(&main_text, Some(main_rel), root)
+}
+
+fn project_of(outcome: &OstwOutcome) -> &wright_ostw::Project {
+    outcome.project.as_ref().expect("project loads")
+}
+
+fn source_paths(outcome: &OstwOutcome) -> Vec<String> {
+    project_of(outcome)
+        .files
+        .iter()
+        .filter(|file| file.source)
+        .map(|file| file.path.clone())
+        .collect()
 }
 
 #[test]
@@ -348,6 +403,193 @@ fn missing_ds_toml_is_structured() {
         .error
         .expect("a missing ds.toml is a project-load error");
     assert_eq!(error.code, "ostw-ds-toml-missing");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// -- compilation-graph regressions -------------------------------------------
+
+#[test]
+fn unreachable_broken_source_does_not_fail_the_project() {
+    // A source with broken syntax that is not reachable from the entry must
+    // not fail the project or produce any diagnostic.
+    let root = temp_project(vec![
+        (
+            "ds.toml".to_string(),
+            "entry_point=\"main.ostw\"\n".to_string(),
+        ),
+        ("main.ostw".to_string(), "rule: \"r\" {}\n".to_string()),
+        (
+            "broken.ostw".to_string(),
+            "globalvar Number x = ;\n".to_string(),
+        ),
+    ]);
+    let outcome = compile_temp(&root, "main.ostw");
+    assert!(outcome.error.is_none());
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "unreachable broken syntax contributes nothing: {:?}",
+        outcome.diagnostics
+    );
+    assert_eq!(
+        source_paths(&outcome),
+        vec!["main.ostw"],
+        "only the entry is a compilation member"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn unreachable_missing_import_does_not_fail_the_project() {
+    // A source with a missing import that is not reachable from the entry
+    // must not produce a missing-import diagnostic.
+    let root = temp_project(vec![
+        (
+            "ds.toml".to_string(),
+            "entry_point=\"main.ostw\"\n".to_string(),
+        ),
+        ("main.ostw".to_string(), "rule: \"r\" {}\n".to_string()),
+        (
+            "orphan.del".to_string(),
+            "import \"gone/File.del\";\nrule: \"o\" {}\n".to_string(),
+        ),
+    ]);
+    let outcome = compile_temp(&root, "main.ostw");
+    assert!(outcome.error.is_none());
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "unreachable missing imports contribute nothing: {:?}",
+        outcome.diagnostics
+    );
+    assert_eq!(source_paths(&outcome), vec!["main.ostw"]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn making_a_source_reachable_surfaces_its_diagnostic() {
+    // The reachability flip: an unreachable source's defect is hidden; once
+    // the entry closure imports it, the structured source-located diagnostic
+    // appears; removing the import hides it again.
+    let mk = |import: bool| {
+        let mut content = vec![
+            (
+                "ds.toml".to_string(),
+                "entry_point=\"main.ostw\"\n".to_string(),
+            ),
+            (
+                "main.ostw".to_string(),
+                if import {
+                    "import \"broken.del\";\nrule: \"r\" {}\n".to_string()
+                } else {
+                    "rule: \"r\" {}\n".to_string()
+                },
+            ),
+            (
+                "broken.del".to_string(),
+                "import \"gone/File.del\";\nrule: \"b\" {}\n".to_string(),
+            ),
+        ];
+        // `gone/File.del` intentionally does not exist: broken.del's defect
+        // is the missing import, surfaced only once broken.del is reachable.
+        if !import {
+            content.push(("unused.del".to_string(), "Number x: 1;\n".to_string()));
+        }
+        temp_project(content)
+    };
+
+    let hidden = compile_temp(&mk(false), "main.ostw");
+    assert!(
+        hidden.diagnostics.is_empty(),
+        "unreachable: no diagnostic: {:?}",
+        hidden.diagnostics
+    );
+    assert_eq!(source_paths(&hidden), vec!["main.ostw"]);
+
+    let visible = compile_temp(&mk(true), "main.ostw");
+    let missing = visible
+        .diagnostics
+        .iter()
+        .find(|error| error.code == "ostw-missing-import")
+        .expect("reachable broken import surfaces ostw-missing-import");
+    let span = missing.span.expect("diagnostic is source-located");
+    assert_eq!(span.file, FileId::from_index(2), "points at broken.del");
+    assert_eq!(
+        source_paths(&visible),
+        vec!["main.ostw", "broken.del"],
+        "broken.del is now a compilation member"
+    );
+
+    let _ = std::fs::remove_dir_all(mk(false));
+    let _ = std::fs::remove_dir_all(mk(true));
+}
+
+#[test]
+fn cycles_and_duplicate_imports_are_deterministic() {
+    // A cycle (a <-> b) plus duplicate imports must include each file once,
+    // produce no duplicate diagnostics, and be byte-stable across loads.
+    let root = temp_project(vec![
+        (
+            "ds.toml".to_string(),
+            "entry_point=\"main.ostw\"\n".to_string(),
+        ),
+        (
+            "main.ostw".to_string(),
+            "import \"a.del\";\nimport \"a.del\";\nimport \"b.del\";\nrule: \"m\" {}\n".to_string(),
+        ),
+        (
+            "a.del".to_string(),
+            "import \"b.del\";\nrule: \"a\" {}\n".to_string(),
+        ),
+        (
+            "b.del".to_string(),
+            "import \"a.del\";\nrule: \"b\" {}\n".to_string(),
+        ),
+    ]);
+    let first = compile_temp(&root, "main.ostw");
+    let second = compile_temp(&root, "main.ostw");
+    assert_eq!(format!("{first:?}"), format!("{second:?}"), "byte-stable");
+
+    assert!(first.error.is_none());
+    assert!(
+        first.diagnostics.is_empty(),
+        "no duplicate diagnostics from the cycle/duplicates: {:?}",
+        first.diagnostics
+    );
+    assert_eq!(
+        source_paths(&first),
+        vec!["main.ostw", "a.del", "b.del"],
+        "each file appears exactly once"
+    );
+    // The duplicate `import "a.del"` produces two resolved edges, both to the
+    // same file id — never a diagnostic.
+    let main = project_of(&first)
+        .files
+        .iter()
+        .find(|file| file.path == "main.ostw")
+        .unwrap();
+    assert_eq!(
+        main.imports
+            .iter()
+            .filter(|import| import.path == "a.del")
+            .count(),
+        2
+    );
+    let a = project_of(&first)
+        .files
+        .iter()
+        .find(|file| file.path == "a.del")
+        .unwrap();
+    assert_eq!(
+        a.imports[0].target,
+        Some(
+            project_of(&first)
+                .files
+                .iter()
+                .find(|file| file.path == "b.del")
+                .unwrap()
+                .id
+        ),
+        "cycle edge a -> b resolves"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 

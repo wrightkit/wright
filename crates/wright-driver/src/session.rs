@@ -819,6 +819,7 @@ fn ostw_project_summary(outcome: &wright_ostw::OstwOutcome) -> OstwProjectSummar
         return OstwProjectSummary {
             entry: String::new(),
             files: Vec::new(),
+            inventory: Vec::new(),
         };
     };
     let path_by_id: std::collections::BTreeMap<u32, String> = project
@@ -848,6 +849,7 @@ fn ostw_project_summary(outcome: &wright_ostw::OstwOutcome) -> OstwProjectSummar
     OstwProjectSummary {
         entry: project.entry.clone(),
         files,
+        inventory: project.inventory.clone(),
     }
 }
 

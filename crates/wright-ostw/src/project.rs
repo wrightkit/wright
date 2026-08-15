@@ -1,16 +1,22 @@
-//! The `ds.toml` project model and quoted-import resolution.
+//! The `ds.toml` project model, compilation graph, and quoted-import
+//! resolution.
 //!
 //! An OSTW project is defined by a `ds.toml` in the project root. This task
 //! supports the `entry_point` key (the project-relative entry source file)
-//! and rejects other configuration keys with a structured diagnostic. The
-//! project source set is the committed `.ostw`/`.del` closure under the
-//! root; quoted imports resolve relative to the importing file (handling
-//! `..`), and imports that resolve outside the closure become structured
-//! `ostw-missing-import` diagnostics rather than aborting the in-closure
-//! parse (#117). Every source file is lexed and parsed with exact spans
-//! through the shared `wright_ir::source` registry.
+//! and rejects other configuration keys with a structured diagnostic.
+//!
+//! Compilation membership follows the pinned reference's entry-point
+//! semantics (#117): the project's compilation graph starts at
+//! `ds.toml.entry_point` and recursively includes exactly the files reachable
+//! through resolved import statements (a visited set makes cycles and
+//! duplicate imports include each file once). Only reachable files are parsed
+//! and only their imports resolved for project/check diagnostics; an
+//! unreachable source with broken syntax or a missing import cannot make the
+//! entry-point project fail. The workspace/source inventory (every
+//! `.ostw`/`.del` under the root) is retained as a distinct, non-diagnostic
+//! structure for tooling.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
 use wright_ir::source::{FileId, Position, Span};
@@ -20,7 +26,8 @@ use crate::diag::{FrontendError, FrontendResult};
 use crate::lexer::{self, LexInput};
 use crate::parser;
 
-/// A resolved project file: `ds.toml` (id 0) and every `.ostw`/`.del` source.
+/// A compilation-graph file: `ds.toml` (id 0) and every entry-point
+/// import-reachable source.
 #[derive(Debug, Clone)]
 pub struct FileRecord {
     /// The registry id used by spans and import edges.
@@ -44,7 +51,7 @@ pub struct ResolvedImport {
     /// The path exactly as written in the import statement.
     pub path: String,
     pub span: Span,
-    /// The target file id when the import resolves inside the closure,
+    /// The target file id when the import resolves inside the project,
     /// `None` when it points outside it (a missing-import diagnostic).
     pub target: Option<u32>,
 }
@@ -54,15 +61,21 @@ pub struct ResolvedImport {
 pub struct Project {
     /// The `ds.toml` `entry_point` value.
     pub entry: String,
-    /// The project file registry: `ds.toml` at id 0, then every source.
+    /// The compilation graph: `ds.toml` at id 0, then the entry-point
+    /// import-reachable closure in deterministic walk order.
     pub files: Vec<FileRecord>,
+    /// The independent workspace/source inventory: every `.ostw`/`.del`
+    /// under the project root, in sorted order. Tooling only — it never
+    /// feeds project diagnostics or compilation membership.
+    pub inventory: Vec<String>,
 }
 
 /// The outcome of a project compile: the registry is retained even when
 /// diagnostics exist, so the driver can map spans to file identities.
 #[derive(Debug, Clone)]
 pub struct OstwOutcome {
-    /// The project file registry (always populated when `ds.toml` loads).
+    /// The project compilation graph (always populated when `ds.toml`
+    /// loads).
     pub project: Option<Project>,
     /// A fatal project-load error (`ds.toml` missing or invalid).
     pub error: Option<FrontendError>,
@@ -105,30 +118,13 @@ fn load(main_text: &str, main_path: Option<&str>, root: &Path) -> FrontendResult
         )
     })?;
 
-    // Registry: ds.toml is id 0; sources follow in deterministic path order.
-    let mut files = vec![FileRecord {
-        id: 0,
-        path: "ds.toml".to_string(),
-        source: false,
-        parsed: false,
-        imports: Vec::new(),
-        cst: None,
-    }];
-
     let (entry, mut diagnostics) = parse_ds_toml(&ds_text, 0);
 
-    let mut sources = walk_sources(root);
-    sources.sort();
-    for (index, path) in sources.iter().enumerate() {
-        files.push(FileRecord {
-            id: index as u32 + 1,
-            path: path.clone(),
-            source: true,
-            parsed: false,
-            imports: Vec::new(),
-            cst: None,
-        });
-    }
+    // The workspace/source inventory: every .ostw/.del under the root, in
+    // sorted order. This is the resolution universe and a tooling inventory;
+    // it is not compilation membership.
+    let mut inventory = walk_sources(root);
+    inventory.sort();
 
     let entry = match entry {
         Some(entry) => entry,
@@ -140,7 +136,15 @@ fn load(main_text: &str, main_path: Option<&str>, root: &Path) -> FrontendResult
             return Ok(OstwOutcome {
                 project: Some(Project {
                     entry: String::new(),
-                    files,
+                    files: vec![FileRecord {
+                        id: 0,
+                        path: "ds.toml".to_string(),
+                        source: false,
+                        parsed: false,
+                        imports: Vec::new(),
+                        cst: None,
+                    }],
+                    inventory,
                 }),
                 error: None,
                 diagnostics,
@@ -148,116 +152,172 @@ fn load(main_text: &str, main_path: Option<&str>, root: &Path) -> FrontendResult
         }
     };
 
-    // Validate the entry point against the source set.
-    if !files.iter().any(|file| file.source && file.path == entry) {
+    // Validate the entry point against the inventory.
+    if !inventory.iter().any(|path| path == &entry) {
         diagnostics.push(FrontendError::new(
             "ostw-entry-not-found",
             format!("entry_point '{entry}' is not a source file in the project"),
         ));
     }
 
-    // Parse every source file. The input file (when it is part of the
-    // closure) uses the caller-provided text so stdin/original text is
-    // preserved; everything else is read from disk.
+    // Build the compilation graph: breadth-first walk from the entry,
+    // following resolved import targets. A visited set makes cycles and
+    // duplicate imports include each file exactly once, and unreachable
+    // sources never enter the graph (so their defects produce no project
+    // diagnostics).
+    let mut files = vec![FileRecord {
+        id: 0,
+        path: "ds.toml".to_string(),
+        source: false,
+        parsed: false,
+        imports: Vec::new(),
+        cst: None,
+    }];
     let mut path_to_id: BTreeMap<String, u32> = BTreeMap::new();
-    for file in &files {
-        path_to_id.insert(file.path.clone(), file.id);
+    path_to_id.insert("ds.toml".to_string(), 0);
+    let mut visited: BTreeSet<String> = BTreeSet::new();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    if inventory.iter().any(|path| path == &entry) {
+        queue.push_back(entry.clone());
     }
-    let main_id = main_path.and_then(|path| path_to_id.get(path).copied());
-    for record in files.iter_mut() {
-        if !record.source {
+    // Imports whose target id is only known after the walk completes.
+    let mut pending_imports: Vec<PendingImport> = Vec::new();
+
+    while let Some(path) = queue.pop_front() {
+        if !visited.insert(path.clone()) {
             continue;
         }
-        let text = if Some(record.id) == main_id || (record.path == entry && main_path.is_none()) {
+        let id = files.len() as u32;
+        path_to_id.insert(path.clone(), id);
+        let text = if (path == entry && main_path.is_none()) || Some(path.as_str()) == main_path {
             main_text.to_string()
         } else {
-            match std::fs::read_to_string(root.join(&record.path)) {
+            match std::fs::read_to_string(root.join(&path)) {
                 Ok(text) => text,
                 Err(error) => {
                     diagnostics.push(FrontendError::new(
                         "ostw-source-unreadable",
-                        format!("cannot read '{}': {error}", record.path),
+                        format!("cannot read '{path}': {error}"),
                     ));
                     continue;
                 }
             }
         };
+        let mut record = FileRecord {
+            id,
+            path: path.clone(),
+            source: true,
+            parsed: false,
+            imports: Vec::new(),
+            cst: None,
+        };
         let tokens = match lexer::lex(LexInput {
-            file_id: FileId::from_index(record.id as usize),
+            file_id: FileId::from_index(id as usize),
             text: &text,
         }) {
             Ok(tokens) => tokens,
             Err(error) => {
                 diagnostics.push(error);
+                files.push(record);
                 continue;
             }
         };
         match parser::parse(tokens) {
             Ok(file) => {
+                let dir = parent_dir(&path);
+                let mut discovered = Vec::new();
+                for import in &file.imports {
+                    match resolve_import_path(&dir, &import.path) {
+                        None => {
+                            diagnostics.push(FrontendError::at(
+                                "ostw-missing-import",
+                                format!(
+                                    "import '{}' resolves outside the project closure",
+                                    import.path
+                                ),
+                                import.span,
+                            ));
+                            record.imports.push(ResolvedImport {
+                                path: import.path.clone(),
+                                span: import.span,
+                                target: None,
+                            });
+                        }
+                        Some(resolved) => {
+                            pending_imports.push(PendingImport {
+                                from: id,
+                                path: import.path.clone(),
+                                span: import.span,
+                                resolved: resolved.clone(),
+                            });
+                            discovered.push(resolved);
+                        }
+                    }
+                }
                 record.parsed = true;
                 record.cst = Some(file);
+                // Enqueue newly discovered targets (deduplicated on dequeue
+                // and via the queue membership check).
+                for target in discovered {
+                    if inventory.iter().any(|inv| inv == &target)
+                        && !visited.contains(&target)
+                        && !queue.contains(&target)
+                    {
+                        queue.push_back(target);
+                    }
+                }
             }
             Err(error) => {
                 diagnostics.push(error);
             }
         }
+        files.push(record);
     }
 
-    // Resolve imports relative to each importing file's directory.
-    for record in files.iter_mut() {
-        if !record.source {
-            continue;
+    // Resolve import targets against the final id map and surface
+    // missing-import diagnostics for in-closure import statements whose
+    // target is not part of the project.
+    for import in pending_imports {
+        let target = path_to_id.get(&import.resolved).copied();
+        if target.is_none() {
+            diagnostics.push(FrontendError::at(
+                "ostw-missing-import",
+                format!(
+                    "import '{}' does not exist in the project closure",
+                    import.path
+                ),
+                import.span,
+            ));
         }
-        let Some(cst) = &record.cst else {
-            continue;
-        };
-        let dir = parent_dir(&record.path);
-        let mut imports = Vec::new();
-        for import in &cst.imports {
-            let resolved = match resolve_import_path(&dir, &import.path) {
-                Some(path) => path,
-                None => {
-                    diagnostics.push(FrontendError::at(
-                        "ostw-missing-import",
-                        format!(
-                            "import '{}' resolves outside the project closure",
-                            import.path
-                        ),
-                        import.span,
-                    ));
-                    imports.push(ResolvedImport {
-                        path: import.path.clone(),
-                        span: import.span,
-                        target: None,
-                    });
-                    continue;
-                }
-            };
-            let target = path_to_id.get(&resolved).copied();
-            if target.is_none() {
-                diagnostics.push(FrontendError::at(
-                    "ostw-missing-import",
-                    format!(
-                        "import '{}' does not exist in the project closure",
-                        import.path
-                    ),
-                    import.span,
-                ));
-            }
-            imports.push(ResolvedImport {
-                path: import.path.clone(),
+        if let Some(record) = files.get_mut(import.from as usize) {
+            record.imports.push(ResolvedImport {
+                path: import.path,
                 span: import.span,
                 target,
             });
         }
-        record.imports = imports;
     }
 
     Ok(OstwOutcome {
-        project: Some(Project { entry, files }),
+        project: Some(Project {
+            entry,
+            files,
+            inventory,
+        }),
         error: None,
         diagnostics,
     })
+}
+
+/// An import statement whose target id is resolved after the graph walk.
+struct PendingImport {
+    /// The importing file's registry id.
+    from: u32,
+    /// The path exactly as written in the import statement.
+    path: String,
+    pub span: Span,
+    /// The lexically resolved project-relative path.
+    resolved: String,
 }
 
 /// Walk the project root for `.ostw`/`.del` source files (recursive),

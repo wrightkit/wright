@@ -952,7 +952,8 @@ fn collapse_whitespace(text: &str) -> String {
 fn ostw_projects_load_through_the_shared_session_path() {
     // `.ostw` extension detection maps to SourceKind::Ostw and the shared
     // CompilerSession load path invokes the native OSTW frontend, carrying
-    // the multi-file registry/provenance into the check result.
+    // the multi-file registry/provenance into the check result. Compilation
+    // membership is the entry-point import closure, not the whole inventory.
     let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
     let mut session = CompilerSession::new(SessionConfig::from_path(root.join("main.ostw")))
         .expect("session builds");
@@ -965,20 +966,26 @@ fn ostw_projects_load_through_the_shared_session_path() {
     let sources: Vec<_> = project.files.iter().filter(|file| file.source).collect();
     assert_eq!(
         sources.len(),
-        16,
-        "the committed protect-ban source closure is 16 files"
+        7,
+        "the entry-point import-reachable closure is 7 files"
     );
     assert!(
         sources.iter().all(|file| file.parsed),
-        "every in-closure source file parses"
+        "every import-reachable source file parses"
     );
-    // The 4 out-of-closure imports are structured, source-located diagnostics.
-    assert_eq!(envelope.diagnostics.len(), 4);
+    assert_eq!(
+        project.inventory.len(),
+        16,
+        "the workspace inventory retains all 16 sources, distinct from membership"
+    );
+    // The 3 reachable OSTWUtils missing imports are structured,
+    // source-located diagnostics; unreachable defects contribute nothing.
+    assert_eq!(envelope.diagnostics.len(), 3);
     for diagnostic in &envelope.diagnostics {
         assert_eq!(diagnostic.code, "ostw-missing-import");
         assert!(diagnostic.span.is_some(), "missing imports carry spans");
     }
-    // Provenance: each missing-import span resolves to the right corpus file.
+    // Provenance: every missing-import span resolves to HeroSelect.del.
     let paths: std::collections::BTreeSet<_> = envelope
         .diagnostics
         .iter()
@@ -986,10 +993,7 @@ fn ostw_projects_load_through_the_shared_session_path() {
         .collect();
     assert_eq!(
         paths,
-        std::collections::BTreeSet::from([
-            "interface/HeroSelect.del".to_string(),
-            "protectBanFull.ostw".to_string(),
-        ])
+        std::collections::BTreeSet::from(["interface/HeroSelect.del".to_string()])
     );
 }
 

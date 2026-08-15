@@ -121,8 +121,12 @@ pub struct CheckResult {
 pub struct OstwProjectSummary {
     /// The `ds.toml` `entry_point` value.
     pub entry: String,
-    /// Every project file: `ds.toml` (id 0) then the source closure.
+    /// The compilation graph: `ds.toml` (id 0) then the entry-point
+    /// import-reachable closure.
     pub files: Vec<OstwFileSummary>,
+    /// The independent workspace/source inventory (every `.ostw`/`.del`
+    /// under the root) — tooling only, never compilation membership.
+    pub inventory: Vec<String>,
 }
 
 /// One project file's parse outcome.
