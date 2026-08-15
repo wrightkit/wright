@@ -13,6 +13,7 @@ Usage: python3 scripts/verify-dist.py
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -97,8 +98,13 @@ def main() -> None:
         fail("install.sh is a Unix-only installer and must not claim the Windows triple")
     print("ok: install.sh covers the declared Unix target matrix")
 
-    subprocess.run(["bash", "-n", str(REPO_ROOT / "install.sh")], check=True)
-    print("ok: install.sh shell syntax valid")
+    if os.name != "nt":
+        subprocess.run(["bash", "-n", str(REPO_ROOT / "install.sh")], check=True)
+        print("ok: install.sh shell syntax valid")
+    else:
+        # install.sh is a Unix-only installer (checked above); on Windows the
+        # `bash` on PATH is the WSL launcher, which fails without a distro.
+        print("skip: install.sh shell syntax check (Unix-only, no real bash on Windows)")
 
     # npm distribution validation (#121)
     meta_json_path = REPO_ROOT / "dist" / "npm" / "wright" / "package.json"
