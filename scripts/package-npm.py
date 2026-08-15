@@ -15,8 +15,10 @@ Usage:
 """
 
 import argparse
+import gzip
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import platform
@@ -186,6 +188,97 @@ def pack_directory(pkg_dir: Path, out_dir: Path) -> Path:
     return tarball_path
 
 
+# The bin entries every npm tarball must carry executable (0o755): the meta
+# package's JS launchers and each platform package's native binaries (and the
+# Windows .exe counterparts). `verify_tarball` enforces the exec bit on these.
+BIN_ENTRIES = {
+    "package/wright",
+    "package/wright-lsp",
+    "package/wright.exe",
+    "package/wright-lsp.exe",
+    "package/bin/wright.js",
+    "package/bin/wright-lsp.js",
+}
+
+
+def fixed_entry_metadata(version: str) -> tuple[int, int, int]:
+    """Host-independent uid/gid/mtime for every tar entry.
+
+    `npm pack` embeds the staged files' stat metadata verbatim. Windows cannot
+    set the executable bit (`os.chmod` is a no-op) and reports source modes
+    like 0o644/0o666, so a Windows source tree yields a tarball whose bytes
+    and bin-entry modes differ from a Unix pack. This derives a fixed stamp
+    deterministically from the version (uid 0, gid 0, a fixed epoch plus a
+    version-derived sub-day offset), so the same version always packs
+    identically on any host (#123).
+    """
+    digest = hashlib.sha256(version.encode("utf-8")).hexdigest()
+    # 0x60000000 is a fixed epoch well past the ustar minimum (1980); the
+    # version hash keeps the stamp stable per version without tying it to the
+    # wall clock.
+    mtime = 0x60000000 + (int(digest[:8], 16) % 86_400)
+    return 0, 0, mtime
+
+
+def normalize_tarball(tarball_path: Path, version: str) -> Path:
+    """Rewrite a packed `.tgz` with deterministic, portable entry metadata.
+
+    npm pack's tarball reflects the source files' stat modes, so on Windows
+    (where the executable bit cannot be set) bin entries are packed at 0o644
+    and `verify_tarball` rejects them. This single pure step reads every entry
+    of the packed tarball and rewrites it with:
+
+    * bin entries forced to mode 0o755 (regular files 0o644, directories
+      0o755), and
+    * fixed, version-derived uid/gid/mtime on every entry (and a fixed gzip
+      header mtime),
+
+    preserving content, names, and order, so the resulting bytes are identical
+    regardless of host OS or source-file stat modes. The exec-bit validation in
+    [`verify_tarball`] is unchanged; this step makes it pass on every host.
+    """
+    uid, gid, mtime = fixed_entry_metadata(version)
+
+    with tarfile.open(tarball_path, "r:gz") as tar:
+        members = tar.getmembers()
+        payloads = {
+            member.name: (tar.extractfile(member).read() if member.isfile() else None)
+            for member in members
+        }
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+        for member in members:
+            # ustar needs no pax/global extended headers for our short paths;
+            # re-emitting them as-is would not survive the format change.
+            if member.type not in (tarfile.REGTYPE, tarfile.DIRTYPE, tarfile.LNKTYPE, tarfile.SYMTYPE):
+                continue
+            rewritten = tarfile.TarInfo(member.name)
+            rewritten.size = member.size
+            rewritten.type = member.type
+            rewritten.linkname = member.linkname
+            if member.isdir():
+                rewritten.mode = 0o755
+            elif member.issym() or member.islnk():
+                rewritten.mode = 0o777
+            else:
+                rewritten.mode = 0o755 if member.name in BIN_ENTRIES else 0o644
+            rewritten.uid = uid
+            rewritten.gid = gid
+            rewritten.mtime = mtime
+            if member.isfile():
+                tar.addfile(rewritten, io.BytesIO(payloads[member.name]))
+            else:
+                tar.addfile(rewritten)
+
+    out_path = tarball_path.with_name(tarball_path.name + ".tmp")
+    with open(out_path, "wb") as out:
+        with gzip.GzipFile(fileobj=out, mode="wb", mtime=0) as gz:
+            gz.write(buffer.getvalue())
+    out_path.replace(tarball_path)
+    return tarball_path
+
+
 def verify_tarball(tarball_path: Path, is_meta: bool) -> None:
     forbidden_suffixes = {".rs", ".o", ".a", ".pdb", ".d", ".rlib"}
     found_files = set()
@@ -277,7 +370,7 @@ def main() -> None:
                     bin_dir = extract_dir
 
                 pkg_dir = stage_platform_package(platform_key, config, version, bin_dir, staging_dir)
-                tarball = pack_directory(pkg_dir, out_dir)
+                tarball = normalize_tarball(pack_directory(pkg_dir, out_dir), version)
                 verify_tarball(tarball, is_meta=False)
                 created_tarballs.append(tarball)
                 print(f"packaged {config['name']} -> {tarball.name}")
@@ -291,14 +384,14 @@ def main() -> None:
 
             print(f"Packaging npm package for host platform {platform_key} from {binaries_dir}")
             pkg_dir = stage_platform_package(platform_key, config, version, binaries_dir, staging_dir)
-            tarball = pack_directory(pkg_dir, out_dir)
+            tarball = normalize_tarball(pack_directory(pkg_dir, out_dir), version)
             verify_tarball(tarball, is_meta=False)
             created_tarballs.append(tarball)
             print(f"packaged {config['name']} -> {tarball.name}")
 
         # Package meta package
         meta_dir = stage_meta_package(version, staging_dir)
-        meta_tarball = pack_directory(meta_dir, out_dir)
+        meta_tarball = normalize_tarball(pack_directory(meta_dir, out_dir), version)
         verify_tarball(meta_tarball, is_meta=True)
         created_tarballs.append(meta_tarball)
         print(f"packaged @wrightkit/wright -> {meta_tarball.name}")
