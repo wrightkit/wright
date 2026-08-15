@@ -11,7 +11,7 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{CompilerSession, SessionConfig, InputSpec, SourceKind, OutputFormat, Profile}` | **stable** | One driver for compile/check/analyze/inspect/lint; `load()` is idempotent |
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
 | `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) |
-| `wright_driver::edit::{SourceEdit, EditValidation, RenameRequest, rename_symbol, validate_edit}` | **stable** | Safe source-oriented edits; validated through the compiler pipeline |
+| `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Frontend-neutral source-edit transactions; validated through the correct native frontend/project semantics (M14 #128) |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright-serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService`; MCP not implemented (no agent evidence) |
@@ -49,11 +49,23 @@ actions, values, events, enum domains, and locales.
 
 ## Safe edits
 
-Proposed edits are source-oriented ([`SourceEdit`]) with a source identity;
-[`validate_edit`] rejects stale versions, invalid ranges, and compiled
-errors, and returns the previewed edited source. The first evidence-backed
-refactoring is symbol rename ([`rename_symbol`]) with whole-word replacement
-and pipeline validation. Raw HIR/WIR mutation is never public.
+Proposed edits are source-oriented ([`SourceEdit`]) and travel as
+[`EditTransaction`]s: one or more file edits with exact source ranges plus
+per-source SHA-256 identity/version preconditions.
+[`validate_transaction`] rejects stale versions, unknown sources,
+overlapping/conflicting edits, invalid ranges, and compiled errors, and
+returns the previewed edited sources — atomically, with no partial preview on
+refusal. Validation runs through the *original* project/session semantics
+(`SessionConfig` kind/root, transformation profile): OPY projects compile
+through the native OPY frontend with edited includes as in-memory overlays,
+and OSTW projects load their `ds.toml` project graph with edited files as
+overlays, so cross-file diagnostics keep their real source paths and no
+filesystem write is ever required to preview or validate. Workshop/Protocol
+inputs refuse explicitly (editing is declared over the OPY and OSTW source
+frontends). The first evidence-backed refactoring is symbol rename
+([`rename_symbol`]) with whole-word replacement and transaction validation.
+Raw HIR/WIR mutation is never public, and application/writing stays an
+explicit caller responsibility.
 
 ## Transports
 

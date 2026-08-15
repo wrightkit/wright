@@ -90,7 +90,24 @@ pub struct OstwOutcome {
 /// path when the input is a file under `root` (`None` for stdin, in which
 /// case `main_text` is used as the `entry_point` file's content).
 pub fn compile(main_text: &str, main_path: Option<&str>, root: &Path) -> OstwOutcome {
-    match load(main_text, main_path, root) {
+    compile_with_overlay(main_text, main_path, root, &BTreeMap::new())
+}
+
+/// Compile an OSTW project rooted at `root` with in-memory source overlays.
+///
+/// The overlay maps project-relative source paths to replacement text and
+/// takes precedence over both `main_text` and the filesystem, so a proposed
+/// multi-file edit can be validated without rewriting the user's files
+/// (M14, #128). Overlay keys are normalized project-relative paths exactly as
+/// [`Project::files`] reports them (e.g. `interface/HeroSelect.del`). The
+/// `ds.toml` project file itself is always read from the filesystem.
+pub fn compile_with_overlay(
+    main_text: &str,
+    main_path: Option<&str>,
+    root: &Path,
+    overlay: &BTreeMap<String, String>,
+) -> OstwOutcome {
+    match load(main_text, main_path, root, overlay) {
         Ok(outcome) => outcome,
         Err(error) => OstwOutcome {
             project: None,
@@ -100,7 +117,12 @@ pub fn compile(main_text: &str, main_path: Option<&str>, root: &Path) -> OstwOut
     }
 }
 
-fn load(main_text: &str, main_path: Option<&str>, root: &Path) -> FrontendResult<OstwOutcome> {
+fn load(
+    main_text: &str,
+    main_path: Option<&str>,
+    root: &Path,
+    overlay: &BTreeMap<String, String>,
+) -> FrontendResult<OstwOutcome> {
     let ds_path = root.join("ds.toml");
     if !ds_path.is_file() {
         return Err(FrontendError::new(
@@ -189,7 +211,11 @@ fn load(main_text: &str, main_path: Option<&str>, root: &Path) -> FrontendResult
         }
         let id = files.len() as u32;
         path_to_id.insert(path.clone(), id);
-        let text = if (path == entry && main_path.is_none()) || Some(path.as_str()) == main_path {
+        // An in-memory overlay (a proposed edit preview) takes precedence
+        // over the passed-in main text and the filesystem (#128).
+        let text = if let Some(text) = overlay.get(&path) {
+            text.clone()
+        } else if (path == entry && main_path.is_none()) || Some(path.as_str()) == main_path {
             main_text.to_string()
         } else {
             match std::fs::read_to_string(root.join(&path)) {

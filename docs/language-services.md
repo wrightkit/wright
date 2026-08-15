@@ -91,6 +91,10 @@ suppression is the authoritative contract.
   source identity, and failed validation refuse explicitly. Edits are
   Wright-owned (`RenameEdit`/`TargetSpan` in `wright-language`) and carry the
   SHA-256 source identity computed through `wright_driver::input_identity`.
+  Edited-project validation routes through the shared M14 driver transaction
+  contract (`wright_driver::edit::validate_transaction`, #128) — one
+  validated transaction per affected root with the same overlay semantics the
+  session uses; no duplicate edit-validation semantics live here.
 * **Semantic tokens** — classified by the native lexer/parser identity
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.

@@ -780,6 +780,12 @@ impl LanguageService {
     /// Validate the edited project: every affected root must still compile
     /// with the edits applied as overlays. Returns refusal reasons when any
     /// affected root fails.
+    ///
+    /// Validation routes through the shared M14 driver transaction contract
+    /// (#128): one validated [`EditTransaction`] per affected root, checked
+    /// against the current text of every edited source through the OPY
+    /// frontend with the same overlay semantics the session uses. No
+    /// duplicate edit-validation semantics live here.
     fn validate_renamed_project(
         &self,
         requesting_uri: &str,
@@ -789,7 +795,6 @@ impl LanguageService {
             .iter()
             .map(|edit| (edit.source.clone(), edit.new_text.clone()))
             .collect();
-        let overlay = self.overlay_with_edits(&edited);
 
         // Affected roots: the requesting document plus any open document that
         // includes an edited source.
@@ -811,19 +816,62 @@ impl LanguageService {
             let Some(document) = self.store.document(&root) else {
                 continue;
             };
-            let canonical = self.canonical_source(&document.uri);
-            let main_text = edited
-                .get(&canonical)
-                .cloned()
-                .unwrap_or_else(|| document.text.clone());
-            let outcome = wright_opy::compile_with_overlay_outcome(
-                &main_text,
-                &document.uri,
-                &self.root,
-                &overlay,
-            );
-            if let Some(error) = outcome.error {
-                problems.push(format!("{}: {}", error.code, error.message));
+            let Some(path) = crate::document::uri_to_path(&document.uri) else {
+                continue;
+            };
+            // Current texts of every edited source plus the root document
+            // itself, keyed by the same source identities the edits carry.
+            let mut sources: BTreeMap<String, String> = BTreeMap::new();
+            for edit in edits {
+                sources.insert(
+                    edit.source.clone(),
+                    self.source_text(&edit.source, document),
+                );
+            }
+            sources.insert(self.canonical_source(&document.uri), document.text.clone());
+            // One full-document edit per edited source (the M10 rename
+            // contract) inside the shared transaction boundary.
+            let mut transaction_edits = Vec::new();
+            for edit in edits {
+                let text = self.source_text(&edit.source, document);
+                let line_count = text.lines().count().max(1) as u32;
+                let end_col = text
+                    .lines()
+                    .last()
+                    .map(|line| line.chars().count() as u32 + 1)
+                    .unwrap_or(1);
+                transaction_edits.push(wright_driver::edit::SourceEdit {
+                    edit_kind: "rename".to_string(),
+                    source: edit.source.clone(),
+                    source_identity: edit.source_identity.clone(),
+                    range: wright_driver::edit::EditRange {
+                        start_line: 1,
+                        start_col: 1,
+                        end_line: line_count,
+                        end_col,
+                    },
+                    new_text: edit.new_text.clone(),
+                });
+            }
+            let transaction = match wright_driver::edit::EditTransaction::new(transaction_edits) {
+                Ok(transaction) => transaction,
+                Err(diagnostic) => {
+                    problems.push(format!("{}: {}", diagnostic.code, diagnostic.message));
+                    continue;
+                }
+            };
+            let config = wright_driver::SessionConfig {
+                input: wright_driver::InputSpec::Path(path),
+                kind: wright_driver::SourceKind::Opy,
+                root: Some(self.root.clone()),
+                ..wright_driver::SessionConfig::default()
+            };
+            let validation =
+                wright_driver::edit::validate_transaction(&config, &sources, &transaction);
+            if !validation.ok {
+                for diagnostic in &validation.diagnostics {
+                    problems.push(format!("{}: {}", diagnostic.code, diagnostic.message));
+                }
             }
         }
         if problems.is_empty() {
@@ -843,23 +891,6 @@ impl LanguageService {
             Some(path) => path.to_string_lossy().into_owned(),
             None => source.to_string(),
         }
-    }
-
-    /// The include overlay with edited sources taking precedence over open
-    /// overlays and the filesystem.
-    fn overlay_with_edits(&self, edited: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-        let mut overlay = self.store.overlay(&self.root);
-        for (source, text) in edited {
-            let path = PathBuf::from(source);
-            overlay.insert(path.to_string_lossy().into_owned(), text.clone());
-            if let Ok(relative) = path.strip_prefix(&self.root) {
-                overlay.insert(relative.to_string_lossy().into_owned(), text.clone());
-            }
-            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                overlay.insert(name.to_string(), text.clone());
-            }
-        }
-        overlay
     }
 
     /// Whether an open document's include closure references `source`.

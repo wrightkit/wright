@@ -93,7 +93,8 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         }
     }
 
-    // Safe rename: propose, validate through the pipeline, preview.
+    // Safe rename: propose, validate through the project transaction
+    // contract, preview (M14 #128: the shared frontend-neutral contract).
     if input.ends_with(".opy") {
         if let Some(name) = first_global(&source) {
             let identity = wright_driver::input_identity(&source);
@@ -103,17 +104,20 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
                     symbol_kind: "globalVariable".to_string(),
                     from: name.to_string(),
                     to: "renamed_by_consumer".to_string(),
+                    source: input.to_string(),
                     source_identity: identity,
                 },
             )
             .map_err(|error| error.message)?;
-            let validation = wright_driver::edit::validate_edit(
-                &source,
-                &rename,
+            let sources = std::collections::BTreeMap::from([(input.to_string(), source.clone())]);
+            let validation = wright_driver::edit::validate_transaction(
                 &SessionConfig {
                     input: InputSpec::Path(input.into()),
                     ..SessionConfig::default()
                 },
+                &sources,
+                &wright_driver::edit::EditTransaction::new(vec![rename])
+                    .map_err(|error| error.message)?,
             );
             assert!(
                 validation.ok,
@@ -125,7 +129,8 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
                     .preview
                     .as_ref()
                     .unwrap()
-                    .contains("renamed_by_consumer")
+                    .iter()
+                    .any(|preview| preview.new_text.contains("renamed_by_consumer"))
             );
             println!("edit: safe rename validated and previewed");
         } else {

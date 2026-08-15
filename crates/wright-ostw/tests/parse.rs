@@ -600,3 +600,122 @@ fn determinism_two_runs_produce_identical_outcomes() {
     let second = compile_project(&root, "main.ostw");
     assert_eq!(format!("{first:?}"), format!("{second:?}"));
 }
+
+#[test]
+fn overlays_validate_proposed_edits_without_rewriting_files() {
+    // M14 #128: a proposed multi-file edit validates against overlay text
+    // (main file and imports) while the on-disk project stays untouched.
+    use std::collections::BTreeMap;
+    let root = temp_project(vec![
+        (
+            "ds.toml".to_string(),
+            "entry_point=\"main.ostw\"\n".to_string(),
+        ),
+        (
+            "main.ostw".to_string(),
+            "import \"lib.del\";\nrule: \"main\" {}\n".to_string(),
+        ),
+        ("lib.del".to_string(), "rule: \"lib\" {}\n".to_string()),
+    ]);
+    let original_main = read(&root.join("main.ostw"));
+
+    // A clean overlay of both files compiles with no diagnostics, and the
+    // overlay text — not the disk content — is what parsed.
+    let overlay: BTreeMap<String, String> = BTreeMap::from([
+        (
+            "main.ostw".to_string(),
+            "import \"lib.del\";\nrule: \"edited main\" {}\n".to_string(),
+        ),
+        (
+            "lib.del".to_string(),
+            "rule: \"edited lib\" {}\n".to_string(),
+        ),
+    ]);
+    let outcome =
+        wright_ostw::compile_with_overlay(&original_main, Some("main.ostw"), &root, &overlay);
+    assert!(
+        outcome.error.is_none(),
+        "project must load: {:?}",
+        outcome.error
+    );
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "clean overlay edits compile: {:?}",
+        outcome.diagnostics
+    );
+    let main = project_of(&outcome)
+        .files
+        .iter()
+        .find(|file| file.path == "main.ostw")
+        .expect("main.ostw in the registry");
+    let edited_name = main
+        .cst
+        .as_ref()
+        .expect("main.ostw parsed")
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            wright_ostw::cst::Item::Rule(rule) => rule.name.clone(),
+            _ => None,
+        })
+        .next();
+    assert_eq!(
+        edited_name.as_deref(),
+        Some("edited main"),
+        "the overlay main text parsed"
+    );
+
+    // A broken overlay edit refuses with a source-located error naming the
+    // overlaid file — the proposed edit was validated, never the disk file.
+    let broken: BTreeMap<String, String> =
+        BTreeMap::from([("lib.del".to_string(), "rule: \"broken {}\n".to_string())]);
+    let outcome =
+        wright_ostw::compile_with_overlay(&original_main, Some("main.ostw"), &root, &broken);
+    assert!(outcome.error.is_none(), "project still loads");
+    assert!(
+        !outcome.diagnostics.is_empty(),
+        "broken overlay edit yields diagnostics, got: {:?}",
+        outcome.diagnostics
+    );
+    let parse = outcome
+        .diagnostics
+        .iter()
+        .find(|error| error.code == "ostw-parse-error" || error.code == "ostw-lex-error")
+        .expect("broken overlay edit yields a parse/lex error");
+    let span = parse.span.expect("parse errors carry a span");
+    let lib = project_of(&outcome)
+        .files
+        .iter()
+        .find(|file| file.path == "lib.del")
+        .expect("lib.del in the registry");
+    assert_eq!(
+        span.file,
+        FileId::from_index(lib.id as usize),
+        "the error points at the overlaid lib.del, not the main file"
+    );
+
+    // The overlay main text takes precedence over the passed-in main text.
+    let overlay_main: BTreeMap<String, String> = BTreeMap::from([(
+        "main.ostw".to_string(),
+        "import \"lib.del\";\nrule: \"overlaid\" {}\n".to_string(),
+    )]);
+    let outcome = wright_ostw::compile_with_overlay(
+        "rule: \"broken main {}\n",
+        Some("main.ostw"),
+        &root,
+        &overlay_main,
+    );
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "overlay main text wins over the passed-in main text: {:?}",
+        outcome.diagnostics
+    );
+
+    // The on-disk files were never rewritten.
+    assert_eq!(
+        read(&root.join("main.ostw")),
+        original_main,
+        "disk main.ostw unchanged"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

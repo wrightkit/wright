@@ -1,22 +1,35 @@
-//! Safe source-edit and refactoring contracts (M9, issue #59).
+//! Frontend-neutral source-edit transactions (M9 #59, reconciled by M14 #128).
 //!
 //! Tools and agents propose edits as validated, source-oriented
-//! [`SourceEdit`]s — never as mutations of Wright's internal IR. An edit
-//! carries the source identity it applies to, a source range, and the
-//! replacement text. [`validate_edit`] rejects stale versions, overlapping
-//! edits, and out-of-range spans, then runs the edited source through the
-//! normal compiler pipeline so a proposed edit is previewed and validated
-//! before application. Unsupported/unsafe edits fail explicitly.
+//! [`SourceEdit`]s — never as mutations of Wright's internal IR. One
+//! [`EditTransaction`] carries one or more file edits with exact source
+//! ranges plus per-source identity/version preconditions, and
+//! [`validate_transaction`] rejects stale versions, overlapping edits, and
+//! out-of-range spans, then runs the edited project through the *correct*
+//! native frontend for its original source kind (`.opy` through the OPY
+//! frontend, `.ostw`/`.del` through the OSTW project frontend) with the
+//! edited files supplied as in-memory overlays — no synthetic `edit.opy`
+//! path, no OPY hard-coding, and no filesystem write. Unsupported/unsafe
+//! edits fail explicitly with structured diagnostics and no partial preview.
 //!
-//! The first evidence-backed refactoring is symbol rename: every reference
-//! to a declared variable or subroutine is renamed in the source
-//! ([`rename_symbol`]), and the result is verified to compile to the same
-//! WIR structure (modulo the new name).
+//! Validation is atomic: a transaction either applies and previews in full
+//! or is refused with diagnostics; the caller decides whether to write any
+//! file. Application/writing is always separate from validation.
+//!
+//! The first evidence-backed refactoring is symbol rename ([`rename_symbol`]),
+//! which proposes an edit carrying the source identity precondition; callers
+//! validate it inside a transaction with [`validate_transaction`].
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::diag::{Diagnostic, Position, Severity, SourceSpan, Stage};
-use crate::result::exit;
+use crate::config::{SessionConfig, SourceKind};
+use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
+use crate::input::ResolvedInput;
+use crate::result::exit_code_from;
+use crate::session;
 
 /// One proposed source edit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,16 +37,21 @@ pub struct SourceEdit {
     /// The kind of edit (drives validation and preview semantics).
     #[serde(rename = "kind")]
     pub edit_kind: String,
-    /// The SHA-256 identity of the source this edit applies to (stale
+    /// The source file identity the edit applies to (a path as given by the
+    /// caller), so one transaction can target multiple files.
+    pub source: String,
+    /// The SHA-256 identity of the source text this edit applies to (stale
     /// versions are rejected).
     pub source_identity: String,
-    /// The target source range, 1-based line/column, end exclusive.
+    /// The target source range, 1-based line/character column, end exclusive
+    /// (matching the compiler's span convention).
     pub range: EditRange,
     /// The replacement text.
     pub new_text: String,
 }
 
-/// A source range (1-based, half-open).
+/// A source range (1-based line and character column, half-open; `end` is
+/// exclusive).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditRange {
     pub start_line: u32,
@@ -42,112 +60,518 @@ pub struct EditRange {
     pub end_col: u32,
 }
 
-/// The result of validating a proposed edit.
+/// One validated source transaction: multiple file edits applied and
+/// validated atomically against one project.
+///
+/// Construction orders the edits deterministically (by source identity, then
+/// position) and rejects overlapping edits within one source up front.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditTransaction {
+    /// The edits, in deterministic order (source, then position).
+    pub edits: Vec<SourceEdit>,
+}
+
+impl EditTransaction {
+    /// Build a transaction from proposed edits.
+    ///
+    /// The edits are ordered deterministically and overlapping edits within
+    /// one source are rejected (`edit-overlap`); an empty transaction is
+    /// rejected (`edit-empty-transaction`).
+    pub fn new(edits: Vec<SourceEdit>) -> Result<EditTransaction, Diagnostic> {
+        if edits.is_empty() {
+            return Err(Diagnostic::error(
+                "edit-empty-transaction",
+                Stage::Discovery,
+                "a source-edit transaction must carry at least one edit",
+            ));
+        }
+        let mut edits = edits;
+        edits.sort_by(|a, b| {
+            a.source
+                .cmp(&b.source)
+                .then_with(|| start_position(a).cmp(&start_position(b)))
+                .then_with(|| end_position(a).cmp(&end_position(b)))
+        });
+        for pair in edits.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            if a.source == b.source && start_position(b) < end_position(a) {
+                return Err(Diagnostic::error(
+                    "edit-overlap",
+                    Stage::Discovery,
+                    format!(
+                        "the transaction carries overlapping edits in '{}' at {}:{}-{} and {}:{}-{}",
+                        a.source,
+                        a.range.start_line,
+                        a.range.start_col,
+                        a.range.end_line,
+                        a.range.end_col,
+                        b.range.start_line,
+                        b.range.start_col
+                    ),
+                ));
+            }
+        }
+        Ok(EditTransaction { edits })
+    }
+}
+
+fn start_position(edit: &SourceEdit) -> (u32, u32) {
+    (edit.range.start_line, edit.range.start_col)
+}
+
+fn end_position(edit: &SourceEdit) -> (u32, u32) {
+    (edit.range.end_line, edit.range.end_col)
+}
+
+/// The edited text of one source in a validated transaction.
+#[derive(Debug, Clone, Serialize)]
+pub struct SourcePreview {
+    /// The source file identity the preview belongs to.
+    pub source: String,
+    /// The complete edited source text.
+    pub new_text: String,
+    /// The SHA-256 identity of the edited text (the new-source precondition).
+    pub source_identity: String,
+}
+
+/// The result of validating a proposed transaction.
 #[derive(Debug, Clone, Serialize)]
 pub struct EditValidation {
-    /// Whether the edit is safe to apply.
+    /// Whether the transaction is safe to apply.
     pub ok: bool,
     /// The intended process exit code (source-error semantics).
     pub exit: u8,
     pub diagnostics: Vec<Diagnostic>,
-    /// The edited source text (the preview), when validation passed.
+    /// The edited source texts (the preview), one per affected source, when
+    /// the transaction applied. `None` when a precondition refused it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
+    pub preview: Option<Vec<SourcePreview>>,
 }
 
-/// Validate and preview one source edit against its source identity and the
-/// compiler pipeline.
+/// Validate and preview a source-edit transaction against one project.
 ///
-/// `source` is the current source text; `edit` must carry the matching
-/// identity (SHA-256 of `source`). The edited text is compiled with the same
-/// driver configuration; compile errors are returned as diagnostics and the
-/// edit is rejected.
-pub fn validate_edit(
-    source: &str,
-    edit: &SourceEdit,
-    config: &crate::SessionConfig,
+/// `config` is the *original* project/session configuration of the edited
+/// code: its source kind selects the native frontend, its root is preserved,
+/// and its transformation profile (when set) applies exactly as the session
+/// would apply it. `sources` supplies the current text of every source the
+/// transaction touches, keyed by the same source identity the edits carry, so
+/// the identity/version preconditions can be verified and the edited project
+/// compiled without reading or rewriting the user's files.
+///
+/// The edited project is validated through the correct native frontend and
+/// project semantics (never a forced `.opy`): OPY projects compile with the
+/// edited files as include overlays; OSTW projects load their `ds.toml`
+/// project graph with the edited files as overlays. Refusals are atomic and
+/// structured: stale sources, overlapping/unknown edits, unsupported input
+/// kinds, and compiled errors produce source-located diagnostics and no
+/// partial preview.
+pub fn validate_transaction(
+    config: &SessionConfig,
+    sources: &BTreeMap<String, String>,
+    transaction: &EditTransaction,
 ) -> EditValidation {
     let mut diagnostics = Vec::new();
-    let identity = crate::input_identity(source);
-    if identity != edit.source_identity {
-        diagnostics.push(Diagnostic::error(
-            "edit-stale-source",
-            Stage::Discovery,
-            "the edit targets a different source version (identity mismatch); re-fetch the source and retry",
-        ));
-        return EditValidation {
-            ok: false,
-            exit: exit::SOURCE_ERROR,
-            diagnostics,
-            preview: None,
+
+    // Preconditions: every edited source must be known and current, so a
+    // stale or fabricated version can never apply.
+    for edit in &transaction.edits {
+        let Some(current) = sources.get(&edit.source) else {
+            diagnostics.push(Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                format!(
+                    "the edit targets '{}' but no current text was provided for it; \
+                     supply the current source so the version precondition can be verified",
+                    edit.source
+                ),
+            ));
+            continue;
         };
+        if crate::input_identity(current) != edit.source_identity {
+            diagnostics.push(Diagnostic::error(
+                "edit-stale-source",
+                Stage::Discovery,
+                format!(
+                    "the edit for '{}' targets a different source version (identity mismatch); \
+                     re-fetch the source and retry",
+                    edit.source
+                ),
+            ));
+        }
+    }
+    if has_error(&diagnostics) {
+        return refusal(diagnostics);
     }
 
-    let edited = match apply_edit(source, edit) {
-        Ok(text) => text,
+    // Apply the exact ranges to build the per-source previews.
+    let previews = match apply_transaction(sources, transaction) {
+        Ok(previews) => previews,
         Err(diagnostic) => {
             diagnostics.push(diagnostic);
-            return EditValidation {
-                ok: false,
-                exit: exit::SOURCE_ERROR,
-                diagnostics,
-                preview: None,
-            };
+            return refusal(diagnostics);
         }
     };
 
-    // Validate through the normal pipeline: compile the edited source.
-    let mut edited_config = config.clone();
-    edited_config.input = crate::InputSpec::Stdin;
-    edited_config.kind = crate::SourceKind::Opy;
-    let mut session = match crate::CompilerSession::new(edited_config) {
-        Ok(session) => session,
+    // The project under validation: the main source is the configured input;
+    // a path-based input is required because the project/source graph needs a
+    // stable main-file identity.
+    let Some(main_path) = config.input.path().cloned() else {
+        diagnostics.push(Diagnostic::error(
+            "edit-input-stdin",
+            Stage::Discovery,
+            "edit validation requires a path-based input so the edited project's \
+             main source identity is established; stdin has no project identity",
+        ));
+        return refusal(diagnostics);
+    };
+    let kind = match resolve_kind(config, &main_path) {
+        Ok(kind) => kind,
         Err(diagnostic) => {
             diagnostics.push(diagnostic);
-            return EditValidation {
-                ok: false,
-                exit: exit::INTERNAL,
-                diagnostics,
-                preview: None,
-            };
+            return refusal(diagnostics);
         }
     };
-    // The session reads stdin; drive it through a temporary source file so
-    // includes resolve relative to the project root. The path is unique per
-    // validation to keep concurrent edits isolated.
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static EDIT_COUNTER: AtomicU64 = AtomicU64::new(0);
-    let temp_dir = std::env::temp_dir().join(format!(
-        "wright-edit-{}-{}",
-        std::process::id(),
-        EDIT_COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    let _ = std::fs::create_dir_all(&temp_dir);
-    let path = temp_dir.join("edit.opy");
-    let _ = std::fs::write(&path, &edited);
-    session.config.input = crate::InputSpec::Path(path.clone());
-    session.config.kind = crate::SourceKind::Opy;
-    let envelope = session.check();
-    let _ = std::fs::remove_file(&path);
+    let root = config.root.clone().unwrap_or_else(|| {
+        main_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    });
 
-    let mut all_diagnostics = envelope.diagnostics.clone();
-    diagnostics.append(&mut all_diagnostics);
-    let has_error = diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.severity == Severity::Error);
-    EditValidation {
-        ok: !has_error,
-        exit: if has_error {
-            envelope.exit
-        } else {
-            exit::SUCCESS
+    // The edited main text: the transaction's preview when the main source is
+    // edited, else the caller-provided current text, else the filesystem.
+    let main_text = match preview_of(&previews, &main_path) {
+        Some(preview) => preview.new_text.clone(),
+        None => match sources.get(&main_path.to_string_lossy().into_owned()) {
+            Some(text) => text.clone(),
+            None => match std::fs::read_to_string(&main_path) {
+                Ok(text) => text,
+                Err(error) => {
+                    diagnostics.push(Diagnostic::error(
+                        "input-io",
+                        Stage::Discovery,
+                        format!("cannot read input '{}': {error}", main_path.display()),
+                    ));
+                    return refusal(diagnostics);
+                }
+            },
         },
+    };
+
+    // Edited non-main sources become in-memory overlays keyed for the native
+    // frontend of the project's original source kind.
+    let overlay = build_overlay(kind, &root, &main_path, &previews);
+    let resolved = ResolvedInput {
+        kind,
+        text: main_text.clone(),
+        path: Some(main_path.clone()),
+        root: root.clone(),
+        display: crate::input::display_path(&main_path),
+        identity: crate::input_identity(&main_text),
+        origin: origin_for(kind, config.locale.as_deref()),
+    };
+
+    match kind {
+        SourceKind::Opy => validate_opy(&resolved, &overlay, config, &mut diagnostics),
+        SourceKind::Ostw => validate_ostw(&resolved, &overlay, &mut diagnostics),
+        _ => unreachable!("resolve_kind never returns Workshop/Protocol/Auto"),
+    }
+
+    EditValidation {
+        ok: !has_error(&diagnostics),
+        exit: exit_code_from(&diagnostics),
         diagnostics,
-        preview: Some(edited),
+        preview: Some(previews),
     }
 }
 
-/// Apply an edit's replacement text at its range.
+/// An atomic refusal: structured diagnostics and no preview.
+fn refusal(diagnostics: Vec<Diagnostic>) -> EditValidation {
+    EditValidation {
+        ok: false,
+        exit: exit_code_from(&diagnostics),
+        diagnostics,
+        preview: None,
+    }
+}
+
+fn has_error(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+}
+
+/// The origin metadata of a resolved input for the given source kind.
+fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
+    Origin {
+        kind: kind.as_str().to_string(),
+        locale: locale.map(str::to_string),
+    }
+}
+
+/// Validate an edited OPY project through the native OPY frontend with the
+/// edited files as include overlays, then the shared HIR→IR→lower→validate
+/// chain and the session's transformation profile.
+fn validate_opy(
+    resolved: &ResolvedInput,
+    overlay: &BTreeMap<String, String>,
+    config: &SessionConfig,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let outcome = wright_opy::compile_with_overlay_outcome(
+        &resolved.text,
+        &resolved.display,
+        &resolved.root,
+        overlay,
+    );
+    let Some(program) = outcome.hir else {
+        diagnostics.push(session::opy_diag(
+            outcome
+                .error
+                .expect("a failed compile outcome always carries an error"),
+            &outcome.files,
+            resolved,
+        ));
+        return;
+    };
+    if let Err(error) = program.validate() {
+        diagnostics.push(session::hir_diag(error, resolved));
+        return;
+    }
+    let model = match program.to_ir() {
+        Ok(model) => model,
+        Err(error) => {
+            diagnostics.push(session::ir_diag(
+                "convert-error",
+                crate::diag::Stage::Lowering,
+                error,
+                resolved,
+            ));
+            return;
+        }
+    };
+    let mut program = match wright_ir::lower::lower(&model) {
+        Ok(program) => program,
+        Err(error) => {
+            diagnostics.push(session::ir_diag(
+                "lower-error",
+                crate::diag::Stage::Lowering,
+                error,
+                resolved,
+            ));
+            return;
+        }
+    };
+    if let Err(error) = program.validate() {
+        diagnostics.push(session::ir_diag(
+            "validation-error",
+            crate::diag::Stage::Validation,
+            error,
+            resolved,
+        ));
+        return;
+    }
+    if config.profile != crate::Profile::Off {
+        if let Err(error) = wright_transform::run(&mut program, config.profile) {
+            diagnostics.push(Diagnostic::error(
+                "transform-error",
+                crate::diag::Stage::Internal,
+                format!("WIR transformation failed: {error}"),
+            ));
+        }
+    }
+}
+
+/// Validate an edited OSTW project through the native OSTW frontend: the
+/// `ds.toml` project graph loads with the edited files as overlays, and the
+/// frontend plus #118 semantic boundary diagnostics decide the outcome
+/// exactly as the shared session path does.
+fn validate_ostw(
+    resolved: &ResolvedInput,
+    overlay: &BTreeMap<String, String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let relative = resolved
+        .path
+        .as_ref()
+        .and_then(|path| path.strip_prefix(&resolved.root).ok())
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"));
+    let (outcome, semantic) = wright_ostw::compile_with_semantics_overlay(
+        &resolved.text,
+        relative.as_deref(),
+        &resolved.root,
+        overlay,
+    );
+    if let Some(error) = &outcome.error {
+        diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
+    }
+    for error in &outcome.diagnostics {
+        diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
+    }
+    for error in &semantic.diagnostics {
+        diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
+    }
+}
+
+/// The concrete source kind to validate against: the configured kind, or
+/// detection from the main file extension for `Auto`. Only the source
+/// frontends OPY and OSTW are declared edit targets; Workshop/Protocol
+/// inputs refuse explicitly.
+fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, Diagnostic> {
+    match config.kind {
+        SourceKind::Opy | SourceKind::Ostw => Ok(config.kind),
+        SourceKind::Auto => match main_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("opy") => Ok(SourceKind::Opy),
+            Some("ostw" | "del") => Ok(SourceKind::Ostw),
+            _ => Err(Diagnostic::error(
+                "edit-unsupported-kind",
+                Stage::Discovery,
+                format!(
+                    "cannot detect the source kind of '{}' for edit validation; \
+                     pass an explicit `opy` or `ostw` source kind",
+                    main_path.display()
+                ),
+            )),
+        },
+        other => Err(Diagnostic::error(
+            "edit-unsupported-kind",
+            Stage::Discovery,
+            format!(
+                "edit validation is declared over the OPY and OSTW source frontends; \
+                 '{}' input is not an editable source kind",
+                other.as_str()
+            ),
+        )),
+    }
+}
+
+/// The edited text of the source matching `main_path`, when the transaction
+/// edits the main source.
+fn preview_of<'a>(previews: &'a [SourcePreview], main_path: &Path) -> Option<&'a SourcePreview> {
+    previews
+        .iter()
+        .find(|preview| same_file(&preview.source, main_path))
+}
+
+/// Whether two spellings identify the same file: canonical paths when both
+/// resolve, else the exact path strings.
+fn same_file(a: &str, b: &Path) -> bool {
+    let b = b.to_string_lossy();
+    if a == b {
+        return true;
+    }
+    match (Path::new(a).canonicalize(), Path::new(&*b).canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Build the in-memory overlay of edited non-main sources, keyed for the
+/// project's native frontend.
+///
+/// OPY includes resolve against the include root by include string and by
+/// canonical path; the overlay carries the as-given, canonical, root-relative,
+/// and basename spellings (the same spellings the language service overlays
+/// use). OSTW sources resolve by normalized project-relative path; the
+/// overlay carries the as-given and root-relative normalized spellings.
+fn build_overlay(
+    kind: SourceKind,
+    root: &Path,
+    main_path: &Path,
+    previews: &[SourcePreview],
+) -> BTreeMap<String, String> {
+    let mut overlay = BTreeMap::new();
+    for preview in previews {
+        if same_file(&preview.source, main_path) {
+            continue;
+        }
+        match kind {
+            SourceKind::Opy => {
+                let path = PathBuf::from(&preview.source);
+                overlay.insert(
+                    path.to_string_lossy().into_owned(),
+                    preview.new_text.clone(),
+                );
+                if let Ok(canonical) = path.canonicalize() {
+                    overlay.insert(
+                        canonical.to_string_lossy().into_owned(),
+                        preview.new_text.clone(),
+                    );
+                }
+                if let Ok(relative) = path.strip_prefix(root) {
+                    overlay.insert(
+                        relative.to_string_lossy().into_owned(),
+                        preview.new_text.clone(),
+                    );
+                }
+                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                    overlay.insert(name.to_string(), preview.new_text.clone());
+                }
+            }
+            SourceKind::Ostw => {
+                overlay.insert(
+                    normalize_relative(&preview.source),
+                    preview.new_text.clone(),
+                );
+                if let Ok(relative) = Path::new(&preview.source).strip_prefix(root) {
+                    overlay.insert(
+                        relative.to_string_lossy().replace('\\', "/"),
+                        preview.new_text.clone(),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    overlay
+}
+
+/// A normalized project-relative spelling of a path (`\` separators become
+/// `/`, matching the OSTW project registry).
+fn normalize_relative(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// Apply every edit of a transaction to the caller-provided current texts,
+/// returning one complete edited source per affected source.
+///
+/// The edits are already deterministically ordered by construction; within
+/// one source they apply in order, so exact ranges are consumed and never
+/// shift. Ranges outside the source refuse explicitly.
+fn apply_transaction(
+    sources: &BTreeMap<String, String>,
+    transaction: &EditTransaction,
+) -> Result<Vec<SourcePreview>, Diagnostic> {
+    let mut previews: Vec<SourcePreview> = Vec::new();
+    for edit in &transaction.edits {
+        let current = sources
+            .get(&edit.source)
+            .expect("precondition check already verified every edited source");
+        match previews.last_mut() {
+            Some(last) if last.source == edit.source => {
+                last.new_text = apply_edit(&last.new_text, edit)?;
+                last.source_identity = crate::input_identity(&last.new_text);
+            }
+            _ => {
+                let new_text = apply_edit(current, edit)?;
+                previews.push(SourcePreview {
+                    source: edit.source.clone(),
+                    source_identity: crate::input_identity(&new_text),
+                    new_text,
+                });
+            }
+        }
+    }
+    Ok(previews)
+}
+
+/// Apply an edit's replacement text at its range (1-based character columns,
+/// end exclusive).
 fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     let lines: Vec<&str> = source.split('\n').collect();
     if edit.range.start_line < 1
@@ -178,22 +602,22 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
             continue;
         }
         if line_number == edit.range.start_line && line_number == edit.range.end_line {
-            let col = byte_col(line, edit.range.start_col);
-            let end = byte_col(line, edit.range.end_col);
+            let col = char_col(line, edit.range.start_col);
+            let end = char_col(line, edit.range.end_col);
             let mut replacement = String::new();
             replacement.push_str(&line[..col]);
             replacement.push_str(&edit.new_text);
-            replacement.push_str(&line[end.min(line.len())..]);
+            replacement.push_str(&line[end..]);
             out.push(replacement);
         } else if line_number == edit.range.start_line {
-            let col = byte_col(line, edit.range.start_col);
+            let col = char_col(line, edit.range.start_col);
             let mut replacement = String::new();
             replacement.push_str(&line[..col]);
             replacement.push_str(&edit.new_text);
             out.push(replacement);
         } else if line_number == edit.range.end_line {
-            let end = byte_col(line, edit.range.end_col);
-            out.push(line[end.min(line.len())..].to_string());
+            let end = char_col(line, edit.range.end_col);
+            out.push(line[end..].to_string());
         } else {
             // A wholly covered middle line is removed.
             continue;
@@ -202,9 +626,15 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     Ok(out.join("\n"))
 }
 
-/// Convert a 1-based column to a byte offset, clamped to the line length.
-fn byte_col(line: &str, col: u32) -> usize {
-    (col as usize - 1).min(line.len())
+/// Convert a 1-based character column to a byte offset, clamped to the line
+/// length (so a full-line replacement with a character-counted column never
+/// splits a multi-byte character).
+fn char_col(line: &str, col: u32) -> usize {
+    let skip = col.saturating_sub(1) as usize;
+    line.char_indices()
+        .nth(skip)
+        .map(|(offset, _)| offset)
+        .unwrap_or(line.len())
 }
 
 /// A proposed symbol rename.
@@ -216,6 +646,8 @@ pub struct RenameRequest {
     pub from: String,
     /// The new name.
     pub to: String,
+    /// The source file identity the rename applies to.
+    pub source: String,
     /// The source identity this rename applies to.
     pub source_identity: String,
 }
@@ -223,8 +655,9 @@ pub struct RenameRequest {
 /// Rename a declared symbol across the source.
 ///
 /// Returns a single multi-line [`SourceEdit`] covering every occurrence of
-/// `from` (declaration and references). The caller validates it with
-/// [`validate_edit`], which recompiles the result. Names that are not
+/// `from` (declaration and references), carrying the source identity
+/// precondition. The caller validates it inside a transaction with
+/// [`validate_transaction`], which recompiles the result. Names that are not
 /// declared fail explicitly (`unknown-symbol`).
 pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit, Diagnostic> {
     if request.from.is_empty() || request.to.is_empty() {
@@ -251,7 +684,13 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
         ));
     }
 
-    rename_occurrences(source, &request.from, &request.to, &request.source_identity)
+    rename_occurrences(
+        source,
+        &request.from,
+        &request.to,
+        &request.source,
+        &request.source_identity,
+    )
 }
 
 /// Rename every whole-word occurrence of `from` to `to`, returning a
@@ -266,6 +705,7 @@ pub fn rename_occurrences(
     source: &str,
     from: &str,
     to: &str,
+    source_file: &str,
     source_identity: &str,
 ) -> Result<SourceEdit, Diagnostic> {
     if from.is_empty() || to.is_empty() {
@@ -290,6 +730,7 @@ pub fn rename_occurrences(
 
     Ok(SourceEdit {
         edit_kind: "rename".to_string(),
+        source: source_file.to_string(),
         source_identity: source_identity.to_string(),
         range: EditRange {
             start_line: 1,
@@ -369,19 +810,33 @@ mod tests {
 
     const SOURCE: &str = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
 
-    #[test]
-    fn rename_rewrites_declaration_and_references() {
-        let edit = rename_symbol(
-            SOURCE,
+    fn rename(edit: SourceEdit, sources: &BTreeMap<String, String>) -> EditValidation {
+        let config = SessionConfig {
+            input: crate::InputSpec::Path("program.opy".into()),
+            ..SessionConfig::default()
+        };
+        validate_transaction(&config, sources, &EditTransaction::new(vec![edit]).unwrap())
+    }
+
+    fn rename_edit(source: &str, from: &str, to: &str) -> SourceEdit {
+        rename_symbol(
+            source,
             &RenameRequest {
                 symbol_kind: "globalVariable".to_string(),
-                from: "score".to_string(),
-                to: "total".to_string(),
-                source_identity: crate::input_identity(SOURCE),
+                from: from.to_string(),
+                to: to.to_string(),
+                source: "program.opy".to_string(),
+                source_identity: crate::input_identity(source),
             },
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn rename_rewrites_declaration_and_references() {
+        let edit = rename_edit(SOURCE, "score", "total");
         assert_eq!(edit.edit_kind, "rename");
+        assert_eq!(edit.source, "program.opy", "the edit names its source file");
         assert!(
             edit.new_text.contains("globalvar total = 0"),
             "declaration renamed: {}",
@@ -396,16 +851,7 @@ mod tests {
 
     #[test]
     fn rename_does_not_touch_longer_identifiers() {
-        let edit = rename_symbol(
-            SOURCE,
-            &RenameRequest {
-                symbol_kind: "globalVariable".to_string(),
-                from: "score".to_string(),
-                to: "total".to_string(),
-                source_identity: crate::input_identity(SOURCE),
-            },
-        )
-        .unwrap();
+        let edit = rename_edit(SOURCE, "score", "total");
         // A hypothetical `scoreboard` must not be renamed (not present, but
         // the word-boundary logic is what keeps it safe).
         assert!(!edit.new_text.contains("totalboard"));
@@ -419,6 +865,7 @@ mod tests {
                 symbol_kind: "globalVariable".to_string(),
                 from: "missing".to_string(),
                 to: "x".to_string(),
+                source: "program.opy".to_string(),
                 source_identity: crate::input_identity(SOURCE),
             },
         )
@@ -430,6 +877,7 @@ mod tests {
     fn stale_source_identity_is_rejected() {
         let edit = SourceEdit {
             edit_kind: "rename".to_string(),
+            source: "program.opy".to_string(),
             source_identity: "wrong-identity".to_string(),
             range: EditRange {
                 start_line: 1,
@@ -439,10 +887,59 @@ mod tests {
             },
             new_text: String::new(),
         };
-        let config = crate::SessionConfig::default();
-        let validation = validate_edit(SOURCE, &edit, &config);
+        let sources = BTreeMap::from([("program.opy".to_string(), SOURCE.to_string())]);
+        let validation = validate_transaction(
+            &SessionConfig::default(),
+            &sources,
+            &EditTransaction::new(vec![edit]).unwrap(),
+        );
         assert!(!validation.ok);
         assert_eq!(validation.diagnostics[0].code, "edit-stale-source");
+    }
+
+    #[test]
+    fn stale_source_identity_is_rejected_before_any_validation() {
+        let edit = SourceEdit {
+            edit_kind: "rename".to_string(),
+            source: "other.opy".to_string(),
+            source_identity: crate::input_identity(SOURCE),
+            range: EditRange {
+                start_line: 1,
+                start_col: 1,
+                end_line: 1,
+                end_col: 1,
+            },
+            new_text: String::new(),
+        };
+        // The current text is missing entirely: the precondition refuses
+        // before any range or compile work.
+        let validation = validate_transaction(
+            &SessionConfig::default(),
+            &BTreeMap::new(),
+            &EditTransaction::new(vec![edit]).unwrap(),
+        );
+        assert!(!validation.ok);
+        assert_eq!(validation.diagnostics[0].code, "edit-unknown-source");
+        assert!(validation.preview.is_none(), "no partial preview");
+    }
+
+    #[test]
+    fn overlapping_edits_in_one_source_are_rejected() {
+        let source = "globalvar score = 0\n";
+        let edit = |start: u32, end: u32| SourceEdit {
+            edit_kind: "rename".to_string(),
+            source: "program.opy".to_string(),
+            source_identity: crate::input_identity(source),
+            range: EditRange {
+                start_line: 1,
+                start_col: start,
+                end_line: 1,
+                end_col: end,
+            },
+            new_text: "x".to_string(),
+        };
+        let error = EditTransaction::new(vec![edit(1, 10), edit(5, 20)]).unwrap_err();
+        assert_eq!(error.code, "edit-overlap");
     }
 
     #[test]
@@ -454,6 +951,7 @@ mod tests {
             source,
             "showStatus",
             "refresh",
+            "program.opy",
             &crate::input_identity(source),
         )
         .unwrap();
@@ -476,30 +974,86 @@ mod tests {
 
     #[test]
     fn rename_validates_through_the_pipeline() {
-        let edit = rename_symbol(
-            SOURCE,
-            &RenameRequest {
-                symbol_kind: "globalVariable".to_string(),
-                from: "score".to_string(),
-                to: "total".to_string(),
-                source_identity: crate::input_identity(SOURCE),
-            },
-        )
-        .unwrap();
-        let config = crate::SessionConfig::default();
-        let validation = validate_edit(SOURCE, &edit, &config);
+        let sources = BTreeMap::from([("program.opy".to_string(), SOURCE.to_string())]);
+        let validation = rename(rename_edit(SOURCE, "score", "total"), &sources);
         assert!(
             validation.ok,
             "the renamed source must compile: {:?}",
             validation.diagnostics
         );
+        let preview = validation.preview.as_ref().unwrap();
+        assert_eq!(preview.len(), 1, "one affected source");
         assert!(
-            validation
-                .preview
-                .as_ref()
-                .unwrap()
-                .contains("globalvar total"),
+            preview[0].new_text.contains("globalvar total"),
             "preview shows the renamed source"
         );
+        assert_eq!(
+            preview[0].source_identity,
+            crate::input_identity(&preview[0].new_text),
+            "the preview carries the new-source identity"
+        );
+    }
+
+    #[test]
+    fn broken_rename_is_refused_with_no_partial_preview() {
+        let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n    missing(;\n";
+        let edit = rename_symbol(
+            source,
+            &RenameRequest {
+                symbol_kind: "globalVariable".to_string(),
+                from: "score".to_string(),
+                to: "total".to_string(),
+                source: "program.opy".to_string(),
+                source_identity: crate::input_identity(source),
+            },
+        )
+        .unwrap();
+        let sources = BTreeMap::from([("program.opy".to_string(), source.to_string())]);
+        let validation = validate_transaction(
+            &SessionConfig {
+                input: crate::InputSpec::Path("program.opy".into()),
+                ..SessionConfig::default()
+            },
+            &sources,
+            &EditTransaction::new(vec![edit]).unwrap(),
+        );
+        assert!(!validation.ok, "a rename that breaks the source refuses");
+        assert!(
+            validation.diagnostics.iter().any(
+                |diagnostic| diagnostic.code == "lex-error" || diagnostic.code == "parse-error"
+            ),
+            "the refusal carries the compile diagnostic: {:?}",
+            validation.diagnostics
+        );
+    }
+
+    #[test]
+    fn empty_transaction_is_rejected() {
+        let error = EditTransaction::new(Vec::new()).unwrap_err();
+        assert_eq!(error.code, "edit-empty-transaction");
+    }
+
+    #[test]
+    fn transaction_orders_edits_deterministically() {
+        let source = "rule \"r\":\n    a\n    b\n";
+        let edit = |line: u32| SourceEdit {
+            edit_kind: "rename".to_string(),
+            source: "program.opy".to_string(),
+            source_identity: crate::input_identity(source),
+            range: EditRange {
+                start_line: line,
+                start_col: 1,
+                end_line: line,
+                end_col: 2,
+            },
+            new_text: "x".to_string(),
+        };
+        let transaction = EditTransaction::new(vec![edit(3), edit(2)]).unwrap();
+        let positions: Vec<u32> = transaction
+            .edits
+            .iter()
+            .map(|edit| edit.range.start_line)
+            .collect();
+        assert_eq!(positions, vec![2, 3], "edits are ordered by position");
     }
 }
