@@ -146,7 +146,11 @@ fn release(version: &str) -> Release {
 
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = sha2::Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    digest.iter().fold(String::new(), |mut output, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(output, "{byte:02x}");
+        output
+    })
 }
 
 /// Build a gzipped tar archive with the canonical `wright-<version>-<target>/`
