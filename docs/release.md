@@ -150,6 +150,7 @@ per-channel process and boundaries.
 | Homebrew (`wrightkit/tap`) | macOS arm64 + Intel | `wright` + `wright-lsp` formula | per-arch `sha256` in the formula |
 | WinGet (`WrightKit.Wright`) | Windows x86_64 | `wright` + `wright-lsp` portable ZIP | `InstallerSha256` in the manifest |
 | Scoop (`wrightkit` bucket) | Windows x86_64 | `wright` + `wright-lsp` ZIP | `hash` in the manifest |
+| npm (`@wrightkit/wright`) | Linux x86_64, macOS arm64, macOS x86_64, Windows x86_64 | `wright` + `wright-lsp` native binaries via platform npm packages | packaged binary checksums and signatures verified at release packaging |
 
 `install.sh` is the supported Unix installer: it detects the platform (with
 explicit failures for unsupported OS/architecture combinations), resolves the
@@ -158,6 +159,24 @@ downloads the archive and checksum, verifies the SHA-256 before extracting,
 installs both binaries, and runs a post-install version smoke check. Its
 functional behavior is covered by `scripts/test-install.sh` against a mock
 release server on Linux and macOS CI.
+
+### npm distribution channel (#121)
+
+Wright distributes native release binaries through npm packages for seamless
+integration with Node.js tooling, language clients, and CI agents:
+
+- **Meta package**: `@wrightkit/wright` exposes `wright` and `wright-lsp` in `bin`,
+  and exports `getBinaryPath()` for programmatic Node.js / TypeScript consumers.
+  It selects the matching native package via `optionalDependencies`.
+- **Platform packages**:
+  - `@wrightkit/wright-darwin-arm64`: macOS Apple Silicon (`aarch64-apple-darwin`)
+  - `@wrightkit/wright-darwin-x64`: macOS Intel (`x86_64-apple-darwin`)
+  - `@wrightkit/wright-linux-x64`: Linux x64 (`x86_64-unknown-linux-gnu`)
+  - `@wrightkit/wright-win32-x64`: Windows x64 (`x86_64-pc-windows-msvc`)
+- **Execution**:
+  - `npx wright --version` or `npm install @wrightkit/wright`
+  - Zero source compilation or postinstall download scripts; native binaries are packaged directly in the platform tarballs.
+  - npm is strictly a package/distribution layer for the native Rust CLI; there is no JavaScript reimplementation.
 
 Standalone installations are also updatable in place: `wright update`
 consumes the same release artifacts and checksums (no `install.sh`
@@ -178,8 +197,8 @@ checksum files.
 
 ### Still deferred
 
-The binary contract deliberately does not solve: crates.io publication, npm
-wrappers, background/automatic update checks or silent startup updates,
+The binary contract deliberately does not solve: crates.io publication,
+background/automatic update checks or silent startup updates,
 signed/notarized installers, MSI/MSIX/APT/RPM packages, or independent
 crate-by-crate versioning. Those can be added later when real consumer
 evidence justifies their maintenance cost.

@@ -147,6 +147,26 @@ scoop install wright
 
 Both WinGet and Scoop consume the same Windows release ZIP.
 
+### npm / npx
+
+For Node.js workflows and agent tooling, install Wright as a platform-native npm package:
+
+```sh
+# Run on-demand with npx
+npx @wrightkit/wright --version
+
+# Or add to a project
+npm install @wrightkit/wright
+npx wright check main.opy
+```
+
+Downstream JavaScript/TypeScript packages can depend on `@wrightkit/wright` directly and resolve the native binary path programmatically without runtime download scripts:
+
+```javascript
+const { getBinaryPath } = require('@wrightkit/wright');
+const wrightBin = getBinaryPath('wright');
+```
+
 ### CI / agents
 
 Pin an exact version non-interactively for deterministic installs:

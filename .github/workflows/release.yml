@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release-gates:
@@ -258,3 +259,77 @@ jobs:
             attach/wright-*.homebrew.rb
             attach/wright-*.scoop.json
             attach/wright-*.winget.zip
+
+  package-npm:
+    name: Package and publish npm distribution
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: wright-*
+          path: artifacts
+
+      - name: Package npm distribution tarballs
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          python3 scripts/package-npm.py \
+            --version "$VERSION" \
+            --artifacts-dir artifacts \
+            --out-dir "$GITHUB_WORKSPACE/npm-packages"
+          ls -lh "$GITHUB_WORKSPACE/npm-packages"
+
+      - name: Smoke test host npm package (Linux x64)
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          SANDBOX="$(mktemp -d)"
+          cd "$SANDBOX"
+          npm init -y
+          PLATFORM_TB="$(ls "$GITHUB_WORKSPACE"/npm-packages/wrightkit-wright-linux-x64-*.tgz "$GITHUB_WORKSPACE"/npm-packages/*wright-linux-x64-*.tgz 2>/dev/null | head -n 1)"
+          META_TB="$(ls "$GITHUB_WORKSPACE"/npm-packages/wrightkit-wright-[0-9]*.tgz "$GITHUB_WORKSPACE"/npm-packages/*wright-[0-9]*.tgz 2>/dev/null | head -n 1)"
+          npm install "$PLATFORM_TB" "$META_TB"
+          npx wright --version | grep -F "$VERSION"
+          npx wright-lsp --version | grep -F "$VERSION"
+          npx wright compile "$GITHUB_WORKSPACE/compatibility/fixtures/synthetic/basic-rule/source.opy" --profile compat >/dev/null
+          npx wright check "$GITHUB_WORKSPACE/scenarios/loops.opy" --profile compat >/dev/null
+          node -e '
+            const { getBinaryPath, getPlatformPackageName } = require("@wrightkit/wright");
+            const p = getBinaryPath("wright");
+            console.log("Resolved:", p);
+          '
+          echo "npm packages smoke test passed on $(uname -s) $(uname -m)"
+
+      - name: Attach npm tarballs to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            npm-packages/*.tgz
+
+      - name: Publish to npm registry
+        if: env.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          for pkg in "$GITHUB_WORKSPACE"/npm-packages/*.tgz; do
+            echo "Publishing $pkg to npm..."
+            npm publish "$pkg" --access public --provenance
+          done

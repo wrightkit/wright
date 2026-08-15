@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Generate Wright package-manager distribution metadata (#108).
+"""Generate Wright package-manager distribution metadata (#108, #121).
 
-Rewrites dist/ with the Homebrew formula, WinGet manifests, and Scoop
-manifest for a Wright version. All generated manifests consume the canonical
-GitHub Release archives (`wright-<version>-<target>.<ext>` + `.sha256`)
-produced by the release workflow; nothing here rebuilds Wright.
+Rewrites dist/ with the Homebrew formula, WinGet manifests, Scoop manifest,
+and npm package manifests for a Wright version. All generated manifests
+consume the canonical GitHub Release archives (`wright-<version>-<target>.<ext>`
++ `.sha256`) or the canonical release binaries; nothing here rebuilds Wright.
 
 Hashes are supplied per platform; missing or zero hashes are rendered as
 all-zero placeholders (the state dist/ ships in between releases). CI keeps
 the checked-in dist/ in sync via scripts/verify-dist.py.
 
 Usage:
-  python3 scripts/update-dist-manifests.py --version 0.1.0 \\
-      [--linux-x64-hash H] [--darwin-arm64-hash H] [--darwin-x64-hash H] \\
+  python3 scripts/update-dist-manifests.py --version 0.1.0 \
+      [--linux-x64-hash H] [--darwin-arm64-hash H] [--darwin-x64-hash H] \
       [--windows-x64-hash H] [--out-dir DIR]
 
 The release workflow runs this against the published release checksums and
@@ -20,6 +20,7 @@ attaches the generated files to the Release (see docs/release.md).
 """
 
 import argparse
+import json
 import re
 import shutil
 from pathlib import Path
@@ -40,6 +41,42 @@ ARCHIVE_EXT = {
     "aarch64-apple-darwin": "tar.gz",
     "x86_64-apple-darwin": "tar.gz",
     "x86_64-pc-windows-msvc": "zip",
+}
+
+# Platform packages configuration for npm distribution (#121)
+NPM_PLATFORM_PACKAGES = {
+    "darwin-arm64": {
+        "dir_name": "wright-darwin-arm64",
+        "name": "@wrightkit/wright-darwin-arm64",
+        "description": "macOS ARM64 (Apple Silicon) native binary for Wright",
+        "os": ["darwin"],
+        "cpu": ["arm64"],
+        "files": ["wright", "wright-lsp", "version.json", "README.md", "LICENSE"],
+    },
+    "darwin-x64": {
+        "dir_name": "wright-darwin-x64",
+        "name": "@wrightkit/wright-darwin-x64",
+        "description": "macOS x64 (Intel) native binary for Wright",
+        "os": ["darwin"],
+        "cpu": ["x64"],
+        "files": ["wright", "wright-lsp", "version.json", "README.md", "LICENSE"],
+    },
+    "linux-x64": {
+        "dir_name": "wright-linux-x64",
+        "name": "@wrightkit/wright-linux-x64",
+        "description": "Linux x64 native binary for Wright",
+        "os": ["linux"],
+        "cpu": ["x64"],
+        "files": ["wright", "wright-lsp", "version.json", "README.md", "LICENSE"],
+    },
+    "windows-x64": {
+        "dir_name": "wright-win32-x64",
+        "name": "@wrightkit/wright-win32-x64",
+        "description": "Windows x64 native binary for Wright",
+        "os": ["win32"],
+        "cpu": ["x64"],
+        "files": ["wright.exe", "wright-lsp.exe", "version.json", "README.md", "LICENSE"],
+    },
 }
 
 
@@ -186,6 +223,66 @@ def scoop_manifest(version: str, windows_hash: str) -> str:
 """
 
 
+def npm_meta_package_json(version: str) -> str:
+    optional_deps = {
+        pkg["name"]: version
+        for pkg in NPM_PLATFORM_PACKAGES.values()
+    }
+    manifest = {
+        "name": "@wrightkit/wright",
+        "version": version,
+        "description": "Wright CLI wrapper - Tooling-first semantic platform for the Overwatch Workshop and OverPy ecosystem",
+        "license": "AGPL-3.0-or-later",
+        "repository": {
+            "type": "git",
+            "url": "https://github.com/wrightkit/wright.git",
+        },
+        "homepage": "https://github.com/wrightkit/wright",
+        "bugs": {
+            "url": "https://github.com/wrightkit/wright/issues",
+        },
+        "main": "index.js",
+        "types": "index.d.ts",
+        "bin": {
+            "wright": "bin/wright.js",
+            "wright-lsp": "bin/wright-lsp.js",
+        },
+        "files": [
+            "bin",
+            "index.js",
+            "index.d.ts",
+            "README.md",
+            "LICENSE",
+        ],
+        "optionalDependencies": optional_deps,
+        "engines": {
+            "node": ">=18",
+        },
+    }
+    return json.dumps(manifest, indent=2) + "\n"
+
+
+def npm_platform_package_json(version: str, config: dict) -> str:
+    manifest = {
+        "name": config["name"],
+        "version": version,
+        "description": config["description"],
+        "license": "AGPL-3.0-or-later",
+        "repository": {
+            "type": "git",
+            "url": "https://github.com/wrightkit/wright.git",
+        },
+        "homepage": "https://github.com/wrightkit/wright",
+        "bugs": {
+            "url": "https://github.com/wrightkit/wright/issues",
+        },
+        "os": config["os"],
+        "cpu": config["cpu"],
+        "files": config["files"],
+    }
+    return json.dumps(manifest, indent=2) + "\n"
+
+
 def generate(version: str, hashes: dict, out_dir: Path) -> list:
     """Write every distribution manifest for `version` into `out_dir`.
 
@@ -223,6 +320,19 @@ def generate(version: str, hashes: dict, out_dir: Path) -> list:
     scoop.parent.mkdir(parents=True, exist_ok=True)
     scoop.write_text(scoop_manifest(version, hashes["windows-x64"]))
     written.append(scoop.relative_to(out_dir))
+
+    # npm meta-package
+    npm_meta = out_dir / "dist" / "npm" / "wright" / "package.json"
+    npm_meta.parent.mkdir(parents=True, exist_ok=True)
+    npm_meta.write_text(npm_meta_package_json(version))
+    written.append(npm_meta.relative_to(out_dir))
+
+    # npm platform packages
+    for platform_key, config in NPM_PLATFORM_PACKAGES.items():
+        pkg_file = out_dir / "dist" / "npm" / config["dir_name"] / "package.json"
+        pkg_file.parent.mkdir(parents=True, exist_ok=True)
+        pkg_file.write_text(npm_platform_package_json(version, config))
+        written.append(pkg_file.relative_to(out_dir))
 
     return written
 

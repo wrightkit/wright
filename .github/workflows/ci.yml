@@ -177,8 +177,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          rustflags: ""
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Build wright CLI and LSP
+        run: cargo build -p wright-cli -p wright-lsp
+
       - name: Validate package-manager metadata and install script
         run: python3 scripts/verify-dist.py
 
       - name: Run installer functional tests
         run: scripts/test-install.sh
+
+      - name: Run npm distribution smoke tests
+        run: python3 scripts/test-npm.py --binaries-dir target/debug
