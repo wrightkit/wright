@@ -10,6 +10,11 @@ HERE = Path(__file__).resolve().parent
 REFERENCE = HERE / "reference.json"
 CORPUS = HERE / "corpus.json"
 RESULTS = HERE / "results.json"
+# After the last didOpen, the langserver's ~50ms debounce fires one final
+# compile. Any gap of this many seconds means the final compile has fully
+# published; earlier (interleaved) compile triples are timing-dependent and
+# are never recorded.
+QUIET_SECONDS = 3.0
 
 class OracleError(RuntimeError): pass
 
@@ -80,17 +85,39 @@ def run_project(executable, reference, project):
     for path in sorted(root.rglob("*")):
         if path.suffix.lower() in (".ostw", ".del"):
             send(proc,{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri_for(path),"languageId":"ostw","version":1,"text":path.read_text(encoding="utf-8")}}})
-    diagnostics=[]; workshop=None; elements=None
-    while time.monotonic() < deadline:
-        try: message=receive(proc, deadline)
-        except TimeoutError: break
-        method=message.get("method"); params=message.get("params")
-        if method == "textDocument/publishDiagnostics": diagnostics.extend(params.get("diagnostics", []))
-        elif method == "workshopCode": workshop = params if isinstance(params,str) else params.get("workshopCode")
-        elif method == "elementCount": elements = params
-        if workshop is not None: break
+    # The langserver debounces compiles ~50ms after the last didOpen and
+    # publishes one coherent workshopCode/elementCount/diagnostics triple per
+    # compile. Compiles that fire between didOpen batches are timing-dependent;
+    # only the LAST triple, after every file is open, is deterministic
+    # evidence. Drain until the server is quiet, then take the last triple.
+    messages=[]
+    last_activity=time.monotonic()
+    drain_deadline=time.monotonic()+120
+    while time.monotonic() < drain_deadline:
+        try: message=receive(proc, time.monotonic()+1.0)
+        except TimeoutError:
+            if time.monotonic()-last_activity >= QUIET_SECONDS: break
+            continue
+        last_activity=time.monotonic()
+        messages.append(message)
     proc.terminate(); proc.wait(timeout=5)
-    return {"id":project["id"],"entry":project["entry"],"accept":"reject" if diagnostics else "accept","firstDiagnostic":diagnostics[0] if diagnostics else None,"workshopCodeSha256":hashlib.sha256(workshop.encode()).hexdigest() if workshop else None,"workshopAvailable":bool(workshop),"elementCount":elements,"files":project["files"]}
+    workshop=None; elements=None; final_elements_index=-1
+    for index,message in enumerate(messages):
+        method=message.get("method"); params=message.get("params")
+        if method == "workshopCode":
+            workshop = params if isinstance(params,str) else params.get("workshopCode")
+        elif method == "elementCount":
+            elements = params
+            final_elements_index = index
+    # Diagnostics published after the final elementCount belong to the final
+    # compile (a successful compile reports warnings/hints only; a failed one
+    # reports the errors that produced the -1 element count).
+    diagnostics=[]
+    for message in messages[final_elements_index+1:]:
+        if message.get("method") == "textDocument/publishDiagnostics":
+            diagnostics.extend(message.get("params", {}).get("diagnostics", []))
+    compiled = elements is not None and elements >= 0
+    return {"id":project["id"],"entry":project["entry"],"accept":"accept" if compiled else "reject","firstDiagnostic":diagnostics[0] if diagnostics else None,"workshopCodeSha256":hashlib.sha256(workshop.encode()).hexdigest() if workshop is not None else None,"workshopAvailable":bool(workshop) and compiled,"elementCount":elements,"files":project["files"]}
 
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument("--reference-root", type=Path, default=ROOT/"target/ostw-reference"); parser.add_argument("--acquire",action="store_true"); parser.add_argument("--ping",action="store_true"); parser.add_argument("--update",action="store_true"); args=parser.parse_args()

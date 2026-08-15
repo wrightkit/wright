@@ -16,3 +16,12 @@ The runner drives `Deltinteger --langserver` using Content-Length framed JSON-RP
 It opens a project workspace so `ds.toml` is visible, records diagnostics and the
 custom `workshopCode` / `elementCount` notifications, and writes deterministic
 JSON evidence. It never invokes the clipboard-bound default compiler path.
+
+The langserver debounces compiles ~50 ms after the last `didOpen` and publishes
+one coherent `workshopCode`/`elementCount`/`publishDiagnostics` triple per
+compile; compiles that fire between `didOpen` batches are timing-dependent. The
+runner therefore drains until the server is quiet (`QUIET_SECONDS`, default
+3 s) and records only the LAST compile triple — the deterministic project
+compile after every file is open. `accept`/`reject` is derived from the final
+`elementCount` (`>= 0` means the reference produced Workshop code; `-1` means
+it reported errors).

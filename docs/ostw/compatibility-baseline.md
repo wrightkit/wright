@@ -115,8 +115,8 @@ Rust dependency or committed fixture.
 
 | Project | Immutable revision | Licensed files | Oracle result | Workshop result |
 | --- | --- | ---: | --- | --- |
-| MOBAwatch | `b9b1ac3b77a484256e89aca6be8c27470803f665` | 70 source/project/license files | accepted; no diagnostic | available, SHA-256 `04aa4bae7832767f7976ee3bda46ed79566c8dc8e347d2ea9272aefd2e374e28` |
-| protect-ban | `f8c2353ed8447f13038fbf6b9938031cced5796f` | 19 source/project/license files | accepted; no diagnostic | `workshopCode` was empty; no N-level artifact |
+| MOBAwatch | `b9b1ac3b77a484256e89aca6be8c27470803f665` | 70 source/project/license files | **rejected**; first error "Operator `==` cannot be applied to the types `T` and `T`." (`tests.ostw:8`) plus missing include-closure files | none; `elementCount` `-1`; the `workshopCode` channel carried the error log, SHA-256 `b0a8d959a1280c4513a15d0ed0ea64e62d192b0dff628f4924514d3490389bc9` |
+| protect-ban | `f8c2353ed8447f13038fbf6b9938031cced5796f` | 19 source/project/license files | accepted; type-inference hints only (`Unable to infer type`) | available, `elementCount` 79, SHA-256 `75722f0aa7ed0484bf8ca5503bd93d2798c7bbb2fd59b5729b122ee1d8a03912` |
 
 `compatibility/ostw/corpus.json` is the machine-readable provenance and
 integrity inventory: repository, license, revision, `ds.toml`, entry point,
@@ -127,10 +127,23 @@ and element-count notification where supplied.
 The corpus exercises project settings, imports, rules, macros, arrays,
 Workshop calls and classes. These categories define the first Wright-owned
 support-boundary evidence set; classes remain evidence-prioritized rather than
-an automatic first implementation requirement. The first blocker is the empty
-protect-ban output notification: investigate project configuration/output
-delivery before making any N-level corpus claim. Neither result supports an
-E-level claim, optimizer parity, multi-locale behavior, or a frontend scope.
+an automatic first implementation requirement. Measured observations:
+
+* **MOBAwatch rejects under the pinned Linux reference.** The errors are the
+  generic `==` on type `T` (`tests.ostw:8`), Windows-authored backslash include
+  paths (`Header Files/projectiles/..\entity.del`, `..\structures.del`) that
+  Linux OSTW cannot resolve, and missing closure assets
+  (`customGameSettings.lobby`, `.resources/meshes/core.obj`). The committed
+  closure is therefore not a clean Linux compile unit; the categories it
+  exercises still define the support-boundary evidence, but no N-level claim
+  can be made from it as acquired.
+* **protect-ban compiles: real Workshop output is available.** The reference
+  emits 79 elements with only `Unable to infer type` hints. The earlier
+  "empty `workshopCode`" blocker was a harness artifact (it captured the first
+  transient compile notification, `"\n"`, before the real compile) and is
+  resolved by the deterministic last-compile capture.
+* Neither result supports an E-level claim, optimizer parity, multi-locale
+  behavior, or a frontend scope.
 
 ## Reference/oracle feasibility report
 

@@ -1,8 +1,8 @@
 {
   "projects": [
     {
-      "accept": "accept",
-      "elementCount": null,
+      "accept": "reject",
+      "elementCount": -1,
       "entry": "Source Files/main.ostw",
       "files": [
         {
@@ -290,14 +290,27 @@
           "sha256": "e68213afbdcf545e7f22898d859d950187fabc14302435137ec1092beda23720"
         }
       ],
-      "firstDiagnostic": null,
+      "firstDiagnostic": {
+        "message": "Operator '==' cannot be applied to the types 'T' and 'T'.",
+        "range": {
+          "end": {
+            "character": 16,
+            "line": 8
+          },
+          "start": {
+            "character": 14,
+            "line": 8
+          }
+        },
+        "severity": 1
+      },
       "id": "mobawatch",
-      "workshopAvailable": true,
-      "workshopCodeSha256": "04aa4bae7832767f7976ee3bda46ed79566c8dc8e347d2ea9272aefd2e374e28"
+      "workshopAvailable": false,
+      "workshopCodeSha256": "b0a8d959a1280c4513a15d0ed0ea64e62d192b0dff628f4924514d3490389bc9"
     },
     {
       "accept": "accept",
-      "elementCount": null,
+      "elementCount": 79,
       "entry": "main.ostw",
       "files": [
         {
@@ -373,10 +386,23 @@
           "sha256": "c2ed484a103a17a40f1d8826f2d971f8fee61b508148c8a5cdef34643ee9ba30"
         }
       ],
-      "firstDiagnostic": null,
+      "firstDiagnostic": {
+        "message": "Unable to infer type",
+        "range": {
+          "end": {
+            "character": 6,
+            "line": 11
+          },
+          "start": {
+            "character": 0,
+            "line": 11
+          }
+        },
+        "severity": 4
+      },
       "id": "protect-ban",
       "workshopAvailable": true,
-      "workshopCodeSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      "workshopCodeSha256": "75722f0aa7ed0484bf8ca5503bd93d2798c7bbb2fd59b5729b122ee1d8a03912"
     }
   ],
   "reference": {
