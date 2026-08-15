@@ -78,40 +78,77 @@ impl<'a> Lowerer<'a> {
         // settings tree is carried to emission, never lowered (#86).
         self.target.settings = self.hir.settings.clone();
 
-        // Variable, player, and subroutine tables in HIR order. Non-trivial
-        // initializers are collected while the tables are built and lowered
-        // into synthetic Initialize rules below.
-        let mut global_initializers = Vec::new();
+        // Variable, player, and subroutine tables. Non-trivial initializers
+        // are collected and lowered into synthetic Initialize rules below.
+        //
+        // Global slots follow the pinned reference's variable manager
+        // (#114): explicit source indices are honored, unindexed globals
+        // (declared without an index, or implicit OverPy default variables
+        // such as `for I in range(...)`) take the lowest free slot, and the
+        // table is emitted in slot order — so `globalvar total` plus an
+        // implicit `I` (fixed slot 8) emits `0: total, 8: I`, exactly like
+        // the reference. Initializers stay in declaration order regardless
+        // of the slot-ordered table, matching the reference's
+        // `globalInitDirectives` order.
+        let mut global_initializers: Vec<(GlobalVarId, ValueId)> = Vec::new();
         for id in range_ids::<hir::GlobalVar>(self.hir.globals.len()) {
-            let (name, span, name_span, initializer, source_index) = {
-                let global = self
-                    .hir
-                    .globals
-                    .get(id)
-                    .ok_or_else(|| dangling("global variable", id))?;
-                (
-                    global.name.clone(),
-                    global.span,
-                    global.name_span,
-                    global.initializer,
-                    global.index,
-                )
-            };
-            let initializer = match initializer {
-                Some(initializer) => Some(self.lower_value(initializer)?),
-                None => None,
-            };
+            let initializer = self
+                .hir
+                .globals
+                .get(id)
+                .ok_or_else(|| dangling("global variable", id))?
+                .initializer;
+            if let Some(initializer) = initializer {
+                global_initializers.push((id, self.lower_value(initializer)?));
+            }
+        }
+        let mut global_taken: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        // (HIR id, name, span, name_span, final Workshop slot).
+        type GlobalEntry = (GlobalVarId, String, Option<Span>, Option<Span>, Option<u32>);
+        let mut global_entries: Vec<GlobalEntry> = Vec::new();
+        for id in range_ids::<hir::GlobalVar>(self.hir.globals.len()) {
+            let global = self
+                .hir
+                .globals
+                .get(id)
+                .ok_or_else(|| dangling("global variable", id))?;
+            let (name, span, name_span, source_index) = (
+                global.name.clone(),
+                global.span,
+                global.name_span,
+                global.index,
+            );
+            if let Some(index) = source_index {
+                global_taken.insert(index);
+            }
+            global_entries.push((id, name, span, name_span, source_index));
+        }
+        let mut next_free = 0u32;
+        for entry in global_entries.iter_mut() {
+            if entry.4.is_some() {
+                continue;
+            }
+            while global_taken.contains(&next_free) {
+                next_free += 1;
+            }
+            entry.4 = Some(next_free);
+            global_taken.insert(next_free);
+            next_free += 1;
+        }
+        global_entries.sort_by_key(|(_, _, _, _, index)| index.expect("assigned above"));
+        for (id, name, span, name_span, index) in global_entries {
             let wir_id = self.target.global_variables.push(wir::WorkshopVariable {
                 name,
-                index: source_index.unwrap_or(id.index() as u32),
+                index: index.expect("assigned above"),
                 span,
                 name_span,
             });
-            if let Some(initializer) = initializer {
-                global_initializers.push((wir_id, initializer));
-            }
             self.globals.insert(id, wir_id);
         }
+        let global_initializers: Vec<(wir::GlobalVarId, ValueId)> = global_initializers
+            .into_iter()
+            .map(|(id, value)| (self.globals[&id], value))
+            .collect();
         let mut player_initializers = Vec::new();
         for id in range_ids::<hir::PlayerVar>(self.hir.players.len()) {
             let (name, span, name_span, initializer, source_index) = {

@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::error::{HirError, invalid};
 use super::types::{
     Declaration, Expr, PROTOCOL_MAJOR, PROTOCOL_NAME, Position, Program, Rule, RuleEntry, Settings,
-    SettingsNode, Span, Stmt,
+    SettingsNode, Span, Stmt, default_var_index,
 };
 use wright_ir::settings::table::{self, KeyKind, PathPart};
 
@@ -543,7 +543,9 @@ fn validate_stmts(
                 }
             }
             Stmt::For { variable, span, .. } => match variable.as_ref() {
-                Expr::GlobalVar { name, .. } if tables.globals.contains(&name.as_str()) => {}
+                Expr::GlobalVar { name, .. }
+                    if tables.globals.contains(&name.as_str())
+                        || default_var_index(name).is_some() => {}
                 Expr::GlobalVar { name, .. } => errors.push(invalid(
                     "unresolved-reference",
                     format!("for-loop variable '{name}' is not a declared global variable"),
@@ -583,7 +585,10 @@ fn validate_exprs(
                 errors.push(error);
             }
             match node {
-                Expr::GlobalVar { name, span } if !tables.globals.contains(&name.as_str()) => {
+                Expr::GlobalVar { name, span }
+                    if !tables.globals.contains(&name.as_str())
+                        && default_var_index(name).is_none() =>
+                {
                     errors.push(invalid(
                         "unresolved-reference",
                         format!("reference to unknown global variable '{name}'"),

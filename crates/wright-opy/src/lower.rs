@@ -21,6 +21,7 @@ use wright_core::hir::types::{
     Declaration, Define, Event, Expr as HirExpr, Generator, IfBranch, Position,
     Program as HirProgram, Protocol, Rule, RuleEntry, Settings as HirSettings,
     SettingsNode as HirSettingsNode, SourceFile, Span as HirSpan, Stmt as HirStmt,
+    default_var_index,
 };
 
 use crate::cst::{self, Decl, Expr, RuleEntry as CstRuleEntry, Stmt};
@@ -514,6 +515,16 @@ impl Lowerer {
                 );
                 HirExpr::Null { span: None }
             }
+            // OverPy default variable names (A–Z, AA–…, DX): implicit global
+            // variables at fixed Workshop slots. The pinned reference accepts
+            // these without a `globalvar` declaration anywhere a variable may
+            // appear, including as a `for ... in range(...)` loop binder
+            // (#114). Custom enums take precedence over default-var names,
+            // matching the reference's identifier resolution order.
+            _ if default_var_index(name).is_some() => HirExpr::GlobalVar {
+                name: name.to_string(),
+                span: Some(span.into()),
+            },
             _ => {
                 self.error_at(
                     "unknown-identifier",
@@ -1563,5 +1574,110 @@ mod tests {
 
         let error = compile_error(&action_source("g = DynamicEffect.SPARKLES"), 4);
         assert_eq!(error.code, "unknown-enum-member");
+    }
+
+    #[test]
+    fn default_var_for_binder_resolves_at_all_range_arities() {
+        // The agent-lab regression: `for I in range(0, 10):` with `I` not
+        // declared. `I` is an OverPy default variable name (A–Z, AA–…), which
+        // the pinned reference accepts as an implicit global loop binder
+        // (#114). All range arities keep compiling (1, 2, and 3 arguments).
+        for (binder, iterable) in [
+            ("I", "range(0, 10)"),
+            ("I", "range(3)"),
+            ("I", "range(1, 5, 2)"),
+        ] {
+            let hir = lower_ok(&format!(
+                "globalvar total\nrule \"r\":\n    @Event global\n    for {binder} in {iterable}:\n        total += {binder}\n"
+            ));
+            let (_, actions) = rule_conditions_and_actions(&hir);
+            let HirStmt::For { variable, body, .. } = &actions[0] else {
+                panic!("expected a for statement");
+            };
+            assert!(
+                matches!(variable.as_ref(), HirExpr::GlobalVar { name, .. } if name == "I"),
+                "the binder resolves to the implicit global 'I', got {variable:?}"
+            );
+            assert!(!body.is_empty(), "the loop body lowers");
+            // The binder use in the body resolves too: `total += I` has a
+            // GlobalVar operand.
+            let HirStmt::Assign { value, .. } = &body[0] else {
+                panic!("expected an assignment in the body");
+            };
+            let HirExpr::Binary { right, .. } = value.as_ref() else {
+                panic!("expected a binary expression");
+            };
+            assert!(
+                matches!(right.as_ref(), HirExpr::GlobalVar { name, .. } if name == "I"),
+                "the binder use inside the body resolves to the implicit global"
+            );
+        }
+    }
+
+    #[test]
+    fn default_var_names_resolve_as_implicit_globals() {
+        // Default variable names resolve anywhere a variable may appear,
+        // matching the pinned reference (no `globalvar` declaration needed).
+        let hir = lower_ok("rule \"r\":\n    @Event global\n    I = 5\n    debug(I)\n");
+        let (_, actions) = rule_conditions_and_actions(&hir);
+        let HirStmt::Assign { target, .. } = &actions[0] else {
+            panic!("expected an assignment");
+        };
+        assert!(
+            matches!(target.as_ref(), HirExpr::GlobalVar { name, .. } if name == "I"),
+            "the implicit global resolves, got {target:?}"
+        );
+        // `AA` (slot 26) and `Z` (slot 25) are default names; `i` is not.
+        assert_eq!(default_var_index("I"), Some(8));
+        assert_eq!(default_var_index("AA"), Some(26));
+        assert_eq!(default_var_index("Z"), Some(25));
+        assert_eq!(default_var_index("DX"), Some(127));
+        assert_eq!(default_var_index("DY"), None);
+        assert_eq!(default_var_index("i"), None);
+    }
+
+    #[test]
+    fn nested_same_name_for_binders_reuse_the_implicit_global() {
+        // Nested loops with the same default-var binder reuse the single
+        // implicit variable, matching the pinned reference (the inner loop
+        // overwrites the same Workshop global — no separate binding).
+        let hir = lower_ok(
+            "rule \"r\":\n    @Event global\n    for I in range(3):\n        for I in range(2):\n            debug(I)\n",
+        );
+        let (_, actions) = rule_conditions_and_actions(&hir);
+        let HirStmt::For {
+            variable: outer,
+            body,
+            ..
+        } = &actions[0]
+        else {
+            panic!("expected an outer for statement");
+        };
+        let HirStmt::For {
+            variable: inner, ..
+        } = &body[0]
+        else {
+            panic!("expected an inner for statement");
+        };
+        assert!(
+            matches!(outer.as_ref(), HirExpr::GlobalVar { name, .. } if name == "I")
+                && matches!(inner.as_ref(), HirExpr::GlobalVar { name, .. } if name == "I"),
+            "both loops bind the same implicit global (spans differ per binder site)"
+        );
+    }
+
+    #[test]
+    fn undeclared_lowercase_binder_is_still_an_unknown_identifier() {
+        // A lowercase undeclared binder is not a default variable name; the
+        // pinned reference rejects the program ("Unknown function name"), and
+        // Wright reports the same reject with the structured
+        // `unknown-identifier` diagnostic (#114).
+        let error = compile_error(
+            "rule \"r\":\n    @Event global\n    for i in range(3):\n        debug(i)\n",
+            3,
+        );
+        assert_eq!(error.code, "unknown-identifier");
+        let span = error.span.expect("the error is source-located");
+        assert_eq!(span.start.line, 3);
     }
 }

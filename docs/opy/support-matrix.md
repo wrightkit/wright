@@ -73,6 +73,16 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   OverPy defaults); other `@` directives fail explicitly.
 - Statements: expression statements, `=` and augmented assignment,
   `if`/`elif`/`else`, `for x in range(...)`, `while`, `pass`.
+- `for`-loop binder resolution (#114): the loop variable must resolve to a
+  global variable — either a declared `globalvar`, or an OverPy **default
+  variable name** (`A`–`Z`, `AA`–`AZ`, …, `DA`–`DX`), which the pinned
+  reference accepts as an implicit global at its fixed Workshop slot (e.g.
+  `for I in range(0, 10):` with no declaration, the agent-lab regression).
+  Nested same-name loops reuse the same implicit variable (no separate
+  binding), matching the reference. An undeclared lowercase binder is
+  rejected exactly like the reference rejects it (`unknown-identifier`,
+  reference: "Unknown function name"). `range(stop)` / `range(start, stop)` /
+  `range(start, stop, step)` are all supported.
 
 ### Expressions and resolution
 - Literals, arrays `[...]`, parenthesized expressions.

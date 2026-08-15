@@ -26,6 +26,10 @@ const PARITY_CASES: &[(&str, &str)] = &[
         "adapter/fixtures/synthetic/control-flow.json",
     ),
     (
+        "synthetic/for-range-agentlab",
+        "adapter/fixtures/synthetic/for-range-agentlab.json",
+    ),
+    (
         "synthetic/declarations-numbers",
         "adapter/fixtures/synthetic/declarations-numbers.json",
     ),

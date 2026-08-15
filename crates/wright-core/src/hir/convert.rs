@@ -13,7 +13,7 @@ use wright_ir::hir::{BinaryOp, UnaryOp};
 use wright_ir::ids::Id;
 use wright_ir::source::{FileId, Position, SourceFile, Span};
 
-use super::types::{self, Declaration, Expr, RuleEntry, Stmt};
+use super::types::{self, Declaration, Expr, RuleEntry, Stmt, default_var_index};
 use crate::hir::Program as ProtocolProgram;
 
 /// Convert a validated protocol `Program` into the internal Opy HIR model.
@@ -344,6 +344,35 @@ impl<'a> Builder<'a> {
             .collect()
     }
 
+    /// Resolve a global-variable reference, auto-creating the internal
+    /// declaration for an OverPy default variable name (`A`–`Z`, `AA`–…,
+    /// `DX`) that the pinned reference accepts without a `globalvar`
+    /// declaration (#114). The implicit declaration carries the name's fixed
+    /// Workshop slot as its index and no source span, exactly as the
+    /// reference models the implicit variable (no protocol declaration is
+    /// added, so native/adapter HIR parity is preserved).
+    fn global_var(
+        &mut self,
+        name: &str,
+        span: Option<Span>,
+    ) -> Result<wright_ir::hir::GlobalVarId, IrError> {
+        if let Some(id) = self.globals.get(name) {
+            return Ok(*id);
+        }
+        let Some(index) = default_var_index(name) else {
+            return Err(unresolved(format!("global variable '{name}'"), span));
+        };
+        let id = self.target.globals.push(wright_ir::hir::GlobalVar {
+            name: name.to_string(),
+            index: Some(index),
+            span: None,
+            name_span: None,
+            initializer: None,
+        });
+        self.globals.insert(name.to_string(), id);
+        Ok(id)
+    }
+
     fn convert_stmt(&mut self, statement: &Stmt) -> Result<wright_ir::hir::StmtId, IrError> {
         let span = self.span(statement.span().copied())?;
         let converted = match statement {
@@ -399,10 +428,7 @@ impl<'a> Builder<'a> {
                     }
                 };
                 let variable = match variable.as_ref() {
-                    Expr::GlobalVar { name, .. } => *self
-                        .globals
-                        .get(name)
-                        .ok_or_else(|| unresolved(format!("global variable '{name}'"), span))?,
+                    Expr::GlobalVar { name, .. } => self.global_var(name, span)?,
                     other => {
                         return Err(unresolved(
                             format!(
@@ -495,10 +521,7 @@ impl<'a> Builder<'a> {
                 span,
             },
             Expr::GlobalVar { name, .. } => {
-                let variable = *self
-                    .globals
-                    .get(name)
-                    .ok_or_else(|| unresolved(format!("global variable '{name}'"), span))?;
+                let variable = self.global_var(name, span)?;
                 wright_ir::hir::Expr::GlobalVar { variable, span }
             }
             Expr::PlayerVar { player, name, .. } => {

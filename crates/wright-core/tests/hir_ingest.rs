@@ -240,6 +240,51 @@ fn rejects_for_loop_over_undeclared_variable() {
     assert_eq!(error.code(), "unresolved-reference");
 }
 
+#[test]
+fn default_var_for_binder_validates_and_converts_to_an_implicit_global() {
+    // The agent-lab regression payload: `for I in range(0, 10): total += 1`
+    // with `I` undeclared. `I` is an OverPy default variable name, so the
+    // reference accepts it as an implicit global loop binder (#114): the
+    // payload validates, and conversion creates an internal global with the
+    // fixed slot (8) and no source span, without adding a protocol
+    // declaration.
+    let payload = format!(
+        r#"{{
+            "protocol": {{ "name": "wright/opy-hir", "version": "1.0.0" }},
+            "generator": {{ "name": "g", "version": "0", "frontend": "f" }},
+            "files": [ {{ "id": 0, "path": "source.opy" }} ],
+            "declarations": [
+                {{ "kind": "globalVariable", "name": "total", "index": null, "span": {{ "file": 0, "start": {{ "line": 1, "col": 1 }}, "end": {{ "line": 1, "col": 15 }} }}, "initializer": null }}
+            ],
+            "rules": [ {rule} ]
+        }}"#,
+        rule = r#"{
+            "name": "r",
+            "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } },
+            "event": { "name": "global", "args": [], "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } } },
+            "conditions": [],
+            "actions": [
+                { "kind": "for", "variable": { "kind": "globalVar", "name": "I", "span": { "file": 0, "start": { "line": 2, "col": 9 }, "end": { "line": 2, "col": 10 } } }, "iterable": { "kind": "call", "name": "range", "args": [ { "kind": "number", "value": 0, "text": "0", "span": { "file": 0, "start": { "line": 2, "col": 20 }, "end": { "line": 2, "col": 21 } } }, { "kind": "number", "value": 10, "text": "10", "span": { "file": 0, "start": { "line": 2, "col": 22 }, "end": { "line": 2, "col": 25 } } } ], "span": { "file": 0, "start": { "line": 2, "col": 14 }, "end": { "line": 2, "col": 26 } } }, "body": [ { "kind": "assign", "target": { "kind": "globalVar", "name": "total", "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 14 } } }, "value": { "kind": "binary", "op": "+", "left": { "kind": "globalVar", "name": "total", "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 14 } } }, "right": { "kind": "globalVar", "name": "I", "span": { "file": 0, "start": { "line": 3, "col": 17 }, "end": { "line": 3, "col": 19 } } }, "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 19 } } }, "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 19 } } } ], "span": { "file": 0, "start": { "line": 2, "col": 5 }, "end": { "line": 2, "col": 10 } } }
+            ]
+        }"#
+    );
+    let program = hir::parse_str(&payload).expect("a default-var binder validates");
+    assert!(
+        program.declarations.len() == 1,
+        "only the declared 'total' is in the protocol declarations"
+    );
+    let model = program.to_ir().expect("converts");
+    assert_eq!(model.globals.len(), 2, "one implicit global is created");
+    let implicit = model
+        .globals
+        .iter()
+        .find(|global| global.name == "I")
+        .expect("the implicit 'I' global exists");
+    assert_eq!(implicit.index, Some(8), "the fixed default-var slot");
+    assert_eq!(implicit.span, None);
+    assert_eq!(implicit.name_span, None);
+}
+
 /// Build a minimal valid payload whose single rule is `rule_json`.
 fn invalid_rule_payload(rule_json: &str) -> String {
     format!(

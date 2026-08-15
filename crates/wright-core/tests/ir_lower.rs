@@ -248,3 +248,55 @@ fn unsupported_for_iterable_fails_with_span() {
         other => panic!("expected unsupported, got {other}"),
     }
 }
+
+#[test]
+fn implicit_default_var_binder_lowers_to_slot_ordered_table() {
+    // The agent-lab shape: `globalvar total` + `for I in range(0, 10)` with
+    // `I` undeclared. The implicit default variable (fixed slot 8) and the
+    // declared `total` (lowest free slot 0) form a slot-ordered table that
+    // matches the pinned reference emission `0: total, 8: I`, and the for
+    // loop lowers to a ForGlobalVariable action on `I` (#114).
+    let payload = r#"{
+        "protocol": { "name": "wright/opy-hir", "version": "1.0.0" },
+        "generator": { "name": "g", "version": "0", "frontend": "f" },
+        "files": [ { "id": 0, "path": "source.opy" } ],
+        "declarations": [
+            { "kind": "globalVariable", "name": "total", "index": null, "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 15 } }, "initializer": null }
+        ],
+        "rules": [ {
+            "name": "r",
+            "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } },
+            "event": { "name": "global", "args": [], "span": { "file": 0, "start": { "line": 1, "col": 1 }, "end": { "line": 1, "col": 2 } } },
+            "conditions": [],
+            "actions": [
+                { "kind": "for", "variable": { "kind": "globalVar", "name": "I", "span": { "file": 0, "start": { "line": 2, "col": 9 }, "end": { "line": 2, "col": 10 } } }, "iterable": { "kind": "call", "name": "range", "args": [ { "kind": "number", "value": 0, "text": "0", "span": { "file": 0, "start": { "line": 2, "col": 20 }, "end": { "line": 2, "col": 21 } } }, { "kind": "number", "value": 10, "text": "10", "span": { "file": 0, "start": { "line": 2, "col": 22 }, "end": { "line": 2, "col": 25 } } } ], "span": { "file": 0, "start": { "line": 2, "col": 14 }, "end": { "line": 2, "col": 26 } } }, "body": [ { "kind": "assign", "target": { "kind": "globalVar", "name": "total", "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 14 } } }, "value": { "kind": "binary", "op": "+", "left": { "kind": "globalVar", "name": "total", "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 14 } } }, "right": { "kind": "globalVar", "name": "I", "span": { "file": 0, "start": { "line": 3, "col": 17 }, "end": { "line": 3, "col": 19 } } }, "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 19 } } }, "span": { "file": 0, "start": { "line": 3, "col": 9 }, "end": { "line": 3, "col": 19 } } } ], "span": { "file": 0, "start": { "line": 2, "col": 5 }, "end": { "line": 2, "col": 10 } } }
+            ]
+        } ]
+    }"#;
+    let protocol = hir::parse_str(payload).unwrap();
+    let model = protocol.to_ir().unwrap();
+    let program = lower::lower(&model).unwrap();
+
+    let slots: Vec<(u32, &str)> = program
+        .global_variables
+        .iter()
+        .map(|variable| (variable.index, variable.name.as_str()))
+        .collect();
+    assert_eq!(
+        slots,
+        vec![(0, "total"), (8, "I")],
+        "the table is slot-ordered like the reference"
+    );
+
+    // The for loop lowers to a ForGlobalVariable on the implicit `I` with
+    // the range bounds (0, 10, 1).
+    let dump = program.dump();
+    assert!(
+        dump.contains("forGlobalVariable I in 0, 10, 1"),
+        "the binder lowers to the implicit global:\n{dump}"
+    );
+    assert!(
+        dump.contains("modifyGlobalVariable total Add I"),
+        "the body assignment lowers with the binder use resolved:\n{dump}"
+    );
+}

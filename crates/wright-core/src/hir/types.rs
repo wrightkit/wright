@@ -12,6 +12,40 @@ pub const PROTOCOL_NAME: &str = "wright/opy-hir";
 /// The protocol major version this consumer understands.
 pub const PROTOCOL_MAJOR: u32 = 1;
 
+/// The number of Workshop variable slots per variable set.
+///
+/// OverPy's `defaultVarNames` table covers exactly these slots: the 128
+/// uppercase letter spellings `A`–`Z`, `AA`–`AZ`, …, `DA`–`DX` (bijective
+/// base-26, Excel-style, zero-based). The pinned OverPy 9.7.10 reference
+/// accepts these names as *implicit* global variables anywhere a variable
+/// may appear — including as a `for ... in range(...)` loop binder — without
+/// requiring a `globalvar` declaration, and assigns each its fixed slot.
+/// Names outside the table (lowercase, mixed case, longer spellings) stay
+/// ordinary unresolved identifiers (see `docs/opy/support-matrix.md`).
+const DEFAULT_VAR_SLOTS: u32 = 128;
+
+/// The fixed Workshop slot for an OverPy default variable name (`A`–`Z`,
+/// `AA`–`AZ`, …, `DA`–`DX`), or `None` for any other spelling.
+///
+/// The index is the zero-based bijective base-26 value of the uppercase
+/// spelling (`A` = 0, `Z` = 25, `AA` = 26, `DX` = 127); spellings beyond the
+/// 128-slot table (`DY`, `EA`, …, three-letter names, lowercase) return
+/// `None`, matching the pinned reference's `defaultVarNames` table exactly.
+pub fn default_var_index(name: &str) -> Option<u32> {
+    if name.is_empty() || name.len() > 2 {
+        return None;
+    }
+    let mut value: u32 = 0;
+    for byte in name.bytes() {
+        if !byte.is_ascii_uppercase() {
+            return None;
+        }
+        value = value * 26 + u32::from(byte - b'A' + 1);
+    }
+    let index = value - 1;
+    (index < DEFAULT_VAR_SLOTS).then_some(index)
+}
+
 /// Protocol envelope identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Protocol {
