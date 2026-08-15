@@ -304,6 +304,10 @@
       "projectSettings": "ds.toml",
       "repository": "pharingWell/MOBAwatch",
       "revision": "b9b1ac3b77a484256e89aca6be8c27470803f665",
+      "roots": [
+        {"root": "Source Files/main.ostw", "role": "entry-root"},
+        {"root": "tests.ostw", "role": "historical-document-root"}
+      ],
       "sourceKind": "licensed-project-source-and-import-closure"
     },
     {
@@ -397,8 +401,26 @@
       "projectSettings": "ds.toml",
       "repository": "GrandeurHammers/protect-ban",
       "revision": "f8c2353ed8447f13038fbf6b9938031cced5796f",
+      "roots": [
+        {"root": "main.ostw", "role": "entry-root"},
+        {"root": "Credits.ostw", "role": "document-root"},
+        {"root": "coreDebug.ostw", "role": "document-root"},
+        {"root": "interface/ClickArea.del", "role": "document-root"},
+        {"root": "interface/HeroSelect.del", "role": "document-root"},
+        {"root": "interface/HeroSelectConfig.del", "role": "document-root"},
+        {"root": "interface/HeroSelectFunctions.del", "role": "document-root"},
+        {"root": "interface/MapData.del", "role": "document-root"},
+        {"root": "interface/PlayerInterface.del", "role": "document-root"},
+        {"root": "interface/miscSetup.del", "role": "document-root"},
+        {"root": "protectBanFull.ostw", "role": "document-root"},
+        {"root": "utils/AltFont.del", "role": "document-root"},
+        {"root": "utils/Colors.del", "role": "document-root"},
+        {"root": "utils/Math.del", "role": "document-root"},
+        {"root": "utils/ScreenToWorld.del", "role": "document-root"},
+        {"root": "utils/ServerLoad.del", "role": "historical-document-root"}
+      ],
       "sourceKind": "licensed-project-source-and-import-closure"
     }
   ],
-  "schemaVersion": 1
+  "schemaVersion": 2
 }

@@ -7,6 +7,7 @@
   "runs": [
     {"runId": "entry-only", "openMode": "entry"}
   ],
+  "role": "differential-target",
   "features": ["enums", "unions", "null", "casts", "ternary", "short-circuit"],
   "reference": {
     "name": "ostw",

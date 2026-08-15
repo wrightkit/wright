@@ -1,9 +1,12 @@
 # OSTW Compatibility Baseline and M13 Investigation
 
-Status: accepted baseline (M13 in progress: OSTW reference/corpus/support investigation #113, baseline pinned #115, native syntax/project frontend foundation #117, and protect-ban HIR lowering #118)
+Status: accepted baseline (M13 in progress: OSTW reference/corpus/support investigation #113, baseline pinned #115, native syntax/project frontend foundation #117, protect-ban HIR lowering #118, and explicit compile-root oracle rebaseline #122)
 Status note: Native AST/parser, project settings (`ds.toml`), import-closure
 resolution, and protect-ban HIR lowering are implemented in `crates/wright-ostw`.
-Emission (OSTW → Workshop) and language services remain in progress.
+Emission (OSTW → Workshop) and language services remain in progress. Since
+#122, every recorded oracle observation names an explicit compile/document
+root; the historical 79-element protect-ban observation is reclassified as the
+`utils/ServerLoad.del` document-root compile, not entry-project acceptance.
 Scope: forward-looking, tiered inventory of the OSTW language surface against
 the pinned reference, the corpus/acquisition plan, the oracle feasibility
 report, and the reuse/boundary findings that M13 milestones respect.
@@ -90,7 +93,8 @@ commits, per-file SHA-256, license fields, full include closures).
 | --- | --- | --- |
 | `ItsDeltin/Lava`: official OSTW example collection (minigames, maze, dodgeball, …), ≈25 `.del` files | No license file (GitHub API `license: null`), last pushed 2021 | **Excluded until licensing resolves**; can be a local reference read for behavior |
 | `pharingWell/MOBAwatch`: "A MOBA made in Overwatch", 69 `.ostw`/`.del` files (35 `.ostw` + 34 `.del`) across `Header Files/`/`Source Files/`, `c_style_workshop_output = true`, `ds.toml` present | BSD-2-Clause, last pushed 2025-02-21, `release` default branch | **Primary corpus candidate** (large, active-format, BSD-redistributable) |
-| `GrandeurHammers/protect-ban`: `main.ostw` + `interface/`/`utils/` `.del` modules, `ds.toml` present | MIT, last pushed 2025-07-19 | **Secondary corpus candidate** (small, clean project layout) |
+| `GrandeurHammers/protect-ban`: `main.ostw` + `interface/`/`utils/` `.del` modules, `ds.toml` present | MIT, last pushed 2025-07-19 | **Secondary corpus candidate** (small, clean project layout); entry closure reaches three missing `../OSTWUtils/…` imports |
+| `GrandeurHammers/OSTWUtils`: the missing protect-ban dependency family (`OnScreenText`, `Cursor`, `StringSorting`) | No license file, public repository | **Excluded until licensing resolves**; source must not be copied into Wright |
 | Upstream `Deltinteger.Tests` sources | Part of the unlicensed compiler repo | Not redistributable; behavior may inform the baseline as observed evidence only |
 | OSTW wiki examples | Wiki repo, no license | Not redistributable wholesale; short snippets under fair-use review before any commit |
 
@@ -111,37 +115,89 @@ The reference is invoked only through `Deltinteger --langserver`; `--ping`
 returned `Hello!`. The binary remains an external `target/`/CI artifact, not a
 Rust dependency or committed fixture.
 
-| Project | Immutable revision | Licensed files | Oracle result | Workshop result |
+| Project | Immutable revision | Licensed files | Entry-root oracle result | Document-root observations |
 | --- | --- | ---: | --- | --- |
-| MOBAwatch | `b9b1ac3b77a484256e89aca6be8c27470803f665` | 70 source/project/license files | **rejected**; first error "Operator `==` cannot be applied to the types `T` and `T`." (`tests.ostw:8`) plus missing include-closure files | none; `elementCount` `-1`; the `workshopCode` channel carried the error log, SHA-256 `b0a8d959a1280c4513a15d0ed0ea64e62d192b0dff628f4924514d3490389bc9` |
-| protect-ban | `f8c2353ed8447f13038fbf6b9938031cced5796f` | 19 source/project/license files | accepted; type-inference hints only (`Unable to infer type`) | available, `elementCount` 79, SHA-256 `75722f0aa7ed0484bf8ca5503bd93d2798c7bbb2fd59b5729b122ee1d8a03912` |
+| MOBAwatch | `b9b1ac3b77a484256e89aca6be8c27470803f665` | 70 source/project/license files | **rejected** (`Source Files/main.ostw`): generic `==` on type `T` plus missing include-closure assets | per-document table in `results.json`; the historical 79-element-era observation was the `tests.ostw` root: reject, error log SHA-256 `b0a8d959a1280c4513a15d0ed0ea64e62d192b0dff628f4924514d3490389bc9` |
+| protect-ban | `f8c2353ed8447f13038fbf6b9938031cced5796f` | 19 source/project/license files | **rejected** (`main.ostw`): three hard missing `../OSTWUtils/…` imports; no Workshop output | per-document table in `results.json`; the historical 79-element observation was the `utils/ServerLoad.del` root: accept, `elementCount` 79, SHA-256 `75722f0aa7ed0484bf8ca5503bd93d2798c7bbb2fd59b5729b122ee1d8a03912` |
 
 `compatibility/ostw/corpus.json` is the machine-readable provenance and
-integrity inventory: repository, license, revision, `ds.toml`, entry point,
-source kind, semantic categories, and SHA-256 for every committed source.
-`results.json` records the S/D/N observation, output availability, diagnostics,
-and element-count notification where supplied.
+integrity inventory: repository, license, revision, `ds.toml` entry point,
+source kind, semantic categories, SHA-256 for every committed source, and the
+explicit reviewable `roots` each project is observed under. `results.json`
+(schema v2) records one observation per root — accept/reject, `elementCount`,
+the full diagnostics with document URIs, the import-closure identity, and the
+missing-import boundaries — as generated by the explicit-root corpus runner.
 
 The corpus exercises project settings, imports, rules, macros, arrays,
 Workshop calls and classes. These categories define the first Wright-owned
 support-boundary evidence set; classes remain evidence-prioritized rather than
 an automatic first implementation requirement. Measured observations:
 
-* **MOBAwatch rejects under the pinned Linux reference.** The errors are the
-  generic `==` on type `T` (`tests.ostw:8`), Windows-authored backslash include
-  paths (`Header Files/projectiles/..\entity.del`, `..\structures.del`) that
-  Linux OSTW cannot resolve, and missing closure assets
-  (`customGameSettings.lobby`, `.resources/meshes/core.obj`). The committed
-  closure is therefore not a clean Linux compile unit; the categories it
-  exercises still define the support-boundary evidence, but no N-level claim
-  can be made from it as acquired.
-* **protect-ban compiles: real Workshop output is available.** The reference
-  emits 79 elements with only `Unable to infer type` hints. The earlier
-  "empty `workshopCode`" blocker was a harness artifact (it captured the first
-  transient compile notification, `"\n"`, before the real compile) and is
-  resolved by the deterministic last-compile capture.
+* **MOBAwatch entry root rejects under the pinned Linux reference.** The errors
+  are the generic `==` on type `T`, Windows-authored backslash include paths
+  (`Header Files/projectiles/..\entity.del`, `..\structures.del`) that Linux
+  OSTW cannot resolve, and missing closure assets (`customGameSettings.json`).
+  The committed closure is therefore not a clean Linux compile unit; the
+  categories it exercises still define the support-boundary evidence, but no
+  N-level claim can be made from it as acquired.
+* **protect-ban per-document evidence is mixed; the project entry root
+  rejects.** `main.ostw` (the `ds.toml` entry point) reaches three hard
+  missing `../OSTWUtils/…` imports and produces no Workshop output. Individual
+  documents that do not touch the missing imports compile (for example
+  `utils/ServerLoad.del`, 79 elements; `Credits.ostw`, 49 elements), while
+  every document that reaches the missing imports rejects. These are
+  per-document observations, not project acceptance: the reference LSP compiles
+  the last-opened document plus its import closure, and `ds.toml.entry_point`
+  is not the LSP compile selector (pinned P1 evidence).
+* The earlier "empty `workshopCode`" blocker was a harness artifact (it
+  captured the first transient compile notification, `"\n"`, before the real
+  compile) and is resolved by the deterministic last-compile capture.
 * Neither result supports an E-level claim, optimizer parity, multi-locale
   behavior, or a frontend scope.
+
+## Corrected evidence model: explicit compile roots (#122)
+
+Pinned P1 evidence established that the upstream LSP compiles the **last-opened
+document plus its transitive import closure**, not the project's
+`ds.toml.entry_point`. The corpus runner therefore changed to schema v2
+(`results.json`): every observation is produced by a session that opens exactly
+one document — the observation's explicit `root` — so the recorded compile can
+only be that root's compile and can never acquire meaning from `didOpen`
+ordering. Each observation also records its computed import-closure identity
+and missing-import boundaries (relative-path resolution per pinned P2
+evidence), so project-level support, per-document evidence, and
+reference-rejected boundaries are distinguishable.
+
+* **Reclassification.** The historical `accept, elementCount 79,
+  SHA-256 75722f…` protect-ban observation was not entry-project acceptance: it
+  is the `utils/ServerLoad.del` document-root compile and is recorded as
+  `historical-document-root` in `results.json` (re-run under the pinned v3.4.0
+  reference reproduces the same 79 elements and hash). The historical MOBAwatch
+  observation is likewise attributed to its `tests.ostw` root (same error log
+  hash). No historical hash or pinned identity changed; only the attribution
+  and the evidence model did.
+* **Entry-root boundary.** `main.ostw` (entry root) rejects at exactly three
+  missing `../OSTWUtils/{OnScreenText,Cursor,StringSorting}.del` imports with
+  an import-closure of exactly the seven reachable files. OSTWUtils remains
+  uncompiled in Wright's corpus because the upstream repository has no
+  license; its source is not copied.
+* **Per-document table.** Every committed protect-ban source is recorded with
+  its own root; documents whose closure avoids the missing imports compile,
+  others reject — per-document evidence never stands in for project support.
+* **#119 differential target.** The first forward-compilation differential
+  targets are the pinned-reference-accepted, Wright-authored #118 semantic
+  probes `p4-types-expressions` (147 elements),
+  `p5-functions-control` (120 elements), and `p6-catalog-signatures`
+  (68 elements), designated `differential-target` in their `probe.json`
+  manifests and aggregated under `differentialTargets` in
+  `probes/results.json`. Their sources are committed (immutable), the pinned
+  reference identity is recorded per probe, and the oracle runner refuses to
+  list a target that the reference rejects. A complete licensed real-world
+  OSTW corpus remains unavailable (OSTWUtils is unlicensed; MOBAwatch is
+  reference-rejected), so the probes are the initial target.
+* **Determinism.** The corpus runner was re-run twice under the pinned
+  reference with byte-identical `results.json`; the drift check
+  (`run_oracle.py` without `--update`) guards CI against silent drift.
 
 ## Reference/oracle feasibility report
 

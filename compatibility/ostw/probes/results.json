@@ -1,4 +1,9 @@
 {
+  "differentialTargets": [
+    "p4-types-expressions",
+    "p5-functions-control",
+    "p6-catalog-signatures"
+  ],
   "probes": [
     {
       "entry": "main.ostw",
@@ -271,6 +276,7 @@
       "entry": "main.ostw",
       "id": "p4-types-expressions",
       "intent": "Decide for #118: enum member value/type in output, null assignment/comparison through a Number | Team union, <Number> cast, ternary lowering, and &&/|| short-circuit behavior with pure and side-effecting operands (block-bodied Boolean function ping(), assignment-expression operands).",
+      "role": "differential-target",
       "runs": [
         {
           "accept": "accept",
@@ -912,6 +918,7 @@
       "entry": "main.ostw",
       "id": "p5-functions-control",
       "intent": "Decide for #118: typed value-returning function and void function lowering, parameter passing and default values, C-style for over a global loop variable, foreach over an array literal, switch with intentional fallthrough + break + default, and mid-body return in a rule.",
+      "role": "differential-target",
       "runs": [
         {
           "accept": "accept",
@@ -932,6 +939,7 @@
       "entry": "main.ostw",
       "id": "p6-catalog-signatures",
       "intent": "Decide for #118 how named arguments, defaults, and positional arguments bind against Wright-owned catalog signatures: fully reordered named WorkshopSettingToggle, CreateInWorldText with reordered named args and a skipped default (Color), BigMessage with only Header named (first parameter omitted), StartCamera all named, user-defined userCall with reordered named args and skipped defaults, IsButtonHeld single named arg, SetInvisible single named arg, CreateHudText named with a null ternary receiver, and positional controls (Wait with enum, SmallMessage, BigMessage).",
+      "role": "differential-target",
       "runs": [
         {
           "accept": "accept",
@@ -966,5 +974,5 @@
     "schemaVersion": 1,
     "version": "v3.4.0"
   },
-  "schemaVersion": 1
+  "schemaVersion": 2
 }

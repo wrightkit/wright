@@ -10,6 +10,7 @@ and SHA-256. `latest` is never an evidence identity.
 python3 compatibility/ostw/run_oracle.py --acquire --ping
 python3 compatibility/ostw/run_oracle.py --acquire --update
 python3 compatibility/ostw/run_oracle.py
+python3 compatibility/ostw/run_oracle.py --probes
 ```
 
 The runner drives `Deltinteger --langserver` using Content-Length framed JSON-RPC.
@@ -17,11 +18,35 @@ It opens a project workspace so `ds.toml` is visible, records diagnostics and th
 custom `workshopCode` / `elementCount` notifications, and writes deterministic
 JSON evidence. It never invokes the clipboard-bound default compiler path.
 
+## Explicit compile/document roots
+
+Pinned P1 evidence (#118) established that the upstream LSP compiles the
+**last-opened document plus its transitive import closure**; `ds.toml.entry_point`
+is not the LSP compile selector. Every recorded observation is therefore
+produced by a session that opens exactly one document — the observation's
+explicit `root` — so the result can only be that root's compile and can never
+acquire meaning from `didOpen` ordering. `corpus.json` lists the reviewable
+`roots` (with `entry-root` / `document-root` / `historical-document-root`
+roles) per project; `results.json` (schema v2) records one observation per
+root: accept/reject, `elementCount`, full source-located diagnostics, the
+import-closure identity, and missing-import boundaries.
+
+`probe.json` manifests may designate a probe as `differential-target`; the
+runner aggregates accepted targets under `differentialTargets` in
+`probes/results.json` and refuses to list a target the pinned reference
+rejects. These are the immutable, reference-accepted forward-compilation
+targets for #119.
+
+## Determinism
+
 The langserver debounces compiles ~50 ms after the last `didOpen` and publishes
 one coherent `workshopCode`/`elementCount`/`publishDiagnostics` triple per
-compile; compiles that fire between `didOpen` batches are timing-dependent. The
-runner therefore drains until the server is quiet (`QUIET_SECONDS`, default
-3 s) and records only the LAST compile triple — the deterministic project
-compile after every file is open. `accept`/`reject` is derived from the final
-`elementCount` (`>= 0` means the reference produced Workshop code; `-1` means
-it reported errors).
+compile. The runner drains until the server is quiet (`QUIET_SECONDS`, default
+3 s) and records only the LAST compile triple — deterministic because the open
+set is explicit and fixed per observation. A session that drops mid-stream
+(transient container failure) is retried; the recorded triple is unchanged.
+
+The corpus runner re-run twice produces byte-identical `results.json`; running
+it without `--update` is the CI drift guard (`OSTW_ORACLE_DRIFT`).
+`accept`/`reject` is derived from the final `elementCount` (`>= 0` means the
+reference produced Workshop code; `-1` means it reported errors).

@@ -27,8 +27,19 @@ output only.
 | `p1-entry-closure` | Entry-only vs all-open compilation membership; omitted-event default; rule-priority ordering. |
 | `p2a-simple-missing` / `p2b-protectban-shape` / `p2c-ambient-resolution` | Missing-import accept/reject, diagnostic range, and whether an ambient source can satisfy an import. |
 | `p3a-variables-auto-explicit` / `p3b-variables-duplicate-ids` / `p3c-variables-player-receiver` | Explicit-ID allocation (`i 127`), duplicate-ID diagnostics, player-variable receiver read/write/modify. |
-| `p4-types-expressions` | User-enum member values, null/union, cast, ternary (`If-Then-Else`), `&&`/`||` (`And`/`Or`), short-circuit behavior. |
-| `p5-functions-control` / `P5b-loops-switch` | Subroutine vs inlined functions, parameter defaults, C-style for (`For Global Variable`), foreach (allocated counter + `Value In Array`), switch jump table, value-function inlining. |
-| `p6-catalog-signatures` | Named/default argument binding against canonical signatures (reordered named args, omitted defaults, `Event Player` restriction). |
+| `p4-types-expressions` **target** | User-enum member values, null/union, cast, ternary (`If-Then-Else`), `&&`/`||` (`And`/`Or`), short-circuit behavior. |
+| `p5-functions-control` **target** | Subroutine vs inlined functions, parameter defaults, C-style for (`For Global Variable`), foreach (allocated counter + `Value In Array`), switch jump table, value-function inlining. |
+| `p6-catalog-signatures` **target** | Named/default argument binding against canonical signatures (reordered named args, omitted defaults, `Event Player` restriction). |
 | `P5b-loops-switch.json` + `p5b-result.txt` | C-style `for`, `foreach` (allocated counter + `Value In Array`), `switch` jump table, value-function inlining. |
 | `P6b-catalog-signatures-extra.json` + `p6b-result.txt` | Additional named-arg signatures exercised by the reachable graph: `CreateEffect`, `CreateProgressBarInWorldText`, `PlayEffect`, `DisableMovementCollisionWithEnvironment`, `EnableMovementCollisionWithEnvironment`, and the `Event Player` restricted-value diagnostic. |
+
+## Differential targets
+
+The **target** probes are the pinned-reference-accepted (entry-only) probes
+designated `differential-target` in their manifests: `p4-types-expressions`
+(147 elements), `p5-functions-control` (120 elements), and
+`p6-catalog-signatures` (68 elements). They form the immutable, Wright-owned
+forward-compilation comparison boundary for #119 (see
+[`docs/ostw/compatibility-baseline.md`](../../docs/ostw/compatibility-baseline.md));
+`run_oracle.py --probes` aggregates them under `differentialTargets` in
+`results.json` and fails if any target is reference-rejected.
