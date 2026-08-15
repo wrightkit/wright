@@ -18,6 +18,7 @@ pub mod lower;
 pub mod manifest;
 pub mod parser;
 pub mod preprocess;
+pub mod reconstruct;
 pub mod settings;
 
 use std::path::Path;

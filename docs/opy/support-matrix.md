@@ -264,6 +264,68 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
   bare variable name; observable semantics and round-trip validity are
   unchanged.
 
+## Reconstruction surface (issue #124)
+
+`wright_opy::reconstruct` consumes a validated Workshop IR program and emits
+deterministic, byte-stable canonical OPY that the native frontend accepts and
+that re-lowers to a structurally equivalent WIR program under
+`wright_workshop::roundtrip::equivalent`. The machine-readable support
+boundary (supported vs explicitly rejected constructs, with a consistency
+test) lives in
+`crates/wright-opy/tests/fixtures/reconstruct/boundary.json`; the round-trip
+suite is `crates/wright-opy/tests/reconstruct.rs`, which runs
+`Workshop → WIR → reconstructed OPY → native frontend → HIR → WIR` per fixture
+and writes a per-fixture report to `target/wright-reconstruction-report.json`
+with one reconstructed OPY per fixture under `target/wright-reconstruction/`.
+
+### Reconstructed surface
+
+- Variable and player-variable declarations with explicit Workshop indices
+  (`globalvar name <index>`, `playervar name <index>`), plus declaration
+  initializers reconstructed from the leading `Initialize global
+  variables`/`Initialize player variables` rules (`globalvar name = value`).
+  Zero-valued initializers are spelled `0.0` because the frontend drops
+  integer-`0` initializers (matching the reference adapter).
+- Subroutine declarations and `def name():` subroutine bodies.
+- `rule "name":` with `@Event global` / `@Event eachPlayer` and
+  `@Condition` lines.
+- Scalar, string, bool, `None`, array, vector, and enum values; global and
+  `eventPlayer.member` variable access; `eventPlayer` itself.
+- Binary and unary operator calls in their OPY source spellings
+  (`(a + b)`, `(a == b)`, `(a and b)`, `(not a)`, `(-a)`), `format` values
+  (`"text".format(...)`), manifest value calls (`isGameInProgress`,
+  `getPlayersInRadius`, `worldVector`, …) and manifest member-value calls
+  (`eventPlayer.getPosition()`, …).
+- Set/Modify global and player variable actions (modify ops `Add`…`Raise To
+  Power` as `x = x <op> v`, `Append To Array` as `x.append(v)`), subroutine
+  calls, `if`/`elif`/`else`, `while`, `for x in range(start, stop, step)`,
+  the manifest action calls (`wait` with full arity, `disableInspector`,
+  `playEffect`, `chaseOverTime`, …) and manifest member actions
+  (`eventPlayer.setMoveSpeed(100)`, …), and the dedicated `debug(x)` /
+  `print(x)` nodes.
+
+### Explicitly rejected constructs
+
+Every WIR construct the OPY frontend cannot recompile identically fails with
+a structured diagnostic naming the construct (never partial or misleading
+OPY): the per-player loop form (`For Player Variable`), disabled rules,
+variable targets on arbitrary (non-`eventPlayer`) player expressions, names
+that are not valid OPY identifiers or collide with OPY keywords/literals,
+negative and non-finite number literals (the lexer has no negative-literal
+token), enums outside the manifest's declared domains, `Remove From Array`
+modifies, calls the frontend lowers to dedicated nodes (`debug`, `print`,
+`append`, `vect`, `range`, `chase`), Workshop-spelled call names with no
+manifest source form (`add`, `countOf`, `createBeamEffect`, …), calls whose
+arity/domains the frontend would reject or default-fill, `Set` actions whose
+value is a binary over the same variable (they re-lower to `Modify`), and
+rule layouts the deterministic re-lowering cannot reproduce (non-leading or
+mixed initializer rules, subroutine-body rules after normal rules or out of
+table order, unsorted global slots, non-canonical subroutine indices,
+initializer-bearing globals whose slot differs from the lowest free slot).
+
+Reconstructed OPY is simple low-level valid OPY: comments, macros, functions,
+settings blocks, and source abstractions are not recovered.
+
 ## Boundary contract
 
 The native frontend produces `wright_core::hir::Program` (Opy HIR v1) with the
