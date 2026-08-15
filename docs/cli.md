@@ -40,6 +40,7 @@ result.
 | `wright analyze [INPUT]` | Parse, lower, analyze | findings and summary |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
 | `wright inspect [INPUT]` | Parse, lower, inspect structure | rules, symbols, references summary |
+| `wright update` | Self-update a standalone installation | update progress (text only) |
 
 `wright version` and `wright --version` print the implementation version
 banner (`wright <version> (wright-driver <version>)`); the version is the
@@ -184,14 +185,50 @@ Non-`while-without-wait` findings carry `"boundedness": null`.
 | Code | Meaning | Examples |
 | --- | --- | --- |
 | 0 | success | clean check, compiled artifact produced |
-| 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input |
+| 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade |
 | 2 | usage error | unknown command/flag, missing option value |
-| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native) |
-| 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output |
+| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation, unsupported platform for `update` |
+| 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure |
 
 Exit codes are deterministic for identical inputs and configuration and are
 also carried inside the JSON envelope (`exit` field), so agents never need to
 infer them from process state alone.
+
+## `wright update` (self-update)
+
+`wright update` upgrades a **standalone** installation (one created by
+`install.sh` or by unpacking a release archive manually) from the canonical
+GitHub Release artifacts — the same archives and checksums the installer and
+the package-manager manifests consume. It is not a compiler workflow, so it
+is text-only and produces no `wright-result/v1` envelope.
+
+* `wright update` — resolve the latest stable release, download the platform
+  archive and its published SHA-256 checksum, verify the checksum before
+  touching anything, extract, and atomically replace `wright` and
+  `wright-lsp` in the running executable's directory, then smoke-check both
+  binaries report the new version.
+* `wright update --check` — resolve and report whether an update is
+  available without modifying the installation.
+* `wright update --version <VERSION>` — install an exact version instead of
+  the latest stable release. Refuses a downgrade (the installed version is
+  newer) with exit 1.
+
+Supported platforms mirror `install.sh`: Linux x86_64 and macOS
+(x86_64/arm64), mapped to the release target matrix in `docs/release.md`.
+On Windows, standalone self-update is refused with guidance to
+`winget upgrade WrightKit.Wright` / `scoop update wright` (exit 3).
+
+Package-manager-managed installations are detected from the executable's
+location (Homebrew/Cellar, Scoop, WinGet paths) and refused with guidance to
+the channel's own upgrade command (exit 3); `wright update` never overwrites
+a binary it does not own. A missing `wright-lsp` next to `wright`, or an
+unwritable installation directory, fails with reinstall guidance (exit 4).
+
+Environment overrides (test/advanced hooks, matching `install.sh`):
+
+* `WRIGHT_INSTALL_BASE_URL` — base URL of release artifacts
+* `WRIGHT_API_URL` — URL used to resolve the latest release
+* `WRIGHT_INSTALL_OS` / `WRIGHT_INSTALL_ARCH` — override platform detection
 
 ## stdout / stderr ownership
 

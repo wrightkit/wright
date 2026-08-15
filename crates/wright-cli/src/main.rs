@@ -7,6 +7,7 @@
 //! (`0` success, `1` source error, `2` usage, `3` unsupported, `4` internal).
 
 mod present;
+mod update;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,6 +32,7 @@ COMMANDS:
     analyze    Parse, lower, and run semantic analysis; report findings
     lint       Parse, lower, and lint the input; report findings
     inspect    Parse, lower, and show the structural/semantic program model
+    update     Update a standalone installation to the latest stable release
     help       Show this help
     version    Show version and result-contract metadata
 
@@ -52,6 +54,10 @@ LINT OPTIONS:
     --disable-rule <ID>          Disable a lint rule by stable ID (lint only; repeatable)
     --rule-severity <ID>:<SEV>   Override a rule's severity: warning|info (lint only; repeatable)
 
+UPDATE OPTIONS:
+    --check              Check for an update without modifying the installation
+    --version <VERSION>  Install an exact version instead of the latest stable
+
 EXIT CODES:
     0  success
     1  source/user error (parse, validation, ambiguous input)
@@ -65,7 +71,10 @@ OUTPUT CONTRACT:
     stderr empty on success. Exit codes and the envelope shape are stable;
     human-readable wording is not part of the machine contract. `lint`
     reports findings through the same envelope with rule metadata and the
-    effective configuration (M12, #97/#98).
+    effective configuration (M12, #97/#98). `update` is text-only and
+    outside the `wright-result/v1` envelope: it updates standalone
+    `wright`/`wright-lsp` installs from the canonical GitHub Release
+    archives and refuses to overwrite package-manager-managed binaries.
 ";
 
 fn main() -> ExitCode {
@@ -85,6 +94,7 @@ enum Command {
     Analyze,
     Lint,
     Inspect,
+    Update,
 }
 
 impl Command {
@@ -95,6 +105,7 @@ impl Command {
             Command::Analyze => "analyze",
             Command::Lint => "lint",
             Command::Inspect => "inspect",
+            Command::Update => "update",
         }
     }
 
@@ -105,6 +116,7 @@ impl Command {
             "analyze" => Command::Analyze,
             "lint" => Command::Lint,
             "inspect" => Command::Inspect,
+            "update" => Command::Update,
             _ => return None,
         })
     }
@@ -133,6 +145,12 @@ fn run() -> Result<u8, String> {
     let command = Command::parse(&args[0])
         .ok_or_else(|| format!("wright: unknown command '{}'\n\n{HELP}", args[0]))?;
     args.remove(0);
+
+    // `update` is not a compiler workflow: it owns its argv entirely and
+    // never touches the driver session.
+    if command == Command::Update {
+        return run_update(args);
+    }
 
     let mut config = SessionConfig::default();
     let mut help = false;
@@ -251,6 +269,8 @@ fn run() -> Result<u8, String> {
         Command::Analyze => run_command(&mut session, wright_driver::CompilerSession::analyze),
         Command::Lint => run_command(&mut session, wright_driver::CompilerSession::lint),
         Command::Inspect => run_command(&mut session, wright_driver::CompilerSession::inspect),
+        // `update` returns before a session is constructed (see above).
+        Command::Update => unreachable!("update is dispatched before session setup"),
     };
     Ok(code)
 }
@@ -264,6 +284,49 @@ fn run_command<T: serde::Serialize>(
     let code = envelope.exit;
     present::render(&envelope, session.config.format);
     code
+}
+
+/// Run `wright update` (#116): parse the update-only flags, delegate to the
+/// self-update workflow, and map its typed errors onto the shared exit-code
+/// contract (`0` success, `1` user error, `2` usage, `3` unsupported,
+/// `4` environment failure).
+fn run_update(args: Vec<String>) -> Result<u8, String> {
+    let mut check_only = false;
+    let mut requested: Option<String> = None;
+    let mut help = false;
+    let mut rest = args;
+    while let Some(arg) = rest.first().cloned() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                help = true;
+                rest.remove(0);
+            }
+            "--check" => {
+                check_only = true;
+                rest.remove(0);
+            }
+            "--version" => {
+                let value = take_value(&mut rest, &arg)?;
+                requested = Some(value);
+            }
+            other => {
+                return Err(format!(
+                    "wright: unknown option '{other}' for `update`\n\n{HELP}"
+                ));
+            }
+        }
+    }
+    if help {
+        print!("{HELP}");
+        return Ok(0);
+    }
+    match update::run(check_only, requested.as_deref()) {
+        Ok(code) => Ok(code),
+        Err(error) => {
+            eprintln!("wright: {}", error.message());
+            Ok(error.exit_code())
+        }
+    }
 }
 
 /// Take the value of an option that requires one, failing on a missing value.

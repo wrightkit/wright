@@ -181,6 +181,23 @@ checksum, and package-manager publication details are in the
 [Release Documentation](docs/release.md) and
 [Distribution Documentation](dist/README.md).
 
+### Updating
+
+Standalone installations (the Unix installer or manual archives) update
+themselves in place:
+
+```sh
+wright update          # upgrade wright and wright-lsp to the latest stable release
+wright update --check  # report whether an update is available, without modifying anything
+wright update --version 0.2.0  # install an exact version
+```
+
+`wright update` downloads the same checksum-verified release archives as the
+installer, replaces both binaries atomically, and never touches
+package-manager-managed installations — Homebrew, Scoop, and WinGet installs
+should upgrade through their own channel (`brew upgrade wrightkit/tap/wright`,
+`scoop update wright`, `winget upgrade WrightKit.Wright`).
+
 ### Building From Source
 
 Build all tools from the root workspace using Rust 1.85.0+:

@@ -159,6 +159,15 @@ installs both binaries, and runs a post-install version smoke check. Its
 functional behavior is covered by `scripts/test-install.sh` against a mock
 release server on Linux and macOS CI.
 
+Standalone installations are also updatable in place: `wright update`
+consumes the same release artifacts and checksums (no `install.sh`
+re-execution, no second release path), verifies the checksum before
+replacing `wright` and `wright-lsp`, and refuses to overwrite
+package-manager-managed binaries. See [`docs/cli.md`](cli.md) for the
+command contract and the `WRIGHT_INSTALL_BASE_URL`/`WRIGHT_API_URL`/
+`WRIGHT_INSTALL_OS`/`WRIGHT_INSTALL_ARCH` test overrides it shares with
+`install.sh`.
+
 Package-manager availability is not instantaneous: Homebrew tap, Scoop
 bucket, and WinGet community-repository publication all require external
 review, and the release pipeline does not assume them. Version drift is
@@ -170,6 +179,7 @@ checksum files.
 ### Still deferred
 
 The binary contract deliberately does not solve: crates.io publication, npm
-wrappers, auto-update behavior, signed/notarized installers, MSI/MSIX/APT/RPM
-packages, or independent crate-by-crate versioning. Those can be added later
-when real consumer evidence justifies their maintenance cost.
+wrappers, background/automatic update checks or silent startup updates,
+signed/notarized installers, MSI/MSIX/APT/RPM packages, or independent
+crate-by-crate versioning. Those can be added later when real consumer
+evidence justifies their maintenance cost.
