@@ -3,7 +3,7 @@
 //! the WIR validated. Source-semantic initializer synthesis is owned by the
 //! profile-independent HIR → WIR lowering, not by this pipeline (#112).
 
-use wright_ir::wir::{self, Action, Value, ValueNode};
+use workshop_rs::wir::{self, Action, Value, ValueNode};
 use wright_transform::profile::Profile;
 use wright_transform::run;
 
@@ -12,7 +12,7 @@ fn arithmetic_program() -> wir::Program {
     let mut program = wir::Program::default();
     program
         .files
-        .push(wright_ir::source::SourceFile::new("test.opy"));
+        .push(workshop_rs::source::SourceFile::new("test.opy"));
 
     let points = program.global_variables.push(wir::WorkshopVariable {
         name: "points".to_string(),

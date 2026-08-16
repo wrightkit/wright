@@ -373,7 +373,7 @@ impl<'a> ToolService<'a> {
         let mut edges: Vec<serde_json::Value> = Vec::new();
         for rule in self.loaded.program.rules.iter() {
             for action in &rule.actions {
-                if let Some(wright_ir::wir::Action::CallSubroutine { subroutine, .. }) =
+                if let Some(workshop_rs::wir::Action::CallSubroutine { subroutine, .. }) =
                     self.loaded.program.actions.get(*action)
                 {
                     let callee = self
@@ -416,7 +416,7 @@ impl<'a> ToolService<'a> {
             .actions
             .iter()
             .filter(|action| {
-                matches!(action, wright_ir::wir::Action::Call { name, .. } if name == "wait")
+                matches!(action, workshop_rs::wir::Action::Call { name, .. } if name == "wait")
             })
             .count();
         let findings = wright_analyzer::analysis::analyze(&self.loaded.program);

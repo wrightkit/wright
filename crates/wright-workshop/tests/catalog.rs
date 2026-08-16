@@ -16,8 +16,18 @@ fn en() -> Locale {
 fn builtin_catalog_loads_and_declares_en_us() {
     let catalog = builtin();
     assert!(catalog.supports(&en()));
-    assert_eq!(catalog.locales().len(), 1);
+    // The workshop-rs catalog (ADR-0001) declares the primary locale en-US
+    // plus zh-CN as a declared-but-empty locale: no zh-CN mapping is claimed
+    // until a reviewed, MIT-permissible reference source exists, and
+    // conversion into zh-CN fails explicitly. Adapted from the pre-cutover
+    // assertion of a single declared locale (wright#143; the catalog's
+    // locale surface is a workshop-rs contract now).
+    assert_eq!(catalog.locales().len(), 2);
     assert_eq!(catalog.locales()[0], en());
+    assert!(catalog.supports(&Locale::new("zh-CN")));
+    let coverage = catalog.locale_coverage(&Locale::new("zh-CN"));
+    assert_eq!(coverage.mapped, 0, "zh-CN must declare no mappings yet");
+    assert!(coverage.total > 0, "the declared surface is non-empty");
 }
 
 #[test]

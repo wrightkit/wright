@@ -15,3 +15,5 @@ serde_json = "1"
 wright-core = { path = "../wright-core" }
 wright-ir = { path = "../wright-ir" }
 wright-workshop = { path = "../wright-workshop" }
+# Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
+workshop-rs.workspace = true

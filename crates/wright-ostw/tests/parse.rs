@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_ir::source::FileId;
+use workshop_rs::source::FileId;
 use wright_ostw::project::{FileRecord, OstwOutcome};
 
 fn workspace_root() -> PathBuf {

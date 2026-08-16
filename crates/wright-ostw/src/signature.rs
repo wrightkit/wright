@@ -1,11 +1,12 @@
-//! OSTW source bindings to the canonical Wright Workshop catalog (#118).
+//! OSTW source bindings to the canonical Workshop catalog (#118).
 //!
 //! This module owns ONLY genuinely OSTW-specific source binding/alias
 //! metadata: the OSTW source name -> canonical catalog identity mapping for
 //! the exercised builtin surface, and the OSTW source member name -> canonical
 //! catalog member id mapping per exercised enum domain. All canonical
 //! Workshop parameter/spelling and enum domain/member data lives in the
-//! Wright-owned catalog (`wright-workshop/src/catalog`); the semantic phase
+//! canonical catalog (`workshop-rs`, consumed via `wright-workshop`); the
+//! semantic phase
 //! resolves builtins and enum domains through that catalog at the consume
 //! sites. No OSTW `Elements.json` or upstream compiler table is copied;
 //! every binding is exercised by the protect-ban reachable closure or a

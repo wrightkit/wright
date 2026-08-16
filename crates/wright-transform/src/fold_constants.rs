@@ -9,7 +9,7 @@
 //! value nodes in place so callers keep their ids, and runs to a fixpoint so
 //! nested constants fold transitively.
 
-use wright_ir::wir::{self, Value};
+use workshop_rs::wir::{self, Value};
 
 use crate::pipeline::{Pass, PassStats};
 

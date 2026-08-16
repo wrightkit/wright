@@ -1,18 +1,18 @@
-//! Pipeline tests (#30): catalog data is regenerable deterministically,
-//! validation rejects collisions/missing aliases, and the committed catalog
-//! is already canonical.
+//! Pipeline tests (#30): the committed canonical catalog data is regenerable
+//! deterministically and validation rejects collisions and missing aliases.
+//!
+//! Cutover note (wright#143): the catalog data, generator binary
+//! (`workshop-catalog-gen`), and its pipeline tests are owned by
+//! `workshop-rs`. The wright-owned `wright-catalog-gen` binary was removed
+//! with the duplicate catalog implementation; the tests that spawned it are
+//! superseded by the workshop-rs pipeline suite. These library-level tests
+//! remain as adapter regression coverage, running against the re-exported
+//! `workshop_rs::catalog` API and the workshop-rs catalog dataset.
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-
-use wright_workshop::catalog::{Catalog, canonicalize};
-
-fn data_file() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/data/catalog.json")
-}
+use wright_workshop::catalog::{CATALOG_DATA, Catalog, canonicalize};
 
 fn read_data() -> String {
-    std::fs::read_to_string(data_file()).expect("catalog data is present")
+    CATALOG_DATA.to_string()
 }
 
 #[test]
@@ -36,60 +36,8 @@ fn committed_catalog_is_already_canonical() {
 }
 
 #[test]
-fn generator_check_passes_on_the_committed_catalog() {
-    let bin = env!("CARGO_BIN_EXE_wright-catalog-gen");
-    let output = Command::new(bin)
-        .args(["check", "--file"])
-        .arg(data_file())
-        .output()
-        .expect("generator runs");
-    assert!(
-        output.status.success(),
-        "check must pass: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        stdout.starts_with("OK "),
-        "check prints a summary: {stdout}"
-    );
-}
-
-#[test]
-fn generator_build_is_byte_deterministic() {
-    let bin = env!("CARGO_BIN_EXE_wright-catalog-gen");
-    let dir = std::env::temp_dir().join("wright-catalog-gen-test");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let out = dir.join("catalog.json");
-    std::fs::write(&out, read_data()).expect("copy data");
-
-    let run_build = |path: &Path| {
-        let output = Command::new(bin)
-            .args(["build", "--file"])
-            .arg(path)
-            .output()
-            .expect("generator runs");
-        assert!(
-            output.status.success(),
-            "build must pass: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        std::fs::read(path).expect("built file exists")
-    };
-
-    let first = run_build(&out);
-    let second = run_build(&out);
-    assert_eq!(first, second, "build must be byte-deterministic");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn generator_rejects_colliding_aliases() {
-    let bin = env!("CARGO_BIN_EXE_wright-catalog-gen");
-    let dir = std::env::temp_dir().join("wright-catalog-gen-bad");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let bad = dir.join("bad.json");
-    let bad_json = r#"{
+fn catalog_rejects_colliding_aliases() {
+    let bad = r#"{
         "schemaVersion": 1,
         "locales": ["en-US"],
         "target": { "game": "g", "format": "f", "surface": "s" },
@@ -99,29 +47,16 @@ fn generator_rejects_colliding_aliases() {
             { "id": "elseIf", "aliases": { "en-US": "If" } }
         ]
     }"#;
-    std::fs::write(&bad, bad_json).expect("write bad catalog");
-
-    let output = Command::new(bin)
-        .args(["check", "--file"])
-        .arg(&bad)
-        .output()
-        .expect("generator runs");
-    assert_eq!(output.status.code(), Some(1), "collision must fail check");
-    let stderr = String::from_utf8(output.stderr).unwrap();
+    let error = Catalog::load(bad).expect_err("collision must fail validation");
     assert!(
-        stderr.contains("duplicate"),
-        "error names the problem: {stderr}"
+        error.to_string().contains("duplicate"),
+        "error names the problem: {error}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn generator_rejects_missing_locale_alias() {
-    let bin = env!("CARGO_BIN_EXE_wright-catalog-gen");
-    let dir = std::env::temp_dir().join("wright-catalog-gen-missing");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let bad = dir.join("bad.json");
-    let bad_json = r#"{
+fn catalog_rejects_missing_locale_alias() {
+    let bad = r#"{
         "schemaVersion": 1,
         "locales": ["en-US"],
         "target": { "game": "g", "format": "f", "surface": "s" },
@@ -133,28 +68,9 @@ fn generator_rejects_missing_locale_alias() {
             { "id": "wait", "aliases": {} }
         ]
     }"#;
-    std::fs::write(&bad, bad_json).expect("write bad catalog");
-
-    let output = Command::new(bin)
-        .args(["check", "--file"])
-        .arg(&bad)
-        .output()
-        .expect("generator runs");
-    assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("missing"));
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn generator_reports_missing_file_to_stderr() {
-    let bin = env!("CARGO_BIN_EXE_wright-catalog-gen");
-    let output = Command::new(bin)
-        .args(["check", "--file"])
-        .arg("/nonexistent/catalog.json")
-        .stdin(Stdio::null())
-        .output()
-        .expect("generator runs");
-    assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot read"));
-    assert!(output.stdout.is_empty());
+    let error = Catalog::load(bad).expect_err("missing alias must fail");
+    assert!(
+        error.to_string().contains("missing"),
+        "error names the problem: {error}"
+    );
 }

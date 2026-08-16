@@ -39,8 +39,8 @@ use crate::error::{IrError, unsupported};
 use crate::hir::{
     self, BinaryOp, Expr, ExprId, GlobalVarId, MacroId, PlayerVarId, Stmt, StmtId, SubroutineId,
 };
-use crate::source::{Position, SourceFile, Span};
-use crate::wir::{self, Action, ModifyOp, Value, ValueId, ValueNode};
+use workshop_rs::source::{Position, SourceFile, Span};
+use workshop_rs::wir::{self, Action, ModifyOp, Value, ValueId, ValueNode};
 
 /// Lower an internal Opy HIR program into a Workshop IR program.
 pub fn lower(program: &hir::Program) -> Result<wir::Program, IrError> {

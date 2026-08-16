@@ -13,8 +13,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use wright_ir::source::{Position, Span};
-use wright_ir::wir::{self, Action, Event, ModifyOp, Program, Value, ValueNode};
+use workshop_rs::source::{Position, Span};
+use workshop_rs::wir::{self, Action, Event, ModifyOp, Program, Value, ValueNode};
 use wright_workshop::catalog::{Catalog, Locale};
 use wright_workshop::parser;
 
@@ -903,7 +903,7 @@ fn rejection_program(case: &str) -> Program {
             });
         }
         "rejects_settings" => {
-            program.settings = Some(wright_ir::settings::Settings {
+            program.settings = Some(workshop_rs::settings::Settings {
                 span: None,
                 children: Vec::new(),
             });

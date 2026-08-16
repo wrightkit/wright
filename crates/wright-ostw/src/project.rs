@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use wright_ir::source::{FileId, Position, Span};
+use workshop_rs::source::{FileId, Position, Span};
 
 use crate::cst;
 use crate::diag::{FrontendError, FrontendResult};

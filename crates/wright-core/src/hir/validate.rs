@@ -13,7 +13,7 @@ use super::types::{
     Declaration, Expr, PROTOCOL_MAJOR, PROTOCOL_NAME, Position, Program, Rule, RuleEntry, Settings,
     SettingsNode, Span, Stmt, default_var_index,
 };
-use wright_ir::settings::table::{self, KeyKind, PathPart};
+use workshop_rs::settings::table::{self, KeyKind, PathPart};
 
 /// Declaration `kind` values understood by this consumer.
 const DECLARATION_KINDS: &[&str] = &[

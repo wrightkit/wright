@@ -2,10 +2,10 @@
 //! is representable in Workshop IR, and catalog-backed validation rejects
 //! unknown or locale-tainted builtin references deterministically.
 
-use wright_ir::source::{Position, SourceFile, Span};
-use wright_ir::wir::{self, Action, Event, Value, ValueNode};
 use wright_workshop::catalog::{Catalog, Locale};
+use wright_workshop::source::{Position, SourceFile, Span};
 use wright_workshop::validate;
+use wright_workshop::wir::{self, Action, Event, Value, ValueNode};
 
 fn catalog() -> Catalog {
     Catalog::builtin().expect("built-in catalog")
@@ -202,7 +202,7 @@ fn unknown_enum_member_is_rejected() {
         .find(|(_, node)| {
             matches!(&node.value, Value::Enum { value_type, .. } if value_type == "Color")
         })
-        .map(|(index, _)| wright_ir::wir::ValueId::from_index(index))
+        .map(|(index, _)| wright_workshop::wir::ValueId::from_index(index))
         .expect("color node");
     if let Value::Enum { value, .. } = &mut program.values.get_mut(color_id).unwrap().value {
         *value = "NEON".into();
@@ -226,7 +226,7 @@ fn unknown_value_id_is_rejected() {
         .iter()
         .enumerate()
         .find(|(_, node)| matches!(&node.value, Value::Call { name, .. } if name == "add"))
-        .map(|(index, _)| wright_ir::wir::ValueId::from_index(index))
+        .map(|(index, _)| wright_workshop::wir::ValueId::from_index(index))
         .expect("add node");
     if let Value::Call { name, .. } = &mut program.values.get_mut(add_id).unwrap().value {
         *name = "plus".into();

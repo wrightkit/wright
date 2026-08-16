@@ -26,7 +26,7 @@ use crate::cst;
 use crate::diag::FrontendError;
 use crate::project::Project;
 use crate::signature;
-use wright_ir::source::Span;
+use workshop_rs::source::Span;
 
 /// The canonical Wright Workshop catalog, loaded once. Workshop builtins and
 /// enum domains resolve through it at the consume sites; wright-ostw ships
@@ -116,7 +116,7 @@ impl<'a> Resolver<'a> {
         for file in &self.project.files {
             self.hir
                 .files
-                .push(wright_ir::source::SourceFile::new(file.path.clone()));
+                .push(workshop_rs::source::SourceFile::new(file.path.clone()));
         }
         self.collect_declarations();
         self.resolve_bodies();

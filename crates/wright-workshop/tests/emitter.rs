@@ -3,10 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_ir::wir;
 use wright_workshop::catalog::{Catalog, Locale};
 use wright_workshop::emitter;
 use wright_workshop::parser;
+use wright_workshop::wir;
 
 fn oracle_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -138,9 +138,9 @@ fn debug_actions_emit_hud_text() {
     let mut program = wir::Program::default();
     let file = program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let value = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let value = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Number {
             value: 1.0,
             text: "1".to_string(),
         },
@@ -176,9 +176,9 @@ fn unknown_value_id_fails_explicitly() {
     let mut program = wir::Program::default();
     program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let value = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Call {
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let value = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Call {
             name: "notACatalogId".into(),
             args: vec![],
         },
@@ -202,7 +202,7 @@ fn unknown_value_id_fails_explicitly() {
     assert!(error.to_string().contains("notACatalogId"), "{error}");
 }
 
-use wright_ir::settings::{Settings, SettingsListElement, SettingsNode};
+use wright_workshop::settings::{Settings, SettingsListElement, SettingsNode};
 
 fn settings(children: Vec<SettingsNode>) -> Settings {
     Settings {
@@ -584,20 +584,20 @@ fn constant_format_calls_fold_to_the_substituted_text() {
     let mut program = wir::Program::default();
     let file = program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let text = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::String("value: {0}".to_string()),
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::String("value: {0}".to_string()),
         None,
     ));
-    let three = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+    let three = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Number {
             value: 3.0,
             text: "3".to_string(),
         },
         None,
     ));
-    let folded = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Call {
+    let folded = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Call {
             name: "format".to_string(),
             args: vec![text, three],
         },
@@ -644,20 +644,20 @@ fn constant_float_format_arguments_use_two_decimals() {
     let mut program = wir::Program::default();
     let file = program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let text = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::String("v: {0}".to_string()),
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::String("v: {0}".to_string()),
         None,
     ));
-    let half = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+    let half = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Number {
             value: 0.5,
             text: "0.5".to_string(),
         },
         None,
     ));
-    let folded = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Call {
+    let folded = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Call {
             name: "format".to_string(),
             args: vec![text, half],
         },
@@ -699,13 +699,13 @@ fn split_and_reescaped_value_strings_round_trip_byte_identically() {
     let mut program = wir::Program::default();
     let file = program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let long = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::String("B".repeat(300)),
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let long = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::String("B".repeat(300)),
         None,
     ));
-    let escaped = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::String("a\nb\"c\\d\te".to_string()),
+    let escaped = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::String("a\nb\"c\\d\te".to_string()),
         None,
     ));
     let first = program.actions.push(wir::Action::SetGlobalVariable {
@@ -770,17 +770,17 @@ fn implicit_format_placeholders_renumber_to_the_oracle_form() {
     let mut program = wir::Program::default();
     let file = program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let text = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::String("v: {}".to_string()),
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::String("v: {}".to_string()),
         None,
     ));
-    let variable = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::GlobalVariable(wright_ir::ids::Id::from_index(0)),
+    let variable = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::GlobalVariable(wright_ir::ids::Id::from_index(0)),
         None,
     ));
-    let call = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Call {
+    let call = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Call {
             name: "format".to_string(),
             args: vec![text, variable],
         },
@@ -835,24 +835,24 @@ fn partial_constant_format_folds_and_renumbers() {
     let mut program = wir::Program::default();
     let file = program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let text = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::String("{} {}".to_string()),
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let text = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::String("{} {}".to_string()),
         None,
     ));
-    let three = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+    let three = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Number {
             value: 3.0,
             text: "3".to_string(),
         },
         None,
     ));
-    let variable = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::GlobalVariable(wright_ir::ids::Id::from_index(0)),
+    let variable = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::GlobalVariable(wright_ir::ids::Id::from_index(0)),
         None,
     ));
-    let call = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Call {
+    let call = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Call {
             name: "format".to_string(),
             args: vec![text, three, variable],
         },
@@ -901,13 +901,13 @@ fn playervar_reads_parenthesize_the_receiver() {
     let mut program = wir::Program::default();
     let file = program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let player = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::EventPlayer,
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let player = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::EventPlayer,
         None,
     ));
-    let read = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::PlayerVariable {
+    let read = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::PlayerVariable {
             player,
             variable: wright_ir::ids::Id::from_index(0),
         },
@@ -963,20 +963,20 @@ fn receiver_call_actions_and_values_emit_catalog_spellings() {
     let mut program = wir::Program::default();
     program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let player = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::EventPlayer,
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let player = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::EventPlayer,
         None,
     ));
-    let percent = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+    let percent = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Number {
             value: 100.0,
             text: "100".to_string(),
         },
         None,
     ));
-    let alive = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Call {
+    let alive = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Call {
             name: "isAlive".to_string(),
             args: vec![player],
         },

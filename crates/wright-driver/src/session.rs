@@ -11,9 +11,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use workshop_rs::wir;
 use wright_analyzer::registry::LintConfig;
 use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService};
-use wright_ir::wir;
 
 use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage};
@@ -797,7 +797,7 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
                     loaded
                         .program
                         .files
-                        .get(wright_ir::source::FileId::from_index(file as usize))
+                        .get(workshop_rs::source::FileId::from_index(file as usize))
                         .map(|source_file| {
                             root_relative(
                                 Some(&loaded.input.root.join(&source_file.path)),
@@ -894,6 +894,24 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
                 },
             }),
         ),
+        // The workshop-rs emitter reports missing target-locale spellings as
+        // a first-class error (ADR-0001 Decision 7; wright#143): conversion
+        // or emission into a locale without a mapping is a diagnostic, never
+        // a guess or a silent passthrough.
+        wright_workshop::WorkshopError::MissingMapping { kind, id, locale } => (
+            "missing-mapping".to_string(),
+            Stage::Frontend,
+            Diagnostic::error(
+                "missing-mapping",
+                Stage::Frontend,
+                format!(
+                    "missing {kind} mapping for locale '{locale}': '{id}' \
+                     (fallback emission is opt-in; see workshop-rs EmitOptions)"
+                ),
+            )
+            .span
+            .map(|_| unreachable!("constructed above without a span")),
+        ),
     };
     Diagnostic {
         code,
@@ -988,7 +1006,7 @@ pub(crate) fn ostw_diag(
 fn reconstruct_diag(
     code: &str,
     message: &str,
-    span: Option<wright_ir::source::Span>,
+    span: Option<workshop_rs::source::Span>,
     loaded: &Loaded,
 ) -> Diagnostic {
     let stage = match code {

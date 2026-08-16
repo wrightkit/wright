@@ -107,14 +107,14 @@ fn same_locale_round_trip_is_a_release_gate() {
 
 #[test]
 fn equivalence_ignores_presentation_but_preserves_semantics() {
-    let a = wright_ir::wir::Program::default();
-    let b = wright_ir::wir::Program::default();
+    let a = wright_workshop::wir::Program::default();
+    let b = wright_workshop::wir::Program::default();
     // Two empty programs are equivalent.
     assert!(roundtrip::equivalent(&a, &b));
     // Same semantics, different file ids in spans: still equivalent.
-    let mut c = wright_ir::wir::Program::default();
+    let mut c = wright_workshop::wir::Program::default();
     c.files
-        .push(wright_ir::source::SourceFile::new("other.txt"));
+        .push(wright_workshop::source::SourceFile::new("other.txt"));
     assert!(
         roundtrip::equivalent(&a, &c),
         "file paths are presentation-only"
@@ -123,41 +123,41 @@ fn equivalence_ignores_presentation_but_preserves_semantics() {
 
 #[test]
 fn equivalence_detects_semantic_differences() {
-    let mut a = wright_ir::wir::Program::default();
+    let mut a = wright_workshop::wir::Program::default();
     a.files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
     let mut b = a.clone();
     b.files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
 
-    let value_a = a.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+    let value_a = a.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Number {
             value: 1.0,
             text: "1".to_string(),
         },
         None,
     ));
-    let value_b = b.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+    let value_b = b.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Number {
             value: 2.0,
             text: "2".to_string(),
         },
         None,
     ));
-    a.actions.push(wright_ir::wir::Action::Debug {
+    a.actions.push(wright_workshop::wir::Action::Debug {
         value: value_a,
         span: None,
     });
-    b.actions.push(wright_ir::wir::Action::Debug {
+    b.actions.push(wright_workshop::wir::Action::Debug {
         value: value_b,
         span: None,
     });
-    a.rules.push(wright_ir::wir::Rule {
+    a.rules.push(wright_workshop::wir::Rule {
         name: "r".into(),
         span: None,
         name_span: None,
         disabled: false,
-        event: wright_ir::wir::Event::Global,
+        event: wright_workshop::wir::Event::Global,
         conditions: vec![],
         actions: a
             .actions
@@ -165,12 +165,12 @@ fn equivalence_detects_semantic_differences() {
             .map(|_| wright_ir::ids::Id::from_index(0))
             .collect(),
     });
-    b.rules.push(wright_ir::wir::Rule {
+    b.rules.push(wright_workshop::wir::Rule {
         name: "r".into(),
         span: None,
         name_span: None,
         disabled: false,
-        event: wright_ir::wir::Event::Global,
+        event: wright_workshop::wir::Event::Global,
         conditions: vec![],
         actions: b
             .actions
@@ -196,28 +196,28 @@ fn malformed_input_is_recorded_not_crashed() {
 #[test]
 fn unknown_builtin_fails_at_emit_stage() {
     // A program that parses but contains a non-catalog value fails emit.
-    let mut program = wright_ir::wir::Program::default();
+    let mut program = wright_workshop::wir::Program::default();
     program
         .files
-        .push(wright_ir::source::SourceFile::new("workshop.txt"));
-    let value = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Call {
+        .push(wright_workshop::source::SourceFile::new("workshop.txt"));
+    let value = program.values.push(wright_workshop::wir::ValueNode::new(
+        wright_workshop::wir::Value::Call {
             name: "notACatalogId".into(),
             args: vec![],
         },
         None,
     ));
-    let call = program.actions.push(wright_ir::wir::Action::Call {
+    let call = program.actions.push(wright_workshop::wir::Action::Call {
         name: "wait".into(),
         args: vec![value],
         span: None,
     });
-    program.rules.push(wright_ir::wir::Rule {
+    program.rules.push(wright_workshop::wir::Rule {
         name: "x".into(),
         span: None,
         name_span: None,
         disabled: false,
-        event: wright_ir::wir::Event::Global,
+        event: wright_workshop::wir::Event::Global,
         conditions: vec![],
         actions: vec![call],
     });

@@ -4,10 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
+use workshop_rs::wir::{Program as WirProgram, RuleId};
 use wright_analyzer::cfg::{BlockKind, Cfg, EdgeKind};
 use wright_core::hir;
 use wright_ir::lower;
-use wright_ir::wir::{Program as WirProgram, RuleId};
 
 fn fixture_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

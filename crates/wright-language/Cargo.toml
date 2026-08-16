@@ -19,6 +19,8 @@ wright-driver = { path = "../wright-driver" }
 wright-ir = { path = "../wright-ir" }
 wright-opy = { path = "../wright-opy" }
 wright-ostw = { path = "../wright-ostw" }
+# Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
+workshop-rs.workspace = true
 
 [dev-dependencies]
 libc = "0.2"

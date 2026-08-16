@@ -14,7 +14,7 @@
 //! followed by a type then `>` is a cast (`<Type>expr`); in binary position
 //! `<`/`<=` are comparisons. Every node carries its exact source span.
 
-use wright_ir::source::{Position, Span};
+use workshop_rs::source::{Position, Span};
 
 use crate::cst::*;
 use crate::diag::{FrontendError, FrontendResult};

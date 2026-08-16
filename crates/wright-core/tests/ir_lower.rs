@@ -19,7 +19,7 @@ fn read_fixture(fixture_id: &str) -> String {
         .unwrap_or_else(|error| panic!("cannot read adapter fixture {fixture_id}: {error}"))
 }
 
-fn lower_fixture(fixture_id: &str) -> wright_ir::wir::Program {
+fn lower_fixture(fixture_id: &str) -> workshop_rs::wir::Program {
     let protocol = hir::parse_str(&read_fixture(fixture_id))
         .unwrap_or_else(|error| panic!("{fixture_id} must parse: {error}"));
     let model = protocol
@@ -144,7 +144,7 @@ fn declaration_initializers_lower_to_initialize_rules() {
     let mut rules = program.rules.iter();
     let global = rules.next().expect("a global Initialize rule");
     assert_eq!(global.name, "Initialize global variables");
-    assert!(matches!(global.event, wright_ir::wir::Event::Global));
+    assert!(matches!(global.event, workshop_rs::wir::Event::Global));
     assert_eq!(
         global.actions.len(),
         2,
@@ -154,7 +154,7 @@ fn declaration_initializers_lower_to_initialize_rules() {
         assert!(
             matches!(
                 program.actions.get(*action),
-                Some(wright_ir::wir::Action::SetGlobalVariable { .. })
+                Some(workshop_rs::wir::Action::SetGlobalVariable { .. })
             ),
             "global initializers lower to Set Global Variable actions"
         );
@@ -162,12 +162,12 @@ fn declaration_initializers_lower_to_initialize_rules() {
 
     let player = rules.next().expect("a player Initialize rule");
     assert_eq!(player.name, "Initialize player variables");
-    assert!(matches!(player.event, wright_ir::wir::Event::EachPlayer));
+    assert!(matches!(player.event, workshop_rs::wir::Event::EachPlayer));
     assert_eq!(player.actions.len(), 1, "playervar p = 7 survives");
     assert!(
         matches!(
             program.actions.get(player.actions[0]),
-            Some(wright_ir::wir::Action::SetPlayerVariable { .. })
+            Some(workshop_rs::wir::Action::SetPlayerVariable { .. })
         ),
         "player initializers lower to Set Player Variable actions"
     );

@@ -624,7 +624,7 @@ pub fn semantic_rename(
 /// display-relative spellings (e.g. the driver's cwd-relative display paths)
 /// and project-relative spellings both match.
 fn file_id_for_source(
-    program: &wright_ir::wir::Program,
+    program: &workshop_rs::wir::Program,
     root: &Path,
     source: &str,
 ) -> Option<usize> {
@@ -652,7 +652,7 @@ fn registry_path_matches(source: &str, root: &Path, registry_path: &str) -> bool
 /// The caller's source identity (a `sources` key) for a program file id,
 /// matching file registry paths against the provided current texts.
 fn source_key_for_file(
-    program: &wright_ir::wir::Program,
+    program: &workshop_rs::wir::Program,
     root: &Path,
     main_path: &Path,
     sources: &BTreeMap<String, String>,
@@ -667,7 +667,7 @@ fn source_key_for_file(
     }
     let registry_path = program
         .files
-        .get(wright_ir::source::FileId::from_index(file))
+        .get(workshop_rs::source::FileId::from_index(file))
         .map(|source_file| &source_file.path)?;
     sources
         .keys()
@@ -701,7 +701,7 @@ fn symbol_at(
     None
 }
 
-fn span_contains(span: wright_ir::source::Span, line: u32, col: u32) -> bool {
+fn span_contains(span: workshop_rs::source::Span, line: u32, col: u32) -> bool {
     (span.start.line, span.start.col) <= (line, col)
         && (line, col)
             <= (
@@ -753,7 +753,7 @@ fn compile_project(
     resolved: &ResolvedInput,
     overlay: &BTreeMap<String, String>,
     profile: crate::Profile,
-) -> Result<wright_ir::wir::Program, Vec<Diagnostic>> {
+) -> Result<workshop_rs::wir::Program, Vec<Diagnostic>> {
     match kind {
         SourceKind::Opy => {
             let outcome = wright_opy::compile_with_overlay_outcome(
@@ -844,7 +844,7 @@ fn compile_project(
                 // The frontend outcome carries no reachable semantic HIR and
                 // no diagnostics: the session path treats this as an empty
                 // program (check succeeds), so rename finds no symbols.
-                return Ok(wright_ir::wir::Program::default());
+                return Ok(workshop_rs::wir::Program::default());
             };
             let program = match wright_ir::lower::lower(&hir) {
                 Ok(program) => program,

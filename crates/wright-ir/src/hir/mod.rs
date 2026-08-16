@@ -21,7 +21,7 @@ mod validate;
 
 use crate::arena::Arena;
 use crate::ids::Id;
-use crate::source::{FileId, SourceFile, Span};
+use workshop_rs::source::{FileId, SourceFile, Span};
 
 /// A typed ID referencing a [`GlobalVar`].
 pub type GlobalVarId = Id<GlobalVar>;
@@ -64,8 +64,9 @@ pub struct Program {
     pub stmts: Arena<Stmt>,
     pub exprs: Arena<Expr>,
     /// The custom-game-settings carrier, copied through from the protocol
-    /// (inert in the internal model, #86).
-    pub settings: Option<super::settings::Settings>,
+    /// (inert in the internal model, #86). The settings model is owned by
+    /// `workshop-rs` (wright#143).
+    pub settings: Option<workshop_rs::settings::Settings>,
 }
 
 impl Default for Program {

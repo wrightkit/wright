@@ -1,7 +1,7 @@
 //! Structural validation of the internal Opy HIR model.
 
 use crate::error::IrError;
-use crate::source::Span;
+use workshop_rs::source::Span;
 
 use super::{
     Constant, EnumDecl, Expr, Function, GlobalVar, Macro, PlayerVar, Program, Rule, Stmt,

@@ -1,6 +1,6 @@
 //! Workshop IR → OPY reconstruction (issue #124).
 //!
-//! Consumes a validated [`wright_ir::wir::Program`] and emits deterministic,
+//! Consumes a validated [`workshop_rs::wir::Program`] and emits deterministic,
 //! byte-stable canonical OPY source that the native [`crate::compile`]
 //! frontend accepts and that re-lowers to a structurally equivalent WIR
 //! program under `wright_workshop::roundtrip::equivalent`.
@@ -42,8 +42,8 @@
 
 use std::fmt;
 
-use wright_ir::source::Span;
-use wright_ir::wir::{self, Action, Event, ModifyOp, Value};
+use workshop_rs::source::Span;
+use workshop_rs::wir::{self, Action, Event, ModifyOp, Value};
 use wright_workshop::catalog::{Catalog, Locale};
 
 use crate::manifest::{Function, FunctionKind, Manifest};
@@ -1679,8 +1679,8 @@ fn kind_label(kind: FunctionKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wright_ir::source::{Position, SourceFile};
-    use wright_ir::wir::{Program, ValueNode};
+    use workshop_rs::source::{Position, SourceFile};
+    use workshop_rs::wir::{Program, ValueNode};
 
     fn catalog() -> Catalog {
         Catalog::builtin().unwrap()
@@ -1778,7 +1778,7 @@ mod tests {
     }
 
     /// Recompile reconstructed OPY through the shipped native frontend.
-    fn recompile(source: &str) -> wright_ir::wir::Program {
+    fn recompile(source: &str) -> workshop_rs::wir::Program {
         let hir = crate::compile(source, "reconstructed.opy", std::path::Path::new(""))
             .expect("the native frontend accepts the reconstructed OPY");
         wright_ir::lower::lower(&hir.to_ir().expect("converts to internal HIR"))
@@ -2517,7 +2517,7 @@ mod tests {
         // Settings.
         let mut program = Program::default();
         file_registry(&mut program);
-        program.settings = Some(wright_ir::settings::Settings {
+        program.settings = Some(workshop_rs::settings::Settings {
             span: None,
             children: Vec::new(),
         });

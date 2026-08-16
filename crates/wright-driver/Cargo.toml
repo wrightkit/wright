@@ -21,3 +21,5 @@ wright-opy = { path = "../wright-opy" }
 wright-ostw = { path = "../wright-ostw" }
 wright-transform = { path = "../wright-transform" }
 wright-workshop = { path = "../wright-workshop" }
+# Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
+workshop-rs.workspace = true

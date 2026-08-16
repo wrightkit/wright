@@ -13,9 +13,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use workshop_rs::source::Span;
+use workshop_rs::wir;
 use wright_ir::error::IrError;
-use wright_ir::source::Span;
-use wright_ir::wir;
 
 use crate::analysis::{Finding, Severity};
 use crate::cfg::Cfg;

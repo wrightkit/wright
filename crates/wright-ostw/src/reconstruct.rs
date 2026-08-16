@@ -39,8 +39,8 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use wright_ir::source::Span;
-use wright_ir::wir::{self, Action, Event, ModifyOp, Value, ValueId};
+use workshop_rs::source::Span;
+use workshop_rs::wir::{self, Action, Event, ModifyOp, Value, ValueId};
 use wright_workshop::catalog::{Catalog, Kind};
 
 use crate::signature;
