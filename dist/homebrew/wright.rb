@@ -3,23 +3,27 @@
 class Wright < Formula
   desc "Tooling-first semantic platform for the Overwatch Workshop and OverPy ecosystem"
   homepage "https://github.com/wrightkit/wright"
+  url "https://github.com/wrightkit/wright/releases/download/v0.1.0/wright-0.1.0-aarch64-apple-darwin.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "AGPL-3.0-or-later"
-  version "0.1.0"
 
-  on_arm do
-    url "https://github.com/wrightkit/wright/releases/download/v0.1.0/wright-0.1.0-aarch64-apple-darwin.tar.gz"
-    sha256 "0000000000000000000000000000000000000000000000000000000000000000"
-  end
-
-  on_intel do
-    url "https://github.com/wrightkit/wright/releases/download/v0.1.0/wright-0.1.0-x86_64-apple-darwin.tar.gz"
-    sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  resource "wright-intel" do
+    on_intel do
+      url "https://github.com/wrightkit/wright/releases/download/v0.1.0/wright-0.1.0-x86_64-apple-darwin.tar.gz"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+    end
   end
 
   def install
-    dir = "wright-#{version}-#{Hardware::CPU.arm? ? "aarch64-apple-darwin" : "x86_64-apple-darwin"}"
-    bin.install "#{dir}/wright"
-    bin.install "#{dir}/wright-lsp"
+    if Hardware::CPU.intel?
+      resource("wright-intel").stage do
+        bin.install "wright"
+        bin.install "wright-lsp"
+      end
+    else
+      bin.install "wright"
+      bin.install "wright-lsp"
+    end
   end
 
   test do

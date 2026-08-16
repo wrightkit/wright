@@ -101,23 +101,27 @@ def homebrew_formula(version: str, hashes: dict) -> str:
 class Wright < Formula
   desc "Tooling-first semantic platform for the Overwatch Workshop and OverPy ecosystem"
   homepage "https://github.com/wrightkit/wright"
+  url "{arm_url}"
+  sha256 "{hashes["darwin-arm64"]}"
   license "AGPL-3.0-or-later"
-  version "{version}"
 
-  on_arm do
-    url "{arm_url}"
-    sha256 "{hashes["darwin-arm64"]}"
-  end
-
-  on_intel do
-    url "{x64_url}"
-    sha256 "{hashes["darwin-x64"]}"
+  resource "wright-intel" do
+    on_intel do
+      url "{x64_url}"
+      sha256 "{hashes["darwin-x64"]}"
+    end
   end
 
   def install
-    dir = "wright-#{{version}}-#{{Hardware::CPU.arm? ? "aarch64-apple-darwin" : "x86_64-apple-darwin"}}"
-    bin.install "#{{dir}}/wright"
-    bin.install "#{{dir}}/wright-lsp"
+    if Hardware::CPU.intel?
+      resource("wright-intel").stage do
+        bin.install "wright"
+        bin.install "wright-lsp"
+      end
+    else
+      bin.install "wright"
+      bin.install "wright-lsp"
+    end
   end
 
   test do
