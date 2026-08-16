@@ -209,6 +209,24 @@ impl CompilerSession {
         &self.diagnostics
     }
 
+    /// Spawn the LPP provider client configured for `language_id` (#142).
+    ///
+    /// Providers are discovered by opaque language id through the session's
+    /// provider registry; no source-language branch lives here. When no
+    /// provider is configured for the id, or when a required capability was
+    /// not negotiated, the failure is an explicit structured
+    /// `wright_lpp::ProviderError` — there is no silent fallback to
+    /// in-process compiler semantics.
+    pub fn language_provider(
+        &self,
+        language_id: &str,
+    ) -> Result<Box<dyn wright_lpp::LanguageProvider>, wright_lpp::ProviderError> {
+        self.config
+            .providers
+            .spawn(language_id)
+            .map(|provider| Box::new(provider) as Box<dyn wright_lpp::LanguageProvider>)
+    }
+
     /// The locale a Workshop input resolved to, if the last load was
     /// Workshop-origin.
     pub fn resolved_locale(&self) -> Option<String> {
