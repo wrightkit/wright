@@ -31,3 +31,4 @@ contracts in [`docs/architecture.md`](../architecture.md) and
 * [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](0006-rust-ir-core.md)
 * [ADR-0007: OverPy reference pinning policy](0007-reference-pinning-policy.md)
 * [ADR-0008: Tooling-first semantic platform rebaseline](0008-tooling-first-semantic-platform.md)
+* [ADR-0009: Language ownership and licensing boundaries](0009-language-ownership-licensing-boundaries.md)

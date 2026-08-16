@@ -7,9 +7,14 @@ qualified lawyer.
 ## Purpose
 
 Wright is independently implemented Rust software: a tooling-first semantic
-platform for the Overwatch Workshop ecosystem, with Wright-owned frontends
-(`wright-opy`, `wright-ostw`, `wright-workshop`). Pinned upstream compilers
-(OverPy, OSTW) are compatibility oracles and behavior references, not
+platform for the Overwatch Workshop ecosystem, with the semantic frontends and
+canonical Workshop core currently co-located as in-repo crates (`wright-opy`,
+`wright-ostw`, `wright-workshop`). Per
+[ADR-0009](adr/0009-language-ownership-licensing-boundaries.md), durable
+ownership of source-language frontends moves to provider repositories
+(`opy-rs`, `del-rs`) and canonical Workshop semantics to `workshop-rs`; the
+in-repo crates are the migration state until extraction. Pinned upstream
+compilers (OverPy, OSTW) are compatibility oracles and behavior references, not
 production runtime dependencies. The repository's root license is GNU AGPL v3.0
 or later, as stated in [`README.md`](../README.md) and provided in
 [`LICENSE`](../LICENSE). That license governs Wright's own repository content;
@@ -20,6 +25,12 @@ The project treats the OverPy reference used for compatibility work as
 GPL-3.0-only, an engineering assumption rather than a legal conclusion. The
 exact version, license notice, and distribution terms must be checked for every
 version used.
+
+Current repository content, including the in-repo frontend crates, is
+AGPL-3.0-or-later as a migration state. Target ownership gives each provider
+repository its own license, decided after its own provenance and contributor
+audit; final Wright relicensing is likewise deferred until an audit completes
+(ADR-0009).
 
 ## Component boundary
 
@@ -40,6 +51,34 @@ No allow-listed path may import reference implementation details into the core
 today. When a compatibility component is added, its ownership, license,
 invocation method, and distribution status must be named in its own manifest or
 README and linked from this document before it is used.
+
+## Provider-specific provenance and licensing
+
+There is no single repository-wide frontend licensing assumption. Each
+provider repository records its own provenance and licensing strategy,
+distinguishing three kinds of work:
+
+* **GPL-compatible reuse**: pinned OverPy is treated as GPL-3.0-only (an
+  engineering assumption, not a legal conclusion) and is used only as a
+  compatibility oracle. Reuse of GPL-3.0 corpus material follows its own
+  terms; no provider may link to, copy, or import OverPy internals.
+* **Independent compatibility work**: providers implement compatible
+  semantics independently. Unlicensed upstream implementation internals (for
+  example the OSTW compiler, which has no license file and is treated as
+  all-rights-reserved) are not an implementation source: their source may be
+  read for behavior but must not be copied, imported, or redistributed. Only
+  the MIT-licensed VS Code extension subdirectory of the OSTW repository is
+  MIT.
+* **Shared permissive-core/protocol goals**: the ecosystem's shared neutral
+  layers — the canonical Workshop core (`workshop-rs`) and the Language
+  Provider Protocol (`language-provider-protocol`) — are intended to be
+  permissively usable across tools and providers. That is a project goal, not
+  a legal safe harbor; it grants no rights in third-party material and does
+  not settle how any specific distribution may be licensed.
+
+None of these categories is a legal conclusion. Process, JSON, or protocol
+separation is engineering isolation; questions that require qualified legal
+advice are listed below.
 
 ## Permitted inputs to the independent core
 
@@ -113,4 +152,5 @@ component, obtain qualified legal review and record the decision in a new ADR.
 * [ADR-0004: OverPy licensing and clean-room boundary](adr/0004-overpy-licensing-boundary.md)
 * [ADR-0007: OverPy reference pinning policy](adr/0007-reference-pinning-policy.md)
 * [ADR-0008: Tooling-first semantic platform rebaseline](adr/0008-tooling-first-semantic-platform.md)
+* [ADR-0009: Language ownership and licensing boundaries](adr/0009-language-ownership-licensing-boundaries.md)
 * [Centralized upstream/reference inventory](compatibility/upstream-references.md)
