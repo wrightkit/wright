@@ -27,18 +27,27 @@ tooling, or a declared semantic contract.
 
 ## Project boundary
 
-Wright owns independent semantic frontends where required for standalone
-compilation, source-aware analysis, agent source editing, CI, WASM/embedding,
-and long-term ecosystem independence.
+The current migration state co-locates the semantic frontends and the
+canonical Workshop core as in-repo crates, while the target architecture
+(ADR-0009) moves durable ownership of source-language frontends to provider
+repositories and canonical Workshop semantics to `workshop-rs`. Wright retains
+tooling, orchestration, and integration ownership and coordinates providers
+through the Language Provider Protocol (LPP) as a stable **process boundary**
+(a documented process and data contract owned by `language-provider-protocol`),
+not a Rust trait, dylib, or FFI ABI.
 
-Current ownership:
+Current implementation state:
 
-- **Vanilla Workshop**: Wright-owned canonical model, parser, emitter, and
-  target semantics (`wright-workshop`);
-- **OPY**: Wright-owned compatible semantic frontend (`wright-opy`);
-- **OSTW**: Wright-owned compatible semantic frontend (`wright-ostw`),
+- **Vanilla Workshop**: in-repo canonical model, parser, emitter, and target
+  semantics (`wright-workshop`); target ownership: `workshop-rs`;
+- **OPY**: in-repo compatible semantic frontend (`wright-opy`); target
+  ownership: `opy-rs`;
+- **OSTW/DEL**: in-repo compatible semantic frontend (`wright-ostw`),
   introduced under M13 per ADR-0008; native syntax/project frontend and HIR
-  lowering for the declared reachable corpus slice.
+  lowering for the declared reachable corpus slice; target ownership: `del-rs`.
+
+Extraction and cutover proceed per release coordination #135: `workshop-rs`
+in v0.2, `opy-rs` in v0.3, `del-rs` in v0.4.
 
 Upstream compilers and language services (OverPy, OSTW) remain compatibility
 oracles, behavior references, and test inputs. They are **not** production
@@ -98,7 +107,10 @@ implementation types.
 
 ### Frontends
 
-Wright owns its semantic frontends. A frontend is responsible for
+In the current migration state Wright hosts the semantic frontends as in-repo
+crates; per ADR-0009, durable ownership of each source-language frontend
+belongs to its provider repository (`opy-rs`, `del-rs`) and canonical Workshop
+to `workshop-rs`. A frontend is responsible for
 source-language parsing, preprocessing, syntax rules, and producing typed
 Wright data at the HIR boundary. Frontends never expose external AST types
 through Wright APIs.
@@ -225,6 +237,9 @@ More precisely:
 * WIR may depend on HIR concepts during lowering, but HIR must not depend on
   WIR;
 * backends may depend on WIR, not on parser internals;
+* providers and the canonical core (`opy-rs`, `del-rs`, `workshop-rs`) must
+  not depend back on Wright tooling internals; Wright consumes them through
+  their public contracts (LPP for language providers);
 * compatibility tooling may depend on public artifacts and documented test
   interfaces, but the core must not require the oracle to compile or run.
 
@@ -302,3 +317,4 @@ Decisions that answer or materially revise these questions belong in an ADR.
 * [ADR-0006: Rust IR core: typed IDs, arenas, and two-layer models](adr/0006-rust-ir-core.md)
 * [ADR-0007: OverPy reference pinning policy](adr/0007-reference-pinning-policy.md)
 * [ADR-0008: Tooling-first semantic platform rebaseline](adr/0008-tooling-first-semantic-platform.md)
+* [ADR-0009: Language ownership and licensing boundaries](adr/0009-language-ownership-licensing-boundaries.md)

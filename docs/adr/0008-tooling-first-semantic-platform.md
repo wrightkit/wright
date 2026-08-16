@@ -1,12 +1,13 @@
 # ADR-0008: Tooling-first semantic platform rebaseline
 
-- Status: Accepted
+- Status: Accepted (amended by [ADR-0009](0009-language-ownership-licensing-boundaries.md))
 - Date: 2026-08-14
 - Supersedes: [ADR-0001: Project scope](0001-project-scope.md)
 - Amends: [ADR-0002: Compatibility strategy](0002-compatibility-strategy.md)
 - Related: [Issue #88](https://github.com/wrightkit/wright/issues/88),
   [docs/architecture.md](../architecture.md),
-  [docs/compatibility.md](../compatibility.md)
+  [docs/compatibility.md](../compatibility.md),
+  [ADR-0009: Language ownership and licensing boundaries](0009-language-ownership-licensing-boundaries.md)
 
 ## Context
 
