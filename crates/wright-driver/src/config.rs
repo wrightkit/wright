@@ -120,6 +120,15 @@ pub struct SessionConfig {
     /// consumers override it here, so CLI and programmatic lint runs apply
     /// the same deterministic configuration.
     pub lint: LintConfig,
+    /// LPP provider configurations, keyed by opaque language id (#142).
+    ///
+    /// [`CompilerSession::language_provider`] spawns a provider client for a
+    /// language id from this registry; when no provider is configured the
+    /// refusal is explicit and there is no fallback to in-process frontends.
+    /// The registry is empty by default; `wright_lpp::ProviderRegistry`
+    /// documents the configuration (and the `LPP_MOCK_PROVIDER` env hook
+    /// used by tests and CI).
+    pub providers: wright_lpp::ProviderRegistry,
 }
 
 impl Default for SessionConfig {
@@ -133,6 +142,7 @@ impl Default for SessionConfig {
             format: OutputFormat::Text,
             profile: wright_transform::Profile::Off,
             lint: LintConfig::default(),
+            providers: wright_lpp::ProviderRegistry::default(),
         }
     }
 }

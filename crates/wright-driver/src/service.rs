@@ -234,6 +234,20 @@ impl<'a> ToolService<'a> {
         self.session.inspect()
     }
 
+    /// Spawn the LPP provider client for `language_id` through the session's
+    /// provider registry (#142).
+    ///
+    /// Tooling consumes provider capabilities through the transport-neutral
+    /// `wright_lpp::LanguageProvider` seam; process and JSON-RPC details
+    /// stay inside `wright-lpp`. Unconfigured languages and missing
+    /// capabilities refuse explicitly.
+    pub fn language_provider(
+        &self,
+        language_id: &str,
+    ) -> Result<Box<dyn wright_lpp::LanguageProvider>, wright_lpp::ProviderError> {
+        self.session.language_provider(language_id)
+    }
+
     fn ok(&self, result: serde_json::Value) -> ToolResponse {
         ToolResponse::Ok { result }
     }

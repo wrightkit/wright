@@ -1,0 +1,144 @@
+//! Provider discovery and configuration by opaque language id.
+//!
+//! A [`ProviderRegistry`] maps opaque language id strings to provider
+//! configurations. Nothing in this module (or elsewhere in the crate)
+//! branches on a particular source language: `x-demo-lang` or any other id
+//! is just a key. When no provider is configured for a language id,
+//! [`ProviderRegistry::spawn`] refuses explicitly with
+//! `ProviderError::NotConfigured` — there is no fallback.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use crate::error::ProviderError;
+use crate::provider::StdioLanguageProvider;
+
+/// The environment variable naming the LPP mock/conformance provider binary
+/// used by integration tests and CI.
+pub const LPP_MOCK_PROVIDER_ENV: &str = "LPP_MOCK_PROVIDER";
+
+/// One configured provider, keyed by its opaque language id.
+#[derive(Debug, Clone)]
+pub struct ProviderConfig {
+    /// The opaque language id this provider serves (the registry key).
+    pub language_id: String,
+    /// The provider binary to spawn.
+    pub command: PathBuf,
+    /// Extra arguments passed to the binary.
+    pub args: Vec<String>,
+    /// Per-request timeout for this provider.
+    pub request_timeout: Duration,
+}
+
+impl ProviderConfig {
+    /// Build a configuration for `language_id` running `command` with `args`
+    /// and the default request timeout.
+    pub fn new(
+        language_id: impl Into<String>,
+        command: impl Into<PathBuf>,
+        args: Vec<String>,
+    ) -> ProviderConfig {
+        ProviderConfig {
+            language_id: language_id.into(),
+            command: command.into(),
+            args,
+            request_timeout: Duration::from_secs(30),
+        }
+    }
+
+    /// Set an explicit per-request timeout.
+    pub fn with_request_timeout(mut self, request_timeout: Duration) -> ProviderConfig {
+        self.request_timeout = request_timeout;
+        self
+    }
+}
+
+/// A registry error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegistryError {
+    /// A provider is already registered for the language id.
+    DuplicateLanguage { language_id: String },
+}
+
+impl fmt::Display for RegistryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RegistryError::DuplicateLanguage { language_id } => write!(
+                f,
+                "a provider is already registered for language id '{language_id}'"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RegistryError {}
+
+/// Provider discovery: a registry of provider configurations keyed by
+/// opaque language id.
+#[derive(Debug, Clone, Default)]
+pub struct ProviderRegistry {
+    providers: BTreeMap<String, ProviderConfig>,
+}
+
+impl ProviderRegistry {
+    /// An empty registry.
+    pub fn new() -> ProviderRegistry {
+        ProviderRegistry::default()
+    }
+
+    /// Register a provider configuration. Refuses duplicates.
+    pub fn register(&mut self, config: ProviderConfig) -> Result<(), RegistryError> {
+        if self.providers.contains_key(&config.language_id) {
+            return Err(RegistryError::DuplicateLanguage {
+                language_id: config.language_id.clone(),
+            });
+        }
+        self.providers.insert(config.language_id.clone(), config);
+        Ok(())
+    }
+
+    /// The configuration registered for a language id, if any.
+    pub fn get(&self, language_id: &str) -> Option<&ProviderConfig> {
+        self.providers.get(language_id)
+    }
+
+    /// Every registered language id, in deterministic order.
+    pub fn languages(&self) -> impl Iterator<Item = &str> {
+        self.providers.keys().map(String::as_str)
+    }
+
+    /// Spawn a fresh provider session for `language_id`.
+    ///
+    /// Refuses explicitly when no provider is configured for the id
+    /// (`ProviderError::NotConfigured`); there is no fallback to in-process
+    /// semantics.
+    pub fn spawn(&self, language_id: &str) -> Result<StdioLanguageProvider, ProviderError> {
+        let config =
+            self.providers
+                .get(language_id)
+                .ok_or_else(|| ProviderError::NotConfigured {
+                    language_id: language_id.to_string(),
+                })?;
+        StdioLanguageProvider::spawn(&config.command, &config.args, config.request_timeout)
+    }
+
+    /// A registry populated from the environment: `LPP_MOCK_PROVIDER` names
+    /// a mock/conformance provider binary serving the reference language
+    /// `x-demo-lang`. This is the integration-test/CI hook; production
+    /// configuration registers providers explicitly.
+    pub fn from_env() -> ProviderRegistry {
+        let mut registry = ProviderRegistry::new();
+        if let Ok(command) = std::env::var(LPP_MOCK_PROVIDER_ENV) {
+            if !command.is_empty() {
+                let _ = registry.register(ProviderConfig::new(
+                    "x-demo-lang",
+                    PathBuf::from(command),
+                    Vec::new(),
+                ));
+            }
+        }
+        registry
+    }
+}
