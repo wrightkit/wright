@@ -234,22 +234,37 @@ fn run() -> Result<(), String> {
                     // standard `documentChanges`/`TextDocumentEdit` form, so
                     // the client refuses to apply the rename to a newer
                     // buffer state; filesystem-backed sources carry the
-                    // unversioned `null` form LSP allows. The unversioned
-                    // `changes`-only shape is never used for rename, and no
-                    // Wright-specific extension is introduced.
+                    // unversioned `null` form LSP allows. The edits are the
+                    // shared M14 #129 transaction in editor conventions —
+                    // one exact-occurrence `TextEdit` per semantic
+                    // occurrence, grouped by document — never a
+                    // protocol-layer re-resolution or textual fallback. The
+                    // unversioned `changes`-only shape is never used for
+                    // rename, and no Wright-specific extension is introduced.
+                    let mut by_source: std::collections::BTreeMap<
+                        String,
+                        Vec<wright_language::service::RenameEdit>,
+                    > = std::collections::BTreeMap::new();
+                    for edit in rename.edits {
+                        by_source.entry(edit.source.clone()).or_default().push(edit);
+                    }
                     let document_changes = DocumentChanges::Edits(
-                        rename
-                            .edits
+                        by_source
                             .into_iter()
-                            .map(|edit| TextDocumentEdit {
+                            .map(|(source, edits)| TextDocumentEdit {
                                 text_document: OptionalVersionedTextDocumentIdentifier {
-                                    uri: source_to_uri(&edit.source),
-                                    version: source_version(&service, &edit.source),
+                                    uri: source_to_uri(&source),
+                                    version: source_version(&service, &source),
                                 },
-                                edits: vec![lsp_types::OneOf::Left(TextEdit {
-                                    range: convert_range(edit.range),
-                                    new_text: edit.new_text,
-                                })],
+                                edits: edits
+                                    .into_iter()
+                                    .map(|edit| {
+                                        lsp_types::OneOf::Left(TextEdit {
+                                            range: convert_range(edit.range),
+                                            new_text: edit.new_text,
+                                        })
+                                    })
+                                    .collect(),
                             })
                             .collect(),
                     );

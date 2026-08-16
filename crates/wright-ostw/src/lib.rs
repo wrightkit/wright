@@ -43,6 +43,20 @@ pub fn compile(main_text: &str, main_path: Option<&str>, root: &Path) -> OstwOut
     project::compile(main_text, main_path, root)
 }
 
+/// Compile with in-memory source overlays (M14, #128).
+///
+/// `overlay` maps project-relative source paths to replacement text and takes
+/// precedence over `main_text` and the filesystem, so a proposed multi-file
+/// edit can be validated without rewriting the user's files.
+pub fn compile_with_overlay(
+    main_text: &str,
+    main_path: Option<&str>,
+    root: &Path,
+    overlay: &std::collections::BTreeMap<String, String>,
+) -> OstwOutcome {
+    project::compile_with_overlay(main_text, main_path, root, overlay)
+}
+
 /// Load the project and resolve its semantic surface into frontend-neutral
 /// HIR (#118). The returned HIR validates structurally; boundary forms
 /// (missing imports, Cursor/Math, classes, define function macros) surface
@@ -52,7 +66,28 @@ pub fn compile_with_semantics(
     main_path: Option<&str>,
     root: &Path,
 ) -> (OstwOutcome, SemanticOutcome) {
-    let project_outcome = project::compile(main_text, main_path, root);
+    compile_with_semantics_overlay(
+        main_text,
+        main_path,
+        root,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Load the project with in-memory source overlays and resolve its semantic
+/// surface into frontend-neutral HIR (M14, #128).
+///
+/// `overlay` maps project-relative source paths to replacement text and takes
+/// precedence over `main_text` and the filesystem, so a proposed multi-file
+/// edit can be validated through the real project/frontend semantics without
+/// rewriting the user's files.
+pub fn compile_with_semantics_overlay(
+    main_text: &str,
+    main_path: Option<&str>,
+    root: &Path,
+    overlay: &std::collections::BTreeMap<String, String>,
+) -> (OstwOutcome, SemanticOutcome) {
+    let project_outcome = project::compile_with_overlay(main_text, main_path, root, overlay);
     match &project_outcome.project {
         Some(project) => {
             let semantic = semantic::compile(project);

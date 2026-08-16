@@ -180,6 +180,7 @@ impl<'a> Resolver<'a> {
                             decl.params.clone().unwrap_or_default(),
                             FunctionBodySpec::Expression(decl.value.clone()),
                             decl.span,
+                            None,
                         );
                     }
                     cst::Item::Function(decl) => {
@@ -193,6 +194,7 @@ impl<'a> Resolver<'a> {
                                 decl.params.clone(),
                                 FunctionBodySpec::Statements(decl.body.clone()),
                                 decl.span,
+                                Some(decl.name_span),
                             );
                         }
                     }
@@ -216,7 +218,7 @@ impl<'a> Resolver<'a> {
                 name: decl.name.clone(),
                 index: None,
                 decl_span: Some(decl.span),
-                decl_name_span: None,
+                decl_name_span: Some(decl.name_span),
                 body: Some(hir::SubroutineBody {
                     span: Some(decl.span),
                     name_span: None,
@@ -260,7 +262,7 @@ impl<'a> Resolver<'a> {
             name: name.clone(),
             index,
             span: Some(decl.span),
-            name_span: None,
+            name_span: Some(decl.name_span),
             initializer,
         });
         self.global_ids.insert(name, id);
@@ -299,7 +301,7 @@ impl<'a> Resolver<'a> {
             name: name.clone(),
             index,
             span: Some(decl.span),
-            name_span: None,
+            name_span: Some(decl.name_span),
             initializer,
         });
         self.player_ids.insert(name, id);
@@ -312,6 +314,7 @@ impl<'a> Resolver<'a> {
         _params: Vec<cst::Param>,
         body: FunctionBodySpec,
         span: Span,
+        name_span: Option<Span>,
     ) {
         if self.function_ids.contains_key(&name) {
             self.diagnostics.push(FrontendError::at(
@@ -333,7 +336,7 @@ impl<'a> Resolver<'a> {
             return_type: return_type.as_ref().map(cst_type_to_hir),
             body: placeholder,
             span: Some(span),
-            name_span: None,
+            name_span,
         });
         self.function_ids.insert(name, function);
     }
@@ -623,7 +626,7 @@ impl<'a> Resolver<'a> {
         self.hir.rules.push(hir::Rule {
             name: decl.name.clone().unwrap_or_default(),
             span: Some(decl.span),
-            name_span: None,
+            name_span: decl.name_span,
             disabled: decl.disabled,
             event: hir::Event {
                 name: event_name.to_string(),

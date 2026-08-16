@@ -72,19 +72,23 @@ pub struct SourceLocation {
     pub range: Range,
 }
 
-/// One source-aware rename edit targeting a full document.
+/// One source-aware rename edit targeting an exact semantic occurrence
+/// (M14, #131).
 ///
-/// Carries the source identity, a 0-based full-document replacement range,
-/// the replacement text, and version/identity preconditions so a client can
-/// apply the edit safely and detect stale state.
+/// Carries the source identity, a 0-based editor-convention range covering
+/// exactly the occurrence's identifier, the replacement text (the new name),
+/// and identity/version preconditions so a client can apply the edit safely
+/// and detect stale state. Multiple edits per source are allowed — this is
+/// the shared #129 transaction mapped to editor conventions, never a
+/// whole-document replacement.
 #[derive(Debug, Clone, Serialize)]
 pub struct RenameEdit {
     /// The source identity: the requesting document URI or a resolved include
     /// path.
     pub source: String,
-    /// The full-document replacement range in the source.
+    /// The 0-based editor range of the exact occurrence (UTF-16 positions).
     pub range: Range,
-    /// The renamed full-document text.
+    /// The replacement text (the new name).
     pub new_text: String,
     /// The SHA-256 identity of the pre-edit source text (stale-state
     /// precondition).
@@ -100,8 +104,11 @@ pub struct RenameResult {
     pub document_version: i32,
     /// Whether the rename validates through the compiler pipeline.
     pub ok: bool,
-    /// The source-aware edits for every semantically affected source.
+    /// The exact-occurrence edits for every semantically affected source.
     pub edits: Vec<RenameEdit>,
+    /// The validated full edited text of every affected source (the #128
+    /// transaction preview).
+    pub previews: Vec<wright_driver::edit::SourcePreview>,
     /// Structured refusal diagnostics when the rename was rejected.
     pub diagnostics: Vec<String>,
 }
@@ -549,23 +556,27 @@ impl LanguageService {
 
     /// Rename the symbol at a position across the whole project.
     ///
-    /// Resolves the symbol through the semantic index of every open root
-    /// whose project includes the requesting document, unions the
-    /// declaration/definition/reference *spans* of that symbol, produces one
-    /// source-aware full-document edit per affected source whose replacement
-    /// text is built from those exact semantic spans (never a whole-word scan
-    /// of the raw source), and validates the edited project through the
-    /// compiler pipeline before returning. Every refusal — an unresolvable
-    /// symbol, an unestablished source identity, a target collision, an
-    /// affected source that changed relative to the validated state, or
-    /// failed edited-project validation — is explicit (`ok = false` with
-    /// diagnostics); a silent or partial rename is never returned.
+    /// Delegates semantic target resolution, edit generation, and validation
+    /// to the shared M14 driver refactoring contract
+    /// (`wright_driver::edit::semantic_rename`, #129): every open root whose
+    /// project includes the requesting document resolves the symbol through
+    /// the shared semantic index, and the union of the resulting exact-range
+    /// transactions — deduplicated by (source, range) — is validated through
+    /// `wright_driver::edit::validate_transaction` against every affected
+    /// root with the original project kind (OPY or OSTW). No whole-word scan
+    /// or document-local rename semantics exist here. Every refusal — an
+    /// unresolvable symbol, an unestablished source identity, a target
+    /// collision, an affected source that changed relative to the validated
+    /// state, or failed edited-project validation — is explicit
+    /// (`ok = false` with diagnostics); a silent or partial rename is never
+    /// returned.
     pub fn rename(&self, uri: &str, position: Position, new_name: &str) -> RenameResult {
         if new_name.is_empty() {
             return RenameResult {
                 document_version: 0,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: vec![
                     "rename-invalid-name: the new name must not be empty".to_string(),
                 ],
@@ -576,6 +587,7 @@ impl LanguageService {
                 document_version: 0,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: vec![format!(
                     "rename-unresolved: no open document for '{uri}'; the source identity cannot be established"
                 )],
@@ -583,136 +595,127 @@ impl LanguageService {
         };
         let (line, col) = requesting.to_line_col(position);
         let requesting_canonical = self.canonical_source(&requesting.uri);
-        let mut from: Option<String> = None;
-        let mut collision: Option<String> = None;
-        // Canonical source identity -> the symbol's exact 1-based occurrence
-        // spans (the declaration identifier, the definition identifier, and
-        // every reference identifier), deduplicated across the root analyses
-        // that reach the requesting file.
-        let mut targets: BTreeMap<String, BTreeSet<TargetSpan>> = BTreeMap::new();
 
-        // Union the symbol's exact occurrences across every open root whose
-        // project includes the requesting document, so a rename from a
-        // declaration in an included file also reaches the roots that
-        // reference it. The position is matched only against spans in the
-        // requesting document's file, never by coincidental line/column in
-        // another file.
+        // The union of the per-root transactions, deduplicated by exact
+        // (source, range), plus the current text of every source any root
+        // project sees (the version/identity precondition snapshot).
+        let mut unioned: BTreeMap<(String, u32, u32, u32, u32), wright_driver::edit::SourceEdit> =
+            BTreeMap::new();
+        let mut sources: BTreeMap<String, String> = BTreeMap::new();
+        let mut found = false;
+
+        // Union across every open root whose project includes the requesting
+        // document, so a rename from a declaration in an included file also
+        // reaches the roots that reference it. The position is matched only
+        // against spans in the requesting document's file, never by
+        // coincidental line/column in another file (the driver resolves it in
+        // the root project).
         for root_uri in self.dependent_documents(uri) {
             let Some(root_document) = self.store.document(&root_uri) else {
                 continue;
             };
+            let Some(root_path) = crate::document::uri_to_path(&root_document.uri) else {
+                continue;
+            };
             let analysis = self.analyze(root_document);
-            let Some(file_index) = (0..analysis.files.len()).find(|index| {
+            let Some(_) = (0..analysis.files.len()).find(|index| {
                 let source = self.source_identity(&analysis.files, root_document, *index);
                 self.canonical_source(&source) == requesting_canonical
             }) else {
                 continue;
             };
-            let Some(symbol) = self.symbol_at_in_file(&analysis, file_index, line, col) else {
-                continue;
+            found = true;
+
+            // The root's current project snapshot: every closure file keyed
+            // by its canonical source identity (open overlays take precedence
+            // over the filesystem, exactly like the service's own analysis).
+            let mut root_sources: BTreeMap<String, String> = BTreeMap::new();
+            for file in &analysis.files {
+                let identity =
+                    self.source_identity(&analysis.files, root_document, file.id as usize);
+                let canonical = self.canonical_source(&identity);
+                root_sources.insert(canonical, self.source_text(&identity, root_document));
+            }
+            let config = wright_driver::SessionConfig {
+                input: wright_driver::InputSpec::Path(root_path),
+                // The driver detects the original project kind from the root
+                // document extension (OPY or OSTW), so validation runs through
+                // the correct native frontend.
+                kind: wright_driver::SourceKind::Auto,
+                root: Some(self.root.clone()),
+                ..wright_driver::SessionConfig::default()
             };
-            from.get_or_insert_with(|| symbol.name.clone());
-            if let Some(problem) = self.collision_problem(&analysis, &symbol, new_name) {
-                collision = Some(problem);
-                break;
+            let rename = wright_driver::edit::semantic_rename(
+                &config,
+                &root_sources,
+                &wright_driver::edit::RenameTarget {
+                    source: requesting_canonical.clone(),
+                    line,
+                    col,
+                    to: new_name.to_string(),
+                },
+            );
+            if !rename.ok {
+                return RenameResult {
+                    document_version: requesting.version,
+                    ok: false,
+                    edits: Vec::new(),
+                    previews: Vec::new(),
+                    diagnostics: rename
+                        .diagnostics
+                        .iter()
+                        .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
+                        .collect(),
+                };
             }
-            if let Some(index) = &analysis.index {
-                let mut occurrences = Vec::new();
-                if let Some(occurrence) = symbol.occurrence {
-                    occurrences.push(occurrence);
-                }
-                for reference in index.references(symbol.id) {
-                    match (reference.occurrence, reference.span) {
-                        (Some(occurrence), _) => occurrences.push(occurrence),
-                        (None, Some(span)) => {
-                            // The reference has a source location but no exact
-                            // identifier occurrence: an exact target cannot be
-                            // established, so the rename refuses rather than
-                            // broadening to the statement span.
-                            let source = self.source_identity(
-                                &analysis.files,
-                                root_document,
-                                span.file.index(),
-                            );
-                            return RenameResult {
-                                document_version: requesting.version,
-                                ok: false,
-                                edits: Vec::new(),
-                                diagnostics: vec![format!(
-                                    "rename-unresolved-target: a semantic occurrence in {source} has no exact identifier span; refusing the rename rather than broadening to a statement span"
-                                )],
-                            };
-                        }
-                        (None, None) => {}
-                    }
-                }
-                for occurrence in occurrences {
-                    let source = self.source_identity(
-                        &analysis.files,
-                        root_document,
-                        occurrence.file.index(),
+            if let Some(transaction) = &rename.transaction {
+                for edit in &transaction.edits {
+                    unioned.insert(
+                        (
+                            edit.source.clone(),
+                            edit.range.start_line,
+                            edit.range.start_col,
+                            edit.range.end_line,
+                            edit.range.end_col,
+                        ),
+                        edit.clone(),
                     );
-                    targets
-                        .entry(self.canonical_source(&source))
-                        .or_default()
-                        .insert(TargetSpan::from_span(occurrence));
                 }
             }
+            sources.extend(root_sources);
         }
 
-        if from.is_none() {
+        if !found {
             return RenameResult {
                 document_version: requesting.version,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: vec![
                     "rename-unresolved: no symbol is resolvable at the requested position"
                         .to_string(),
                 ],
             };
         }
-        if let Some(problem) = collision {
-            return RenameResult {
-                document_version: requesting.version,
-                ok: false,
-                edits: Vec::new(),
-                diagnostics: vec![problem],
+        let transaction =
+            match wright_driver::edit::EditTransaction::new(unioned.into_values().collect()) {
+                Ok(transaction) => transaction,
+                Err(diagnostic) => {
+                    return RenameResult {
+                        document_version: requesting.version,
+                        ok: false,
+                        edits: Vec::new(),
+                        previews: Vec::new(),
+                        diagnostics: vec![format!("{}: {}", diagnostic.code, diagnostic.message)],
+                    };
+                }
             };
-        }
-
-        // Produce one full-document edit per affected source from the symbol's
-        // exact semantic occurrence ranges. Each range is the identifier
-        // itself (declaration/definition/reference), so no source-wide or
-        // statement-level scan ever edits unrelated text. Open overlays take
-        // precedence over disk, and the edit carries the identity/version
-        // preconditions of the exact text it was computed from.
-        let mut edits = Vec::new();
-        for (source, spans) in &targets {
-            let text = self.source_text(source, requesting);
-            let Some(new_text) = renamed_text(&text, new_name, spans) else {
-                return RenameResult {
-                    document_version: requesting.version,
-                    ok: false,
-                    edits: Vec::new(),
-                    diagnostics: vec![format!(
-                        "rename-incomplete-coverage: an exact semantic target in {source} cannot be established; refusing the rename rather than editing unrelated text"
-                    )],
-                };
-            };
-            edits.push(RenameEdit {
-                source: source.clone(),
-                range: full_document_range(&text),
-                new_text,
-                source_identity: wright_driver::input_identity(&text),
-                source_version: self.source_version(source, requesting),
-            });
-        }
 
         // Stale-state guard: the rename must not return edits for a source
         // that changed relative to the validated state. Re-fetch the current
         // effective text of every affected source and verify the identity the
         // edits were computed against still holds.
-        for edit in &edits {
+        for edit in &transaction.edits {
             if wright_driver::input_identity(&self.source_text(&edit.source, requesting))
                 != edit.source_identity
             {
@@ -720,6 +723,7 @@ impl LanguageService {
                     document_version: requesting.version,
                     ok: false,
                     edits: Vec::new(),
+                    previews: Vec::new(),
                     diagnostics: vec![format!(
                         "rename-stale-source: {} changed relative to the validated state; re-fetch the source and retry",
                         edit.source
@@ -728,78 +732,81 @@ impl LanguageService {
             }
         }
 
-        // Validate the edited project state before returning.
-        if let Some(problems) = self.validate_renamed_project(uri, &edits) {
+        // Validate the unioned transaction through the shared #128 contract
+        // against every affected root before returning success.
+        let (problems, previews) = self.validate_renamed_project(uri, &transaction, &sources);
+        if let Some(problems) = problems {
             return RenameResult {
                 document_version: requesting.version,
                 ok: false,
                 edits: Vec::new(),
+                previews: Vec::new(),
                 diagnostics: problems,
             };
+        }
+
+        // Materialize the shared #129 transaction in editor conventions:
+        // one exact-occurrence edit per semantic occurrence (0-based UTF-16
+        // ranges), plus the validated full edited text of every affected
+        // source. The LSP adapter maps these edits directly to
+        // `WorkspaceEdit` without re-resolving symbols or reimplementing
+        // collision/stale checks (#131).
+        let mut edits = Vec::new();
+        for edit in &transaction.edits {
+            let text = sources.get(&edit.source).cloned().unwrap_or_default();
+            let span = wright_ir::source::Span::new(
+                wright_ir::source::FileId::from_index(0),
+                wright_ir::source::Position::new(edit.range.start_line, edit.range.start_col),
+                wright_ir::source::Position::new(edit.range.end_line, edit.range.end_col),
+            );
+            edits.push(RenameEdit {
+                source: edit.source.clone(),
+                range: crate::document::span_to_range(&span, &text),
+                new_text: edit.new_text.clone(),
+                source_identity: edit.source_identity.clone(),
+                source_version: self.source_version(&edit.source, requesting),
+            });
         }
 
         RenameResult {
             document_version: requesting.version,
             ok: true,
             edits,
+            previews,
             diagnostics: Vec::new(),
         }
     }
 
-    /// A refusal reason when renaming `symbol` to `new_name` would introduce
-    /// a target-name collision with another declared symbol, else `None`.
-    ///
-    /// A same-spelled symbol in a different namespace is *not* a collision:
-    /// the semantic index distinguishes the two identities by typed symbol ID,
-    /// so span-targeted rename edits only the selected symbol's occurrences
-    /// (test C). Only a genuine target-name conflict refuses the rename.
-    fn collision_problem(
-        &self,
-        analysis: &Analysis,
-        symbol: &wright_analyzer::symbols::Symbol,
-        new_name: &str,
-    ) -> Option<String> {
-        let Some(index) = &analysis.index else {
-            return Some("rename-collision: semantic identity is unavailable".to_string());
-        };
-        for other in index.symbols() {
-            if other.id == symbol.id {
-                continue;
-            }
-            if other.name == new_name {
-                return Some(format!(
-                    "rename-collision: '{}' is already declared as {}; the new name would collide",
-                    new_name,
-                    symbol_kind_name(other.kind)
-                ));
-            }
-        }
-        None
-    }
-
     /// Validate the edited project: every affected root must still compile
-    /// with the edits applied as overlays. Returns refusal reasons when any
-    /// affected root fails.
+    /// with the unioned transaction applied as overlays. Returns refusal
+    /// reasons when any affected root fails, plus the validated per-source
+    /// previews (identical across roots, since the transaction and the source
+    /// snapshot are the same).
+    ///
+    /// Validation routes through the shared M14 driver transaction contract
+    /// (#128) with the root's original source kind detected from its
+    /// extension, so OPY and OSTW projects validate through their own native
+    /// frontend; no duplicate edit-validation semantics live here.
     fn validate_renamed_project(
         &self,
         requesting_uri: &str,
-        edits: &[RenameEdit],
-    ) -> Option<Vec<String>> {
-        let edited: BTreeMap<String, String> = edits
-            .iter()
-            .map(|edit| (edit.source.clone(), edit.new_text.clone()))
-            .collect();
-        let overlay = self.overlay_with_edits(&edited);
-
+        transaction: &wright_driver::edit::EditTransaction,
+        sources: &BTreeMap<String, String>,
+    ) -> (Option<Vec<String>>, Vec<wright_driver::edit::SourcePreview>) {
         // Affected roots: the requesting document plus any open document that
         // includes an edited source.
+        let edited_sources: BTreeSet<String> = transaction
+            .edits
+            .iter()
+            .map(|edit| edit.source.clone())
+            .collect();
         let mut roots = vec![requesting_uri.to_string()];
         for open_uri in self.store.uris() {
             if open_uri == requesting_uri {
                 continue;
             }
-            if edited
-                .keys()
+            if edited_sources
+                .iter()
                 .any(|source| self.document_includes_source(open_uri, source))
             {
                 roots.push(open_uri.to_string());
@@ -807,29 +814,37 @@ impl LanguageService {
         }
 
         let mut problems = Vec::new();
+        let mut previews = Vec::new();
         for root in roots {
             let Some(document) = self.store.document(&root) else {
                 continue;
             };
-            let canonical = self.canonical_source(&document.uri);
-            let main_text = edited
-                .get(&canonical)
-                .cloned()
-                .unwrap_or_else(|| document.text.clone());
-            let outcome = wright_opy::compile_with_overlay_outcome(
-                &main_text,
-                &document.uri,
-                &self.root,
-                &overlay,
-            );
-            if let Some(error) = outcome.error {
-                problems.push(format!("{}: {}", error.code, error.message));
+            let Some(path) = crate::document::uri_to_path(&document.uri) else {
+                continue;
+            };
+            let config = wright_driver::SessionConfig {
+                input: wright_driver::InputSpec::Path(path),
+                // The original project kind is detected from the root document
+                // extension so the edited project validates through the
+                // correct native frontend.
+                kind: wright_driver::SourceKind::Auto,
+                root: Some(self.root.clone()),
+                ..wright_driver::SessionConfig::default()
+            };
+            let validation =
+                wright_driver::edit::validate_transaction(&config, sources, transaction);
+            if !validation.ok {
+                for diagnostic in &validation.diagnostics {
+                    problems.push(format!("{}: {}", diagnostic.code, diagnostic.message));
+                }
+            } else if previews.is_empty() {
+                previews = validation.preview.unwrap_or_default();
             }
         }
         if problems.is_empty() {
-            None
+            (None, previews)
         } else {
-            Some(problems)
+            (Some(problems), Vec::new())
         }
     }
 
@@ -843,23 +858,6 @@ impl LanguageService {
             Some(path) => path.to_string_lossy().into_owned(),
             None => source.to_string(),
         }
-    }
-
-    /// The include overlay with edited sources taking precedence over open
-    /// overlays and the filesystem.
-    fn overlay_with_edits(&self, edited: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-        let mut overlay = self.store.overlay(&self.root);
-        for (source, text) in edited {
-            let path = PathBuf::from(source);
-            overlay.insert(path.to_string_lossy().into_owned(), text.clone());
-            if let Ok(relative) = path.strip_prefix(&self.root) {
-                overlay.insert(relative.to_string_lossy().into_owned(), text.clone());
-            }
-            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                overlay.insert(name.to_string(), text.clone());
-            }
-        }
-        overlay
     }
 
     /// Whether an open document's include closure references `source`.
@@ -996,37 +994,6 @@ impl LanguageService {
         }
         None
     }
-
-    /// The symbol whose declaration or reference span in `file_index`
-    /// contains a 1-based line/column. Unlike [`Self::symbol_at_line_col`],
-    /// spans in other files are never considered, so a position in the
-    /// requesting document cannot resolve to a coincidental same-coordinate
-    /// symbol in an included file.
-    fn symbol_at_in_file(
-        &self,
-        analysis: &Analysis,
-        file_index: usize,
-        line: u32,
-        col: u32,
-    ) -> Option<Symbol> {
-        let index = analysis.index.as_ref()?;
-        for symbol in index.symbols() {
-            let symbol_id = symbol.id;
-            if let Some(span) = symbol.span {
-                if span.file.index() == file_index && span_contains(span, line, col) {
-                    return Some(symbol.clone());
-                }
-            }
-            for reference in index.references(symbol_id) {
-                if let Some(span) = reference.span {
-                    if span.file.index() == file_index && span_contains(span, line, col) {
-                        return Some(symbol.clone());
-                    }
-                }
-            }
-        }
-        None
-    }
 }
 
 /// Convert a frontend span to the IR span representation.
@@ -1090,102 +1057,6 @@ fn empty_range() -> Range {
             character: 0,
         },
     }
-}
-
-/// A 0-based range covering the entire source text, including any trailing
-/// newline (so a full-document replacement can delete the final line break).
-/// The end character is a UTF-16 code-unit offset, matching the editor
-/// convention used everywhere else at the LSP boundary.
-fn full_document_range(text: &str) -> Range {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let line_count = lines.len().max(1) as u32;
-    let last_line_len = crate::document::utf16_len(lines.last().unwrap_or(&"")) as u32;
-    Range {
-        start: Position {
-            line: 0,
-            character: 0,
-        },
-        end: Position {
-            line: line_count - 1,
-            character: last_line_len,
-        },
-    }
-}
-
-/// One 1-based source span of the renamed symbol (a declaration, definition,
-/// or reference site), deduplicated across the root analyses that reach the
-/// requesting file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct TargetSpan {
-    start_line: u32,
-    start_col: u32,
-    end_line: u32,
-    end_col: u32,
-}
-
-impl TargetSpan {
-    fn from_span(span: wright_ir::source::Span) -> TargetSpan {
-        TargetSpan {
-            start_line: span.start.line,
-            start_col: span.start.col,
-            end_line: span.end.line,
-            end_col: span.end.col,
-        }
-    }
-}
-
-/// Build the renamed source text by editing exactly the symbol's semantic
-/// occurrence ranges: every 1-based half-open target span (the declaration
-/// identifier, the definition identifier, or a reference identifier) is
-/// replaced with `to`.
-///
-/// The spans are identifier-exact by construction — derived in the
-/// frontend/HIR/WIR/semantic-index provenance path, never by scanning source
-/// text for the spelling — so a same-spelled string, comment, or sibling
-/// identifier anywhere else in the source is never touched. A span that is
-/// not a valid single-line identifier range in the source (an exact target
-/// that cannot be established) returns `None` so the caller refuses instead
-/// of emitting a partial edit.
-fn renamed_text(text: &str, to: &str, spans: &BTreeSet<TargetSpan>) -> Option<String> {
-    let lines: Vec<&str> = text.split('\n').collect();
-    // Group the exact 0-based character ranges by line, validating each span
-    // against the source so a stale or imprecise span refuses rather than
-    // silently editing the wrong text.
-    let mut per_line: BTreeMap<u32, Vec<(usize, usize)>> = BTreeMap::new();
-    for span in spans {
-        if span.start_line != span.end_line || span.start_line == 0 {
-            return None;
-        }
-        let line = lines.get(span.start_line as usize - 1)?;
-        let char_count = line.chars().count() as u32;
-        if span.start_col == 0 || span.end_col < span.start_col || span.end_col > char_count + 1 {
-            return None;
-        }
-        per_line
-            .entry(span.start_line - 1)
-            .or_default()
-            .push((span.start_col as usize - 1, span.end_col as usize - 1));
-    }
-
-    // Apply the replacements line by line in ascending order with a running
-    // cursor; the ranges are disjoint (deduplicated exact occurrences), so
-    // earlier offsets are consumed in order and never shift.
-    let mut out = Vec::with_capacity(lines.len());
-    for (line_number, line) in lines.iter().enumerate() {
-        let mut ranges = per_line.remove(&(line_number as u32)).unwrap_or_default();
-        ranges.sort_unstable();
-        let chars: Vec<char> = line.chars().collect();
-        let mut rebuilt = String::with_capacity(line.len());
-        let mut cursor = 0usize;
-        for (start, end) in ranges {
-            rebuilt.extend(chars[cursor..start].iter());
-            rebuilt.push_str(to);
-            cursor = end;
-        }
-        rebuilt.extend(chars[cursor..].iter());
-        out.push(rebuilt);
-    }
-    Some(out.join("\n"))
 }
 
 fn severity_name(severity: analysis::Severity) -> &'static str {

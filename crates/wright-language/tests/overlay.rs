@@ -85,35 +85,40 @@ fn rename_uses_open_overlay_content_over_filesystem() {
         .iter()
         .find(|edit| edit.source.ends_with("shared.opy"))
         .expect("shared edit from the overlay");
+    assert_eq!(shared_edit.new_text, "refresh");
+    let shared_text = result
+        .previews
+        .iter()
+        .find(|preview| preview.source.ends_with("shared.opy"))
+        .map(|preview| preview.new_text.clone())
+        .expect("shared preview from the overlay");
     assert!(
-        shared_edit.new_text.contains("subroutine refresh"),
+        shared_text.contains("subroutine refresh"),
         "overlay declaration renamed: {}",
-        shared_edit.new_text
+        shared_text
     );
     assert!(
-        shared_edit.new_text.contains("print(\"overlay\")"),
+        shared_text.contains("print(\"overlay\")"),
         "overlay body survives the rename: {}",
-        shared_edit.new_text
+        shared_text
     );
     assert!(
-        shared_edit.new_text.contains("def refresh()"),
+        shared_text.contains("def refresh()"),
         "overlay definition renamed: {}",
-        shared_edit.new_text
+        shared_text
     );
     assert!(
-        shared_edit
-            .new_text
-            .contains("# showStatus is an unsaved overlay"),
+        shared_text.contains("# showStatus is an unsaved overlay"),
         "overlay comment text survives unchanged: {}",
-        shared_edit.new_text
+        shared_text
     );
     // Only the comment retains the old spelling; every semantic occurrence is
     // renamed.
     assert_eq!(
-        shared_edit.new_text.matches("showStatus").count(),
+        shared_text.matches("showStatus").count(),
         1,
         "only the comment occurrence of the old spelling remains: {}",
-        shared_edit.new_text
+        shared_text
     );
     // The overlay is the source of truth: shared.opy does not exist on disk
     // in this fixture, so the renamed overlay text proves filesystem content

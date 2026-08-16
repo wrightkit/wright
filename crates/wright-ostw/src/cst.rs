@@ -53,6 +53,8 @@ pub struct VarDecl {
     /// The initializer, when present (`= expr`).
     pub value: Option<Expr>,
     pub span: Span,
+    /// The exact span of the declared identifier (the rename target, #129).
+    pub name_span: Span,
 }
 
 /// A `define` constant or define-macro.
@@ -88,6 +90,8 @@ pub struct FunctionDecl {
     pub rule_name: Option<String>,
     pub body: Vec<Stmt>,
     pub span: Span,
+    /// The exact span of the declared identifier (the rename target, #129).
+    pub name_span: Span,
 }
 
 /// An `enum Name { Member, ... }` declaration.
@@ -104,6 +108,9 @@ pub struct RuleDecl {
     pub disabled: bool,
     /// The quoted rule name, when present.
     pub name: Option<String>,
+    /// The exact span of the quoted rule-name content (the rename target,
+    /// #129), when a name is present.
+    pub name_span: Option<Span>,
     /// The rule priority (`rule: "name" -1`), when present.
     pub priority: Option<Expr>,
     /// The event expression (`Event.OngoingPlayer`), when present.

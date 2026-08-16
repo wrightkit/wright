@@ -91,6 +91,13 @@ suppression is the authoritative contract.
   source identity, and failed validation refuse explicitly. Edits are
   Wright-owned (`RenameEdit`/`TargetSpan` in `wright-language`) and carry the
   SHA-256 source identity computed through `wright_driver::input_identity`.
+  Rename delegates target resolution, edit generation, and validation to the
+  shared M14 driver refactoring contract
+  (`wright_driver::edit::semantic_rename`, #129): every affected root
+  resolves through its original native frontend, the unioned exact-range
+  transaction is validated through the shared #128 transaction boundary
+  (`wright_driver::edit::validate_transaction`), and no duplicate
+  edit-validation or span-collection semantics live here.
 * **Semantic tokens** — classified by the native lexer/parser identity
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.
@@ -109,9 +116,16 @@ surfaces) surface as source-aware errors with project-relative paths.
 Operations that stay unsupported for OSTW are **explicitly refused or
 documented, never emulated through upstream calls**:
 
-- **Rename / safe source edits** — a whole-source OSTW regeneration/emitter is
-  a declared non-goal (#120); rename would rewrite entire OSTW files, so it is
-  not offered for OSTW documents.
+- **Semantic rename** — offered for OSTW symbols on the declared semantic
+  surface (globals, player variables, subroutines/functions) through the
+  shared M14 refactoring contract (#129): resolution runs over the shared
+  semantic index of the `ds.toml` project graph, edited transactions validate
+  through the native OSTW frontend, and targets without an exact identifier
+  span (e.g. typed constants and other provenance-limited forms) refuse
+  explicitly instead of broadening to a statement span. Whole-source OSTW
+  regeneration/emitters remain a declared non-goal (#120) — rename edits
+  original OSTW source with exact identifier ranges, never reconstructed
+  text.
 - **Whole-source pretty-printing / comment-preserving regeneration** — not
   implemented; diagnostics and navigation are source-preserving.
 - Upstream OSTW LSP parity, classes/generics/lambdas/pattern matching beyond
@@ -133,10 +147,20 @@ retired with an empty publishDiagnostics unless another open root still owns
 it, so no diagnostic stays stale solely because its source left the analysis,
 dependency-refresh of affected documents on include/overlay changes, hover,
 definition, references, completion, rename (multi-document workspace edit),
-semanticTokens/full, shutdown/exit. The end-to-end
+semanticTokens/full, shutdown/exit.
+
+**Rename is a pure adapter (#131)**: the LSP layer maps the shared #129
+transaction (exact-occurrence editor edits from `wright-language`) directly
+to `WorkspaceEdit` `documentChanges`/`TextDocumentEdit` — one `TextEdit` per
+semantic occurrence, grouped by document, with each open document identified
+at its current version and filesystem-backed sources in the unversioned
+`null` form. No symbol resolution, collision, or stale-state logic exists in
+the protocol layer; unsupported rename targets surface the shared refusal as
+an explicit LSP error, never a textual fallback. The end-to-end
 harness (`wright-lsp/tests/lsp.rs`) drives the real binary and verifies
-capability negotiation, lifecycle, navigation, completion, rename, semantic
-tokens, and stale-version suppression.
+capability negotiation, lifecycle, navigation, completion, rename (OPY
+multi-document and supported OSTW rename, UTF-16/non-BMP ranges, version
+preconditions), semantic tokens, and stale-version suppression.
 
 ## Out of scope (recorded)
 

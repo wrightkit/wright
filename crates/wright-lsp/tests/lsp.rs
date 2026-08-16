@@ -143,36 +143,34 @@ fn workspace_root() -> PathBuf {
 /// Apply a full-document WorkspaceEdit (version-aware `documentChanges`
 /// form) range to the original source.
 fn apply_lsp_edit(source: &str, result: &serde_json::Value, uri: &str) -> String {
+    // Apply every exact-occurrence TextEdit of one document to the source,
+    // in reverse order (what an LSP client applying the WorkspaceEdit does).
     let document_changes = result["documentChanges"]
         .as_array()
         .expect("rename uses the version-aware documentChanges form");
-    let edit = document_changes
+    let edits = document_changes
         .iter()
         .find(|entry| entry["textDocument"]["uri"].as_str() == Some(uri))
         .and_then(|entry| entry["edits"].as_array())
-        .and_then(|edits| edits.first())
-        .expect("document edit for the uri");
-    let new_text = edit["newText"].as_str().unwrap();
-    let range = &edit["range"];
-    let start_line = range["start"]["line"].as_u64().unwrap() as usize;
-    let start_char = range["start"]["character"].as_u64().unwrap() as usize;
-    let end_line = range["end"]["line"].as_u64().unwrap() as usize;
-    let end_char = range["end"]["character"].as_u64().unwrap() as usize;
-    let lines: Vec<&str> = source.split('\n').collect();
-    assert_eq!(start_line, 0, "full-document edit starts at the top");
-    assert_eq!(start_char, 0, "full-document edit starts at column 0");
-    assert_eq!(
-        end_line,
-        lines.len() - 1,
-        "full-document edit ends on the last line"
-    );
-    let last_line = lines.last().unwrap_or(&"");
-    assert_eq!(
-        end_char,
-        last_line.chars().count(),
-        "full-document edit ends at last line length"
-    );
-    new_text.to_string()
+        .expect("document edits for the uri");
+    let mut lines: Vec<String> = source.split('\n').map(str::to_string).collect();
+    for edit in edits.iter().rev() {
+        let range = &edit["range"];
+        let start_line = range["start"]["line"].as_u64().unwrap() as usize;
+        let start_char = range["start"]["character"].as_u64().unwrap() as usize;
+        let end_line = range["end"]["line"].as_u64().unwrap() as usize;
+        let end_char = range["end"]["character"].as_u64().unwrap() as usize;
+        assert_eq!(start_line, end_line, "occurrence edits are single-line");
+        let new_text = edit["newText"].as_str().unwrap();
+        let line = &mut lines[start_line];
+        let start = wright_language::document::utf16_offset_to_char(line, start_char);
+        let end = wright_language::document::utf16_offset_to_char(line, end_char);
+        let mut replaced: String = line.chars().take(start).collect();
+        replaced.push_str(new_text);
+        replaced.extend(line.chars().skip(end));
+        *line = replaced;
+    }
+    lines.join("\n")
 }
 
 fn corpus_source(id: &str) -> String {
@@ -333,10 +331,21 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
         main_entry["textDocument"]["version"], 1,
         "the open document is identified at its current version"
     );
-    let new_text = main_entry["edits"][0]["newText"].as_str().unwrap();
-    assert!(new_text.contains("globalvar total"), "renamed: {new_text}");
-    assert!(!new_text.contains("globalvar score"));
-    let range = &main_entry["edits"][0]["range"];
+    // The shared #129 transaction in LSP form: one exact-occurrence TextEdit
+    // per semantic occurrence (declaration + reference), never a
+    // whole-document replacement.
+    let edits = main_entry["edits"].as_array().unwrap();
+    assert_eq!(edits.len(), 2, "declaration + reference edits: {edits:?}");
+    assert!(
+        edits.iter().all(|edit| edit["newText"] == "total"),
+        "every edit replaces the identifier: {edits:?}"
+    );
+    let range = &edits[0]["range"];
+    assert_eq!(range["start"]["line"], 0);
+    assert_eq!(range["start"]["character"], 10);
+    assert_eq!(range["end"]["character"], 15);
+    let reference_range = &edits[1]["range"];
+    assert_eq!(reference_range["start"]["line"], 5, "{reference_range:?}");
     assert!(
         !(range["start"]["line"] == 0
             && range["start"]["character"] == 0
@@ -344,16 +353,13 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
             && range["end"]["character"] == 0),
         "rename range must not be the degenerate (0,0)..(0,0): {range}"
     );
-    assert!(
-        range["end"]["line"].as_u64().unwrap() > 0,
-        "range covers the document: {range}"
-    );
-    // Applying the returned edit to the original source reproduces the
+    // Applying the returned edits to the original source reproduces the
     // validated preview exactly.
     let original = corpus_source("synthetic/declarations-rules");
     let applied = apply_lsp_edit(&original, &rename["result"], &uri_for("main.opy"));
     assert_eq!(
-        applied, new_text,
+        applied,
+        original.replace("score", "total"),
         "applying the WorkspaceEdit yields the validated result"
     );
 
@@ -1140,32 +1146,40 @@ fn lsp_rename_returns_multi_document_workspace_edit() {
         shared_entry["textDocument"]["version"], 1,
         "shared.opy is identified at its current version"
     );
-    let main_edit = main_entry["edits"][0].clone();
-    let shared_edit = shared_entry["edits"][0].clone();
-    assert!(
-        main_edit["newText"].as_str().unwrap().contains("refresh()"),
-        "root call site renamed: {main_edit}"
+    // The shared transaction in LSP form: exact-occurrence TextEdits, one per
+    // semantic occurrence (call site in main.opy; declaration + definition in
+    // shared.opy).
+    let main_edits = main_entry["edits"].as_array().unwrap();
+    let shared_edits = shared_entry["edits"].as_array().unwrap();
+    assert_eq!(
+        main_edits.len(),
+        1,
+        "one call-site occurrence: {main_edits:?}"
+    );
+    assert_eq!(
+        shared_edits.len(),
+        2,
+        "declaration + definition: {shared_edits:?}"
     );
     assert!(
-        !main_edit["newText"]
-            .as_str()
-            .unwrap()
-            .contains("showStatus"),
-        "old name gone from the root"
+        main_edits
+            .iter()
+            .chain(shared_edits.iter())
+            .all(|edit| edit["newText"] == "refresh"),
+        "every edit replaces the identifier"
     );
+    // Applying the edits to the original sources reproduces the validated
+    // previews: no textual occurrence of the old spelling survives except in
+    // the untouched comment/string of the multi-file fixture.
+    let applied_main = apply_lsp_edit(&main, &rename["result"], &main_uri);
     assert!(
-        shared_edit["newText"]
-            .as_str()
-            .unwrap()
-            .contains("subroutine refresh"),
-        "include declaration renamed: {shared_edit}"
+        applied_main.contains("refresh()") && !applied_main.contains("showStatus"),
+        "root call site renamed: {applied_main}"
     );
+    let applied_shared = apply_lsp_edit(&shared, &rename["result"], &shared_uri);
     assert!(
-        !shared_edit["newText"]
-            .as_str()
-            .unwrap()
-            .contains("showStatus"),
-        "old name gone from the include"
+        applied_shared.contains("subroutine refresh") && applied_shared.contains("def refresh()"),
+        "include declaration/definition renamed: {applied_shared}"
     );
 
     client.request(3, "shutdown", serde_json::json!(null));
@@ -1367,10 +1381,11 @@ fn lsp_rename_tags_the_edit_with_the_documents_version() {
         "the edit is identified at version 5"
     );
     assert!(
-        entry["edits"][0]["newText"]
-            .as_str()
+        entry["edits"]
+            .as_array()
             .unwrap()
-            .contains("globalvar points"),
+            .iter()
+            .all(|edit| edit["newText"] == "points"),
         "version-5 rename edits the version-5 buffer"
     );
 
@@ -1403,7 +1418,7 @@ fn lsp_rename_tags_the_edit_with_the_documents_version() {
         "the earlier rename keeps its version-5 precondition"
     );
     // The version-5 edit cannot be treated as applicable to the version-6
-    // buffer: the versions differ and the new texts disagree.
+    // buffer: the versions differ and the new names disagree.
     let v5_text = rename_at_version_5["result"]["documentChanges"][0]["edits"][0]["newText"]
         .as_str()
         .unwrap();
@@ -1547,26 +1562,43 @@ fn lsp_rename_leaves_strings_and_comments_untouched_in_an_affected_source() {
         .iter()
         .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&shared_uri))
         .expect("shared.opy document edit");
-    let shared_text = shared_entry["edits"][0]["newText"].as_str().unwrap();
-    assert!(
-        shared_text.contains("subroutine refresh"),
-        "declaration renamed: {shared_text}"
+    // Only the semantic occurrences are edited: the declaration identifier
+    // (line 0) and the definition identifier (line 4); the comment and string
+    // lines carry no edit.
+    let shared_edits = shared_entry["edits"].as_array().unwrap();
+    let edit_lines: Vec<u64> = shared_edits
+        .iter()
+        .map(|edit| edit["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        edit_lines,
+        vec![0, 4],
+        "only declaration and definition identifiers: {edit_lines:?}"
     );
     assert!(
-        shared_text.contains("def refresh():"),
-        "definition renamed: {shared_text}"
+        shared_edits.iter().all(|edit| edit["newText"] == "refresh"),
+        "every edit replaces the identifier"
+    );
+    let applied = apply_lsp_edit(shared, &rename["result"], &shared_uri);
+    assert!(
+        applied.contains("subroutine refresh"),
+        "declaration renamed: {applied}"
     );
     assert!(
-        shared_text.contains("# showStatus is documented here"),
-        "comment text is untouched: {shared_text}"
+        applied.contains("def refresh():"),
+        "definition renamed: {applied}"
     );
     assert!(
-        shared_text.contains("print(\"showStatus running\")"),
-        "string literal is untouched: {shared_text}"
+        applied.contains("# showStatus is documented here"),
+        "comment text is untouched: {applied}"
     );
     assert!(
-        !shared_text.contains("showStatus()"),
-        "no semantic reference to showStatus remains: {shared_text}"
+        applied.contains("print(\"showStatus running\")"),
+        "string literal is untouched: {applied}"
+    );
+    assert!(
+        !applied.contains("showStatus()"),
+        "no semantic reference to showStatus remains: {applied}"
     );
 
     client.request(3, "shutdown", serde_json::json!(null));
@@ -2013,5 +2045,161 @@ fn lsp_didclose_retires_only_sole_owned_diagnostics() {
         "closing the final owner retires root-b's own diagnostics: {after_b:?}"
     );
 
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn lsp_rename_serves_ostw_rename_through_the_shared_adapter() {
+    // #131: the LSP rename path surfaces supported OSTW rename through the
+    // same adapter and the shared #129/#128 contracts — a multi-file
+    // WorkspaceEdit validated by the native OSTW project frontend, with the
+    // open document identified at its current version.
+    let root = std::env::temp_dir().join(format!("wright-lsp-ostw-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    let main_text = "import \"lib.del\";\nrule: \"main\" {}\nglobalvar Number score = 5;\n";
+    std::fs::write(root.join("main.ostw"), main_text).unwrap();
+    std::fs::write(
+        root.join("lib.del"),
+        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n}\n",
+    )
+    .unwrap();
+    let main_uri = format!("file://{}", root.join("main.ostw").display());
+    let lib_uri = format!("file://{}", root.join("lib.del").display());
+
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": format!("file://{}", root.display()),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri, "languageId": "ostw", "version": 3, "text": main_text },
+        }),
+    );
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    // Rename the `score` global from its declaration (line 3, col 18).
+    let rename = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 2, "character": 17 },
+            "newName": "total",
+        }),
+    );
+    let document_changes = rename["result"]["documentChanges"]
+        .as_array()
+        .expect("version-aware documentChanges");
+    assert!(
+        rename["result"]["changes"].is_null(),
+        "the unversioned changes shape is not used"
+    );
+    let main_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&main_uri))
+        .expect("main.ostw document edit");
+    assert_eq!(
+        main_entry["textDocument"]["version"], 3,
+        "the open OSTW document is identified at its current version"
+    );
+    let lib_entry = document_changes
+        .iter()
+        .find(|entry| entry["textDocument"]["uri"].as_str() == Some(&lib_uri))
+        .expect("lib.del document edit from the filesystem");
+    assert!(
+        lib_entry["textDocument"]["version"].is_null(),
+        "the filesystem-backed import carries the unversioned form"
+    );
+    assert!(
+        main_entry["edits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(lib_entry["edits"].as_array().unwrap().iter())
+            .all(|edit| edit["newText"] == "total"),
+        "exact occurrence edits for the OSTW identity: {document_changes:?}"
+    );
+    // Applying the edits reproduces the validated edited project.
+    let applied_main = apply_lsp_edit(main_text, &rename["result"], &main_uri);
+    assert!(
+        applied_main.contains("globalvar Number total = 5;"),
+        "declaration renamed in main.ostw: {applied_main}"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
+    client.notify("exit", serde_json::json!(null));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn lsp_rename_uses_utf16_positions_after_non_bmp_text() {
+    // #131: a rename whose occurrence sits after a non-BMP character is
+    // delivered with exact UTF-16 ranges (the 🎯 counts as two code units),
+    // and applying the edits reproduces the validated preview.
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    client.request(
+        1,
+        "initialize",
+        serde_json::json!({
+            "processId": null,
+            "rootUri": uri_for(""),
+            "capabilities": {},
+        }),
+    );
+    client.notify("initialized", serde_json::json!({}));
+
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(score))\n";
+    let uri = uri_for("utf16.opy");
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": { "uri": uri, "languageId": "opy", "version": 1, "text": source },
+        }),
+    );
+    let _ = client.read_notification("textDocument/publishDiagnostics");
+
+    let rename = client.request(
+        2,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 11 },
+            "newName": "total",
+        }),
+    );
+    let document_changes = rename["result"]["documentChanges"]
+        .as_array()
+        .expect("version-aware documentChanges");
+    let edits = document_changes[0]["edits"].as_array().unwrap();
+    let reference = edits
+        .iter()
+        .find(|edit| edit["range"]["start"]["line"] == 4)
+        .expect("the reference edit on the non-BMP line");
+    assert_eq!(
+        reference["range"]["start"]["character"], 25,
+        "the identifier starts at its UTF-16 offset after the 🎯: {reference:?}"
+    );
+    assert_eq!(
+        reference["range"]["end"]["character"], 30,
+        "the range ends at the UTF-16 offset plus the identifier length"
+    );
+    let applied = apply_lsp_edit(source, &rename["result"], &uri);
+    assert!(
+        applied.contains("format(total)"),
+        "applying the edits reproduces the validated preview: {applied}"
+    );
+
+    client.request(3, "shutdown", serde_json::json!(null));
     client.notify("exit", serde_json::json!(null));
 }

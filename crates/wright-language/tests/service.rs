@@ -39,6 +39,41 @@ fn doc(id: &str) -> Document {
     Document::new("file:///main.opy", corpus_text(id), workspace_root())
 }
 
+/// The full edited text of the first affected source (the validated preview).
+fn edited_text(result: &wright_language::service::RenameResult) -> String {
+    result.previews[0].new_text.clone()
+}
+
+/// Apply exact-occurrence edits to the source (what an LSP client applying
+/// the `WorkspaceEdit` does) and return the resulting text.
+fn apply_edits(source: &str, edits: &[wright_language::service::RenameEdit]) -> String {
+    let mut lines: Vec<Vec<char>> = source
+        .split('\n')
+        .map(|line| line.chars().collect())
+        .collect();
+    for edit in edits.iter().rev() {
+        let line = edit.range.start.line as usize;
+        let start = wright_language::document::utf16_offset_to_char(
+            source.split('\n').nth(line).unwrap_or_default(),
+            edit.range.start.character as usize,
+        );
+        let end = wright_language::document::utf16_offset_to_char(
+            source.split('\n').nth(line).unwrap_or_default(),
+            edit.range.end.character as usize,
+        );
+        let text: String = lines[line].drain(start..end).collect();
+        let _ = text;
+        for (index, ch) in edit.new_text.chars().enumerate() {
+            lines[line].insert(start + index, ch);
+        }
+    }
+    lines
+        .into_iter()
+        .map(|line| line.into_iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn diagnostics_include_parse_errors_and_findings() {
     // A malformed rule produces a structured parse diagnostic.
@@ -216,10 +251,15 @@ fn semantic_tokens_emit_utf16_offsets_after_non_bmp_text() {
 }
 
 #[test]
-fn rename_full_document_range_ends_at_utf16_length_on_non_bmp_lines() {
-    // The final line ends inside a string containing a non-BMP character, so
-    // the full-document range's end character must count it as two units.
-    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n    print(\"🎯\")\n";
+fn rename_edit_ranges_use_utf16_offsets_after_non_bmp_text() {
+    // The reference occurrence sits after a non-BMP character on the same
+    // line, so its exact range's start/end characters must be UTF-16
+    // code-unit offsets (the 🎯 counts as two units), never byte or char
+    // offsets.
+    // The same line shape the semantic-token UTF-16 test pins: the 🎯
+    // before the identifier shifts the offset, and the exact edit range must
+    // agree with the compiler span convention (UTF-16 code units).
+    let source = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(score))\n";
     let document = Document::new("file:///rnb.opy", source, workspace_root());
     let (service, uri) = service_with(document);
     let result = service.rename(
@@ -231,18 +271,23 @@ fn rename_full_document_range_ends_at_utf16_length_on_non_bmp_lines() {
         "total",
     );
     assert!(result.ok, "rename validates: {:?}", result.diagnostics);
-    let edit = &result.edits[0];
-    let lines: Vec<&str> = source.split('\n').collect();
+    let reference = result
+        .edits
+        .iter()
+        .find(|edit| edit.range.start.line == 4)
+        .expect("the reference occurrence edit");
     assert_eq!(
-        edit.range.end.line as usize,
-        lines.len() - 1,
-        "range ends on the final line"
+        reference.range.start.character, 25,
+        "the identifier starts at its UTF-16 offset after the 🎯: {:?}",
+        reference.range
     );
-    let last_line = lines.last().unwrap_or(&"");
     assert_eq!(
-        edit.range.end.character as usize,
-        wright_language::document::utf16_len(last_line),
-        "end character is the UTF-16 length of the final line (the 🎯 counts twice)"
+        reference.range.end.character, 30,
+        "the range ends at the UTF-16 offset plus the identifier length"
+    );
+    assert!(
+        edited_text(&result).contains("format(total)"),
+        "the preview shows the renamed reference after the non-BMP text"
     );
 }
 
@@ -404,39 +449,41 @@ fn rename_uses_the_safe_edit_contract() {
         "total",
     );
     assert!(result.ok, "rename validates");
+    // The shared transaction in editor conventions: one exact-occurrence
+    // edit per semantic occurrence (declaration + reference), never a
+    // whole-document replacement.
     assert_eq!(
         result.edits.len(),
-        1,
-        "single-file rename produces one edit"
+        2,
+        "declaration + reference occurrences: {:?}",
+        result.edits
     );
-    let edit = &result.edits[0];
-    assert!(edit.new_text.contains("globalvar total = 0"), "{:?}", edit);
-    assert!(
-        !edit.new_text.contains("globalvar score"),
-        "old name gone: {:?}",
-        edit
-    );
-    // The edit range must be a real, applicable full-document range, not a
-    // degenerate (0,0)..(0,0) placeholder.
-    assert_eq!(edit.range.start.line, 0);
-    assert_eq!(edit.range.start.character, 0);
-    assert!(
-        edit.range.end.line > 0,
-        "range covers the document: {:?}",
-        edit.range
-    );
-    // The last line may be empty (trailing newline), so character may be 0;
-    // the line must still be the final line of the buffer.
-    let expected_last_line = corpus_text(CORPUS).split('\n').count() as u32 - 1;
+    for edit in &result.edits {
+        assert_eq!(edit.new_text, "total", "each edit replaces the identifier");
+        assert_eq!(
+            edit.source_identity,
+            wright_driver::input_identity(&corpus_text(CORPUS)),
+            "edit identity matches the source it targets"
+        );
+    }
+    let declaration = &result.edits[0];
+    assert_eq!(declaration.range.start.line, 0);
+    assert_eq!(declaration.range.start.character, 10);
     assert_eq!(
-        edit.range.end.line, expected_last_line,
-        "range ends on the last line"
+        declaration.range.end.character, 15,
+        "the range covers exactly the identifier (UTF-16 positions): {:?}",
+        declaration.range
     );
-    // The edit carries the identity precondition of the source it targets.
-    assert_eq!(
-        edit.source_identity,
-        wright_driver::input_identity(&corpus_text(CORPUS)),
-        "edit identity matches the source it applies to"
+    let reference = &result.edits[1];
+    assert_eq!(reference.range.start.line, 5);
+    assert!(
+        edited_text(&result).contains("globalvar total = 0"),
+        "the validated preview carries the renamed text: {:?}",
+        result.previews
+    );
+    assert!(
+        !edited_text(&result).contains("globalvar score"),
+        "old name gone from the preview"
     );
 }
 
@@ -454,40 +501,19 @@ fn rename_edit_applies_to_produce_the_validated_result() {
         "total",
     );
     assert!(result.ok);
-    assert_eq!(result.edits.len(), 1);
-    let range = result.edits[0].range;
-    let new_text = result.edits[0].new_text.clone();
+    assert_eq!(result.edits.len(), 2, "declaration + reference occurrences");
 
-    // Applying a full-document range with the new text must reproduce the
-    // validated result exactly (this is what an LSP client does).
-    let applied = apply_full_document(&source, &range, &new_text);
+    // Applying the exact-occurrence edits (what an LSP client applying the
+    // `WorkspaceEdit` does) must reproduce the validated preview exactly.
+    let applied = apply_edits(&source, &result.edits);
     assert_eq!(
-        applied, new_text,
-        "applying the edit yields the validated result"
+        applied, result.previews[0].new_text,
+        "applying the exact edits yields the validated result"
     );
-}
-
-fn apply_full_document(
-    source: &str,
-    range: &wright_language::document::Range,
-    new_text: &str,
-) -> String {
-    // A full-document range replaces the whole buffer.
-    assert_eq!(range.start.line, 0);
-    assert_eq!(range.start.character, 0);
-    let lines: Vec<&str> = source.split('\n').collect();
-    assert_eq!(
-        range.end.line as usize,
-        lines.len() - 1,
-        "range ends on the last line"
+    assert!(
+        applied.contains("globalvar total = 0"),
+        "the applied result is the renamed source: {applied}"
     );
-    let last_line = lines.last().unwrap_or(&"");
-    assert_eq!(
-        range.end.character as usize,
-        last_line.chars().count(),
-        "range ends at last line length"
-    );
-    new_text.to_string()
 }
 
 #[test]
@@ -561,7 +587,7 @@ fn rename_write_target_with_same_statement_string() {
         "same-statement string rename validates: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("globalvar total"),
         "declaration identifier renamed: {new_text}"
@@ -600,7 +626,7 @@ fn rename_modify_target_with_unrelated_textual_score() {
         "modify-form rename validates: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("total += \"score\""),
         "the modify target is renamed, the operand string survives: {new_text}"
@@ -632,7 +658,7 @@ fn rename_declaration_initializer_leaves_the_string_unchanged() {
         "declaration-initializer rename validates: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("globalvar total = \"score\""),
         "the declaration identifier is renamed, the initializer string survives: {new_text}"
@@ -668,7 +694,7 @@ fn rename_rhs_reference_leaves_same_statement_sibling_untouched() {
         "sibling rename validates: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("total = score2"),
         "the write target is renamed, the sibling read survives: {new_text}"
@@ -704,7 +730,7 @@ fn rename_multiple_genuine_occurrences_in_one_statement_edit_exactly_once() {
         "multi-occurrence rename validates: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("debug(total + total)"),
         "every genuine occurrence changes exactly once: {new_text}"
@@ -719,6 +745,13 @@ fn rename_multiple_genuine_occurrences_in_one_statement_edit_exactly_once() {
         0,
         "no old spelling remains: {new_text}"
     );
+    // One exact-occurrence edit per genuine occurrence, no duplicates.
+    assert_eq!(
+        result.edits.len(),
+        3,
+        "three occurrence edits, no overlap/duplicates: {:?}",
+        result.edits
+    );
 
     // Determinism: a second rename on the same state produces the same edit.
     let again = service.rename(
@@ -731,7 +764,8 @@ fn rename_multiple_genuine_occurrences_in_one_statement_edit_exactly_once() {
     );
     assert!(again.ok, "{:?}", again.diagnostics);
     assert_eq!(
-        &again.edits[0].new_text, new_text,
+        edited_text(&again),
+        new_text,
         "repeated renames agree exactly"
     );
 }
@@ -777,7 +811,7 @@ fn rename_does_not_touch_longer_identifiers_containing_the_spelling() {
         "total",
     );
     assert!(result.ok, "rename validates: {:?}", result.diagnostics);
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("globalvar scoreboard = 1"),
         "the longer identifier declaration is untouched: {new_text}"
@@ -809,7 +843,7 @@ fn rename_leaves_string_literals_with_the_same_spelling_untouched() {
         "string-literal rename validates: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("globalvar total = 0"),
         "declaration renamed: {new_text}"
@@ -844,7 +878,7 @@ fn rename_leaves_comments_with_the_same_spelling_untouched() {
         "comment rename validates: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("globalvar total = 0"),
         "declaration renamed: {new_text}"
@@ -1013,7 +1047,7 @@ fn rename_same_spelled_distinct_identity_only_edits_the_selected_symbol() {
         "span-targeted rename distinguishes the identities: {:?}",
         result.diagnostics
     );
-    let new_text = &result.edits[0].new_text;
+    let new_text = edited_text(&result);
     assert!(
         new_text.contains("globalvar total = 0"),
         "variable declaration renamed: {new_text}"
@@ -1136,5 +1170,195 @@ fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
             .iter()
             .any(|t| t.token_type == "variable" || t.token_type == "class"),
         "symbol classification through the shared index"
+    );
+}
+
+// -- M14 #129: OSTW semantic rename through the shared contract -----------------
+
+fn ostw_project_documents() -> (LanguageService, String, String, String) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "wright-lang-ostw-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    std::fs::write(
+        root.join("main.ostw"),
+        "import \"lib.del\";\nrule: \"main\" {}\nglobalvar Number score = 5;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib.del"),
+        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n}\n",
+    )
+    .unwrap();
+    let main_uri = format!("file://{}", root.join("main.ostw").display());
+    let lib_uri = format!("file://{}", root.join("lib.del").display());
+    let mut service = LanguageService::new(root);
+    service.store.open(Document::new(
+        &main_uri,
+        std::fs::read_to_string(service.root.join("main.ostw")).unwrap(),
+        service.root.clone(),
+    ));
+    service.store.open(Document::new(
+        &lib_uri,
+        std::fs::read_to_string(service.root.join("lib.del")).unwrap(),
+        service.root.clone(),
+    ));
+    let main_text = service.store.document(&main_uri).unwrap().text.clone();
+    (service, main_uri, lib_uri, main_text)
+}
+
+#[test]
+fn ostw_rename_edits_occurrences_across_project_files() {
+    // #129: OSTW rename resolves through the shared semantic index and
+    // validates through the native OSTW project frontend; the declaration in
+    // main.ostw and the reference in lib.del belong to the same identity.
+    let (service, main_uri, _lib_uri, main_text) = ostw_project_documents();
+    // Position on the `score` declaration (line 3, col 18 of main.ostw).
+    let result = service.rename(
+        &main_uri,
+        Position {
+            line: 2,
+            character: 17,
+        },
+        "total",
+    );
+    assert!(result.ok, "OSTW rename resolves: {:?}", result.diagnostics);
+    assert_eq!(
+        result.edits.len(),
+        2,
+        "one exact occurrence per file: {:?}",
+        result.edits
+    );
+    let main_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("main.ostw"))
+        .expect("main.ostw edit");
+    assert_eq!(main_edit.new_text, "total");
+    let lib_edit = result
+        .edits
+        .iter()
+        .find(|edit| edit.source.ends_with("lib.del"))
+        .expect("lib.del edit");
+    assert_eq!(lib_edit.new_text, "total");
+    // The edits carry the identity of the text they were computed from.
+    assert_eq!(
+        main_edit.source_identity,
+        wright_driver::input_identity(&main_text),
+        "the edit precondition is the original source identity"
+    );
+    // The validated previews carry the full edited texts.
+    let preview_text = |suffix: &str| {
+        result
+            .previews
+            .iter()
+            .find(|preview| preview.source.ends_with(suffix))
+            .map(|preview| preview.new_text.clone())
+            .unwrap_or_default()
+    };
+    assert!(
+        preview_text("main.ostw").contains("globalvar Number total = 5;"),
+        "declaration renamed in the preview"
+    );
+    assert!(
+        preview_text("lib.del").contains("total = 1;"),
+        "cross-file reference renamed in the preview"
+    );
+}
+
+#[test]
+fn ostw_rename_refuses_unsafe_targets_explicitly() {
+    let (service, main_uri, _, _) = ostw_project_documents();
+
+    // A collision with an already-declared name refuses with no edits.
+    let collision = service.rename(
+        &main_uri,
+        Position {
+            line: 2,
+            character: 17,
+        },
+        "count",
+    );
+    assert!(!collision.ok, "a colliding OSTW rename refuses");
+    assert!(collision.edits.is_empty(), "no partial edits");
+    assert!(
+        collision
+            .diagnostics
+            .iter()
+            .any(|d| d.starts_with("rename-collision")),
+        "collision diagnostics: {:?}",
+        collision.diagnostics
+    );
+
+    // A position with no symbol (the import statement) refuses explicitly.
+    let unresolved = service.rename(
+        &main_uri,
+        Position {
+            line: 0,
+            character: 0,
+        },
+        "x",
+    );
+    assert!(!unresolved.ok);
+    assert!(
+        unresolved
+            .diagnostics
+            .iter()
+            .any(|d| d.starts_with("rename-unresolved")),
+        "unresolved diagnostics: {:?}",
+        unresolved.diagnostics
+    );
+}
+
+#[test]
+fn ostw_rename_includes_open_overlay_references() {
+    // #129: open unsaved overlays take precedence; a reference that only
+    // exists in the overlay participates in the rename and its edited text is
+    // validated through the project frontend.
+    let (mut service, main_uri, lib_uri, _) = ostw_project_documents();
+    let overlaid =
+        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n    score = 2;\n}\n";
+    service
+        .store
+        .open(Document::new(&lib_uri, overlaid, service.root.clone()));
+    let result = service.rename(
+        &main_uri,
+        Position {
+            line: 2,
+            character: 17,
+        },
+        "total",
+    );
+    assert!(
+        result.ok,
+        "overlay rename validates: {:?}",
+        result.diagnostics
+    );
+    let lib_edits: Vec<_> = result
+        .edits
+        .iter()
+        .filter(|edit| edit.source.ends_with("lib.del"))
+        .collect();
+    assert_eq!(
+        lib_edits.len(),
+        2,
+        "both overlay references are edited: {:?}",
+        result.edits
+    );
+    let lib_preview = result
+        .previews
+        .iter()
+        .find(|preview| preview.source.ends_with("lib.del"))
+        .expect("lib.del preview");
+    assert!(
+        lib_preview.new_text.contains("total = 1;") && lib_preview.new_text.contains("total = 2;"),
+        "both overlay references renamed in the preview: {}",
+        lib_preview.new_text
     );
 }

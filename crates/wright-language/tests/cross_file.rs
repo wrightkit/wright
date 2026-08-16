@@ -11,10 +11,26 @@ fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/multifile")
 }
 
+/// The full edited text of an affected source (the validated preview).
+fn preview_text(result: &wright_language::service::RenameResult, suffix: &str) -> String {
+    result
+        .previews
+        .iter()
+        .find(|preview| preview.source.ends_with(suffix))
+        .map(|preview| preview.new_text.clone())
+        .unwrap_or_default()
+}
+
 fn main_document() -> Document {
     let root = fixtures();
     let text = std::fs::read_to_string(root.join("main.opy")).unwrap();
-    Document::new("file:///project/main.opy", text, root)
+    // The document identity is the real file URI (the M14 shared contract
+    // validates against path-based project identities, #128/#129).
+    Document::new(
+        format!("file://{}", root.join("main.opy").display()),
+        text,
+        root,
+    )
 }
 
 fn broken_include_fixtures() -> PathBuf {
@@ -162,51 +178,52 @@ fn rename_from_root_updates_declaration_and_references_across_files() {
         "cross-file rename validates: {:?}",
         result.diagnostics
     );
-    assert_eq!(result.edits.len(), 2, "both sources are covered");
-    let main_edit = result
-        .edits
-        .iter()
-        .find(|edit| edit.source.ends_with("main.opy"))
-        .expect("root edit");
-    let shared_edit = result
-        .edits
-        .iter()
-        .find(|edit| edit.source.ends_with("shared.opy"))
-        .expect("include edit");
+    assert_eq!(
+        result.previews.len(),
+        2,
+        "both sources are covered: {:?}",
+        result.previews
+    );
+    let main_text = preview_text(&result, "main.opy");
+    let shared_text = preview_text(&result, "shared.opy");
     assert!(
-        main_edit.new_text.contains("refresh()"),
+        main_text.contains("refresh()"),
         "call site renamed in the root: {}",
-        main_edit.new_text
+        main_text
     );
     assert!(
-        !main_edit.new_text.contains("showStatus"),
+        !main_text.contains("showStatus"),
         "old name gone from the root: {}",
-        main_edit.new_text
+        main_text
     );
     assert!(
-        shared_edit.new_text.contains("subroutine refresh"),
+        shared_text.contains("subroutine refresh"),
         "declaration renamed in the include: {}",
-        shared_edit.new_text
+        shared_text
     );
     assert!(
-        shared_edit.new_text.contains("def refresh()"),
+        shared_text.contains("def refresh()"),
         "definition renamed in the include: {}",
-        shared_edit.new_text
+        shared_text
     );
     assert!(
-        !shared_edit.new_text.contains("showStatus"),
+        !shared_text.contains("showStatus"),
         "old name gone from the include: {}",
-        shared_edit.new_text
+        shared_text
     );
     assert!(
-        shared_edit.new_text.contains("print(\"status\")"),
+        shared_text.contains("print(\"status\")"),
         "the definition body survives untouched: {}",
-        shared_edit.new_text
+        shared_text
+    );
+    // Every edit is an exact occurrence replacement.
+    assert!(
+        result.edits.iter().all(|edit| edit.new_text == "refresh"),
+        "exact occurrence edits only: {:?}",
+        result.edits
     );
 
     // Applying all edits yields sources that compile together.
-    let main_text = main_edit.new_text.clone();
-    let shared_text = shared_edit.new_text.clone();
     let overlay = [("shared.opy".to_string(), shared_text.clone())]
         .into_iter()
         .collect();
@@ -226,7 +243,7 @@ fn cross_file_rename_edits_only_semantic_occurrences_in_the_affected_source() {
     // edited — choosing the correct affected source is not sufficient.
     let root = fixtures();
     let mut service = LanguageService::new(root.clone());
-    let main_uri = "file:///project/main.opy".to_string();
+    let main_uri = format!("file://{}", root.join("main.opy").display());
     let shared_uri = format!("file://{}", root.join("shared.opy").display());
     service.store.open(Document::new(
         main_uri.clone(),
@@ -252,44 +269,44 @@ fn cross_file_rename_edits_only_semantic_occurrences_in_the_affected_source() {
         "cross-file rename validates: {:?}",
         result.diagnostics
     );
-    let main_edit = result
-        .edits
-        .iter()
-        .find(|edit| edit.source.ends_with("main.opy"))
-        .expect("root edit");
+    let main_text = preview_text(&result, "main.opy");
     assert!(
-        main_edit.new_text.contains("refresh()"),
+        main_text.contains("refresh()"),
         "call site renamed: {}",
-        main_edit.new_text
+        main_text
     );
-    let shared_edit = result
+    let shared_text = preview_text(&result, "shared.opy");
+    assert!(
+        shared_text.contains("subroutine refresh"),
+        "declaration renamed: {}",
+        shared_text
+    );
+    assert!(
+        shared_text.contains("def refresh():"),
+        "definition renamed: {}",
+        shared_text
+    );
+    assert!(
+        shared_text.contains("# showStatus is documented here"),
+        "comment text in the affected source is untouched: {}",
+        shared_text
+    );
+    assert!(
+        shared_text.contains("print(\"showStatus running\")"),
+        "string literal in the affected source is untouched: {}",
+        shared_text
+    );
+    // No edit touches the comment or string lines.
+    let shared_edit_lines: Vec<u32> = result
         .edits
         .iter()
-        .find(|edit| edit.source.ends_with("shared.opy"))
-        .expect("include edit");
-    assert!(
-        shared_edit.new_text.contains("subroutine refresh"),
-        "declaration renamed: {}",
-        shared_edit.new_text
-    );
-    assert!(
-        shared_edit.new_text.contains("def refresh():"),
-        "definition renamed: {}",
-        shared_edit.new_text
-    );
-    assert!(
-        shared_edit
-            .new_text
-            .contains("# showStatus is documented here"),
-        "comment text in the affected source is untouched: {}",
-        shared_edit.new_text
-    );
-    assert!(
-        shared_edit
-            .new_text
-            .contains("print(\"showStatus running\")"),
-        "string literal in the affected source is untouched: {}",
-        shared_edit.new_text
+        .filter(|edit| edit.source.ends_with("shared.opy"))
+        .map(|edit| edit.range.start.line)
+        .collect();
+    assert_eq!(
+        shared_edit_lines,
+        vec![0, 4],
+        "only the declaration and definition identifiers: {shared_edit_lines:?}"
     );
 }
 
@@ -331,7 +348,7 @@ fn rename_from_include_declaration_updates_the_root() {
         .find(|edit| edit.source.ends_with("main.opy"))
         .expect("root edit");
     assert!(
-        main_edit.new_text.contains("refresh()"),
+        main_edit.new_text.contains("refresh"),
         "root call site renamed: {}",
         main_edit.new_text
     );
@@ -341,7 +358,7 @@ fn rename_from_include_declaration_updates_the_root() {
         .find(|edit| edit.source.ends_with("shared.opy"))
         .expect("include edit");
     assert!(
-        shared_edit.new_text.contains("subroutine refresh"),
+        shared_edit.new_text.contains("refresh"),
         "include declaration renamed: {}",
         shared_edit.new_text
     );
@@ -369,20 +386,16 @@ fn rename_resolves_the_symbol_in_the_requesting_file_when_positions_collide() {
         "total",
     );
     assert!(result.ok, "rename validates: {:?}", result.diagnostics);
-    let main_edit = result
-        .edits
-        .iter()
-        .find(|edit| edit.source.ends_with("main.opy"))
-        .expect("main edit");
+    let main_text = preview_text(&result, "main.opy");
     assert!(
-        main_edit.new_text.contains("globalvar total"),
+        main_text.contains("globalvar total"),
         "score renamed in main: {}",
-        main_edit.new_text
+        main_text
     );
     assert!(
-        main_edit.new_text.contains("total += 1"),
+        main_text.contains("total += 1"),
         "score reference renamed in main: {}",
-        main_edit.new_text
+        main_text
     );
     // alpha in a.opy must not be touched by a rename of score.
     let alpha_edit = result
@@ -390,7 +403,7 @@ fn rename_resolves_the_symbol_in_the_requesting_file_when_positions_collide() {
         .iter()
         .find(|edit| edit.source.ends_with("a.opy"));
     assert!(
-        alpha_edit.is_none_or(|edit| edit.new_text.contains("alpha")),
+        alpha_edit.is_none(),
         "a.opy's unrelated alpha is left alone: {:?}",
         result.edits
     );

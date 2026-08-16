@@ -892,7 +892,7 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
 /// Span paths resolve through the frontend file registry so a failure inside
 /// an included file names that file; file 0 (the main file) carries the
 /// resolved display path by construction (#83).
-fn opy_diag(
+pub(crate) fn opy_diag(
     error: wright_opy::FrontendError,
     files: &[wright_opy::preprocess::FileRecord],
     resolved: &ResolvedInput,
@@ -926,7 +926,7 @@ fn opy_diag(
 ///
 /// Span paths resolve through the OSTW project registry, so a failure inside
 /// an imported file names that file with its project-relative path.
-fn ostw_diag(
+pub(crate) fn ostw_diag(
     error: wright_ostw::FrontendError,
     outcome: &wright_ostw::OstwOutcome,
     resolved: &ResolvedInput,
@@ -1045,7 +1045,7 @@ fn ostw_project_summary(outcome: &wright_ostw::OstwOutcome) -> OstwProjectSummar
 }
 
 /// Map an Opy HIR ingestion error to a driver diagnostic.
-fn hir_diag(error: wright_core::hir::HirError, resolved: &ResolvedInput) -> Diagnostic {
+pub(crate) fn hir_diag(error: wright_core::hir::HirError, resolved: &ResolvedInput) -> Diagnostic {
     let stage = match &error {
         wright_core::hir::HirError::Invalid { .. } => Stage::Validation,
         _ => Stage::Frontend,
@@ -1073,7 +1073,7 @@ fn hir_diag(error: wright_core::hir::HirError, resolved: &ResolvedInput) -> Diag
 }
 
 /// Map an IR error to a driver diagnostic.
-fn ir_diag(
+pub(crate) fn ir_diag(
     code: &'static str,
     stage: Stage,
     error: wright_ir::error::IrError,
