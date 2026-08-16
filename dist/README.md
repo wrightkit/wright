@@ -55,10 +55,14 @@ after release archives are published:
 
 - Repository: `wrightkit/homebrew-tap` (create it once under the WrightKit
   organization; taps are plain git repositories with the formula at the root).
-- Per release: copy the attached `wright-<version>.homebrew.rb` into the tap
-  as `wright.rb` and commit it. The formula downloads the exact published
-  macOS archives for both Apple Silicon and Intel and installs `wright` and
-  `wright-lsp`; Homebrew verifies the per-arch `sha256` before extraction.
+- Publication is automatic: the `publish-tap` job of the release workflow
+  pushes the generated `wright.rb` (the same formula attached to the Release
+  as `wright-<version>.homebrew.rb`) into the tap on every release. It needs a
+  fine-grained PAT with `Contents: Read and write` on `wrightkit/homebrew-tap`,
+  stored as the `HOMEBREW_TAP_TOKEN` Actions secret in this repository. The
+  formula downloads the exact published macOS archives for both Apple Silicon
+  and Intel and installs `wright` and `wright-lsp`; Homebrew verifies the
+  per-arch `sha256` before extraction.
 - User experience: `brew install wrightkit/tap/wright`.
 - The tap repository must never build Wright from source or bottle it.
 

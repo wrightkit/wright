@@ -251,6 +251,13 @@ jobs:
           (cd "$GITHUB_WORKSPACE/manifests/dist/winget" && tar -a -cf "$GITHUB_WORKSPACE/attach/wright-$VERSION.winget.zip" manifests)
           ls -l "$GITHUB_WORKSPACE/attach"
 
+      - name: Upload Homebrew formula for tap publication
+        uses: actions/upload-artifact@v7
+        with:
+          name: homebrew-formula
+          path: ${{ github.workspace }}/manifests/dist/homebrew/wright.rb
+          if-no-files-found: error
+
       - name: Attach manifests to the Release
         uses: softprops/action-gh-release@v2
         with:
@@ -259,6 +266,51 @@ jobs:
             attach/wright-*.homebrew.rb
             attach/wright-*.scoop.json
             attach/wright-*.winget.zip
+
+  publish-tap:
+    name: Publish formula to homebrew-tap
+    needs: package-manifests
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+    steps:
+      - name: Download generated Homebrew formula
+        uses: actions/download-artifact@v7
+        with:
+          name: homebrew-formula
+          path: formula
+
+      - name: Check out wrightkit/homebrew-tap
+        uses: actions/checkout@v7
+        with:
+          repository: wrightkit/homebrew-tap
+          ref: main
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update wright.rb and push to the tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
+            echo "error: HOMEBREW_TAP_TOKEN secret is not set." >&2
+            echo "Add a fine-grained PAT with Contents: Read and write on" >&2
+            echo "wrightkit/homebrew-tap as an Actions secret in this repository." >&2
+            exit 1
+          fi
+          cp formula/wright.rb tap/wright.rb
+          cd tap
+          if git diff --quiet -- wright.rb; then
+            echo "wright.rb is already current for ${RELEASE_TAG}; nothing to push"
+            exit 0
+          fi
+          git -c user.name="wrightkit-bot" \
+              -c user.email="wrightkit-bot@users.noreply.github.com" \
+              commit -m "Update wright formula to ${VERSION}" -- wright.rb
+          git push origin HEAD
+          echo "pushed wright.rb for ${RELEASE_TAG} to wrightkit/homebrew-tap"
 
   package-npm:
     name: Package and publish npm distribution
