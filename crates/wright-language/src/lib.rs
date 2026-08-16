@@ -1,4 +1,4 @@
-//! Wright's editor-neutral language-service core (milestone M10, issue #63).
+//! Wright's editor-neutral language-service core (issue #63).
 //!
 //! This crate owns language intelligence **without any LSP types**: a
 //! versioned [`Document`]/[`DocumentStore`] workspace model, editor-neutral

@@ -1,4 +1,4 @@
-//! Wright's reusable compiler/session driver (milestone M6).
+//! Wright's reusable compiler/session driver.
 //!
 //! One orchestration path for every frontend and workflow: input discovery →
 //! frontend selection (`opy` bridge, native Workshop, or protocol JSON) →
@@ -34,7 +34,7 @@ pub use wright_transform::Profile;
 /// The driver crate name reported in result metadata.
 pub const DRIVER_NAME: &str = "wright-driver";
 
-/// The stable embedding-API contract name (M9 #56).
+/// The stable embedding-API contract name (#56).
 pub const EMBEDDING_CONTRACT: &str = "wright-embedding/v1";
 
 /// A deterministic SHA-256 identity for an input or artifact.

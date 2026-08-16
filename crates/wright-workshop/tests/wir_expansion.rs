@@ -1,5 +1,5 @@
-//! WIR expansion and canonical-identity tests (#31): the M5 P0 surface is
-//! representable in Workshop IR, and catalog-backed validation rejects
+//! WIR expansion and canonical-identity tests (#31): the declared P0 surface
+//! is representable in Workshop IR, and catalog-backed validation rejects
 //! unknown or locale-tainted builtin references deterministically.
 
 use wright_ir::source::{Position, SourceFile, Span};

@@ -103,7 +103,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let kind = match config.kind {
         SourceKind::Auto => kind_from_stdin(&text)?,
-        // The native frontend (M7) reads `.opy` from stdin; the include root
+        // The native `.opy` frontend reads source from stdin; the include root
         // defaults to the working directory.
         other => other,
     };

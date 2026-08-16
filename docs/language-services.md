@@ -92,7 +92,7 @@ suppression is the authoritative contract.
   Wright-owned (`RenameEdit`/`TargetSpan` in `wright-language`) and carry the
   SHA-256 source identity computed through `wright_driver::input_identity`.
   Rename delegates target resolution, edit generation, and validation to the
-  shared M14 driver refactoring contract
+  shared driver refactoring contract
   (`wright_driver::edit::semantic_rename`, #129): every affected root
   resolves through its original native frontend, the unioned exact-range
   transaction is validated through the shared #128 transaction boundary
@@ -118,7 +118,7 @@ documented, never emulated through upstream calls**:
 
 - **Semantic rename** — offered for OSTW symbols on the declared semantic
   surface (globals, player variables, subroutines/functions) through the
-  shared M14 refactoring contract (#129): resolution runs over the shared
+  shared refactoring contract (#129): resolution runs over the shared
   semantic index of the `ds.toml` project graph, edited transactions validate
   through the native OSTW frontend, and targets without an exact identifier
   span (e.g. typed constants and other provenance-limited forms) refuse

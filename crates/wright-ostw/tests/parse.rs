@@ -603,7 +603,7 @@ fn determinism_two_runs_produce_identical_outcomes() {
 
 #[test]
 fn overlays_validate_proposed_edits_without_rewriting_files() {
-    // M14 #128: a proposed multi-file edit validates against overlay text
+    // #128: a proposed multi-file edit validates against overlay text
     // (main file and imports) while the on-disk project stays untouched.
     use std::collections::BTreeMap;
     let root = temp_project(vec![

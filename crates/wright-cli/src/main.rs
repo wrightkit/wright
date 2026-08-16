@@ -1,4 +1,4 @@
-//! `wright` — the primary Wright command-line interface (M6, issue #38).
+//! `wright` — the primary Wright command-line interface (issue #38).
 //!
 //! A thin presentation/argv layer over [`wright_driver::CompilerSession`]:
 //! every subcommand builds a [`SessionConfig`] and renders the driver's typed
@@ -76,7 +76,7 @@ OUTPUT CONTRACT:
     OPY or OSTW; semantic reconstruction, not original-source recovery) and
     reports the reconstructed text plus its SHA-256 in the `result` envelope
     in JSON mode. `lint` reports findings through the same envelope with rule
-    metadata and the effective configuration (M12, #97/#98). `update` is
+    metadata and the effective configuration (#97/#98). `update` is
     text-only and outside the `wright-result/v1` envelope: it updates
     standalone `wright`/`wright-lsp` installs from the canonical GitHub
     Release archives and refuses to overwrite package-manager-managed

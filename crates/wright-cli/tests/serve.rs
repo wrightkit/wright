@@ -141,7 +141,7 @@ fn capability_negotiation_is_preserved() {
 
 #[test]
 fn stdio_transport_serves_mutation_operations() {
-    // M14 #130: the stdio adapter exposes the shared mutation operations as
+    // #130: the stdio adapter exposes the shared mutation operations as
     // thin mappings — validated edit preview and semantic rename — with the
     // same structured all-or-nothing results as in-process consumers.
     let input = corpus_opy("synthetic/declarations-rules");
@@ -209,7 +209,7 @@ fn stdio_transport_serves_mutation_operations() {
 
 #[test]
 fn transports_are_equivalent_for_mutation_operations() {
-    // M14 #130: stdio and JSON-RPC map the same mutation request to the same
+    // #130: stdio and JSON-RPC map the same mutation request to the same
     // in-process behavior.
     let input = corpus_opy("synthetic/declarations-rules");
     let rename = serde_json::json!({

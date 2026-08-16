@@ -1,7 +1,7 @@
 # Centralized Upstream / Reference Inventory
 
 Status: accepted baseline (centralized upstream-reference documentation, #106,
-extended with the OSTW reference by the M13 investigation, #113)
+extended with the OSTW reference by the reference investigation (#113))
 Scope: project-level provenance for every upstream implementation Wright studies
 or derives compatibility knowledge from; the durable record that lets Wright
 read and reference upstream source without per-symbol or per-file provenance
@@ -82,8 +82,8 @@ extracted from OverPy's GPL-3.0 data files.
   changed only on demonstrated behavioral need, never on release recency
   (ADR-0007). A version bump alone is not an oracle change.
 * **Measured stability.** Every accept/reject outcome and diagnostic in the
-  M11 evidence set is byte-identical across `9.7.10 → 9.7.13`; only
-  hero/settings schema data differs. Historical claims stay interpretable
+  OverPy compatibility evidence set is byte-identical across `9.7.10 → 9.7.13`;
+  only hero/settings schema data differs. Historical claims stay interpretable
   because every result records the exact pinned identity.
 * **Settings data newer than the pin.** Hero settings newer than the pin
   (e.g. dmon/domina/mizuki/vendetta) are unavailable to fixtures until a

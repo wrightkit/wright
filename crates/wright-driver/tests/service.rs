@@ -1,4 +1,4 @@
-//! Session-aware tool service tests (#57/#58): the M9 service exposes the
+//! Session-aware tool service tests (#57/#58): the service exposes the
 //! same operations in-process that the stdio/JSON-RPC adapters serve, with
 //! deterministic structured results, capability negotiation, cost
 //! inspection, and target metadata.
@@ -288,7 +288,7 @@ fn cross_language_shared_service_behavior_is_frontend_neutral() {
     assert_shared_service_surface(&ostw_service());
 }
 
-// -- M14 #130: validated mutation through the shared tool API ------------------
+// -- #130: validated mutation through the shared tool API ----------------------
 
 fn corpus_source(id: &str) -> String {
     std::fs::read_to_string(

@@ -1,6 +1,6 @@
-//! Wright's native `.opy` frontend (milestone M7).
+//! Wright's native `.opy` frontend.
 //!
-//! Owns the source-language surface declared by the M7 support matrix
+//! Owns the source-language surface declared by the OPY support matrix
 //! (`docs/opy/support-matrix.md`): a lexer, an indentation-aware
 //! CST/parser with structured diagnostics and recovery, token-level
 //! preprocessing (includes and `#!define` macros), semantic resolution, and

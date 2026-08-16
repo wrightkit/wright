@@ -1,6 +1,6 @@
 //! Black-box CLI end-to-end tests (#41): the actual `wright` executable is
 //! exercised across commands, inputs, output modes, exit codes, diagnostics,
-//! and stdout/stderr separation — the automation contract of the M6 CLI.
+//! and stdout/stderr separation — the automation contract of the CLI.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -207,7 +207,7 @@ fn inspect_over_workshop_input_lists_rules_and_symbols() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-// ── Lint (M12, #98) ──────────────────────────────────────────────────────────
+// ── Lint (#98) ───────────────────────────────────────────────────────────────
 
 #[test]
 fn lint_over_workshop_input_reports_findings_in_text_and_json() {
@@ -248,7 +248,7 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
     assert_eq!(
         envelope["result"]["rules"].as_array().unwrap().len(),
         5,
-        "all five M12 rules are reported"
+        "all five first-party rules are reported"
     );
     assert_eq!(
         envelope["result"]["config"]["rules"]

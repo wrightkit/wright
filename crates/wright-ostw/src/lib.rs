@@ -1,4 +1,4 @@
-//! Wright's native OSTW frontend (milestone M13, issues #117/#118).
+//! Wright's native OSTW frontend (issues #117/#118).
 //!
 //! Owns the OSTW surface evidenced by the pinned protect-ban corpus: a
 //! lexer, a CST/parser with structured diagnostics, the `ds.toml` project
@@ -43,7 +43,7 @@ pub fn compile(main_text: &str, main_path: Option<&str>, root: &Path) -> OstwOut
     project::compile(main_text, main_path, root)
 }
 
-/// Compile with in-memory source overlays (M14, #128).
+/// Compile with in-memory source overlays (#128).
 ///
 /// `overlay` maps project-relative source paths to replacement text and takes
 /// precedence over `main_text` and the filesystem, so a proposed multi-file
@@ -75,7 +75,7 @@ pub fn compile_with_semantics(
 }
 
 /// Load the project with in-memory source overlays and resolve its semantic
-/// surface into frontend-neutral HIR (M14, #128).
+/// surface into frontend-neutral HIR (#128).
 ///
 /// `overlay` maps project-relative source paths to replacement text and takes
 /// precedence over `main_text` and the filesystem, so a proposed multi-file

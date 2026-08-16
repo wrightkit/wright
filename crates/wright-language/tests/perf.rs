@@ -12,7 +12,7 @@ use wright_language::document::{Document, Position};
 
 const ITERATIONS: usize = 20;
 /// A generous bound: each single-document workflow must finish well under
-/// interactive latency (the corpus compiles in ~1–3 ms in the M8 benchmark).
+/// interactive latency (the corpus compiles in ~1–3 ms under `wright-bench`).
 const MAX_MEAN_MILLIS: f64 = 200.0;
 
 fn workspace_root() -> PathBuf {

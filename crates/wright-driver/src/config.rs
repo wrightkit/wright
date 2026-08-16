@@ -16,9 +16,10 @@ pub use wright_analyzer::registry::LintConfig;
 pub enum SourceKind {
     /// Detect from the input path extension or stdin content.
     Auto,
-    /// `.opy` source through the adapter bridge (native frontend lands in M7).
+    /// `.opy` source through the adapter bridge (the native frontend is the
+    /// default path).
     Opy,
-    /// `.ostw` / `.del` source through the native OSTW frontend (M13, #117).
+    /// `.ostw` / `.del` source through the native OSTW frontend (#117).
     Ostw,
     /// Localized vanilla Workshop text (native frontend).
     Workshop,
@@ -112,7 +113,7 @@ pub struct SessionConfig {
     /// The WIR transformation policy (`off` by default; `compat`/`aggressive`
     /// opt into evidence-backed passes).
     pub profile: wright_transform::Profile,
-    /// The lint rule configuration used by `lint` (M12, #97/#98).
+    /// The lint rule configuration used by `lint` (#97/#98).
     ///
     /// [`LintConfig::default`] enables every registered rule at its default
     /// severity; `--disable-rule`/`--rule-severity` on the CLI and library

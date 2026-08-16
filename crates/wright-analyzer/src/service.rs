@@ -50,7 +50,7 @@ pub enum Request {
     /// Every static-analysis finding.
     GetFindings,
     /// The registered lint rules and the effective lint configuration
-    /// (M12, #98).
+    /// (#98).
     LintRules,
 }
 
@@ -149,7 +149,7 @@ impl<'a> SemanticService<'a> {
     /// `config` controls which rules run and at what severity; callers that
     /// only need the default behavior should use [`SemanticService::with_origin`].
     /// The retained `config` also drives `lintRules` responses, so rule
-    /// metadata and findings always reflect the same configuration (M12, #98).
+    /// metadata and findings always reflect the same configuration (#98).
     pub fn with_origin_and_config(
         program: &'a wir::Program,
         origin: Origin,

@@ -1,4 +1,4 @@
-//! M14 #128 evidence: source-edit transactions validate through the correct
+//! #128 evidence: source-edit transactions validate through the correct
 //! native frontend and project semantics (OPY and OSTW), with deterministic
 //! stale/overlap/kind refusals, atomic previews, and cross-file diagnostic
 //! provenance — never a forced `.opy` or a synthetic `edit.opy` path.
@@ -244,7 +244,7 @@ fn opy_stale_transaction_refuses_atomically() {
 
 #[test]
 fn unsupported_input_kinds_refuse_explicitly() {
-    // Workshop text is not an editable source frontend (M14 declares OPY and
+    // Workshop text is not an editable source frontend (#128 declares OPY and
     // OSTW): the refusal is structured, not a misleading `.opy` attempt.
     let root = temp_project(
         "kind-refusal",
@@ -437,7 +437,7 @@ fn opy_auto_kind_detects_from_the_main_path_extension() {
     );
 }
 
-// -- semantic rename (M14 #129) ------------------------------------------------
+// -- semantic rename (#129) ---------------------------------------------------
 
 fn rename_at(
     root: &Path,

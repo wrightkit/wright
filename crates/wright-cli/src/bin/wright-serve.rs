@@ -1,11 +1,12 @@
 //! `wright-serve` — thin transport adapters over the session-aware tool
-//! service (M9, issue #60).
+//! service (issue #60).
 //!
 //! Exposes the same operations as [`wright_driver::service::ToolService`]
 //! over two transports:
 //!
 //! * **stdio JSON-lines** (`--transport stdio`): one request per line, one
-//!   response per line (the M4 tool style, generalized to the M9 service).
+//!   response per line (the legacy tool style, generalized to the current
+//!   service).
 //! * **JSON-RPC 2.0** (`--transport jsonrpc`): standard JSON-RPC envelopes
 //!   with `id`/`method`/`params` and `result`/`error` responses.
 //!
@@ -147,8 +148,8 @@ fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
         let result = match method {
             "request" => {
                 // The full params object is forwarded verbatim (op plus any
-                // operation arguments, e.g. mutation sources/targets, M14
-                // #130) so the JSON-RPC adapter maps the same request shape
+                // operation arguments, e.g. mutation sources/targets, #130)
+                // so the JSON-RPC adapter maps the same request shape
                 // as the stdio adapter; a params object without `op` is a
                 // malformed request rather than a silently empty one.
                 let request_line = match params {

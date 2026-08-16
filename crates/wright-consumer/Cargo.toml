@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "An external consumer fixture proving Wright's public embedding/tool contracts (M9 #61)."
+description = "An external consumer fixture proving Wright's public embedding/tool contracts (#61)."
 
 [lints]
 workspace = true

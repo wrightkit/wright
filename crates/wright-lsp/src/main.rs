@@ -1,4 +1,4 @@
-//! `wright-lsp` — the Wright language server (M10, issue #67).
+//! `wright-lsp` — the Wright language server (issue #67).
 //!
 //! A thin LSP protocol adapter over [`wright_language::LanguageService`]:
 //! all semantic logic lives in the editor-neutral service crate; this
@@ -235,7 +235,7 @@ fn run() -> Result<(), String> {
                     // the client refuses to apply the rename to a newer
                     // buffer state; filesystem-backed sources carry the
                     // unversioned `null` form LSP allows. The edits are the
-                    // shared M14 #129 transaction in editor conventions —
+                    // shared #129 transaction in editor conventions —
                     // one exact-occurrence `TextEdit` per semantic
                     // occurrence, grouped by document — never a
                     // protocol-layer re-resolution or textual fallback. The

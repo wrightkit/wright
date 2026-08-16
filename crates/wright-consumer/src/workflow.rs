@@ -35,7 +35,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         analyze.result.findings.as_array().unwrap().len()
     );
 
-    // Lint through the shared session (M12, #98): the same pipeline with
+    // Lint through the shared session (#98): the same pipeline with
     // rule metadata, effective configuration, and evidence-tagged findings.
     let lint = session.lint();
     assert!(lint.ok, "lint passes: {:?}", lint.diagnostics);
@@ -94,7 +94,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     }
 
     // Safe rename: propose, validate through the project transaction
-    // contract, preview (M14 #128: the shared frontend-neutral contract).
+    // contract, preview (#128: the shared frontend-neutral contract).
     if input.ends_with(".opy") {
         if let Some(name) = first_global(&source) {
             let identity = wright_driver::input_identity(&source);

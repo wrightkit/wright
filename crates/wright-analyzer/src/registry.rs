@@ -1,4 +1,4 @@
-//! Lint rule registry and configuration contract (M12, #97).
+//! Lint rule registry and configuration contract (#97).
 //!
 //! This module defines the stable rule-identity and metadata types, the
 //! [`LintRegistry`] that holds the first-party rule set, and [`LintConfig`]
@@ -204,13 +204,13 @@ struct RegistryEntry {
 ///
 /// First-party rules are added by pushing a [`RegistryEntry`] in
 /// [`Default::default`]. Third-party plugin loading is explicitly out of scope
-/// for M12 (issue #97).
+/// (issue #97).
 pub struct LintRegistry {
     entries: Vec<RegistryEntry>,
 }
 
 impl Default for LintRegistry {
-    /// Build the registry containing all five first-party M12 lint rules in
+    /// Build the registry containing all five first-party lint rules in
     /// their canonical order: `min-wait-loop`, `duplicate-condition`,
     /// `expensive-loop-check`, `repeated-value`, `while-without-wait`.
     fn default() -> Self {

@@ -164,7 +164,7 @@ fn workshop_analyze_reports_program_and_findings() {
     );
 }
 
-// ── Lint (M12, #98) ──────────────────────────────────────────────────────────
+// ── Lint (#98) ───────────────────────────────────────────────────────────────
 
 #[test]
 fn workshop_lint_reports_structured_findings_rules_and_config() {
@@ -180,7 +180,7 @@ fn workshop_lint_reports_structured_findings_rules_and_config() {
     );
     assert_eq!(envelope.result.program["rules"], 2);
     let rules = envelope.result.rules.as_array().unwrap();
-    assert_eq!(rules.len(), 5, "all five M12 rules are reported");
+    assert_eq!(rules.len(), 5, "all five first-party rules are reported");
     let config_rules = envelope.result.config["rules"].as_object().unwrap();
     assert_eq!(
         config_rules.len(),

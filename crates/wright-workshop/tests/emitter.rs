@@ -132,9 +132,9 @@ fn emitted_condition_matches_reference_infix_form() {
 
 #[test]
 fn debug_actions_emit_hud_text() {
-    // Since M8, Debug/Print emit a semantically equivalent Create HUD Text
-    // effect (documented intentional difference from the reference's
-    // type-aware formatting).
+    // Since the transform pipeline landed (#51/#52), Debug/Print emit a
+    // semantically equivalent Create HUD Text effect (documented intentional
+    // difference from the reference's type-aware formatting).
     let mut program = wir::Program::default();
     let file = program
         .files

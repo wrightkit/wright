@@ -54,7 +54,7 @@ fn registry_has_five_first_party_rules_with_stable_ids() {
             "repeated-value",
             "while-without-wait",
         ],
-        "exactly five first-party rules in M12, in canonical order"
+        "exactly five first-party rules, in canonical order"
     );
 }
 

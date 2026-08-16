@@ -24,7 +24,7 @@ fn preview_text(result: &wright_language::service::RenameResult, suffix: &str) -
 fn main_document() -> Document {
     let root = fixtures();
     let text = std::fs::read_to_string(root.join("main.opy")).unwrap();
-    // The document identity is the real file URI (the M14 shared contract
+    // The document identity is the real file URI (the shared contract
     // validates against path-based project identities, #128/#129).
     Document::new(
         format!("file://{}", root.join("main.opy").display()),
