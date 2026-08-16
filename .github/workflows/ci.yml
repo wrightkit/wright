@@ -42,6 +42,45 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features
 
+  lpp-client-integration:
+    name: LPP client integration (#142)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          rustflags: ""
+          cache-shared-key: linux-quality
+          cache-save-if: false
+          cache-on-failure: false
+
+      # The mock provider is built from the pinned language-provider-protocol
+      # commit the integration tests were validated against (merged LPP v1,
+      # PR wrightkit/language-provider-protocol#2 plus docs-only follow-ups).
+      - name: Check out language-provider-protocol (pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: wrightkit/language-provider-protocol
+          ref: 416b293e26e6fb2d29061608a493a7aecd2ce14f
+          path: language-provider-protocol
+
+      - name: Build the pinned LPP mock provider
+        run: cargo build -p lpp-mock-provider
+        working-directory: language-provider-protocol
+
+      # REQUIRED: these suites self-skip when LPP_MOCK_PROVIDER is absent,
+      # so the variable must be set here for them to run at all.
+      - name: Run LPP client integration tests (required)
+        env:
+          LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
+        run: |
+          cargo test -p wright-lpp --test mock_provider
+          cargo test -p wright-driver --test lpp
+
   v1-gates:
     name: v1 release gates (N-level, scenarios, benchmarks)
     runs-on: ubuntu-latest
