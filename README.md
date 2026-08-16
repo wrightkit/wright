@@ -48,50 +48,46 @@ surfaces alongside compiler code generation.
 
 ---
 
-## Ecosystem Compatibility and Conversion
+## Ecosystem compatibility
 
-Wright is designed as a multi-frontend semantic platform for the Overwatch
-Workshop ecosystem, with Vanilla Workshop text as the canonical
-interoperability boundary.
+Wright analyzes and compiles three languages through one shared pipeline,
+with Vanilla Workshop text as the common interchange format: OverPy
+(`.opy`), OSTW / DeltinScript (`.ostw` / `.del`), and Vanilla Workshop.
 
-### High-Level Ecosystem Support
+| System | Check & analyze | Compile / convert | Notes |
+| --- | --- | --- | --- |
+| OverPy (`.opy`) | ✅ Supported | ✅ Supported | Compiles `.opy` to Workshop and reconstructs Workshop back to `.opy`; corpus-evidenced against the pinned `overpy@9.7.10` reference |
+| OSTW / DeltinScript (`.ostw` / `.del`) | 🟡 Partial | 🟡 Partial | Declared compile subset (types & expressions, functions & control flow, catalog signatures); reconstructing Workshop back to OSTW is supported |
+| Vanilla Workshop | ✅ Supported | ✅ Supported | Native parser, localized catalog, validation, and deterministic emission (`en-US` baseline); canonical Workshop semantics come from `workshop-rs` |
 
-| System | Role in Wright | Current Capabilities | Status & Support Boundary | Authority Contract |
-| --- | --- | --- | --- | --- |
-| **Vanilla Workshop** | Canonical target and interoperability layer | Canonical parser, localized catalog, validation, and deterministic emitter (`workshop-rs`, consumed through the `wright-workshop` adapter). Supports rules, actions, values, events, enums, variables, subroutines, and custom-game-settings emission. | Supported (`en-US` baseline; data-driven localization extensible) | [`docs/workshop/support-matrix.md`](docs/workshop/support-matrix.md) |
-| **OPY / OverPy** | Native compatible semantic frontend | Native Rust parser (`wright-opy`), preprocessor (`#!include`, `#!define`), macro expansion, declarations, expressions, enums, custom-game-settings (JSONC blocks), lowering to Wright HIR and Workshop IR. Pinned `overpy@9.7.10` acts strictly as an external compatibility oracle under clean-room isolation. | Supported (corpus-evidenced native compiler and tooling) | [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md), [`docs/licensing.md`](docs/licensing.md) |
-| **OSTW (Overwatch Script To Workshop)** | Compatible semantic frontend (native OSTW frontend) | Native Rust parser/CST (`wright-ostw`), project settings (`ds.toml`), import-closure resolution, and semantic lowering to Wright HIR for the protect-ban slice. Pinned OSTW `v3.4.0` serves strictly as an external compatibility oracle. | In progress (native frontend & HIR lowering baseline) | [`docs/ostw/compatibility-baseline.md`](docs/ostw/compatibility-baseline.md), [`docs/architecture.md`](docs/architecture.md) |
+### Conversion directions
 
-### Conversion Matrix
+Workshop is the common hub for cross-language conversion:
 
-Workshop is the canonical hub for cross-language conversion. The required
-long-term conversion directions are:
-
-```text
-OPY      → Workshop   (Supported: native wright-opy → HIR → WIR → workshop-rs)
-OSTW     → Workshop   (In progress: native wright-ostw → HIR → WIR → workshop-rs)
-Workshop → OPY        (Planned: decompilation / translation via canonical WIR)
-Workshop → OSTW       (Planned: translation via canonical WIR)
-Workshop → Workshop   (Supported: localized catalog parse → canonical WIR → deterministic emit)
-```
+| Direction | Status | Notes |
+| --- | --- | --- |
+| OPY → Workshop | ✅ Supported | Emits through `workshop-rs` |
+| OSTW → Workshop | 🟡 Partial | Declared subset (see above); emits through `workshop-rs` |
+| Workshop → OPY | ✅ Supported | `wright convert --target opy` |
+| Workshop → OSTW | ✅ Supported | `wright convert --target ostw` |
+| Workshop → Workshop | ✅ Supported | Parse → canonical intermediate representation → deterministic emit |
 
 Direct OPY ↔ OSTW source translation is an optional side path and does not
 drive core architecture.
 
-### Four-Level Verification Model
-
-Compiler compatibility is rigorously measured under the S/D/N/E framework:
-
-- **S (Syntax)**: Agrees on accepting valid inputs and rejecting unsupported syntax across the corpus.
-- **D (Diagnostics)**: Reports structured diagnostic categories, codes, and accurate source spans for diagnosed inputs.
-- **N (Normalized Output)**: Produces equivalent Workshop output under versioned normalization.
-- **E (Observable Semantics)**: High-risk runtime semantics are verified against repeatable behavioral scenarios.
-
-> **Semantic Priority ([ADR-0008](docs/adr/0008-tooling-first-semantic-platform.md)):**
-> Observable semantics and valid Workshop syntax outrank byte-identical text formatting:
-> `E (semantics) > D (diagnostics) > S (syntax) > N (text output)`. Clean-room licensing
-> boundaries isolate external evaluation oracles from Wright runtime code
-> ([`docs/licensing.md`](docs/licensing.md)).
+Compatibility is measured per capability against pinned reference oracles,
+never as a single aggregate percentage. The verification methodology
+(S/D/N/E levels and release gates) is described in
+[`docs/compatibility.md`](docs/compatibility.md) and
+[`docs/v1-matrix.md`](docs/v1-matrix.md); the per-language declared surfaces
+are [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md),
+[`docs/ostw/support-matrix.md`](docs/ostw/support-matrix.md), and
+[`docs/workshop/support-matrix.md`](docs/workshop/support-matrix.md).
+Standalone implementations of these languages live in
+[`wrightkit/opy-rs`](https://github.com/wrightkit/opy-rs) (OverPy),
+[`wrightkit/del-rs`](https://github.com/wrightkit/del-rs) (OSTW/DeltinScript),
+and canonical Workshop semantics in
+[`wrightkit/workshop-rs`](https://github.com/wrightkit/workshop-rs).
 
 ---
 
