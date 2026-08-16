@@ -82,3 +82,7 @@ compiler/tooling crates (`wright-ir`, `wright-core`, `wright-driver`,
   generated artifacts, and dependencies.
 * Keep commits focused on one functional boundary and do not include unrelated
   working-tree changes.
+* Describe planning work by concrete capability, issue reference, or release
+  version (normative pre-1.0 roadmap: [#134](https://github.com/wrightkit/wright/issues/134));
+  internal phase-number labels are not the roadmap model for new issues, PRs,
+  or living docs.

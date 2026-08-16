@@ -1,7 +1,7 @@
 ---
 kind: wright-spec/v1
 id: SPEC-99-stability-rules
-title: Bounded evidence-backed Workshop stability rule set (M12)
+title: Bounded evidence-backed Workshop stability rule set
 status: accepted
 related_issue: "#99"
 owner: PM
@@ -11,7 +11,7 @@ freshness: live
 ## Goal
 
 Ship a small, high-value first-party stability/performance rule set through the
-M12 lint registry (#97) and `wright lint` path (#98), extending the existing
+lint registry (#97) and `wright lint` path (#98), extending the existing
 three rules with exactly **two new rules** — `repeated-value` and
 `while-without-wait` — so `wright lint` reports a bounded five-rule first-party
 set. Every rule keeps a stable ID, default severity, evidence classification,

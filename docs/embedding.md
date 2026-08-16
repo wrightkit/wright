@@ -10,8 +10,8 @@ safe source-edit contracts, and the transport adapters
 | --- | --- | --- |
 | `wright_driver::{CompilerSession, SessionConfig, InputSpec, SourceKind, OutputFormat, Profile}` | **stable** | One driver for compile/check/analyze/inspect/lint; `load()` is idempotent |
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
-| `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) plus validated mutation (`validateEditTransaction`, `semanticRename`, M14 #130) |
-| `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Frontend-neutral source-edit transactions; validated through the correct native frontend/project semantics (M14 #128); `EditTransaction::apply` applies ranges against one original source snapshot |
+| `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) plus validated mutation (`validateEditTransaction`, `semanticRename`, #130) |
+| `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Frontend-neutral source-edit transactions; validated through the correct native frontend/project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright-serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService`; MCP not implemented (no agent evidence) |
@@ -47,7 +47,7 @@ findings and from compiler-host performance (measured by `wright-bench`, not
 in-process). Target/catalog metadata enables reasoning about Workshop
 actions, values, events, enum domains, and locales.
 
-## Validated mutation (M14, #130)
+## Validated mutation (#130)
 
 Agents and embedding consumers request mutation through two structured
 tool operations over the session's project:

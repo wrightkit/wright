@@ -20,7 +20,8 @@ Project-level provenance for every upstream implementation Wright studies or
 derives compatibility knowledge from is recorded once, centrally, in
 [`compatibility/upstream-references.md`](compatibility/upstream-references.md)
 (pinned OverPy 9.7.10 identity and the durable OSTW reference entry added by
-the M13 investigation, #113: license assumption, oracle role, reference-vs-Wright
+the OSTW reference investigation (#113): license assumption, oracle role,
+reference-vs-Wright
 architecture boundary, and durable reference limitations). Implementation
 issues and compatibility entries reference
 that document instead of repeating provenance notes.
