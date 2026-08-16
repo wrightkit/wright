@@ -165,7 +165,7 @@ pub struct InspectResult {
     pub references: serde_json::Value,
 }
 
-/// The result of a `lint` run (M12, #98): source identity, the program
+/// The result of a `lint` run (#98): source identity, the program
 /// summary, the registered lint rules with their effective configuration,
 /// the active configuration, and the findings.
 #[derive(Debug, Clone, Default, Serialize)]

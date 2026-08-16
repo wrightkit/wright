@@ -98,7 +98,7 @@ pub fn compile(main_text: &str, main_path: Option<&str>, root: &Path) -> OstwOut
 /// The overlay maps project-relative source paths to replacement text and
 /// takes precedence over both `main_text` and the filesystem, so a proposed
 /// multi-file edit can be validated without rewriting the user's files
-/// (M14, #128). Overlay keys are normalized project-relative paths exactly as
+/// (#128). Overlay keys are normalized project-relative paths exactly as
 /// [`Project::files`] reports them (e.g. `interface/HeroSelect.del`). The
 /// `ds.toml` project file itself is always read from the filesystem.
 pub fn compile_with_overlay(

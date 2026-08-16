@@ -1,10 +1,10 @@
-//! The reusable compiler/session driver (M6, issue #37).
+//! The reusable compiler/session driver (issue #37).
 //!
 //! [`CompilerSession`] is the single orchestration path shared by the CLI,
 //! library consumers, and (in later milestones) tool APIs and LSP: input
 //! resolution → frontend selection → validation → lowering → analysis →
 //! emission. Frontends are selected by [`SourceKind`] behind one contract, so
-//! the M7 native `.opy` frontend can replace the temporary adapter bridge
+//! the native `.opy` frontend can replace the temporary adapter bridge
 //! without changing callers. Every workflow returns a typed [`Envelope`]
 //! whose JSON serialization is the machine-readable CLI contract.
 
@@ -479,7 +479,7 @@ impl CompilerSession {
     }
 
     /// `lint`: load and produce the source identity, program summary, rule
-    /// metadata, effective configuration, and findings (M12, #98).
+    /// metadata, effective configuration, and findings (#98).
     ///
     /// Lint findings are reported in `result.findings`, not in the envelope
     /// diagnostics (like `analyze`). Rule enable/disable and severity come

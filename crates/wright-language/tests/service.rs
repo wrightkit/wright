@@ -1173,7 +1173,7 @@ fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
     );
 }
 
-// -- M14 #129: OSTW semantic rename through the shared contract -----------------
+// -- #129: OSTW semantic rename through the shared contract --------------------
 
 fn ostw_project_documents() -> (LanguageService, String, String, String) {
     use std::sync::atomic::{AtomicUsize, Ordering};

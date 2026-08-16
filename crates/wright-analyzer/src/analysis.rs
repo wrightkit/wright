@@ -28,8 +28,8 @@
 //! while-without-wait trigger is static but the impact (loop frequency) is an
 //! indicator, and `For Global Variable` loops are never flagged.
 //!
-//! Every [`Finding`] also carries the [`EvidenceClass`] of its rule (M12,
-//! #98): whether the finding is an exact structural fact, a static indicator,
+//! Every [`Finding`] also carries the [`EvidenceClass`] of its rule (#98):
+//! whether the finding is an exact structural fact, a static indicator,
 //! a documented heuristic, or (reserved) runtime-validated.
 
 use std::collections::HashMap;

@@ -1,4 +1,4 @@
-//! WIR transformation pipeline (milestone M8, issues #51/#52).
+//! WIR transformation pipeline (issues #51/#52).
 //!
 //! Transformations live in an explicit, validated pass pipeline separate from
 //! read-only analysis and backend emission. Profiles select the pass set:

@@ -1,14 +1,14 @@
-//! The session-aware tool service (M9, issues #57/#58).
+//! The session-aware tool service (issues #57/#58).
 //!
 //! [`ToolService`] exposes Wright's compile/check/analyze/query workflows and
 //! agent-oriented semantic queries over stable public contracts, reusing the
-//! M6 driver session. It is transport-neutral: the stdio/JSON-RPC adapters
-//! (M9 #60) and the embedding API are thin mappings over the same operations,
+//! driver session. It is transport-neutral: the stdio/JSON-RPC adapters
+//! (#60) and the embedding API are thin mappings over the same operations,
 //! so behavior is testable in-process without a transport.
 //!
 //! Capability/version negotiation is provided by [`Capabilities`]; cost and
 //! resource inspection ([`ToolRequest::CostEstimate`]) consumes the
-//! Wright-owned generated-resource semantics established by the M8 benchmark
+//! Wright-owned generated-resource semantics established by the `wright-bench`
 //! harness (emitted bytes, WIR node counts, action/rule counts) and
 //! distinguishes exact counts from static findings.
 
@@ -46,7 +46,7 @@ pub enum ToolRequest {
     Cfg { rule: u32 },
     /// Every static-analysis finding.
     Findings,
-    /// Lint findings plus rule metadata and effective configuration (M12, #98).
+    /// Lint findings plus rule metadata and effective configuration (#98).
     Lint,
     /// The registered lint rules and the effective lint configuration.
     LintRules,
@@ -57,7 +57,7 @@ pub enum ToolRequest {
     /// Target/catalog metadata (actions, values, events, enum domains).
     TargetMetadata,
     /// Validate and preview a caller-supplied source-edit transaction
-    /// against the session's project (M14, #130): atomic all-or-nothing
+    /// against the session's project (#130): atomic all-or-nothing
     /// semantics, structured refusal diagnostics, no filesystem writes.
     #[serde(rename = "validateEditTransaction")]
     ValidateEdit {
@@ -67,7 +67,7 @@ pub enum ToolRequest {
         transaction: crate::edit::EditTransaction,
     },
     /// Request a semantic rename through the shared refactoring contract
-    /// (M14, #129/#130): returns the validated exact-range transaction or
+    /// (#129/#130): returns the validated exact-range transaction or
     /// structured refusal diagnostics. Wright proposes/validates; applying
     /// edits to disk is an explicit consumer responsibility.
     SemanticRename {
@@ -263,7 +263,7 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// Run one M4 semantic query over the loaded program.
+    /// Run one semantic query over the loaded program.
     fn semantic_query(&self, request: wright_analyzer::service::Request) -> ToolResponse {
         self.semantic_query_with_config(request, wright_analyzer::registry::LintConfig::default())
     }
@@ -299,7 +299,7 @@ impl<'a> ToolService<'a> {
 
     /// `lint`: rule metadata, effective configuration, and findings over the
     /// loaded program through the same semantic-service path as the CLI
-    /// `lint` workflow (no duplicated rule execution, M12 #98).
+    /// `lint` workflow (no duplicated rule execution, #98).
     fn lint(&self) -> ToolResponse {
         let config = self.session.config.lint.clone();
         let origin = wright_analyzer::service::Origin {
@@ -383,7 +383,7 @@ impl<'a> ToolService<'a> {
     ///
     /// Exact counts: emitted bytes, WIR value/action/rule counts, and wait
     /// actions. Static indicators: analysis findings (e.g. `min-wait-loop`).
-    /// Compiler-host performance is measured by the M8 benchmark harness, not
+    /// Compiler-host performance is measured by the `wright-bench` harness, not
     /// in-process.
     fn cost_estimate(&self) -> serde_json::Value {
         let catalog = wright_workshop::catalog::Catalog::builtin().expect("built-in catalog loads");

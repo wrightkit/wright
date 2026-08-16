@@ -242,7 +242,7 @@ fn while_without_wait_findings_carry_boundedness_in_json() {
     }
 }
 
-// ── Lint rules and configuration (M12, #98) ──────────────────────────────────
+// ── Lint rules and configuration (#98) ───────────────────────────────────────
 
 #[test]
 fn lint_rules_reports_rule_metadata_and_effective_config() {
@@ -256,7 +256,7 @@ fn lint_rules_reports_rule_metadata_and_effective_config() {
     );
     let result = &responses[0]["result"];
     let rules = result["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 5, "all five M12 rules are reported");
+    assert_eq!(rules.len(), 5, "all five first-party rules are reported");
     for rule in rules {
         assert!(rule["id"].is_string(), "rules carry stable ids");
         assert!(rule["defaultSeverity"].is_string());

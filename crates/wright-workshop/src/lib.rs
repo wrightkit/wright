@@ -1,4 +1,4 @@
-//! Wright's native Workshop language model (milestone M5).
+//! Wright's native Workshop language model.
 //!
 //! This crate owns the Workshop-language foundation so localized vanilla
 //! Workshop text can be parsed, analyzed, transformed, and emitted without an

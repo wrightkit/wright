@@ -1,7 +1,7 @@
 //! The editor-neutral language service (#63, #65, #66).
 //!
-//! Composes the native `.opy` frontend, the semantic index/analyzer, the M9
-//! safe-edit contract, and the workshop catalog. Every result is tagged with
+//! Composes the native `.opy` frontend, the semantic index/analyzer, the
+//! safe-edit transaction contract, and the workshop catalog. Every result is tagged with
 //! the document version it was computed for, so stale results are
 //! deterministic and replaceable (#64). No LSP types appear here.
 
@@ -73,7 +73,7 @@ pub struct SourceLocation {
 }
 
 /// One source-aware rename edit targeting an exact semantic occurrence
-/// (M14, #131).
+/// (#131).
 ///
 /// Carries the source identity, a 0-based editor-convention range covering
 /// exactly the occurrence's identifier, the replacement text (the new name),
@@ -557,7 +557,7 @@ impl LanguageService {
     /// Rename the symbol at a position across the whole project.
     ///
     /// Delegates semantic target resolution, edit generation, and validation
-    /// to the shared M14 driver refactoring contract
+    /// to the shared driver refactoring contract
     /// (`wright_driver::edit::semantic_rename`, #129): every open root whose
     /// project includes the requesting document resolves the symbol through
     /// the shared semantic index, and the union of the resulting exact-range
@@ -783,7 +783,7 @@ impl LanguageService {
     /// previews (identical across roots, since the transaction and the source
     /// snapshot are the same).
     ///
-    /// Validation routes through the shared M14 driver transaction contract
+    /// Validation routes through the shared driver transaction contract
     /// (#128) with the root's original source kind detected from its
     /// extension, so OPY and OSTW projects validate through their own native
     /// frontend; no duplicate edit-validation semantics live here.

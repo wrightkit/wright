@@ -1,4 +1,4 @@
-//! The external consumer's public API surface (M9, issue #61).
+//! The external consumer's public API surface (issue #61).
 //!
 //! [`run_consumer`] drives every public embedding/tool workflow over one
 //! input, proving that a consumer depending only on `wright-driver` can

@@ -1,4 +1,4 @@
-//! Frontend-neutral source-edit transactions (M9 #59, reconciled by M14 #128).
+//! Frontend-neutral source-edit transactions (#59, reconciled by #128).
 //!
 //! Tools and agents propose edits as validated, source-oriented
 //! [`SourceEdit`]s — never as mutations of Wright's internal IR. One
@@ -345,7 +345,7 @@ fn refusal(diagnostics: Vec<Diagnostic>) -> EditValidation {
 }
 
 /// A semantic rename target: the exact identifier occurrence at a 1-based
-/// line/column in one source of the project (M14, #129).
+/// line/column in one source of the project (#129).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameTarget {
     /// The source identity the position names (a key of the current-sources
@@ -360,7 +360,7 @@ pub struct RenameTarget {
 }
 
 /// The outcome of a semantic rename: a validated multi-source transaction or
-/// structured refusal diagnostics (M14, #129).
+/// structured refusal diagnostics (#129).
 ///
 /// The transaction edits exactly the resolved semantic identity's occurrence
 /// ranges — never a whole-word scan or whole-document replacement — and is
@@ -381,7 +381,7 @@ pub struct SemanticRename {
 }
 
 /// Rename the symbol whose declaration or reference occurrence sits at a
-/// position in one source of a project (M14, #129).
+/// position in one source of a project (#129).
 ///
 /// `config` and `sources` are the project and current-source snapshot of the
 /// *unmodified* code, exactly as [`validate_transaction`] takes them. The
@@ -1198,7 +1198,7 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
 /// full-document [`SourceEdit`] carrying the source identity precondition.
 ///
 /// Unlike [`rename_symbol`], this does not require a declaration in `source`.
-/// This is the M9 textual contract: it is name- and boundary-driven, so the
+/// This is the established textual contract: it is name- and boundary-driven, so the
 /// caller must guarantee semantic identity (the project-wide rename in
 /// `wright-language` targets exact semantic spans instead, so it never routes
 /// through this whole-word scan).

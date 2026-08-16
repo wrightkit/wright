@@ -5,7 +5,7 @@
 //! a [`Kind`]; localized aliases map to ids and back, so parser, emitter,
 //! analyzer, and tooling never embed locale-specific strings as identity.
 //!
-//! The v0.2 catalog data (`data/catalog.json`) is authored from the M5
+//! The v0.2 catalog data (`data/catalog.json`) is authored from the
 //! support-matrix evidence ([`docs/workshop/support-matrix.md`]) and covers
 //! the corpus surface in `en-US`; additional locales are an explicit
 //! data-pipeline change, not a code change.
