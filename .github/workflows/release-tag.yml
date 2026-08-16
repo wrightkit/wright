@@ -24,6 +24,7 @@ jobs:
         with:
           toolchain: stable
           rustflags: ""
+          cache: false
 
       - name: Validate version, then create and push the tag
         id: tag
