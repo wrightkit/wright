@@ -17,6 +17,7 @@ pub mod diag;
 pub mod edit;
 pub mod input;
 pub mod opy;
+pub mod provider_edit;
 pub mod result;
 pub mod service;
 pub mod session;

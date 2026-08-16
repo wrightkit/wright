@@ -52,7 +52,7 @@ pub struct SourceEdit {
 
 /// A source range (1-based line and character column, half-open; `end` is
 /// exclusive).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditRange {
     pub start_line: u32,
     pub start_col: u32,
@@ -165,7 +165,7 @@ fn is_zero_width(edit: &SourceEdit) -> bool {
 }
 
 /// The edited text of one source in a validated transaction.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcePreview {
     /// The source file identity the preview belongs to.
     pub source: String,

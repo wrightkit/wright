@@ -76,6 +76,60 @@ pub enum ToolRequest {
         sources: std::collections::BTreeMap<String, String>,
         target: crate::edit::RenameTarget,
     },
+    /// Provider-driven semantic rename (#139): rename target resolution and
+    /// edit generation route through the LPP `rename` capability of the
+    /// provider configured for `language_id`; the resulting source edits are
+    /// wrapped in Wright's own transaction (identity/version preconditions,
+    /// deterministic ordering, overlap checks, atomic preview) and validated
+    /// through the provider's project semantics (`lpp/validateEdits` per
+    /// edited document, then `lpp/check` over the edited project) before
+    /// success. Provider refusals, unsupported capabilities, stale sources,
+    /// and semantic validation failures are structured refusals with no
+    /// partial edit set; there is no fallback to textual search/replace.
+    #[serde(rename = "providerSemanticRename")]
+    ProviderSemanticRename {
+        /// The opaque language id of the configured provider.
+        language_id: String,
+        /// The document set the rename is computed against (the provider's
+        /// view: text, language id, version).
+        documents: wright_lpp::DocumentSet,
+        /// The URI (a key of `documents`) in which `position` is
+        /// interpreted.
+        position_document_uri: String,
+        /// The position of the symbol to rename (0-based LSP conventions).
+        position: wright_lpp::Position,
+        /// The new name; the provider validates it against the language's
+        /// identifier rules.
+        new_name: String,
+        /// The project the documents belong to (informational).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_root: Option<String>,
+        /// The caller's current text for every source the rename may edit,
+        /// keyed by document URI (the identity/version precondition view).
+        sources: std::collections::BTreeMap<String, String>,
+    },
+    /// Provider-driven edit validation (#139): validate a caller-proposed
+    /// source-edit transaction against the provider's project semantics
+    /// (`lpp/validateEdits` per edited document, then `lpp/check` over the
+    /// edited project) before any application. The transaction must carry
+    /// document URIs as source identities and the identity of the text the
+    /// edits were computed against; stale, malformed, or semantically
+    /// invalid transactions refuse with no partial edit set.
+    #[serde(rename = "providerValidateEdit")]
+    ProviderValidateEdit {
+        /// The opaque language id of the configured provider.
+        language_id: String,
+        /// The unmodified project as the provider sees it.
+        documents: wright_lpp::DocumentSet,
+        /// The caller-proposed transaction (Wright-owned edit contract).
+        transaction: crate::edit::EditTransaction,
+        /// The caller's current text for every edited source, keyed by
+        /// document URI (the identity/version precondition view).
+        sources: std::collections::BTreeMap<String, String>,
+        /// The project the documents belong to (informational).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_root: Option<String>,
+    },
 }
 
 /// A tool response: a structured owned result or a structured error.
@@ -148,6 +202,8 @@ impl<'a> ToolService<'a> {
                 "inspect",
                 "validateEditTransaction",
                 "semanticRename",
+                "providerSemanticRename",
+                "providerValidateEdit",
             ]
             .into_iter()
             .map(str::to_string)
@@ -211,6 +267,50 @@ impl<'a> ToolService<'a> {
                 crate::edit::semantic_rename(&self.session.config, sources, target),
             )
             .expect("semantic rename serializes")),
+            ToolRequest::ProviderSemanticRename {
+                language_id,
+                documents,
+                position_document_uri,
+                position,
+                new_name,
+                project_root,
+                sources,
+            } => {
+                let request = crate::provider_edit::ProviderRenameRequest {
+                    documents: documents.clone(),
+                    position_document_uri: position_document_uri.clone(),
+                    position: *position,
+                    new_name: new_name.clone(),
+                    project_root: project_root.clone(),
+                    sources: sources.clone(),
+                };
+                self.ok(
+                    serde_json::to_value(self.run_provider_flow(language_id, |provider| {
+                        crate::provider_edit::semantic_rename(provider, &request)
+                    }))
+                    .expect("provider semantic rename serializes"),
+                )
+            }
+            ToolRequest::ProviderValidateEdit {
+                language_id,
+                documents,
+                transaction,
+                sources,
+                project_root,
+            } => {
+                let request = crate::provider_edit::ProviderValidateRequest {
+                    documents: documents.clone(),
+                    transaction: transaction.clone(),
+                    sources: sources.clone(),
+                    project_root: project_root.clone(),
+                };
+                self.ok(
+                    serde_json::to_value(self.run_provider_flow(language_id, |provider| {
+                        crate::provider_edit::validate_transaction(provider, &request)
+                    }))
+                    .expect("provider edit validation serializes"),
+                )
+            }
         }
     }
 
@@ -246,6 +346,38 @@ impl<'a> ToolService<'a> {
         language_id: &str,
     ) -> Result<Box<dyn wright_lpp::LanguageProvider>, wright_lpp::ProviderError> {
         self.session.language_provider(language_id)
+    }
+
+    /// Run a provider-driven mutation flow (#139) over a fresh provider
+    /// session: spawn by opaque language id, initialize, run the flow, and
+    /// terminate gracefully.
+    ///
+    /// Any failure before the flow — an unconfigured language id, a spawn
+    /// failure, a failed handshake — is the same structured
+    /// [`crate::provider_edit::ProviderMutation`] refusal surface the flow
+    /// itself uses, so callers handle one refusal contract. The provider
+    /// process never outlives the request: graceful shutdown when possible,
+    /// and the session's drop guard terminates it otherwise.
+    fn run_provider_flow(
+        &self,
+        language_id: &str,
+        flow: impl FnOnce(
+            &mut dyn wright_lpp::LanguageProvider,
+        ) -> crate::provider_edit::ProviderMutation,
+    ) -> crate::provider_edit::ProviderMutation {
+        let mut provider = match self.session.language_provider(language_id) {
+            Ok(provider) => provider,
+            Err(error) => return crate::provider_edit::provider_failure(&error),
+        };
+        if let Err(error) = provider.initialize(Some(&wright_lpp::ClientInfo {
+            name: SERVICE_NAME.to_string(),
+            version: SERVICE_VERSION.to_string(),
+        })) {
+            return crate::provider_edit::provider_failure(&error);
+        }
+        let mutation = flow(provider.as_mut());
+        let _ = provider.shutdown();
+        mutation
     }
 
     fn ok(&self, result: serde_json::Value) -> ToolResponse {
