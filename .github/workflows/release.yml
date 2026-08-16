@@ -34,6 +34,7 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
           rustflags: ""
+          cache: false
 
       - name: Verify tag version matches the workspace implementation version
         run: |
@@ -98,6 +99,7 @@ jobs:
         with:
           toolchain: stable
           rustflags: ""
+          cache: false
 
       - name: Add cross-compile target
         run: rustup target add "$TARGET"
