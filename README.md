@@ -56,9 +56,9 @@ with Vanilla Workshop text as the common interchange format: OverPy
 
 | System | Check & analyze | Compile / convert | Notes |
 | --- | --- | --- | --- |
-| OverPy (`.opy`) | ✅ Supported | ✅ Supported | Compiles `.opy` to Workshop and reconstructs Workshop back to `.opy`; corpus-evidenced against the pinned `overpy@9.7.10` reference |
-| OSTW / DeltinScript (`.ostw` / `.del`) | 🟡 Partial | 🟡 Partial | Declared compile subset (types & expressions, functions & control flow, catalog signatures); reconstructing Workshop back to OSTW is supported |
-| Vanilla Workshop | ✅ Supported | ✅ Supported | Native parser, localized catalog, validation, and deterministic emission (`en-US` baseline); canonical Workshop semantics come from `workshop-rs` |
+| [OverPy (`.opy`)](https://github.com/wrightkit/opy-rs) | ✅ Supported | ✅ Supported | Compiles `.opy` to Workshop and reconstructs Workshop back to `.opy`; corpus-evidenced against the pinned `overpy@9.7.10` reference |
+| [OSTW / DeltinScript (`.ostw` / `.del`)](https://github.com/wrightkit/del-rs) | 🟡 Partial | 🟡 Partial | Declared compile subset (types & expressions, functions & control flow, catalog signatures); reconstructing Workshop back to OSTW is supported |
+| [Vanilla Workshop](https://github.com/wrightkit/workshop-rs) | ✅ Supported | ✅ Supported | Native parser, localized catalog, validation, and deterministic emission (`en-US` baseline) |
 
 ### Conversion directions
 
@@ -75,19 +75,9 @@ Workshop is the common hub for cross-language conversion:
 Direct OPY ↔ OSTW source translation is an optional side path and does not
 drive core architecture.
 
-Compatibility is measured per capability against pinned reference oracles,
-never as a single aggregate percentage. The verification methodology
-(S/D/N/E levels and release gates) is described in
-[`docs/compatibility.md`](docs/compatibility.md) and
-[`docs/v1-matrix.md`](docs/v1-matrix.md); the per-language declared surfaces
-are [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md),
-[`docs/ostw/support-matrix.md`](docs/ostw/support-matrix.md), and
-[`docs/workshop/support-matrix.md`](docs/workshop/support-matrix.md).
-Standalone implementations of these languages live in
-[`wrightkit/opy-rs`](https://github.com/wrightkit/opy-rs) (OverPy),
-[`wrightkit/del-rs`](https://github.com/wrightkit/del-rs) (OSTW/DeltinScript),
-and canonical Workshop semantics in
-[`wrightkit/workshop-rs`](https://github.com/wrightkit/workshop-rs).
+> [!NOTE]
+> Compatibility is measured per capability against pinned reference evidence,
+> not as a single aggregate percentage.[^compatibility-details]
 
 ---
 
@@ -292,26 +282,8 @@ Wright Workshop IR (WIR) & Semantic Analysis (wright-analyzer)
 
 ## Documentation
 
-Full architectural specifications, API references, and policy contracts are
-indexed in [`docs/README.md`](docs/README.md):
-
-- **Architecture & Design**:
-  - [System Architecture](docs/architecture.md): Module boundaries, responsibilities, and data flow.
-  - [Architecture Decision Records (ADRs)](docs/adr/README.md): Recorded architectural decisions and historical context.
-- **Contracts & Interfaces**:
-  - [CLI & Driver Contract](docs/cli.md): Command interface, exit codes, and JSON result envelope.
-  - [Embedding & Tool API](docs/embedding.md): Programmatic Rust API and session tool service.
-  - [Language Services & LSP](docs/language-services.md): Editor language features and transport specifications.
-  - [Opy HIR v1 Protocol](docs/hir/opy-hir-v1.md): Frontend interchange protocol.
-- **Compatibility & Standards**:
-  - [Compatibility Policy](docs/compatibility.md): S/D/N/E verification methodology and release gates.
-  - [Compatibility Matrix](docs/v1-matrix.md): Declared surfaces and release gate status.
-  - [OPY Support Matrix](docs/opy/support-matrix.md): Supported `.opy` syntax and feature boundary.
-  - [Workshop Support Matrix](docs/workshop/support-matrix.md): Evidenced Workshop actions, values, and enums.
-- **Engineering & Operations**:
-  - [Licensing & Clean-Room Policy](docs/licensing.md): Intellectual property boundary and clean-room development rules.
-  - [Release Process](docs/release.md): Versioning scheme, CI packaging, and distribution gates.
-  - [Agent Team Contract](docs/agent-team.md): Multi-agent collaboration protocol and decision governance.
+Architecture, compatibility methodology, APIs, release guidance, ADRs, and
+maintainer references are indexed in [`docs/README.md`](docs/README.md).
 
 ---
 
@@ -346,3 +318,8 @@ v3.0 or later](LICENSE).
 Third-party compatibility references, test fixtures, and adapter components are
 isolated and governed by their own recorded licenses and provenance; see
 [`docs/licensing.md`](docs/licensing.md).
+
+[^compatibility-details]: See the [compatibility methodology](docs/compatibility.md),
+    [release/compatibility matrix](docs/v1-matrix.md), and the
+    [OverPy](docs/opy/support-matrix.md), [OSTW](docs/ostw/support-matrix.md),
+    and [Workshop](docs/workshop/support-matrix.md) support references.
