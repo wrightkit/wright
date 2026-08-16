@@ -10,11 +10,12 @@ compatibility.
 
 ## Reference boundary
 
-Wright owns its semantic frontends (`wright-opy`, `wright-ostw`,
-`wright-workshop`). OverPy and OSTW compilers and language services are
-compatibility oracles, behavior references, and test inputs for supported
-surface claims. They are not production runtime dependencies for supported
-standalone workflows.
+Wright owns its semantic frontends (`wright-opy`, `wright-ostw`) and consumes
+the canonical Workshop core from `workshop-rs` through the `wright-workshop`
+re-export adapter (wright#143). OverPy and OSTW compilers and language
+services are compatibility oracles, behavior references, and test inputs for
+supported surface claims. They are not production runtime dependencies for
+supported standalone workflows.
 
 Project-level provenance for every upstream implementation Wright studies or
 derives compatibility knowledge from is recorded once, centrally, in

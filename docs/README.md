@@ -152,7 +152,7 @@ JSON document asset, and historical artifact across the repository.
 
 | Asset Path | Document Class | Action | Description & Rationale |
 | --- | --- | --- | --- |
-| `crates/wright-workshop/src/catalog/data/catalog.json` | Catalog Data Asset | `keep` | Canonical localized Workshop catalog data (actions, values, enums, events, keywords) with recorded provenance. |
+| `workshop-rs` catalog data (`crates/workshop-rs/src/catalog/data/catalog.json`, external repo, pinned rev in root `Cargo.toml`) | Catalog Data Asset (external owner) | `keep` | Canonical localized Workshop catalog data (actions, values, enums, events, keywords) with recorded provenance; owned by `workshop-rs` per ADR-0009/wright#143, consumed by Wright through the `wright-workshop` re-export adapter. |
 | `compatibility/oracle/oracle-metadata.json` | Reference Metadata Asset | `keep` | Records pinned `overpy@9.7.10` tarball integrity, gitHead commit, registry URL, and license assumption. |
 | `compatibility/oracle/package.json` | Tooling Package Manifest | `keep` | Pinned npm package manifest for installing external OverPy oracle during compatibility evaluation. |
 | `adapter/package.json` | Tooling Package Manifest | `keep` | Pinned npm package manifest for executing the isolated OverPy adapter bridge. |

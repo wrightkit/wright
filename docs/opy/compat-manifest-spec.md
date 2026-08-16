@@ -28,7 +28,8 @@ reference-validated source for:
 
 It is **language-compatibility metadata**, distinct from:
 
-* `crates/wright-workshop/src/catalog/data/catalog.json` — the Workshop
+* the `workshop-rs` catalog (`crates/workshop-rs/src/catalog/data/catalog.json`,
+  consumed via the `wright-workshop` adapter) — the Workshop
   emission/localization layer (en-US spellings, emitter output); the manifest
   links to it by canonical id (`catalogId`) rather than duplicating spellings;
   and
@@ -160,15 +161,15 @@ description/localization text.
 ## Data provenance and licensing rule
 
 The manifest is **Wright-authored data validated against observed oracle
-behavior** — the same path used by the existing chase-enums fixtures and the
-`wright-catalog-gen` pipeline. It must not be produced by mechanically
-converting OverPy's GPL-3.0 TypeScript data files (`src/data/*.ts`) into the
-manifest: ADR-0004 and `docs/licensing.md` forbid importing OverPy
-implementation details into the core, and observed behavior through documented
-compatibility tests is the permitted input. Every entry records the reference
-probe that validates it (`probes/probes.json` carries the probe source hash,
-expected oracle status, normalized emission hash, and — for rejections — the
-diagnostic category fragment).
+behavior** — the same evidence path used by the chase-enums fixtures and the
+catalog update pipeline in `workshop-rs`. It must not be produced by
+mechanically converting OverPy's GPL-3.0 TypeScript data files
+(`src/data/*.ts`) into the manifest: ADR-0004 and `docs/licensing.md` forbid
+importing OverPy implementation details into the core, and observed behavior
+through documented compatibility tests is the permitted input. Every entry
+records the reference probe that validates it (`probes/probes.json` carries
+the probe source hash, expected oracle status, normalized emission hash, and
+— for rejections — the diagnostic category fragment).
 
 ## Validation rules (implemented pipeline)
 
@@ -180,7 +181,8 @@ diagnostic category fragment).
   integrity (the contextual domain is not a declared enum domain, the
   selector parameter exists and its keyword spellings cover the options,
   every option domain is declared), and entries lacking oracle evidence all
-  fail deterministically (mirroring `wright-catalog-gen`); a
+  fail deterministically (mirroring the canonical-catalog validation in
+  `workshop-rs`); a
   canonical-rewrite test pins the data file to its byte-canonical form, and a
   cross-check test pins every `catalogId` (and contextual option target) to
   the Workshop emission catalog.
@@ -202,8 +204,8 @@ diagnostic category fragment).
 * `wright-opy` — name/member/enum resolution, arity and signature checks,
   `KNOWN_ENUMS` absorption, earlier resolution of unknown-action/value errors
   (addressing the diagnostic-provenance limitation);
-* `wright-workshop` — canonical-id linkage to the emission catalog (validated
-  by the cross-check test);
+* `wright-workshop` (adapter over `workshop-rs`) — canonical-id linkage to
+  the emission catalog (validated by the cross-check test);
 * differential and systematic reference tests (the probe validator);
 * documentation, agents, and future release metadata can consume the same
   declared boundary.

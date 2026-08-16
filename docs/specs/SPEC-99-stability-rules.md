@@ -299,8 +299,8 @@ indicator). No new `heuristic`-class rules are added in this set.
   `source.opy:54` / workshop line 46) and overpy-pixelart (0 findings) parse
   through the native OPY frontend; the other 11 fail the OPY frontend (e.g.,
   santa.opy:192, parabola.opy:35), and corpus Workshop text is largely rejected
-  by the workshop parser (`settings` top-level section rejected per
-  `crates/wright-workshop/src/emitter.rs`; settings-stripped pixelart parses with
+  by the canonical Workshop parser (`settings` top-level section rejected;
+  settings-stripped pixelart parses with
   0 findings).
 - **Adapter** — pinned `overpy@9.7.10` adapter (`../../adapter/bin/wright-adapter.js`)
   for regenerating analyzer fixture payloads when needed.

@@ -263,12 +263,13 @@ semantics/WIR" requirement):
   envelope, profile application, and result rendering are frontend-neutral.
 * **HIR/WIR/lowering** (`wright-core`, `wright-ir`): the OSTW frontend lowers
   to Wright HIR; workshop-function calls resolve through the existing
-  catalog/WIR path exactly like the OPY receiver-call surface
-  (`crates/wright-workshop/src/catalog/`).
-* **Workshop parser/emitter/round-trip** (`wright-workshop`): Workshop stays
-  the interoperability hub; OSTW → Workshop emission reuses the emitter, and
-  Workshop → OSTW reconstruction reuses the Workshop parser and WIR, adding
-  only a Wright-owned OSTW emitter.
+  catalog/WIR path exactly like the OPY receiver-call surface (the canonical
+  `workshop-rs` catalog, consumed via `wright-workshop`).
+* **Workshop parser/emitter/round-trip** (`workshop-rs` via the
+  `wright-workshop` adapter): Workshop stays the interoperability hub;
+  OSTW → Workshop emission reuses the canonical emitter, and
+  Workshop → OSTW reconstruction reuses the canonical Workshop parser and
+  WIR, adding only a Wright-owned OSTW emitter.
 * **Analyzer/language services/LSP** (`wright-analyzer`, `wright-language`,
   `wright-lsp`): symbols, references, CFG, hover/definition/references/rename/
   semantic tokens are language-neutral once the frontend produces HIR with

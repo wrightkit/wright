@@ -122,8 +122,8 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
 - Receiver/member calls (`eventPlayer.setMoveSpeed(100)`,
   `eventPlayer.teleport(eventPlayer.getPosition())`,
   `target.setMoveSpeed(50)` on a player-valued global) lower to
-  `ReceiverCall` and resolve at emission through the Workshop catalog
-  (`crates/wright-workshop/src/catalog/data/catalog.json`); the
+  `ReceiverCall` and resolve at emission through the canonical `workshop-rs`
+  catalog; the
   corpus-evidenced receiver methods are the `synthetic/receiver-calls`
   fixture methods plus the #106 enum-gated members (en-US spellings per
   [`docs/workshop/support-matrix.md`](../workshop/support-matrix.md),
@@ -271,7 +271,7 @@ resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
 `wright_opy::reconstruct` consumes a validated Workshop IR program and emits
 deterministic, byte-stable canonical OPY that the native frontend accepts and
 that re-lowers to a structurally equivalent WIR program under
-`wright_workshop::roundtrip::equivalent`. The machine-readable support
+`wright_workshop::roundtrip::equivalent` (re-exported from `workshop-rs`). The machine-readable support
 boundary (supported vs explicitly rejected constructs, with a consistency
 test) lives in
 `crates/wright-opy/tests/fixtures/reconstruct/boundary.json`; the round-trip

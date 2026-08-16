@@ -10,7 +10,7 @@ thresholds, unsupported constructs, and intentional differences
 | --- | --- | --- |
 | Native `.opy` (lexer/preprocess/parser/resolve/lower/settings) | `wright-opy` | [`opy/support-matrix.md`](opy/support-matrix.md) |
 | Native OSTW (lexer/parser/CST/project/lower) | `wright-ostw` | [`ostw/compatibility-baseline.md`](ostw/compatibility-baseline.md) |
-| Localized Workshop text (catalog/lexer/parser/emitter) | `wright-workshop` | [`workshop/support-matrix.md`](workshop/support-matrix.md) |
+| Localized Workshop text (catalog/lexer/parser/emitter) | `workshop-rs` (via `wright-workshop` adapter) | [`workshop/support-matrix.md`](workshop/support-matrix.md) |
 | Driver/CLI result contract | `wright-driver`/`wright-cli` | [`cli.md`](cli.md) |
 
 Supported Workshop target: the Overwatch Workshop surface evidenced by the
