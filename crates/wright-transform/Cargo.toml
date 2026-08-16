@@ -12,3 +12,5 @@ workspace = true
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 wright-ir = { path = "../wright-ir" }
+# Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
+workshop-rs.workspace = true

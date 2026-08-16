@@ -73,7 +73,7 @@ impl Document {
 
     /// Convert a 1-based compiler span into a 0-based editor range, where
     /// the editor character is a UTF-16 code-unit offset.
-    pub fn from_span(&self, span: &wright_ir::source::Span) -> Range {
+    pub fn from_span(&self, span: &workshop_rs::source::Span) -> Range {
         span_to_range(span, &self.text)
     }
 }
@@ -248,7 +248,7 @@ pub fn char_offset_to_utf16(line: &str, char_offset: usize) -> usize {
 
 /// Convert a 1-based compiler span to a 0-based editor range with UTF-16
 /// character offsets, using the source text to resolve each line's length.
-pub fn span_to_range(span: &wright_ir::source::Span, source_text: &str) -> Range {
+pub fn span_to_range(span: &workshop_rs::source::Span, source_text: &str) -> Range {
     let start_line = source_text
         .lines()
         .nth(span.start.line.saturating_sub(1) as usize)
@@ -357,10 +357,10 @@ mod tests {
         // 🎯 is one Rust char but two UTF-16 units, so `score` (1-based
         // column 16) starts at UTF-16 offset 16 and ends at 21.
         let source = "    debug(\"🎯\", score)\n";
-        let span = wright_ir::source::Span::new(
+        let span = workshop_rs::source::Span::new(
             wright_ir::ids::Id::from_index(0),
-            wright_ir::source::Position::new(1, 16),
-            wright_ir::source::Position::new(1, 21),
+            workshop_rs::source::Position::new(1, 16),
+            workshop_rs::source::Position::new(1, 21),
         );
         let range = span_to_range(&span, source);
         assert_eq!(range.start.line, 0);

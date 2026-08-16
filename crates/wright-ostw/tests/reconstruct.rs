@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use sha2::Digest as _;
-use wright_ir::wir::{self, Action, Event, Value};
+use workshop_rs::wir::{self, Action, Event, Value};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
@@ -146,7 +146,7 @@ fn inline_write_once_player_vars(program: &mut wir::Program) {
                 .values
                 .get(id)
                 .cloned()
-                .unwrap_or_else(|| wright_ir::wir::ValueNode::new(wir::Value::Null, None));
+                .unwrap_or_else(|| workshop_rs::wir::ValueNode::new(wir::Value::Null, None));
             let replacement = match &node.value {
                 Value::PlayerVariable { player, variable }
                     if matches!(
@@ -207,7 +207,7 @@ fn foreach_globalize(program: &mut wir::Program) {
             .values
             .get(id)
             .cloned()
-            .unwrap_or_else(|| wright_ir::wir::ValueNode::new(wir::Value::Null, None));
+            .unwrap_or_else(|| workshop_rs::wir::ValueNode::new(wir::Value::Null, None));
         let children: Vec<wir::ValueId> = match &node.value {
             Value::Array(elements) => elements.clone(),
             Value::Vector { x, y, z } => vec![*x, *y, *z],
@@ -1551,7 +1551,7 @@ fn program_with_print(_: &wright_workshop::catalog::Catalog) -> wir::Program {
 
 fn program_with_settings(_: &wright_workshop::catalog::Catalog) -> wir::Program {
     wir::Program {
-        settings: Some(wright_ir::settings::Settings {
+        settings: Some(workshop_rs::settings::Settings {
             span: None,
             children: Vec::new(),
         }),

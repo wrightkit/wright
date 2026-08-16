@@ -6,7 +6,8 @@ supports for native localized Workshop input/output
 
 This document inventories the Workshop surface evidenced by the compatibility
 corpus, records the localization matrix, and specifies the supported feature
-set of the `wright-workshop` frontend and emitter.
+set of the canonical `workshop-rs` core as consumed through the
+`wright-workshop` adapter.
 
 ## Evidence sources
 
@@ -111,8 +112,9 @@ locale. Cross-locale behavior is not inferred from English-only fixtures.
 ## Catalog and IR design
 
 1. Builtin references (`Action::Call`/`Value::Call` `name`) use canonical
-   identifiers (`crates/wright-workshop/src/catalog/data/catalog.json`) so no
-   locale-specific spelling becomes semantic identity.
+   identifiers (the `workshop-rs` catalog, `crates/workshop-rs/src/catalog/
+   data/catalog.json`) so no locale-specific spelling becomes semantic
+   identity.
 2. Enum spellings ("Grapple Beam", "Ignore Condition", …) map to
    locale-independent canonical identities.
 3. Supported events cover `Global`, `EachPlayer`, `Subroutine`.

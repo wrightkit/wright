@@ -8,13 +8,13 @@
 
 use std::collections::HashSet;
 
+use workshop_rs::source::Span;
+use workshop_rs::wir::{
+    self, Action, ActionId, GlobalVarId, PlayerVarId, RuleId, SubroutineId, Value, ValueId,
+};
 use wright_ir::arena::Arena;
 use wright_ir::error::IrError;
 use wright_ir::ids::Id;
-use wright_ir::source::Span;
-use wright_ir::wir::{
-    self, Action, ActionId, GlobalVarId, PlayerVarId, RuleId, SubroutineId, Value, ValueId,
-};
 
 /// A typed ID referencing a [`Symbol`].
 pub type SymbolId = Id<Symbol>;
@@ -612,7 +612,7 @@ impl<'a> Builder<'a> {
             .unwrap_or(0);
         Some(Span::new(
             span.file,
-            wright_ir::source::Position::new(
+            workshop_rs::source::Position::new(
                 span.end.line,
                 span.end.col.saturating_sub(name_len).max(span.start.col),
             ),

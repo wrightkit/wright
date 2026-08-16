@@ -8,10 +8,10 @@
 
 use std::collections::HashMap;
 
+use workshop_rs::source::{FileId, Position, SourceFile, Span};
 use wright_ir::error::IrError;
 use wright_ir::hir::{BinaryOp, UnaryOp};
 use wright_ir::ids::Id;
-use wright_ir::source::{FileId, Position, SourceFile, Span};
 
 use super::types::{self, Declaration, Expr, RuleEntry, Stmt, default_var_index};
 use crate::hir::Program as ProtocolProgram;
@@ -269,7 +269,7 @@ impl<'a> Builder<'a> {
             for child in &settings.children {
                 converted.push(self.convert_settings_node(child)?);
             }
-            self.target.settings = Some(wright_ir::settings::Settings {
+            self.target.settings = Some(workshop_rs::settings::Settings {
                 span: self.span(settings.span)?,
                 children: converted,
             });
@@ -281,13 +281,13 @@ impl<'a> Builder<'a> {
     fn convert_settings_node(
         &self,
         node: &types::SettingsNode,
-    ) -> Result<wright_ir::settings::SettingsNode, IrError> {
+    ) -> Result<workshop_rs::settings::SettingsNode, IrError> {
         Ok(match node {
             types::SettingsNode::Group {
                 name,
                 children,
                 span,
-            } => wright_ir::settings::SettingsNode::Group {
+            } => workshop_rs::settings::SettingsNode::Group {
                 name: name.clone(),
                 children: children
                     .iter()
@@ -296,21 +296,21 @@ impl<'a> Builder<'a> {
                 span: self.span(*span)?,
             },
             types::SettingsNode::Number { name, value, span } => {
-                wright_ir::settings::SettingsNode::Number {
+                workshop_rs::settings::SettingsNode::Number {
                     name: name.clone(),
                     value: *value,
                     span: self.span(*span)?,
                 }
             }
             types::SettingsNode::Bool { name, value, span } => {
-                wright_ir::settings::SettingsNode::Bool {
+                workshop_rs::settings::SettingsNode::Bool {
                     name: name.clone(),
                     value: *value,
                     span: self.span(*span)?,
                 }
             }
             types::SettingsNode::String { name, value, span } => {
-                wright_ir::settings::SettingsNode::String {
+                workshop_rs::settings::SettingsNode::String {
                     name: name.clone(),
                     value: value.clone(),
                     span: self.span(*span)?,
@@ -320,12 +320,12 @@ impl<'a> Builder<'a> {
                 name,
                 elements,
                 span,
-            } => wright_ir::settings::SettingsNode::List {
+            } => workshop_rs::settings::SettingsNode::List {
                 name: name.clone(),
                 elements: elements
                     .iter()
                     .map(|element| {
-                        Ok(wright_ir::settings::SettingsListElement {
+                        Ok(workshop_rs::settings::SettingsListElement {
                             value: element.value.clone(),
                             span: self.span(element.span)?,
                         })
@@ -471,10 +471,10 @@ impl<'a> Builder<'a> {
                 // exactly the name's character count (columns are char-based).
                 let callee_span = span.map(|span| {
                     let end_col = span.start.col + name.chars().count() as u32;
-                    wright_ir::source::Span::new(
+                    workshop_rs::source::Span::new(
                         span.file,
                         span.start,
-                        wright_ir::source::Position::new(span.start.line, end_col),
+                        workshop_rs::source::Position::new(span.start.line, end_col),
                     )
                 });
                 wright_ir::hir::Stmt::CallSubroutine {

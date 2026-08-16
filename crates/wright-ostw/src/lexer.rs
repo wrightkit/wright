@@ -5,9 +5,9 @@
 //! insignificant and skipped with other whitespace. Comments (`#`, `//`,
 //! `/* */`) are skipped; string literals preserve their unescaped value and
 //! exact span. Positions are 1-based line/column, matching the shared
-//! `wright_ir::source` registry.
+//! `workshop_rs::source` registry.
 
-use wright_ir::source::{FileId, Position, Span};
+use workshop_rs::source::{FileId, Position, Span};
 
 use crate::diag::{FrontendError, FrontendResult};
 

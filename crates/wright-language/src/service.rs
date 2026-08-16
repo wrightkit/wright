@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::Serialize;
+use workshop_rs::wir;
 use wright_analyzer::analysis::{self, Finding};
 use wright_analyzer::symbols::{SemanticIndex, Symbol};
-use wright_ir::wir;
 use wright_opy::preprocess::FileRecord;
 
 use crate::document::{Document, DocumentStore, Position, Range};
@@ -400,7 +400,7 @@ impl LanguageService {
         &self,
         files: &[FileRecord],
         document: &Document,
-        span: wright_ir::source::Span,
+        span: workshop_rs::source::Span,
     ) -> SourceLocation {
         let file_index = span.file.index();
         let source = self.source_identity(files, document, file_index);
@@ -468,7 +468,7 @@ impl LanguageService {
         &self,
         files: &[FileRecord],
         document: &Document,
-        span: Option<wright_ir::source::Span>,
+        span: Option<workshop_rs::source::Span>,
     ) -> (String, Range) {
         let Some(span) = span else {
             return (document.uri.clone(), empty_range());
@@ -754,10 +754,10 @@ impl LanguageService {
         let mut edits = Vec::new();
         for edit in &transaction.edits {
             let text = sources.get(&edit.source).cloned().unwrap_or_default();
-            let span = wright_ir::source::Span::new(
-                wright_ir::source::FileId::from_index(0),
-                wright_ir::source::Position::new(edit.range.start_line, edit.range.start_col),
-                wright_ir::source::Position::new(edit.range.end_line, edit.range.end_col),
+            let span = workshop_rs::source::Span::new(
+                workshop_rs::source::FileId::from_index(0),
+                workshop_rs::source::Position::new(edit.range.start_line, edit.range.start_col),
+                workshop_rs::source::Position::new(edit.range.end_line, edit.range.end_col),
             );
             edits.push(RenameEdit {
                 source: edit.source.clone(),
@@ -997,11 +997,11 @@ impl LanguageService {
 }
 
 /// Convert a frontend span to the IR span representation.
-fn ir_span(span: &wright_opy::diag::Span) -> wright_ir::source::Span {
-    wright_ir::source::Span::new(
+fn ir_span(span: &wright_opy::diag::Span) -> workshop_rs::source::Span {
+    workshop_rs::source::Span::new(
         wright_ir::ids::Id::from_index(span.file as usize),
-        wright_ir::source::Position::new(span.start.line, span.start.col),
-        wright_ir::source::Position::new(span.end.line, span.end.col),
+        workshop_rs::source::Position::new(span.start.line, span.start.col),
+        workshop_rs::source::Position::new(span.end.line, span.end.col),
     )
 }
 
@@ -1029,7 +1029,7 @@ fn ostw_error_to_opy(error: &wright_ostw::FrontendError) -> wright_opy::Frontend
 
 /// Convert a shared `wright_ir` span into the language service's frontend
 /// span shape.
-fn opy_span(span: wright_ir::source::Span) -> wright_opy::diag::Span {
+fn opy_span(span: workshop_rs::source::Span) -> wright_opy::diag::Span {
     wright_opy::diag::Span {
         file: span.file.index() as u32,
         start: wright_opy::diag::Position::new(span.start.line, span.start.col),
@@ -1037,7 +1037,7 @@ fn opy_span(span: wright_ir::source::Span) -> wright_opy::diag::Span {
     }
 }
 
-fn span_contains(span: wright_ir::source::Span, line: u32, col: u32) -> bool {
+fn span_contains(span: workshop_rs::source::Span, line: u32, col: u32) -> bool {
     (span.start.line, span.start.col) <= (line, col)
         && (line, col)
             <= (

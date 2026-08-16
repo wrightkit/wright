@@ -9,6 +9,15 @@ rust-version = "1.85.0"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/wrightkit/wright"
 
+[workspace.dependencies]
+# Canonical Workshop core (wright#143): workshop-rs owns the Workshop catalog,
+# parser, emitter, detection, validation, and Workshop IR. This is the single
+# pinned reference for the cutover — workspace crates consume it via
+# `workshop-rs.workspace = true`. The rev is pinned to the merge commit of
+# workshop-rs#4 (canonical core bootstrap); do not consume workshop-rs main
+# headless.
+workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "b96896f8dee0bd5940ed62e2e332785ea315403e" }
+
 [workspace.lints.rust]
 # Unsafe operations inside an unsafe function still need an explicit block so
 # the unsafe surface and its invariants remain visible at the operation site.

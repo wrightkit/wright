@@ -2,11 +2,11 @@
 //! construction, validation, deterministic dumps, and rejection of invalid
 //! states.
 
+use workshop_rs::source::{Position, SourceFile, Span};
+use workshop_rs::wir::{self, Action, Program as WirProgram};
 use wright_ir::error::IrError;
 use wright_ir::hir::{BinaryOp, Expr, GlobalVar, Program as HirProgram, Rule, Stmt};
 use wright_ir::ids::Id;
-use wright_ir::source::{Position, SourceFile, Span};
-use wright_ir::wir::{self, Action, Program as WirProgram};
 
 fn span(file: Id<SourceFile>, start_line: u32, start_col: u32, end_col: u32) -> Span {
     Span::new(
@@ -147,8 +147,8 @@ fn build_wir_program() -> WirProgram {
         span: Some(span(file, 1, 1, 12)),
         name_span: Some(span(file, 1, 10, 11)),
     });
-    let value = program.values.push(wright_ir::wir::ValueNode::new(
-        wright_ir::wir::Value::Number {
+    let value = program.values.push(workshop_rs::wir::ValueNode::new(
+        workshop_rs::wir::Value::Number {
             value: 5.0,
             text: "5".to_string(),
         },

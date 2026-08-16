@@ -58,7 +58,7 @@ interoperability boundary.
 
 | System | Role in Wright | Current Capabilities | Status & Support Boundary | Authority Contract |
 | --- | --- | --- | --- | --- |
-| **Vanilla Workshop** | Canonical target and interoperability layer | Native parser, localized catalog (`catalog.json`), validation, and deterministic emitter (`wright-workshop`). Supports rules, actions, values, events, enums, variables, subroutines, and custom-game-settings emission. | Supported (`en-US` baseline; data-driven localization extensible) | [`docs/workshop/support-matrix.md`](docs/workshop/support-matrix.md) |
+| **Vanilla Workshop** | Canonical target and interoperability layer | Canonical parser, localized catalog, validation, and deterministic emitter (`workshop-rs`, consumed through the `wright-workshop` adapter). Supports rules, actions, values, events, enums, variables, subroutines, and custom-game-settings emission. | Supported (`en-US` baseline; data-driven localization extensible) | [`docs/workshop/support-matrix.md`](docs/workshop/support-matrix.md) |
 | **OPY / OverPy** | Native compatible semantic frontend | Native Rust parser (`wright-opy`), preprocessor (`#!include`, `#!define`), macro expansion, declarations, expressions, enums, custom-game-settings (JSONC blocks), lowering to Wright HIR and Workshop IR. Pinned `overpy@9.7.10` acts strictly as an external compatibility oracle under clean-room isolation. | Supported (corpus-evidenced native compiler and tooling) | [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md), [`docs/licensing.md`](docs/licensing.md) |
 | **OSTW (Overwatch Script To Workshop)** | Compatible semantic frontend (native OSTW frontend) | Native Rust parser/CST (`wright-ostw`), project settings (`ds.toml`), import-closure resolution, and semantic lowering to Wright HIR for the protect-ban slice. Pinned OSTW `v3.4.0` serves strictly as an external compatibility oracle. | In progress (native frontend & HIR lowering baseline) | [`docs/ostw/compatibility-baseline.md`](docs/ostw/compatibility-baseline.md), [`docs/architecture.md`](docs/architecture.md) |
 
@@ -68,8 +68,8 @@ Workshop is the canonical hub for cross-language conversion. The required
 long-term conversion directions are:
 
 ```text
-OPY      → Workshop   (Supported: native wright-opy → HIR → WIR → wright-workshop)
-OSTW     → Workshop   (In progress: native wright-ostw → HIR → WIR → wright-workshop)
+OPY      → Workshop   (Supported: native wright-opy → HIR → WIR → workshop-rs)
+OSTW     → Workshop   (In progress: native wright-ostw → HIR → WIR → workshop-rs)
 Workshop → OPY        (Planned: decompilation / translation via canonical WIR)
 Workshop → OSTW       (Planned: translation via canonical WIR)
 Workshop → Workshop   (Supported: localized catalog parse → canonical WIR → deterministic emit)
@@ -272,7 +272,7 @@ Wright processes source code through a modular, owned pipeline:
 ```text
 Source Input (.opy or Workshop text)
     ↓
-Owned Semantic Frontend (wright-opy / wright-workshop)
+Owned Semantic Frontend (wright-opy / workshop-rs via wright-workshop adapter)
     ↓
 Wright High-Level Intermediate Representation (HIR)
     ↓

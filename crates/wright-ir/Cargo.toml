@@ -4,7 +4,16 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Wright's typed intermediate-representation core: Opy HIR and Workshop IR models."
+description = "Wright's typed intermediate-representation core: Opy HIR and the HIR-to-WIR lowering."
 
 [lints]
 workspace = true
+
+[dependencies]
+# Canonical Workshop IR ownership (#143): the `wir`, `settings`, and `source`
+# models, and the generic IR infrastructure they share, are owned by
+# `workshop-rs`. This crate re-exports that infrastructure for the in-repo
+# Opy HIR and lowering; the re-export shims disappear when the HIR/lowering
+# extract to `opy-rs`. Single pinned reference: `[workspace.dependencies]`
+# in the root Cargo.toml.
+workshop-rs.workspace = true

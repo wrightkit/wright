@@ -8,10 +8,10 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
+use workshop_rs::wir::Program as WirProgram;
 use wright_analyzer::analysis::Severity;
 use wright_analyzer::registry::LintConfig;
 use wright_analyzer::service::SemanticService;
-use wright_ir::wir::Program as WirProgram;
 
 fn fixture_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -7,7 +7,7 @@
 //! committed protect-ban corpus exercises; other OSTW forms are rejected
 //! explicitly by the parser rather than guessed.
 
-use wright_ir::source::Span;
+use workshop_rs::source::Span;
 
 /// A parsed source file: imports and top-level items.
 #[derive(Debug, Clone)]

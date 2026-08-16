@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use wright_ir::wir;
+use workshop_rs::wir;
 
 use crate::analysis::{
     Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,

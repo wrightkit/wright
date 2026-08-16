@@ -1,6 +1,6 @@
 //! Deterministic debug dump for the internal Opy HIR model.
 
-use crate::source::Span;
+use workshop_rs::source::Span;
 
 use super::{Event, Expr, Program, Stmt, UnaryOp};
 

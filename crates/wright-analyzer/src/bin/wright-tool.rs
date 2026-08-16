@@ -26,7 +26,7 @@ use wright_workshop::{detect, parser};
 
 enum Input {
     Protocol(wright_core::hir::Program),
-    Workshop(wright_ir::wir::Program, String),
+    Workshop(workshop_rs::wir::Program, String),
 }
 
 fn main() -> ExitCode {

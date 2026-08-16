@@ -1,6 +1,6 @@
 //! The pass pipeline: ordering, profiles, metrics, and validation.
 
-use wright_ir::wir;
+use workshop_rs::wir;
 
 use crate::fold_constants::FoldConstants;
 use crate::profile::Profile;
@@ -63,7 +63,7 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wright_ir::settings::{Settings, SettingsNode};
+    use workshop_rs::settings::{Settings, SettingsNode};
 
     fn program_with_settings() -> wir::Program {
         wir::Program {

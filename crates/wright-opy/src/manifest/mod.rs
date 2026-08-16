@@ -14,11 +14,11 @@
 //!   (`probes/probes.json`); `probes/validate.py` runs each probe against the
 //!   pinned OverPy 9.7.10 oracle and verifies accept/reject, emission hash,
 //!   and diagnostic category deterministically.
-//! * `catalogId` links each entry to the Workshop emission catalog
-//!   (`crates/wright-workshop/src/catalog/data/catalog.json`) by canonical
-//!   identity without duplicating localization/output spelling data; a
-//!   cross-check test verifies every declared id exists with the matching
-//!   kind.
+//! * `catalogId` links each entry to the canonical Workshop emission
+//!   catalog (workshop-rs, consumed through the `wright-workshop` adapter)
+//!   by canonical identity without duplicating localization/output spelling
+//!   data; a cross-check test verifies every declared id exists with the
+//!   matching kind.
 //!
 //! The manifest is language-compatibility metadata, not runtime content data
 //! (issue #96 stays deferred), and it is Wright-authored data validated
@@ -886,55 +886,47 @@ mod tests {
 
     #[test]
     fn catalog_ids_link_to_the_workshop_emission_catalog() {
-        // Every declared `catalogId` must exist in the Workshop emission
-        // catalog (`crates/wright-workshop/src/catalog/data/catalog.json`)
-        // under the matching kind, so manifest entries never surface as
-        // accidental emitter catalog misses. Entries without a `catalogId`
-        // (special emission forms like `debug`/`print`, or emission surfaces
-        // not yet catalog-covered like the alias targets) are exempt by
-        // design.
+        // Every declared `catalogId` must exist in the canonical Workshop
+        // emission catalog (workshop-rs, consumed through the wright-workshop
+        // adapter) under the matching kind, so manifest entries never
+        // surface as accidental emitter catalog misses. Entries without a
+        // `catalogId` (special emission forms like `debug`/`print`, or
+        // emission surfaces not yet catalog-covered like the alias targets)
+        // are exempt by design.
         let manifest = Manifest::builtin().expect("builtin");
-        let catalog_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("wright-workshop")
-            .join("src/catalog/data/catalog.json");
-        let catalog: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&catalog_path).unwrap()).unwrap();
+        let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+        let has_id = |kind: wright_workshop::catalog::Kind, id: &str| {
+            catalog.entries_of(kind).any(|entry| entry.id == id)
+        };
         for function in &manifest.functions {
             let Some(catalog_id) = &function.catalog_id else {
                 continue;
             };
-            let section = match function.kind {
-                FunctionKind::Action | FunctionKind::MemberAction => "actions",
-                FunctionKind::Value | FunctionKind::MemberValue => "values",
+            let kind = match function.kind {
+                FunctionKind::Action | FunctionKind::MemberAction => {
+                    wright_workshop::catalog::Kind::Action
+                }
+                FunctionKind::Value | FunctionKind::MemberValue => {
+                    wright_workshop::catalog::Kind::Value
+                }
             };
-            let found = catalog[section]
-                .as_array()
-                .expect("catalog section")
-                .iter()
-                .any(|entry| entry["id"] == serde_json::Value::String(catalog_id.clone()));
             assert!(
-                found,
+                has_id(kind, catalog_id),
                 "catalogId '{}' of '{}' is missing from the Workshop emission catalog",
-                catalog_id, function.id
+                catalog_id,
+                function.id
             );
             // Contextual dispatch targets (the `chase` form) must exist in
             // the action catalog too, so a valid contextual call never
             // surfaces as an accidental emitter catalog miss.
             if let Some(contextual) = &function.contextual_domain {
                 for (keyword, option) in &contextual.options {
-                    let found = catalog["actions"]
-                        .as_array()
-                        .expect("catalog actions")
-                        .iter()
-                        .any(|entry| {
-                            entry["id"] == serde_json::Value::String(option.target.clone())
-                        });
                     assert!(
-                        found,
+                        has_id(wright_workshop::catalog::Kind::Action, &option.target),
                         "contextual target '{}' (keyword '{keyword}') of '{}' is missing \
                          from the Workshop emission catalog",
-                        option.target, function.id
+                        option.target,
+                        function.id
                     );
                 }
             }

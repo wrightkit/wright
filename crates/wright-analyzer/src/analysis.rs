@@ -35,8 +35,8 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use wright_ir::source::Span;
-use wright_ir::wir::{
+use workshop_rs::source::Span;
+use workshop_rs::wir::{
     self, Action, ActionId, GlobalVarId, ModifyOp, PlayerVarId, RuleId, Value, ValueId,
 };
 

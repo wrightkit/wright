@@ -1,20 +1,23 @@
 //! Wright's typed intermediate-representation core.
 //!
-//! This crate owns the durable compiler data model described by
+//! This crate owns the Opy-frontend IR content described by
 //! [`docs/adr/0006-rust-ir-core.md`](../../docs/adr/0006-rust-ir-core.md):
 //!
-//! * [`ids`] — strongly typed IDs for every stable identity;
-//! * [`arena`] — bounds-checked arena storage for nodes;
-//! * [`source`] — the source-file model and spans;
-//! * [`settings`] — the neutral custom-game-settings carrier and table;
 //! * [`hir`] — the internal Opy HIR model (frontend semantics);
-//! * [`wir`] — the Workshop IR model (workshop program structure);
-//! * [`lower`] — the HIR → Workshop IR lowering boundary;
-//! * [`error`] — structured IR errors.
+//! * [`lower`] — the HIR → Workshop IR lowering boundary.
 //!
-//! The crate is protocol-agnostic: it does not depend on the
+//! Canonical Workshop IR ownership moved to `workshop-rs` (wright#143,
+//! ADR-0009): the `wir`, `settings`, and `source` models are no longer
+//! implemented here. The generic IR infrastructure they share (`ids`,
+//! `arena`, `format`, `error`) is re-exported from `workshop-rs` so the HIR
+//! and the Workshop IR it lowers into share one type identity. These
+//! re-export shims contain no independent implementation and disappear when
+//! the HIR and lowering extract to `opy-rs`; until then, canonical
+//! Workshop-type changes route to `workshop-rs`.
+//!
+//! The crate remains protocol-agnostic: it does not depend on the
 //! `wright/opy-hir` bridge types in `wright-core`, on OverPy, or on any other
-//! crate.
+//! Wright tooling crate.
 
 pub mod arena;
 pub mod error;
@@ -22,6 +25,3 @@ pub mod format;
 pub mod hir;
 pub mod ids;
 pub mod lower;
-pub mod settings;
-pub mod source;
-pub mod wir;

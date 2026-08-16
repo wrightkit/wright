@@ -21,10 +21,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use workshop_rs::wir::{self, Action, Value};
 use wright_driver::CompilerSession;
 use wright_driver::config::SessionConfig;
 use wright_driver::result::{ConvertResult, ConvertTarget};
-use wright_ir::wir::{self, Action, Value};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
@@ -212,7 +212,7 @@ fn inline_write_once_player_vars(program: &mut wir::Program) {
                 .values
                 .get(id)
                 .cloned()
-                .unwrap_or_else(|| wright_ir::wir::ValueNode::new(wir::Value::Null, None));
+                .unwrap_or_else(|| workshop_rs::wir::ValueNode::new(wir::Value::Null, None));
             let replacement = match &node.value {
                 Value::PlayerVariable { player, variable }
                     if matches!(
@@ -273,7 +273,7 @@ fn foreach_globalize(program: &mut wir::Program) {
             .values
             .get(id)
             .cloned()
-            .unwrap_or_else(|| wright_ir::wir::ValueNode::new(wir::Value::Null, None));
+            .unwrap_or_else(|| workshop_rs::wir::ValueNode::new(wir::Value::Null, None));
         let children: Vec<wir::ValueId> = match &node.value {
             Value::Array(elements) => elements.clone(),
             Value::Vector { x, y, z } => vec![*x, *y, *z],

@@ -38,8 +38,9 @@ not a Rust trait, dylib, or FFI ABI.
 
 Current implementation state:
 
-- **Vanilla Workshop**: in-repo canonical model, parser, emitter, and target
-  semantics (`wright-workshop`); target ownership: `workshop-rs`;
+- **Vanilla Workshop**: canonical model, parser, emitter, and target
+  semantics consumed from `workshop-rs` via the `wright-workshop` re-export
+  adapter (wright#143); ownership: `workshop-rs`;
 - **OPY**: in-repo compatible semantic frontend (`wright-opy`); target
   ownership: `opy-rs`;
 - **OSTW/DEL**: in-repo compatible semantic frontend (`wright-ostw`),
@@ -84,7 +85,7 @@ The intended primary flow is:
 
 ```text
 `.opy` or Workshop source
-    → wright-opy / wright-workshop (owned semantic frontend)
+    → wright-opy (owned frontend) / workshop-rs (canonical Workshop core)
     → Wright HIR
     → Wright Workshop IR (WIR)
     → Wright backend
@@ -127,9 +128,9 @@ to Wright HIR). The supported baseline is documented in
 [`docs/ostw/compatibility-baseline.md`](ostw/compatibility-baseline.md). Pinned
 OSTW (`v3.4.0`) serves as the compatibility oracle.
 
-**`wright-workshop`**: the native Workshop frontend and emitter (localized
-catalog, lexer, parser, validation, and emitter). Workshop is the canonical
-target for all frontends.
+**`wright-workshop`**: re-export-only adapter over the canonical `workshop-rs`
+core (catalog, lexer, parser, validation, emitter, and Workshop IR; wright#143).
+Workshop is the canonical target for all frontends.
 
 ### Adapter and bridge
 

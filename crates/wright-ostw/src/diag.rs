@@ -2,11 +2,11 @@
 //!
 //! Every frontend failure is a [`FrontendError`] with a stable `code`, a
 //! human message, and an optional source span. Spans use the shared
-//! `wright_ir::source` registry types, so the driver maps them into the
+//! `workshop_rs::source` registry types, so the driver maps them into the
 //! `wright-result/v1` diagnostic contract with the same provenance rules as
 //! the other frontends; wording is not part of the machine contract.
 
-use wright_ir::source::Span;
+use workshop_rs::source::Span;
 
 /// A structured frontend error.
 #[derive(Debug, Clone, PartialEq, Eq)]

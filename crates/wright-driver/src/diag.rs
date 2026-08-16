@@ -102,8 +102,8 @@ pub struct Diagnostic {
 
 /// Build a source span from the IR source model, resolving the file path.
 pub fn span_from_ir(
-    span: Option<wright_ir::source::Span>,
-    files: &wright_ir::arena::Arena<wright_ir::source::SourceFile>,
+    span: Option<workshop_rs::source::Span>,
+    files: &wright_ir::arena::Arena<workshop_rs::source::SourceFile>,
 ) -> Option<SourceSpan> {
     let span = span?;
     let file = span.file.index();

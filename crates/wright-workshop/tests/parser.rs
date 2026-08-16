@@ -4,10 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_ir::wir;
 use wright_workshop::catalog::{Catalog, Locale};
 use wright_workshop::parser;
 use wright_workshop::validate;
+use wright_workshop::wir;
 
 fn fixture_oracle_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

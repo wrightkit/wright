@@ -7,9 +7,10 @@ qualified lawyer.
 ## Purpose
 
 Wright is independently implemented Rust software: a tooling-first semantic
-platform for the Overwatch Workshop ecosystem, with the semantic frontends and
-canonical Workshop core currently co-located as in-repo crates (`wright-opy`,
-`wright-ostw`, `wright-workshop`). Per
+platform for the Overwatch Workshop ecosystem, with the semantic frontends
+currently co-located as in-repo crates (`wright-opy`, `wright-ostw`);
+canonical Workshop semantics are consumed from `workshop-rs` through the
+`wright-workshop` re-export adapter (wright#143). Per
 [ADR-0009](adr/0009-language-ownership-licensing-boundaries.md), durable
 ownership of source-language frontends moves to provider repositories
 (`opy-rs`, `del-rs`) and canonical Workshop semantics to `workshop-rs`; the

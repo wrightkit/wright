@@ -1,27 +1,17 @@
-//! Wright's native Workshop language model.
+//! Wright's Workshop-language adapter: re-exports the canonical `workshop-rs`
+//! core.
 //!
-//! This crate owns the Workshop-language foundation so localized vanilla
-//! Workshop text can be parsed, analyzed, transformed, and emitted without an
-//! `.opy` round-trip:
+//! This crate is a **cutover adapter** (wright#143, ADR-0009): the canonical
+//! Workshop catalog, parser, emitter, detection, round-trip, validation, and
+//! Workshop IR are owned by `workshop-rs`; this crate only re-exports that
+//! surface so existing `wright_workshop::…` call sites keep resolving during
+//! the v0.2 cutover. It contains **no independent semantic implementation**:
+//! every item below is the `workshop-rs` item.
 //!
-//! * [`catalog`] — the Wright-owned canonical Workshop catalog: stable
-//!   semantic identities, kinds, parameters, and locale aliases;
-//! * `lexer`/`parser` — the native localized Workshop frontend producing
-//!   validated Workshop IR;
-//! * `emitter` — deterministic localized Workshop emission from WIR;
-//! * `detect` — Workshop client-language detection and explicit override;
-//! * `roundtrip` — cross-language round-trip validation.
-//!
-//! The catalog is locale-independent at the identity layer: analyzer and WIR
-//! APIs never need locale-specific strings to identify a builtin.
+//! Removal path: migrate call sites to `workshop_rs::…` directly (the
+//! re-exported paths are the `workshop-rs` paths), then delete this crate.
+//! Wright tooling (CLI, services, analyzer, driver) consumes
+//! `workshop-rs` for Workshop semantics; do not reintroduce Workshop
+//! implementation here.
 
-pub mod catalog;
-pub mod detect;
-pub mod emitter;
-mod error;
-pub mod lexer;
-pub mod parser;
-pub mod roundtrip;
-pub mod validate;
-
-pub use error::WorkshopError;
+pub use workshop_rs::*;
