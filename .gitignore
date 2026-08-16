@@ -40,3 +40,4 @@ compatibility/**/__pycache__/
 adapter/node_modules/
 
 .agents/
+.opencode/
