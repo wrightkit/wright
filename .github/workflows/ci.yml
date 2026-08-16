@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: ["main"]
   pull_request:
 
 permissions:
@@ -28,6 +29,9 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: clippy, rustfmt
           rustflags: ""
+          cache-shared-key: linux-quality
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -50,6 +54,9 @@ jobs:
         with:
           toolchain: stable
           rustflags: ""
+          cache-shared-key: linux-quality
+          cache-save-if: false
+          cache-on-failure: false
 
       - name: Build wright (debug)
         run: cargo build -p wright-cli -p wright-bench
@@ -126,6 +133,9 @@ jobs:
         with:
           toolchain: stable
           rustflags: ""
+          cache-shared-key: linux-quality
+          cache-save-if: false
+          cache-on-failure: false
 
       - name: Run OSTW forward-compilation differential suite
         run: cargo test -p wright-ostw --test differential
@@ -176,6 +186,9 @@ jobs:
         with:
           toolchain: stable
           rustflags: ""
+          cache-shared-key: linux-quality
+          cache-save-if: false
+          cache-on-failure: false
 
       - name: Run native-vs-reference differential suite
         run: cargo test -p wright-opy --test differential
@@ -211,6 +224,10 @@ jobs:
         with:
           toolchain: stable
           rustflags: ""
+          cache-targets: false
+          cache-bin: false
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
