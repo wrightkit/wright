@@ -30,12 +30,10 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
           components: clippy, rustfmt
-          rustflags: ""
-          cache: false
 
       - name: Verify tag version matches the workspace implementation version
         run: |
@@ -96,17 +94,15 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          rustflags: ""
-          cache: false
 
       - name: Add cross-compile target
         run: rustup target add "$TARGET"
 
       - name: Build release binaries
-        run: cargo build --release -p wright-cli -p wright-lsp --target "$TARGET"
+        run: cargo build --locked --release -p wright-cli -p wright-lsp --target "$TARGET"
 
       - name: Package archive with version stamp
         run: |

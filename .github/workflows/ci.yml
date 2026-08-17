@@ -30,23 +30,29 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy, rustfmt
-          rustflags: ""
-          cache-shared-key: linux-quality
-          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: false
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --workspace --all-targets --all-features
+        run: cargo test --locked --workspace --all-targets --all-features
 
   lpp-client-integration:
     name: LPP client integration (#142, #139)
@@ -56,12 +62,18 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          rustflags: ""
-          cache-shared-key: linux-quality
-          cache-save-if: false
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: false
           cache-on-failure: false
 
       # The mock provider is built from the pinned language-provider-protocol
@@ -75,7 +87,7 @@ jobs:
           path: language-provider-protocol
 
       - name: Build the pinned LPP mock provider
-        run: cargo build -p lpp-mock-provider
+        run: cargo build --locked -p lpp-mock-provider
         working-directory: language-provider-protocol
 
       # REQUIRED: these suites self-skip when LPP_MOCK_PROVIDER is absent,
@@ -84,9 +96,9 @@ jobs:
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
         run: |
-          cargo test -p wright-lpp --test mock_provider
-          cargo test -p wright-driver --test lpp
-          cargo test -p wright-driver --test provider_edit
+          cargo test --locked -p wright-lpp --test mock_provider
+          cargo test --locked -p wright-driver --test lpp
+          cargo test --locked -p wright-driver --test provider_edit
 
   v1-gates:
     name: v1 release gates (N-level, scenarios, benchmarks)
@@ -96,12 +108,18 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          rustflags: ""
-          cache-shared-key: linux-quality
-          cache-save-if: false
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: false
           cache-on-failure: false
 
       - name: Build wright (debug)
@@ -175,16 +193,22 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          rustflags: ""
-          cache-shared-key: linux-quality
-          cache-save-if: false
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: false
           cache-on-failure: false
 
       - name: Run OSTW forward-compilation differential suite
-        run: cargo test -p wright-ostw --test differential
+        run: cargo test --locked -p wright-ostw --test differential
 
       - name: Upload differential report
         if: always()
@@ -228,16 +252,22 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          rustflags: ""
-          cache-shared-key: linux-quality
-          cache-save-if: false
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: false
           cache-on-failure: false
 
       - name: Run native-vs-reference differential suite
-        run: cargo test -p wright-opy --test differential
+        run: cargo test --locked -p wright-opy --test differential
 
       - name: Upload differential report
         if: always()
@@ -266,13 +296,18 @@ jobs:
           python-version: "3.12"
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          rustflags: ""
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dist-validation-${{ runner.os }}
           cache-targets: false
+          cache-all-crates: false
+          cache-workspace-crates: false
           cache-bin: false
-          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: false
 
       - name: Set up Node.js
@@ -281,7 +316,7 @@ jobs:
           node-version: 22
 
       - name: Build wright CLI and LSP
-        run: cargo build -p wright-cli -p wright-lsp
+        run: cargo build --locked -p wright-cli -p wright-lsp
 
       - name: Validate package-manager metadata and install script
         run: python scripts/verify-dist.py
