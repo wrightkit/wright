@@ -63,17 +63,22 @@ publication; there is no partial release.
 
 ### Creating a release
 
-The tag is the release decision point. Before tagging, bump the version in
-`[workspace.package]` of the root `Cargo.toml` (and land it via a normal PR);
-the release workflows reject a tag whose version does not match the workspace
-implementation version. Then either:
+The tag is the release decision point. The **Release tag** workflow is the
+single-input release entry point: enter the target version, and it validates
+SemVer, updates `[workspace.package]` in the root `Cargo.toml` and the
+generated version metadata, commits that version bump to `main`, pushes
+`v<version>`, and dispatches `release.yml`. It rejects an existing tag and
+does not start the release until the committed workspace version matches the
+tag.
+
+For a manual command-line release, update the workspace version and generated
+metadata first, then use either:
 
 * **From the command line:** `git tag v0.1.0 && git push origin v0.1.0` — the
   tag push triggers `release.yml` directly; or
 * **From GitHub:** run the **Release tag** workflow
-  (Actions → Release tag → Run workflow) with the version, e.g. `0.1.0`. It
-  validates the semver and the workspace-version match, fails if the tag
-  already exists, pushes `v<version>`, and then dispatches `release.yml`.
+  (Actions → Release tag → Run workflow) with only the target version, e.g.
+  `0.2.0`.
 
 Both paths run the same release gates, build the same target matrix, and
 publish through the same `publish` job.
