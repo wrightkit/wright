@@ -147,7 +147,7 @@ checksums, then attached to the Release as
 `wright-<version>.homebrew.rb`, `wright-<version>.winget.zip`, and
 `wright-<version>.scoop.json`. The `publish-tap` job then pushes the generated
 Homebrew formula into `wrightkit/homebrew-tap` automatically; see
-[`dist/README.md`](dist/README.md) for the required `HOMEBREW_TAP_TOKEN`
+[`dist/README.md`](dist/README.md) for the required `GH_TOKEN`
 secret and the per-channel publication process and boundaries.
 
 | Channel | Platforms | Installs | Checksum control |

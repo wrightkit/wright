@@ -288,19 +288,19 @@ jobs:
         with:
           repository: wrightkit/homebrew-tap
           ref: main
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
           path: tap
 
       - name: Update wright.rb and push to the tap
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
-          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
-            echo "error: HOMEBREW_TAP_TOKEN secret is not set." >&2
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "error: GH_TOKEN secret is not set." >&2
             echo "Add a fine-grained PAT with Contents: Read and write on" >&2
-            echo "wrightkit/homebrew-tap as an Actions secret in this repository." >&2
+            echo "wrightkit/homebrew-tap as an Actions secret available to this repository." >&2
             exit 1
           fi
           cp formula/wright.rb tap/wright.rb

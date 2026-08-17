@@ -59,7 +59,7 @@ after release archives are published:
   pushes the generated `wright.rb` (the same formula attached to the Release
   as `wright-<version>.homebrew.rb`) into the tap on every release. It needs a
   fine-grained PAT with `Contents: Read and write` on `wrightkit/homebrew-tap`,
-  stored as the `HOMEBREW_TAP_TOKEN` Actions secret in this repository. The
+  stored as the `GH_TOKEN` Actions secret available to this repository. The
   formula downloads the exact published macOS archives for both Apple Silicon
   and Intel and installs `wright` and `wright-lsp`; Homebrew verifies the
   per-arch `sha256` before extraction.
