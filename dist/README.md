@@ -49,7 +49,8 @@ after release archives are published:
 
 2. `package-npm` packages the release binaries into platform-native npm packages
    via `scripts/package-npm.py`, runs smoke tests on the packaged artifacts,
-   attaches the `.tgz` tarballs to the Release, and publishes to the npm registry.
+   attaches the `.tgz` tarballs to the Release, and publishes the same tarballs
+   to npmjs.org and GitHub Packages.
 
 ### Homebrew
 
@@ -118,6 +119,10 @@ postinstall download scripts.
   ```
 - **Boundary**: npm is strictly a package/distribution layer for the native Rust
   CLI; there is no JavaScript reimplementation of the Wright compiler.
+- **Registries**: the release workflow publishes to npmjs.org when `NPM_TOKEN`
+  is configured, and always publishes to GitHub Packages with the workflow
+  `GITHUB_TOKEN`. GitHub Packages consumers must configure the `@wrightkit`
+  scope to use `https://npm.pkg.github.com` and authenticate with GitHub.
 
 ## Drift detection
 

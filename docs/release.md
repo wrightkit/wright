@@ -183,6 +183,10 @@ integration with Node.js tooling, language clients, and CI agents:
   - `npx wright --version` or `npm install @wrightkit/wright`
   - Zero source compilation or postinstall download scripts; native binaries are packaged directly in the platform tarballs.
   - npm is strictly a package/distribution layer for the native Rust CLI; there is no JavaScript reimplementation.
+- **Registries**: the release workflow publishes the same packages to npmjs.org
+  when `NPM_TOKEN` is available and to GitHub Packages using the workflow
+  `GITHUB_TOKEN`. GitHub Packages installs require an authenticated npm scope
+  mapping for `@wrightkit` to `https://npm.pkg.github.com`.
 
 Standalone installations are also updatable in place: `wright update`
 consumes the same release artifacts and checksums (no `install.sh`
