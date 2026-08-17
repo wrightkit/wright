@@ -415,7 +415,8 @@ fn settings_emission_reparses_with_the_workshop_parser() {
     let program = program_with_settings(pixelart_settings());
     let emitted = emitter::emit(&program, &catalog(), &en()).expect("emits");
     assert!(emitted.starts_with("settings {"));
-    let reparsed = parser::parse(&emitted, &catalog(), &en()).expect("settings-bearing text parses");
+    let reparsed =
+        parser::parse(&emitted, &catalog(), &en()).expect("settings-bearing text parses");
     assert!(reparsed.settings.is_some());
 }
 
