@@ -566,7 +566,9 @@ impl LanguageService {
                 document_version: 0,
                 ok: false,
                 edits: Vec::new(),
-                diagnostics: vec!["rename-invalid-name: the new name must not be empty".to_string()],
+                diagnostics: vec![
+                    "rename-invalid-name: the new name must not be empty".to_string(),
+                ],
             };
         }
         let Some(requesting) = self.store.document(uri) else {

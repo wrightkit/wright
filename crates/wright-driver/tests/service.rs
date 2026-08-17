@@ -44,11 +44,13 @@ fn capabilities_negotiate_version_and_operations() {
     assert_eq!(capabilities["contract"], "wright-result/v1");
     assert_eq!(capabilities["name"], "wright-tool-service");
     assert!(capabilities["operations"].as_array().unwrap().len() >= 10);
-    assert!(capabilities["languages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|language| language == "opy"));
+    assert!(
+        capabilities["languages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|language| language == "opy")
+    );
 }
 
 #[test]
@@ -105,11 +107,13 @@ fn target_metadata_reports_catalog_surface() {
     assert!(metadata["actions"].as_u64().unwrap() > 0);
     assert!(metadata["values"].as_u64().unwrap() > 0);
     assert!(!metadata["enumDomains"].as_array().unwrap().is_empty());
-    assert!(metadata["locales"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|locale| locale == "en-us"));
+    assert!(
+        metadata["locales"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|locale| locale == "en-us")
+    );
 }
 
 #[test]
