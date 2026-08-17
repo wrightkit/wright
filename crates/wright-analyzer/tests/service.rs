@@ -69,7 +69,7 @@ fn version_reports_identity_and_capabilities() {
     let responses = in_process_responses("synthetic/control-flow", &[r#"{"op":"version"}"#]);
     let result = &responses[0]["result"];
     assert_eq!(result["name"], "wright-tool");
-    assert_eq!(result["version"], "0.1.0");
+    assert_eq!(result["version"], env!("CARGO_PKG_VERSION"));
     let capabilities: Vec<&str> = result["capabilities"]
         .as_array()
         .unwrap()
