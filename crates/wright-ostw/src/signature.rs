@@ -40,7 +40,7 @@ pub const BUILTIN_BINDINGS: &[(&str, (Kind, &str))] = &[
     ("OppositeTeamOf", (Kind::Value, "oppositeTeamOf")),
     ("NumberOfPlayers", (Kind::Value, "numberOfPlayers")),
     ("ArrayContains", (Kind::Value, "arrayContains")),
-    ("ArrayElement", (Kind::Value, "arrayElement")),
+    ("ArrayElement", (Kind::Value, "currentArrayElement")),
     ("CurrentArrayIndex", (Kind::Value, "currentArrayIndex")),
     ("CountOf", (Kind::Value, "countOf")),
     ("IndexOfArrayValue", (Kind::Value, "indexOfArrayValue")),
@@ -163,9 +163,11 @@ pub const BUILTIN_BINDINGS: &[(&str, (Kind, &str))] = &[
         "DestroyAllProgressBarInWorldText",
         (Kind::Action, "destroyAllProgressBarInWorldText"),
     ),
-    ("DeleteAllClasses", (Kind::Action, "deleteAllClasses")),
     ("StopChasingVariable", (Kind::Action, "stopChasingVariable")),
-    ("ChaseVariableAtRate", (Kind::Action, "chaseVariableAtRate")),
+    // The generic OSTW chase spelling is lowered to the canonical chase
+    // family; workshop-rs emits the global/player spelling from the variable
+    // value shape.
+    ("ChaseVariableAtRate", (Kind::Action, "chaseAtRate")),
     ("Teleport", (Kind::Action, "teleport")),
 ];
 
