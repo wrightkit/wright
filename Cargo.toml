@@ -15,7 +15,7 @@ repository = "https://github.com/wrightkit/wright"
 # pinned reference for the cutover — workspace crates consume it via
 # `workshop-rs.workspace = true`. The rev is pinned to the accepted workshop-rs
 # v0.2 candidate; do not consume workshop-rs main headless.
-workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "7b0f8c38b9d1ee627565e8406de25293df9b4f7f" }
+workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "3b9a9b6b5ce70921c466268522272abad8aaee34" }
 
 [workspace.lints.rust]
 # Unsafe operations inside an unsafe function still need an explicit block so
