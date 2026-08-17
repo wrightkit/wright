@@ -13,10 +13,9 @@ repository = "https://github.com/wrightkit/wright"
 # Canonical Workshop core (wright#143): workshop-rs owns the Workshop catalog,
 # parser, emitter, detection, validation, and Workshop IR. This is the single
 # pinned reference for the cutover — workspace crates consume it via
-# `workshop-rs.workspace = true`. The rev is pinned to the merge commit of
-# workshop-rs#4 (canonical core bootstrap); do not consume workshop-rs main
-# headless.
-workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "b96896f8dee0bd5940ed62e2e332785ea315403e" }
+# `workshop-rs.workspace = true`. The rev is pinned to the accepted workshop-rs
+# v0.2 candidate; do not consume workshop-rs main headless.
+workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "7b0f8c38b9d1ee627565e8406de25293df9b4f7f" }
 
 [workspace.lints.rust]
 # Unsafe operations inside an unsafe function still need an explicit block so

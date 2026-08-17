@@ -56,7 +56,6 @@ rule("Reconstruction surface: action calls")
         Destroy Effect(Last Created Entity);
         Destroy All Progress Bar HUD Text;
         Destroy All Progress Bar In-World Text;
-        Delete All Classes;
         Stop Chasing Variable(Global Variable(g));
     }
 }
