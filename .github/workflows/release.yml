@@ -135,8 +135,14 @@ jobs:
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
           PAYLOAD="wright-$VERSION-$TARGET"
-          EXTRACT="$(mktemp -d)"
-          tar -xf "dist/$PAYLOAD.$EXT" -C "$EXTRACT"
+          if [[ "$EXT" == "zip" ]]; then
+            EXTRACT="dist/smoke-extract"
+            pwsh -NoLogo -NoProfile -NonInteractive -Command \
+              "Expand-Archive -LiteralPath 'dist/$PAYLOAD.$EXT' -DestinationPath '$EXTRACT' -Force"
+          else
+            EXTRACT="$(mktemp -d)"
+            tar -xf "dist/$PAYLOAD.$EXT" -C "$EXTRACT"
+          fi
           if [[ "$RUNNER_OS" == "Windows" ]]; then EXE=".exe"; else EXE=""; fi
           WRIGHT="$EXTRACT/$PAYLOAD/wright$EXE"
           LSP="$EXTRACT/$PAYLOAD/wright-lsp$EXE"
