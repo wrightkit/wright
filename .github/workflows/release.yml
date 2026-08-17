@@ -118,7 +118,8 @@ jobs:
           cp "target/$TARGET/release/wright$EXE" "dist/$PAYLOAD/"
           cp "target/$TARGET/release/wright-lsp$EXE" "dist/$PAYLOAD/"
           if [[ "$EXT" == "zip" ]]; then
-            (cd dist && tar -a -cf "$PAYLOAD.zip" "$PAYLOAD")
+            (cd dist && pwsh -NoLogo -NoProfile -NonInteractive -Command \
+              "Compress-Archive -Path '$PAYLOAD' -DestinationPath '$PAYLOAD.zip' -Force")
           else
             (cd dist && tar -czf "$PAYLOAD.tar.gz" "$PAYLOAD")
           fi
