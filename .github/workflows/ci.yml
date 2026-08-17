@@ -43,7 +43,7 @@ jobs:
         run: cargo test --workspace --all-targets --all-features
 
   lpp-client-integration:
-    name: LPP client integration (#142)
+    name: LPP client integration (#142, #139)
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -80,6 +80,7 @@ jobs:
         run: |
           cargo test -p wright-lpp --test mock_provider
           cargo test -p wright-driver --test lpp
+          cargo test -p wright-driver --test provider_edit
 
   v1-gates:
     name: v1 release gates (N-level, scenarios, benchmarks)
