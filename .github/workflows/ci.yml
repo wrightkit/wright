@@ -9,7 +9,86 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.classify.outputs.rust }}
+      lpp: ${{ steps.classify.outputs.lpp }}
+      v1: ${{ steps.classify.outputs.v1 }}
+      overpy_oracle: ${{ steps.classify.outputs.overpy_oracle }}
+      ostw_reference: ${{ steps.classify.outputs.ostw_reference }}
+      ostw_diff: ${{ steps.classify.outputs.ostw_diff }}
+      adapter: ${{ steps.classify.outputs.adapter }}
+      opy_diff: ${{ steps.classify.outputs.opy_diff }}
+      dist: ${{ steps.classify.outputs.dist }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE_SHA"
+          else
+            base="$PUSH_BASE_SHA"
+          fi
+
+          emit_all() {
+            for key in rust lpp v1 overpy_oracle ostw_reference ostw_diff adapter opy_diff dist; do
+              echo "$key=true" >> "$GITHUB_OUTPUT"
+            done
+          }
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            emit_all
+            exit 0
+          fi
+
+          files="$(git diff --name-only "$base" "$GITHUB_SHA")"
+          printf '%s\n' "$files"
+
+          if grep -Eq '^\.github/workflows/ci\.yml$' <<< "$files"; then
+            emit_all
+            exit 0
+          fi
+
+          match() {
+            grep -Eq "$1" <<< "$files"
+          }
+          output() {
+            local key="$1"
+            local pattern="$2"
+            if match "$pattern"; then
+              echo "$key=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$key=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          workspace='^(crates/|Cargo\.(toml|lock)$|rust-toolchain\.toml$)'
+          output rust "$workspace"
+          output lpp "$workspace"
+          output v1 '^(crates/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|scripts/(v1-gates\.py|run-scenarios\.py)$|scenarios/)'
+          output overpy_oracle '^compatibility/(oracle/|tests/|run_oracle\.py$|fixtures/)'
+          output ostw_reference '^compatibility/ostw/'
+          output ostw_diff '^(crates/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|compatibility/ostw/)'
+          output adapter '^adapter/'
+          output opy_diff '^(crates/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|compatibility/)'
+          output dist '^(crates/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|dist/|install\.sh$|scripts/(verify-dist\.py|test-install\.sh|test-npm\.py)$)'
+
   rust-quality:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: Rust quality (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
     strategy:
@@ -43,6 +122,8 @@ jobs:
         run: cargo test --workspace --all-targets --all-features
 
   lpp-client-integration:
+    needs: changes
+    if: needs.changes.outputs.lpp == 'true'
     name: LPP client integration (#142, #139)
     runs-on: ubuntu-latest
     steps:
@@ -83,6 +164,8 @@ jobs:
           cargo test -p wright-driver --test provider_edit
 
   v1-gates:
+    needs: changes
+    if: needs.changes.outputs.v1 == 'true'
     name: v1 release gates (N-level, scenarios, benchmarks)
     runs-on: ubuntu-latest
     steps:
@@ -121,6 +204,8 @@ jobs:
             target/wright-bench-report.json
 
   compatibility-oracle:
+    needs: changes
+    if: needs.changes.outputs.overpy_oracle == 'true'
     name: OverPy compatibility oracle
     runs-on: ubuntu-latest
     steps:
@@ -150,6 +235,8 @@ jobs:
         run: python3 compatibility/run_oracle.py
 
   ostw-reference:
+    needs: changes
+    if: needs.changes.outputs.ostw_reference == 'true'
     name: OSTW reference baseline
     runs-on: ubuntu-latest
     steps:
@@ -162,6 +249,8 @@ jobs:
           python3 compatibility/ostw/run_oracle.py
 
   ostw-compile-differential:
+    needs: changes
+    if: needs.changes.outputs.ostw_diff == 'true'
     name: OSTW compile differential (#119)
     runs-on: ubuntu-latest
     steps:
@@ -188,6 +277,8 @@ jobs:
           path: target/wright-ostw-differential-report.json
 
   adapter:
+    needs: changes
+    if: needs.changes.outputs.adapter == 'true'
     name: OverPy-to-HIR adapter
     runs-on: ubuntu-latest
     steps:
@@ -215,6 +306,8 @@ jobs:
         working-directory: adapter
 
   compatibility-differential:
+    needs: changes
+    if: needs.changes.outputs.opy_diff == 'true'
     name: Native-vs-reference frontend differential
     runs-on: ubuntu-latest
     steps:
@@ -241,6 +334,8 @@ jobs:
           path: target/wright-differential-report.json
 
   dist-validation:
+    needs: changes
+    if: needs.changes.outputs.dist == 'true'
     name: Distribution validation (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
