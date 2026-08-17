@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
-          PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | \
+          PACKAGE_VERSION="$(cargo metadata --locked --no-deps --format-version 1 | \
             python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "wright-cli"))')"
           if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
             echo "tag $RELEASE_TAG does not match the workspace implementation version $PACKAGE_VERSION"

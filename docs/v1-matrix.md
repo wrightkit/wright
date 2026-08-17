@@ -67,7 +67,8 @@ The compatibility contract does **not** claim:
 cargo test --workspace --all-targets </dev/null # S/D evidence (differential suite)
 python3 scripts/v1-gates.py                     # N report -> target/v1-gates-report.json
 python3 scripts/run-scenarios.py                # E report -> target/scenarios-report.json
-cargo run -p wright-bench --bin wright-bench    # resource/regression thresholds
+cargo build --locked -p wright-bench
+target/debug/wright-bench                       # resource/regression thresholds
 ```
 
 Each report records the corpus identity (fixture hashes), the reference

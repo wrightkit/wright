@@ -105,7 +105,7 @@ jobs:
           cache-on-failure: false
 
       - name: Build wright (debug)
-        run: cargo build -p wright-cli -p wright-bench
+        run: cargo build --locked -p wright-cli -p wright-bench
 
       - name: Run N-level gate
         run: python3 scripts/v1-gates.py
@@ -114,7 +114,7 @@ jobs:
         run: python3 scripts/run-scenarios.py
 
       - name: Run benchmarks
-        run: cargo run -p wright-bench
+        run: target/debug/wright-bench
 
       - name: Upload gate reports
         if: always()

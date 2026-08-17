@@ -23,15 +23,17 @@ cd "$ROOT"
 
 echo "==> quality gates"
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets --all-features
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets --all-features
 
 echo "==> release build"
-cargo build --release -p wright-cli -p wright-lsp
+cargo build --locked --release -p wright-cli -p wright-lsp -p wright-bench
 BIN="$ROOT/target/release/wright"
 LSP_BIN="$ROOT/target/release/wright-lsp"
+BENCH_BIN="$ROOT/target/release/wright-bench"
 test -x "$BIN" || { echo "release binary missing"; exit 1; }
 test -x "$LSP_BIN" || { echo "release LSP binary missing"; exit 1; }
+test -x "$BENCH_BIN" || { echo "release benchmark binary missing"; exit 1; }
 
 echo "==> N-level gate (compat profile)"
 python3 scripts/v1-gates.py --wright "$BIN"
@@ -40,7 +42,7 @@ echo "==> E-level scenarios"
 python3 scripts/run-scenarios.py --wright "$BIN"
 
 echo "==> benchmarks"
-cargo run -p wright-bench --release > /dev/null
+"$BENCH_BIN" > /dev/null
 
 echo "==> standalone proof (Node/OverPy absent from PATH)"
 SANDBOX="$(mktemp -d)"
