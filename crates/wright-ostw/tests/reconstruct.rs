@@ -495,7 +495,38 @@ fn compare(actual: &wir::Program, expected: &wir::Program) -> Result<(), String>
             ));
         }
         match (&rule_a.event, &rule_b.event) {
-            (Event::Global, Event::Global) | (Event::EachPlayer, Event::EachPlayer) => {}
+            (Event::Global, Event::Global)
+            | (Event::EachPlayer, Event::EachPlayer)
+            | (
+                Event::EachPlayer,
+                Event::EachPlayerWithFilters {
+                    team: workshop_rs::wir::EventTeam::All,
+                    target: workshop_rs::wir::EventTarget::All,
+                },
+            )
+            | (
+                Event::EachPlayerWithFilters {
+                    team: workshop_rs::wir::EventTeam::All,
+                    target: workshop_rs::wir::EventTarget::All,
+                },
+                Event::EachPlayer,
+            )
+            | (
+                Event::EachPlayerWithFilters {
+                    team: workshop_rs::wir::EventTeam::All,
+                    target: workshop_rs::wir::EventTarget::All,
+                },
+                Event::EachPlayerWithFilters {
+                    team: workshop_rs::wir::EventTeam::All,
+                    target: workshop_rs::wir::EventTarget::All,
+                },
+            ) => {}
+            (Event::EachPlayerWithFilters { .. }, _)
+            | (Event::Player { .. }, _)
+            | (_, Event::EachPlayerWithFilters { .. })
+            | (_, Event::Player { .. }) => {
+                return Err(format!("rule {index} uses an unsupported event"));
+            }
             (Event::Subroutine(a), Event::Subroutine(b)) => {
                 let name_a = actual
                     .subroutines

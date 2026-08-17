@@ -146,7 +146,10 @@ fn parsed_events_are_canonical() {
         .iter()
         .map(|rule| match &rule.event {
             wir::Event::Global => "global".to_string(),
-            wir::Event::EachPlayer => "eachPlayer".to_string(),
+            wir::Event::EachPlayer | wir::Event::EachPlayerWithFilters { .. } => {
+                "eachPlayer".to_string()
+            }
+            wir::Event::Player { kind, .. } => kind.catalog_id().to_string(),
             wir::Event::Subroutine(subroutine) => format!(
                 "subroutine:{}",
                 program.subroutines.get(*subroutine).unwrap().name
@@ -392,6 +395,14 @@ fn cross_domain_member_spelling_collisions_are_the_documented_inventory() {
         collisions,
         vec![
             (
+                "All".to_string(),
+                vec![
+                    "EventTeam".to_string(),
+                    "EventPlayer".to_string(),
+                    "Invis".to_string()
+                ]
+            ),
+            (
                 "None".to_string(),
                 vec![
                     "ChaseTimeReeval".to_string(),
@@ -401,11 +412,19 @@ fn cross_domain_member_spelling_collisions_are_the_documented_inventory() {
             ),
             (
                 "Team 1".to_string(),
-                vec!["Color".to_string(), "Team".to_string()]
+                vec![
+                    "Color".to_string(),
+                    "Team".to_string(),
+                    "EventTeam".to_string()
+                ]
             ),
             (
                 "Team 2".to_string(),
-                vec!["Color".to_string(), "Team".to_string()]
+                vec![
+                    "Color".to_string(),
+                    "Team".to_string(),
+                    "EventTeam".to_string()
+                ]
             ),
             (
                 "Up".to_string(),

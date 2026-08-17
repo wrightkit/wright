@@ -219,6 +219,8 @@ impl<'a> SemanticService<'a> {
                 let event = match &rule_data.event {
                     wir::Event::Global => "global".to_string(),
                     wir::Event::EachPlayer => "eachPlayer".to_string(),
+                    wir::Event::EachPlayerWithFilters { .. } => "eachPlayer".to_string(),
+                    wir::Event::Player { kind, .. } => kind.catalog_id().to_string(),
                     wir::Event::Subroutine(subroutine) => {
                         let name = self
                             .program

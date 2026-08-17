@@ -882,6 +882,15 @@ impl<'a> Emitter<'a> {
             Event::EachPlayer => {
                 write!(header, " Event.OngoingPlayer").unwrap();
             }
+            Event::EachPlayerWithFilters {
+                team: workshop_rs::wir::EventTeam::All,
+                target: workshop_rs::wir::EventTarget::All,
+            } => {
+                write!(header, " Event.OngoingPlayer").unwrap();
+            }
+            Event::EachPlayerWithFilters { .. } | Event::Player { .. } => {
+                unreachable!("filtered/player events are outside the OSTW reconstruction surface")
+            }
             Event::Subroutine(_) => unreachable!("subroutine rules emit as functions"),
         }
         for condition in &rule.conditions {

@@ -630,6 +630,18 @@ impl<'a> Emitter<'a> {
             match &rule.event {
                 Event::Global => self.out.push_str("    @Event global\n"),
                 Event::EachPlayer => self.out.push_str("    @Event eachPlayer\n"),
+                Event::EachPlayerWithFilters {
+                    team: workshop_rs::wir::EventTeam::All,
+                    target: workshop_rs::wir::EventTarget::All,
+                } => self.out.push_str("    @Event eachPlayer\n"),
+                Event::EachPlayerWithFilters { .. } | Event::Player { .. } => {
+                    self.issue(
+                        "unsupported-rule-event",
+                        format!("rule '{}' uses an event outside the OPY surface", rule.name),
+                        rule.span,
+                    );
+                    continue;
+                }
                 Event::Subroutine(_) => {
                     self.issue(
                         "unsupported-rule-order",
