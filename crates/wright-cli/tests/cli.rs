@@ -63,6 +63,22 @@ fn run(args: &[&str]) -> std::process::Output {
         .expect("wright runs")
 }
 
+fn run_with_env(args: &[&str], variables: &[(&str, &str)]) -> std::process::Output {
+    let mut command = Command::new(wright());
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .env_remove("CI")
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("GITHUB_STEP_SUMMARY")
+        .env_remove("NO_COLOR")
+        .env_remove("FORCE_COLOR");
+    for (name, value) in variables {
+        command.env(name, value);
+    }
+    command.output().expect("wright runs")
+}
+
 fn run_with_stdin(args: &[&str], stdin: &str) -> std::process::Output {
     let mut child = Command::new(wright())
         .args(args)
@@ -100,6 +116,19 @@ fn compile_over_workshop_file_emits_correct_text() {
 fn compile_writes_output_file_and_reports_envelope() {
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
     let out_path = temp_file("emitted.txt", "");
+    let text_output = run(&[
+        "compile",
+        path.to_str().unwrap(),
+        "-o",
+        out_path.to_str().unwrap(),
+    ]);
+    assert!(text_output.status.success());
+    assert!(
+        text_output.stdout.is_empty(),
+        "-o keeps artifacts off stdout"
+    );
+    assert!(text_output.stderr.is_empty());
+
     let output = run(&[
         "compile",
         path.to_str().unwrap(),
@@ -558,7 +587,194 @@ fn version_and_help_are_documented_contract_surfaces() {
     for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
         assert!(help.contains(command), "help documents {command}");
     }
+    for option in [
+        "--kind",
+        "--target",
+        "--locale",
+        "--root",
+        "--profile",
+        "--format",
+        "--renderer",
+        "--color",
+        "--disable-rule",
+        "--rule-severity",
+    ] {
+        assert!(help.contains(option), "top-level help documents {option}");
+    }
     assert!(help.contains("EXIT CODES"));
+}
+
+#[test]
+fn completion_is_generated_for_all_supported_shells() {
+    for shell in ["bash", "zsh", "fish", "powershell"] {
+        let output = run(&["completion", shell]);
+        assert!(output.status.success(), "{shell}: {:?}", output.status);
+        assert!(output.stderr.is_empty(), "{shell}: stderr is not clean");
+        let completion = String::from_utf8_lossy(&output.stdout);
+        assert!(completion.contains("compile"), "{shell}: {completion}");
+        assert!(completion.contains("renderer"), "{shell}: {completion}");
+        assert!(completion.contains("color"), "{shell}: {completion}");
+    }
+}
+
+#[test]
+fn explicit_renderer_and_color_overrides_are_respected() {
+    let path = temp_file("broken.txt", "rule (\"x\") { event { Ongoing - Global; }");
+
+    let github = run_with_env(
+        &[
+            "check",
+            path.to_str().unwrap(),
+            "--renderer",
+            "github-actions",
+        ],
+        &[("GITHUB_ACTIONS", "true")],
+    );
+    assert_eq!(github.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&github.stderr).contains("::error"));
+    assert!(String::from_utf8_lossy(&github.stderr).contains("::group::"));
+
+    let plain = run_with_env(
+        &["check", path.to_str().unwrap(), "--renderer", "plain"],
+        &[("GITHUB_ACTIONS", "true")],
+    );
+    assert_eq!(plain.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&plain.stderr).contains("::error"));
+    assert!(!String::from_utf8_lossy(&plain.stderr).contains("\x1b["));
+
+    let color = run_with_env(
+        &[
+            "check",
+            path.to_str().unwrap(),
+            "--renderer",
+            "terminal",
+            "--color",
+            "always",
+        ],
+        &[("GITHUB_ACTIONS", "true"), ("NO_COLOR", "1")],
+    );
+    assert_eq!(color.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&color.stderr).contains("\x1b["));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn json_and_source_stdout_stay_pure_in_github_actions() {
+    let path = temp_file("broken.txt", "rule (\"x\") { event { Ongoing - Global; }");
+    let json = run_with_env(
+        &[
+            "check",
+            path.to_str().unwrap(),
+            "-f",
+            "json",
+            "--renderer",
+            "github-actions",
+            "--color",
+            "always",
+        ],
+        &[("GITHUB_ACTIONS", "true")],
+    );
+    assert_eq!(json.status.code(), Some(1));
+    assert!(json.stderr.is_empty());
+    let envelope = parse_json(&json.stdout);
+    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+
+    let source = corpus_workshop("synthetic/basic-rule");
+    let path = temp_file("basic.txt", &source);
+    let compile = run_with_env(
+        &[
+            "compile",
+            path.to_str().unwrap(),
+            "--renderer",
+            "github-actions",
+        ],
+        &[("GITHUB_ACTIONS", "true")],
+    );
+    assert_eq!(compile.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&compile.stdout);
+    assert!(stdout.contains("Disable Inspector Recording"));
+    assert!(!stdout.contains("::"));
+    assert!(String::from_utf8_lossy(&compile.stderr).contains("::group::"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn source_artifacts_are_byte_exact_in_plain_and_github_renderers() {
+    let source = corpus_workshop("synthetic/basic-rule");
+    let path = temp_file("basic.txt", &source);
+
+    let expected = parse_json(&run(&["compile", path.to_str().unwrap(), "-f", "json"])
+        .stdout)["result"]["output"]["text"]
+        .as_str()
+        .unwrap()
+        .as_bytes()
+        .to_vec();
+    for renderer in ["plain", "github-actions"] {
+        let output = run_with_env(
+            &["compile", path.to_str().unwrap(), "--renderer", renderer],
+            &[("GITHUB_ACTIONS", "true")],
+        );
+        assert!(output.status.success(), "{renderer}");
+        assert_eq!(output.stdout, expected, "{renderer} must preserve bytes");
+    }
+
+    for target in ["opy", "ostw"] {
+        let fixture = if target == "opy" {
+            workspace_fixture(
+                "crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws",
+            )
+        } else {
+            workspace_fixture("compatibility/ostw/reconstruction/surface-basic/workshop.txt")
+        };
+        let expected = parse_json(
+            &run(&["convert", "--target", target, &fixture, "-f", "json"]).stdout,
+        )["result"]["text"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        for renderer in ["plain", "github-actions"] {
+            let output = run_with_env(
+                &[
+                    "convert",
+                    "--target",
+                    target,
+                    &fixture,
+                    "--renderer",
+                    renderer,
+                ],
+                &[("GITHUB_ACTIONS", "true")],
+            );
+            assert_eq!(output.status.code(), Some(0), "{target}/{renderer}");
+            assert_eq!(
+                output.stdout, expected,
+                "{target}/{renderer} must preserve bytes"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn github_summary_uses_step_summary_file_when_available() {
+    let path = temp_file("broken.txt", "rule (\"x\") { event { Ongoing - Global; }");
+    let summary = temp_file("summary.md", "");
+    let output = run_with_env(
+        &[
+            "check",
+            path.to_str().unwrap(),
+            "--renderer",
+            "github-actions",
+        ],
+        &[
+            ("GITHUB_ACTIONS", "true"),
+            ("GITHUB_STEP_SUMMARY", summary.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!std::fs::read_to_string(&summary).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
