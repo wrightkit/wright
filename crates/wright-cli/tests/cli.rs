@@ -56,11 +56,7 @@ fn temp_dir() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> std::process::Output {
-    Command::new(wright())
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .expect("wright runs")
+    run_with_env(args, &[])
 }
 
 fn run_with_env(args: &[&str], variables: &[(&str, &str)]) -> std::process::Output {
