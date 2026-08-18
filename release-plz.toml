@@ -1,0 +1,40 @@
+[workspace]
+changelog_update = false
+dependencies_update = false
+git_only = true
+git_release_enable = false
+git_release_draft = true
+git_release_latest = false
+git_tag_enable = false
+git_tag_name = "v{{ version }}"
+pr_labels = ["release"]
+release = false
+release_always = false
+semver_check = false
+
+[[package]]
+name = "wright-cli"
+changelog_include = [
+    "wright-analyzer",
+    "wright-bench",
+    "wright-consumer",
+    "wright-core",
+    "wright-driver",
+    "wright-ir",
+    "wright-language",
+    "wright-lpp",
+    "wright-lsp",
+    "wright-opy",
+    "wright-ostw",
+    "wright-transform",
+    "wright-workshop",
+]
+git_release_enable = true
+git_release_name = "v{{ version }}"
+git_release_body = "{{ changelog }}"
+git_release_draft = true
+git_release_latest = false
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+release = true
+version_group = "wright-product"

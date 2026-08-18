@@ -14,9 +14,9 @@ public distribution
   commit, build timestamp, and the runtime-dependency claim
   (`"requires": { "node": false, "overpy": false }`).
 
-This is the local staging path and the validation suite behind the public
-tag-driven release workflow; the GitHub workflow publishes the per-platform
-archives, and this script verifies and packages the host platform.
+This is the local staging path and the validation suite behind the release-plz
+workflow; the reusable GitHub workflow publishes the per-platform archives,
+and this script verifies and packages the host platform.
 
 ## What the release script verifies before stamping
 
@@ -37,7 +37,7 @@ Any gate failure aborts the release before the version is stamped.
 ## Version metadata
 
 The binaries report the workspace implementation version (one authoritative
-`version = "0.1.0"` in `[workspace.package]`; every crate inherits it via
+`version = "<release version>"` in `[workspace.package]`; every crate inherits it via
 `version.workspace = true`). `wright version` / `wright --version` prints the
 CLI banner, `wright-lsp --version` prints the LSP banner, and the LSP
 `initialize` response carries `serverInfo.version`. Every `wright-result/v1`
@@ -46,42 +46,39 @@ envelope carries `wright.version` + `wright.contract`. The release archive's
 
 ## Public distribution contract
 
-A `v*` tag push (e.g. `v0.1.0`) drives `.github/workflows/release.yml`:
+A merge to `main` drives `.github/workflows/release-plz.yml`. The release
+workflow is the single product release path:
 
-1. **release-gates** verifies the tag version equals the workspace
-   implementation version (drift guard), then runs the full `scripts/release.sh`
-   gate suite.
-2. **build** compiles `wright` + `wright-lsp` for the target matrix and
-   packages each platform-appropriate archive.
-3. **publish** verifies the complete artifact set and creates the GitHub
-   Release from the tag with archives and checksums attached.
-4. **package-manifests** regenerates the package-manager metadata from the
-   published checksums and attaches it to the Release (see below).
+1. `release-plz release-pr` maintains a Release PR for the single product
+   package `wright-cli`. `release-plz.toml` uses `git_only = true`, so no
+   workspace crate is published to crates.io.
+2. The Release PR updates the shared workspace version, `Cargo.lock`, and the
+   checked-in `dist/` metadata. All workspace crate changes are included in the
+   product changelog decision.
+3. Merging that Release PR runs `release-plz release`, which creates exactly
+   one `vX.Y.Z` tag and a draft GitHub Release. The job passes the release-plz
+   tag and merge commit to the reusable `release.yml` workflow.
+4. The reusable workflow verifies the tag/revision and version identity, runs
+   `scripts/release.sh` and `scripts/verify-dist.py`, builds and smoke-tests the
+   native matrix, attaches archives/checksums/manifests/npm tarballs to the
+   draft, publishes downstream registries and the Homebrew tap, and only then
+   marks the GitHub Release public.
 
-A failure in any gate or any required target aborts the workflow before
-publication; there is no partial release.
+A failure in any gate or required downstream stage leaves the same draft
+Release/tag available for a retry; it does not create a new product version.
 
 ### Creating a release
 
-The tag is the release decision point. The **Release tag** workflow is the
-single-input release entry point: enter the target version, and it validates
-SemVer, updates `[workspace.package]` in the root `Cargo.toml` and the
-generated version metadata, commits that version bump to `main`, pushes
-`v<version>`, and dispatches `release.yml`. It rejects an existing tag and
-does not start the release until the committed workspace version matches the
-tag.
+The Release PR is the release decision point. Maintainers do not enter a
+version, edit version files, create a tag, or dispatch a second workflow for
+the normal case. Review and merge the automatically maintained Release PR;
+release-plz derives the next version from the shared workspace history and
+creates the one product tag/release.
 
-For a manual command-line release, update the workspace version and generated
-metadata first, then use either:
-
-* **From the command line:** `git tag v0.1.0 && git push origin v0.1.0` — the
-  tag push triggers `release.yml` directly; or
-* **From GitHub:** run the **Release tag** workflow
-  (Actions → Release tag → Run workflow) with only the target version, e.g.
-  `0.2.0`.
-
-Both paths run the same release gates, build the same target matrix, and
-publish through the same `publish` job.
+The `release.yml` workflow is reusable and is intentionally not triggered by a
+tag or Release event. The default Actions token cannot start a new workflow
+from a tag push; passing release-plz outputs through a job dependency keeps
+the release in one run.
 
 ### Target matrix and artifact naming
 
@@ -133,16 +130,33 @@ matching `.zip.sha256`, then extract with `tar -xf` or Explorer.
 Each build leg smoke-tests its **packaged archive** (not workspace binaries):
 it extracts the archive, runs `wright --version` and `wright-lsp --version`,
 asserts both report the tagged version, and compiles/checks the
-`synthetic/basic-rule` and `scenarios/loops` fixtures. The publish job
+`synthetic/basic-rule` and `scenarios/loops` fixtures. The upload job
 re-verifies that every declared target's archive and checksum are present
-before the Release is created.
+before attaching them to the draft Release.
+
+### Repository configuration
+
+Enable Actions to create and approve pull requests, and grant the default
+repository `GITHUB_TOKEN` `contents: write` and `pull-requests: write` for the
+release-plz workflow. The reusable distribution workflow also needs
+`id-token: write` for npm provenance and `packages: write` for GitHub Packages.
+Create a protected `release` environment if publication approval is required;
+the release job is the only job that uses it.
+
+Configure these optional/required environment secrets:
+
+* `NPM_TOKEN` enables npmjs.org publication. If absent, npmjs.org is skipped.
+* `GH_TOKEN` is a fine-grained token with write access to
+  `wrightkit/homebrew-tap`; it is required for automatic Homebrew tap updates.
+* The workflow's built-in `GITHUB_TOKEN` publishes GitHub Packages and updates
+  the draft GitHub Release.
 
 ## Supported installation channels
 
 All channels consume the canonical GitHub Release archives above; none of
 them rebuild Wright. Metadata lives under [`dist/`](dist/README.md), generated
 by `scripts/update-dist-manifests.py`, and is regenerated by the
-`package-manifests` job of this workflow from the published per-target
+the release PR maintenance step and again by the `package-manifests` job from the published per-target
 checksums, then attached to the Release as
 `wright-<version>.homebrew.rb`, `wright-<version>.winget.zip`, and
 `wright-<version>.scoop.json`. The `publish-tap` job then pushes the generated
@@ -204,7 +218,9 @@ release pipeline does not assume them. Version drift is
 detectable: CI runs `scripts/verify-dist.py`, which regenerates the checked-in
 metadata for the current workspace version and fails on any mismatch, and the
 release workflow generates the attached manifests from the release's own
-checksum files.
+checksum files. Registry publication checks whether the exact package/version
+already exists before publishing, so rerunning the downstream stage reuses the
+same release identity.
 
 ### Still deferred
 
