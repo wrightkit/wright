@@ -137,9 +137,9 @@ before attaching them to the draft Release.
 
 ### Repository configuration
 
-Enable Actions to create and approve pull requests, and grant the default
-repository `GITHUB_TOKEN` `contents: write`, `issues: write`, and
-`pull-requests: write` for the release-please workflow. The reusable distribution workflow also needs
+Enable Actions to create and approve pull requests. The release-please workflow
+uses the repository's `GH_TOKEN` secret as `GITHUB_TOKEN` so it can create and
+update the Release PR. The reusable distribution workflow also needs
 `id-token: write` for npm provenance and `packages: write` for GitHub Packages.
 Create a protected `release` environment if publication approval is required;
 the final `publish-release` job is the only job that uses it.

@@ -29,19 +29,21 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-          token: ${{ github.token }}
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Run release-please
         id: release
         uses: googleapis/release-please-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.GH_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
       - name: Synchronize checked-in release metadata
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
           PR: ${{ steps.release.outputs.pr }}
         run: |
           set -euo pipefail
