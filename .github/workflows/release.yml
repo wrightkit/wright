@@ -17,7 +17,7 @@ on:
         type: string
     secrets:
       GH_TOKEN:
-        description: Token with write access to wrightkit/homebrew-tap
+        description: Dedicated cross-repository token with write access to wrightkit/homebrew-tap
         required: true
       NPM_TOKEN:
         description: Optional npmjs.org publication token
@@ -324,6 +324,7 @@ jobs:
         with:
           repository: wrightkit/homebrew-tap
           ref: main
+          # Only this cross-repository tap operation uses secrets.GH_TOKEN.
           token: ${{ secrets.GH_TOKEN }}
           path: tap
 
