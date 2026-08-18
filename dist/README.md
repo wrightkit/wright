@@ -38,19 +38,25 @@ install script stops covering the declared target matrix.
 
 ## Publication process
 
-The release workflow (`release.yml`) executes two downstream distribution jobs
-after release archives are published:
+The release-plz workflow creates one draft GitHub Release and calls the
+reusable release workflow (`release.yml`) with its tag and merge commit. The
+workflow keeps the Release draft until native and package-manager distribution
+stages complete:
 
 1. `package-manifests` regenerates the Homebrew, WinGet, and Scoop manifests from
-   the published release checksums and attaches them to the Release as:
+   the native release checksums and attaches them to the draft Release as:
    - `wright-<version>.homebrew.rb`
    - `wright-<version>.winget.zip` (unzip into a winget-pkgs checkout)
    - `wright-<version>.scoop.json`
 
 2. `package-npm` packages the release binaries into platform-native npm packages
    via `scripts/package-npm.py`, runs smoke tests on the packaged artifacts,
-   attaches the `.tgz` tarballs to the Release, and publishes the same tarballs
-   to npmjs.org and GitHub Packages.
+   attaches the `.tgz` tarballs to the draft Release, and publishes the same
+   tarballs to npmjs.org and GitHub Packages.
+
+3. `publish-release` marks the draft Release public only after the Homebrew tap
+   and registry jobs succeed. Re-running an already completed registry stage
+   skips package versions that already exist.
 
 ### Homebrew
 

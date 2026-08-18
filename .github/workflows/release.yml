@@ -1,14 +1,27 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      version:
-        description: "Release version, e.g. 0.1.0 (a matching v<version> tag must already exist, e.g. via the Release tag workflow)"
+      ref:
+        description: Git revision containing the release packages
         required: true
+        type: string
+      tag:
+        description: GitHub Release tag created by release-plz
+        required: true
+        type: string
+      commit:
+        description: Release commit used for version identity
+        required: true
+        type: string
+    secrets:
+      GH_TOKEN:
+        description: Token with write access to wrightkit/homebrew-tap
+        required: true
+      NPM_TOKEN:
+        description: Optional npmjs.org publication token
+        required: false
 
 permissions:
   contents: write
@@ -20,14 +33,27 @@ jobs:
     name: Release gates
     runs-on: ubuntu-latest
     env:
-      # The tag this run releases: the dispatch input (normalized with the v
-      # prefix) or, on a tag push, the tag name itself.
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Verify release revision and tag identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${RELEASE_COMMIT}"
+          tag_commit="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" \
+            --jq .sha)"
+          test "${tag_commit}" = "${RELEASE_COMMIT}"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -49,6 +75,9 @@ jobs:
 
       - name: Run release gates (fmt, clippy, tests, v1 gates, scenarios, benchmarks, standalone proof)
         run: scripts/release.sh "${RELEASE_TAG#v}"
+
+      - name: Verify checked-in distribution metadata
+        run: python3 scripts/verify-dist.py
 
       - name: Upload gate reports
         if: always()
@@ -84,14 +113,15 @@ jobs:
       run:
         shell: bash
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -162,12 +192,12 @@ jobs:
             dist/wright-*.zip
             dist/wright-*.zip.sha256
 
-  publish:
-    name: Publish GitHub Release
+  upload-artifacts:
+    name: Upload native release artifacts
     needs: build
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v7
@@ -192,30 +222,37 @@ jobs:
           (cd release && sha256sum wright-*.tar.gz wright-*.zip > SHA256SUMS)
           ls -l release/
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            release/wright-*.tar.gz
-            release/wright-*.tar.gz.sha256
-            release/wright-*.zip
-            release/wright-*.zip.sha256
-            release/SHA256SUMS
+      - name: Wait for the release-plz draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if gh release view "${RELEASE_TAG}" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "draft GitHub Release ${RELEASE_TAG} was not found" >&2
+          exit 1
+
+      - name: Attach native archives and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${RELEASE_TAG}" release/* --clobber
 
   package-manifests:
     name: Generate package-manager manifests
-    needs: publish
+    needs: upload-artifacts
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - name: Download release artifacts
         uses: actions/download-artifact@v7
@@ -264,21 +301,17 @@ jobs:
           path: ${{ github.workspace }}/manifests/dist/homebrew/wright.rb
           if-no-files-found: error
 
-      - name: Attach manifests to the Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: |
-            attach/wright-*.homebrew.rb
-            attach/wright-*.scoop.json
-            attach/wright-*.winget.zip
+      - name: Attach package-manager manifests to the draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${RELEASE_TAG}" attach/* --clobber
 
   publish-tap:
     name: Publish formula to homebrew-tap
     needs: package-manifests
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Download generated Homebrew formula
         uses: actions/download-artifact@v7
@@ -320,15 +353,16 @@ jobs:
 
   package-npm:
     name: Package npm distribution
-    needs: publish
+    needs: upload-artifacts
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -373,12 +407,10 @@ jobs:
           '
           echo "npm packages smoke test passed on $(uname -s) $(uname -m)"
 
-      - name: Attach npm tarballs to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: |
-            npm-packages/*.tgz
+      - name: Attach npm tarballs to the draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${RELEASE_TAG}" npm-packages/*.tgz --clobber
 
       - name: Upload npm tarballs for registry publishing
         uses: actions/upload-artifact@v7
@@ -412,9 +444,22 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          publish_if_missing() {
+            local pkg="$1"
+            local metadata name version published
+            metadata="$(tar -xOf "${pkg}" package/package.json)"
+            name="$(node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).name))' <<<"${metadata}")"
+            version="$(node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).version))' <<<"${metadata}")"
+            published="$(npm view "${name}@${version}" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
+            if [[ "${published}" == "${version}" ]]; then
+              echo "${name}@${version} is already published; skipping"
+              return
+            fi
+            echo "Publishing ${pkg} to npmjs.org..."
+            npm publish "${pkg}" --access public --provenance
+          }
           for pkg in "$GITHUB_WORKSPACE"/npm-packages/*.tgz; do
-            echo "Publishing $pkg to npmjs.org..."
-            npm publish "$pkg" --access public --provenance
+            publish_if_missing "${pkg}"
           done
 
       - name: Skip npmjs.org publication
@@ -446,9 +491,36 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          for pkg in "$GITHUB_WORKSPACE"/npm-packages/*.tgz; do
-            echo "Publishing $pkg to GitHub Packages..."
-            npm publish "$pkg" \
+          publish_if_missing() {
+            local pkg="$1"
+            local metadata name version published
+            metadata="$(tar -xOf "${pkg}" package/package.json)"
+            name="$(node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).name))' <<<"${metadata}")"
+            version="$(node -e 'let s=""; process.stdin.on("data", c => s += c).on("end", () => process.stdout.write(JSON.parse(s).version))' <<<"${metadata}")"
+            published="$(npm view "${name}@${version}" version --registry=https://npm.pkg.github.com 2>/dev/null || true)"
+            if [[ "${published}" == "${version}" ]]; then
+              echo "${name}@${version} is already published; skipping"
+              return
+            fi
+            echo "Publishing ${pkg} to GitHub Packages..."
+            npm publish "${pkg}" \
               --registry=https://npm.pkg.github.com \
               --access public
+          }
+          for pkg in "$GITHUB_WORKSPACE"/npm-packages/*.tgz; do
+            publish_if_missing "${pkg}"
           done
+
+  publish-release:
+    name: Publish completed GitHub Release
+    needs:
+      - publish-tap
+      - publish-npm
+      - publish-github-packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the completed draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release edit "${RELEASE_TAG}" --draft=false --latest
