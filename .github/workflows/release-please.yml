@@ -41,23 +41,24 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      - name: Ensure draft GitHub Release exists
+      - name: Normalize GitHub Release to draft
         if: steps.release.outputs.release_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
         run: |
           set -euo pipefail
-          if gh release view "${RELEASE_TAG}" --json isDraft,publishedAt >/dev/null 2>&1; then
+          if gh release view "${RELEASE_TAG}" --json isDraft >/dev/null 2>&1; then
             is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
-            published_at="$(gh release view "${RELEASE_TAG}" --json publishedAt --jq .publishedAt)"
-            if [[ "${is_draft}" == "true" && "${published_at}" == "null" ]]; then
+            if [[ "${is_draft}" == "true" ]]; then
               echo "draft GitHub Release ${RELEASE_TAG} already exists"
               exit 0
             fi
-            echo "${RELEASE_TAG} exists but is not an unpublished draft." >&2
-            exit 1
+            echo "GitHub Release ${RELEASE_TAG} was published before distribution completed; returning it to draft"
+            gh release edit "${RELEASE_TAG}" --draft
+            exit 0
           fi
+          echo "GitHub Release ${RELEASE_TAG} does not exist; creating draft"
           gh release create "${RELEASE_TAG}" \
             --draft \
             --verify-tag \
