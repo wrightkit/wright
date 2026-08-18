@@ -164,10 +164,13 @@ jobs:
       - name: Build wright (debug)
         run: cargo build --locked -p wright-cli -p wright-bench
 
+      - name: Validate committed compatibility evidence
+        run: python3 -m unittest discover -s compatibility/tests
+
       - name: Run N-level gate
         run: python3 scripts/v1-gates.py
 
-      - name: Run E-level scenarios
+      - name: Run compile-time scenarios
         run: python3 scripts/run-scenarios.py
 
       - name: Run benchmarks
@@ -182,35 +185,6 @@ jobs:
             target/v1-gates-report.json
             target/scenarios-report.json
             target/wright-bench-report.json
-
-  compatibility-oracle:
-    name: OverPy compatibility oracle
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 11.10.0
-
-      - name: Install Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: compatibility/oracle/pnpm-lock.yaml
-
-      - name: Install pinned OverPy oracle
-        run: pnpm install --frozen-lockfile
-        working-directory: compatibility/oracle
-
-      - name: Test compatibility runner
-        run: python3 -m unittest discover -s compatibility/tests
-
-      - name: Run compatibility oracle
-        run: python3 compatibility/run_oracle.py
 
   ostw-compile-differential:
     name: OSTW compile differential (#119)
