@@ -5,6 +5,7 @@
       "release-type": "simple",
       "version-file": "version.txt",
       "changelog-path": "CHANGELOG.md",
+      "versioning": "always-bump-patch",
       "include-component-in-tag": false,
       "draft": true,
       "force-tag-creation": true
