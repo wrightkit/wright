@@ -4,6 +4,38 @@ Status: accepted baseline (living driver and CLI contract)
 Scope: `wright` executable, `wright-driver` crate, and their machine-readable
 contracts
 
+## CLI presentation and completion (#164)
+
+The `wright` command model is defined once with `clap`. The same model drives
+argv parsing, generated help, and the static completion entry point:
+
+```text
+wright completion bash
+wright completion zsh
+wright completion fish
+wright completion powershell
+```
+
+Workflow commands accept these CLI-only presentation options:
+
+* `--format text|json` selects human or machine output (`-f` remains an alias).
+* `--renderer auto|terminal|plain|github-actions` selects the presentation
+  environment. `auto` selects GitHub Actions when `GITHUB_ACTIONS` is truthy,
+  plain output for generic `CI` or a non-TTY, and terminal output otherwise.
+* `--color auto|always|never` controls ANSI color. Explicit options take
+  precedence over environment detection; GitHub Actions keeps workflow
+  command lines free of ANSI even when color is explicitly requested.
+
+JSON output is one `wright-result/v1` envelope on stdout with no ANSI, progress,
+or workflow commands. `compile` and `convert` source artifacts remain the only
+stdout payload in text mode, including when GitHub Actions presentation is
+selected. GitHub Actions diagnostics and findings are emitted as escaped
+workflow annotations; grouping is sent to the workflow command stream and a
+concise PASS/WARN/ERROR line is appended to `GITHUB_STEP_SUMMARY` when the
+runner provides that file. The summary uses the highest structured severity:
+errors produce `ERROR`, warnings produce `WARN`, and info/notice-only results
+produce `PASS`.
+
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,
 stdout/stderr ownership, and the `wright-result/v1` envelope that CI and
