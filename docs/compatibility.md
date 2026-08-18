@@ -1,6 +1,6 @@
 # Wright Compatibility Contract
 
-Status: accepted baseline (semantic compatibility priority, ADR-0008)
+Status: accepted baseline (semantic compatibility priority, ADR-0008/ADR-0009)
 Scope: measurable compatibility claims for the Wright tooling and compiler core
 
 Compatibility is a claim about a named input corpus, reference version,
@@ -10,12 +10,16 @@ compatibility.
 
 ## Reference boundary
 
-Wright owns its semantic frontends (`wright-opy`, `wright-ostw`) and consumes
-the canonical Workshop core from `workshop-rs` through the `wright-workshop`
-re-export adapter (wright#143). OverPy and OSTW compilers and language
-services are compatibility oracles, behavior references, and test inputs for
-supported surface claims. They are not production runtime dependencies for
-supported standalone workflows.
+Wright owns tooling and orchestration, not the durable source-language
+implementations. `opy-rs` owns OPY language semantics, `del-rs` owns the
+DEL/OSTW-compatible implementation, and `workshop-rs` owns canonical Workshop
+semantics and WIR. During the migration described by ADR-0009, Wright still
+contains the in-repo `wright-opy` / `wright-ostw` migration frontends and the
+`wright-workshop` re-export adapter until their planned cutovers complete.
+Wright therefore keeps regression coverage for those current integration paths,
+but upstream OverPy and OSTW compilers/language services remain compatibility
+oracles and behavior references rather than production or default-CI runtime
+dependencies.
 
 Project-level provenance for every upstream implementation Wright studies or
 derives compatibility knowledge from is recorded once, centrally, in
@@ -147,9 +151,12 @@ normalizer/scenario version, when applicable
 expected result
 ```
 
-Run `python3 compatibility/run_oracle.py` to verify normalized snapshots. Use
-`--update` only for an intentional oracle update that is reviewed with its
-fixture and provenance changes.
+Run `python3 compatibility/run_oracle.py` only when intentionally refreshing or
+reviewing the legacy recorded OverPy evidence. It is maintainer/reference
+infrastructure, not a default Wright merge gate; durable upstream-oracle
+ownership moves with the corresponding language repositories as provider
+cutovers complete. Use `--update` only for an intentional oracle update that is
+reviewed with its fixture and provenance changes.
 
 Run `python3 compatibility/diff.py --wright-command '...'` to compare a Wright
 producer against the oracle. Its machine-readable report separates compile,
@@ -184,3 +191,4 @@ Record a decision in `docs/adr/` when implementation evidence is available.
 * [ADR-0003: IR boundary](adr/0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](adr/0004-overpy-licensing-boundary.md)
 * [ADR-0008: Tooling-first semantic platform rebaseline](adr/0008-tooling-first-semantic-platform.md)
+* [ADR-0009: Language ownership and licensing boundaries](adr/0009-language-ownership-licensing-boundaries.md)

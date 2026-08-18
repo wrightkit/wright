@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Wright E-level scenario framework runner (#50).
+"""Wright compile-time scenario regression runner (#50).
 
 Each scenario in scenarios/<id>.json declares a source program, target
-metadata, and expected observable behaviors. The runner compiles the scenario
+metadata, and expected compile-time behaviors. The runner compiles the scenario
 through the real `wright` executable (compat profile), records the emitted
-Workshop text and analysis findings as the repeatable behavioral evidence, and
+Workshop text and analysis findings as repeatable compile-time evidence, and
 verifies every declared expectation structurally. The report
-(target/scenarios-report.json) is machine-readable and reproducible; running
-the Overwatch client is outside v1 scope, so the recorded evidence is the
-compile-time WIR/emission trace plus static findings.
+(target/scenarios-report.json) is machine-readable and reproducible. It does
+not establish E-level semantic compatibility: running the Overwatch client is
+outside the current scope, so the recorded evidence is the compile-time
+WIR/emission trace plus static findings.
 
 Usage: python3 scripts/run-scenarios.py [--wright path/to/wright]
 """
