@@ -21,19 +21,26 @@ but upstream OverPy and OSTW compilers/language services remain compatibility
 oracles and behavior references rather than production or default-CI runtime
 dependencies.
 
-Project-level provenance for every upstream implementation Wright studies or
-derives compatibility knowledge from is recorded once, centrally, in
+Live reference acquisition and authoritative language compatibility evidence
+belong to the language owner:
+
+- `opy-rs` owns the pinned OverPy oracle, OPY corpus, oracle runner,
+  differential expectations, and OPY support matrix;
+- `del-rs` is the durable owner for pinned OSTW reference evidence and
+  DEL/OSTW compatibility claims;
+- Wright may keep immutable recorded snapshots required by its current
+  migration/provider/product regressions, but those snapshots do not make
+  Wright the semantic or oracle owner.
+
+Project-level provenance for upstream implementations referenced by Wright is
+recorded in
 [`compatibility/upstream-references.md`](compatibility/upstream-references.md)
-(pinned OverPy 9.7.10 identity and the durable OSTW reference entry added by
-the OSTW reference investigation (#113): license assumption, oracle role,
-reference-vs-Wright
-architecture boundary, and durable reference limitations). Implementation
-issues and compatibility entries reference
-that document instead of repeating provenance notes.
+while the corresponding language repositories maintain their authoritative
+language-side provenance and evidence.
 
 The reference for every compatibility result must record:
 
-* the OverPy version or immutable source revision;
+* the reference version or immutable source revision;
 * the corpus or fixture identifier and input hash;
 * Wright's version or commit and relevant configuration;
 * target/runtime versions when execution is involved;
@@ -134,53 +141,43 @@ reported rather than counted as successes.
 
 ## Fixture and corpus rules
 
-Compatibility fixtures are executable evidence. The repository layout,
-metadata schema, pinned oracle, and runner commands are defined in
-[`../compatibility/README.md`](../compatibility/README.md). Each fixture should make
-its scope visible and should avoid relying on unrecorded local state. Its
-manifest includes at least:
+Wright's [`../compatibility/`](../compatibility/) directory contains consumer
+regression evidence for the language/integration paths still present in this
+repository. Its historical `oracle.json` files are immutable recorded reference
+results, not a Wright-owned live oracle.
 
-```text
-fixture id
-input hash and provenance
-reference identity
-Wright identity
-target/runtime identity, when applicable
-compatibility level
-normalizer/scenario version, when applicable
-expected result
+Run the repository-local integrity checks with:
+
+```sh
+python3 -m unittest discover -s compatibility/tests
 ```
 
-Run `python3 compatibility/run_oracle.py` only when intentionally refreshing or
-reviewing the legacy recorded OverPy evidence. It is maintainer/reference
-infrastructure, not a default Wright merge gate; durable upstream-oracle
-ownership moves with the corresponding language repositories as provider
-cutovers complete. Use `--update` only for an intentional oracle update that is
-reviewed with its fixture and provenance changes.
+These checks verify fixture identity, source hashes, expected status, recorded
+output hashes, and provenance without installing an upstream language runtime.
 
-Run `python3 compatibility/diff.py --wright-command '...'` to compare a Wright
-producer against the oracle. Its machine-readable report separates compile,
-diagnostic, exact-output, normalized-output, and optional semantic stages;
-missing producer output is inconclusive rather than a pass.
+Reference evidence changes must begin in the owning language repository. For
+OPY, refresh and review the pinned OverPy evidence in `wrightkit/opy-rs`, then
+import only the immutable result needed by a Wright consumer regression. The
+legacy OSTW reference harness currently remaining under
+`compatibility/ostw/` is migration state and must move to `wrightkit/del-rs`
+before Wright removes it.
 
 Fixtures containing third-party code, generated output, or user data require a
 redistribution and provenance review before being committed. When a fixture
-cannot be redistributed, the repository may record a generator, hash, or local
-acquisition instruction instead of shipping the content.
+cannot be redistributed, the owning repository should record a generator, hash,
+or acquisition instruction instead of shipping the content here.
 
 ## Open questions
 
 The following remain unresolved until the relevant implementation exists:
 
-* the supported OverPy version range and extension policy (resolved by
-  [ADR-0007](adr/0007-reference-pinning-policy.md): version-exact,
-  content-pinned, changed only on demonstrated behavioral need; the
-  centralized upstream-reference record is
-  [`compatibility/upstream-references.md`](compatibility/upstream-references.md));
+* the final Wright-side evidence retained after the OPY and DEL provider
+  cutovers;
 * the machine-readable diagnostic schema and stable code registry;
 * the canonical Workshop output normalizer and its versioning policy;
 * the target/runtime used for semantic scenarios; and
-* the corpus licensing and local-generation process.
+* the corpus licensing and local-generation process for future Wright-owned
+  product scenarios.
 
 These questions must not be silently answered by a compatibility shortcut.
 Record a decision in `docs/adr/` when implementation evidence is available.
