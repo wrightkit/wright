@@ -21,16 +21,12 @@ import importlib.util
 import io
 import json
 import shutil
-import subprocess
-import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
-COMPATIBILITY_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = COMPATIBILITY_DIR.parent
-
+REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_NPM = REPO_ROOT / "scripts" / "package-npm.py"
 
 
@@ -71,7 +67,6 @@ PLATFORM_LAYOUT = {
     "package/LICENSE": b"AGPL-3.0-or-later\n",
 }
 
-# The bin entries the shipped validation requires to be executable.
 BIN_PATHS = {
     "package/wright",
     "package/wright-lsp",
@@ -83,8 +78,6 @@ BIN_PATHS = {
 
 
 def stage_package(root: Path, layout: dict[str, bytes], exec_bits: bool) -> None:
-    """Materialize an npm-style staged package; bin files carry the exec bit
-    only when `exec_bits` is set (the Unix condition)."""
     for rel, content in layout.items():
         path = root / rel
         if content == b"" and rel.endswith("/"):
@@ -99,9 +92,6 @@ def stage_package(root: Path, layout: dict[str, bytes], exec_bits: bool) -> None
 
 
 def pack_staged(root: Path, mtime: int) -> bytes:
-    """Pack a staged tree into an npm-style ustar .tgz, mirroring `npm pack`:
-    source stat modes verbatim, a per-pack mtime (host-varying in reality),
-    and uid/gid from the staging host. `root` contains the `package/` tree."""
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as tar:
         for path in sorted(root.rglob("*")):
@@ -150,9 +140,6 @@ class NpmPackagingNormalizationTests(unittest.TestCase):
         return pack_staged(root, mtime)
 
     def test_bin_entries_are_0755_after_normalization_from_exec_less_sources(self):
-        # The Windows condition: staged bin files carry no exec bit, so npm
-        # pack embeds them at 0o644. The shipped normalization must force the
-        # bin entries to 0o755 and fix every entry's metadata.
         _, _, expected_mtime = package_npm.fixed_entry_metadata("0.1.0")
         covered = set()
         for layout in (META_LAYOUT, PLATFORM_LAYOUT):
@@ -163,59 +150,32 @@ class NpmPackagingNormalizationTests(unittest.TestCase):
             for path in BIN_PATHS & set(layout):
                 covered.add(path)
                 self.assertIn(path, modes, f"{path} missing after normalization")
-                self.assertEqual(
-                    modes[path][0],
-                    0o755,
-                    f"{path} must be 0o755 after normalization, got {oct(modes[path][0])}",
-                )
-            for path, (mode, uid, gid, mtime) in modes.items():
+                self.assertEqual(modes[path][0], 0o755, f"{path} must be 0o755")
+            for path, (_, uid, gid, mtime) in modes.items():
                 self.assertEqual(uid, 0, f"{path} uid must be fixed")
                 self.assertEqual(gid, 0, f"{path} gid must be fixed")
-                self.assertEqual(
-                    mtime,
-                    expected_mtime,
-                    f"{path} mtime must be the version-derived fixed stamp",
-                )
-        self.assertEqual(
-            covered,
-            BIN_PATHS,
-            "every bin entry (meta JS launchers and platform binaries/.exe) must be covered",
-        )
+                self.assertEqual(mtime, expected_mtime, f"{path} mtime must be fixed")
+        self.assertEqual(covered, BIN_PATHS)
 
     def test_normalized_bytes_match_exec_bit_source_pack(self):
-        # A pack from exec-less sources (Windows) and a pack from exec-bit
-        # sources (Unix) normalize to byte-identical tarballs.
         windows = self._pack(META_LAYOUT, exec_bits=False, mtime=499162500)
         unix = self._pack(META_LAYOUT, exec_bits=True, mtime=1610613000)
         a = write_tgz(windows)
         b = write_tgz(unix)
         package_npm.normalize_tarball(a, "0.1.0")
         package_npm.normalize_tarball(b, "0.1.0")
-        self.assertEqual(
-            hashlib.sha256(a.read_bytes()).hexdigest(),
-            hashlib.sha256(b.read_bytes()).hexdigest(),
-            "exec-less and exec-bit source packs must normalize to identical bytes",
-        )
+        self.assertEqual(hashlib.sha256(a.read_bytes()).hexdigest(), hashlib.sha256(b.read_bytes()).hexdigest())
 
     def test_normalization_is_byte_deterministic(self):
-        # Packing the same inputs twice (different pack times) and normalizing
-        # yields identical bytes on both runs.
         first = self._pack(META_LAYOUT, exec_bits=False, mtime=499162500)
         second = self._pack(META_LAYOUT, exec_bits=False, mtime=1700000000)
         a = write_tgz(first)
         b = write_tgz(second)
         package_npm.normalize_tarball(a, "0.1.0")
         package_npm.normalize_tarball(b, "0.1.0")
-        self.assertEqual(
-            hashlib.sha256(a.read_bytes()).hexdigest(),
-            hashlib.sha256(b.read_bytes()).hexdigest(),
-            "repeated packs must normalize to identical bytes",
-        )
+        self.assertEqual(hashlib.sha256(a.read_bytes()).hexdigest(), hashlib.sha256(b.read_bytes()).hexdigest())
 
     def test_verify_tarball_still_rejects_non_executable_bin(self):
-        # The Unix executability validation is retained: a (non-normalized)
-        # tarball whose bin entry has no exec bit is still rejected by the
-        # real shipped `verify_tarball`.
         raw = self._pack(META_LAYOUT, exec_bits=False, mtime=499162500)
         tgz = write_tgz(raw)
         with self.assertRaises(SystemExit) as ctx:
@@ -225,19 +185,13 @@ class NpmPackagingNormalizationTests(unittest.TestCase):
         self.assertIn("mode 0o644", message)
 
     def test_normalized_tarballs_pass_real_verify(self):
-        # After the shipped normalization, the real validation accepts the
-        # tarball (meta and platform layouts).
         for layout, is_meta in ((META_LAYOUT, True), (PLATFORM_LAYOUT, False)):
             raw = self._pack(layout, exec_bits=False, mtime=499162500)
             tgz = write_tgz(raw)
             package_npm.normalize_tarball(tgz, "0.1.0")
-            package_npm.verify_tarball(tgz, is_meta=is_meta)  # must not raise
+            package_npm.verify_tarball(tgz, is_meta=is_meta)
 
     def test_end_to_end_npm_pack_of_exec_less_staged_package(self):
-        # Full shipped path with the real `npm pack` (the Windows CI condition
-        # cannot set exec bits): stage an exec-less source package, npm-pack
-        # it, run the shipped normalization, and confirm the real validation
-        # passes.
         npm = shutil.which("npm.cmd") or shutil.which("npm")
         if npm is None:
             self.skipTest("npm is not available on this host")
@@ -246,8 +200,6 @@ class NpmPackagingNormalizationTests(unittest.TestCase):
         out = root.parent / "wright-npm-e2e-out"
         out.mkdir(exist_ok=True)
         self._dirs.append(str(out))
-        # A real npm source package (package.json at the root, bin scripts
-        # without exec bits, as a Windows checkout yields).
         for rel, content in META_LAYOUT.items():
             if rel.endswith("/"):
                 continue
@@ -257,14 +209,12 @@ class NpmPackagingNormalizationTests(unittest.TestCase):
             path.chmod(0o755 if rel in BIN_PATHS else 0o644)
         tarball = package_npm.pack_directory(root, out)
         package_npm.normalize_tarball(tarball, "0.1.0")
-        package_npm.verify_tarball(tarball, is_meta=True)  # must not raise
+        package_npm.verify_tarball(tarball, is_meta=True)
         modes = entry_modes(tarball)
         for path in ("package/bin/wright.js", "package/bin/wright-lsp.js"):
             self.assertEqual(modes[path][0], 0o755, f"{path} must be 0o755")
 
     def test_exec_bit_validation_source_is_preserved(self):
-        # Structural guard: the shipped validation still contains the exec-bit
-        # check and the full bin-entry inventory (no loosening).
         source = PACKAGE_NPM.read_text()
         self.assertIn("mode & 0o111", source)
         self.assertIn("not executable", source)

@@ -16,6 +16,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -157,6 +158,25 @@ def main() -> None:
         fail("dist/npm/wright/index.d.ts is missing or does not export getBinaryPath")
 
     print("ok: npm packages and wrapper scripts valid")
+
+    # Detailed tarball-mode/determinism tests are distribution regressions,
+    # not language compatibility tests. Run them once in the Linux matrix;
+    # the normal dist smoke below still runs on every supported CI platform.
+    if sys.platform.startswith("linux"):
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                str(REPO_ROOT / "scripts" / "tests"),
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+        )
+        print("ok: distribution helper regression tests passed")
+
     print("dist validation passed")
 
 
