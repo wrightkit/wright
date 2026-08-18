@@ -14,7 +14,7 @@ public distribution
   commit, build timestamp, and the runtime-dependency claim
   (`"requires": { "node": false, "overpy": false }`).
 
-This is the local staging path and the validation suite behind the release-plz
+This is the local staging path and the validation suite behind the release-please
 workflow; the reusable GitHub workflow publishes the per-platform archives,
 and this script verifies and packages the host platform.
 
@@ -46,18 +46,19 @@ envelope carries `wright.version` + `wright.contract`. The release archive's
 
 ## Public distribution contract
 
-A merge to `main` drives `.github/workflows/release-plz.yml`. The release
+A merge to `main` drives `.github/workflows/release-please.yml`. The release
 workflow is the single product release path:
 
-1. `release-plz release-pr` maintains a Release PR for the single product
-   package `wright-cli`. `release-plz.toml` uses `git_only = true`, so no
-   workspace crate is published to crates.io.
+1. `release-please-action` maintains one root Release PR for the Wright
+   product. `release-please-config.json` uses the `simple` release type, with
+   `version.txt` and `CHANGELOG.md` as its product-level version and changelog
+   files. No workspace crate is published to crates.io.
 2. The Release PR updates the shared workspace version, `Cargo.lock`, and the
    checked-in `dist/` metadata. All workspace crate changes are included in the
    product changelog decision.
-3. Merging that Release PR runs `release-plz release`, which creates exactly
-   one `vX.Y.Z` tag and a draft GitHub Release. The job passes the release-plz
-   tag and merge commit to the reusable `release.yml` workflow.
+3. Merging that Release PR runs release-please, which creates exactly one
+   `vX.Y.Z` tag and a draft GitHub Release. The job passes the release-please
+   tag and release commit to the reusable `release.yml` workflow.
 4. The reusable workflow verifies the tag/revision and version identity, runs
    `scripts/release.sh` and `scripts/verify-dist.py`, builds and smoke-tests the
    native matrix, attaches archives/checksums/manifests/npm tarballs to the
@@ -72,12 +73,12 @@ Release/tag available for a retry; it does not create a new product version.
 The Release PR is the release decision point. Maintainers do not enter a
 version, edit version files, create a tag, or dispatch a second workflow for
 the normal case. Review and merge the automatically maintained Release PR;
-release-plz derives the next version from the shared workspace history and
-creates the one product tag/release.
+release-please derives the next version from Conventional Commits and creates
+the one product tag/release.
 
 The `release.yml` workflow is reusable and is intentionally not triggered by a
 tag or Release event. The default Actions token cannot start a new workflow
-from a tag push; passing release-plz outputs through a job dependency keeps
+from a tag push; passing release-please outputs through a job dependency keeps
 the release in one run.
 
 ### Target matrix and artifact naming
@@ -137,11 +138,11 @@ before attaching them to the draft Release.
 ### Repository configuration
 
 Enable Actions to create and approve pull requests, and grant the default
-repository `GITHUB_TOKEN` `contents: write` and `pull-requests: write` for the
-release-plz workflow. The reusable distribution workflow also needs
+repository `GITHUB_TOKEN` `contents: write`, `issues: write`, and
+`pull-requests: write` for the release-please workflow. The reusable distribution workflow also needs
 `id-token: write` for npm provenance and `packages: write` for GitHub Packages.
 Create a protected `release` environment if publication approval is required;
-the release job is the only job that uses it.
+the final `publish-release` job is the only job that uses it.
 
 Configure these optional/required environment secrets:
 
