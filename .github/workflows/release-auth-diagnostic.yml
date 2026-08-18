@@ -15,35 +15,23 @@ jobs:
       - name: Show GitHub CLI version
         run: gh --version
 
-      - name: Reproduce release lookups with workflow token
+      - name: Reproduce original lookup without repository context
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          echo 'original-command-without-checkout-or-repo:'
+          gh release view v0.2.6 --json isDraft --jq '.isDraft'
+          echo "exit=$?"
+
+      - name: Verify explicit repository lookup
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for tag in v0.2.5 v0.2.6; do
-            echo "tag=${tag} token=github.token"
-            gh release view "${tag}" --repo "$GITHUB_REPOSITORY" \
-              --json tagName,isDraft,isImmutable,publishedAt,url
-            printf 'isDraft=<%s>\n' "$(gh release view "${tag}" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
-            printf 'publishedAt=<%s>\n' "$(gh release view "${tag}" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)"
-            if gh release view "${tag}" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' | grep -qx true; then
-              echo 'wait-expression=PASS'
-            else
-              echo 'wait-expression=FAIL'
-            fi
-          done
-
-      - name: Reproduce release guard with dedicated token
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          set -euo pipefail
-          tag=v0.2.6
-          is_draft="$(gh release view "${tag}" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
-          published_at="$(gh release view "${tag}" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)"
-          printf 'isDraft=<%s> publishedAt=<%s>\n' "${is_draft}" "${published_at}"
-          if [[ "${is_draft}" == "true" && "${published_at}" == "null" ]]; then
-            echo 'guard-expression=PASS'
-          else
-            echo 'guard-expression=FAIL'
-          fi
+          echo 'explicit-repo-command:'
+          gh release view v0.2.6 \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isImmutable,publishedAt,url
+          test "$(gh release view v0.2.6 --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
