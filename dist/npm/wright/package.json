@@ -1,6 +1,6 @@
 {
   "name": "@wrightkit/wright",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Wright CLI wrapper - Tooling-first semantic platform for the Overwatch Workshop and OverPy ecosystem",
   "license": "AGPL-3.0-or-later",
   "repository": {
@@ -25,10 +25,10 @@
     "LICENSE"
   ],
   "optionalDependencies": {
-    "@wrightkit/wright-darwin-arm64": "0.2.5",
-    "@wrightkit/wright-darwin-x64": "0.2.5",
-    "@wrightkit/wright-linux-x64": "0.2.5",
-    "@wrightkit/wright-win32-x64": "0.2.5"
+    "@wrightkit/wright-darwin-arm64": "0.2.6",
+    "@wrightkit/wright-darwin-x64": "0.2.6",
+    "@wrightkit/wright-linux-x64": "0.2.6",
+    "@wrightkit/wright-win32-x64": "0.2.6"
   },
   "engines": {
     "node": ">=18"
