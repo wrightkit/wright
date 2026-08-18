@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       tag:
-        description: GitHub Release tag created by release-plz
+        description: GitHub Release tag created by release-please
         required: true
         type: string
       commit:
@@ -222,7 +222,7 @@ jobs:
           (cd release && sha256sum wright-*.tar.gz wright-*.zip > SHA256SUMS)
           ls -l release/
 
-      - name: Wait for the release-plz draft Release
+      - name: Wait for the release-please draft Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -519,6 +519,7 @@ jobs:
       - publish-npm
       - publish-github-packages
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Publish the completed draft Release
         env:

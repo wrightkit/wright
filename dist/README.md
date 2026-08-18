@@ -38,7 +38,7 @@ install script stops covering the declared target matrix.
 
 ## Publication process
 
-The release-plz workflow creates one draft GitHub Release and calls the
+The release-please workflow creates one draft GitHub Release and calls the
 reusable release workflow (`release.yml`) with its tag and merge commit. The
 workflow keeps the Release draft until native and package-manager distribution
 stages complete:

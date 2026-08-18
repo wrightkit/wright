@@ -1,0 +1,88 @@
+name: Release-please
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Maintain Wright release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-please-${{ github.ref }}
+      cancel-in-progress: false
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      release_tag: ${{ steps.release.outputs.tag_name }}
+      release_commit: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ github.token }}
+
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Synchronize checked-in release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PR}" ]]; then
+            echo 'No release-please PR requires metadata synchronization.'
+            exit 0
+          fi
+          pr_number="$(jq -r '.number // empty' <<<"${PR}")"
+          if [[ -z "${pr_number}" ]]; then
+            echo 'release-please returned a PR without a number.' >&2
+            exit 1
+          fi
+
+          gh pr checkout "${pr_number}"
+          version="$(tr -d '[:space:]' < version.txt)"
+          python3 scripts/sync-release-version.py --version "${version}"
+          python3 scripts/update-dist-manifests.py --version "${version}"
+          python3 scripts/verify-dist.py
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml Cargo.lock dist
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "release metadata already synchronized for ${version}"
+            exit 0
+          fi
+          git commit -m 'chore(release): synchronize Wright product metadata'
+          git push
+
+  release-artifacts:
+    name: Build and publish release artifacts
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.release.outputs.release_commit }}
+      tag: ${{ needs.release.outputs.release_tag }}
+      commit: ${{ needs.release.outputs.release_commit }}
+    secrets: inherit
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
