@@ -39,10 +39,10 @@ jobs:
           MarcoIeni/release-plz-action@476794ede164c5137bfc3a1dc6ed3675275690f9
         with:
           command: release-pr
-          version: "0.3.125"
+          version: "0.3.160"
         env:
+          # Use the per-run Actions token; this is not secrets.GH_TOKEN.
           GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
 
       - name: Synchronize checked-in release metadata
         env:
@@ -112,10 +112,10 @@ jobs:
           MarcoIeni/release-plz-action@476794ede164c5137bfc3a1dc6ed3675275690f
         with:
           command: release
-          version: "0.3.125"
+          version: "0.3.160"
         env:
+          # Use the per-run Actions token; this is not secrets.GH_TOKEN.
           GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
 
       - name: Export release identity
         id: release-identity
