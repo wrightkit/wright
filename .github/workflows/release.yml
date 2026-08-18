@@ -310,7 +310,9 @@ jobs:
 
   publish-tap:
     name: Publish formula to homebrew-tap
-    needs: package-manifests
+    needs:
+      - package-manifests
+      - publish-release
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ inputs.tag }}
@@ -426,7 +428,9 @@ jobs:
 
   publish-npm:
     name: Publish packages to npm registry
-    needs: package-npm
+    needs:
+      - package-npm
+      - publish-release
     runs-on: ubuntu-latest
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -473,7 +477,9 @@ jobs:
 
   publish-github-packages:
     name: Publish packages to GitHub Packages
-    needs: package-npm
+    needs:
+      - package-npm
+      - publish-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -519,9 +525,8 @@ jobs:
   publish-release:
     name: Publish completed GitHub Release
     needs:
-      - publish-tap
-      - publish-npm
-      - publish-github-packages
+      - package-manifests
+      - package-npm
     runs-on: ubuntu-latest
     environment: release
     steps:
