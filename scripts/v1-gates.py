@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Wright v1 N-level gate: compiled output vs the pinned reference oracle.
+"""Wright v1 N-level gate: compiled output vs recorded reference snapshots.
 
-Runs `wright compile --profile compat` over the versioned corpus and compares
-the emitted Workshop text to the oracle snapshots with a documented normalizer
-(debug/print HUD lines collapse to a canonical marker; whitespace-only
-differences collapse). Produces a machine-readable report at
-target/v1-gates-report.json. Exits non-zero when any fixture fails N-level
-with an undocumented difference.
+Runs `wright compile --profile compat` over Wright's selected consumer
+regression fixtures and compares the emitted Workshop text to immutable
+recorded reference snapshots with a documented normalizer (debug/print HUD
+lines collapse to a canonical marker; whitespace-only differences collapse).
+The live OverPy oracle and authoritative OPY corpus are owned by `opy-rs`;
+this script only consumes evidence committed to Wright. Produces a
+machine-readable report at target/v1-gates-report.json and exits non-zero when
+a selected Wright regression fixture diverges after normalization.
 
 Usage: python3 scripts/v1-gates.py [--wright path/to/wright]
 """
@@ -14,7 +16,6 @@ Usage: python3 scripts/v1-gates.py [--wright path/to/wright]
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -29,6 +30,7 @@ FIXTURES = [
     "synthetic/preprocessing",
     "real-world/overpy-cake",
 ]
+
 
 def _collapse_hud(text: str) -> str:
     """Collapse each `Create HUD Text(...)` statement (balanced parens,
@@ -87,8 +89,8 @@ def main() -> int:
     for fixture_id in FIXTURES:
         fixture_dir = ROOT / "compatibility/fixtures" / fixture_id
         source = fixture_dir / "source.opy"
-        oracle = json.loads((fixture_dir / "oracle.json").read_text())
-        expected = oracle["compile"]["workshop"]
+        snapshot = json.loads((fixture_dir / "oracle.json").read_text())
+        expected = snapshot["compile"]["workshop"]
 
         result = subprocess.run(
             [args.wright, "compile", str(source), "--profile", args.profile, "-f", "json"],
