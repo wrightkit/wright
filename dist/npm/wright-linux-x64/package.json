@@ -1,6 +1,6 @@
 {
   "name": "@wrightkit/wright-linux-x64",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Linux x64 native binary for Wright",
   "license": "AGPL-3.0-or-later",
   "repository": {
