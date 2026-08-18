@@ -32,7 +32,9 @@ stdout payload in text mode, including when GitHub Actions presentation is
 selected. GitHub Actions diagnostics and findings are emitted as escaped
 workflow annotations; grouping is sent to the workflow command stream and a
 concise PASS/WARN/ERROR line is appended to `GITHUB_STEP_SUMMARY` when the
-runner provides that file.
+runner provides that file. The summary uses the highest structured severity:
+errors produce `ERROR`, warnings produce `WARN`, and info/notice-only results
+produce `PASS`.
 
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,

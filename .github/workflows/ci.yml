@@ -54,6 +54,45 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --all-targets --all-features
 
+  cli-github-actions-smoke:
+    name: Wright CLI GitHub Actions smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Build wright CLI
+        run: cargo build --locked -p wright-cli
+
+      - name: Exercise auto GitHub Actions renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/wright-gha-smoke.ws"
+          stdout="$RUNNER_TEMP/wright-gha-smoke.stdout"
+          stderr="$RUNNER_TEMP/wright-gha-smoke.stderr"
+          cat > "$fixture" <<'EOF'
+          rule ("gha smoke") {
+              event {
+                  Ongoing - Global;
+              }
+              actions {
+                  Disable Inspector Recording;
+              }
+          }
+          EOF
+          target/debug/wright check "$fixture" > "$stdout" 2> "$stderr"
+          test ! -s "$stdout"
+          grep -Fq '::group::wright check' "$stderr"
+          grep -Fq '::endgroup::' "$stderr"
+          ! grep -Fq 'title=Wright summary' "$stderr"
+          grep -Fq 'Wright `check`: **PASS** (exit 0)' "$GITHUB_STEP_SUMMARY"
+
   lpp-client-integration:
     name: LPP client integration (#142, #139)
     runs-on: ubuntu-latest

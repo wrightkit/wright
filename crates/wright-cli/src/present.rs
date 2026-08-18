@@ -260,30 +260,59 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
     );
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum SummaryStatus {
+    Pass,
+    Warn,
+    Error,
+}
+
+impl SummaryStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::Warn => "WARN",
+            Self::Error => "ERROR",
+        }
+    }
+
+    fn from_finding_severity(severity: &str) -> Self {
+        match severity {
+            "error" => Self::Error,
+            "warning" => Self::Warn,
+            "info" | "notice" => Self::Pass,
+            _ => Self::Warn,
+        }
+    }
+}
+
 fn summary_status<T: serde::Serialize>(
     envelope: &Envelope<T>,
     value: &serde_json::Value,
 ) -> &'static str {
-    if !envelope.ok
-        || envelope
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.severity == Severity::Error)
-    {
-        "ERROR"
-    } else if envelope
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.severity == Severity::Warning)
-        || value
-            .pointer("/result/findings")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|findings| !findings.is_empty())
-    {
-        "WARN"
+    let mut status = if envelope.ok {
+        SummaryStatus::Pass
     } else {
-        "PASS"
+        SummaryStatus::Error
+    };
+    for diagnostic in &envelope.diagnostics {
+        status = status.max(match diagnostic.severity {
+            Severity::Error => SummaryStatus::Error,
+            Severity::Warning => SummaryStatus::Warn,
+            Severity::Info => SummaryStatus::Pass,
+        });
     }
+    if let Some(findings) = value
+        .pointer("/result/findings")
+        .and_then(serde_json::Value::as_array)
+    {
+        for finding in findings {
+            if let Some(severity) = finding.get("severity").and_then(serde_json::Value::as_str) {
+                status = status.max(SummaryStatus::from_finding_severity(severity));
+            }
+        }
+    }
+    status.as_str()
 }
 
 fn emit_summary<T: serde::Serialize>(envelope: &Envelope<T>, value: &serde_json::Value) {
@@ -679,5 +708,73 @@ mod tests {
     fn workflow_command_escaping_is_split_by_context() {
         assert_eq!(escape_workflow_property("a,b:c%\n"), "a%2Cb%3Ac%25%0A");
         assert_eq!(escape_workflow_data("a,b:c%\n"), "a,b:c%25%0A");
+    }
+
+    fn summary_envelope(
+        ok: bool,
+        diagnostics: Vec<wright_driver::Diagnostic>,
+        findings: serde_json::Value,
+    ) -> (Envelope<serde_json::Value>, serde_json::Value) {
+        let envelope = Envelope {
+            wright: wright_driver::result::VersionInfo {
+                version: "test".to_string(),
+                contract: "wright-result/v1".to_string(),
+            },
+            command: "lint".to_string(),
+            ok,
+            exit: if ok { 0 } else { 1 },
+            diagnostics,
+            result: serde_json::json!({"findings": findings}),
+        };
+        let value = serde_json::to_value(&envelope).unwrap();
+        (envelope, value)
+    }
+
+    fn diagnostic(severity: Severity) -> wright_driver::Diagnostic {
+        wright_driver::Diagnostic {
+            code: "test".to_string(),
+            stage: wright_driver::Stage::Analysis,
+            severity,
+            message: "test".to_string(),
+            span: None,
+            source: None,
+        }
+    }
+
+    #[test]
+    fn summary_info_only_is_pass() {
+        let (envelope, value) = summary_envelope(
+            true,
+            vec![diagnostic(Severity::Info)],
+            serde_json::json!([
+                {"severity": "info"},
+                {"severity": "notice"}
+            ]),
+        );
+        assert_eq!(summary_status(&envelope, &value), "PASS");
+    }
+
+    #[test]
+    fn summary_warning_over_info_is_warn() {
+        let (envelope, value) = summary_envelope(
+            true,
+            vec![diagnostic(Severity::Warning)],
+            serde_json::json!([{"severity": "info"}]),
+        );
+        assert_eq!(summary_status(&envelope, &value), "WARN");
+    }
+
+    #[test]
+    fn summary_error_over_warning_is_error() {
+        let (envelope, value) = summary_envelope(
+            true,
+            vec![diagnostic(Severity::Error)],
+            serde_json::json!([
+                {"severity": "warning"},
+                {"severity": "error"},
+                {"severity": "info"}
+            ]),
+        );
+        assert_eq!(summary_status(&envelope, &value), "ERROR");
     }
 }
