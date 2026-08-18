@@ -41,30 +41,6 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      - name: Normalize GitHub Release to draft
-        if: steps.release.outputs.release_created == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          if gh release view "${RELEASE_TAG}" --json isDraft >/dev/null 2>&1; then
-            is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
-            if [[ "${is_draft}" == "true" ]]; then
-              echo "draft GitHub Release ${RELEASE_TAG} already exists"
-              exit 0
-            fi
-            echo "GitHub Release ${RELEASE_TAG} was published before distribution completed; returning it to draft"
-            gh release edit "${RELEASE_TAG}" --draft
-            exit 0
-          fi
-          echo "GitHub Release ${RELEASE_TAG} does not exist; creating draft"
-          gh release create "${RELEASE_TAG}" \
-            --draft \
-            --verify-tag \
-            --title "${RELEASE_TAG}" \
-            --generate-notes
-
       - name: Synchronize checked-in release metadata
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
