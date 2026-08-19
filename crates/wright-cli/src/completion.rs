@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use clap::CommandFactory;
 
-use crate::cli::{Cli, CompletionInstallArgs, ShellArg};
 use crate::CLI_NAME;
+use crate::cli::{Cli, CompletionInstallArgs, ShellArg};
 
 mod exit {
     pub(super) const SUCCESS: u8 = 0;
@@ -596,7 +596,11 @@ mod tests {
             let script = generate_script(shell);
             assert!(!script.is_empty(), "{:?} script must not be empty", shell);
             let text = String::from_utf8_lossy(&script);
-            assert!(text.contains("wright"), "{:?} script contains wright", shell);
+            assert!(
+                text.contains("wright"),
+                "{:?} script contains wright",
+                shell
+            );
         }
     }
 }

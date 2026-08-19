@@ -632,7 +632,11 @@ fn completion_install_explicit_shell_and_dir() {
         "--dir",
         dir.to_str().unwrap(),
     ]);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("installed zsh completion"), "{stdout}");
     let target = dir.join("_wright");
@@ -682,7 +686,10 @@ fn completion_install_dry_run() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("would install bash completion"), "{stdout}");
-    assert!(!dir.join("wright").exists(), "dry-run must not create files");
+    assert!(
+        !dir.join("wright").exists(),
+        "dry-run must not create files"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -696,7 +703,11 @@ fn completion_install_detection_via_env() {
             ("WRIGHT_COMPLETION_DIR", dir.to_str().unwrap()),
         ],
     );
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("installed fish completion"), "{stdout}");
     assert!(dir.join("wright.fish").is_file());
@@ -713,12 +724,19 @@ fn completion_install_all_flag() {
         "--dir",
         dir.to_str().unwrap(),
     ]);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("installed bash completion"), "{stdout}");
     assert!(stdout.contains("installed zsh completion"), "{stdout}");
     assert!(stdout.contains("installed fish completion"), "{stdout}");
-    assert!(stdout.contains("installed powershell completion"), "{stdout}");
+    assert!(
+        stdout.contains("installed powershell completion"),
+        "{stdout}"
+    );
     assert!(dir.join("wright").is_file());
     assert!(dir.join("_wright").is_file());
     assert!(dir.join("wright.fish").is_file());
@@ -746,8 +764,14 @@ fn completion_install_undetected_shell_reports_user_error() {
     if !cfg!(windows) {
         assert_eq!(output.status.code(), Some(1));
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("could not automatically detect your shell"), "{stderr}");
-        assert!(stderr.contains("wright completion install <bash|zsh|fish|powershell>"), "{stderr}");
+        assert!(
+            stderr.contains("could not automatically detect your shell"),
+            "{stderr}"
+        );
+        assert!(
+            stderr.contains("wright completion install <bash|zsh|fish|powershell>"),
+            "{stderr}"
+        );
     }
 }
 
