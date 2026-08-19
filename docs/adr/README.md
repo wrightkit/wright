@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
-ADRs record decisions that affect Wright's observable compiler contract or
-component boundaries. They complement, rather than replace, the normative
+ADRs record decisions that affect Wright's observable product/compiler contract
+or component boundaries. They complement, rather than replace, the normative
 contracts in [`docs/architecture.md`](../architecture.md) and
 [`docs/compatibility.md`](../compatibility.md).
 
@@ -32,3 +32,4 @@ contracts in [`docs/architecture.md`](../architecture.md) and
 * [ADR-0007: OverPy reference pinning policy](0007-reference-pinning-policy.md)
 * [ADR-0008: Tooling-first semantic platform rebaseline](0008-tooling-first-semantic-platform.md)
 * [ADR-0009: Language ownership and licensing boundaries](0009-language-ownership-licensing-boundaries.md)
+* [ADR-0010: Independent language implementations and Wright integration](0010-independent-implementations-and-wright-integration.md)
