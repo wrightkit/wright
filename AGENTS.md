@@ -1,165 +1,139 @@
 # AGENTS.md
 
-This repository is part of the **WrightKit** multi-repository workspace.
-Apply the workspace-level `AGENTS.md` when available, then follow this
-repository's local ownership, architecture, validation, and delivery rules.
+This repository is part of the **WrightKit** multi-repository workspace. Apply
+the workspace-level `AGENTS.md` first, then this repository's local ownership,
+architecture, validation, and delivery rules.
 
-Within WrightKit, Wright is the user-facing **tooling and orchestration**
-repository for Overwatch Workshop development. It owns CLI/service
-orchestration, diagnostics, static analysis, generic source-edit transaction
-safety, semantic refactoring, agent tooling and embedding APIs
-([`docs/embedding.md`](docs/embedding.md)), and protocol integration (Language
-Server Protocol, Language Provider Protocol).
+Wright is WrightKit's user-facing **tooling and integration product**. It gives
+users one surface across independently usable implementations of OverPy,
+DEL/OSTW, and raw Workshop, then adds linting, static analysis, semantic query,
+validated source edits, agent tooling, CI/embedding, and language services.
 
-Wright does **not** claim durable ownership of source-language compiler
-internals (owned by language-specific provider repositories) or canonical
-Workshop semantics/catalog/IR (owned by `workshop-rs`).
+Wright is not the durable owner of those language implementations.
 
-This file is a concise routing and engineering guide, not a project status page
-or a duplicate of architecture contracts.
+## Repository ownership
 
-## Coordination and multi-repository routing
+- **`workshop-rs`** — standalone raw Workshop implementation and canonical
+  Workshop semantics, parser, WIR, catalog, settings/localization, validation,
+  emission, and Workshop-owned gameplay/query data.
+- **`opy-rs`** — standalone OverPy implementation: syntax, preprocessing,
+  macros, semantics, diagnostics/provenance, OPY-specific compiler behavior,
+  standalone tooling, compatibility evidence, and Workshop→OPY reconstruction.
+- **`del-rs`** — standalone DEL/OSTW implementation: source/project model,
+  semantics/types, runtime/compiler lowering, diagnostics/provenance,
+  standalone tooling, compatibility evidence, and Workshop→DEL reconstruction.
+- **`language-provider-protocol`** — versioned LPP process/data contract.
+- **Wright** — unified CLI/service orchestration, cross-language diagnostics,
+  lint/static analysis, semantic query, source-edit transaction safety,
+  refactoring, agent/embedding APIs, CI presentation, editor-neutral language
+  services, LSP, and integration adapters.
 
-Read the [Agent Team contract](docs/agent-team.md) for role authority (PM,
-Architect, Engineer, QA), workflow, blocked routes, and evidence traceability.
-GitHub issues remain the product scope and roadmap (normative pre-1.0 roadmap:
-[#134](https://github.com/wrightkit/wright/issues/134)); do not copy issue
-state into `docs/`.
+Terminology:
 
-### Repository ownership
+- **frontend** is an internal stage inside a language implementation; do not use
+  it as shorthand for the product identity of `opy-rs` or `del-rs`;
+- **provider** is an integration role/process exposed through LPP or another
+  reviewed boundary; it does not make a language implementation subordinate to
+  Wright;
+- Wright may integrate through native Rust APIs and/or LPP depending on the
+  product boundary, but must not pull language ownership back into this repo.
 
-Before implementing a task, identify the semantic and product owner:
+See [`docs/adr/0010-independent-implementations-and-wright-integration.md`](docs/adr/0010-independent-implementations-and-wright-integration.md).
 
-* **Wright (`wright`)**: Owns user-facing CLI and service binaries
-  (`wright-cli`, `wright-tool`, `wright-serve`), compiler session orchestration
-  (`wright-driver`), static analysis and query (`wright-analyzer`), transform
-  pipelines (`wright-transform`), generic source-edit transaction safety and
-  semantic refactoring (`wright-driver`, `wright-language`), editor-neutral
-  language services (`wright-language`), LSP protocol mapping (`wright-lsp`),
-  agent/embedding APIs (`wright-consumer`, [`docs/embedding.md`](docs/embedding.md)),
-  and protocol adapters.
-* **`workshop-rs`**: Owns canonical Workshop semantics, actions, values, AST,
-  parser, emitter, multi-locale action/value catalogs, and Workshop IR (WIR).
-  Route canonical Workshop language rules, catalogs, or AST/WIR contract changes
-  to `workshop-rs`.
-* **Language Providers** (e.g. OPY, OSTW providers): Own source-language
-  syntax, lexers, parsers, ASTs, source-level symbol resolution, and compiler
-  internals.
+## Dependency direction
 
-Do not bypass ownership boundaries or move responsibilities across repositories
-merely to simplify an implementation.
-
-### Migration boundary
-
-During the ecosystem migration period, in-repo crates (`crates/wright-opy`,
-`crates/wright-ostw`, `crates/wright-workshop`, `crates/wright-ir`) coexist
-within this workspace until repository extraction is complete. Agents must not
-conflate temporary in-repo co-location with target architecture:
-
-* Keep language-specific code decoupled from Wright tooling internals.
-* Do not introduce new dependencies from source-language frontends back into
-  Wright tooling internals.
-* Route durable contract changes to their target repository owners.
-
-## Architecture boundaries and licensing
-
-The tooling and orchestration layer coordinates language providers and Workshop
-core via explicit protocol and data contracts:
+Durable dependencies point toward the owning implementation, never back from a
+language/core repository into Wright tooling internals:
 
 ```text
-Client / Agent / LSP / CLI
-    ↓
-Wright Tooling & Session Orchestration (wright-driver, wright-language, wright-analyzer)
-    ↓                                    ↓
-Language Providers (LPP / native)   Workshop Core (workshop-rs / WIR)
-    ↓                                    ↓
-Source AST & Semantic Diagnostics    Canonical Workshop AST & Output
+Wright ─────► opy-rs
+Wright ─────► del-rs
+Wright ─────► workshop-rs
+opy-rs ─────► workshop-rs
+del-rs ─────► workshop-rs
 ```
 
-Durable architecture and decision records live in [`docs/architecture.md`](docs/architecture.md)
-and [`docs/adr/`](docs/adr/README.md).
+LPP is a process boundary and does not imply a cross-repository Rust dependency.
 
-### Upstream references and licensing
+Do not bypass ownership boundaries merely to make a Wright command appear to
+work. If a real OPY project fails because `opy-rs` lacks semantic support, fix
+`opy-rs`; if a canonical Workshop primitive is missing, fix `workshop-rs`; if
+the implementation is correct and Wright integrates it incorrectly, fix Wright.
 
-Pinned upstream compilers (e.g. OverPy, OSTW) are external compatibility
-oracles and behavior references, never runtime dependencies.
+## Product priority
 
-* Do not link to upstream references, copy their source, import internal ASTs,
-  or commit unreviewed third-party fixtures.
-* Clean-room development, provenance verification, and redistribution review
-  follow [`docs/licensing.md`](docs/licensing.md) and [`docs/compatibility.md`](docs/compatibility.md).
+Wright is tooling-first. Prioritize:
 
-## Verified routing and extension paths
+1. real `check` / diagnostics;
+2. lint / static analysis;
+3. inspect / semantic query;
+4. safe source edits / refactoring;
+5. agent and embedding workflows;
+6. CI and language-service integration;
+7. Workshop stability/cost analysis;
+8. compilation/conversion needed by real workflows.
 
-Add regressions at the lowest layer that proves the behavior. Use the shortest
-applicable path:
+Architecture and cleanup matter when they protect a public/versioned contract,
+repository ownership, dependency direction, provenance/source-edit correctness,
+licensing boundaries, or an observed maintenance risk. Internal layout, helper
+abstractions, temporary adapters, and code organization are revisable and must
+not displace user-visible functionality without evidence.
 
-### 1. Wright tooling, diagnostics, and source edits
+## Real-project execution rule
 
-1. Read [`docs/cli.md`](docs/cli.md), [`docs/architecture.md`](docs/architecture.md),
-   and the diagnostic/edit types in `wright-driver`, `wright-analyzer`, or
-   `wright-transform`.
-2. Implement transaction-safe edits, structured diagnostics, or CLI/tool
-   commands in the owning crate; preserve source provenance and determinism.
-3. Run `cargo test -p wright-driver`, `cargo test -p wright-analyzer`, and
-   `cargo test -p wright-cli`.
+A passing unit-test count is not sufficient when Wright is unusable on the real
+projects that motivated the work. For product regressions:
 
-### 2. Language services and protocol integration (LSP / LPP)
+1. reproduce the failure with the released/current Wright path and the owning
+   standalone implementation where possible;
+2. classify the owner before changing code;
+3. keep the full-project regression or pinned project evidence;
+4. add a minimized regression where practical;
+5. rerun the full user workflow (`check`, `lint`, `analyze`, `inspect`, compile
+   when relevant) before claiming the blocker resolved.
 
-1. Read [`docs/language-services.md`](docs/language-services.md).
-2. Keep editor-neutral language intelligence in `wright-language` and protocol
-   DTO mapping in `wright-lsp` (or LPP provider adapters).
-3. Run `cargo test -p wright-language` and `cargo test -p wright-lsp --test lsp`.
+Issue trees and support matrices are tracking structures, not mandatory
+execution algorithms. Prefer coherent implementation waves over unnecessary
+per-construct issue/PR fragmentation when ownership and review boundaries remain
+clear.
 
-### 3. Canonical Workshop semantics and catalog (`workshop-rs`)
+## Architecture boundaries
 
-1. Route canonical Workshop AST, parser, emitter, and catalog changes to
-   `workshop-rs`.
-2. In-repo migration path: verify `crates/wright-workshop` and `crates/wright-ir`.
-3. Run `cargo test -p wright-workshop` and `cargo test -p wright-ir`.
+- Preserve source provenance and structured diagnostics across integration
+  boundaries.
+- Never silently fall back to upstream OverPy/OSTW runtimes for a declared
+  first-party workflow.
+- Never duplicate canonical Workshop data or semantics in Wright.
+- Never invent Wright-only OPY/DEL syntax.
+- Compatibility targets observable semantics, not output-text identity,
+  formatting, optimizer shape, temporary variables, or upstream internals.
+- Source-oriented validated edits are preferred over full-file regeneration.
 
-### 4. Language-provider semantics (OPY / OSTW)
+Durable architecture and ADRs live under [`docs/`](docs/README.md). Current
+support claims must be grounded in the owning repositories and executable
+evidence, not in historical Wright monolith behavior.
 
-1. Check the relevant support matrix (e.g. [`docs/opy/support-matrix.md`](docs/opy/support-matrix.md),
-   [`docs/ostw/compatibility-baseline.md`](docs/ostw/compatibility-baseline.md)).
-2. In-repo migration path: implement in `crates/wright-opy` or
-   `crates/wright-ostw`; keep semantic data in frontend-neutral HIR/WIR and reject
-   unsupported constructs explicitly.
-3. Run `cargo test -p wright-opy` (and `cargo test -p wright-opy --test differential`),
-   or `cargo test -p wright-ostw` (and `cargo test -p wright-ostw --test differential`).
+## Validation
 
-### 5. Compatibility, oracles, and conformance evidence
+Use the smallest focused test set while iterating, then run the affected product
+and workspace gates before delivery. At minimum for broad Wright changes:
 
-1. Read [`docs/compatibility.md`](docs/compatibility.md) and
-   [`compatibility/README.md`](compatibility/README.md); establish the claim
-   class (S, D, N, E) and provenance first.
-2. Add or update fixture manifests/snapshots under `compatibility/` only with
-   reviewed provenance; do not update snapshots incidentally.
-3. Run `python3 -m unittest discover -s compatibility/tests` and the relevant
-   oracle harness.
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets --all-features </dev/null
+git diff --check
+```
 
-### 6. Agent tooling, embedding, and scenarios
+Run relevant scenario/compatibility gates for the changed surface. Real-project
+support claims require real-project validation in addition to focused tests.
 
-1. Read [`docs/embedding.md`](docs/embedding.md) and [`docs/release.md`](docs/release.md).
-2. For agent/consumer APIs: test `crates/wright-consumer` via
-   `cargo test -p wright-consumer`.
-3. For scenario and release gates: run `python3 scripts/run-scenarios.py` and
-   `python3 scripts/v1-gates.py`.
+## Delivery
 
-## Validation and delivery
-
-The Rust baseline and MSRV policy are in [`CONTRIBUTING.md`](CONTRIBUTING.md);
-CI runs on stable and Rust 1.85.0. External oracle checks require pinned
-pnpm/Node dependencies when invoked, and release gates record evidence under
-`target/`. A single test or build pass is not proof of compatibility; state the
-evidence level and boundary.
-
-For implementation work:
-
-* Review the complete diff and run `git diff --check`.
-* Stage only task-owned files; preserve unrelated dirt.
-* Use Conventional Commits (`type(scope): subject`).
-* Do not push, rewrite history, delete data, publish artifacts, or modify remote
-  issues unless explicitly authorized.
-* Never commit credentials, private runtime data, or unreviewed third-party
+- Never push directly to `main`; use independent branches/worktrees and PRs.
+- Keep commits focused and do not mix unrelated repository changes.
+- Do not use repository changes or commits for GitHub metadata-only operations.
+- Do not publish, rewrite history, delete data, or modify unrelated remote state
+  unless explicitly authorized.
+- Never commit credentials, private runtime data, or unreviewed third-party
   material.
