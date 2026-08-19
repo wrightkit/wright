@@ -130,6 +130,14 @@ postinstall download scripts.
   `GITHUB_TOKEN`. GitHub Packages consumers must configure the `@wrightkit`
   scope to use `https://npm.pkg.github.com` and authenticate with GitHub.
 
+## Shell completions (#186)
+
+- Standalone installations (`install.sh`) automatically run `wright completion install`
+  post-install and refresh completions on `wright update`.
+- Package managers (Homebrew, Scoop, WinGet) should consume the authoritative
+  generator `wright completion bash|zsh|fish|powershell` following their native
+  packaging conventions rather than maintaining hand-written completion scripts.
+
 ## Drift detection
 
 - CI runs `scripts/verify-dist.py` on every commit: it regenerates the

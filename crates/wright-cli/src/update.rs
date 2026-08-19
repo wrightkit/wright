@@ -333,6 +333,7 @@ fn install_version(
         "==> done: wright and wright-lsp {version} installed in {}",
         install_dir.display()
     );
+    let _ = crate::completion::refresh_installed_completions();
     Ok(())
 }
 

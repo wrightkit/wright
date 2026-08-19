@@ -139,9 +139,51 @@ pub(crate) struct LintArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct CompletionArgs {
-    /// Shell to generate completion for.
+    #[command(subcommand)]
+    pub(crate) subcommand: Option<CompletionSubcommand>,
+
+    /// Shell to generate completion for: bash|zsh|fish|powershell.
     #[arg(value_enum, value_name = "SHELL")]
-    pub(crate) shell: ShellArg,
+    pub(crate) shell: Option<ShellArg>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum CompletionSubcommand {
+    /// Install generated shell completions into standard user-local directories.
+    Install(CompletionInstallArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct CompletionInstallArgs {
+    /// Shell to install completion for (defaults to detecting the current shell).
+    #[arg(value_enum, value_name = "SHELL")]
+    pub(crate) shell: Option<ShellArg>,
+
+    /// Shell override (alias for positional shell argument).
+    #[arg(short = 's', long = "shell", value_enum)]
+    pub(crate) shell_flag: Option<ShellArg>,
+
+    /// Explicit destination directory for the completion script.
+    #[arg(long, value_name = "DIR")]
+    pub(crate) dir: Option<PathBuf>,
+
+    /// Check or print what would be installed without writing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+
+    /// Install/refresh completions for all supported shells.
+    #[arg(long)]
+    pub(crate) all: bool,
+
+    /// Force overwrite of existing completion files.
+    #[arg(long)]
+    pub(crate) force: bool,
+}
+
+impl CompletionInstallArgs {
+    pub(crate) fn effective_shell(&self) -> Option<ShellArg> {
+        self.shell.or(self.shell_flag)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -209,4 +251,24 @@ pub(crate) enum ShellArg {
     Fish,
     #[value(name = "powershell", alias = "pwsh")]
     PowerShell,
+}
+
+impl ShellArg {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            ShellArg::Bash => "bash",
+            ShellArg::Zsh => "zsh",
+            ShellArg::Fish => "fish",
+            ShellArg::PowerShell => "powershell",
+        }
+    }
+
+    pub(crate) fn to_clap_shell(self) -> clap_complete::Shell {
+        match self {
+            ShellArg::Bash => clap_complete::Shell::Bash,
+            ShellArg::Zsh => clap_complete::Shell::Zsh,
+            ShellArg::Fish => clap_complete::Shell::Fish,
+            ShellArg::PowerShell => clap_complete::Shell::PowerShell,
+        }
+    }
 }

@@ -172,6 +172,13 @@ echo "==> post-install smoke check"
 "$INSTALL_DIR/wright-lsp" --version | grep -Fq "$VERSION" \
   || fail "smoke check failed: '$INSTALL_DIR/wright-lsp --version' did not report version $VERSION"
 
+echo "==> installing shell completion"
+if "$INSTALL_DIR/wright" completion install 2>/dev/null; then
+  :
+else
+  echo "note: shell completion could not be installed automatically; run '$INSTALL_DIR/wright completion install' or '$INSTALL_DIR/wright completion <shell>' to configure completion" >&2
+fi
+
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) echo "note: add $INSTALL_DIR to your PATH to use wright" >&2 ;;

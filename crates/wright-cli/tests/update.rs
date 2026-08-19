@@ -309,6 +309,42 @@ fn update_installs_and_replaces_both_binaries() {
 }
 
 #[test]
+fn update_refreshes_existing_completions() {
+    let server = MockServer::new(release(RELEASE).files);
+    let dir = install_dir("update-completions");
+    let comp_dir = std::env::temp_dir().join(format!("wright-comp-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&comp_dir);
+    std::fs::create_dir_all(&comp_dir).unwrap();
+    let comp_file = comp_dir.join("_wright");
+    std::fs::write(&comp_file, b"old completion content").unwrap();
+
+    let mut env = server.env();
+    env.push((
+        "WRIGHT_COMPLETION_DIR",
+        comp_dir.to_str().unwrap().to_string(),
+    ));
+
+    let output = run_update(&dir, &["update"], &env);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("refreshed") || stdout.contains("installed"),
+        "{stdout}"
+    );
+
+    let new_content = std::fs::read(&comp_file).unwrap();
+    assert_ne!(new_content, b"old completion content");
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&comp_dir);
+}
+
+#[test]
 fn update_already_at_latest_reports_up_to_date() {
     let current = env!("CARGO_PKG_VERSION");
     let server = MockServer::new(release(current).files);

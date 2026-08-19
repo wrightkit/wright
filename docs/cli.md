@@ -4,17 +4,69 @@ Status: accepted baseline (living driver and CLI contract)
 Scope: `wright` executable, `wright-driver` crate, and their machine-readable
 contracts
 
-## CLI presentation and completion (#164)
+## CLI presentation and completion (#164, #186)
 
 The `wright` command model is defined once with `clap`. The same model drives
-argv parsing, generated help, and the static completion entry point:
+argv parsing, generated help, and shell completion:
 
 ```text
+# Pure completion generation (stdout)
 wright completion bash
 wright completion zsh
 wright completion fish
 wright completion powershell
+
+# Automatic or explicit user-local completion installation
+wright completion install
+wright completion install zsh
+wright completion install --dir <DIR>
+wright completion install --dry-run
+wright completion install --all
 ```
+
+### Shell completion lifecycle (#186)
+
+Wright manages its completion lifecycle directly so installations and updates
+provide working completions without duplicating shell filesystem logic or
+mutating shell startup configuration:
+
+* `wright completion <shell>`: generates pure static completion scripts for
+  Bash, Zsh, Fish, or PowerShell (`pwsh`) directly to stdout for manual setup or
+  package-manager packaging.
+* `wright completion install [SHELL]`: detects the current shell (or takes an
+  explicit shell/`--shell` override) and installs generated completion into the
+  standard conventional user-local directories without modifying `.zshrc`,
+  `.bashrc`, or user startup scripts.
+  - `--dir <DIR>` overrides the target directory.
+  - `--dry-run` prints planned installation paths without writing files.
+  - `--all` installs/refreshes completions for all supported shells.
+  - `--force` forces re-writing existing completion files.
+* **Shell detection**: resolves `$WRIGHT_SHELL` first, then inspects `$SHELL`
+  path/filename, followed by shell environment variables (`ZSH_VERSION`,
+  `BASH_VERSION`, `FISH_VERSION`, `PSModulePath`), falling back to PowerShell on
+  Windows.
+* **Conventional installation locations**:
+  - **Fish**: `~/.config/fish/completions/wright.fish` (or
+    `~/.local/share/fish/vendor_completions.d/wright.fish`), automatically loaded
+    by Fish.
+  - **Bash**: `~/.local/share/bash-completion/completions/wright` (or
+    `~/.bash_completion.d/wright`), loaded automatically when `bash-completion`
+    is active.
+  - **Zsh**: `$ZSH_CUSTOM/completions/_wright` (if `$ZSH_CUSTOM` set),
+    `~/.oh-my-zsh/custom/completions/_wright` (if Oh My Zsh exists),
+    `~/.zfunc/_wright`, `~/.zsh/completions/_wright`, or
+    `~/.local/share/zsh/site-functions/_wright`.
+  - **PowerShell**: `~/Documents/PowerShell/Scripts/_wright.ps1` (Windows) or
+    `~/.config/powershell/completions/_wright.ps1` (Unix).
+* **Install and Update integration**:
+  - `install.sh` invokes `wright completion install` post-installation and
+    reports non-fatal guidance if automatic completion installation cannot run.
+  - `wright update` refreshes existing Wright completion files in conventional
+    locations upon replacing the binaries so completions stay aligned with the
+    installed command model.
+* **Package-manager boundaries**: Homebrew, Scoop, and WinGet packaging
+  consume `wright completion <shell>` generation using native package conventions
+  rather than maintaining hand-written completion scripts.
 
 Workflow commands accept these CLI-only presentation options:
 
@@ -74,6 +126,8 @@ result.
 | `wright analyze [INPUT]` | Parse, lower, analyze | findings and summary |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
 | `wright inspect [INPUT]` | Parse, lower, inspect structure | rules, symbols, references summary |
+| `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
+| `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update` | Self-update a standalone installation | update progress (text only) |
 
 `wright version` and `wright --version` print the implementation version

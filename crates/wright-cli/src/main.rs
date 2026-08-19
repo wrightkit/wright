@@ -1,9 +1,11 @@
 //! `wright` — the primary Wright command-line interface.
 
 mod cli;
+mod completion;
 mod present;
 mod update;
 
+use std::io::Write;
 use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser};
@@ -55,17 +57,30 @@ fn main() -> ExitCode {
             println!("{}", version_banner());
             ExitCode::SUCCESS
         }
-        Some(Command::Completion(args)) => {
-            let mut command = Cli::command();
-            let shell = match args.shell {
-                cli::ShellArg::Bash => clap_complete::Shell::Bash,
-                cli::ShellArg::Zsh => clap_complete::Shell::Zsh,
-                cli::ShellArg::Fish => clap_complete::Shell::Fish,
-                cli::ShellArg::PowerShell => clap_complete::Shell::PowerShell,
-            };
-            clap_complete::generate(shell, &mut command, CLI_NAME, &mut std::io::stdout());
-            ExitCode::SUCCESS
-        }
+        Some(Command::Completion(args)) => match args.subcommand {
+            Some(cli::CompletionSubcommand::Install(install_args)) => {
+                match completion::run_install(&install_args) {
+                    Ok(code) => ExitCode::from(code),
+                    Err(error) => {
+                        eprintln!("wright: {}", error.message());
+                        ExitCode::from(error.exit_code())
+                    }
+                }
+            }
+            None => match args.shell {
+                Some(shell) => {
+                    let bytes = completion::generate_script(shell);
+                    let _ = std::io::stdout().write_all(&bytes);
+                    ExitCode::SUCCESS
+                }
+                None => {
+                    eprintln!(
+                        "wright: specify a shell (bash, zsh, fish, powershell) or 'install' (run 'wright completion --help' for details)"
+                    );
+                    ExitCode::from(exit::USAGE)
+                }
+            },
+        },
         Some(Command::Update(args)) => match update::run(args.check, args.version.as_deref()) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {

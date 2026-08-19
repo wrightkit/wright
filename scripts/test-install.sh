@@ -235,6 +235,16 @@ else
     || report "archive missing wright-lsp fails cleanly" fail
 fi
 
+if run_install --dir "$WORK/d10" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
+  if grep -Fq "installing shell completion" "$INSTALL_OUTPUT"; then
+    report "install.sh runs completion installation" ok
+  else
+    report "install.sh runs completion installation" fail
+  fi
+else
+  report "install.sh runs completion installation" fail
+fi
+
 echo
 echo "installer tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
