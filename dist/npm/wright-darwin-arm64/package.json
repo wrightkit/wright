@@ -1,6 +1,6 @@
 {
   "name": "@wrightkit/wright-darwin-arm64",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "macOS ARM64 (Apple Silicon) native binary for Wright",
   "license": "AGPL-3.0-or-later",
   "repository": {
