@@ -1110,6 +1110,14 @@ impl<'a> Emitter<'a> {
                     span,
                 );
             }
+            ModifyOp::RemoveFromArrayByIndex => {
+                self.issue(
+                    "unsupported-modify-op",
+                    "Modify ... Remove From Array By Index is outside the reconstruction \
+                     surface (the OPY surface has no indexed remove-from-array form)",
+                    span,
+                );
+            }
             ModifyOp::Add
             | ModifyOp::Subtract
             | ModifyOp::Multiply

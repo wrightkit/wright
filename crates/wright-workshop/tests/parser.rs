@@ -405,9 +405,12 @@ fn cross_domain_member_spelling_collisions_are_the_documented_inventory() {
             (
                 "None".to_string(),
                 vec![
+                    "FacingReeval".to_string(),
                     "ChaseTimeReeval".to_string(),
                     "ChaseRateReeval".to_string(),
-                    "Invis".to_string()
+                    "Invis".to_string(),
+                    "ThrottleReeval".to_string(),
+                    "EffectReeval".to_string()
                 ]
             ),
             (
