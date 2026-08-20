@@ -621,7 +621,9 @@ impl<'a> Classifier<'a> {
             | ModifyOp::Divide
             | ModifyOp::Modulo => {}
             ModifyOp::AppendToArray => {} // representable as `receiver.append(value)`
-            ModifyOp::RaiseToPower | ModifyOp::RemoveFromArray => {
+            ModifyOp::RaiseToPower
+            | ModifyOp::RemoveFromArray
+            | ModifyOp::RemoveFromArrayByIndex => {
                 self.error(ReconstructError::at(
                     "reconstruct-unsupported-modify-op",
                     format!("modifyOp:{}", op.as_str()),
@@ -1209,7 +1211,10 @@ fn assign_op_spelling(op: ModifyOp) -> &'static str {
         ModifyOp::Multiply => "*=",
         ModifyOp::Divide => "/=",
         ModifyOp::Modulo => "%=",
-        ModifyOp::AppendToArray | ModifyOp::RaiseToPower | ModifyOp::RemoveFromArray => {
+        ModifyOp::AppendToArray
+        | ModifyOp::RaiseToPower
+        | ModifyOp::RemoveFromArray
+        | ModifyOp::RemoveFromArrayByIndex => {
             unreachable!("classified")
         }
     }
