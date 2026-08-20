@@ -16,7 +16,7 @@ use wright_analyzer::registry::LintConfig;
 use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService};
 
 use crate::config::{SessionConfig, SourceKind};
-use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage};
+use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage, span_from_ir};
 use crate::input::{self, ResolvedInput};
 use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
@@ -412,6 +412,7 @@ impl CompilerSession {
                 },
             );
         }
+        self.attach_workshop_completeness(&loaded);
         self.attach_analysis(&loaded);
         self.finish(command, CheckResult { ostw: None })
     }
@@ -431,6 +432,7 @@ impl CompilerSession {
             // then run the shared semantic service over the lowered program.
             self.push_ostw_diagnostics(&loaded);
         }
+        self.attach_workshop_completeness(&loaded);
         let service = match self.service(&loaded) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -517,6 +519,7 @@ impl CompilerSession {
             // then run the shared semantic service over the lowered program.
             self.push_ostw_diagnostics(&loaded);
         }
+        self.attach_workshop_completeness(&loaded);
         let service = match self.service_with(&loaded, self.config.lint.clone()) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -698,6 +701,67 @@ impl CompilerSession {
         }
     }
 
+    /// Structural validation permits source-preserving Workshop fallbacks.
+    /// Surface those nodes as blocking semantic diagnostics before presenting
+    /// check/lint output as definitive. The catalog remains owned by
+    /// workshop-rs; this is only the consumer-side diagnostic projection.
+    fn attach_workshop_completeness(&mut self, loaded: &Loaded) {
+        if loaded.input.kind != SourceKind::Workshop {
+            return;
+        }
+        let mut issues = Vec::new();
+        if let Some(settings) = &loaded.program.settings {
+            collect_raw_settings(&settings.children, &mut issues);
+        }
+        for action in loaded.program.actions.iter() {
+            if let wir::Action::Call { name, span, .. } = action {
+                if name == "rawWorkshopAction"
+                    || self
+                        .catalog
+                        .entry(wright_workshop::catalog::Kind::Action, name)
+                        .is_none()
+                {
+                    issues.push((
+                        if name == "rawWorkshopAction" {
+                            "opaque-action"
+                        } else {
+                            "unknown-action"
+                        },
+                        name.clone(),
+                        *span,
+                    ));
+                }
+            }
+        }
+        for value in loaded.program.values.iter() {
+            if let wir::Value::Call { name, .. } = &value.value {
+                if self
+                    .catalog
+                    .entry(wright_workshop::catalog::Kind::Value, name)
+                    .is_none()
+                    && self
+                        .catalog
+                        .entry(wright_workshop::catalog::Kind::Operator, name)
+                        .is_none()
+                {
+                    issues.push(("unknown-value", name.clone(), value.span));
+                }
+            }
+        }
+        for (kind, name, span) in issues {
+            self.diagnostics.push(Diagnostic {
+                code: "workshop-semantic-incomplete".to_string(),
+                stage: Stage::Analysis,
+                severity: crate::diag::Severity::Error,
+                message: format!(
+                    "raw Workshop construct '{name}' is preserved or unknown ({kind}); analysis and lint findings are not definitive"
+                ),
+                span: span_from_ir(span, &loaded.program.files),
+                source: Some(loaded.origin.clone()),
+            });
+        }
+    }
+
     fn finish<T: serde::Serialize>(&mut self, command: &str, result: T) -> Envelope<T> {
         let diagnostics = std::mem::take(&mut self.diagnostics);
         let has_error = diagnostics
@@ -735,6 +799,23 @@ impl CompilerSession {
                 self.diagnostics
                     .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
             }
+        }
+    }
+}
+
+fn collect_raw_settings(
+    nodes: &[wright_workshop::settings::SettingsNode],
+    issues: &mut Vec<(&'static str, String, Option<workshop_rs::source::Span>)>,
+) {
+    for node in nodes {
+        match node {
+            wright_workshop::settings::SettingsNode::Group { children, .. } => {
+                collect_raw_settings(children, issues)
+            }
+            wright_workshop::settings::SettingsNode::Raw { name, span, .. } => {
+                issues.push(("raw-setting", name.clone(), *span))
+            }
+            _ => {}
         }
     }
 }
