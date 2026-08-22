@@ -24,3 +24,7 @@ tar = "0.4"
 ureq = "2"
 wright-driver = { path = "../wright-driver" }
 wright-transform = { path = "../wright-transform" }
+
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }
+jsonschema = "0.18"

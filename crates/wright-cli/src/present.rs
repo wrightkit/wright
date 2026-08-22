@@ -115,7 +115,10 @@ fn env_truthy(name: &str) -> bool {
 /// selection so it can never receive ANSI, progress, or workflow commands.
 pub(crate) fn render<T: serde::Serialize>(envelope: &Envelope<T>, presentation: Presentation) {
     if presentation.format == OutputFormat::Json {
-        let value = serde_json::to_value(envelope).expect("envelope serializes");
+        let mut value = serde_json::to_value(envelope).expect("envelope serializes");
+        if envelope.command == "check" {
+            value["schema_version"] = serde_json::Value::String("1".to_string());
+        }
         let text = serde_json::to_string_pretty(&value).expect("envelope serializes");
         println!("{text}");
         return;

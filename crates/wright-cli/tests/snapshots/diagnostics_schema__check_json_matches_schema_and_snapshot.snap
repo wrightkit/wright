@@ -1,0 +1,38 @@
+---
+source: crates/wright-cli/tests/diagnostics_schema.rs
+expression: value
+---
+{
+  "command": "check",
+  "diagnostics": [
+    {
+      "code": "unsupported-construct",
+      "message": "unsupported: ambiguous enum member 'Up' (multiple domains match)",
+      "severity": "error",
+      "source": {
+        "kind": "workshop"
+      },
+      "span": {
+        "end": {
+          "col": 171,
+          "line": 33
+        },
+        "file": 0,
+        "path": "../../target/diagnostics-schema-test/cake.txt",
+        "start": {
+          "col": 169,
+          "line": 33
+        }
+      },
+      "stage": "frontend"
+    }
+  ],
+  "exit": 1,
+  "ok": false,
+  "result": {},
+  "schema_version": "1",
+  "wright": {
+    "contract": "wright-result/v1",
+    "version": "0.2.9"
+  }
+}

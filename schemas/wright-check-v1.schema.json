@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wrightkit.dev/schemas/wright-check-v1.schema.json",
+  "title": "Wright check result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "wright", "command", "ok", "exit", "diagnostics", "result"],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "wright": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "contract"],
+      "properties": {
+        "version": { "type": "string" },
+        "contract": { "const": "wright-result/v1" }
+      }
+    },
+    "command": { "const": "check" },
+    "ok": { "type": "boolean" },
+    "exit": { "type": "integer", "minimum": 0 },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    },
+    "result": { "type": "object" }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "stage", "severity", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "stage": { "enum": ["discovery", "frontend", "lowering", "validation", "emission", "analysis", "reconstruction", "internal"] },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "status": { "enum": ["supported", "partial", "unsupported"] },
+        "message": { "type": "string" },
+        "span": { "$ref": "#/$defs/span" },
+        "source": { "$ref": "#/$defs/origin" }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "path", "start", "end"],
+      "properties": {
+        "file": { "type": "integer", "minimum": 0 },
+        "path": { "type": "string" },
+        "start": { "$ref": "#/$defs/position" },
+        "end": { "$ref": "#/$defs/position" }
+      }
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "col"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "locale": { "type": "string" }
+      }
+    }
+  }
+}
