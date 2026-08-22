@@ -182,7 +182,11 @@ class NpmPackagingNormalizationTests(unittest.TestCase):
             package_npm.verify_tarball(tgz, is_meta=True)
         message = str(ctx.exception)
         self.assertIn("not executable", message)
-        self.assertIn("mode 0o644", message)
+        # The observed mode is platform-dependent (0o644 on POSIX,
+        # 0o666 on Windows where exec bits do not exist); the contract is
+        # that the rejection names the offending file and reports the mode.
+        self.assertIn("package/bin/", message)
+        self.assertIn("mode 0o", message)
 
     def test_normalized_tarballs_pass_real_verify(self):
         for layout, is_meta in ((META_LAYOUT, True), (PLATFORM_LAYOUT, False)):
