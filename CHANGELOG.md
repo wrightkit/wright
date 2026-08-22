@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.11](https://github.com/wrightkit/wright/compare/v0.2.10...v0.2.11) (2026-08-22)
+
+
+### Features
+
+* **cli:** separate workflows and improve terminal UX ([ac052ea](https://github.com/wrightkit/wright/commit/ac052ea6217c71a89502984bdf8c94feb668e6fb)), closes [#209](https://github.com/wrightkit/wright/issues/209) [#210](https://github.com/wrightkit/wright/issues/210)
+
+
+### Bug Fixes
+
+* **ci:** source scenario findings from lint ([d7c7458](https://github.com/wrightkit/wright/commit/d7c745877e5cbb481472032540b03b6099c4bf3e))
+
 ## [0.2.10](https://github.com/wrightkit/wright/compare/v0.2.9...v0.2.10) (2026-08-22)
 
 

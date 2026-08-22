@@ -1,6 +1,6 @@
 {
   "name": "@wrightkit/wright-win32-x64",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Windows x64 native binary for Wright",
   "license": "AGPL-3.0-or-later",
   "repository": {
