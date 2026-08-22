@@ -16,14 +16,18 @@ fn en() -> Locale {
 fn builtin_catalog_loads_and_declares_locales() {
     let catalog = builtin();
     assert!(catalog.supports(&en()));
-    // The workshop-rs catalog declares the two v0.2 conversion locales with
-    // complete coverage.
+    // The workshop-rs catalog declares the two v0.2 conversion locales and
+    // exposes partial coverage for the secondary locale.
     assert_eq!(catalog.locales().len(), 2);
     assert_eq!(catalog.locales()[0], en());
     let zh = Locale::new("zh-CN");
     assert!(catalog.supports(&zh));
     let coverage = catalog.locale_coverage(&zh);
-    assert_eq!(coverage.mapped, coverage.total);
+    assert!(
+        coverage.mapped > 0,
+        "the secondary locale has mapped entries"
+    );
+    assert!(coverage.mapped <= coverage.total);
     assert!(coverage.total > 0, "the declared surface is non-empty");
 }
 

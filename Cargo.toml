@@ -14,7 +14,7 @@ repository = "https://github.com/wrightkit/wright"
 # parser, emitter, detection, validation, and Workshop IR. This is the single
 # released reference for the cutover — workspace crates consume it via
 # `workshop-rs.workspace = true`.
-workshop-rs = "=0.1.2"
+workshop-rs = "=0.1.5"
 
 [workspace.lints.rust]
 # Unsafe operations inside an unsafe function still need an explicit block so

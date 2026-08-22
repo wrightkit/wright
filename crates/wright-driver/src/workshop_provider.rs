@@ -10,13 +10,13 @@ use wright_core::signatures::ExpectedDomain as WrightExpectedDomain;
 
 /// Wright's in-process provider for localized raw Workshop source.
 pub struct WorkshopProvider {
-    catalog: workshop_rs_provider::catalog::Catalog,
+    catalog: workshop_rs::catalog::Catalog,
 }
 
 impl WorkshopProvider {
     /// Construct a provider from the canonical Workshop catalog.
     pub fn new() -> ProviderResult<Self> {
-        let catalog = workshop_rs_provider::catalog::Catalog::builtin()
+        let catalog = workshop_rs::catalog::Catalog::builtin()
             .map_err(|error| ProviderError::new("workshop.catalog", error.to_string()))?;
         Ok(Self { catalog })
     }
@@ -24,7 +24,7 @@ impl WorkshopProvider {
 
 impl LanguageProvider for WorkshopProvider {
     fn check(&self, source: &str, path: &Path) -> ProviderResult<Vec<ProviderDiagnostic>> {
-        let locale = workshop_rs_provider::detect::resolve_locale(source, &self.catalog, None)
+        let locale = workshop_rs::detect::resolve_locale(source, &self.catalog, None)
             .map_err(|error| ProviderError::new("workshop.locale", error.to_string()))?;
         let manifest = wright_opy::manifest::Manifest::builtin()
             .map_err(|error| ProviderError::new("workshop.manifest", error.to_string()))?;
@@ -32,13 +32,9 @@ impl LanguageProvider for WorkshopProvider {
             manifest,
             catalog: &self.catalog,
         };
-        let program = workshop_rs_provider::parser::parse_with_context(
-            source,
-            &self.catalog,
-            &locale,
-            &context,
-        )
-        .map_err(|error| ProviderError::new("workshop.parse", error.to_string()))?;
+        let program =
+            workshop_rs::parser::parse_with_context(source, &self.catalog, &locale, &context)
+                .map_err(|error| ProviderError::new("workshop.parse", error.to_string()))?;
         program
             .validate()
             .map_err(|error| ProviderError::new("workshop.validate", error.to_string()))?;
@@ -53,13 +49,13 @@ impl LanguageProvider for WorkshopProvider {
 
 struct ProviderExpectedDomain<'a> {
     manifest: &'a wright_opy::manifest::Manifest,
-    catalog: &'a workshop_rs_provider::catalog::Catalog,
+    catalog: &'a workshop_rs::catalog::Catalog,
 }
 
-impl workshop_rs_provider::signatures::ExpectedDomain for ProviderExpectedDomain<'_> {
+impl workshop_rs::signatures::ExpectedDomain for ProviderExpectedDomain<'_> {
     fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
         WrightExpectedDomain::expected_domain(self.manifest, catalog_id, arg_index).or_else(|| {
-            workshop_rs_provider::signatures::ExpectedDomain::expected_domain(
+            workshop_rs::signatures::ExpectedDomain::expected_domain(
                 self.catalog,
                 catalog_id,
                 arg_index,
@@ -68,21 +64,18 @@ impl workshop_rs_provider::signatures::ExpectedDomain for ProviderExpectedDomain
     }
 }
 
-fn map_issue(
-    issue: workshop_rs_provider::semantic::SemanticIssue,
-    path: &Path,
-) -> ProviderDiagnostic {
+fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> ProviderDiagnostic {
     let (kind_code, severity) = match issue.kind {
-        workshop_rs_provider::semantic::IncompletenessKind::RawSetting => {
+        workshop_rs::semantic::IncompletenessKind::RawSetting => {
             ("raw-setting", ProviderSeverity::Warning)
         }
-        workshop_rs_provider::semantic::IncompletenessKind::UnknownAction => {
+        workshop_rs::semantic::IncompletenessKind::UnknownAction => {
             ("unknown-action", ProviderSeverity::Error)
         }
-        workshop_rs_provider::semantic::IncompletenessKind::UnknownValue => {
+        workshop_rs::semantic::IncompletenessKind::UnknownValue => {
             ("unknown-value", ProviderSeverity::Error)
         }
-        workshop_rs_provider::semantic::IncompletenessKind::OpaqueAction => {
+        workshop_rs::semantic::IncompletenessKind::OpaqueAction => {
             ("opaque-action", ProviderSeverity::Error)
         }
     };
@@ -104,16 +97,14 @@ fn map_issue(
 }
 
 pub fn status_for_classification(
-    classification: workshop_rs_provider::semantic::ResidualClassification,
+    classification: workshop_rs::semantic::ResidualClassification,
 ) -> Status {
     match classification {
-        workshop_rs_provider::semantic::ResidualClassification::ProjectDefinedConstruct
-        | workshop_rs_provider::semantic::ResidualClassification::SourceDeclaredVariable => {
-            Status::Partial
-        }
-        workshop_rs_provider::semantic::ResidualClassification::ProducerExtension
-        | workshop_rs_provider::semantic::ResidualClassification::LegacyOpaque
-        | workshop_rs_provider::semantic::ResidualClassification::UnresolvedIdentifier => {
+        workshop_rs::semantic::ResidualClassification::ProjectDefinedConstruct
+        | workshop_rs::semantic::ResidualClassification::SourceDeclaredVariable => Status::Partial,
+        workshop_rs::semantic::ResidualClassification::ProducerExtension
+        | workshop_rs::semantic::ResidualClassification::LegacyOpaque
+        | workshop_rs::semantic::ResidualClassification::UnresolvedIdentifier => {
             Status::Unsupported
         }
     }
@@ -143,10 +134,7 @@ fn status_name(status: Status) -> &'static str {
     }
 }
 
-fn provider_span(
-    span: Option<workshop_rs_provider::source::Span>,
-    path: &Path,
-) -> ProviderSourceSpan {
+fn provider_span(span: Option<workshop_rs::source::Span>, path: &Path) -> ProviderSourceSpan {
     let (start_line, start_col, end_line, end_col) = span
         .map(|span| (span.start.line, span.start.col, span.end.line, span.end.col))
         .unwrap_or((1, 1, 1, 1));
@@ -167,31 +155,29 @@ mod tests {
     fn maps_residual_classifications_fail_closed() {
         assert_eq!(
             status_for_classification(
-                workshop_rs_provider::semantic::ResidualClassification::ProjectDefinedConstruct
+                workshop_rs::semantic::ResidualClassification::ProjectDefinedConstruct
             ),
             Status::Partial
         );
         assert_eq!(
             status_for_classification(
-                workshop_rs_provider::semantic::ResidualClassification::SourceDeclaredVariable
+                workshop_rs::semantic::ResidualClassification::SourceDeclaredVariable
             ),
             Status::Partial
         );
         assert_eq!(
             status_for_classification(
-                workshop_rs_provider::semantic::ResidualClassification::ProducerExtension
+                workshop_rs::semantic::ResidualClassification::ProducerExtension
             ),
             Status::Unsupported
         );
         assert_eq!(
-            status_for_classification(
-                workshop_rs_provider::semantic::ResidualClassification::LegacyOpaque
-            ),
+            status_for_classification(workshop_rs::semantic::ResidualClassification::LegacyOpaque),
             Status::Unsupported
         );
         assert_eq!(
             status_for_classification(
-                workshop_rs_provider::semantic::ResidualClassification::UnresolvedIdentifier
+                workshop_rs::semantic::ResidualClassification::UnresolvedIdentifier
             ),
             Status::Unsupported
         );

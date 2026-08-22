@@ -581,6 +581,10 @@ fn visit_action_value_roots(
             visit_value_with_parent(program, *player, parents, out);
             visit_value_with_parent(program, *value, parents, out);
         }
+        Action::AssignMember { target, value, .. } => {
+            visit_value_with_parent(program, *target, parents, out);
+            visit_value_with_parent(program, *value, parents, out);
+        }
         Action::CallSubroutine { .. } => {}
         Action::If { branches, .. } => {
             for branch in branches {
@@ -643,6 +647,7 @@ fn visit_value_children(value: &Value, f: &mut impl FnMut(ValueId)) {
         | Value::Null
         | Value::Enum { .. }
         | Value::GlobalVariable(_)
+        | Value::Subroutine(_)
         | Value::EventPlayer => {}
     }
 }
@@ -904,6 +909,7 @@ fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -
             body.iter().any(|id| subtree_writes(program, *id, variable))
         }
         Action::Debug { .. } | Action::Print { .. } => false,
+        Action::AssignMember { .. } => true,
     }
 }
 
@@ -1079,6 +1085,7 @@ fn visit_actions(
             | Action::CallSubroutine { .. }
             | Action::Debug { .. }
             | Action::Print { .. }
+            | Action::AssignMember { .. }
             | Action::Call { .. } => {}
         }
     }
@@ -1094,6 +1101,10 @@ fn visit_values_in_action(program: &wir::Program, action: &Action, f: &mut impl 
         Action::SetPlayerVariable { player, value, .. }
         | Action::ModifyPlayerVariable { player, value, .. } => {
             visit_value(program, *player, f);
+            visit_value(program, *value, f);
+        }
+        Action::AssignMember { target, value, .. } => {
+            visit_value(program, *target, f);
             visit_value(program, *value, f);
         }
         Action::CallSubroutine { .. } => {}

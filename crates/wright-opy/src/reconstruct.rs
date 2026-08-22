@@ -624,6 +624,9 @@ impl<'a> Emitter<'a> {
                 );
                 continue;
             }
+            if rule.actions.is_empty() {
+                continue;
+            }
             self.out.push_str("rule \"");
             self.out.push_str(&rule.name);
             self.out.push_str("\":\n");
@@ -943,6 +946,13 @@ impl<'a> Emitter<'a> {
                     *op,
                     *value,
                     span,
+                );
+            }
+            Action::AssignMember { span, .. } => {
+                self.issue(
+                    "unsupported-member-assignment",
+                    "dynamic member assignments are outside the OPY reconstruction surface",
+                    *span,
                 );
             }
             Action::CallSubroutine {
@@ -1514,6 +1524,13 @@ impl<'a> Emitter<'a> {
                 };
                 self.out.push_str("eventPlayer.");
                 self.out.push_str(&variable.name);
+            }
+            Value::Subroutine(_) => {
+                self.issue(
+                    "unsupported-subroutine-value",
+                    "subroutine values are outside the OPY reconstruction surface",
+                    node.span,
+                );
             }
             Value::EventPlayer => {
                 self.out.push_str("eventPlayer");

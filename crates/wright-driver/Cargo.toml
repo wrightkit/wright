@@ -21,6 +21,5 @@ wright-opy = { path = "../wright-opy" }
 wright-ostw = { path = "../wright-ostw" }
 wright-transform = { path = "../wright-transform" }
 wright-workshop = { path = "../wright-workshop" }
-# Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
+# Single released reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
-workshop-rs-provider = { package = "workshop-rs", git = "https://github.com/wrightkit/workshop-rs.git", rev = "34d2a55c0170d80b7359140e4280d47f0c42dd60" }

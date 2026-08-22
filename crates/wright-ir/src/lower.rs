@@ -335,8 +335,10 @@ impl<'a> Lowerer<'a> {
                 .ok_or_else(|| dangling("rule", id))?
                 .priority;
             let rule = self.lower_rule(id)?;
-            rules.push((priority.unwrap_or(0), order, rule));
-            order += 1;
+            if !rule.actions.is_empty() {
+                rules.push((priority.unwrap_or(0), order, rule));
+                order += 1;
+            }
         }
         rules.sort_by_key(|(priority, order, _)| (*priority, *order));
         for (_, _, rule) in rules {

@@ -477,6 +477,7 @@ fn action_name(program: &wir::Program, action: ActionId) -> String {
                 .map_or_else(|| "<dangling>".to_string(), |v| v.name.clone());
             format!("modifyPlayerVariable {name} {}", op.as_str())
         }
+        Some(Action::AssignMember { .. }) => "assignMember".to_string(),
         Some(Action::If { .. }) => "if".to_string(),
         Some(Action::While { .. }) => "while".to_string(),
         Some(Action::ForGlobalVariable { variable, .. }) => {

@@ -76,6 +76,29 @@ fn build_surface_program() -> wir::Program {
         },
         Some(s(5, 41, 47)),
     ));
+    let beam_type = program.values.push(ValueNode::new(
+        Value::Enum {
+            value_type: "Beam".into(),
+            value: "GOOD".into(),
+        },
+        Some(s(5, 35, 39)),
+    ));
+    let start_position = program.values.push(ValueNode::new(
+        Value::Vector {
+            x: zero,
+            y: zero,
+            z: zero,
+        },
+        Some(s(5, 49, 60)),
+    ));
+    let end_position = program.values.push(ValueNode::new(
+        Value::Vector {
+            x: one,
+            y: one,
+            z: one,
+        },
+        Some(s(5, 62, 73)),
+    ));
     let all_teams = program.values.push(ValueNode::new(
         Value::Enum {
             value_type: "Team".into(),
@@ -120,7 +143,7 @@ fn build_surface_program() -> wir::Program {
     });
     let beam = program.actions.push(Action::Call {
         name: "createBeamEffect".into(),
-        args: vec![players, yellow],
+        args: vec![players, beam_type, start_position, end_position, yellow],
         span: Some(s(6, 5, 25)),
     });
     let for_action = program.actions.push(Action::ForGlobalVariable {
