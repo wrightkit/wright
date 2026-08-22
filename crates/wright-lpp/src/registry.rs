@@ -15,10 +15,6 @@ use std::time::Duration;
 use crate::error::ProviderError;
 use crate::provider::StdioLanguageProvider;
 
-/// The environment variable naming the LPP mock/conformance provider binary
-/// used by integration tests and CI.
-pub const LPP_MOCK_PROVIDER_ENV: &str = "LPP_MOCK_PROVIDER";
-
 /// One configured provider, keyed by its opaque language id.
 #[derive(Debug, Clone)]
 pub struct ProviderConfig {
@@ -46,12 +42,6 @@ impl ProviderConfig {
             args,
             request_timeout: Duration::from_secs(30),
         }
-    }
-
-    /// Set an explicit per-request timeout.
-    pub fn with_request_timeout(mut self, request_timeout: Duration) -> ProviderConfig {
-        self.request_timeout = request_timeout;
-        self
     }
 }
 
@@ -99,16 +89,6 @@ impl ProviderRegistry {
         Ok(())
     }
 
-    /// The configuration registered for a language id, if any.
-    pub fn get(&self, language_id: &str) -> Option<&ProviderConfig> {
-        self.providers.get(language_id)
-    }
-
-    /// Every registered language id, in deterministic order.
-    pub fn languages(&self) -> impl Iterator<Item = &str> {
-        self.providers.keys().map(String::as_str)
-    }
-
     /// Spawn a fresh provider session for `language_id`.
     ///
     /// Refuses explicitly when no provider is configured for the id
@@ -122,23 +102,5 @@ impl ProviderRegistry {
                     language_id: language_id.to_string(),
                 })?;
         StdioLanguageProvider::spawn(&config.command, &config.args, config.request_timeout)
-    }
-
-    /// A registry populated from the environment: `LPP_MOCK_PROVIDER` names
-    /// a mock/conformance provider binary serving the reference language
-    /// `x-demo-lang`. This is the integration-test/CI hook; production
-    /// configuration registers providers explicitly.
-    pub fn from_env() -> ProviderRegistry {
-        let mut registry = ProviderRegistry::new();
-        if let Ok(command) = std::env::var(LPP_MOCK_PROVIDER_ENV) {
-            if !command.is_empty() {
-                let _ = registry.register(ProviderConfig::new(
-                    "x-demo-lang",
-                    PathBuf::from(command),
-                    Vec::new(),
-                ));
-            }
-        }
-        registry
     }
 }

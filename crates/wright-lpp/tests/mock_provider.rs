@@ -170,10 +170,6 @@ fn registry_lookup_is_by_opaque_language_id() {
             language_id: "x-other-lang".to_string(),
         }
     );
-    assert_eq!(
-        registry.languages().collect::<Vec<_>>(),
-        vec![DEMO_LANGUAGE_ID]
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -506,14 +502,11 @@ fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
     };
     let mut registry = ProviderRegistry::new();
     registry
-        .register(
-            ProviderConfig::new(
-                DEMO_LANGUAGE_ID,
-                path,
-                vec!["--without".to_string(), "compile".to_string()],
-            )
-            .with_request_timeout(std::time::Duration::from_secs(30)),
-        )
+        .register(ProviderConfig::new(
+            DEMO_LANGUAGE_ID,
+            path,
+            vec!["--without".to_string(), "compile".to_string()],
+        ))
         .expect("registered");
     let mut provider = registry.spawn(DEMO_LANGUAGE_ID).expect("spawns");
     let result = provider
