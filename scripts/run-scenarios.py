@@ -9,7 +9,7 @@ verifies every declared expectation structurally. The report
 (target/scenarios-report.json) is machine-readable and reproducible. It does
 not establish E-level semantic compatibility: running the Overwatch client is
 outside the current scope, so the recorded evidence is the compile-time
-WIR/emission trace plus static findings.
+WIR/emission trace plus configurable lint findings.
 
 Usage: python3 scripts/run-scenarios.py [--wright path/to/wright]
 """
@@ -87,8 +87,8 @@ def main() -> int:
             capture_output=True,
             text=True,
         )
-        analyze_result = subprocess.run(
-            [args.wright, "analyze", str(source), "--profile", "compat", "-f", "json"],
+        lint_result = subprocess.run(
+            [args.wright, "lint", str(source), "--profile", "compat", "-f", "json"],
             capture_output=True,
             text=True,
         )
@@ -103,7 +103,7 @@ def main() -> int:
 
         envelope = json.loads(compile_result.stdout)
         text = envelope["result"]["output"]["text"]
-        findings = json.loads(analyze_result.stdout)["result"]["findings"]
+        findings = json.loads(lint_result.stdout)["result"]["findings"]
         entry["compileOk"] = True
         entry["emittedLines"] = len(text.strip().splitlines())
         entry["findings"] = [
