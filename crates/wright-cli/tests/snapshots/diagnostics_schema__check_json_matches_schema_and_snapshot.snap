@@ -6,29 +6,30 @@ expression: value
   "command": "check",
   "diagnostics": [
     {
-      "code": "unsupported-construct",
-      "message": "unsupported: ambiguous enum member 'Up' (multiple domains match)",
-      "severity": "error",
+      "code": "min-wait-loop",
+      "message": "loop body waits at the workshop minimum rate; the loop runs at maximum frequency",
+      "severity": "warning",
       "source": {
-        "kind": "workshop"
+        "kind": "workshop",
+        "locale": "en-us"
       },
       "span": {
         "end": {
-          "col": 171,
-          "line": 33
+          "col": 13,
+          "line": 59
         },
         "file": 0,
-        "path": "../../target/diagnostics-schema-test/cake.txt",
+        "path": "<file 0>",
         "start": {
-          "col": 169,
-          "line": 33
+          "col": 9,
+          "line": 54
         }
       },
-      "stage": "frontend"
+      "stage": "analysis"
     }
   ],
-  "exit": 1,
-  "ok": false,
+  "exit": 0,
+  "ok": true,
   "result": {},
   "schema_version": "1",
   "wright": {
