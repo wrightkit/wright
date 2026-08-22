@@ -84,9 +84,9 @@ are strict 1-based character columns, `0` or beyond-line columns refuse, and
 order-dependent zero-width combinations at one position are refused as
 `edit-zero-width-conflict`).
 [`validate_transaction`] rejects stale versions, unknown sources,
-overlapping/conflicting edits, invalid ranges, and compiled errors, and
-returns the previewed edited sources — atomically: any failed validation
-returns `ok = false` and no validated preview. Validation runs through the
+overlapping/conflicting edits, invalid ranges, and compilation errors, and
+returns the previewed edited sources atomically (any failed validation returns
+`ok = false` and no validated preview). Validation runs through the
 *original* project/session semantics
 (`SessionConfig` kind/root, transformation profile): OPY projects compile
 through the native OPY frontend with edited includes as in-memory overlays,

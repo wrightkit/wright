@@ -219,7 +219,7 @@ OPY ─────► Workshop ◄───── DEL/OSTW
              Workshop
 ```
 
-Required useful directions include source→Workshop, Workshop→supported source,
+Supported conversion directions include source→Workshop, Workshop→supported source,
 and Workshop→Workshop. Direct OPY↔DEL translation is optional and should not
 drive architecture for symmetry.
 
@@ -227,15 +227,15 @@ Source→Workshop compilation is owned jointly by the source-language
 implementation (source semantics/lowering) and `workshop-rs` (canonical
 Workshop semantics/validation/emission). Wright owns the integrated UX.
 
-Workshop→OPY / Workshop→DEL reconstruction belongs to the respective language
-implementation and consumes canonical Workshop semantics from `workshop-rs`.
-Wright does not claim those directions supported until the owning repository has
-executable evidence.
+Workshop→OPY and Workshop→DEL reconstruction belong to the respective language
+implementations and consume canonical Workshop semantics from `workshop-rs`.
+Wright does not claim those directions as supported until the owning repositories
+have executable evidence.
 
 ## Capability claims
 
-A Wright command existing is not evidence that every source-language construct
-is supported.
+The existence of a Wright command is not evidence that every source-language
+construct is supported.
 
 Public claims must satisfy:
 

@@ -105,8 +105,8 @@ E-level evidence.
 
 ## Compatibility priority
 
-The four-level framework (S/D/N/E) measures different contracts. Their
-**priority order** is:
+The four-level framework (S/D/N/E) measures distinct contracts in order of
+priority:
 
 > **E (observable semantics) > D (diagnostics) > S (syntax) > N (text output)**
 
