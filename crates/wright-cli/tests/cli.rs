@@ -163,6 +163,24 @@ fn check_over_clean_input_exits_zero() {
 }
 
 #[test]
+fn terminal_renderer_uses_command_specific_hierarchy() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    for (command, heading, detail) in [
+        ("check", "PASS check", "diagnostic(s)"),
+        ("lint", "WARN lint", "Lint findings"),
+        ("analyze", "PASS analyze", "Analysis details"),
+        ("inspect", "PASS inspect", "Program structure"),
+    ] {
+        let output = run(&[command, path.to_str().unwrap(), "--renderer", "terminal"]);
+        assert!(output.status.code().is_some(), "{command} exited by signal");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(heading), "{command}: {stdout}");
+        assert!(stdout.contains(detail), "{command}: {stdout}");
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn check_over_malformed_input_exits_one_with_structured_diagnostics() {
     // Enough locale evidence to pass detection, then a syntax error.
     let path = temp_file(
