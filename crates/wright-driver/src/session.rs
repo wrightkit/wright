@@ -390,7 +390,9 @@ impl CompilerSession {
         })
     }
 
-    /// `check`: load, validate, and surface analysis findings as diagnostics.
+    /// `check`: load, validate, and surface frontend/project/semantic
+    /// validation diagnostics. Configurable lint findings are not part of the
+    /// correctness gate.
     pub fn check(&mut self) -> Envelope<CheckResult> {
         let command = "check";
         let loaded = match self.load() {
@@ -414,11 +416,11 @@ impl CompilerSession {
             );
         }
         self.attach_workshop_completeness(&loaded);
-        self.attach_analysis(&loaded);
         self.finish(command, CheckResult { ostw: None })
     }
 
-    /// `analyze`: load and produce the semantic summary and findings.
+    /// `analyze`: load and produce the semantic summary and structural facts.
+    /// This report deliberately does not execute or expose the lint registry.
     pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
         let command = "analyze";
         let loaded = match self.load() {
@@ -440,10 +442,14 @@ impl CompilerSession {
                 return self.finish(command, AnalyzeResult::default());
             }
         };
-        let program = service_response(&service, &Request::Program);
-        let mut findings = service_response(&service, &Request::GetFindings);
-        resolve_finding_span_paths(&mut findings, &loaded);
-        self.finish(command, AnalyzeResult { program, findings })
+        let mut program = service_response(&service, &Request::Program);
+        if let serde_json::Value::Object(object) = &mut program {
+            // The service also supports the legacy findings query for agents,
+            // but an analyze report must not be a view of that lint registry.
+            object.remove("findings");
+        }
+        let facts = semantic_facts(&service);
+        self.finish(command, AnalyzeResult { program, facts })
     }
 
     /// `inspect`: load and produce the structural/semantic program model.
@@ -665,42 +671,6 @@ impl CompilerSession {
             .map_err(|error| ir_diag("analysis-error", Stage::Analysis, error, &loaded.input))
     }
 
-    /// Attach semantic-analysis findings to the diagnostic list (for `check`).
-    fn attach_analysis(&mut self, loaded: &Loaded) {
-        let Ok(service) = self.service(loaded) else {
-            return;
-        };
-        let findings = service_response(&service, &Request::GetFindings);
-        let Some(findings) = findings.as_array() else {
-            return;
-        };
-        for finding in findings {
-            let code = finding
-                .get("code")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("finding");
-            let severity = match finding.get("severity").and_then(serde_json::Value::as_str) {
-                Some("error") => crate::diag::Severity::Error,
-                Some("warning") => crate::diag::Severity::Warning,
-                _ => crate::diag::Severity::Info,
-            };
-            let message = finding
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            self.diagnostics.push(Diagnostic {
-                code: code.to_string(),
-                stage: Stage::Analysis,
-                severity,
-                message,
-                status: None,
-                span: span_from_json(finding.get("span")),
-                source: Some(loaded.origin.clone()),
-            });
-        }
-    }
-
     /// Structural validation permits source-preserving Workshop fallbacks.
     /// Surface those nodes as blocking semantic diagnostics before presenting
     /// check/lint output as definitive. The catalog remains owned by
@@ -810,23 +780,99 @@ fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_j
     }
 }
 
-/// Convert a JSON span value (from the semantic service) to a diagnostic span.
-fn span_from_json(value: Option<&serde_json::Value>) -> Option<SourceSpan> {
-    let value = value?;
-    let file = value.get("file")?.as_u64()? as usize;
-    let start = value.get("start")?;
-    let end = value.get("end")?;
-    Some(SourceSpan {
-        file,
-        path: format!("<file {file}>"),
-        start: Position {
-            line: start.get("line")?.as_u64()? as u32,
-            col: start.get("col")?.as_u64()? as u32,
-        },
-        end: Position {
-            line: end.get("line")?.as_u64()? as u32,
-            col: end.get("col")?.as_u64()? as u32,
-        },
+/// Build the initial `analyze` report from existing semantic query surfaces.
+///
+/// Keeping this composition here makes the product boundary explicit: the
+/// report contains symbol usage and CFG measurements, while lint rules remain
+/// owned by `LintRegistry` and are only exposed by `lint`/`findings` queries.
+fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
+    let symbols = service_response(service, &Request::ListSymbols { kind: None });
+    let symbols = symbols
+        .as_array()
+        .map(|symbols| {
+            symbols
+                .iter()
+                .map(|symbol| {
+                    let id = symbol
+                        .get("id")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or_default() as u32;
+                    let usage = service_response(service, &Request::GetUsage { symbol: id });
+                    serde_json::json!({
+                        "id": symbol.get("id").cloned().unwrap_or_default(),
+                        "kind": symbol.get("kind").cloned().unwrap_or_default(),
+                        "name": symbol.get("name").cloned().unwrap_or_default(),
+                        "span": symbol.get("span").cloned().unwrap_or(serde_json::Value::Null),
+                        "usage": usage,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let rules = service_response(service, &Request::ListRules);
+    let rules = rules
+        .as_array()
+        .map(|rules| {
+            rules
+                .iter()
+                .map(|rule| {
+                    let id = rule
+                        .get("id")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or_default() as u32;
+                    let cfg = service_response(service, &Request::GetCfg { rule: id });
+                    let blocks = cfg
+                        .get("blocks")
+                        .and_then(serde_json::Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let edge_count = blocks
+                        .iter()
+                        .map(|block| {
+                            block
+                                .get("successors")
+                                .and_then(serde_json::Value::as_array)
+                                .map_or(0, Vec::len)
+                        })
+                        .sum::<usize>();
+                    let wait_blocks = blocks
+                        .iter()
+                        .filter(|block| {
+                            block
+                                .get("waits")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(false)
+                        })
+                        .count();
+                    let loop_blocks = blocks
+                        .iter()
+                        .filter(|block| {
+                            matches!(
+                                block.get("kind").and_then(serde_json::Value::as_str),
+                                Some("while" | "for")
+                            )
+                        })
+                        .count();
+                    serde_json::json!({
+                        "id": rule.get("id").cloned().unwrap_or_default(),
+                        "name": rule.get("name").cloned().unwrap_or_default(),
+                        "span": rule.get("span").cloned().unwrap_or(serde_json::Value::Null),
+                        "controlFlow": {
+                            "blocks": blocks.len(),
+                            "edges": edge_count,
+                            "loopBlocks": loop_blocks,
+                            "waitBlocks": wait_blocks,
+                        },
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    serde_json::json!({
+        "symbols": symbols,
+        "rules": rules,
     })
 }
 

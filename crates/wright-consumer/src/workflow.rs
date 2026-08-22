@@ -31,8 +31,9 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     let analyze = session.analyze();
     assert!(analyze.ok, "analyze passes");
     println!(
-        "analyze: {} findings",
-        analyze.result.findings.as_array().unwrap().len()
+        "analyze: {} symbols, {} rules",
+        analyze.result.facts["symbols"].as_array().unwrap().len(),
+        analyze.result.facts["rules"].as_array().unwrap().len()
     );
 
     // Lint through the shared session (#98): the same pipeline with

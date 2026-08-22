@@ -88,6 +88,18 @@ runner provides that file. The summary uses the highest structured severity:
 errors produce `ERROR`, warnings produce `WARN`, and info/notice-only results
 produce `PASS`.
 
+Interactive terminal mode is TUI-lite by design. For text workflows selected
+as `terminal`, Wright starts one delayed `working…` status on stderr after a
+short threshold, so fast commands do not flicker and longer commands provide
+truthful activity feedback. The status is cleared before the result is
+rendered. Completed `check`, `lint`, `analyze`, and `inspect` commands print a
+command-specific PASS/WARN/ERROR verdict and compact summary before details;
+diagnostics and findings include a one-line source context when the reported
+provenance path is readable. This is presentation-only: no progress event,
+spinner, ANSI sequence, or source context enters the driver envelope or JSON.
+Plain output, redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and
+explicit JSON rendering remain static and deterministic.
+
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,
 stdout/stderr ownership, and the `wright-result/v1` envelope that CI and
@@ -102,7 +114,7 @@ CompilerSession (wright-driver)
     ├─ frontend: .opy bridge | native Workshop | protocol JSON
     ├─ validation (WIR)
     ├─ lowering (HIR → WIR)
-    ├─ analysis (SemanticService: findings, symbols, references, CFG)
+    ├─ analysis (SemanticService: semantic facts, symbols, references, CFG)
     ├─ emission (Workshop text)
     └─ reconstruction (WIR → canonical OPY/OSTW source, #126)
             ↓
@@ -122,8 +134,8 @@ result.
 | --- | --- | --- |
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
-| `wright check [INPUT]` | Parse, lower, validate, analyze | `check: ok` (or nothing on failure) |
-| `wright analyze [INPUT]` | Parse, lower, analyze | findings and summary |
+| `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
+| `wright analyze [INPUT]` | Report semantic structure, symbol usage, and CFG measurements | semantic facts and measurements |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
 | `wright inspect [INPUT]` | Parse, lower, inspect structure | rules, symbols, references summary |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
@@ -290,17 +302,32 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
 }
 ```
 
-Analysis findings (`analyze`, `lint`, and the tool/agent `getFindings`/`lint`
-responses) carry an `evidence` field classifying how strongly the finding is
-supported (`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
+The three core workflows have separate contracts:
+
+* `check` is the correctness gate. It reports discovery, frontend, project,
+  semantic, lowering, and validation diagnostics. Ordinary configurable lint
+  findings such as `duplicate-condition` and `min-wait-loop` are not emitted
+  by default.
+* `lint` executes the configurable `LintRegistry` and returns stable rule IDs,
+  severity, evidence class, boundedness where applicable, source spans, rule
+  metadata, and effective configuration.
+* `analyze` returns semantic facts rather than lint findings. Its initial
+  `result.facts` report contains symbol usage (`reads`, `writes`, `calls`, and
+  referencing rule count) and per-rule CFG measurements (blocks, edges, loop
+  blocks, and wait blocks). These facts can inform future lint rules without
+  making analysis a view of the registry.
+
+Analysis findings (`lint` and the tool/agent `getFindings`/`lint` responses)
+carry an `evidence` field classifying how strongly the finding is supported
+(`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
 
 Finding spans carry a machine-readable `path` resolved root-relative to the
 input include root (`--root`, defaulting to the input's directory): file 0 is
 the main input, and additional files in a multi-file program resolve from the
 program file registry. The same source location therefore reports the same
-`path` across `analyze`, `lint`, and the tool/agent `Findings`/`Lint` surfaces
-regardless of how the input was spelled (absolute, relative, or
-cwd-relative); stdin inputs report `<stdin>`.
+`path` across `lint` and the tool/agent `Findings`/`Lint` surfaces regardless
+of how the input was spelled (absolute, relative, or cwd-relative); stdin
+inputs report `<stdin>`.
 
 `while-without-wait` findings additionally carry a machine-readable
 `boundedness` field (`obviously-unbounded` | `statically-bounded` | `unknown`)
@@ -386,17 +413,14 @@ Environment overrides (test/advanced hooks, matching `install.sh`):
   "command": "analyze",
   "ok": true,
   "exit": 0,
-  "diagnostics": [
-    {
-      "code": "min-wait-loop",
-      "stage": "analysis",
-      "severity": "warning",
-      "message": "loop body waits at the workshop minimum rate; ...",
-      "span": { "file": 0, "path": "program.txt", "start": { "line": 28, "col": 9 }, "end": { "line": 31, "col": 13 } },
-      "source": { "kind": "workshop", "locale": "en-us" }
+  "diagnostics": [],
+  "result": {
+    "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2 },
+    "facts": {
+      "symbols": [{ "id": 0, "kind": "globalVariable", "name": "counter", "usage": { "reads": 1, "writes": 1, "calls": 0, "rules": 1 } }],
+      "rules": [{ "id": 0, "name": "loop", "controlFlow": { "blocks": 4, "edges": 4, "loopBlocks": 1, "waitBlocks": 1 } }]
     }
-  ],
-  "result": { "program": { "...": "..." }, "findings": [ "..."] }
+  }
 }
 ```
 

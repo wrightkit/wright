@@ -130,7 +130,7 @@ fn workshop_compile_emits_corpus_text() {
 }
 
 #[test]
-fn workshop_check_surfaces_analysis_findings_as_diagnostics() {
+fn workshop_check_excludes_configurable_lint_findings() {
     let text = corpus_workshop_text("synthetic/control-flow");
     let mut session = workshop_session(&text);
     let envelope = session.check();
@@ -139,15 +139,13 @@ fn workshop_check_surfaces_analysis_findings_as_diagnostics() {
         envelope
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "min-wait-loop"),
-        "check must attach analysis findings: {:?}",
-        envelope.diagnostics
+            .all(|diagnostic| diagnostic.code != "min-wait-loop")
     );
     assert_eq!(envelope.exit, exit::SUCCESS);
 }
 
 #[test]
-fn workshop_analyze_reports_program_and_findings() {
+fn workshop_analyze_reports_program_and_semantic_facts() {
     let text = corpus_workshop_text("synthetic/control-flow");
     let mut session = workshop_session(&text);
     let envelope = session.analyze();
@@ -155,12 +153,18 @@ fn workshop_analyze_reports_program_and_findings() {
     assert_eq!(envelope.result.program["origin"]["kind"], "workshop");
     assert_eq!(envelope.result.program["origin"]["locale"], "en-us");
     assert_eq!(envelope.result.program["rules"], 2);
-    let findings = envelope.result.findings.as_array().unwrap();
+    assert!(envelope.result.program.get("findings").is_none());
     assert!(
-        findings
-            .iter()
-            .any(|finding| finding["code"] == "min-wait-loop"),
-        "findings: {findings:?}"
+        !envelope.result.facts["symbols"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !envelope.result.facts["rules"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
 }
 
@@ -205,9 +209,7 @@ fn workshop_lint_reports_structured_findings_rules_and_config() {
 }
 
 #[test]
-fn analyze_findings_carry_the_same_span_path_as_lint() {
-    // The issue's core acceptance (#102): for the same source location,
-    // `analyze` and `lint` findings carry the identical `span.path`.
+fn analyze_and_lint_have_distinct_result_surfaces() {
     let text = corpus_workshop_text("synthetic/control-flow");
     let path = temp_file("flow.txt", &text);
     let mut analyze_session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
@@ -216,23 +218,19 @@ fn analyze_findings_carry_the_same_span_path_as_lint() {
     let mut lint_session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
     let lint = lint_session.lint();
     assert!(lint.ok, "lint: {:?}", lint.diagnostics);
-    let analyze_findings = analyze.result.findings.as_array().unwrap();
     let lint_findings = lint.result.findings.as_array().unwrap();
     assert!(
-        !analyze_findings.is_empty(),
-        "control-flow produces findings"
+        !lint_findings.is_empty(),
+        "control-flow produces lint findings"
     );
-    assert_eq!(analyze_findings.len(), lint_findings.len());
-    for (analyzed, linted) in analyze_findings.iter().zip(lint_findings) {
-        assert_eq!(
-            analyzed["span"]["path"], linted["span"]["path"],
-            "analyze and lint must report the same span.path for the same finding"
-        );
-    }
-    assert_eq!(
-        analyze_findings[0]["span"]["path"], "flow.txt",
-        "the shared path is the root-relative file name"
+    assert!(
+        analyze.result.facts["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| rule["controlFlow"]["loopBlocks"].as_u64().unwrap_or(0) > 0)
     );
+    assert!(analyze.result.facts.get("findings").is_none());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -262,14 +260,9 @@ fn span_path_is_consistent_across_input_spellings() {
 
     let abs_findings = abs_lint.result.findings.as_array().unwrap();
     let rel_findings = rel_lint.result.findings.as_array().unwrap();
-    let analyze_findings = analyze.result.findings.as_array().unwrap();
     assert!(!abs_findings.is_empty(), "loop.opy fires min-wait-loop");
     assert_eq!(abs_findings.len(), rel_findings.len());
-    assert_eq!(abs_findings.len(), analyze_findings.len());
-    for (a, (b, c)) in abs_findings
-        .iter()
-        .zip(rel_findings.iter().zip(analyze_findings))
-    {
+    for (a, b) in abs_findings.iter().zip(rel_findings) {
         assert_eq!(
             a["span"]["path"], "loop.opy",
             "the absolute spelling resolves to the root-relative basename"
@@ -277,10 +270,6 @@ fn span_path_is_consistent_across_input_spellings() {
         assert_eq!(
             a["span"]["path"], b["span"]["path"],
             "absolute and relative input spellings must agree"
-        );
-        assert_eq!(
-            a["span"]["path"], c["span"]["path"],
-            "lint and analyze must agree on the repro shape"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -1090,10 +1079,7 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
             .is_some_and(|program| !program.is_empty()),
         "analyze carries the shared program summary"
     );
-    assert!(
-        envelope.result.findings.as_array().is_some(),
-        "analyze carries the shared findings list"
-    );
+    assert!(envelope.result.facts["rules"].as_array().is_some());
 }
 
 #[test]
@@ -1130,12 +1116,10 @@ fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
     let analyze = analyze_session.analyze();
     assert!(
-        analyze
-            .result
-            .findings
+        analyze.result.facts["rules"]
             .as_array()
-            .is_some_and(|f| !f.is_empty()),
-        "analyze returns shared-analysis findings"
+            .is_some_and(|rules| !rules.is_empty()),
+        "analyze returns semantic rule measurements"
     );
 
     let mut inspect_session =
@@ -1216,15 +1200,7 @@ fn ostw_multi_file_provenance_survives_through_shared_workflows() {
         );
     }
 
-    // Findings from the shared analyzer resolve to the main file (file 0 in
-    // the shared span convention maps to the input; imported files resolve
-    // through the program file registry).
-    let findings = envelope.result.findings.as_array().expect("findings");
-    assert!(!findings.is_empty(), "shared findings present");
-    for finding in findings {
-        if let Some(span) = finding.get("span") {
-            let path = span.get("path").and_then(serde_json::Value::as_str);
-            assert!(path.is_some(), "every finding span carries a resolved path");
-        }
-    }
+    // Analyze facts are structural and intentionally do not expose lint
+    // findings; provenance remains on the frontend diagnostics above.
+    assert!(envelope.result.facts["rules"].as_array().is_some());
 }

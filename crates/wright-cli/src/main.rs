@@ -199,6 +199,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 ConvertTargetArg::Opy => wright_driver::ConvertTarget::Opy,
                 ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
             };
+            let _activity = presentation.activity();
             let envelope = session.convert(target);
             let code = envelope.exit;
             present::render(&envelope, presentation);
@@ -244,6 +245,7 @@ fn run_command<T: serde::Serialize>(
     run: fn(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
 ) -> u8 {
+    let _activity = presentation.activity();
     let envelope = run(session);
     let code = envelope.exit;
     present::render(&envelope, presentation);
