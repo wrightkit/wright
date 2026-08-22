@@ -736,6 +736,7 @@ mod tests {
             stage: wright_driver::Stage::Analysis,
             severity,
             message: "test".to_string(),
+            status: None,
             span: None,
             source: None,
         }
