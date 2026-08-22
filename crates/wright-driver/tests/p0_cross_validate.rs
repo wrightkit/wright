@@ -21,10 +21,7 @@ fn provider_matches_workshop_rs_p0_expectations() {
     let provider = WorkshopProvider::new().expect("provider initializes");
 
     for case in P0_EXPECTATION.cases {
-        let file_name = Path::new(case.source_fixture)
-            .file_name()
-            .expect("owner contract fixture filename");
-        let path = artifact_root.join(file_name);
+        let path = find_artifact_by_hash(&artifact_root, case.source_sha256, case.id);
         let bytes =
             std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         assert_eq!(
@@ -58,6 +55,44 @@ fn provider_matches_workshop_rs_p0_expectations() {
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(actual, expected, "{} provider parity", case.id);
+    }
+}
+
+fn find_artifact_by_hash(root: &Path, expected_hash: &str, case_id: &str) -> PathBuf {
+    let mut matches = Vec::new();
+    collect_artifact_matches(root, expected_hash, &mut matches);
+    assert_eq!(
+        matches.len(),
+        1,
+        "{case_id} must resolve exactly one artifact by owner-provided SHA-256, found {}",
+        matches.len()
+    );
+    matches.pop().expect("one artifact match")
+}
+
+fn collect_artifact_matches(root: &Path, expected_hash: &str, matches: &mut Vec<PathBuf>) {
+    let entries = std::fs::read_dir(root).unwrap_or_else(|error| {
+        panic!(
+            "cannot read P0 artifact directory {}: {error}",
+            root.display()
+        )
+    });
+    for entry in entries {
+        let entry = entry.expect("read P0 artifact directory entry");
+        let path = entry.path();
+        let file_type = entry.file_type().expect("inspect P0 artifact entry");
+        if file_type.is_dir() {
+            collect_artifact_matches(&path, expected_hash, matches);
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("cannot read P0 artifact {}: {error}", path.display()));
+        if format!("{:x}", Sha256::digest(&bytes)) == expected_hash {
+            matches.push(path);
+        }
     }
 }
 
