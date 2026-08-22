@@ -29,7 +29,7 @@ impl LanguageProvider for WorkshopProvider {
         let manifest = wright_opy::manifest::Manifest::builtin()
             .map_err(|error| ProviderError::new("workshop.manifest", error.to_string()))?;
         let context = ProviderExpectedDomain {
-            manifest: &manifest,
+            manifest,
             catalog: &self.catalog,
         };
         let program = workshop_rs_provider::parser::parse_with_context(
