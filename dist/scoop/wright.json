@@ -1,13 +1,13 @@
 {
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Tooling-first semantic platform for the Overwatch Workshop and OverPy ecosystem",
   "homepage": "https://github.com/wrightkit/wright",
   "license": "AGPL-3.0-or-later",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/wrightkit/wright/releases/download/v0.2.11/wright-0.2.11-x86_64-pc-windows-msvc.zip",
+      "url": "https://github.com/wrightkit/wright/releases/download/v0.2.12/wright-0.2.12-x86_64-pc-windows-msvc.zip",
       "hash": "0000000000000000000000000000000000000000000000000000000000000000",
-      "extract_dir": "wright-0.2.11-x86_64-pc-windows-msvc"
+      "extract_dir": "wright-0.2.12-x86_64-pc-windows-msvc"
     }
   },
   "bin": [

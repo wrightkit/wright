@@ -1,6 +1,6 @@
 {
   "name": "@wrightkit/wright-darwin-x64",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "macOS x64 (Intel) native binary for Wright",
   "license": "AGPL-3.0-or-later",
   "repository": {

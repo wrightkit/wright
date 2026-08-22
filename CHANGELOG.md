@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12](https://github.com/wrightkit/wright/compare/v0.2.11...v0.2.12) (2026-08-22)
+
+
+### Features
+
+* **cli:** refine interactive terminal presentation ([#216](https://github.com/wrightkit/wright/issues/216)) ([d44d023](https://github.com/wrightkit/wright/commit/d44d023c81b82ca9cfcafeb4febc13f7803874be))
+
 ## [0.2.11](https://github.com/wrightkit/wright/compare/v0.2.10...v0.2.11) (2026-08-22)
 
 

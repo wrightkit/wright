@@ -1790,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "wright-analyzer"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "serde",
  "serde_json",
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "wright-bench"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "libc",
  "serde",
@@ -1812,7 +1812,7 @@ dependencies = [
 
 [[package]]
 name = "wright-cli"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1830,7 +1830,7 @@ dependencies = [
 
 [[package]]
 name = "wright-consumer"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "serde_json",
  "wright-driver",
@@ -1838,7 +1838,7 @@ dependencies = [
 
 [[package]]
 name = "wright-core"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "serde",
  "serde_json",
@@ -1848,7 +1848,7 @@ dependencies = [
 
 [[package]]
 name = "wright-driver"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "serde",
  "serde_json",
@@ -1865,14 +1865,14 @@ dependencies = [
 
 [[package]]
 name = "wright-ir"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "workshop-rs",
 ]
 
 [[package]]
 name = "wright-language"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "libc",
  "serde",
@@ -1889,7 +1889,7 @@ dependencies = [
 
 [[package]]
 name = "wright-lpp"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "os_pipe",
  "serde",
@@ -1898,7 +1898,7 @@ dependencies = [
 
 [[package]]
 name = "wright-lsp"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "lsp-types",
  "serde_json",
@@ -1907,7 +1907,7 @@ dependencies = [
 
 [[package]]
 name = "wright-opy"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "serde",
  "serde_json",
@@ -1919,7 +1919,7 @@ dependencies = [
 
 [[package]]
 name = "wright-ostw"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "serde_json",
  "sha2",
@@ -1932,7 +1932,7 @@ dependencies = [
 
 [[package]]
 name = "wright-transform"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "serde",
  "workshop-rs",
