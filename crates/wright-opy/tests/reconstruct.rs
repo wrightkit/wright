@@ -4,7 +4,7 @@
 //! semantic equivalence for every deterministic reconstruction fixture:
 //! the native OPY frontend accepts the reconstructed source, the recompiled
 //! WIR is structurally equivalent to the parsed Workshop program under
-//! `wright_workshop::roundtrip::equivalent`, and the recompiled WIR still
+//! `workshop_rs::roundtrip::equivalent`, and the recompiled WIR still
 //! emits to Workshop text through the shipped emitter (the trailing
 //! `→ Workshop` hop). Determinism, the machine-readable support boundary,
 //! and the explicit rejection surface are all asserted here through the
@@ -13,10 +13,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use workshop_rs::catalog::{Catalog, Locale};
+use workshop_rs::parser;
 use workshop_rs::source::{Position, Span};
 use workshop_rs::wir::{self, Action, Event, ModifyOp, Program, Value, ValueNode};
-use wright_workshop::catalog::{Catalog, Locale};
-use wright_workshop::parser;
 
 /// (fixture id, constructs covered) — the machine-readable coverage map that
 /// the support boundary consistency test cross-checks.
@@ -403,10 +403,10 @@ fn every_fixture_round_trips_through_the_shipped_path() {
                 continue;
             }
         };
-        let equivalent = wright_workshop::roundtrip::equivalent(&parsed, &recompiled);
+        let equivalent = workshop_rs::roundtrip::equivalent(&parsed, &recompiled);
         // The trailing `→ Workshop` hop: the recompiled WIR still emits to
         // Workshop text through the shipped emitter.
-        let workshop_emit = wright_workshop::emitter::emit(&recompiled, &catalog, &locale)
+        let workshop_emit = workshop_rs::emitter::emit(&recompiled, &catalog, &locale)
             .map(|_| ())
             .map_err(|error| error.to_string());
         if !equivalent {

@@ -28,7 +28,8 @@ and LPP-conformant providers, with OPY and DEL provider cutover following in
 v0.3 and v0.4.
 
 The current in-repo crates (`crates/wright-opy`, `crates/wright-ostw`,
-`crates/wright-workshop`, `crates/wright-ir`) are a migration state: they
+`crates/wright-ir`; the `crates/wright-workshop` cutover adapter was removed
+after its call-site migration completed) are a migration state: they
 coexist inside this repository until extraction completes. They do not define
 the target ownership.
 

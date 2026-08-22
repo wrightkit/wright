@@ -47,7 +47,7 @@ not enable Clippy's `pedantic`, `nursery`, or `restriction` groups.
 
 This policy was audited against the workspace manifests, CI, and representative
 compiler/tooling crates (`wright-ir`, `wright-core`, `wright-driver`,
-`wright-opy`, `wright-workshop`, `wright-language`, and `wright-lsp`):
+`wright-opy`, `wright-language`, and `wright-lsp`):
 
 * Semantic identities use typed IR IDs and arena lookups; raw strings remain at
   protocol, source-name, and presentation boundaries. New public contracts

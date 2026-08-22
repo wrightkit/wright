@@ -37,14 +37,14 @@ fn read(path: &Path) -> String {
 
 /// Parse Workshop text through the shared parser with the canonical
 /// signature context (the same path the driver uses).
-fn parse(catalog: &wright_workshop::catalog::Catalog, text: &str) -> wir::Program {
+fn parse(catalog: &workshop_rs::catalog::Catalog, text: &str) -> wir::Program {
     let manifest =
         wright_opy::manifest::Manifest::builtin().expect("the OPY manifest is embedded and valid");
     let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, catalog);
-    let program = wright_workshop::parser::parse_with_context(
+    let program = workshop_rs::parser::parse_with_context(
         text,
         catalog,
-        &wright_workshop::catalog::Locale::new("en-US"),
+        &workshop_rs::catalog::Locale::new("en-US"),
         &context,
     )
     .unwrap_or_else(|error| panic!("fixture Workshop text must parse: {error}"));
@@ -1043,7 +1043,7 @@ fn fixture_dir(name: &str) -> PathBuf {
 }
 
 /// The full loop for one positive fixture.
-fn run_full_loop(catalog: &wright_workshop::catalog::Catalog, name: &str) -> serde_json::Value {
+fn run_full_loop(catalog: &workshop_rs::catalog::Catalog, name: &str) -> serde_json::Value {
     let dir = fixture_dir(name);
     let fixture_text = read(&dir.join("workshop.txt"));
 
@@ -1068,20 +1068,20 @@ fn run_full_loop(catalog: &wright_workshop::catalog::Catalog, name: &str) -> ser
     reconstructed.validate().expect("lowered program validates");
 
     // WIR → Workshop text (the shared emitter).
-    let emitted = wright_workshop::emitter::emit(
+    let emitted = workshop_rs::emitter::emit(
         &reconstructed,
         catalog,
-        &wright_workshop::catalog::Locale::new("en-US"),
+        &workshop_rs::catalog::Locale::new("en-US"),
     )
     .expect("reconstructed Workshop emission succeeds");
 
     // The reconstructed Workshop text reparses and re-emits byte-identically
     // (round-trip fixed point).
     let reparsed = parse(catalog, &emitted);
-    let reemitted = wright_workshop::emitter::emit(
+    let reemitted = workshop_rs::emitter::emit(
         &reparsed,
         catalog,
-        &wright_workshop::catalog::Locale::new("en-US"),
+        &workshop_rs::catalog::Locale::new("en-US"),
     )
     .expect("re-emission succeeds");
     assert_eq!(
@@ -1115,7 +1115,7 @@ fn run_full_loop(catalog: &wright_workshop::catalog::Catalog, name: &str) -> ser
 
 #[test]
 fn reconstruction_full_loop_holds_for_positive_fixtures() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     let mut report = serde_json::Map::new();
     for name in POSITIVE_FIXTURES {
         report.insert(name.to_string(), run_full_loop(&catalog, name));
@@ -1142,7 +1142,7 @@ fn reconstruction_full_loop_holds_for_positive_fixtures() {
 
 /// Build a minimal WIR program exercising every declared-surface construct,
 /// used by the per-construct emission assertions.
-fn surface_program(catalog: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn surface_program(catalog: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1424,7 +1424,7 @@ fn surface_program(catalog: &wright_workshop::catalog::Catalog) -> wir::Program 
 
 #[test]
 fn emission_covers_every_declared_construct() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     let program = surface_program(&catalog);
     program.validate().expect("synthetic program validates");
     let text = wright_ostw::reconstruct::reconstruct(&program, &catalog)
@@ -1463,7 +1463,7 @@ fn emission_covers_every_declared_construct() {
 
 #[test]
 fn emission_is_byte_identical_across_runs() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     let program = surface_program(&catalog);
     program.validate().expect("synthetic program validates");
     let first = wright_ostw::reconstruct::reconstruct(&program, &catalog).expect("reconstructs");
@@ -1482,9 +1482,9 @@ fn emission_is_byte_identical_across_runs() {
 
 // -- structured rejections (synthetic WIR per declared boundary) ------------
 
-type ProgramBuilder = fn(&wright_workshop::catalog::Catalog) -> wir::Program;
+type ProgramBuilder = fn(&workshop_rs::catalog::Catalog) -> wir::Program;
 
-fn program_with_for_player_variable(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_for_player_variable(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let p = program.player_variables.push(wir::WorkshopVariable {
         name: "p".to_string(),
@@ -1537,7 +1537,7 @@ fn program_with_for_player_variable(_: &wright_workshop::catalog::Catalog) -> wi
     program
 }
 
-fn program_with_debug(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_debug(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let value = program.values.push(wir::ValueNode::new(
         wir::Value::Number {
@@ -1561,7 +1561,7 @@ fn program_with_debug(_: &wright_workshop::catalog::Catalog) -> wir::Program {
     program
 }
 
-fn program_with_print(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_print(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let message = program.values.push(wir::ValueNode::new(
         wir::Value::String("x".to_string()),
@@ -1583,7 +1583,7 @@ fn program_with_print(_: &wright_workshop::catalog::Catalog) -> wir::Program {
     program
 }
 
-fn program_with_settings(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_settings(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     wir::Program {
         settings: Some(workshop_rs::settings::Settings {
             span: None,
@@ -1593,7 +1593,7 @@ fn program_with_settings(_: &wright_workshop::catalog::Catalog) -> wir::Program 
     }
 }
 
-fn program_with_unbound_action(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_unbound_action(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let action = program.actions.push(wir::Action::Call {
         name: "createBeamEffect".to_string(),
@@ -1612,7 +1612,7 @@ fn program_with_unbound_action(_: &wright_workshop::catalog::Catalog) -> wir::Pr
     program
 }
 
-fn program_with_unbound_value(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_unbound_value(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1645,7 +1645,7 @@ fn program_with_unbound_value(_: &wright_workshop::catalog::Catalog) -> wir::Pro
     program
 }
 
-fn program_with_unbound_enum(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_unbound_enum(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1678,7 +1678,7 @@ fn program_with_unbound_enum(_: &wright_workshop::catalog::Catalog) -> wir::Prog
     program
 }
 
-fn program_with_raise_to_power(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_raise_to_power(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1712,7 +1712,7 @@ fn program_with_raise_to_power(_: &wright_workshop::catalog::Catalog) -> wir::Pr
     program
 }
 
-fn program_with_remove_from_array(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_remove_from_array(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1746,7 +1746,7 @@ fn program_with_remove_from_array(_: &wright_workshop::catalog::Catalog) -> wir:
     program
 }
 
-fn program_with_non_comparison_condition(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_non_comparison_condition(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let condition = program
         .values
@@ -1763,7 +1763,7 @@ fn program_with_non_comparison_condition(_: &wright_workshop::catalog::Catalog) 
     program
 }
 
-fn program_with_partial_arity(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_partial_arity(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let event_player = program
         .values
@@ -1785,7 +1785,7 @@ fn program_with_partial_arity(_: &wright_workshop::catalog::Catalog) -> wir::Pro
     program
 }
 
-fn program_with_name_collision(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_name_collision(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1802,7 +1802,7 @@ fn program_with_name_collision(_: &wright_workshop::catalog::Catalog) -> wir::Pr
     program
 }
 
-fn program_with_empty_name(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_empty_name(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     program.global_variables.push(wir::WorkshopVariable {
         name: String::new(),
@@ -1813,7 +1813,7 @@ fn program_with_empty_name(_: &wright_workshop::catalog::Catalog) -> wir::Progra
     program
 }
 
-fn program_with_bodiless_subroutine(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_bodiless_subroutine(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     program.subroutines.push(wir::WorkshopSubroutine {
         name: "sub".to_string(),
@@ -1824,7 +1824,7 @@ fn program_with_bodiless_subroutine(_: &wright_workshop::catalog::Catalog) -> wi
     program
 }
 
-fn program_with_player_modify_receiver(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_player_modify_receiver(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let p = program.player_variables.push(wir::WorkshopVariable {
         name: "p".to_string(),
@@ -1873,7 +1873,7 @@ fn program_with_player_modify_receiver(_: &wright_workshop::catalog::Catalog) ->
     program
 }
 
-fn program_with_non_literal_format_text(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_non_literal_format_text(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1913,7 +1913,7 @@ fn program_with_non_literal_format_text(_: &wright_workshop::catalog::Catalog) -
     program
 }
 
-fn program_with_strict_greater_in_format(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_strict_greater_in_format(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -1974,7 +1974,7 @@ fn program_with_strict_greater_in_format(_: &wright_workshop::catalog::Catalog) 
     program
 }
 
-fn program_with_invalid_number(_: &wright_workshop::catalog::Catalog) -> wir::Program {
+fn program_with_invalid_number(_: &workshop_rs::catalog::Catalog) -> wir::Program {
     let mut program = wir::Program::default();
     let g = program.global_variables.push(wir::WorkshopVariable {
         name: "g".to_string(),
@@ -2103,7 +2103,7 @@ fn rejection_cases() -> Vec<(&'static str, &'static str, ProgramBuilder)> {
 
 #[test]
 fn every_declared_rejection_is_structured_and_total() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     for (kind, code, builder) in rejection_cases() {
         let program = builder(&catalog);
         program
@@ -2132,7 +2132,7 @@ fn every_declared_rejection_is_structured_and_total() {
 
 #[test]
 fn rejection_never_produces_partial_output() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     // The committed for-player-variable rejection fixture.
     let dir = fixture_dir("reject/for-player-variable");
     let fixture = parse(&catalog, &read(&dir.join("workshop.txt")));
@@ -2283,7 +2283,7 @@ fn manifest() -> serde_json::Value {
 
 #[test]
 fn boundary_manifest_matches_classification_and_fixture_coverage() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     let manifest = manifest();
 
     // The rejected set in the manifest is exactly the tested rejection table.
@@ -2464,32 +2464,32 @@ fn boundary_manifest_matches_classification_and_fixture_coverage() {
 
 #[test]
 fn reconstruct_api_exposes_the_reverse_binding_tables() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     // Every bound id maps to a catalog entry of the right kind, and the OSTW
     // name resolves back through signature::builtin to the same id.
     for (id, source) in wright_ostw::reconstruct::bound_action_ids() {
         assert!(
             catalog
-                .entry(wright_workshop::catalog::Kind::Action, id)
+                .entry(workshop_rs::catalog::Kind::Action, id)
                 .is_some(),
             "bound action id '{id}' must exist in the canonical catalog"
         );
         assert_eq!(
             crate_signature_builtin(source),
-            Some((wright_workshop::catalog::Kind::Action, id)),
+            Some((workshop_rs::catalog::Kind::Action, id)),
             "OSTW action name '{source}' must resolve back to catalog id '{id}'"
         );
     }
     for (id, source) in wright_ostw::reconstruct::bound_value_ids() {
         assert!(
             catalog
-                .entry(wright_workshop::catalog::Kind::Value, id)
+                .entry(workshop_rs::catalog::Kind::Value, id)
                 .is_some(),
             "bound value id '{id}' must exist in the canonical catalog"
         );
         assert_eq!(
             crate_signature_builtin(source),
-            Some((wright_workshop::catalog::Kind::Value, id)),
+            Some((workshop_rs::catalog::Kind::Value, id)),
             "OSTW value name '{source}' must resolve back to catalog id '{id}'"
         );
     }
@@ -2514,6 +2514,6 @@ fn reconstruct_api_exposes_the_reverse_binding_tables() {
 /// The same lookup the OSTW semantic phase uses (signature::builtin), kept
 /// local so the test asserts the round trip through the shipped frontend
 /// binding table without importing the private module path.
-fn crate_signature_builtin(name: &str) -> Option<(wright_workshop::catalog::Kind, &'static str)> {
+fn crate_signature_builtin(name: &str) -> Option<(workshop_rs::catalog::Kind, &'static str)> {
     wright_ostw::signature::builtin(name)
 }

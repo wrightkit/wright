@@ -15,7 +15,7 @@ the corrected explicit-root oracle evidence model is documented there too
 
 The pipeline is `wright-ostw` (project + syntax + #118 semantics) →
 frontend-neutral HIR → shared `wright-ir` lowering → canonical
-`workshop-rs` emitter (en-US, via the `wright-workshop` adapter), identical
+`workshop-rs` emitter (en-US), identical
 to the OPY/Workshop paths — no OSTW-specific backend exists.
 
 ## Accepted differential targets
@@ -209,6 +209,6 @@ writes `target/wright-convert-report.json`.
   and the boundary-conformance test.
 - `workshop-rs` catalog data (`crates/workshop-rs/src/catalog/data/catalog.json`)
   — canonical catalog with `paramDefaults` (probe-evidenced) and the `abort`
-  action, consumed via the `wright-workshop` adapter.
+  action, consumed from `workshop-rs`.
 - `docs/ostw/compatibility-baseline.md` — the explicit-root evidence model
   and #122 correction.

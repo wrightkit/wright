@@ -532,16 +532,16 @@ impl<'a> ToolService<'a> {
     /// Compiler-host performance is measured by the `wright-bench` harness, not
     /// in-process.
     fn cost_estimate(&self) -> serde_json::Value {
-        let catalog = wright_workshop::catalog::Catalog::builtin().expect("built-in catalog loads");
+        let catalog = workshop_rs::catalog::Catalog::builtin().expect("built-in catalog loads");
         let locale = self
             .loaded
             .origin
             .locale
             .clone()
-            .map(|locale| wright_workshop::catalog::Locale::new(&locale))
-            .unwrap_or_else(|| wright_workshop::catalog::Locale::new("en-US"));
-        let text = wright_workshop::emitter::emit(&self.loaded.program, &catalog, &locale)
-            .unwrap_or_default();
+            .map(|locale| workshop_rs::catalog::Locale::new(&locale))
+            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        let text =
+            workshop_rs::emitter::emit(&self.loaded.program, &catalog, &locale).unwrap_or_default();
         let waits = self
             .loaded
             .program
@@ -575,7 +575,7 @@ impl<'a> ToolService<'a> {
 
     /// Target/catalog metadata for reasoning about Workshop operations.
     fn target_metadata(&self) -> serde_json::Value {
-        let catalog = match wright_workshop::catalog::Catalog::builtin() {
+        let catalog = match workshop_rs::catalog::Catalog::builtin() {
             Ok(catalog) => catalog,
             Err(error) => {
                 return json!({ "error": error.to_string() });
@@ -584,10 +584,10 @@ impl<'a> ToolService<'a> {
         json!({
             "catalogVersion": catalog.schema_version,
             "locales": catalog.locales().iter().map(|l| l.to_string()).collect::<Vec<_>>(),
-            "actions": catalog.entries_of(wright_workshop::catalog::Kind::Action).count(),
-            "values": catalog.entries_of(wright_workshop::catalog::Kind::Value).count(),
-            "events": catalog.entries_of(wright_workshop::catalog::Kind::Event).count(),
-            "operators": catalog.entries_of(wright_workshop::catalog::Kind::Operator).count(),
+            "actions": catalog.entries_of(workshop_rs::catalog::Kind::Action).count(),
+            "values": catalog.entries_of(workshop_rs::catalog::Kind::Value).count(),
+            "events": catalog.entries_of(workshop_rs::catalog::Kind::Event).count(),
+            "operators": catalog.entries_of(workshop_rs::catalog::Kind::Operator).count(),
             "enumDomains": catalog.enum_domains().map(|domain| json!({
                 "domain": domain.domain,
                 "members": domain.members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),

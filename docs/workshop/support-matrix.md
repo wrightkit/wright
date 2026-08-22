@@ -6,8 +6,7 @@ supports for native localized Workshop input/output
 
 This document inventories the Workshop surface evidenced by the compatibility
 corpus, records the localization matrix, and specifies the supported feature
-set of the canonical `workshop-rs` core as consumed through the
-`wright-workshop` adapter.
+set of the canonical `workshop-rs` core as consumed directly by Wright.
 
 ## Evidence sources
 

@@ -68,14 +68,14 @@ fn compile_semantic(root: &Path, main_rel: &str) -> wright_ostw::SemanticOutcome
 
 /// Parse Workshop text through the shared parser with the canonical
 /// signature context (the same path the driver uses).
-fn parse(catalog: &wright_workshop::catalog::Catalog, text: &str) -> wir::Program {
+fn parse(catalog: &workshop_rs::catalog::Catalog, text: &str) -> wir::Program {
     let manifest =
         wright_opy::manifest::Manifest::builtin().expect("the OPY manifest is embedded and valid");
     let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, catalog);
-    let program = wright_workshop::parser::parse_with_context(
+    let program = workshop_rs::parser::parse_with_context(
         text,
         catalog,
-        &wright_workshop::catalog::Locale::new("en-US"),
+        &workshop_rs::catalog::Locale::new("en-US"),
         &context,
     )
     .unwrap_or_else(|error| panic!("reference/Wright text must parse: {error}"));
@@ -98,7 +98,7 @@ fn fold(program: &mut wir::Program) {
 /// Team/Color collision needs it: the other shared spellings (e.g.
 /// `Visible To And String`) resolve through the catalog's expected-domain
 /// pins at their call positions.
-fn qualify_ambiguous_members(catalog: &wright_workshop::catalog::Catalog, text: &str) -> String {
+fn qualify_ambiguous_members(catalog: &workshop_rs::catalog::Catalog, text: &str) -> String {
     let mut out = text.to_string();
     // workshop-rs 0.1.5 exposes Vector as a catalog enum domain. The pinned
     // reference's zero-vector spelling is otherwise ambiguous with
@@ -117,7 +117,7 @@ fn qualify_ambiguous_members(catalog: &wright_workshop::catalog::Catalog, text: 
         "Start Camera(Event Player, Vector(0, 0, 0), Left, 0)",
         "Start Camera(Event Player, Vector(0, 0, 0), Vector.Left, 0)",
     );
-    let locale = wright_workshop::catalog::Locale::new("en-US");
+    let locale = workshop_rs::catalog::Locale::new("en-US");
     for domain in catalog.enum_domains() {
         if domain.domain != "Team" {
             continue;
@@ -1198,7 +1198,7 @@ fn value_kind(value: &Value) -> &'static str {
 
 #[test]
 fn accepted_targets_compile_and_match_pinned_reference_semantics() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     let mut report = serde_json::Map::new();
     for target in TARGETS {
         let dir = workspace_root()
@@ -1214,20 +1214,20 @@ fn accepted_targets_compile_and_match_pinned_reference_semantics() {
         let program = wright_ir::lower::lower(hir).expect("lowering succeeds");
         program.validate().expect("lowered program validates");
 
-        let emitted = wright_workshop::emitter::emit(
+        let emitted = workshop_rs::emitter::emit(
             &program,
             &catalog,
-            &wright_workshop::catalog::Locale::new("en-US"),
+            &workshop_rs::catalog::Locale::new("en-US"),
         )
         .expect("emission succeeds");
 
         // Declared round-trip contract: Wright-emitted Workshop reparses and
         // re-emits byte-identically (semantic fixed point).
         let reparsed = parse(&catalog, &emitted);
-        let reemitted = wright_workshop::emitter::emit(
+        let reemitted = workshop_rs::emitter::emit(
             &reparsed,
             &catalog,
-            &wright_workshop::catalog::Locale::new("en-US"),
+            &workshop_rs::catalog::Locale::new("en-US"),
         )
         .expect("re-emission succeeds");
         assert_eq!(

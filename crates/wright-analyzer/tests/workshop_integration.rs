@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde_json::Value;
+use workshop_rs::catalog::{Catalog, Locale};
+use workshop_rs::parser;
 use wright_analyzer::service::SemanticService;
-use wright_workshop::catalog::{Catalog, Locale};
-use wright_workshop::parser;
 
 fn oracle_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

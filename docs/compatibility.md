@@ -14,8 +14,9 @@ Wright owns tooling and orchestration, not the durable source-language
 implementations. `opy-rs` owns OPY language semantics, `del-rs` owns the
 DEL/OSTW-compatible implementation, and `workshop-rs` owns canonical Workshop
 semantics and WIR. During the migration described by ADR-0009, Wright still
-contains the in-repo `wright-opy` / `wright-ostw` migration frontends and the
-`wright-workshop` re-export adapter until their planned cutovers complete.
+contains the in-repo `wright-opy` / `wright-ostw` migration frontends until
+their planned cutovers complete (the `wright-workshop` re-export adapter was
+removed once call sites consumed `workshop-rs` directly).
 Wright therefore keeps regression coverage for those current integration paths,
 but upstream OverPy and OSTW compilers/language services remain compatibility
 oracles and behavior references rather than production or default-CI runtime

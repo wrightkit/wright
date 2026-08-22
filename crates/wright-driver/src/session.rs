@@ -49,7 +49,7 @@ pub struct Loaded {
 pub struct CompilerSession {
     /// The session configuration (input, frontend, overrides, format).
     pub config: SessionConfig,
-    catalog: wright_workshop::catalog::Catalog,
+    catalog: workshop_rs::catalog::Catalog,
     loaded: Option<Loaded>,
     diagnostics: Vec<Diagnostic>,
 }
@@ -57,7 +57,7 @@ pub struct CompilerSession {
 impl CompilerSession {
     /// Build a session from a configuration.
     pub fn new(config: SessionConfig) -> Result<CompilerSession, Diagnostic> {
-        let catalog = wright_workshop::catalog::Catalog::builtin().map_err(|error| {
+        let catalog = workshop_rs::catalog::Catalog::builtin().map_err(|error| {
             Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
@@ -244,8 +244,8 @@ impl CompilerSession {
             .config
             .locale
             .as_deref()
-            .map(wright_workshop::catalog::Locale::new);
-        let locale = wright_workshop::detect::resolve_locale(
+            .map(workshop_rs::catalog::Locale::new);
+        let locale = workshop_rs::detect::resolve_locale(
             &resolved.text,
             &self.catalog,
             override_locale.as_ref(),
@@ -266,7 +266,7 @@ impl CompilerSession {
             )
         })?;
         let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, &self.catalog);
-        let program = wright_workshop::parser::parse_with_context(
+        let program = workshop_rs::parser::parse_with_context(
             &resolved.text,
             &self.catalog,
             &locale,
@@ -376,9 +376,9 @@ impl CompilerSession {
             .origin
             .locale
             .clone()
-            .map(|locale| wright_workshop::catalog::Locale::new(&locale))
-            .unwrap_or_else(|| wright_workshop::catalog::Locale::new("en-US"));
-        let text = wright_workshop::emitter::emit(&loaded.program, &self.catalog, &locale)
+            .map(|locale| workshop_rs::catalog::Locale::new(&locale))
+            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        let text = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
             .map_err(|error| workshop_diag(error, &loaded.input))?;
         let sha256 = input_identity(&text);
         Ok(CompiledOutput {
@@ -946,16 +946,16 @@ fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
 }
 
 /// Map a Workshop-language error to a driver diagnostic.
-fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput) -> Diagnostic {
+fn workshop_diag(error: workshop_rs::WorkshopError, resolved: &ResolvedInput) -> Diagnostic {
     let (code, stage, span) = match &error {
-        wright_workshop::WorkshopError::Catalog(catalog) => {
+        workshop_rs::WorkshopError::Catalog(catalog) => {
             return Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
                 format!("{}: {}", catalog.code, catalog.message),
             );
         }
-        wright_workshop::WorkshopError::Unknown { kind, span, .. } => (
+        workshop_rs::WorkshopError::Unknown { kind, span, .. } => (
             format!("unknown-{kind}"),
             Stage::Frontend,
             span.map(|span| SourceSpan {
@@ -971,7 +971,7 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
                 },
             }),
         ),
-        wright_workshop::WorkshopError::Malformed { span, .. } => (
+        workshop_rs::WorkshopError::Malformed { span, .. } => (
             "parse-error".to_string(),
             Stage::Frontend,
             span.map(|span| SourceSpan {
@@ -987,7 +987,7 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
                 },
             }),
         ),
-        wright_workshop::WorkshopError::Unsupported { span, .. } => (
+        workshop_rs::WorkshopError::Unsupported { span, .. } => (
             "unsupported-construct".to_string(),
             Stage::Frontend,
             span.map(|span| SourceSpan {
@@ -1007,7 +1007,7 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
         // a first-class error (ADR-0001 Decision 7; wright#143): conversion
         // or emission into a locale without a mapping is a diagnostic, never
         // a guess or a silent passthrough.
-        wright_workshop::WorkshopError::MissingMapping { kind, id, locale } => (
+        workshop_rs::WorkshopError::MissingMapping { kind, id, locale } => (
             "missing-mapping".to_string(),
             Stage::Frontend,
             Diagnostic::error(
