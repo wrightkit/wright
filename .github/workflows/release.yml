@@ -200,7 +200,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: wright-*
           path: artifacts
@@ -255,7 +255,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: wright-*
           path: artifacts
@@ -318,7 +318,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Download generated Homebrew formula
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: homebrew-formula
           path: formula
@@ -376,7 +376,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: wright-*
           path: artifacts
@@ -436,7 +436,7 @@ jobs:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Download npm tarballs
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: npm-packages
           path: npm-packages
@@ -486,7 +486,7 @@ jobs:
       packages: write
     steps:
       - name: Download npm tarballs
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: npm-packages
           path: npm-packages
