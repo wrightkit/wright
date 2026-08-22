@@ -24,8 +24,8 @@ pub(crate) struct Cli {
 
 pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
 
-Commands check correctness, report semantic facts, lint, inspect, compile, or reconstruct
-source through the typed wright-driver result envelope. `compile` and `convert`
+Commands check correctness, summarize semantic hotspots, lint, inspect exhaustive
+facts, compile, or reconstruct source through the typed wright-driver result envelope. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
 wright-result/v1 envelope to stdout.
 
@@ -63,11 +63,11 @@ pub(crate) enum Command {
     Convert(ConvertArgs),
     /// Check frontend, project, semantic, and validation correctness.
     Check(CommonArgs),
-    /// Report semantic structure, symbol usage, and CFG measurements.
+    /// Summarize semantic structure, CFG hotspots, and cross-cutting state.
     Analyze(CommonArgs),
     /// Parse, lower, and report lint findings.
     Lint(LintArgs),
-    /// Parse, lower, and show the structural/semantic program model.
+    /// Parse, lower, and show exhaustive structural/semantic facts.
     Inspect(CommonArgs),
     /// Generate static shell completion from the command model.
     Completion(CompletionArgs),

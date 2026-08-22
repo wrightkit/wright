@@ -259,9 +259,11 @@ fn render_verdict<T: serde::Serialize>(
             array_len(value, "/result/rules"),
         ),
         "analyze" => format!(
-            "{} symbol(s), {} rule measurement(s)",
+            "{} rule(s), {} symbol(s); ranked semantic report",
+            value
+                .pointer("/result/program")
+                .map_or(0, |program| count(program, "rules")),
             array_len(value, "/result/facts/symbols"),
-            array_len(value, "/result/facts/rules"),
         ),
         "inspect" => format!(
             "{} rule(s), {} symbol(s)",
@@ -527,6 +529,10 @@ fn render_convert<T: serde::Serialize>(envelope: &Envelope<T>) {
 
 fn render_analyze<T: serde::Serialize>(envelope: &Envelope<T>) {
     let value = serde_json::to_value(envelope).expect("envelope serializes");
+    let program = value
+        .pointer("/result/program")
+        .cloned()
+        .unwrap_or_default();
     let facts = value.pointer("/result/facts").cloned().unwrap_or_default();
     let symbols = facts
         .get("symbols")
@@ -538,59 +544,113 @@ fn render_analyze<T: serde::Serialize>(envelope: &Envelope<T>) {
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
-    println!("\nAnalysis details");
-    for symbol in &symbols {
-        let kind = symbol
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("symbol");
-        let name = symbol
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("<unnamed>");
-        let usage = symbol.get("usage").cloned().unwrap_or_default();
-        println!(
-            "  {kind} {name}: reads {}, writes {}, calls {}, rules {}",
-            usage
-                .get("reads")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            usage
-                .get("writes")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            usage
-                .get("calls")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            usage
-                .get("rules")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-        );
-    }
+    println!("\nProgram overview");
+    println!(
+        "  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s)",
+        count(&program, "files"),
+        count(&program, "rules"),
+        count(&program, "globalVariables"),
+        count(&program, "playerVariables"),
+        count(&program, "subroutines"),
+    );
+    println!("  evidence: [static] parsed program inventory");
+
+    let mut total_blocks = 0;
+    let mut total_edges = 0;
+    let mut total_loops = 0;
+    let mut total_waits = 0;
+    let mut rule_hotspots = Vec::new();
     for rule in &rules {
-        let name = rule
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("<unnamed>");
         let flow = rule.get("controlFlow").cloned().unwrap_or_default();
-        println!(
-            "  rule {name}: {} blocks, {} edges, {} loop block(s), {} wait block(s)",
-            flow.get("blocks")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            flow.get("edges")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            flow.get("loopBlocks")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            flow.get("waitBlocks")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-        );
+        let blocks = count(&flow, "blocks");
+        let edges = count(&flow, "edges");
+        let loops = count(&flow, "loopBlocks");
+        let waits = count(&flow, "waitBlocks");
+        total_blocks += blocks;
+        total_edges += edges;
+        total_loops += loops;
+        total_waits += waits;
+        rule_hotspots.push((
+            blocks + edges,
+            rule.get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("<unnamed>"),
+            blocks,
+            edges,
+            loops,
+            waits,
+        ));
     }
+    rule_hotspots.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+    println!("\nControl-flow summary");
+    println!(
+        "  {total_blocks} blocks, {total_edges} edges, {total_loops} loop block(s), {total_waits} wait block(s)"
+    );
+    println!("  Top rules (heuristic ranking: blocks + edges; facts are [static])");
+    if rule_hotspots.is_empty() {
+        println!("    none");
+    } else {
+        for (_, name, blocks, edges, loops, waits) in rule_hotspots.iter().take(5) {
+            println!(
+                "    {name}: {blocks} blocks, {edges} edges, {loops} loop block(s), {waits} wait block(s)"
+            );
+        }
+    }
+
+    let mut coupled_symbols = symbols
+        .iter()
+        .filter(|symbol| {
+            matches!(
+                symbol.get("kind").and_then(serde_json::Value::as_str),
+                Some("globalVariable" | "playerVariable")
+            )
+        })
+        .map(|symbol| {
+            let usage = symbol.get("usage").cloned().unwrap_or_default();
+            let rules = count(&usage, "rules");
+            let reads = count(&usage, "reads");
+            let writes = count(&usage, "writes");
+            (
+                rules,
+                reads + writes,
+                symbol
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("variable"),
+                symbol
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("<unnamed>"),
+                reads,
+                writes,
+            )
+        })
+        .collect::<Vec<_>>();
+    coupled_symbols.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.3.cmp(right.3))
+    });
+    println!("\nState and coupling");
+    println!("  Top variables (heuristic ranking: rules touched, then reads + writes)");
+    if coupled_symbols.is_empty() {
+        println!("    none");
+    } else {
+        for (rules, _, kind, name, reads, writes) in coupled_symbols.iter().take(5) {
+            println!(
+                "    {kind} {name}: {rules} rule(s), {reads} read(s), {writes} write(s) [static]"
+            );
+        }
+    }
+}
+
+fn count(value: &serde_json::Value, key: &str) -> usize {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize
 }
 
 fn render_lint<T: serde::Serialize>(envelope: &Envelope<T>) {

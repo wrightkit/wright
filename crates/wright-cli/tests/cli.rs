@@ -168,7 +168,7 @@ fn terminal_renderer_uses_command_specific_hierarchy() {
     for (command, heading, detail) in [
         ("check", "PASS check", "diagnostic(s)"),
         ("lint", "WARN lint", "Lint findings"),
-        ("analyze", "PASS analyze", "Analysis details"),
+        ("analyze", "PASS analyze", "Program overview"),
         ("inspect", "PASS inspect", "Program structure"),
     ] {
         let output = run(&[
@@ -184,6 +184,34 @@ fn terminal_renderer_uses_command_specific_hierarchy() {
         assert!(stdout.contains(heading), "{command}: {stdout}");
         assert!(stdout.contains(detail), "{command}: {stdout}");
     }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn analyze_real_project_report_is_bounded_and_ranked() {
+    let path = temp_file(
+        "pixelart.txt",
+        &corpus_workshop("real-world/overpy-pixelart"),
+    );
+    let output = run(&[
+        "analyze",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Program overview"));
+    assert!(stdout.contains("Control-flow summary"));
+    assert!(stdout.contains("Top rules (heuristic ranking"));
+    assert!(stdout.contains("State and coupling"));
+    assert!(stdout.contains("[static]"));
+    assert!(
+        stdout.lines().count() <= 40,
+        "report is not bounded:\n{stdout}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -586,6 +614,14 @@ fn version_and_help_are_documented_contract_surfaces() {
     for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
         assert!(help.contains(command), "help documents {command}");
     }
+    assert!(
+        help.contains("semantic hotspots"),
+        "help distinguishes analyze"
+    );
+    assert!(
+        help.contains("exhaustive structural"),
+        "help distinguishes inspect"
+    );
     for option in [
         "--kind",
         "--target",
