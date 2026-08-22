@@ -322,6 +322,12 @@ jobs:
       - name: Validate package-manager metadata and install script
         run: python scripts/verify-dist.py
 
+      # #183 moved the npm tarball determinism/executable-bit regressions
+      # (#123) to scripts/tests and declared them part of distribution
+      # validation; this step is that wiring.
+      - name: Run npm packaging unit regressions (#123)
+        run: python -m unittest discover -s scripts/tests
+
       - name: Run installer functional tests
         if: runner.os != 'Windows'
         run: scripts/test-install.sh

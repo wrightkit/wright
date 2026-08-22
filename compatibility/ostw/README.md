@@ -47,6 +47,11 @@ set is explicit and fixed per observation. A session that drops mid-stream
 (transient container failure) is retried; the recorded triple is unchanged.
 
 The corpus runner re-run twice produces byte-identical `results.json`; running
-it without `--update` is the CI drift guard (`OSTW_ORACLE_DRIFT`).
-`accept`/`reject` is derived from the final `elementCount` (`>= 0` means the
-reference produced Workshop code; `-1` means it reported errors).
+it without `--update` fails with `OSTW_ORACLE_DRIFT` when the recorded
+evidence no longer reproduces under the pinned reference. That drift check is
+a manual maintainer command, not a Wright CI gate: the upstream-reference CI
+job was removed in #177, and future oracle reproducibility workflows belong to
+`del-rs` (del-rs#49, tracked in Wright by #182). Wright CI still consumes the
+recorded evidence through the #119 compile differential; it does not re-derive
+it. `accept`/`reject` is derived from the final `elementCount` (`>= 0` means
+the reference produced Workshop code; `-1` means it reported errors).
