@@ -429,13 +429,13 @@ fn settings_mode_subset_violations_are_rejected() {
         matches!(&error, HirError::Invalid { span: Some(_), .. }),
         "the violation carries the key span"
     );
-    // gamemodes.general.roleLimit is outside the per-key subsets (roleLimit
-    // is evidenced under assault/control/escort/hybrid only, #86).
+    // The released settings table recognizes general.roleLimit as a key but
+    // rejects the inherited `off` value at this path.
     let payload = VALID_SETTINGS
         .replace("__SPAN__", SPAN)
         .replace("\"name\": \"heroLimit\"", "\"name\": \"roleLimit\"");
     let error = hir::parse_str(&payload).unwrap_err();
-    assert_eq!(error.code(), "settings-unknown-key");
+    assert_eq!(error.code(), "settings-unknown-value");
 }
 
 #[test]

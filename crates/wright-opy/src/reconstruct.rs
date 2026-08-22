@@ -613,9 +613,6 @@ impl<'a> Emitter<'a> {
 
         // Rules.
         for rule in &layout.normal_rules {
-            if rule.actions.is_empty() {
-                continue;
-            }
             if rule.disabled {
                 self.issue(
                     "unsupported-disabled-rule",
@@ -625,6 +622,9 @@ impl<'a> Emitter<'a> {
                     ),
                     rule.span,
                 );
+                continue;
+            }
+            if rule.actions.is_empty() {
                 continue;
             }
             self.out.push_str("rule \"");
