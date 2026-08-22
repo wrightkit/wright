@@ -75,7 +75,7 @@ evidence those reconstruction paths.
 Compatibility targets observable semantics, not compiler-output identity,
 formatting, temporary variables, optimizer shape, or internal architecture.
 
-## Why Wright exists if the implementations are standalone
+## Why Wright exists alongside standalone implementations
 
 The standalone implementations solve language-specific problems. Wright solves
 the cross-language product problem:
@@ -151,7 +151,7 @@ wright lint input.opy --format json
 
 ## How it works
 
-Wright should consume the owning implementation for the source form instead of
+Wright consumes the owning implementation for each source form rather than
 maintaining a second authoritative language implementation:
 
 ```text

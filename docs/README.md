@@ -132,7 +132,7 @@ JSON document asset, and historical artifact across the repository.
 | `docs/opy/compat-manifest-spec.md` | Living Durable Contract | `new` | Specification for the machine-readable Wright-owned OPY semantic compatibility manifest (builtins, signatures, enum domains, aliases); implementation deferred to a bounded child issue. |
 | `docs/hir/opy-hir-v1.md` | Living Protocol Specification | `update` | Updated relative links to `docs/`; documents Opy HIR v1 JSON protocol schema and versioning. |
 | `docs/specs/SPEC-99-stability-rules.md` (was `docs/m12-issue99-spec.md`) | Active Feature Specification | `move` + `update` | Moved into dedicated `docs/specs/` directory; updated relative links; active spec for issue #99. |
-| `docs/adr/README.md` | Architecture Decision Index | `update` | Updated relative links to `docs/architecture.md` and `docs/compatibility.md`; indexes ADR 0000–0009. |
+| `docs/adr/README.md` | Architecture Decision Index | `update` | Updated relative links to `docs/architecture.md` and `docs/compatibility.md`; indexes ADR 0000–0010. |
 | `docs/adr/0000-template.md` | Architecture Decision Record | `keep` | Standard ADR template for proposing new architectural decisions. |
 | `docs/adr/0001-project-scope.md` | Architecture Decision Record | `update` | Updated link to `docs/compatibility.md`; recorded as superseded by ADR-0008. |
 | `docs/adr/0002-compatibility-strategy.md` | Architecture Decision Record | `update` | Updated link to `docs/compatibility.md`; records S/D/N/E strategy (amended by ADR-0008). |
