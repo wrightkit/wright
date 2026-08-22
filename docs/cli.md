@@ -89,16 +89,19 @@ errors produce `ERROR`, warnings produce `WARN`, and info/notice-only results
 produce `PASS`.
 
 Interactive terminal mode is TUI-lite by design. For text workflows selected
-as `terminal`, Wright starts one delayed `working…` status on stderr after a
-short threshold, so fast commands do not flicker and longer commands provide
-truthful activity feedback. The status is cleared before the result is
-rendered. Completed `check`, `lint`, `analyze`, and `inspect` commands print a
+as `terminal`, Wright prints immediate activity feedback and then renders
+truthful session phases such as input resolution, parsing, semantic analysis,
+linting, emission, or conversion. A lightweight spinner starts only after a
+short anti-flicker threshold; phase output is transient and is fully cleared
+before the final verdict, diagnostics, report, or source artifact is rendered.
+Completed `check`, `lint`, `analyze`, and `inspect` commands print a
 command-specific PASS/WARN/ERROR verdict and compact summary before details;
 diagnostics and findings include a one-line source context when the reported
-provenance path is readable. This is presentation-only: no progress event,
-spinner, ANSI sequence, or source context enters the driver envelope or JSON.
-Plain output, redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and
-explicit JSON rendering remain static and deterministic.
+provenance path is readable. The driver exposes typed progress events through
+`ProgressObserver`; no terminal strings, spinner frames, ANSI sequence, or
+source context enters the driver envelope or JSON. Plain output,
+redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and explicit JSON
+rendering remain static and deterministic.
 
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,

@@ -75,6 +75,34 @@ fn run_with_env(args: &[&str], variables: &[(&str, &str)]) -> std::process::Outp
     command.output().expect("wright runs")
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn run_in_tty(args: &[&str]) -> std::process::Output {
+    #[cfg(target_os = "linux")]
+    let command = std::iter::once(wright())
+        .chain(args.iter().copied())
+        .map(|arg| {
+            if arg
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || "-_/.:".contains(ch))
+            {
+                arg.to_string()
+            } else {
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut script = Command::new("script");
+    #[cfg(target_os = "linux")]
+    script.args(["-qefc", &command, "/dev/null"]);
+    #[cfg(target_os = "macos")]
+    script.args(["-q", "/dev/null", wright()]).args(args);
+    script
+        .env("TERM", "xterm")
+        .output()
+        .expect("script is available")
+}
+
 fn run_with_stdin(args: &[&str], stdin: &str) -> std::process::Output {
     let mut child = Command::new(wright())
         .args(args)
@@ -580,6 +608,98 @@ fn stdout_stderr_separation_holds_in_both_modes() {
     let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.stderr.is_empty());
     parse_json(&output.stdout);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn tty_progress_stops_and_clears_before_final_render() {
+    let path =
+        workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart/pixelart.opy");
+    let output = run_in_tty(&[
+        "analyze",
+        path.to_str().unwrap(),
+        "--kind",
+        "opy",
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let mut transcript = output.stdout;
+    transcript.extend_from_slice(&output.stderr);
+    let transcript = String::from_utf8_lossy(&transcript);
+    let final_render = transcript
+        .find("PASS analyze")
+        .expect("final analyze render is present");
+    let before_final = &transcript[..final_render];
+    assert!(before_final.contains("Starting workflow"));
+    assert!(before_final.contains("Resolving input"));
+    assert!(before_final.contains("Parsing"));
+    assert!(before_final.contains("Resolving semantics"));
+    let cleared = before_final
+        .rfind("\x1b[2K")
+        .expect("activity line is cleared before final render");
+    assert!(cleared < final_render);
+    assert!(!transcript.contains("working…PASS"));
+
+    let lint = run_in_tty(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--kind",
+        "opy",
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(lint.status.success());
+    let mut lint_transcript = lint.stdout;
+    lint_transcript.extend_from_slice(&lint.stderr);
+    let lint_transcript = String::from_utf8_lossy(&lint_transcript);
+    assert!(lint_transcript.contains("Running lint rules"));
+    assert!(lint_transcript.contains(" rules…"));
+}
+
+#[test]
+fn non_interactive_renderers_have_no_progress_artifacts() {
+    let source = std::fs::read_to_string(
+        workspace_root().join("compatibility/fixtures/synthetic/control-flow/source.opy"),
+    )
+    .unwrap();
+    let path = temp_file("basic.opy", &source);
+    for renderer in ["plain", "github-actions"] {
+        let output = run_with_env(
+            &[
+                "analyze",
+                path.to_str().unwrap(),
+                "--renderer",
+                renderer,
+                "--color",
+                "always",
+            ],
+            &[("GITHUB_ACTIONS", "true")],
+        );
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !combined.contains("Resolving input"),
+            "{renderer}: {combined}"
+        );
+        assert!(
+            !combined.contains("Running lint rules"),
+            "{renderer}: {combined}"
+        );
+        assert!(!combined.contains("⠋"), "{renderer}: {combined}");
+    }
+    let json = run(&["analyze", path.to_str().unwrap(), "--format", "json"]);
+    assert!(json.status.success());
+    assert!(json.stderr.is_empty());
+    assert!(!String::from_utf8_lossy(&json.stdout).contains("Resolving input"));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

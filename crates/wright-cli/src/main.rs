@@ -7,6 +7,7 @@ mod update;
 
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
 use wright_driver::config::{InputSpec, OutputFormat, SessionConfig, SourceKind};
@@ -199,8 +200,11 @@ fn run_workflow(command: Command) -> ExitCode {
                 ConvertTargetArg::Opy => wright_driver::ConvertTarget::Opy,
                 ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
             };
-            let _activity = presentation.activity();
+            let activity = Arc::new(presentation.activity());
+            session.set_progress_observer(activity.clone());
             let envelope = session.convert(target);
+            session.clear_progress_observer();
+            drop(activity);
             let code = envelope.exit;
             present::render(&envelope, presentation);
             code
@@ -245,8 +249,11 @@ fn run_command<T: serde::Serialize>(
     run: fn(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
 ) -> u8 {
-    let _activity = presentation.activity();
+    let activity = Arc::new(presentation.activity());
+    session.set_progress_observer(activity.clone());
     let envelope = run(session);
+    session.clear_progress_observer();
+    drop(activity);
     let code = envelope.exit;
     present::render(&envelope, presentation);
     code

@@ -19,6 +19,7 @@ use crate::WorkshopProvider;
 use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
+use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
     Envelope, InspectResult, LintResult, OstwFileSummary, OstwProjectSummary, exit_code_from,
@@ -52,6 +53,7 @@ pub struct CompilerSession {
     catalog: workshop_rs::catalog::Catalog,
     loaded: Option<Loaded>,
     diagnostics: Vec<Diagnostic>,
+    progress_observer: Option<Arc<dyn ProgressObserver>>,
 }
 
 impl CompilerSession {
@@ -69,7 +71,24 @@ impl CompilerSession {
             catalog,
             loaded: None,
             diagnostics: Vec::new(),
+            progress_observer: None,
         })
+    }
+
+    /// Attach a transport-neutral observer for real workflow phase events.
+    pub fn set_progress_observer(&mut self, observer: Arc<dyn ProgressObserver>) {
+        self.progress_observer = Some(observer);
+    }
+
+    /// Detach the current progress observer before a caller renders a result.
+    pub fn clear_progress_observer(&mut self) {
+        self.progress_observer = None;
+    }
+
+    fn progress(&self, event: ProgressEvent) {
+        if let Some(observer) = &self.progress_observer {
+            observer.on_progress(event);
+        }
     }
 
     /// Load (or reuse) the validated program for this session.
@@ -81,21 +100,26 @@ impl CompilerSession {
         if let Some(loaded) = &self.loaded {
             return Ok(loaded.clone());
         }
+        self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
         let mut resolved = input::resolve(&self.config)?;
         if resolved.kind == SourceKind::Ostw {
+            self.progress(ProgressEvent::new(ProgressPhase::ProjectLoading));
             return self.load_ostw(&mut resolved);
         }
         let mut program = match resolved.kind {
             SourceKind::Workshop => {
+                self.progress(ProgressEvent::new(ProgressPhase::Parsing));
                 let (program, locale) = self.load_workshop(&resolved)?;
                 resolved.origin.locale = Some(locale);
                 program
             }
             SourceKind::Protocol => {
+                self.progress(ProgressEvent::new(ProgressPhase::Parsing));
                 let json = resolved.text.clone();
                 self.load_protocol(&json, &resolved)?
             }
             SourceKind::Opy => {
+                self.progress(ProgressEvent::new(ProgressPhase::Parsing));
                 if opy::adapter_fallback_requested() {
                     let json = opy::run_adapter(&resolved)?;
                     self.load_protocol(&json, &resolved)?
@@ -158,6 +182,8 @@ impl CompilerSession {
     /// project outcome (file registry + project and semantic diagnostics) is
     /// retained on the session so spans keep their multi-file provenance.
     fn load_ostw(&mut self, resolved: &mut ResolvedInput) -> Result<Loaded, Diagnostic> {
+        self.progress(ProgressEvent::new(ProgressPhase::Parsing));
+        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
         let relative = resolved
             .path
             .as_ref()
@@ -194,9 +220,11 @@ impl CompilerSession {
         model: &wright_ir::hir::Program,
         resolved: &ResolvedInput,
     ) -> Result<wir::Program, Diagnostic> {
+        self.progress(ProgressEvent::new(ProgressPhase::Validation));
         model
             .validate()
             .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
+        self.progress(ProgressEvent::new(ProgressPhase::Lowering));
         let program = wright_ir::lower::lower(model)
             .map_err(|error| ir_diag("lower-error", Stage::Lowering, error, resolved))?;
         program
@@ -273,6 +301,7 @@ impl CompilerSession {
             &context,
         )
         .map_err(|error| workshop_diag(error, resolved))?;
+        self.progress(ProgressEvent::new(ProgressPhase::Validation));
         program
             .validate()
             .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
@@ -299,9 +328,11 @@ impl CompilerSession {
         // (settings domain checks against the emission table, #86); the
         // adapter path validates inside parse_str, so this is a double
         // validation there — acceptable.
+        self.progress(ProgressEvent::new(ProgressPhase::Validation));
         protocol
             .validate()
             .map_err(|error| hir_diag(error, resolved))?;
+        self.progress(ProgressEvent::new(ProgressPhase::Lowering));
         let model = protocol
             .to_ir()
             .map_err(|error| ir_diag("convert-error", Stage::Lowering, error, resolved))?;
@@ -378,6 +409,7 @@ impl CompilerSession {
             .clone()
             .map(|locale| workshop_rs::catalog::Locale::new(&locale))
             .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
             .map_err(|error| workshop_diag(error, &loaded.input))?;
         let sha256 = input_identity(&text);
@@ -415,6 +447,7 @@ impl CompilerSession {
                 },
             );
         }
+        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
         self.attach_workshop_completeness(&loaded);
         self.finish(command, CheckResult { ostw: None })
     }
@@ -442,6 +475,7 @@ impl CompilerSession {
                 return self.finish(command, AnalyzeResult::default());
             }
         };
+        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
         let mut program = service_response(&service, &Request::Program);
         if let serde_json::Value::Object(object) = &mut program {
             // The service also supports the legacy findings query for agents,
@@ -474,6 +508,7 @@ impl CompilerSession {
                 return self.finish(command, InspectResult::default());
             }
         };
+        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
         let program = service_response(&service, &Request::Program);
         let rules = service_response(&service, &Request::ListRules);
         let symbols = service_response(&service, &Request::ListSymbols { kind: None });
@@ -532,8 +567,18 @@ impl CompilerSession {
                 return self.finish(command, LintResult::default());
             }
         };
+        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
         let program = service_response(&service, &Request::Program);
         let lint_rules = service_response(&service, &Request::LintRules);
+        let lint_rule_count = lint_rules
+            .pointer("/rules")
+            .and_then(serde_json::Value::as_array)
+            .map_or(0, Vec::len);
+        self.progress(ProgressEvent::with_count(
+            ProgressPhase::Linting,
+            lint_rule_count,
+            ProgressUnit::Rules,
+        ));
         let mut findings = service_response(&service, &Request::GetFindings);
         resolve_finding_span_paths(&mut findings, &loaded);
         let (rules, config) = match lint_rules {
@@ -595,6 +640,7 @@ impl CompilerSession {
             ));
             return self.finish(command, ConvertResult::default());
         }
+        self.progress(ProgressEvent::new(ProgressPhase::Conversion));
         let text = match target {
             ConvertTarget::Opy => self.convert_opy(&loaded),
             ConvertTarget::Ostw => self.convert_ostw(&loaded),

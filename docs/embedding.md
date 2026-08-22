@@ -9,6 +9,7 @@ safe source-edit contracts, and the transport adapters
 | Surface | Status | Notes |
 | --- | --- | --- |
 | `wright_driver::{CompilerSession, SessionConfig, InputSpec, SourceKind, OutputFormat, Profile}` | **stable** | One driver for compile/check/analyze/inspect/lint; `load()` is idempotent |
+| `wright_driver::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit}` | **stable** | Transport-neutral workflow phase events; no terminal presentation or machine-result mutation |
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
 | `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) plus validated mutation (`validateEditTransaction`, `semanticRename`, #130) |
 | `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Frontend-neutral source-edit transactions; validated through the correct native frontend/project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
@@ -35,6 +36,12 @@ let check = session.check();      // typed Envelope<CheckResult>
 let lint = session.lint();        // typed Envelope<LintResult>
 let compile = session.compile();  // typed Envelope<CompileResult>
 ```
+
+Consumers that need truthful workflow progress may attach a
+`ProgressObserver` before invoking a workflow and clear it before rendering or
+otherwise presenting the result. Events describe real orchestration phases and
+may carry bounded counts such as lint-rule count; they never contain terminal
+strings, ANSI, percentages, or fabricated completion estimates.
 
 ## Session-aware tool service
 

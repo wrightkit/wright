@@ -5,8 +5,10 @@
 //! Actions. JSON and source artifacts bypass every human/CI renderer.
 
 use std::io::{IsTerminal, Write};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::thread;
@@ -14,6 +16,7 @@ use std::time::Duration;
 
 use wright_driver::Severity;
 use wright_driver::config::OutputFormat;
+use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::Envelope;
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
@@ -32,6 +35,11 @@ pub(crate) struct Presentation {
 pub(crate) struct Activity {
     done: Arc<AtomicBool>,
     visible: Arc<AtomicBool>,
+    status: Arc<Mutex<Option<ProgressEvent>>>,
+    output: Arc<Mutex<()>>,
+    #[cfg(test)]
+    #[allow(dead_code)]
+    frame: Arc<AtomicUsize>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -40,6 +48,10 @@ impl Activity {
         Self {
             done: Arc::new(AtomicBool::new(true)),
             visible: Arc::new(AtomicBool::new(false)),
+            status: Arc::new(Mutex::new(None)),
+            output: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            frame: Arc::new(AtomicUsize::new(0)),
             handle: None,
         }
     }
@@ -47,21 +59,81 @@ impl Activity {
     fn start() -> Self {
         let done = Arc::new(AtomicBool::new(false));
         let visible = Arc::new(AtomicBool::new(false));
+        let status = Arc::new(Mutex::new(None));
+        let output = Arc::new(Mutex::new(()));
+        #[cfg(test)]
+        let frame = Arc::new(AtomicUsize::new(0));
+        write_activity_line(&output, None, None);
+        visible.store(true, Ordering::Release);
         let thread_done = Arc::clone(&done);
-        let thread_visible = Arc::clone(&visible);
+        let thread_status = Arc::clone(&status);
+        let thread_output = Arc::clone(&output);
+        #[cfg(test)]
+        let thread_frame = Arc::clone(&frame);
         let handle = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(150));
-            if !thread_done.load(Ordering::Acquire) {
-                eprint!("wright: working…");
-                let _ = std::io::stderr().flush();
-                thread_visible.store(true, Ordering::Release);
+            thread::sleep(Duration::from_millis(60));
+            let mut frame = 0;
+            while !thread_done.load(Ordering::Acquire) {
+                let event = *thread_status.lock().expect("activity status lock");
+                write_activity_line(&thread_output, event, Some(SPINNER[frame]));
+                frame = (frame + 1) % SPINNER.len();
+                #[cfg(test)]
+                thread_frame.store(frame, Ordering::Release);
+                thread::sleep(Duration::from_millis(80));
             }
         });
         Self {
             done,
             visible,
+            status,
+            output,
+            #[cfg(test)]
+            frame,
             handle: Some(handle),
         }
+    }
+}
+
+const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+impl ProgressObserver for Activity {
+    fn on_progress(&self, event: ProgressEvent) {
+        if self.done.load(Ordering::Acquire) {
+            return;
+        }
+        *self.status.lock().expect("activity status lock") = Some(event);
+        write_activity_line(&self.output, Some(event), None);
+    }
+}
+
+fn write_activity_line(output: &Mutex<()>, event: Option<ProgressEvent>, spinner: Option<char>) {
+    let _guard = output.lock().expect("activity output lock");
+    let label = event
+        .map(progress_label)
+        .unwrap_or("Starting workflow".to_string());
+    match spinner {
+        Some(spinner) => eprint!("\r\x1b[2K\r  {spinner} {label}…"),
+        None => eprint!("\r\x1b[2K\r  {label}…"),
+    }
+    let _ = std::io::stderr().flush();
+}
+
+fn progress_label(event: ProgressEvent) -> String {
+    let label = match event.phase {
+        ProgressPhase::InputResolution => "Resolving input".to_string(),
+        ProgressPhase::ProjectLoading => "Loading project".to_string(),
+        ProgressPhase::Parsing => "Parsing".to_string(),
+        ProgressPhase::Validation => "Validating".to_string(),
+        ProgressPhase::Lowering => "Lowering".to_string(),
+        ProgressPhase::SemanticAnalysis => "Resolving semantics".to_string(),
+        ProgressPhase::Linting => "Running lint rules".to_string(),
+        ProgressPhase::Emission => "Emitting Workshop".to_string(),
+        ProgressPhase::Conversion => "Reconstructing source".to_string(),
+    };
+    match (event.count, event.unit) {
+        (Some(count), Some(ProgressUnit::Files)) => format!("{label} {count} files"),
+        (Some(count), Some(ProgressUnit::Rules)) => format!("{label} {count} rules"),
+        _ => label,
     }
 }
 
@@ -988,7 +1060,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_becomes_visible_only_after_delay() {
+    fn activity_is_visible_immediately_and_accepts_phase_updates() {
         let terminal = Presentation::resolve(
             OutputFormat::Text,
             RendererArg::Terminal,
@@ -996,9 +1068,23 @@ mod tests {
             environment(),
         );
         let activity = terminal.activity();
-        assert!(!activity.visible.load(Ordering::Acquire));
-        thread::sleep(Duration::from_millis(180));
         assert!(activity.visible.load(Ordering::Acquire));
+        assert_eq!(*activity.status.lock().unwrap(), None);
+        activity.on_progress(ProgressEvent::with_count(
+            ProgressPhase::Linting,
+            12,
+            ProgressUnit::Rules,
+        ));
+        assert_eq!(
+            *activity.status.lock().unwrap(),
+            Some(ProgressEvent::with_count(
+                ProgressPhase::Linting,
+                12,
+                ProgressUnit::Rules,
+            ))
+        );
+        thread::sleep(Duration::from_millis(150));
+        assert!(activity.frame.load(Ordering::Acquire) > 0);
     }
 
     #[test]
