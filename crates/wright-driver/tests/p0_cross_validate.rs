@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use workshop_rs_provider::p0::P0_EXPECTATION;
-use workshop_rs_provider::semantic::{IncompletenessKind, ResidualClassification};
+use workshop_rs::p0::P0_EXPECTATION;
+use workshop_rs::semantic::{IncompletenessKind, ResidualClassification};
 use wright_core::provider::{LanguageProvider, Status};
 use wright_driver::{WorkshopProvider, workshop_provider};
 
