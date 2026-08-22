@@ -215,7 +215,12 @@ reference-rejected boundaries are distinguishable.
   reference-rejected), so the probes are the initial target.
 * **Determinism.** The corpus runner was re-run twice under the pinned
   reference with byte-identical `results.json`; the drift check
-  (`run_oracle.py` without `--update`) guards CI against silent drift.
+  (`run_oracle.py` without `--update`) fails on divergence. It is a manual
+  maintainer command, not a Wright CI gate: the upstream-reference replay was
+  removed from CI in #177, and future oracle reproducibility workflows belong
+  to `del-rs` (del-rs#49, tracked in Wright by #182). Wright CI consumes the
+  recorded evidence through the #119 compile differential; it does not
+  re-derive it.
 
 ## Reference/oracle feasibility report
 
