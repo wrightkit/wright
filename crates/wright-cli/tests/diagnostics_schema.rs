@@ -37,7 +37,14 @@ fn check_json_matches_schema_and_snapshot() {
     )
     .expect("schema JSON");
     let value = validate_output(&schema, &output.stdout);
-    insta::assert_json_snapshot!(value);
+    assert_eq!(
+        value["wright"]["version"],
+        serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string())
+    );
+    assert_eq!(value["wright"]["contract"], "wright-result/v1");
+    let mut snapshot_value = value;
+    snapshot_value["wright"]["version"] = serde_json::Value::String("<package-version>".into());
+    insta::assert_json_snapshot!(snapshot_value);
 
     let status_source = format!(
         "{source}\nrule (\"provider status\") {{ actions {{ Set Global Variable(0, FutureValue()); }} }}"

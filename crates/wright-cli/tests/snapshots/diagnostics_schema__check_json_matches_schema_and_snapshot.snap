@@ -1,6 +1,6 @@
 ---
 source: crates/wright-cli/tests/diagnostics_schema.rs
-expression: value
+expression: snapshot_value
 ---
 {
   "command": "check",
@@ -34,6 +34,6 @@ expression: value
   "schema_version": "1",
   "wright": {
     "contract": "wright-result/v1",
-    "version": "0.2.9"
+    "version": "<package-version>"
   }
 }
