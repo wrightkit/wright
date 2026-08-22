@@ -125,9 +125,10 @@ pub struct SessionConfig {
     /// [`CompilerSession::language_provider`] spawns a provider client for a
     /// language id from this registry; when no provider is configured the
     /// refusal is explicit and there is no fallback to in-process frontends.
-    /// The registry is empty by default; `wright_lpp::ProviderRegistry`
-    /// documents the configuration (and the `LPP_MOCK_PROVIDER` env hook
-    /// used by tests and CI).
+    /// The registry is empty by default; providers are registered explicitly
+    /// through `wright_lpp::ProviderRegistry` (integration tests and CI
+    /// locate the mock provider through the `LPP_MOCK_PROVIDER`
+    /// environment variable).
     pub providers: wright_lpp::ProviderRegistry,
 }
 
