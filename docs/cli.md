@@ -135,9 +135,9 @@ result.
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
-| `wright analyze [INPUT]` | Report semantic structure, symbol usage, and CFG measurements | semantic facts and measurements |
+| `wright analyze [INPUT]` | Summarize project structure, ranked CFG hotspots, and cross-cutting state | bounded semantic report with static evidence labels |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
-| `wright inspect [INPUT]` | Parse, lower, inspect structure | rules, symbols, references summary |
+| `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update` | Self-update a standalone installation | update progress (text only) |
@@ -311,11 +311,14 @@ The three core workflows have separate contracts:
 * `lint` executes the configurable `LintRegistry` and returns stable rule IDs,
   severity, evidence class, boundedness where applicable, source spans, rule
   metadata, and effective configuration.
-* `analyze` returns semantic facts rather than lint findings. Its initial
-  `result.facts` report contains symbol usage (`reads`, `writes`, `calls`, and
-  referencing rule count) and per-rule CFG measurements (blocks, edges, loop
-  blocks, and wait blocks). These facts can inform future lint rules without
-  making analysis a view of the registry.
+* `analyze` returns semantic facts rather than lint findings. Human text output
+  is a bounded report with a program overview, aggregate CFG measurements,
+  ranked rule hotspots, and ranked cross-cutting variables. The displayed
+  facts are static; rankings are heuristics based on CFG size or usage
+  coupling. `analyze --format json` retains the complete `result.facts`
+  payload for agents and embedding, while `inspect` is the human-facing
+  exhaustive structural/semantic view. These facts can inform future lint
+  rules without making analysis a view of the registry.
 
 Analysis findings (`lint` and the tool/agent `getFindings`/`lint` responses)
 carry an `evidence` field classifying how strongly the finding is supported
