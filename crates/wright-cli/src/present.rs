@@ -72,10 +72,15 @@ impl Drop for Activity {
             let _ = handle.join();
         }
         if self.visible.load(Ordering::Acquire) {
-            eprint!("\r             \r");
-            let _ = std::io::stderr().flush();
+            clear_activity_line(&mut std::io::stderr());
         }
     }
+}
+
+fn clear_activity_line(writer: &mut impl Write) {
+    let _ = write!(writer, "\r\x1b[2K\r");
+    let _ = writeln!(writer);
+    let _ = writer.flush();
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -245,29 +250,35 @@ fn render_verdict<T: serde::Serialize>(
     } else {
         status.to_string()
     };
-    let summary = match envelope.command.as_str() {
-        "check" => format!(
-            "{label} check — {} diagnostic(s)",
-            envelope.diagnostics.len()
-        ),
+    println!("{label} {}", envelope.command);
+    let metadata = match envelope.command.as_str() {
+        "check" => format!("{} diagnostic(s)", envelope.diagnostics.len()),
         "lint" => format!(
-            "{label} lint — {} finding(s) across {} rule(s)",
+            "{} finding(s) across {} rule(s)",
             array_len(value, "/result/findings"),
             array_len(value, "/result/rules"),
         ),
         "analyze" => format!(
-            "{label} analyze — {} symbol(s), {} rule measurement(s)",
+            "{} symbol(s), {} rule measurement(s)",
             array_len(value, "/result/facts/symbols"),
             array_len(value, "/result/facts/rules"),
         ),
         "inspect" => format!(
-            "{label} inspect — {} rule(s), {} symbol(s)",
+            "{} rule(s), {} symbol(s)",
             array_len(value, "/result/rules"),
             array_len(value, "/result/symbols"),
         ),
-        other => format!("{label} {other}"),
+        _ => return,
     };
-    println!("{summary}");
+    println!("  {}", dim(&metadata, color));
+}
+
+fn dim(value: &str, color: bool) -> String {
+    if color {
+        format!("\x1b[2m{value}\x1b[0m")
+    } else {
+        value.to_string()
+    }
 }
 
 fn array_len(value: &serde_json::Value, pointer: &str) -> usize {
@@ -527,6 +538,7 @@ fn render_analyze<T: serde::Serialize>(envelope: &Envelope<T>) {
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
+    println!("\nAnalysis details");
     for symbol in &symbols {
         let kind = symbol
             .get("kind")
@@ -588,6 +600,10 @@ fn render_lint<T: serde::Serialize>(envelope: &Envelope<T>) {
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
+    println!("\nLint findings");
+    if findings.is_empty() {
+        println!("  none");
+    }
     for finding in &findings {
         let code = finding
             .get("code")
@@ -640,7 +656,8 @@ fn render_inspect<T: serde::Serialize>(envelope: &Envelope<T>) {
         .get("rules")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0);
-    println!("inspect: {count} rule(s), {} symbol(s)", symbols.len());
+    println!("\nProgram structure");
+    println!("  {count} rule(s), {} symbol(s)", symbols.len());
     for rule in &rules {
         let id = rule
             .get("id")
@@ -922,6 +939,19 @@ mod tests {
         assert!(!activity.visible.load(Ordering::Acquire));
         thread::sleep(Duration::from_millis(180));
         assert!(activity.visible.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn activity_cleanup_clears_the_line_and_terminates_it() {
+        let mut output = Vec::new();
+        clear_activity_line(&mut output);
+        assert_eq!(output, b"\r\x1b[2K\r\n");
+    }
+
+    #[test]
+    fn metadata_is_dimmed_only_for_terminal_color_output() {
+        assert_eq!(dim("2 symbols", false), "2 symbols");
+        assert_eq!(dim("2 symbols", true), "\x1b[2m2 symbols\x1b[0m");
     }
 
     #[test]
