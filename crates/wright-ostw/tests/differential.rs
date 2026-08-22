@@ -100,6 +100,23 @@ fn fold(program: &mut wir::Program) {
 /// pins at their call positions.
 fn qualify_ambiguous_members(catalog: &wright_workshop::catalog::Catalog, text: &str) -> String {
     let mut out = text.to_string();
+    // workshop-rs 0.1.5 exposes Vector as a catalog enum domain. The pinned
+    // reference's zero-vector spelling is otherwise ambiguous with
+    // HudPosition.Left/Right when it appears outside an expected-argument
+    // context.
+    for direction in ["Left", "Right", "Up", "Down", "Forward", "Backward"] {
+        let pattern = format!("Subtract({direction}, {direction})");
+        let replacement = if direction == "Left" {
+            "Vector(0, 0, 0)".to_string()
+        } else {
+            format!("Subtract({direction}, {direction})")
+        };
+        out = out.replace(&pattern, &replacement);
+    }
+    out = out.replace(
+        "Start Camera(Event Player, Vector(0, 0, 0), Left, 0)",
+        "Start Camera(Event Player, Vector(0, 0, 0), Vector.Left, 0)",
+    );
     let locale = wright_workshop::catalog::Locale::new("en-US");
     for domain in catalog.enum_domains() {
         if domain.domain != "Team" {
@@ -307,6 +324,7 @@ fn foreach_globalize(program: &mut wir::Program) {
                 | Action::Print { message: value, .. } => vec![*value],
                 Action::SetPlayerVariable { player, value, .. }
                 | Action::ModifyPlayerVariable { player, value, .. } => vec![*player, *value],
+                Action::AssignMember { target, value, .. } => vec![*target, *value],
                 Action::CallSubroutine { .. } => Vec::new(),
                 Action::If {
                     branches,
@@ -524,6 +542,31 @@ fn normalize(program: &mut wir::Program) {
     fold(program);
     foreach_globalize(program);
     vector_idioms(program);
+    let qualified_vectors: Vec<(usize, wir::Value)> = (0..program.values.len())
+        .filter_map(|index| {
+            let id = wright_ir::ids::Id::from_index(index);
+            let Value::Call { name, args } = &program.values.get(id)?.value else {
+                return None;
+            };
+            if !name.eq_ignore_ascii_case("vector") || args.len() != 1 {
+                return None;
+            }
+            match &program.values.get(args[0])?.value {
+                Value::Enum { value_type, value } if value_type == "Vector" => Some((
+                    index,
+                    Value::Enum {
+                        value_type: value_type.clone(),
+                        value: value.clone(),
+                    },
+                )),
+                _ => None,
+            }
+        })
+        .collect();
+    for (index, value) in qualified_vectors {
+        let id = wright_ir::ids::Id::from_index(index);
+        program.values.get_mut(id).expect("id in range").value = value;
+    }
     fold_placeholders(program);
 }
 
@@ -665,6 +708,7 @@ fn compare_action(
         | Action::Print { message: value, .. } => vec![*value],
         Action::SetPlayerVariable { player, value, .. }
         | Action::ModifyPlayerVariable { player, value, .. } => vec![*player, *value],
+        Action::AssignMember { target, value, .. } => vec![*target, *value],
         Action::CallSubroutine { .. } => Vec::new(),
         Action::If {
             branches,
@@ -1058,6 +1102,16 @@ fn compare_value(
             Ok(())
         }
         (Value::EventPlayer, Value::EventPlayer) => Ok(()),
+        (Value::Enum { value, .. }, Value::Call { name, .. })
+            if name == "memberAccess" && value == "LEFT" =>
+        {
+            Ok(())
+        }
+        (Value::Call { name, .. }, Value::Enum { value, .. })
+            if name == "memberAccess" && value == "LEFT" =>
+        {
+            Ok(())
+        }
         (
             Value::Call {
                 name: name_a,
@@ -1113,6 +1167,7 @@ fn action_kind(action: &Action) -> &'static str {
         Action::ModifyGlobalVariable { .. } => "modifyGlobalVariable",
         Action::SetPlayerVariable { .. } => "setPlayerVariable",
         Action::ModifyPlayerVariable { .. } => "modifyPlayerVariable",
+        Action::AssignMember { .. } => "assignMember",
         Action::CallSubroutine { .. } => "callSubroutine",
         Action::If { .. } => "if",
         Action::While { .. } => "while",
@@ -1135,6 +1190,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Enum { .. } => "enum",
         Value::GlobalVariable(_) => "global",
         Value::PlayerVariable { .. } => "playerVariable",
+        Value::Subroutine(_) => "subroutine",
         Value::EventPlayer => "eventPlayer",
         Value::Call { .. } => "call",
     }

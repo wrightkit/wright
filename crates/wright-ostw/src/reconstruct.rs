@@ -497,6 +497,21 @@ impl<'a> Classifier<'a> {
                 self.check_value(*player);
                 self.check_value(*value);
             }
+            Action::AssignMember {
+                target, op, value, ..
+            } => {
+                self.error(ReconstructError::at(
+                    "reconstruct-unsupported-action",
+                    "assignMember",
+                    "dynamic member assignment is outside the declared OSTW reconstruction surface",
+                    action.span(),
+                ));
+                if let Some(op) = op {
+                    self.check_modify_op(*op, action.span());
+                }
+                self.check_value(*target);
+                self.check_value(*value);
+            }
             Action::CallSubroutine { .. } => {}
             Action::If {
                 branches,
@@ -690,6 +705,16 @@ impl<'a> Classifier<'a> {
             }
             Value::GlobalVariable(_) => {}
             Value::PlayerVariable { player, .. } => self.check_value(*player),
+            Value::Subroutine(subroutine) => {
+                if self.program.subroutines.get(*subroutine).is_none() {
+                    self.error(ReconstructError::at(
+                        "reconstruct-dangling-subroutine",
+                        "subroutine",
+                        format!("subroutine value '{subroutine}' does not reference a declared subroutine"),
+                        node.span,
+                    ));
+                }
+            }
             Value::Call { name, args } => self.check_value_call(name, args, node.span),
         }
     }
@@ -1018,7 +1043,10 @@ impl<'a> Emitter<'a> {
                 self.emit_actions(body, level + 1);
                 self.line(level, "}");
             }
-            Action::ForPlayerVariable { .. } | Action::Debug { .. } | Action::Print { .. } => {
+            Action::AssignMember { .. }
+            | Action::ForPlayerVariable { .. }
+            | Action::Debug { .. }
+            | Action::Print { .. } => {
                 unreachable!("classified as unsupported")
             }
             Action::Call { name, args, .. } => {
@@ -1080,6 +1108,7 @@ impl<'a> Emitter<'a> {
                     format!("({}).{name}", self.value(*player))
                 }
             }
+            Value::Subroutine(subroutine) => self.subroutine_name(*subroutine),
             Value::EventPlayer => "EventPlayer()".to_string(),
             Value::Call { name, args } => self.value_call(name, args),
         }

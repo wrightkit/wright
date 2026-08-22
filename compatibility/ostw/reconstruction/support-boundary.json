@@ -19,7 +19,7 @@
       "allSupportHeroes", "allTankHeroes", "allowedHeroes", "arrayContains",
       "countOf", "crossProduct", "currentMap", "customColor",
       "directionFromAngles", "evaluateOnce", "filteredArray",
-      "forward", "hasSpawned", "heroIconString", "horizontalAngleFromDirection",
+      "hasSpawned", "heroIconString", "horizontalAngleFromDirection",
       "iconString", "indexOfArrayValue", "inputBindingString", "isButtonHeld",
       "isInSpawnRoom", "isTrueForAll", "isWaitingForPlayers", "lastCreatedEntity",
       "lastOf", "lastTextId", "localPlayer", "max", "min",
@@ -51,16 +51,17 @@
     "syntaxActionIds": ["abort"],
     "enumDomains": [
       "Button", "Clipping", "Color", "DynamicEffect", "Hero", "HudPosition",
-      "HudReeval", "Icon", "Invis", "InworldTextReeval", "Map", "Rounding",
-      "SpecVisibility", "Team", "Wait"
+      "HudReeval", "Icon", "Invis", "Map", "Rounding",
+      "WorldTextReeval",
+      "SpecVisibility", "Team", "Vector", "Wait"
     ],
     "enumMembers": [
       "Button.ABILITY_1", "Button.ABILITY_2", "Clipping.DO_NOT_CLIP",
       "Color.RED", "Color.WHITE", "DynamicEffect.BUFF_IMPACT_SOUND",
       "Hero.ANA", "HudPosition.LEFT", "HudReeval.VISIBILITY", "Icon.SKULL",
-      "Invis.ALL", "InworldTextReeval.VISIBLE_TO_AND_COLOR", "Map.HANAMURA",
+      "Invis.ALL", "WorldTextReeval.VISIBILITY_AND_COLOR", "Map.HANAMURA",
       "Rounding.DOWN", "Rounding.UP", "SpecVisibility.VISIBLE_ALWAYS",
-      "Team.ALL", "Wait.ABORT_WHEN_FALSE", "Wait.IGNORE_CONDITION"
+      "Team.ALL", "Vector.FORWARD", "Wait.ABORT_WHEN_FALSE", "Wait.IGNORE_CONDITION"
     ]
   },
   "rejected": [

@@ -382,6 +382,10 @@ impl<'a> Builder<'a> {
                 self.walk_value(*player, rule, Some(action_id))?;
                 self.walk_value(*value, rule, Some(action_id))
             }
+            Action::AssignMember { target, value, .. } => {
+                self.walk_value(*target, rule, Some(action_id))?;
+                self.walk_value(*value, rule, Some(action_id))
+            }
             Action::CallSubroutine {
                 subroutine,
                 callee_span,
@@ -536,6 +540,7 @@ impl<'a> Builder<'a> {
             | Value::Bool(_)
             | Value::Null
             | Value::Enum { .. }
+            | Value::Subroutine(_)
             | Value::EventPlayer => Ok(()),
         }
     }

@@ -1779,19 +1779,9 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "0.1.2"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0885d25b1ac2c47947008eb404530ef19b7eaf4ed6196d8c53a4c2842cd790e8"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "workshop-rs"
-version = "0.1.4"
-source = "git+https://github.com/wrightkit/workshop-rs.git?rev=34d2a55c0170d80b7359140e4280d47f0c42dd60#34d2a55c0170d80b7359140e4280d47f0c42dd60"
+checksum = "e741d6faadf9c0df949d76dbf4faa2af6799fae56ffbc780be975ed10855066a"
 dependencies = [
  "serde",
  "serde_json",
@@ -1804,7 +1794,7 @@ version = "0.2.9"
 dependencies = [
  "serde",
  "serde_json",
- "workshop-rs 0.1.2",
+ "workshop-rs",
  "wright-core",
  "wright-ir",
  "wright-workshop",
@@ -1853,7 +1843,7 @@ version = "0.2.9"
 dependencies = [
  "serde",
  "serde_json",
- "workshop-rs 0.1.2",
+ "workshop-rs",
  "wright-ir",
 ]
 
@@ -1864,8 +1854,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "workshop-rs 0.1.2",
- "workshop-rs 0.1.4",
+ "workshop-rs",
  "wright-analyzer",
  "wright-core",
  "wright-ir",
@@ -1880,7 +1869,7 @@ dependencies = [
 name = "wright-ir"
 version = "0.2.9"
 dependencies = [
- "workshop-rs 0.1.2",
+ "workshop-rs",
 ]
 
 [[package]]
@@ -1891,7 +1880,7 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
- "workshop-rs 0.1.2",
+ "workshop-rs",
  "wright-analyzer",
  "wright-core",
  "wright-driver",
@@ -1925,7 +1914,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "workshop-rs 0.1.2",
+ "workshop-rs",
  "wright-core",
  "wright-ir",
  "wright-workshop",
@@ -1937,7 +1926,7 @@ version = "0.2.9"
 dependencies = [
  "serde_json",
  "sha2",
- "workshop-rs 0.1.2",
+ "workshop-rs",
  "wright-core",
  "wright-ir",
  "wright-opy",
@@ -1950,7 +1939,7 @@ name = "wright-transform"
 version = "0.2.9"
 dependencies = [
  "serde",
- "workshop-rs 0.1.2",
+ "workshop-rs",
  "wright-ir",
 ]
 
@@ -1960,7 +1949,7 @@ version = "0.2.9"
 dependencies = [
  "regex",
  "serde_json",
- "workshop-rs 0.1.2",
+ "workshop-rs",
  "wright-core",
  "wright-ir",
  "wright-opy",

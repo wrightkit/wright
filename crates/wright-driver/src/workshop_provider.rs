@@ -32,13 +32,9 @@ impl LanguageProvider for WorkshopProvider {
             manifest,
             catalog: &self.catalog,
         };
-        let program = workshop_rs::parser::parse_with_context(
-            source,
-            &self.catalog,
-            &locale,
-            &context,
-        )
-        .map_err(|error| ProviderError::new("workshop.parse", error.to_string()))?;
+        let program =
+            workshop_rs::parser::parse_with_context(source, &self.catalog, &locale, &context)
+                .map_err(|error| ProviderError::new("workshop.parse", error.to_string()))?;
         program
             .validate()
             .map_err(|error| ProviderError::new("workshop.validate", error.to_string()))?;
@@ -100,13 +96,17 @@ fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> Provid
     }
 }
 
-pub fn status_for_classification(classification: workshop_rs::semantic::ResidualClassification) -> Status {
+pub fn status_for_classification(
+    classification: workshop_rs::semantic::ResidualClassification,
+) -> Status {
     match classification {
         workshop_rs::semantic::ResidualClassification::ProjectDefinedConstruct
         | workshop_rs::semantic::ResidualClassification::SourceDeclaredVariable => Status::Partial,
         workshop_rs::semantic::ResidualClassification::ProducerExtension
         | workshop_rs::semantic::ResidualClassification::LegacyOpaque
-        | workshop_rs::semantic::ResidualClassification::UnresolvedIdentifier => Status::Unsupported,
+        | workshop_rs::semantic::ResidualClassification::UnresolvedIdentifier => {
+            Status::Unsupported
+        }
     }
 }
 
@@ -172,9 +172,7 @@ mod tests {
             Status::Unsupported
         );
         assert_eq!(
-            status_for_classification(
-                workshop_rs::semantic::ResidualClassification::LegacyOpaque
-            ),
+            status_for_classification(workshop_rs::semantic::ResidualClassification::LegacyOpaque),
             Status::Unsupported
         );
         assert_eq!(

@@ -246,6 +246,7 @@ fn foreach_globalize(program: &mut wir::Program) {
                 | Action::Print { message: value, .. } => vec![*value],
                 Action::SetPlayerVariable { player, value, .. }
                 | Action::ModifyPlayerVariable { player, value, .. } => vec![*player, *value],
+                Action::AssignMember { target, value, .. } => vec![*target, *value],
                 Action::CallSubroutine { .. } => Vec::new(),
                 Action::If {
                     branches,
@@ -980,6 +981,7 @@ fn action_kind(action: &Action) -> &'static str {
         Action::ModifyGlobalVariable { .. } => "modifyGlobalVariable",
         Action::SetPlayerVariable { .. } => "setPlayerVariable",
         Action::ModifyPlayerVariable { .. } => "modifyPlayerVariable",
+        Action::AssignMember { .. } => "assignMember",
         Action::CallSubroutine { .. } => "callSubroutine",
         Action::If { .. } => "if",
         Action::While { .. } => "while",
@@ -1002,6 +1004,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Enum { .. } => "enum",
         Value::GlobalVariable(_) => "global",
         Value::PlayerVariable { .. } => "playerVariable",
+        Value::Subroutine(_) => "subroutine",
         Value::EventPlayer => "eventPlayer",
         Value::Call { .. } => "call",
     }

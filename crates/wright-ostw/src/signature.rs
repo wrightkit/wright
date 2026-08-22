@@ -412,6 +412,32 @@ pub const ENUM_DOMAIN_BINDINGS: &[(&str, EnumDomainBinding)] = &[
         },
     ),
     (
+        "WorldTextRev",
+        EnumDomainBinding {
+            domain: "WorldTextReeval",
+            members: &[
+                ("Color", "COLOR"),
+                ("None", "NONE"),
+                ("String", "STRING"),
+                ("StringAndColor", "STRING_AND_COLOR"),
+                ("VisibleTo", "VISIBILITY"),
+                ("VisibleToAndColor", "VISIBILITY_AND_COLOR"),
+                ("VisibleToAndPosition", "VISIBILITY_AND_POSITION"),
+                ("VisibleToAndString", "VISIBILITY_AND_STRING"),
+                ("VisibleToPositionAndColor", "VISIBILITY_POSITION_AND_COLOR"),
+                (
+                    "VisibleToPositionAndString",
+                    "VISIBILITY_POSITION_AND_STRING",
+                ),
+                (
+                    "VisibleToPositionStringAndColor",
+                    "VISIBILITY_POSITION_STRING_AND_COLOR",
+                ),
+                ("VisibleToStringAndColor", "VISIBILITY_STRING_AND_COLOR"),
+            ],
+        },
+    ),
+    (
         "Location",
         EnumDomainBinding {
             domain: "HudPosition",
@@ -485,6 +511,13 @@ pub const ENUM_DOMAIN_BINDINGS: &[(&str, EnumDomainBinding)] = &[
                 ("AbortWhenFalse", "ABORT_WHEN_FALSE"),
                 ("IgnoreCondition", "IGNORE_CONDITION"),
             ],
+        },
+    ),
+    (
+        "Vector",
+        EnumDomainBinding {
+            domain: "Vector",
+            members: &[("Forward", "FORWARD"), ("Backward", "BACKWARD")],
         },
     ),
 ];

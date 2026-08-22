@@ -312,6 +312,7 @@ fn foreach_globalize(program: &mut wir::Program) {
                 | Action::Print { message: value, .. } => vec![*value],
                 Action::SetPlayerVariable { player, value, .. }
                 | Action::ModifyPlayerVariable { player, value, .. } => vec![*player, *value],
+                Action::AssignMember { target, value, .. } => vec![*target, *value],
                 Action::CallSubroutine { .. } => Vec::new(),
                 Action::If {
                     branches,
