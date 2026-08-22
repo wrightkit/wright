@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.13](https://github.com/wrightkit/wright/compare/v0.2.12...v0.2.13) (2026-08-22)
+
+
+### Features
+
+* **cli:** make analyze a concise semantic report ([#218](https://github.com/wrightkit/wright/issues/218)) ([562d9cb](https://github.com/wrightkit/wright/commit/562d9cb0a87327094de21b7b7cee4217f1018052))
+
 ## [0.2.12](https://github.com/wrightkit/wright/compare/v0.2.11...v0.2.12) (2026-08-22)
 
 
