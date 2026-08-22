@@ -132,6 +132,11 @@ support claims require real-project validation in addition to focused tests.
 
 - Never push directly to `main`; use independent branches/worktrees and PRs.
 - Keep commits focused and do not mix unrelated repository changes.
+- Review-time verification results, including hashes, residual counts, and
+  pass/fail status, must come from the test/CI run under review. Never hand-write
+  or manually refresh a committed evidence/result file; put results in the PR
+  description and CI logs/artifacts. Committed fixtures and provenance/input
+  manifests are allowed only as reproducible, machine-validated inputs.
 - Do not use repository changes or commits for GitHub metadata-only operations.
 - Do not publish, rewrite history, delete data, or modify unrelated remote state
   unless explicitly authorized.
