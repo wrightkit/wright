@@ -149,11 +149,14 @@ pub struct OstwFileSummary {
     pub imports: Vec<String>,
 }
 
-/// The result of an `analyze` run: program summary and semantic findings.
+/// The result of an `analyze` run: program summary and semantic facts.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AnalyzeResult {
     pub program: serde_json::Value,
-    pub findings: serde_json::Value,
+    /// Deterministic semantic facts derived from the program structure,
+    /// symbol index, and control-flow graphs. This is intentionally separate
+    /// from the lint registry and its configurable findings.
+    pub facts: serde_json::Value,
 }
 
 /// The result of an `inspect` run: the structural/semantic program model.

@@ -5,6 +5,12 @@
 //! Actions. JSON and source artifacts bypass every human/CI renderer.
 
 use std::io::{IsTerminal, Write};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::thread;
+use std::time::Duration;
 
 use wright_driver::Severity;
 use wright_driver::config::OutputFormat;
@@ -17,6 +23,59 @@ pub(crate) struct Presentation {
     format: OutputFormat,
     renderer: Renderer,
     color: bool,
+    interactive: bool,
+}
+
+/// A deliberately small, boundary-only activity indicator for interactive
+/// terminal runs. It never participates in the result contract and is never
+/// created for JSON, plain, CI, or GitHub Actions rendering.
+pub(crate) struct Activity {
+    done: Arc<AtomicBool>,
+    visible: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl Activity {
+    fn disabled() -> Self {
+        Self {
+            done: Arc::new(AtomicBool::new(true)),
+            visible: Arc::new(AtomicBool::new(false)),
+            handle: None,
+        }
+    }
+
+    fn start() -> Self {
+        let done = Arc::new(AtomicBool::new(false));
+        let visible = Arc::new(AtomicBool::new(false));
+        let thread_done = Arc::clone(&done);
+        let thread_visible = Arc::clone(&visible);
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            if !thread_done.load(Ordering::Acquire) {
+                eprint!("wright: working…");
+                let _ = std::io::stderr().flush();
+                thread_visible.store(true, Ordering::Release);
+            }
+        });
+        Self {
+            done,
+            visible,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for Activity {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        if self.visible.load(Ordering::Acquire) {
+            eprint!("\r             \r");
+            let _ = std::io::stderr().flush();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -97,6 +156,17 @@ impl Presentation {
             format,
             renderer,
             color,
+            interactive: renderer == Renderer::Terminal
+                && environment.stdout_terminal
+                && !environment.term_dumb,
+        }
+    }
+
+    pub(crate) fn activity(&self) -> Activity {
+        if self.format == OutputFormat::Text && self.interactive {
+            Activity::start()
+        } else {
+            Activity::disabled()
         }
     }
 }
@@ -131,6 +201,10 @@ pub(crate) fn render<T: serde::Serialize>(envelope: &Envelope<T>, presentation: 
 }
 
 fn render_text<T: serde::Serialize>(envelope: &Envelope<T>, color: bool) {
+    let value = serde_json::to_value(envelope).expect("envelope serializes");
+    if !matches!(envelope.command.as_str(), "compile" | "convert") {
+        render_verdict(envelope, &value, color);
+    }
     for diagnostic in &envelope.diagnostics {
         render_diagnostic(diagnostic, color);
     }
@@ -147,12 +221,60 @@ fn render_text<T: serde::Serialize>(envelope: &Envelope<T>, color: bool) {
     match envelope.command.as_str() {
         "compile" => render_compile(envelope),
         "convert" => render_convert(envelope),
-        "check" => println!("check: ok"),
+        "check" => {}
         "analyze" => render_analyze(envelope),
         "lint" => render_lint(envelope),
         "inspect" => render_inspect(envelope),
         other => println!("{other}: ok"),
     }
+}
+
+fn render_verdict<T: serde::Serialize>(
+    envelope: &Envelope<T>,
+    value: &serde_json::Value,
+    color: bool,
+) {
+    let status = summary_status(envelope, value);
+    let label = if color {
+        let code = match status {
+            "PASS" => "32",
+            "WARN" => "33",
+            _ => "31",
+        };
+        format!("\x1b[{code}m{status}\x1b[0m")
+    } else {
+        status.to_string()
+    };
+    let summary = match envelope.command.as_str() {
+        "check" => format!(
+            "{label} check — {} diagnostic(s)",
+            envelope.diagnostics.len()
+        ),
+        "lint" => format!(
+            "{label} lint — {} finding(s) across {} rule(s)",
+            array_len(value, "/result/findings"),
+            array_len(value, "/result/rules"),
+        ),
+        "analyze" => format!(
+            "{label} analyze — {} symbol(s), {} rule measurement(s)",
+            array_len(value, "/result/facts/symbols"),
+            array_len(value, "/result/facts/rules"),
+        ),
+        "inspect" => format!(
+            "{label} inspect — {} rule(s), {} symbol(s)",
+            array_len(value, "/result/rules"),
+            array_len(value, "/result/symbols"),
+        ),
+        other => format!("{label} {other}"),
+    };
+    println!("{summary}");
+}
+
+fn array_len(value: &serde_json::Value, pointer: &str) -> usize {
+    value
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len)
 }
 
 fn render_github<T: serde::Serialize>(envelope: &Envelope<T>) {
@@ -394,33 +516,68 @@ fn render_convert<T: serde::Serialize>(envelope: &Envelope<T>) {
 
 fn render_analyze<T: serde::Serialize>(envelope: &Envelope<T>) {
     let value = serde_json::to_value(envelope).expect("envelope serializes");
-    let findings = value
-        .pointer("/result/findings")
+    let facts = value.pointer("/result/facts").cloned().unwrap_or_default();
+    let symbols = facts
+        .get("symbols")
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
-    println!(
-        "analyze: {} finding(s), {} diagnostic(s)",
-        findings.len(),
-        envelope.diagnostics.len()
-    );
-    for finding in &findings {
-        let code = finding
-            .get("code")
+    let rules = facts
+        .get("rules")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for symbol in &symbols {
+        let kind = symbol
+            .get("kind")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("finding");
-        let severity = finding
-            .get("severity")
+            .unwrap_or("symbol");
+        let name = symbol
+            .get("name")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("info");
-        let message = finding
-            .get("message")
+            .unwrap_or("<unnamed>");
+        let usage = symbol.get("usage").cloned().unwrap_or_default();
+        println!(
+            "  {kind} {name}: reads {}, writes {}, calls {}, rules {}",
+            usage
+                .get("reads")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            usage
+                .get("writes")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            usage
+                .get("calls")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            usage
+                .get("rules")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        );
+    }
+    for rule in &rules {
+        let name = rule
+            .get("name")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        println!("  {severity}[{code}]: {message}");
-        if let Some(span) = finding.get("span") {
-            print_span(span, "      ");
-        }
+            .unwrap_or("<unnamed>");
+        let flow = rule.get("controlFlow").cloned().unwrap_or_default();
+        println!(
+            "  rule {name}: {} blocks, {} edges, {} loop block(s), {} wait block(s)",
+            flow.get("blocks")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            flow.get("edges")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            flow.get("loopBlocks")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            flow.get("waitBlocks")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        );
     }
 }
 
@@ -431,17 +588,6 @@ fn render_lint<T: serde::Serialize>(envelope: &Envelope<T>) {
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let rules = value
-        .pointer("/result/rules")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    println!(
-        "lint: {} finding(s) across {} rule(s), {} diagnostic(s)",
-        findings.len(),
-        rules.len(),
-        envelope.diagnostics.len()
-    );
     for finding in &findings {
         let code = finding
             .get("code")
@@ -609,6 +755,7 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
     );
     if let Some(span) = &diagnostic.span {
         eprintln!("  --> {}:{}:{}", span.path, span.start.line, span.start.col);
+        render_source_context(&span.path, span.start.line, span.start.col, "  ");
     }
 }
 
@@ -635,6 +782,28 @@ fn print_span(span: &serde_json::Value, indent: &str) {
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0);
     println!("{indent}--> {path}:{line}:{col}");
+    render_source_context(path, line as u32, col as u32, indent);
+}
+
+/// Add one source line only when the provenance path resolves in the current
+/// process. Structured output never calls this renderer, and an unresolved
+/// path remains a normal location-only presentation.
+fn render_source_context(path: &str, line: u32, col: u32, indent: &str) {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Some(text) = source.lines().nth(line.saturating_sub(1) as usize) else {
+        return;
+    };
+    let number_width = line.to_string().len();
+    println!("{indent}| {:>number_width$} | {text}", line);
+    let marker_col = col.saturating_sub(1) as usize;
+    let prefix = text
+        .chars()
+        .take(marker_col)
+        .map(|ch| if ch == '\t' { '\t' } else { ' ' })
+        .collect::<String>();
+    println!("{indent}| {:>number_width$} | {prefix}^", "");
 }
 
 #[cfg(test)]
@@ -705,6 +874,54 @@ mod tests {
             env,
         );
         assert!(!never.color);
+    }
+
+    #[test]
+    fn activity_is_only_enabled_for_interactive_text() {
+        let terminal = Presentation::resolve(
+            OutputFormat::Text,
+            RendererArg::Terminal,
+            ColorArg::Never,
+            environment(),
+        );
+        let plain = Presentation::resolve(
+            OutputFormat::Text,
+            RendererArg::Plain,
+            ColorArg::Never,
+            environment(),
+        );
+        let json = Presentation::resolve(
+            OutputFormat::Json,
+            RendererArg::Terminal,
+            ColorArg::Always,
+            environment(),
+        );
+        let mut dumb_environment = environment();
+        dumb_environment.term_dumb = true;
+        let dumb = Presentation::resolve(
+            OutputFormat::Text,
+            RendererArg::Terminal,
+            ColorArg::Never,
+            dumb_environment,
+        );
+        assert!(terminal.activity().handle.is_some());
+        assert!(plain.activity().handle.is_none());
+        assert!(json.activity().handle.is_none());
+        assert!(dumb.activity().handle.is_none());
+    }
+
+    #[test]
+    fn activity_becomes_visible_only_after_delay() {
+        let terminal = Presentation::resolve(
+            OutputFormat::Text,
+            RendererArg::Terminal,
+            ColorArg::Never,
+            environment(),
+        );
+        let activity = terminal.activity();
+        assert!(!activity.visible.load(Ordering::Acquire));
+        thread::sleep(Duration::from_millis(180));
+        assert!(activity.visible.load(Ordering::Acquire));
     }
 
     #[test]

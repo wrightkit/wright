@@ -158,7 +158,7 @@ fn check_over_clean_input_exits_zero() {
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
     let output = run(&["check", path.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("check: ok"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("PASS check"));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -183,7 +183,7 @@ fn check_over_malformed_input_exits_one_with_structured_diagnostics() {
 }
 
 #[test]
-fn check_reports_analysis_findings_as_diagnostics() {
+fn check_excludes_configurable_lint_findings() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
     assert_eq!(output.status.code(), Some(0), "warnings do not fail check");
@@ -193,31 +193,30 @@ fn check_reports_analysis_findings_as_diagnostics() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|diagnostic| diagnostic["code"] == "min-wait-loop")
+            .all(|diagnostic| diagnostic["code"] != "min-wait-loop")
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn analyze_over_workshop_input_reports_findings_with_spans() {
+fn analyze_over_workshop_input_reports_semantic_facts() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
     let output = run(&["analyze", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.status.success());
     let envelope = parse_json(&output.stdout);
-    let findings = envelope["result"]["findings"].as_array().unwrap();
+    assert!(envelope["result"]["program"]["findings"].is_null());
     assert!(
-        findings
-            .iter()
-            .any(|finding| finding["code"] == "min-wait-loop"),
-        "findings: {findings:?}"
+        !envelope["result"]["facts"]["symbols"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
-    for finding in findings {
-        assert!(finding["span"].is_object(), "findings carry spans");
-        let path = finding["span"]["path"]
-            .as_str()
-            .expect("findings carry a resolved span path");
-        assert!(!path.is_empty(), "the resolved span path is non-empty");
-    }
+    assert!(
+        !envelope["result"]["facts"]["rules"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -245,7 +244,7 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("lint:"), "summary line: {stdout}");
+    assert!(stdout.contains("WARN lint"), "summary line: {stdout}");
     assert!(stdout.contains("min-wait-loop"), "findings: {stdout}");
     assert!(
         stdout.contains("evidence:"),
@@ -287,9 +286,8 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
 
 #[test]
 fn span_path_is_consistent_across_input_spellings() {
-    // The issue's repro (#102): lint resolves the same root-relative
-    // `span.path` for the absolute, bare-name (cwd), and dir-relative
-    // spellings of the same file, and `analyze` reports the identical value.
+    // Lint resolves the same root-relative `span.path` for the absolute,
+    // bare-name (cwd), and dir-relative spellings of the same file.
     // Each subprocess gets its own cwd, so the bare-name spelling is
     // exercised end-to-end exactly as in the issue.
     let dir = temp_dir();
@@ -348,22 +346,6 @@ fn span_path_is_consistent_across_input_spellings() {
         .unwrap()
         .to_string();
 
-    let analyze = Command::new(wright())
-        .args(["analyze", "loop.opy", "-f", "json"])
-        .current_dir(dir.join("sub"))
-        .stdin(Stdio::null())
-        .output()
-        .expect("wright runs");
-    assert!(
-        analyze.status.success(),
-        "{}",
-        String::from_utf8_lossy(&analyze.stderr)
-    );
-    let analyze_path = parse_json(&analyze.stdout)["result"]["findings"][0]["span"]["path"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
     assert_eq!(
         absolute_path, "loop.opy",
         "the absolute spelling resolves to the root-relative basename"
@@ -375,10 +357,6 @@ fn span_path_is_consistent_across_input_spellings() {
     assert_eq!(
         relative_path, absolute_path,
         "the dir-relative spelling must agree with the absolute spelling"
-    );
-    assert_eq!(
-        analyze_path, absolute_path,
-        "analyze must report the same span.path as lint"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -544,7 +522,7 @@ fn stdout_stderr_separation_holds_in_both_modes() {
     // Text mode: result on stdout, no stderr on success.
     let output = run(&["check", path.to_str().unwrap()]);
     assert!(output.stderr.is_empty());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("check: ok"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("PASS check"));
     // JSON mode: envelope on stdout only.
     let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
     assert!(output.stderr.is_empty());

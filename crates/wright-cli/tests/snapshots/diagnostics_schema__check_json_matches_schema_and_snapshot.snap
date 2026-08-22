@@ -4,30 +4,7 @@ expression: snapshot_value
 ---
 {
   "command": "check",
-  "diagnostics": [
-    {
-      "code": "min-wait-loop",
-      "message": "loop body waits at the workshop minimum rate; the loop runs at maximum frequency",
-      "severity": "warning",
-      "source": {
-        "kind": "workshop",
-        "locale": "en-us"
-      },
-      "span": {
-        "end": {
-          "col": 13,
-          "line": 59
-        },
-        "file": 0,
-        "path": "<file 0>",
-        "start": {
-          "col": 9,
-          "line": 54
-        }
-      },
-      "stage": "analysis"
-    }
-  ],
+  "diagnostics": [],
   "exit": 0,
   "ok": true,
   "result": {},
