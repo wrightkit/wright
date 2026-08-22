@@ -141,7 +141,7 @@ fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
         "opy" => Ok(SourceKind::Opy),
         "ostw" | "del" => Ok(SourceKind::Ostw),
         "json" => Ok(SourceKind::Protocol),
-        "txt" | "ws" | "workshop" => Ok(SourceKind::Workshop),
+        "txt" | "ow" | "ws" | "workshop" => Ok(SourceKind::Workshop),
         other => Err(Diagnostic::error(
             "input-kind-unknown",
             Stage::Discovery,

@@ -15,8 +15,9 @@ use workshop_rs::wir;
 use wright_analyzer::registry::LintConfig;
 use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService};
 
+use crate::WorkshopProvider;
 use crate::config::{SessionConfig, SourceKind};
-use crate::diag::{Diagnostic, Origin, Position, SourceSpan, Stage, span_from_ir};
+use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
 use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
@@ -432,7 +433,6 @@ impl CompilerSession {
             // then run the shared semantic service over the lowered program.
             self.push_ostw_diagnostics(&loaded);
         }
-        self.attach_workshop_completeness(&loaded);
         let service = match self.service(&loaded) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -519,7 +519,6 @@ impl CompilerSession {
             // then run the shared semantic service over the lowered program.
             self.push_ostw_diagnostics(&loaded);
         }
-        self.attach_workshop_completeness(&loaded);
         let service = match self.service_with(&loaded, self.config.lint.clone()) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -695,6 +694,7 @@ impl CompilerSession {
                 stage: Stage::Analysis,
                 severity,
                 message,
+                status: None,
                 span: span_from_json(finding.get("span")),
                 source: Some(loaded.origin.clone()),
             });
@@ -709,56 +709,55 @@ impl CompilerSession {
         if loaded.input.kind != SourceKind::Workshop {
             return;
         }
-        let mut issues = Vec::new();
-        if let Some(settings) = &loaded.program.settings {
-            collect_raw_settings(&settings.children, &mut issues);
-        }
-        for action in loaded.program.actions.iter() {
-            if let wir::Action::Call { name, span, .. } = action {
-                if name == "rawWorkshopAction"
-                    || self
-                        .catalog
-                        .entry(wright_workshop::catalog::Kind::Action, name)
-                        .is_none()
-                {
-                    issues.push((
-                        if name == "rawWorkshopAction" {
-                            "opaque-action"
-                        } else {
-                            "unknown-action"
+        let provider = match WorkshopProvider::new() {
+            Ok(provider) => provider,
+            Err(error) => {
+                self.diagnostics.push(Diagnostic::error(
+                    "workshop-provider-init",
+                    Stage::Internal,
+                    error.to_string(),
+                ));
+                return;
+            }
+        };
+        let path = loaded
+            .input
+            .path
+            .as_deref()
+            .unwrap_or_else(|| Path::new("<stdin>"));
+        match wright_core::provider::LanguageProvider::check(&provider, &loaded.input.text, path) {
+            Ok(diagnostics) => {
+                self.diagnostics
+                    .extend(diagnostics.into_iter().map(|diagnostic| Diagnostic {
+                        code: diagnostic.code,
+                        stage: Stage::Analysis,
+                        severity: match diagnostic.severity {
+                            wright_core::provider::Severity::Error => Severity::Error,
+                            wright_core::provider::Severity::Warning => Severity::Warning,
+                            wright_core::provider::Severity::Info => Severity::Info,
                         },
-                        name.clone(),
-                        *span,
-                    ));
-                }
+                        message: diagnostic.message,
+                        span: Some(SourceSpan {
+                            file: 0,
+                            path: diagnostic.span.file.display().to_string(),
+                            start: Position {
+                                line: diagnostic.span.start_line,
+                                col: diagnostic.span.start_col,
+                            },
+                            end: Position {
+                                line: diagnostic.span.end_line,
+                                col: diagnostic.span.end_col,
+                            },
+                        }),
+                        status: Some(diagnostic.status),
+                        source: Some(loaded.origin.clone()),
+                    }));
             }
-        }
-        for value in loaded.program.values.iter() {
-            if let wir::Value::Call { name, .. } = &value.value {
-                if self
-                    .catalog
-                    .entry(wright_workshop::catalog::Kind::Value, name)
-                    .is_none()
-                    && self
-                        .catalog
-                        .entry(wright_workshop::catalog::Kind::Operator, name)
-                        .is_none()
-                {
-                    issues.push(("unknown-value", name.clone(), value.span));
-                }
-            }
-        }
-        for (kind, name, span) in issues {
-            self.diagnostics.push(Diagnostic {
-                code: "workshop-semantic-incomplete".to_string(),
-                stage: Stage::Analysis,
-                severity: crate::diag::Severity::Error,
-                message: format!(
-                    "raw Workshop construct '{name}' is preserved or unknown ({kind}); analysis and lint findings are not definitive"
-                ),
-                span: span_from_ir(span, &loaded.program.files),
-                source: Some(loaded.origin.clone()),
-            });
+            Err(error) => self.diagnostics.push(Diagnostic::error(
+                "workshop-provider-check",
+                Stage::Internal,
+                error.to_string(),
+            )),
         }
     }
 
@@ -799,23 +798,6 @@ impl CompilerSession {
                 self.diagnostics
                     .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
             }
-        }
-    }
-}
-
-fn collect_raw_settings(
-    nodes: &[wright_workshop::settings::SettingsNode],
-    issues: &mut Vec<(&'static str, String, Option<workshop_rs::source::Span>)>,
-) {
-    for node in nodes {
-        match node {
-            wright_workshop::settings::SettingsNode::Group { children, .. } => {
-                collect_raw_settings(children, issues)
-            }
-            wright_workshop::settings::SettingsNode::Raw { name, span, .. } => {
-                issues.push(("raw-setting", name.clone(), *span))
-            }
-            _ => {}
         }
     }
 }
@@ -999,6 +981,7 @@ fn workshop_diag(error: wright_workshop::WorkshopError, resolved: &ResolvedInput
         stage,
         severity: crate::diag::Severity::Error,
         message: error.to_string(),
+        status: None,
         span,
         source: Some(resolved.origin.clone()),
     }
@@ -1034,6 +1017,7 @@ pub(crate) fn opy_diag(
         stage: Stage::Frontend,
         severity: crate::diag::Severity::Error,
         message: error.message,
+        status: None,
         span,
         source: Some(resolved.origin.clone()),
     }
@@ -1070,6 +1054,7 @@ pub(crate) fn ostw_diag(
         stage: Stage::Frontend,
         severity: crate::diag::Severity::Error,
         message: error.message,
+        status: None,
         span,
         source: Some(resolved.origin.clone()),
     }
@@ -1116,6 +1101,7 @@ fn reconstruct_diag(
         stage,
         severity: crate::diag::Severity::Error,
         message: message.to_string(),
+        status: None,
         span,
         source: Some(loaded.origin.clone()),
     }
@@ -1184,6 +1170,7 @@ pub(crate) fn hir_diag(error: wright_core::hir::HirError, resolved: &ResolvedInp
         stage,
         severity: crate::diag::Severity::Error,
         message: error.message(),
+        status: None,
         span,
         source: Some(resolved.origin.clone()),
     }
@@ -1201,6 +1188,7 @@ pub(crate) fn ir_diag(
         stage,
         severity: crate::diag::Severity::Error,
         message: error.to_string(),
+        status: None,
         span: None,
         source: Some(resolved.origin.clone()),
     }

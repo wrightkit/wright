@@ -21,6 +21,7 @@ pub mod provider_edit;
 pub mod result;
 pub mod service;
 pub mod session;
+pub mod workshop_provider;
 
 pub use config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind};
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
@@ -30,6 +31,7 @@ pub use result::{
     Envelope, InspectResult, LintResult, RESULT_CONTRACT,
 };
 pub use session::{CompilerSession, Loaded};
+pub use workshop_provider::WorkshopProvider;
 pub use wright_transform::Profile;
 
 /// The driver crate name reported in result metadata.

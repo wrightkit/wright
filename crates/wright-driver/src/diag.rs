@@ -94,6 +94,10 @@ pub struct Diagnostic {
     pub severity: Severity,
     /// Human-readable message; wording is not part of the machine contract.
     pub message: String,
+    /// Provider semantic support status, when this diagnostic came from an
+    /// in-process language provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<wright_core::provider::Status>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,6 +138,7 @@ impl Diagnostic {
             stage,
             severity: Severity::Error,
             message: message.into(),
+            status: None,
             span: None,
             source: None,
         }
@@ -150,6 +155,7 @@ impl Diagnostic {
             stage,
             severity: Severity::Warning,
             message: message.into(),
+            status: None,
             span: None,
             source: None,
         }
