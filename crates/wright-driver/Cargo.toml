@@ -23,3 +23,4 @@ wright-transform = { path = "../wright-transform" }
 wright-workshop = { path = "../wright-workshop" }
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
+workshop-rs-provider = { package = "workshop-rs", git = "https://github.com/wrightkit/workshop-rs.git", rev = "a6110e0e5e2d8167b61ae37e22f7752c8a24befc" }
