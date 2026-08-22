@@ -29,7 +29,7 @@ reference-validated source for:
 It is **language-compatibility metadata**, distinct from:
 
 * the `workshop-rs` catalog (`crates/workshop-rs/src/catalog/data/catalog.json`,
-  consumed via the `wright-workshop` adapter) — the Workshop
+  consumed from `workshop-rs`) — the Workshop
   emission/localization layer (en-US spellings, emitter output); the manifest
   links to it by canonical id (`catalogId`) rather than duplicating spellings;
   and
@@ -204,7 +204,7 @@ the probe source hash, expected oracle status, normalized emission hash, and
 * `wright-opy` — name/member/enum resolution, arity and signature checks,
   `KNOWN_ENUMS` absorption, earlier resolution of unknown-action/value errors
   (addressing the diagnostic-provenance limitation);
-* `wright-workshop` (adapter over `workshop-rs`) — canonical-id linkage to
+* `workshop-rs` — canonical-id linkage to
   the emission catalog (validated by the cross-check test);
 * differential and systematic reference tests (the probe validator);
 * documentation, agents, and future release metadata can consume the same

@@ -12,10 +12,10 @@ dataset and surfaced by `workshop-rs-cli version --json`. It is the
 locale-identity layer for the canonical Workshop parser and emitter; parser
 and emitter code never contain locale-specific branches.
 
-Wright no longer authors or generates catalog data. The in-repo
-`wright-workshop` crate is a re-export-only adapter over `workshop-rs`
-(wright#143): it contains no catalog implementation and no `wright-catalog-gen`
-binary. The consumed `workshop-rs` revision is pinned in one place,
+Wright no longer authors or generates catalog data. The `wright-workshop`
+re-export-only adapter from the wright#143 cutover has been removed: Wright
+consumes `workshop-rs` directly and contains no catalog implementation and no
+`wright-catalog-gen` binary. The consumed `workshop-rs` revision is pinned in one place,
 `[workspace.dependencies]` in the root `Cargo.toml`; catalog or locale changes
 route to `workshop-rs` and are picked up here by updating that pin.
 

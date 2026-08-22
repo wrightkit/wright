@@ -269,9 +269,9 @@ semantics/WIR" requirement):
 * **HIR/WIR/lowering** (`wright-core`, `wright-ir`): the OSTW frontend lowers
   to Wright HIR; workshop-function calls resolve through the existing
   catalog/WIR path exactly like the OPY receiver-call surface (the canonical
-  `workshop-rs` catalog, consumed via `wright-workshop`).
-* **Workshop parser/emitter/round-trip** (`workshop-rs` via the
-  `wright-workshop` adapter): Workshop stays the interoperability hub;
+  `workshop-rs` catalog).
+* **Workshop parser/emitter/round-trip** (`workshop-rs`): Workshop stays
+  the interoperability hub;
   OSTW → Workshop emission reuses the canonical emitter, and
   Workshop → OSTW reconstruction reuses the canonical Workshop parser and
   WIR, adding only a Wright-owned OSTW emitter.

@@ -115,7 +115,7 @@ impl<'a> SemanticService<'a> {
             program,
             Origin {
                 kind: "workshop".to_string(),
-                locale: Some(wright_workshop::catalog::Locale::new(locale).to_string()),
+                locale: Some(workshop_rs::catalog::Locale::new(locale).to_string()),
             },
         )
     }

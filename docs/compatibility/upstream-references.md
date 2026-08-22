@@ -55,7 +55,7 @@ artifacts. Concretely, it serves as:
 | Wright surface | Use of the reference |
 | --- | --- |
 | `wright-opy` native frontend | Differential HIR parity, accept/reject agreement, structured diagnostics |
-| `workshop-rs` catalog/emission (via `wright-workshop` adapter) | Canonical en-US spelling validation against oracle-emitted Workshop text; receiver-method and enum emission evidence |
+| `workshop-rs` catalog/emission | Canonical en-US spelling validation against oracle-emitted Workshop text; receiver-method and enum emission evidence |
 | `compatibility/` harness | Fixture snapshots, oracle identity blocks, S/D/N gate evidence |
 | Systematic baseline | Reference-validated probes for builtin action/value/member/enum/signature metadata — implemented as the OPY semantic compatibility manifest (`crates/wright-opy/src/manifest/`): every entry records the probe that validates it, and `probes/validate.py` runs the full probe set against the pinned oracle (accept/reject, normalized emission hash, diagnostic category; wired into `compatibility/tests`) |
 
@@ -141,7 +141,7 @@ release artifacts. Concretely it serves as:
 | Wright surface | Use of the reference |
 | --- | --- |
 | `wright-ostw` native frontend | Accept/reject agreement, structured diagnostics, HIR semantic identity for the declared OSTW surface |
-| `workshop-rs` emitter/catalog (via `wright-workshop` adapter) | Canonical en-US emission cross-check against the oracle's `workshopCode` output for shared Workshop surfaces |
+| `workshop-rs` emitter/catalog | Canonical en-US emission cross-check against the oracle's `workshopCode` output for shared Workshop surfaces |
 | Workshop → OSTW reconstruction (future) | Reference decompiler output for the declared reconstruction surface and quality criteria |
 | `compatibility/` harness | OSTW fixture snapshots, oracle identity blocks, S/D/N gate evidence |
 

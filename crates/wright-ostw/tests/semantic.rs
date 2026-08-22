@@ -203,8 +203,8 @@ fn every_ostw_binding_resolves_through_the_canonical_catalog() {
     // Catalog-ownership invariant (#118 AC): wright-ostw ships only OSTW
     // source-name bindings, and every binding resolves to real canonical
     // catalog data (kind/id for builtins; domain + member ids for enums).
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
-    let en = wright_workshop::catalog::Locale::new("en-US");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
+    let en = workshop_rs::catalog::Locale::new("en-US");
 
     for (source, (kind, id)) in wright_ostw::signature::BUILTIN_BINDINGS {
         let entry = catalog

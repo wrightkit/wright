@@ -5,7 +5,7 @@
 //! proves both reverse loops through the real native frontends:
 //!
 //! * `Workshop → convert(opy) → native wright-opy frontend → HIR → WIR →
-//!   Workshop` — equivalence under `wright_workshop::roundtrip::equivalent`
+//!   Workshop` — equivalence under `workshop_rs::roundtrip::equivalent`
 //!   (the #124 contract, no normalization);
 //! * `Workshop → convert(ostw) → native wright-ostw frontend (generated
 //!   `ds.toml` project root) → HIR → WIR → Workshop` — equivalence under the
@@ -58,14 +58,14 @@ fn sha256(input: &str) -> String {
 
 /// Parse Workshop text through the shared parser with the canonical
 /// signature context (the same path the driver uses).
-fn parse(catalog: &wright_workshop::catalog::Catalog, text: &str) -> wir::Program {
+fn parse(catalog: &workshop_rs::catalog::Catalog, text: &str) -> wir::Program {
     let manifest =
         wright_opy::manifest::Manifest::builtin().expect("the OPY manifest is embedded and valid");
     let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, catalog);
-    let program = wright_workshop::parser::parse_with_context(
+    let program = workshop_rs::parser::parse_with_context(
         text,
         catalog,
-        &wright_workshop::catalog::Locale::new("en-US"),
+        &workshop_rs::catalog::Locale::new("en-US"),
         &context,
     )
     .unwrap_or_else(|error| panic!("fixture Workshop text must parse: {error}"));
@@ -129,13 +129,13 @@ fn compile_reconstructed_ostw(ostw_text: &str, test_name: &str) -> wright_ir::hi
 
 /// Emit Workshop text for a WIR program through the shared emitter.
 fn emit_workshop(
-    catalog: &wright_workshop::catalog::Catalog,
+    catalog: &workshop_rs::catalog::Catalog,
     program: &wir::Program,
 ) -> Result<String, String> {
-    wright_workshop::emitter::emit(
+    workshop_rs::emitter::emit(
         program,
         catalog,
-        &wright_workshop::catalog::Locale::new("en-US"),
+        &workshop_rs::catalog::Locale::new("en-US"),
     )
     .map_err(|error| error.to_string())
 }
@@ -538,7 +538,7 @@ fn normalize(program: &mut wir::Program) {
 
 /// The full Workshop → OPY loop through the shared driver path.
 fn opy_round_trip(
-    catalog: &wright_workshop::catalog::Catalog,
+    catalog: &workshop_rs::catalog::Catalog,
     fixture: &str,
     failures: &mut Vec<String>,
 ) -> serde_json::Value {
@@ -579,7 +579,7 @@ fn opy_round_trip(
             return serde_json::json!({ "status": "lower-failed" });
         }
     };
-    let equivalent = wright_workshop::roundtrip::equivalent(&original, &recompiled);
+    let equivalent = workshop_rs::roundtrip::equivalent(&original, &recompiled);
     if !equivalent {
         failures.push(format!("{fixture}: recompiled WIR is not equivalent"));
     }
@@ -606,7 +606,7 @@ fn opy_round_trip(
 
 /// The full Workshop → OSTW loop through the shared driver path.
 fn ostw_round_trip(
-    catalog: &wright_workshop::catalog::Catalog,
+    catalog: &workshop_rs::catalog::Catalog,
     fixture: &str,
     failures: &mut Vec<String>,
 ) -> serde_json::Value {
@@ -669,7 +669,7 @@ fn ostw_round_trip(
     let mut reference = original;
     normalize(&mut actual);
     normalize(&mut reference);
-    let equivalent = wright_workshop::roundtrip::equivalent(&actual, &reference);
+    let equivalent = workshop_rs::roundtrip::equivalent(&actual, &reference);
     if !equivalent {
         failures.push(format!(
             "{fixture}: normalized recompiled WIR is not equivalent"
@@ -690,7 +690,7 @@ fn ostw_round_trip(
 
 #[test]
 fn cross_format_conversion_round_trips_and_reports() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     let mut failures = Vec::new();
     let mut report = serde_json::Map::new();
     for fixture in OPY_FIXTURES {
@@ -784,7 +784,7 @@ fn rejection_entry(
 
 #[test]
 fn conversion_is_byte_deterministic_across_runs() {
-    let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
     for (target, fixture) in [
         (
             ConvertTarget::Opy,

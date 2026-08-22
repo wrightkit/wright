@@ -1797,7 +1797,6 @@ dependencies = [
  "workshop-rs",
  "wright-core",
  "wright-ir",
- "wright-workshop",
 ]
 
 [[package]]
@@ -1862,7 +1861,6 @@ dependencies = [
  "wright-opy",
  "wright-ostw",
  "wright-transform",
- "wright-workshop",
 ]
 
 [[package]]
@@ -1917,7 +1915,6 @@ dependencies = [
  "workshop-rs",
  "wright-core",
  "wright-ir",
- "wright-workshop",
 ]
 
 [[package]]
@@ -1931,7 +1928,6 @@ dependencies = [
  "wright-ir",
  "wright-opy",
  "wright-transform",
- "wright-workshop",
 ]
 
 [[package]]
@@ -1941,18 +1937,6 @@ dependencies = [
  "serde",
  "workshop-rs",
  "wright-ir",
-]
-
-[[package]]
-name = "wright-workshop"
-version = "0.2.11"
-dependencies = [
- "regex",
- "serde_json",
- "workshop-rs",
- "wright-core",
- "wright-ir",
- "wright-opy",
 ]
 
 [[package]]

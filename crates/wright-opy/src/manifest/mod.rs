@@ -15,7 +15,7 @@
 //!   pinned OverPy 9.7.10 oracle and verifies accept/reject, emission hash,
 //!   and diagnostic category deterministically.
 //! * `catalogId` links each entry to the canonical Workshop emission
-//!   catalog (workshop-rs, consumed through the `wright-workshop` adapter)
+//!   catalog (workshop-rs, consumed directly)
 //!   by canonical identity without duplicating localization/output spelling
 //!   data; a cross-check test verifies every declared id exists with the
 //!   matching kind.
@@ -887,15 +887,15 @@ mod tests {
     #[test]
     fn catalog_ids_link_to_the_workshop_emission_catalog() {
         // Every declared `catalogId` must exist in the canonical Workshop
-        // emission catalog (workshop-rs, consumed through the wright-workshop
-        // adapter) under the matching kind, so manifest entries never
-        // surface as accidental emitter catalog misses. Entries without a
+        // emission catalog (workshop-rs, consumed directly) under the
+        // matching kind, so manifest entries never surface as accidental
+        // emitter catalog misses. Entries without a
         // `catalogId` (special emission forms like `debug`/`print`, or
         // emission surfaces not yet catalog-covered like the alias targets)
         // are exempt by design.
         let manifest = Manifest::builtin().expect("builtin");
-        let catalog = wright_workshop::catalog::Catalog::builtin().expect("catalog loads");
-        let has_id = |kind: wright_workshop::catalog::Kind, id: &str| {
+        let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
+        let has_id = |kind: workshop_rs::catalog::Kind, id: &str| {
             catalog.entries_of(kind).any(|entry| entry.id == id)
         };
         for function in &manifest.functions {
@@ -904,10 +904,10 @@ mod tests {
             };
             let kind = match function.kind {
                 FunctionKind::Action | FunctionKind::MemberAction => {
-                    wright_workshop::catalog::Kind::Action
+                    workshop_rs::catalog::Kind::Action
                 }
                 FunctionKind::Value | FunctionKind::MemberValue => {
-                    wright_workshop::catalog::Kind::Value
+                    workshop_rs::catalog::Kind::Value
                 }
             };
             assert!(
@@ -922,7 +922,7 @@ mod tests {
             if let Some(contextual) = &function.contextual_domain {
                 for (keyword, option) in &contextual.options {
                     assert!(
-                        has_id(wright_workshop::catalog::Kind::Action, &option.target),
+                        has_id(workshop_rs::catalog::Kind::Action, &option.target),
                         "contextual target '{}' (keyword '{keyword}') of '{}' is missing \
                          from the Workshop emission catalog",
                         option.target,

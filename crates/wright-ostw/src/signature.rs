@@ -5,14 +5,14 @@
 //! the exercised builtin surface, and the OSTW source member name -> canonical
 //! catalog member id mapping per exercised enum domain. All canonical
 //! Workshop parameter/spelling and enum domain/member data lives in the
-//! canonical catalog (`workshop-rs`, consumed via `wright-workshop`); the
+//! canonical catalog (`workshop-rs`); the
 //! semantic phase
 //! resolves builtins and enum domains through that catalog at the consume
 //! sites. No OSTW `Elements.json` or upstream compiler table is copied;
 //! every binding is exercised by the protect-ban reachable closure or a
 //! committed pinned-reference probe under `compatibility/ostw/probes/`.
 
-use wright_workshop::catalog::Kind;
+use workshop_rs::catalog::Kind;
 
 /// One exercised builtin binding: OSTW source name -> (kind, canonical catalog id).
 pub const BUILTIN_BINDINGS: &[(&str, (Kind, &str))] = &[

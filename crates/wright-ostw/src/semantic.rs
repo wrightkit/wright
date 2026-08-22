@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 use wright_ir::hir::{self, ExprId, FunctionId, GlobalVarId, PlayerVarId, StmtId, SubroutineId};
 
-use wright_workshop::catalog::{Catalog, Kind};
+use workshop_rs::catalog::{Catalog, Kind};
 
 use crate::cst;
 use crate::diag::FrontendError;

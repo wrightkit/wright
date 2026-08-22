@@ -20,6 +20,5 @@ wright-lpp = { path = "../wright-lpp" }
 wright-opy = { path = "../wright-opy" }
 wright-ostw = { path = "../wright-ostw" }
 wright-transform = { path = "../wright-transform" }
-wright-workshop = { path = "../wright-workshop" }
 # Single released reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true

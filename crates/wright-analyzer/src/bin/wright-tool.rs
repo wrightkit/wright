@@ -19,10 +19,10 @@
 use std::io::{BufRead, Write};
 use std::process::ExitCode;
 
+use workshop_rs::catalog::{Catalog, Locale};
+use workshop_rs::{detect, parser};
 use wright_analyzer::service::SemanticService;
 use wright_ir::lower;
-use wright_workshop::catalog::{Catalog, Locale};
-use wright_workshop::{detect, parser};
 
 enum Input {
     Protocol(wright_core::hir::Program),

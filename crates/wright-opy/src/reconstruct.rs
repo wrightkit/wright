@@ -3,7 +3,7 @@
 //! Consumes a validated [`workshop_rs::wir::Program`] and emits deterministic,
 //! byte-stable canonical OPY source that the native [`crate::compile`]
 //! frontend accepts and that re-lowers to a structurally equivalent WIR
-//! program under `wright_workshop::roundtrip::equivalent`.
+//! program under `workshop_rs::roundtrip::equivalent`.
 //!
 //! Scope and ownership:
 //!
@@ -42,9 +42,9 @@
 
 use std::fmt;
 
+use workshop_rs::catalog::{Catalog, Locale};
 use workshop_rs::source::Span;
 use workshop_rs::wir::{self, Action, Event, ModifyOp, Value};
-use wright_workshop::catalog::{Catalog, Locale};
 
 use crate::manifest::{Function, FunctionKind, Manifest};
 
@@ -1306,10 +1306,10 @@ impl<'a> Emitter<'a> {
         if let Some(catalog_id) = &entry.catalog_id {
             let expected_kind = match entry.kind {
                 FunctionKind::Action | FunctionKind::MemberAction => {
-                    wright_workshop::catalog::Kind::Action
+                    workshop_rs::catalog::Kind::Action
                 }
                 FunctionKind::Value | FunctionKind::MemberValue => {
-                    wright_workshop::catalog::Kind::Value
+                    workshop_rs::catalog::Kind::Value
                 }
             };
             if self
@@ -1809,7 +1809,7 @@ mod tests {
         let source = emit(program).expect("reconstruction succeeds");
         let recompiled = recompile(&source);
         assert!(
-            wright_workshop::roundtrip::equivalent(program, &recompiled),
+            workshop_rs::roundtrip::equivalent(program, &recompiled),
             "recompiled WIR must be equivalent to the input:\n{source}"
         );
     }
