@@ -171,7 +171,14 @@ fn terminal_renderer_uses_command_specific_hierarchy() {
         ("analyze", "PASS analyze", "Analysis details"),
         ("inspect", "PASS inspect", "Program structure"),
     ] {
-        let output = run(&[command, path.to_str().unwrap(), "--renderer", "terminal"]);
+        let output = run(&[
+            command,
+            path.to_str().unwrap(),
+            "--renderer",
+            "terminal",
+            "--color",
+            "never",
+        ]);
         assert!(output.status.code().is_some(), "{command} exited by signal");
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains(heading), "{command}: {stdout}");
