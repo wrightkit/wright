@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.14](https://github.com/wrightkit/wright/compare/v0.2.13...v0.2.14) (2026-08-23)
+
+
+### Features
+
+* **cli:** add phase-aware terminal progress ([#221](https://github.com/wrightkit/wright/issues/221)) ([764300c](https://github.com/wrightkit/wright/commit/764300cff2fa87e1e2df1864c06fe6ee0369816b))
+
 ## [0.2.13](https://github.com/wrightkit/wright/compare/v0.2.12...v0.2.13) (2026-08-22)
 
 
