@@ -1779,9 +1779,9 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "0.1.5"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e741d6faadf9c0df949d76dbf4faa2af6799fae56ffbc780be975ed10855066a"
+checksum = "fb8b6c25a292fbb06742c158966a628de20aecc543e218ddfef03219c431aad4"
 dependencies = [
  "serde",
  "serde_json",
@@ -1824,6 +1824,7 @@ dependencies = [
  "sha2",
  "tar",
  "ureq",
+ "workshop-rs",
  "wright-driver",
  "wright-transform",
 ]

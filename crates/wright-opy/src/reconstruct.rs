@@ -1464,6 +1464,13 @@ impl<'a> Emitter<'a> {
                 }
             }
             Value::String(value) => self.emit_string_literal(value),
+            Value::LocalizedString(value) => {
+                self.issue(
+                    "unsupported-localized-string",
+                    format!("localized Workshop preset string '{value}' has no OPY source representation"),
+                    node.span,
+                );
+            }
             Value::Bool(value) => {
                 self.out.push_str(if *value { "true" } else { "false" });
             }

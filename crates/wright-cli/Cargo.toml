@@ -28,3 +28,4 @@ wright-transform.workspace = true
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
 jsonschema = "0.18"
+workshop-rs.workspace = true

@@ -6,8 +6,6 @@ use wright_core::provider::{
     Diagnostic as ProviderDiagnostic, LanguageProvider, ProviderError, Result as ProviderResult,
     Severity as ProviderSeverity, SourceSpan as ProviderSourceSpan, Status,
 };
-use wright_core::signatures::ExpectedDomain as WrightExpectedDomain;
-
 /// Wright's in-process provider for localized raw Workshop source.
 pub struct WorkshopProvider {
     catalog: workshop_rs::catalog::Catalog,
@@ -26,14 +24,8 @@ impl LanguageProvider for WorkshopProvider {
     fn check(&self, source: &str, path: &Path) -> ProviderResult<Vec<ProviderDiagnostic>> {
         let locale = workshop_rs::detect::resolve_locale(source, &self.catalog, None)
             .map_err(|error| ProviderError::new("workshop.locale", error.to_string()))?;
-        let manifest = wright_opy::manifest::Manifest::builtin()
-            .map_err(|error| ProviderError::new("workshop.manifest", error.to_string()))?;
-        let context = ProviderExpectedDomain {
-            manifest,
-            catalog: &self.catalog,
-        };
         let program =
-            workshop_rs::parser::parse_with_context(source, &self.catalog, &locale, &context)
+            workshop_rs::parser::parse_with_context(source, &self.catalog, &locale, &self.catalog)
                 .map_err(|error| ProviderError::new("workshop.parse", error.to_string()))?;
         program
             .validate()
@@ -44,23 +36,6 @@ impl LanguageProvider for WorkshopProvider {
             .into_iter()
             .map(|issue| map_issue(issue, path))
             .collect())
-    }
-}
-
-struct ProviderExpectedDomain<'a> {
-    manifest: &'a wright_opy::manifest::Manifest,
-    catalog: &'a workshop_rs::catalog::Catalog,
-}
-
-impl workshop_rs::signatures::ExpectedDomain for ProviderExpectedDomain<'_> {
-    fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
-        WrightExpectedDomain::expected_domain(self.manifest, catalog_id, arg_index).or_else(|| {
-            workshop_rs::signatures::ExpectedDomain::expected_domain(
-                self.catalog,
-                catalog_id,
-                arg_index,
-            )
-        })
     }
 }
 

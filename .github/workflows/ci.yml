@@ -135,6 +135,54 @@ jobs:
         run: cargo test --locked --workspace --all-targets --all-features
 
   # -------------------------------------------------------------------------
+  # [1a] RAW WORKSHOP PRODUCT DOGFOOD  (Wright's released Workshop consumer)
+  # Runs the owner-pinned real-project inputs through the actual `wright`
+  # check/lint commands. The source snapshots and residual expectations remain
+  # owned by the released workshop-rs corpus.
+  # -------------------------------------------------------------------------
+  workshop-integration:
+    name: Raw Workshop product dogfood
+    needs: [paths, rust-quality]
+    if: needs.paths.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Wright
+        uses: actions/checkout@v7
+
+      - name: Check out released workshop-rs P0 corpus
+        uses: actions/checkout@v7
+        with:
+          repository: wrightkit/workshop-rs
+          ref: f2834ce09b83144070a5c8670695663be6f02daf # v0.1.8
+          path: workshop-rs-pinned
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: false
+          cache-on-failure: false
+
+      - name: Run owner-contract cross-validation
+        env:
+          WRIGHTKIT_P0_ARTIFACT_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
+        run: cargo test --locked -p wright-driver --test p0_cross_validate -- --ignored
+
+      - name: Run Wright check and lint dogfood
+        env:
+          WRIGHTKIT_P0_ARTIFACT_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
+        run: cargo test --locked -p wright-cli --test workshop_p0 -- --ignored --nocapture
+
+  # -------------------------------------------------------------------------
   # [2] OPY INTEGRATION  (Wright's consumer contract with OverPy/OPY)
   # Covers:
   #   - Committed compatibility evidence integrity (no live oracle needed)

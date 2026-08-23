@@ -1183,6 +1183,7 @@ fn value_kind(value: &Value) -> &'static str {
     match value {
         Value::Number { .. } => "number",
         Value::String(_) => "string",
+        Value::LocalizedString(_) => "localizedString",
         Value::Bool(_) => "bool",
         Value::Null => "null",
         Value::Array(_) => "array",
