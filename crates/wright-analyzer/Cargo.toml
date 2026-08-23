@@ -10,9 +10,9 @@ description = "Wright's semantic analysis and agent tooling layer over the IR."
 workspace = true
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-wright-core = { path = "../wright-core" }
-wright-ir = { path = "../wright-ir" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+wright-core.workspace = true
+wright-ir.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true

@@ -10,15 +10,15 @@ description = "Wright's reusable compiler/session driver shared by the CLI, tool
 workspace = true
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-wright-analyzer = { path = "../wright-analyzer" }
-wright-core = { path = "../wright-core" }
-wright-ir = { path = "../wright-ir" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+wright-analyzer.workspace = true
+wright-core.workspace = true
+wright-ir.workspace = true
 wright-lpp = { path = "../wright-lpp" }
-wright-opy = { path = "../wright-opy" }
-wright-ostw = { path = "../wright-ostw" }
-wright-transform = { path = "../wright-transform" }
+wright-opy.workspace = true
+wright-ostw.workspace = true
+wright-transform.workspace = true
 # Single released reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true

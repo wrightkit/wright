@@ -10,7 +10,7 @@ description = "Wright's WIR transformation pipeline: optimization profiles and e
 workspace = true
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-wright-ir = { path = "../wright-ir" }
+serde = { workspace = true, features = ["derive"] }
+wright-ir.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
