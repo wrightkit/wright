@@ -10,13 +10,13 @@ description = "Wright's native OSTW frontend: lexer, CST/parser, and ds.toml pro
 workspace = true
 
 [dependencies]
-wright-ir = { path = "../wright-ir" }
+wright-ir.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
 
 [dev-dependencies]
-serde_json = "1.0"
-sha2 = "0.10"
-wright-core = { path = "../wright-core" }
-wright-opy = { path = "../wright-opy" }
-wright-transform = { path = "../wright-transform" }
+serde_json.workspace = true
+sha2.workspace = true
+wright-core.workspace = true
+wright-opy.workspace = true
+wright-transform.workspace = true

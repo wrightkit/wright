@@ -10,12 +10,12 @@ description = "Wright's native .opy frontend: lexer, CST/parser, preprocessing, 
 workspace = true
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-wright-core = { path = "../wright-core" }
-wright-ir = { path = "../wright-ir" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+wright-core.workspace = true
+wright-ir.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
 
 [dev-dependencies]
-sha2 = "0.10"
+sha2.workspace = true
