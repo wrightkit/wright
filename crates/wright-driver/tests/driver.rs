@@ -3,10 +3,13 @@
 //! CLI and library consumers share this single orchestration path.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-use wright_driver::CompilerSession;
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::result::exit;
+use wright_driver::{
+    CompilerSession, ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit,
+};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
@@ -41,6 +44,81 @@ fn corpus_source_opy(fixture_id: &str) -> String {
             .join("source.opy"),
     )
     .unwrap()
+}
+
+#[derive(Default)]
+struct RecordingProgress(Mutex<Vec<ProgressEvent>>);
+
+impl ProgressObserver for RecordingProgress {
+    fn on_progress(&self, event: ProgressEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+#[test]
+fn progress_events_follow_the_real_workflow_boundaries() {
+    let path = temp_file("progress.opy", &corpus_source_opy("synthetic/control-flow"));
+    let observer = Arc::new(RecordingProgress::default());
+    let mut analyze = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
+    analyze.set_progress_observer(observer.clone());
+    assert!(analyze.analyze().ok);
+    let analyze_events = observer.0.lock().unwrap().clone();
+    assert!(
+        analyze_events
+            .iter()
+            .any(|event| event.phase == ProgressPhase::InputResolution)
+    );
+    assert!(
+        analyze_events
+            .iter()
+            .any(|event| event.phase == ProgressPhase::Parsing)
+    );
+    assert!(
+        analyze_events
+            .iter()
+            .any(|event| event.phase == ProgressPhase::SemanticAnalysis)
+    );
+    let input_index = analyze_events
+        .iter()
+        .position(|event| event.phase == ProgressPhase::InputResolution)
+        .unwrap();
+    let parsing_index = analyze_events
+        .iter()
+        .position(|event| event.phase == ProgressPhase::Parsing)
+        .unwrap();
+    let semantics_index = analyze_events
+        .iter()
+        .position(|event| event.phase == ProgressPhase::SemanticAnalysis)
+        .unwrap();
+    assert!(input_index < parsing_index && parsing_index < semantics_index);
+    assert!(
+        !analyze_events
+            .iter()
+            .any(|event| event.phase == ProgressPhase::Linting)
+    );
+
+    let lint_observer = Arc::new(RecordingProgress::default());
+    let mut lint = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
+    lint.set_progress_observer(lint_observer.clone());
+    assert!(lint.lint().ok);
+    let lint_events = lint_observer.0.lock().unwrap().clone();
+    let linting = lint_events
+        .iter()
+        .find(|event| event.phase == ProgressPhase::Linting)
+        .expect("lint emits a linting phase");
+    let lint_semantics_index = lint_events
+        .iter()
+        .position(|event| event.phase == ProgressPhase::SemanticAnalysis)
+        .unwrap();
+    let linting_index = lint_events
+        .iter()
+        .position(|event| event.phase == ProgressPhase::Linting)
+        .unwrap();
+    assert!(lint_semantics_index < linting_index);
+    assert_eq!(linting.unit, Some(ProgressUnit::Rules));
+    assert!(linting.count.is_some());
+    assert_ne!(analyze_events, lint_events);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 fn temp_file(name: &str, content: &str) -> PathBuf {
