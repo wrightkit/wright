@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: wrightkit/workshop-rs
-          ref: f2834ce09b83144070a5c8670695663be6f02daf # v0.1.8
+          ref: 3d61bd4423924ca005d67f7c141a1866580f76fa # v0.1.9
           path: workshop-rs-pinned
 
       - name: Install Rust toolchain

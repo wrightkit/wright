@@ -14,7 +14,7 @@ repository = "https://github.com/wrightkit/wright"
 # parser, emitter, detection, validation, and Workshop IR. This is the single
 # released reference for the cutover — workspace crates consume it via
 # `workshop-rs.workspace = true`.
-workshop-rs = "=0.1.8"
+workshop-rs = "=0.1.9"
 libc = "0.2"
 serde = "1"
 serde_json = "1"
