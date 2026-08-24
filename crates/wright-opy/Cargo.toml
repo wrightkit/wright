@@ -4,12 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Wright's native .opy frontend: lexer, CST/parser, preprocessing, semantic resolution, and HIR lowering."
+description = "Wright's narrow adapter for the owner-side opy-rs implementation."
 
 [lints]
 workspace = true
 
 [dependencies]
+opy-rs.workspace = true
+opy-compiler.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 wright-core.workspace = true

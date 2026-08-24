@@ -840,22 +840,11 @@ fn compile_project(
             if has_error(&diagnostics) {
                 return Err(diagnostics);
             }
-            let Some(hir) = semantic.hir else {
+            let Some(program) = semantic.wir else {
                 // The frontend outcome carries no reachable semantic HIR and
                 // no diagnostics: the session path treats this as an empty
                 // program (check succeeds), so rename finds no symbols.
                 return Ok(workshop_rs::wir::Program::default());
-            };
-            let program = match wright_ir::lower::lower(&hir) {
-                Ok(program) => program,
-                Err(error) => {
-                    return Err(vec![session::ir_diag(
-                        "lower-error",
-                        crate::diag::Stage::Lowering,
-                        error,
-                        resolved,
-                    )]);
-                }
             };
             if let Err(error) = program.validate() {
                 return Err(vec![session::ir_diag(

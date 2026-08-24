@@ -65,19 +65,7 @@ the better integration choice.
 
 No language/core implementation should depend back on Wright tooling internals.
 
-## Terminology
-
-### Frontend
-
-A **frontend** is an internal stage inside a language implementation that turns
-authored source into parsed/project/semantic representations and HIR where
-applicable.
-
-It is useful to distinguish a Workshop-independent semantic frontend from the
-compiler backend because `check`, inspect/query, and source tooling need not
-wait for complete target emission.
-
-`frontend` is not the product identity of `opy-rs` or `del-rs`.
+## Integration terminology
 
 ### Provider
 
@@ -89,7 +77,9 @@ Provider conformance proves protocol behavior, not semantic completeness. A
 standalone implementation can expose a provider and still remain independently
 usable through its own library and CLI.
 
-See ADR-0010 for the durable terminology decision.
+Language repositories own source parsing, semantics, lowering, diagnostics, and
+compatibility evidence. Wright adapters translate those owner contracts into
+driver results and do not become a second implementation.
 
 ## Source-form integrations
 

@@ -1,142 +1,329 @@
-//! Wright's native `.opy` frontend.
+//! Narrow Wright adapter for the owner-side `opy-rs` implementation.
 //!
-//! Owns the source-language surface declared by the OPY support matrix
-//! (`docs/opy/support-matrix.md`): a lexer, an indentation-aware
-//! CST/parser with structured diagnostics and recovery, token-level
-//! preprocessing (includes and `#!define` macros), semantic resolution, and
-//! lowering into the existing Wright-owned Opy HIR contract
-//! (`wright_core::hir::Program`). The frontend never depends on OverPy or
-//! Node; the OverPy adapter remains a separate compatibility oracle.
-//!
-//! Pipeline: [`lexer::lex`] → [`preprocess::preprocess`] →
-//! [`parser::parse`] → [`lower::lower`].
+//! This crate owns no OPY parsing, semantic resolution, HIR, manifest, or
+//! reconstruction rules. It preserves the historical Wright-facing boundary
+//! while delegating those capabilities to `opy-rs` and `opy-compiler`.
 
-pub mod cst;
-pub mod diag;
-pub mod lexer;
-pub mod lower;
-pub mod manifest;
-pub mod parser;
-pub mod preprocess;
-pub mod reconstruct;
-pub mod settings;
+pub use opy_rs::{cst, diag, lexer, parser, preprocess, settings, support, tooling};
 
-use std::path::Path;
+pub mod manifest {
+    pub use opy_rs::manifest::{CatalogLink, Function, FunctionKind, Param, ParamDefault};
 
-pub use diag::{FrontendError, FrontendResult};
-pub use lower::lower;
-pub use parser::parse;
-pub use preprocess::{preprocess, preprocess_with_overlay};
+    use opy_rs::manifest::ManifestError;
 
-/// The frontend's supported protocol identity for generated HIR.
-pub const FRONTEND_NAME: &str = "wright/opy-native";
-pub const FRONTEND_VERSION: &str = env!("CARGO_PKG_VERSION");
+    pub struct EnumDomain {
+        pub domain: String,
+        pub members: Vec<String>,
+    }
 
-/// Compile one `.opy` source end-to-end into the Opy HIR contract:
-/// preprocess (includes/defines) → parse (CST) → lower (HIR).
-///
-/// `main_path` is the file's display path recorded in the HIR file registry;
-/// `root` is the include base. `compile` never requires Node or OverPy.
-pub fn compile(
-    source: &str,
-    main_path: &str,
-    root: &Path,
-) -> FrontendResult<wright_core::hir::Program> {
-    compile_with_overlay(source, main_path, root, &std::collections::BTreeMap::new())
-}
+    pub struct Manifest {
+        pub functions: &'static [Function],
+        inner: &'static opy_rs::manifest::Manifest,
+    }
 
-/// Compile with open-document overlays: includes resolve to overlay text
-/// (keyed by the include string or the resolved canonical path) before the
-/// filesystem, so unsaved editor buffers participate in include resolution.
-pub fn compile_with_overlay(
-    source: &str,
-    main_path: &str,
-    root: &Path,
-    overlay: &std::collections::BTreeMap<String, String>,
-) -> FrontendResult<wright_core::hir::Program> {
-    let outcome = compile_with_overlay_outcome(source, main_path, root, overlay);
-    match outcome.hir {
-        Some(hir) => Ok(hir),
-        None => Err(outcome
-            .error
-            .expect("a failed compile outcome always carries an error")),
+    impl Manifest {
+        pub fn builtin() -> Result<Self, ManifestError> {
+            let inner = opy_rs::manifest::Manifest::builtin()?;
+            Ok(Self {
+                functions: &inner.functions,
+                inner,
+            })
+        }
+
+        pub fn enum_domain(&self, name: &str) -> Option<EnumDomain> {
+            if !self.inner.domain_identity(name) {
+                return None;
+            }
+            let catalog = workshop_rs::catalog::Catalog::builtin().ok()?;
+            let domain = catalog.enum_domain(name)?;
+            Some(EnumDomain {
+                domain: name.to_string(),
+                members: domain
+                    .members
+                    .iter()
+                    .map(|member| member.member.clone())
+                    .collect(),
+            })
+        }
+    }
+
+    impl workshop_rs::signatures::ExpectedDomain for Manifest {
+        fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
+            self.functions
+                .iter()
+                .find(|function| function.catalog_id.as_deref() == Some(catalog_id))
+                .and_then(|function| function.params.get(arg_index))
+                .and_then(|param| param.domain.as_deref())
+        }
     }
 }
 
-/// The outcome of a compile with overlays.
-///
-/// Unlike [`compile_with_overlay`], this retains the frontend file registry
-/// even when parsing or lowering fails, so language tooling can map span file
-/// ids to their actual source identities without building a diagnostics-only
-/// project model.
+pub use diag::{OpyError, OpyResult};
+
+fn validate_builtin_enum_members(program: &opy_rs::hir::Program) -> OpyResult<()> {
+    let catalog = workshop_rs::catalog::Catalog::builtin()
+        .map_err(|error| OpyError::new("catalog-load", error.to_string()))?;
+    for declaration in &program.declarations {
+        match declaration {
+            opy_rs::hir::Declaration::GlobalVariable { initializer, .. }
+            | opy_rs::hir::Declaration::PlayerVariable { initializer, .. } => {
+                if let Some(initializer) = initializer {
+                    validate_expr(initializer, &catalog)?;
+                }
+            }
+            opy_rs::hir::Declaration::Constant { value, .. } => {
+                validate_expr(value, &catalog)?;
+            }
+            opy_rs::hir::Declaration::Macro { body, .. } => {
+                validate_stmts(body, &catalog)?;
+            }
+            opy_rs::hir::Declaration::Subroutine { .. } => {}
+        }
+    }
+    for rule in &program.rules {
+        match rule {
+            opy_rs::hir::RuleEntry::Rule(rule) => {
+                for argument in &rule.event.args {
+                    validate_expr(argument, &catalog)?;
+                }
+                for condition in &rule.conditions {
+                    validate_expr(condition, &catalog)?;
+                }
+                validate_stmts(&rule.actions, &catalog)?;
+            }
+            opy_rs::hir::RuleEntry::SubroutineDef { body, .. } => {
+                validate_stmts(body, &catalog)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_stmts(
+    statements: &[opy_rs::hir::Stmt],
+    catalog: &workshop_rs::catalog::Catalog,
+) -> OpyResult<()> {
+    for statement in statements {
+        match statement {
+            opy_rs::hir::Stmt::Expr { expr, .. } => validate_expr(expr, catalog)?,
+            opy_rs::hir::Stmt::Assign { target, value, .. } => {
+                validate_expr(target, catalog)?;
+                validate_expr(value, catalog)?;
+            }
+            opy_rs::hir::Stmt::If {
+                branches, r#else, ..
+            } => {
+                for branch in branches {
+                    validate_expr(&branch.condition, catalog)?;
+                    validate_stmts(&branch.body, catalog)?;
+                }
+                if let Some(body) = r#else {
+                    validate_stmts(body, catalog)?;
+                }
+            }
+            opy_rs::hir::Stmt::For {
+                variable,
+                iterable,
+                body,
+                ..
+            } => {
+                validate_expr(variable, catalog)?;
+                validate_expr(iterable, catalog)?;
+                validate_stmts(body, catalog)?;
+            }
+            opy_rs::hir::Stmt::While {
+                condition, body, ..
+            }
+            | opy_rs::hir::Stmt::DoWhile {
+                condition, body, ..
+            } => {
+                validate_expr(condition, catalog)?;
+                validate_stmts(body, catalog)?;
+            }
+            opy_rs::hir::Stmt::Switch {
+                value,
+                cases,
+                r#default,
+                ..
+            } => {
+                validate_expr(value, catalog)?;
+                for case in cases {
+                    validate_expr(&case.value, catalog)?;
+                    validate_stmts(&case.body, catalog)?;
+                }
+                if let Some(body) = r#default {
+                    validate_stmts(body, catalog)?;
+                }
+            }
+            opy_rs::hir::Stmt::Break { .. }
+            | opy_rs::hir::Stmt::CallSubroutine { .. }
+            | opy_rs::hir::Stmt::Pass { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_expr(
+    expr: &opy_rs::hir::Expr,
+    catalog: &workshop_rs::catalog::Catalog,
+) -> OpyResult<()> {
+    use opy_rs::hir::Expr;
+
+    match expr {
+        Expr::Enum {
+            value_type,
+            value,
+            span,
+        } => {
+            if let Some(domain) = catalog.enum_domain(value_type)
+                && !domain.members.iter().any(|member| member.member == *value)
+            {
+                let message = format!("enum '{value_type}' has no member '{value}'");
+                return match span {
+                    Some(span) => Err(OpyError::at(
+                        "unknown-enum-member",
+                        message,
+                        opy_rs::diag::Span::new(
+                            span.file,
+                            opy_rs::diag::Position::new(span.start.line, span.start.col),
+                            opy_rs::diag::Position::new(span.end.line, span.end.col),
+                        ),
+                    )),
+                    None => Err(OpyError::new("unknown-enum-member", message)),
+                };
+            }
+        }
+        Expr::Array { elements, .. } => {
+            for element in elements {
+                validate_expr(element, catalog)?;
+            }
+        }
+        Expr::Dict { entries, .. } => {
+            for entry in entries {
+                validate_expr(&entry.key, catalog)?;
+                validate_expr(&entry.value, catalog)?;
+            }
+        }
+        Expr::Comprehension {
+            element,
+            iterable,
+            condition,
+            ..
+        } => {
+            validate_expr(element, catalog)?;
+            validate_expr(iterable, catalog)?;
+            if let Some(condition) = condition {
+                validate_expr(condition, catalog)?;
+            }
+        }
+        Expr::Lambda { body, .. } => validate_expr(body, catalog)?,
+        Expr::Vector { x, y, z, .. } => {
+            validate_expr(x, catalog)?;
+            validate_expr(y, catalog)?;
+            validate_expr(z, catalog)?;
+        }
+        Expr::PlayerVar { player, .. } => validate_expr(player, catalog)?,
+        Expr::Member { receiver, .. } => validate_expr(receiver, catalog)?,
+        Expr::Call { args, .. } | Expr::MacroCall { args, .. } => {
+            for argument in args {
+                validate_expr(argument, catalog)?;
+            }
+        }
+        Expr::ReceiverCall { receiver, args, .. } => {
+            validate_expr(receiver, catalog)?;
+            for argument in args {
+                validate_expr(argument, catalog)?;
+            }
+        }
+        Expr::Binary { left, right, .. } => {
+            validate_expr(left, catalog)?;
+            validate_expr(right, catalog)?;
+        }
+        Expr::Unary { operand, .. } => {
+            validate_expr(operand, catalog)?;
+        }
+        Expr::Index { array, index, .. } => {
+            validate_expr(array, catalog)?;
+            validate_expr(index, catalog)?;
+        }
+        Expr::Format { args, .. } => {
+            for argument in args {
+                validate_expr(argument, catalog)?;
+            }
+        }
+        Expr::Number { .. }
+        | Expr::String { .. }
+        | Expr::Bool { .. }
+        | Expr::Null { .. }
+        | Expr::StringModifier { .. }
+        | Expr::Local { .. }
+        | Expr::GlobalVar { .. }
+        | Expr::EventPlayer { .. }
+        | Expr::Constant { .. }
+        | Expr::MacroParam { .. } => {}
+    }
+    Ok(())
+}
+
 pub struct CompileOutcome {
     pub hir: Option<wright_core::hir::Program>,
-    pub error: Option<FrontendError>,
+    pub error: Option<OpyError>,
     pub files: Vec<preprocess::FileRecord>,
 }
 
-/// Compile with open-document overlays while retaining the frontend file
-/// registry on parse/lower failure.
+pub fn compile(
+    source: &str,
+    main_path: &str,
+    root: &std::path::Path,
+) -> OpyResult<wright_core::hir::Program> {
+    compile_with_overlay(source, main_path, root, &std::collections::BTreeMap::new())
+}
+
+pub fn compile_with_overlay(
+    source: &str,
+    main_path: &str,
+    root: &std::path::Path,
+    overlay: &std::collections::BTreeMap<String, String>,
+) -> OpyResult<wright_core::hir::Program> {
+    let outcome = compile_with_overlay_outcome(source, main_path, root, overlay);
+    outcome
+        .hir
+        .ok_or_else(|| outcome.error.expect("failed compile outcome has an error"))
+}
+
 pub fn compile_with_overlay_outcome(
     source: &str,
     main_path: &str,
-    root: &Path,
+    root: &std::path::Path,
     overlay: &std::collections::BTreeMap<String, String>,
 ) -> CompileOutcome {
-    let preprocess::PreprocessOutcome { result, files } =
-        preprocess::preprocess_with_overlay_outcome(source, main_path, root, overlay);
-    let preprocessed = match result {
-        Ok((preprocessed, _)) => preprocessed,
+    let owner = opy_rs::compile_with_overlay_outcome(source, main_path, root, overlay);
+    let files = owner.files;
+    let Some(hir) = owner.hir else {
+        return CompileOutcome {
+            hir: None,
+            error: owner.error,
+            files,
+        };
+    };
+    if let Err(error) = validate_builtin_enum_members(&hir) {
+        return CompileOutcome {
+            hir: None,
+            error: Some(error),
+            files,
+        };
+    }
+    let value = match serde_json::to_value(hir) {
+        Ok(value) => value,
         Err(error) => {
             return CompileOutcome {
                 hir: None,
-                error: Some(error),
+                error: Some(OpyError::new("hir-serialization", error.to_string())),
                 files,
             };
         }
     };
-    let parsed = parse(&preprocessed.tokens);
-    if let Some(error) = parsed.errors.first() {
-        return CompileOutcome {
-            hir: None,
-            error: Some(error.clone()),
-            files,
-        };
-    }
-    let mut program = parsed
-        .program
-        .expect("program present when errors are empty");
-    // Parse the extracted settings block into the CST; errors flow through
-    // the same error path (registry retained for span mapping, #86).
-    if let Some(block) = &preprocessed.settings {
-        match settings::parse_block(block) {
-            Ok(parsed_settings) => program.settings = Some(parsed_settings),
-            Err(error) => {
-                return CompileOutcome {
-                    hir: None,
-                    error: Some(error),
-                    files,
-                };
-            }
-        }
-    }
-    let defines = preprocessed
-        .defines
-        .iter()
-        .map(|define| wright_core::hir::types::Define {
-            name: define.name.clone(),
-            is_function: define.is_function,
-            span: define.span.map(Into::into),
-        })
-        .collect();
-    let hir_files = files
-        .iter()
-        .map(|file| wright_core::hir::types::SourceFile {
-            id: file.id,
-            path: file.path.clone(),
-        })
-        .collect();
-    match lower(&program, hir_files, defines) {
+    match wright_core::hir::parse_value(value) {
         Ok(hir) => CompileOutcome {
             hir: Some(hir),
             error: None,
@@ -144,8 +331,23 @@ pub fn compile_with_overlay_outcome(
         },
         Err(error) => CompileOutcome {
             hir: None,
-            error: Some(error),
+            error: Some(match error.span() {
+                Some(span) => OpyError::at(
+                    error.code(),
+                    error.message(),
+                    opy_rs::diag::Span::new(
+                        span.file,
+                        opy_rs::diag::Position::new(span.start.line, span.start.col),
+                        opy_rs::diag::Position::new(span.end.line, span.end.col),
+                    ),
+                ),
+                None => OpyError::new(error.code(), error.message()),
+            }),
             files,
         },
     }
+}
+
+pub mod reconstruct {
+    pub use opy_compiler::reconstruct::{ReconstructError, ReconstructIssue, reconstruct};
 }

@@ -2,10 +2,10 @@
 
 Status: accepted specification — implemented (#109), extended for named/keyword
 argument binding (#110)
-Scope: the Wright-owned representation for builtin actions/values, member
+Scope: the OPY owner-side representation for builtin actions/values, member
 functions, signatures, parameter enum domains, enum members, and source
-aliases; reference-validated and consumed by the native frontend. The
-implementation lives in `crates/wright-opy/src/manifest/` (data in
+aliases; reference-validated and consumed by the owner source implementation.
+The implementation lives in `opy-rs/crates/opy-rs/src/manifest/` (data in
 `data/manifest.json`, probe evidence in `probes/`); this document is the
 schema and boundary contract for that data.
 
@@ -16,7 +16,7 @@ Wright-owned manifest is justified: Wright's parse surface already exceeds its
 semantic/compile surface, and the residual `unknown-action`/`unknown-value`/
 `unsupported-member` emission gaps are catalog-coverage gaps, not grammar gaps.
 The manifest replaces the hardcoded `KNOWN_ENUMS` table in
-`crates/wright-opy/src/lower.rs` with data and gives the frontend a single,
+the former Wright lowering table with data and gives the owner implementation a single,
 reference-validated source for:
 
 * builtin actions and values (generic and member);
@@ -191,12 +191,12 @@ the probe source hash, expected oracle status, normalized emission hash, and
   emission hash, and diagnostic category (S/D level, see the #106 planning
   comment); wired into the compatibility harness test suite
   (`compatibility/tests/test_manifest_probes.py`).
-* The frontend consumes the manifest in `lower.rs`: unknown names, wrong
+* The owner implementation consumes the manifest: unknown names, wrong
   action/value position, invalid arity, invalid receiver category,
   enum-domain mismatches, and named/keyword argument binding
   (`unknown-keyword`, `duplicate-argument`, `missing-argument`,
   `positional-after-keyword`, `keyword-required`, `keyword-unsupported`,
-  `invalid-argument`) produce structured, source-located frontend
+  `invalid-argument`) produce structured, source-located owner
   diagnostics before Workshop emission.
 
 ## Consumers

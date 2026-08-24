@@ -197,10 +197,7 @@ impl CompilerSession {
         if let Some(error) = &outcome.error {
             return Err(ostw_diag(error.clone(), &outcome, resolved));
         }
-        let program = match &semantic.hir {
-            Some(hir) => self.load_ir_model(hir, resolved)?,
-            None => wir::Program::default(),
-        };
+        let program = semantic.wir.clone().unwrap_or_default();
         let loaded = Loaded {
             program: Arc::new(program),
             ostw: Some(Arc::new(outcome)),
@@ -210,27 +207,6 @@ impl CompilerSession {
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
-    }
-
-    /// Ingest an already-resolved internal HIR model (e.g. the #118 semantic
-    /// HIR of an OSTW project) through the shared validate→lower→validate
-    /// path shared with the protocol/OPY frontends.
-    fn load_ir_model(
-        &mut self,
-        model: &wright_ir::hir::Program,
-        resolved: &ResolvedInput,
-    ) -> Result<wir::Program, Diagnostic> {
-        self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        model
-            .validate()
-            .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
-        self.progress(ProgressEvent::new(ProgressPhase::Lowering));
-        let program = wright_ir::lower::lower(model)
-            .map_err(|error| ir_diag("lower-error", Stage::Lowering, error, resolved))?;
-        program
-            .validate()
-            .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
-        Ok(program)
     }
 
     /// The diagnostics accumulated by the last workflow run.
@@ -1071,7 +1047,7 @@ fn workshop_diag(error: workshop_rs::WorkshopError, resolved: &ResolvedInput) ->
 /// an included file names that file; file 0 (the main file) carries the
 /// resolved display path by construction (#83).
 pub(crate) fn opy_diag(
-    error: wright_opy::FrontendError,
+    error: wright_opy::OpyError,
     files: &[wright_opy::preprocess::FileRecord],
     resolved: &ResolvedInput,
 ) -> Diagnostic {
@@ -1106,7 +1082,7 @@ pub(crate) fn opy_diag(
 /// Span paths resolve through the OSTW project registry, so a failure inside
 /// an imported file names that file with its project-relative path.
 pub(crate) fn ostw_diag(
-    error: wright_ostw::FrontendError,
+    error: wright_ostw::SourceError,
     outcome: &wright_ostw::OstwOutcome,
     resolved: &ResolvedInput,
 ) -> Diagnostic {

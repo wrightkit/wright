@@ -12,7 +12,7 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit}` | **stable** | Transport-neutral workflow phase events; no terminal presentation or machine-result mutation |
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
 | `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) plus validated mutation (`validateEditTransaction`, `semanticRename`, #130) |
-| `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Frontend-neutral source-edit transactions; validated through the correct native frontend/project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
+| `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Source-edit transactions; validated through the correct owner-backed project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
 | `wright-serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService`; MCP not implemented (no agent evidence) |
@@ -94,14 +94,12 @@ order-dependent zero-width combinations at one position are refused as
 overlapping/conflicting edits, invalid ranges, and compilation errors, and
 returns the previewed edited sources atomically (any failed validation returns
 `ok = false` and no validated preview). Validation runs through the
-*original* project/session semantics
-(`SessionConfig` kind/root, transformation profile): OPY projects compile
-through the native OPY frontend with edited includes as in-memory overlays,
-and OSTW projects load their `ds.toml` project graph with edited files as
-overlays, so cross-file diagnostics keep their real source paths and no
-filesystem write is ever required to preview or validate. Workshop/Protocol
-inputs refuse explicitly (editing is declared over the OPY and OSTW source
-frontends). The first evidence-backed refactoring is symbol rename
+owner-backed project/session semantics (`SessionConfig` kind/root,
+transformation profile): OPY projects compile through `opy-rs` with edited
+includes as in-memory overlays. DEL/OSTW overlays refuse explicitly because
+`del-rs` has not exposed an equivalent overlay project contract. Workshop and
+Protocol inputs also refuse explicitly. The first evidence-backed refactoring
+is symbol rename
 ([`rename_symbol`]) with whole-word replacement and transaction validation.
 Raw HIR/WIR mutation is never public, and application/writing stays an
 explicit caller responsibility.

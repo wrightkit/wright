@@ -28,15 +28,9 @@ Wright is not the durable owner of those language implementations.
   refactoring, agent/embedding APIs, CI presentation, editor-neutral language
   services, LSP, and integration adapters.
 
-Terminology:
-
-- **frontend** is an internal stage inside a language implementation; do not use
-  it as shorthand for the product identity of `opy-rs` or `del-rs`;
-- **provider** is an integration role/process exposed through LPP or another
-  reviewed boundary; it does not make a language implementation subordinate to
-  Wright;
-- Wright may integrate through native Rust APIs and/or LPP depending on the
-  product boundary, but must not pull language ownership back into this repo.
+Wright may integrate through narrow Rust adapters and/or LPP depending on the
+product boundary. The adapters translate owner contracts; they do not define
+language syntax, semantics, HIR, compatibility data, or lowering policy.
 
 See [`docs/adr/0010-independent-implementations-and-wright-integration.md`](docs/adr/0010-independent-implementations-and-wright-integration.md).
 

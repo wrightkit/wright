@@ -61,7 +61,7 @@ fn sha256(input: &str) -> String {
 fn parse(catalog: &workshop_rs::catalog::Catalog, text: &str) -> wir::Program {
     let manifest =
         wright_opy::manifest::Manifest::builtin().expect("the OPY manifest is embedded and valid");
-    let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, catalog);
+    let context = wright_core::signatures::ChainedExpectedDomain::new(&manifest, catalog);
     let program = workshop_rs::parser::parse_with_context(
         text,
         catalog,
@@ -99,9 +99,9 @@ fn convert(text: &str, target: ConvertTarget) -> (wright_driver::Envelope<Conver
     (envelope, path)
 }
 
-/// Load the reconstructed OSTW through the native frontend in a generated
-/// project root (`ds.toml` + `main.ostw`). Returns the HIR.
-fn compile_reconstructed_ostw(ostw_text: &str, test_name: &str) -> wright_ir::hir::Program {
+/// Load the reconstructed OSTW through the owner-backed adapter in a
+/// generated project root (`ds.toml` + `main.ostw`). Returns canonical WIR.
+fn compile_reconstructed_ostw(ostw_text: &str, test_name: &str) -> wir::Program {
     let root = std::env::temp_dir().join(format!("wright-convert-ostw-{test_name}"));
     std::fs::create_dir_all(&root).expect("create project root");
     std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").expect("write ds.toml");
@@ -124,7 +124,7 @@ fn compile_reconstructed_ostw(ostw_text: &str, test_name: &str) -> wright_ir::hi
         "reconstructed OSTW must resolve cleanly: {:?}",
         semantic.diagnostics
     );
-    semantic.hir.expect("HIR produced")
+    semantic.wir.expect("WIR produced")
 }
 
 /// Emit Workshop text for a WIR program through the shared emitter.
@@ -522,8 +522,49 @@ fn vector_idioms(program: &mut wir::Program) {
     }
 }
 
+/// The Workshop parser preserves numeric `0`/`1` spellings for boolean action
+/// arguments while the owner-backed source path lowers them as typed booleans.
+/// Normalize that representation difference before applying the #119 rules.
+fn normalize_boolean_argument_spellings(
+    program: &mut wir::Program,
+    catalog: &workshop_rs::catalog::Catalog,
+) {
+    let mut rewrites = Vec::new();
+    for action in program.actions.iter() {
+        let workshop_rs::wir::Action::Call { name, args, .. } = action else {
+            continue;
+        };
+        let Some(entry) = catalog.entry(workshop_rs::catalog::Kind::Action, name) else {
+            continue;
+        };
+        for (index, arg) in args.iter().enumerate() {
+            if entry.param_types.get(index).and_then(Option::as_deref) != Some("Boolean") {
+                continue;
+            }
+            match program.values.get(*arg).map(|node| &node.value) {
+                Some(workshop_rs::wir::Value::Bool(value)) => rewrites.push((*arg, *value)),
+                Some(workshop_rs::wir::Value::Number { value, .. }) if *value == 0.0 => {
+                    rewrites.push((*arg, false));
+                }
+                Some(workshop_rs::wir::Value::Number { value, .. }) if *value == 1.0 => {
+                    rewrites.push((*arg, true));
+                }
+                _ => {}
+            }
+        }
+    }
+    for (id, value) in rewrites {
+        program
+            .values
+            .get_mut(id)
+            .expect("boolean argument in range")
+            .value = workshop_rs::wir::Value::Bool(value);
+    }
+}
+
 /// The declared #119 normalization, applied identically to both sides.
-fn normalize(program: &mut wir::Program) {
+fn normalize(program: &mut wir::Program, catalog: &workshop_rs::catalog::Catalog) {
+    normalize_boolean_argument_spellings(program, catalog);
     fold(program);
     inline_write_once_player_vars(program);
     fold(program);
@@ -629,14 +670,7 @@ fn ostw_round_trip(
     assert_eq!(envelope.result.target, ConvertTarget::Ostw);
 
     // Reload through the native OSTW frontend in a generated project root.
-    let hir = compile_reconstructed_ostw(&ostw, fixture);
-    let reconstructed = match wright_ir::lower::lower(&hir) {
-        Ok(program) => program,
-        Err(error) => {
-            failures.push(format!("{fixture}: re-lowering failed: {error}"));
-            return serde_json::json!({ "status": "lower-failed" });
-        }
-    };
+    let reconstructed = compile_reconstructed_ostw(&ostw, fixture);
     reconstructed.validate().expect("lowered program validates");
 
     // WIR → Workshop text through the shared emitter, then the round-trip
@@ -667,8 +701,8 @@ fn ostw_round_trip(
     // Semantic equivalence under the declared #119 normalization.
     let mut actual = reparsed;
     let mut reference = original;
-    normalize(&mut actual);
-    normalize(&mut reference);
+    normalize(&mut actual, catalog);
+    normalize(&mut reference, catalog);
     let equivalent = workshop_rs::roundtrip::equivalent(&actual, &reference);
     if !equivalent {
         failures.push(format!(

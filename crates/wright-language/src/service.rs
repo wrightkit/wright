@@ -118,7 +118,7 @@ pub struct Analysis {
     pub program: wir::Program,
     pub index: Option<SemanticIndex>,
     pub findings: Vec<Finding>,
-    pub parse_errors: Vec<wright_opy::FrontendError>,
+    pub parse_errors: Vec<wright_opy::OpyError>,
     /// The frontend file registry, retained even when parsing/lowering fails
     /// so diagnostic spans can be mapped to their actual source.
     pub files: Vec<FileRecord>,
@@ -190,9 +190,16 @@ impl LanguageService {
     /// semantic index then come from the same shared code OPY/Workshop use.
     fn analyze_ostw(&self, document: &Document) -> Analysis {
         let relative = crate::document::uri_to_path(&document.uri).and_then(|path| {
-            path.strip_prefix(&self.root)
+            let relative = path
+                .strip_prefix(&self.root)
                 .ok()
-                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                .map(PathBuf::from)
+                .or_else(|| {
+                    let root = self.root.canonicalize().ok()?;
+                    let path = path.canonicalize().ok()?;
+                    path.strip_prefix(root).ok().map(PathBuf::from)
+                })?;
+            Some(relative.to_string_lossy().replace('\\', "/"))
         });
         let (outcome, semantic) =
             wright_ostw::compile_with_semantics(&document.text, relative.as_deref(), &self.root);
@@ -210,10 +217,10 @@ impl LanguageService {
                     .collect()
             })
             .unwrap_or_default();
-        let mut parse_errors: Vec<wright_opy::FrontendError> =
+        let mut parse_errors: Vec<wright_opy::OpyError> =
             outcome.diagnostics.iter().map(ostw_error_to_opy).collect();
         parse_errors.extend(semantic.diagnostics.iter().map(ostw_error_to_opy));
-        let Some(hir) = semantic.hir else {
+        let Some(program) = semantic.wir else {
             return Analysis {
                 program: wir::Program::default(),
                 index: None,
@@ -223,12 +230,8 @@ impl LanguageService {
             };
         };
         let mut findings = Vec::new();
-        let mut program = wir::Program::default();
-        if let Ok(lowered) = wright_ir::lower::lower(&hir) {
-            if lowered.validate().is_ok() {
-                program = lowered;
-                findings = analysis::analyze(&program);
-            }
+        if program.validate().is_ok() {
+            findings = analysis::analyze(&program);
         }
         let index = SemanticIndex::build(&program).ok();
         Analysis {
@@ -637,7 +640,7 @@ impl LanguageService {
                 root_sources.insert(canonical, self.source_text(&identity, root_document));
             }
             let config = wright_driver::SessionConfig {
-                input: wright_driver::InputSpec::Path(root_path),
+                input: wright_driver::InputSpec::Path(root_path.clone()),
                 // The driver detects the original project kind from the root
                 // document extension (OPY or OSTW), so validation runs through
                 // the correct native frontend.
@@ -867,15 +870,19 @@ impl LanguageService {
         };
         let analysis = self.analyze(document);
         let target = PathBuf::from(source);
-        analysis.files.iter().any(|file| {
-            let include_path = PathBuf::from(&file.path);
-            let resolved = if include_path.is_absolute() {
-                include_path
-            } else {
-                self.root.join(include_path)
-            };
-            resolved == target
-        })
+        analysis
+            .files
+            .iter()
+            .filter(|file| file.id != 0)
+            .any(|file| {
+                let include_path = PathBuf::from(&file.path);
+                let resolved = if include_path.is_absolute() {
+                    include_path
+                } else {
+                    self.root.join(include_path)
+                };
+                resolved == target
+            })
     }
 
     /// Semantic tokens for a document, classified by the native lexer.
@@ -1019,8 +1026,8 @@ fn is_ostw_document(uri: &str) -> bool {
 
 /// Map an OSTW frontend error into the shared language-service error shape
 /// (same code/message/span contract; the registry ids are project ids).
-fn ostw_error_to_opy(error: &wright_ostw::FrontendError) -> wright_opy::FrontendError {
-    wright_opy::FrontendError {
+fn ostw_error_to_opy(error: &wright_ostw::SourceError) -> wright_opy::OpyError {
+    wright_opy::OpyError {
         code: error.code.clone(),
         message: error.message.clone(),
         span: error.span.map(opy_span),

@@ -1,7 +1,7 @@
-# Opy HIR v1 — Wright frontend protocol
+# Opy HIR v1 — producer protocol
 
 Status: accepted baseline for v0.1
-Scope: the interchange format between the temporary OverPy frontend adapter
+Scope: the interchange format between an OPY source producer and Wright's
 and the Wright Rust core
 
 This document is the normative specification for `wright/opy-hir` protocol

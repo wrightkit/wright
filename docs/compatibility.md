@@ -14,11 +14,11 @@ Wright owns tooling and orchestration, not the durable source-language
 implementations. `opy-rs` owns OPY language semantics, `del-rs` owns the
 DEL/OSTW-compatible implementation, and `workshop-rs` owns canonical Workshop
 semantics and WIR. During the migration described by ADR-0009, Wright still
-contains the in-repo `wright-opy` / `wright-ostw` migration frontends until
-their planned cutovers complete (the `wright-workshop` re-export adapter was
-removed once call sites consumed `workshop-rs` directly).
-Wright therefore keeps regression coverage for those current integration paths,
-but upstream OverPy and OSTW compilers/language services remain compatibility
+contains only narrow `wright-opy` / `wright-ostw` contract adapters; source
+language ownership and regression evidence live in the owner repositories
+(the `wright-workshop` re-export adapter was removed once call sites consumed
+`workshop-rs` directly). Upstream OverPy and OSTW compilers/language services
+remain compatibility
 oracles and behavior references rather than production or default-CI runtime
 dependencies.
 
@@ -57,7 +57,7 @@ subset; passing a lower level never implies passing a higher one.
 ### S: syntax compatibility
 
 Wright and the reference agree on whether each corpus input is accepted by the
-supported frontend boundary, and accepted inputs are classified into the same
+supported source implementation boundary, and accepted inputs are classified into the same
 documented supported or unsupported subset.
 
 Minimum evidence:

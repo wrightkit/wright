@@ -1,4 +1,4 @@
-# Native OSTW Compile Support Matrix
+# OSTW Compile Support Matrix
 
 Status: accepted baseline — first declared OSTW forward-compilation surface (#119)
 Scope: the OSTW source surface Wright compiles to Workshop through the shared
@@ -13,8 +13,8 @@ the corrected explicit-root oracle evidence model is documented there too
 (#122). The pinned reference identity is recorded in
 [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md).
 
-The pipeline is `wright-ostw` (project + syntax + #118 semantics) →
-frontend-neutral HIR → shared `wright-ir` lowering → canonical
+The owner-side pipeline is `del-rs` (project + syntax + semantic analysis) →
+canonical WIR through the narrow `wright-ostw` adapter → canonical
 `workshop-rs` emitter (en-US), identical
 to the OPY/Workshop paths — no OSTW-specific backend exists.
 
@@ -163,7 +163,7 @@ match exactly (`compatibility/ostw/reconstruction/`):
   the optional oracle cross-check records exactly this one remaining
   rejection (`target/ostw-reference`, reference-only by contract).
 
-The full loop `Workshop → WIR → OSTW → native frontend → HIR → WIR →
+The full loop `Workshop → WIR → OSTW → owner source implementation → WIR →
 Workshop` is proven per committed fixture with zero frontend diagnostics, the
 declared #119 normalization applied to both sides, structural equality, and
 the round-trip fixed point (reconstructed Workshop reparses and re-emits
