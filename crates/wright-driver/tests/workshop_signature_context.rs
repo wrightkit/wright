@@ -43,7 +43,7 @@ fn enum_value_of_first_action(program: &wir::Program, action_index: usize) -> &w
 }
 
 #[test]
-fn context_pinned_ambiguous_none_resolves_via_canonical_signature() {
+fn catalog_signature_resolves_ambiguous_none_for_chase() {
     // #111: emitter-produced `Chase Global Variable Over Time(..., None)`
     // reparses to ChaseTimeReeval.NONE because the canonical chaseOverTime
     // signature pins argument 3 to the ChaseTimeReeval domain.
@@ -58,7 +58,7 @@ fn context_pinned_ambiguous_none_resolves_via_canonical_signature() {
 }
 
 #[test]
-fn context_pinned_ambiguous_none_resolves_for_set_invisible() {
+fn catalog_signature_resolves_ambiguous_none_for_set_invisible() {
     // #111: `Set Invisible(Event Player, None)` reparses to Invis.NONE. The
     // the catalog's setInvisibility is a member action, so Workshop text places
     // the receiver as argument 0 and the signature-pinned parameter at
@@ -74,7 +74,7 @@ fn context_pinned_ambiguous_none_resolves_for_set_invisible() {
 }
 
 #[test]
-fn wrong_domain_context_keeps_the_ambiguity_rejected() {
+fn mismatched_catalog_signature_keeps_ambiguity_rejected() {
     // A signature pinning a *different* domain than the ambiguous member's
     // candidates must not resolve it: `Wait(...)` expects `Wait` (which has
     // no `None` member), so the bare `None` stays ambiguous — no guessing,
@@ -196,7 +196,7 @@ fn chase_keyword_fixture_round_trips_through_the_shipped_path() {
 }
 
 #[test]
-fn context_free_chase_none_stays_a_documented_exception() {
+fn context_free_parser_preserves_ambiguous_none_boundary() {
     // Without a signature pin the ambiguity stays rejected: the same input
     // through the plain (context-free) round-trip fails at parse, keeping the
     // pre-#111 boundary deterministic.
@@ -208,7 +208,7 @@ fn context_free_chase_none_stays_a_documented_exception() {
 }
 
 #[test]
-fn context_chase_none_emission_is_a_fixed_point() {
+fn catalog_signature_emission_is_a_fixed_point() {
     // Parse the emitted form with context, emit, reparse with context, and
     // emit again: the text is a fixed point.
     let text = "variables { global: 0: g }\nrule (\"chase\") { event { Ongoing - Global; } actions { Chase Global Variable Over Time(Global.g, 0, 30, None); } }";

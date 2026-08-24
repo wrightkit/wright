@@ -1825,6 +1825,7 @@ dependencies = [
  "tar",
  "ureq",
  "workshop-rs",
+ "wright-analyzer",
  "wright-driver",
  "wright-transform",
 ]

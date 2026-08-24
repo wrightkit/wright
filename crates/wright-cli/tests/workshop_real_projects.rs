@@ -11,6 +11,7 @@ use std::process::Command;
 use workshop_rs::p0::{
     P0_EXPECTATION as WORKSHOP_EXPECTATION, P0ResidualExpectation as WorkshopResidualExpectation,
 };
+use wright_analyzer::registry::LintRegistry;
 use wright_driver::workshop_provider::{diagnostic_code, status_for_classification};
 
 fn wright() -> &'static str {
@@ -101,10 +102,27 @@ fn real_projects_run_check_and_lint_through_wright() {
             "{} lint must reach the canonical semantic program",
             case.id
         );
+        let lint_rules = lint["result"]["rules"]
+            .as_array()
+            .expect("lint rules array");
+        let expected_rule_ids = LintRegistry::default()
+            .rules()
+            .map(|rule| rule.id)
+            .collect::<Vec<_>>();
+        let actual_rule_ids = lint_rules
+            .iter()
+            .map(|rule| rule["id"].as_str().expect("lint rule id"))
+            .collect::<Vec<_>>();
         assert_eq!(
-            lint["result"]["rules"].as_array().map(Vec::len),
-            Some(5),
-            "{} lint must execute every default rule",
+            actual_rule_ids, expected_rule_ids,
+            "{} lint must report the authoritative default rule registry",
+            case.id
+        );
+        assert!(
+            lint_rules
+                .iter()
+                .all(|rule| rule["enabled"].as_bool() == Some(true)),
+            "{} lint must enable every default rule",
             case.id
         );
 
