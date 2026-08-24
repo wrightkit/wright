@@ -537,6 +537,7 @@ impl<'a> Builder<'a> {
             }
             Value::Number { .. }
             | Value::String(_)
+            | Value::LocalizedString(_)
             | Value::Bool(_)
             | Value::Null
             | Value::Enum { .. }

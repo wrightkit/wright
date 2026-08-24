@@ -28,3 +28,5 @@ wright-transform.workspace = true
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
 jsonschema = "0.18"
+wright-analyzer.workspace = true
+workshop-rs.workspace = true

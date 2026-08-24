@@ -675,6 +675,14 @@ impl<'a> Classifier<'a> {
                 }
             }
             Value::String(_) | Value::Bool(_) | Value::Null | Value::EventPlayer => {}
+            Value::LocalizedString(value) => {
+                self.error(ReconstructError::at(
+                    "reconstruct-unsupported-localized-string",
+                    format!("localized-string:{value}"),
+                    "localized Workshop preset strings have no OSTW source representation",
+                    node.span,
+                ));
+            }
             Value::Array(elements) => {
                 for element in elements {
                     self.check_value(*element);
@@ -1075,6 +1083,7 @@ impl<'a> Emitter<'a> {
         match &node.value {
             Value::Number { text, .. } => text.clone(),
             Value::String(value) => format!("\"{}\"", escape_string(value)),
+            Value::LocalizedString(_) => unreachable!("classified"),
             Value::Bool(true) => "true".to_string(),
             Value::Bool(false) => "false".to_string(),
             Value::Null => "null".to_string(),

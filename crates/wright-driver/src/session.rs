@@ -279,26 +279,11 @@ impl CompilerSession {
             override_locale.as_ref(),
         )
         .map_err(|error| workshop_diag(error, resolved))?;
-        // Context-sensitive bare-enum resolution (#111): the #109 canonical
-        // signature metadata pins the expected domain for call arguments, so
-        // emitter-produced text like `Chase Global Variable Over Time(...,
-        // None)` reparses instead of failing on the ambiguous `None`. The
-        // canonical Workshop catalog supplies the remaining domains the
-        // manifest does not document (e.g. Create HUD Text's `HudReeval`
-        // reevaluation argument, #118).
-        let manifest = wright_opy::manifest::Manifest::builtin().map_err(|error| {
-            Diagnostic::error(
-                "manifest-error",
-                Stage::Frontend,
-                format!("cannot load the OPY semantic compatibility manifest: {error}"),
-            )
-        })?;
-        let context = wright_core::signatures::ChainedExpectedDomain::new(manifest, &self.catalog);
         let program = workshop_rs::parser::parse_with_context(
             &resolved.text,
             &self.catalog,
             &locale,
-            &context,
+            &self.catalog,
         )
         .map_err(|error| workshop_diag(error, resolved))?;
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
@@ -542,10 +527,10 @@ impl CompilerSession {
     /// `lint`: load and produce the source identity, program summary, rule
     /// metadata, effective configuration, and findings (#98).
     ///
-    /// Lint findings are reported in `result.findings`, not in the envelope
-    /// diagnostics (like `analyze`). Rule enable/disable and severity come
-    /// from `self.config.lint`, the same configuration the CLI flags and
-    /// programmatic consumers set.
+    /// Lint rule findings are reported in `result.findings`; frontend and
+    /// Workshop semantic-completeness diagnostics remain in the envelope.
+    /// Rule enable/disable and severity come from `self.config.lint`, the same
+    /// configuration the CLI flags and programmatic consumers set.
     pub fn lint(&mut self) -> Envelope<LintResult> {
         let command = "lint";
         let loaded = match self.load() {
@@ -560,6 +545,7 @@ impl CompilerSession {
             // then run the shared semantic service over the lowered program.
             self.push_ostw_diagnostics(&loaded);
         }
+        self.attach_workshop_completeness(&loaded);
         let service = match self.service_with(&loaded, self.config.lint.clone()) {
             Ok(service) => service,
             Err(diagnostic) => {

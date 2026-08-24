@@ -643,6 +643,7 @@ fn visit_value_children(value: &Value, f: &mut impl FnMut(ValueId)) {
         }
         Value::Number { .. }
         | Value::String(_)
+        | Value::LocalizedString(_)
         | Value::Bool(_)
         | Value::Null
         | Value::Enum { .. }

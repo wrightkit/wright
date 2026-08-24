@@ -2,25 +2,25 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use workshop_rs::p0::P0_EXPECTATION;
+use workshop_rs::p0::P0_EXPECTATION as WORKSHOP_EXPECTATION;
 use workshop_rs::semantic::{IncompletenessKind, ResidualClassification};
 use wright_core::provider::{LanguageProvider, Status};
 use wright_driver::{WorkshopProvider, workshop_provider};
 
 #[test]
-#[ignore = "requires the pinned external P0 artifact directory"]
-fn provider_matches_workshop_rs_p0_expectations() {
-    let artifact_root = std::env::var_os("WRIGHTKIT_P0_ARTIFACT_DIR")
+#[ignore = "requires the pinned external Workshop corpus directory"]
+fn provider_matches_workshop_contract() {
+    let artifact_root = std::env::var_os("WRIGHTKIT_WORKSHOP_CORPUS_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("WRIGHTKIT_P0_ARTIFACT_DIR must be set for this test"));
+        .unwrap_or_else(|| panic!("WRIGHTKIT_WORKSHOP_CORPUS_DIR must be set for this test"));
     assert!(
         artifact_root.is_absolute() && artifact_root.is_dir(),
-        "WRIGHTKIT_P0_ARTIFACT_DIR must be an absolute directory: {}",
+        "WRIGHTKIT_WORKSHOP_CORPUS_DIR must be an absolute directory: {}",
         artifact_root.display()
     );
     let provider = WorkshopProvider::new().expect("provider initializes");
 
-    for case in P0_EXPECTATION.cases {
+    for case in WORKSHOP_EXPECTATION.cases {
         let path = find_artifact_by_hash(&artifact_root, case.source_sha256, case.id);
         let bytes =
             std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
@@ -30,7 +30,7 @@ fn provider_matches_workshop_rs_p0_expectations() {
             "{} source hash",
             case.id
         );
-        let source = String::from_utf8(bytes).expect("P0 source is UTF-8");
+        let source = String::from_utf8(bytes).expect("Workshop source is UTF-8");
         let diagnostics = provider
             .check(&source, &path)
             .unwrap_or_else(|error| panic!("{} provider failure: {error}", case.id));
@@ -73,14 +73,14 @@ fn find_artifact_by_hash(root: &Path, expected_hash: &str, case_id: &str) -> Pat
 fn collect_artifact_matches(root: &Path, expected_hash: &str, matches: &mut Vec<PathBuf>) {
     let entries = std::fs::read_dir(root).unwrap_or_else(|error| {
         panic!(
-            "cannot read P0 artifact directory {}: {error}",
+            "cannot read Workshop corpus directory {}: {error}",
             root.display()
         )
     });
     for entry in entries {
-        let entry = entry.expect("read P0 artifact directory entry");
+        let entry = entry.expect("read Workshop corpus directory entry");
         let path = entry.path();
-        let file_type = entry.file_type().expect("inspect P0 artifact entry");
+        let file_type = entry.file_type().expect("inspect Workshop corpus entry");
         if file_type.is_dir() {
             collect_artifact_matches(&path, expected_hash, matches);
             continue;
@@ -88,8 +88,12 @@ fn collect_artifact_matches(root: &Path, expected_hash: &str, matches: &mut Vec<
         if !file_type.is_file() {
             continue;
         }
-        let bytes = std::fs::read(&path)
-            .unwrap_or_else(|error| panic!("cannot read P0 artifact {}: {error}", path.display()));
+        let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+            panic!(
+                "cannot read Workshop corpus artifact {}: {error}",
+                path.display()
+            )
+        });
         if format!("{:x}", Sha256::digest(&bytes)) == expected_hash {
             matches.push(path);
         }
