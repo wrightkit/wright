@@ -1,4 +1,4 @@
-//! Product dogfood for the pinned raw Workshop corpus (#191).
+//! Real-project integration coverage for the pinned Workshop corpus.
 //!
 //! The source artifacts are owned by `workshop-rs`; this test consumes the
 //! owner-provided expectation contract and invokes the actual `wright` binary
@@ -8,7 +8,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use workshop_rs::p0::{P0_EXPECTATION, P0ResidualExpectation};
+use workshop_rs::p0::{
+    P0_EXPECTATION as WORKSHOP_EXPECTATION, P0ResidualExpectation as WorkshopResidualExpectation,
+};
 use wright_driver::workshop_provider::{diagnostic_code, status_for_classification};
 
 fn wright() -> &'static str {
@@ -16,18 +18,18 @@ fn wright() -> &'static str {
 }
 
 #[test]
-#[ignore = "requires the released workshop-rs P0 fixture checkout"]
-fn pinned_real_projects_run_check_and_lint_through_wright() {
-    let artifact_root = std::env::var_os("WRIGHTKIT_P0_ARTIFACT_DIR")
+#[ignore = "requires the released workshop-rs Workshop corpus checkout"]
+fn real_projects_run_check_and_lint_through_wright() {
+    let artifact_root = std::env::var_os("WRIGHTKIT_WORKSHOP_CORPUS_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("WRIGHTKIT_P0_ARTIFACT_DIR must be set for this test"));
+        .unwrap_or_else(|| panic!("WRIGHTKIT_WORKSHOP_CORPUS_DIR must be set for this test"));
     assert!(
         artifact_root.is_absolute() && artifact_root.is_dir(),
-        "WRIGHTKIT_P0_ARTIFACT_DIR must be an absolute directory: {}",
+        "WRIGHTKIT_WORKSHOP_CORPUS_DIR must be an absolute directory: {}",
         artifact_root.display()
     );
 
-    for case in P0_EXPECTATION.cases {
+    for case in WORKSHOP_EXPECTATION.cases {
         let path = find_artifact_by_hash(&artifact_root, case.source_sha256, case.id);
         let (check, check_success) = run_json("check", &path);
         let (lint, lint_success) = run_json("lint", &path);
@@ -138,7 +140,7 @@ fn pinned_real_projects_run_check_and_lint_through_wright() {
             })
             .collect::<Vec<_>>();
         println!(
-            "WORKSHOP_P0 {}",
+            "WORKSHOP_CORPUS {}",
             serde_json::json!({
                 "corpus": workshop_rs::p0::P0_CORPUS_ID,
                 "case": case.id,
@@ -175,7 +177,7 @@ fn run_json(command: &str, path: &Path) -> (serde_json::Value, bool) {
     }
 }
 
-fn expected_diagnostic(residual: &P0ResidualExpectation) -> (String, String) {
+fn expected_diagnostic(residual: &WorkshopResidualExpectation) -> (String, String) {
     (
         diagnostic_code(residual_kind_code(residual.kind), residual.identity),
         serde_json::to_value(status_for_classification(residual.classification))
@@ -210,18 +212,21 @@ fn find_artifact_by_hash(root: &Path, expected_hash: &str, case_id: &str) -> Pat
 fn collect_artifact_matches(root: &Path, expected_hash: &str, matches: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(root).unwrap_or_else(|error| {
         panic!(
-            "cannot read P0 artifact directory {}: {error}",
+            "cannot read Workshop corpus directory {}: {error}",
             root.display()
         )
     }) {
-        let entry = entry.expect("read P0 artifact directory entry");
+        let entry = entry.expect("read Workshop corpus directory entry");
         let path = entry.path();
-        let file_type = entry.file_type().expect("inspect P0 artifact entry");
+        let file_type = entry.file_type().expect("inspect Workshop corpus entry");
         if file_type.is_dir() {
             collect_artifact_matches(&path, expected_hash, matches);
         } else if file_type.is_file() {
             let bytes = std::fs::read(&path).unwrap_or_else(|error| {
-                panic!("cannot read P0 artifact {}: {error}", path.display())
+                panic!(
+                    "cannot read Workshop corpus artifact {}: {error}",
+                    path.display()
+                )
             });
             if wright_driver::sha256_hex(&bytes) == expected_hash {
                 matches.push(path);

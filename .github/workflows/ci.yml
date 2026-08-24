@@ -135,13 +135,13 @@ jobs:
         run: cargo test --locked --workspace --all-targets --all-features
 
   # -------------------------------------------------------------------------
-  # [1a] RAW WORKSHOP PRODUCT DOGFOOD  (Wright's released Workshop consumer)
+  # [1a] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
   # Runs the owner-pinned real-project inputs through the actual `wright`
   # check/lint commands. The source snapshots and residual expectations remain
   # owned by the released workshop-rs corpus.
   # -------------------------------------------------------------------------
   workshop-integration:
-    name: Raw Workshop product dogfood
+    name: Workshop real-project integration
     needs: [paths, rust-quality]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
@@ -149,7 +149,7 @@ jobs:
       - name: Check out Wright
         uses: actions/checkout@v7
 
-      - name: Check out released workshop-rs P0 corpus
+      - name: Check out released workshop-rs corpus
         uses: actions/checkout@v7
         with:
           repository: wrightkit/workshop-rs
@@ -174,13 +174,13 @@ jobs:
 
       - name: Run owner-contract cross-validation
         env:
-          WRIGHTKIT_P0_ARTIFACT_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-driver --test p0_cross_validate -- --ignored
+          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
+        run: cargo test --locked -p wright-driver --test workshop_contract -- --ignored
 
-      - name: Run Wright check and lint dogfood
+      - name: Run Wright check and lint on real projects
         env:
-          WRIGHTKIT_P0_ARTIFACT_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-cli --test workshop_p0 -- --ignored --nocapture
+          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
+        run: cargo test --locked -p wright-cli --test workshop_real_projects -- --ignored --nocapture
 
   # -------------------------------------------------------------------------
   # [2] OPY INTEGRATION  (Wright's consumer contract with OverPy/OPY)
