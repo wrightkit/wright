@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.15](https://github.com/wrightkit/wright/compare/v0.2.14...v0.2.15) (2026-08-24)
+
+
+### Bug Fixes
+
+* **workshop:** converge on released workshop-rs 0.1.9 ([#225](https://github.com/wrightkit/wright/issues/225)) ([967c5ad](https://github.com/wrightkit/wright/commit/967c5ad5b801682abd6d9749432adb8a8125b6a6))
+
 ## [0.2.14](https://github.com/wrightkit/wright/compare/v0.2.13...v0.2.14) (2026-08-23)
 
 
