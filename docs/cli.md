@@ -216,7 +216,7 @@ available. It reuses the lint registry, so rule enable/disable/severity
 configuration is deterministic and identical across CLI and programmatic
 (`CompilerSession::lint`, tool/agent `lint`) use.
 
-The following lint-only flags configure the registry; both are repeatable:
+The following lint-only flags configure the registry and are repeatable:
 
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
