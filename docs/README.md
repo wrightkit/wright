@@ -116,7 +116,7 @@ JSON document asset, and historical artifact across the repository.
 | `docs/architecture.md` (was `ARCHITECTURE.md`) | Living Durable Contract | `move` + `update` | Moved to `docs/`; updated relative links and reframed as living tooling-first architecture baseline (ADR-0008). |
 | `docs/compatibility.md` (was `COMPATIBILITY.md`) | Living Durable Contract | `move` + `update` | Moved to `docs/`; updated relative links and codified the S/D/N/E compatibility framework and priority order. |
 | `docs/licensing.md` (was `LICENSE-BOUNDARY.md`) | Living Durable Contract | `move` + `update` | Moved to `docs/`; updated relative links and formalized clean-room development and oracle isolation policies. |
-| `docs/cli.md` | Living Durable Contract | `update` | Removed stale M6 milestone framing; updated 5-rule lint configuration and `wright-result/v1` envelope contracts. |
+| `docs/cli.md` | Living Durable Contract | `update` | Removed stale M6 milestone framing; updated lint configuration and `wright-result/v1` envelope contracts. |
 | `docs/embedding.md` | Living Durable Contract | `update` | Removed stale M9 milestone framing; updated `ToolService` operations and session-aware embedding contracts. |
 | `docs/language-services.md` | Living Durable Contract | `update` | Removed stale M10 milestone framing; updated editor-neutral responsiveness and LSP adapter contracts. |
 | `docs/release.md` | Living Durable Contract | `update` | Removed stale M8 framing; documents release automation, checksum verification, packaging contracts, and supported installation channels. |

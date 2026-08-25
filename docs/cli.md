@@ -216,7 +216,7 @@ available. It reuses the lint registry, so rule enable/disable/severity
 configuration is deterministic and identical across CLI and programmatic
 (`CompilerSession::lint`, tool/agent `lint`) use.
 
-Two lint-only flags configure the registry; both are repeatable:
+The following lint-only flags configure the registry; both are repeatable:
 
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
@@ -305,7 +305,7 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
 }
 ```
 
-The three core workflows have separate contracts:
+The core workflows have separate contracts:
 
 * `check` is the correctness gate. It reports discovery, frontend, project,
   semantic, lowering, and validation diagnostics. Ordinary configurable lint

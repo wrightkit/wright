@@ -210,8 +210,8 @@ pub struct LintRegistry {
 }
 
 impl Default for LintRegistry {
-    /// Build the registry containing all five first-party lint rules in
-    /// their canonical order: `min-wait-loop`, `duplicate-condition`,
+    /// Build the registry containing the first-party lint rules in their
+    /// canonical order: `min-wait-loop`, `duplicate-condition`,
     /// `expensive-loop-check`, `repeated-value`, `while-without-wait`.
     fn default() -> Self {
         // Build each analysis in a local binding first so the rule metadata
