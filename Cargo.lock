@@ -1092,17 +1092,16 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "opy-compiler"
-version = "0.2.14"
+version = "0.1.0"
 source = "git+https://github.com/wrightkit/opy-rs.git?rev=e319735e93344302e1b2d827d9809683997723a7#e319735e93344302e1b2d827d9809683997723a7"
 dependencies = [
  "opy-rs",
- "serde_json",
  "workshop-rs",
 ]
 
 [[package]]
 name = "opy-macro-js"
-version = "0.2.14"
+version = "0.1.0"
 source = "git+https://github.com/wrightkit/opy-rs.git?rev=e319735e93344302e1b2d827d9809683997723a7#e319735e93344302e1b2d827d9809683997723a7"
 dependencies = [
  "libquickjs-ng-sys",
@@ -1111,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "opy-rs"
-version = "0.2.14"
+version = "0.1.0"
 source = "git+https://github.com/wrightkit/opy-rs.git?rev=e319735e93344302e1b2d827d9809683997723a7#e319735e93344302e1b2d827d9809683997723a7"
 dependencies = [
  "opy-macro-js",
