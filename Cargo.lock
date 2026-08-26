@@ -323,7 +323,7 @@ dependencies = [
 [[package]]
 name = "del-rs"
 version = "0.1.0"
-source = "git+https://github.com/wrightkit/del-rs.git?rev=7422fb67fc1c0ea37d3fcd4cdcfeecf1f6b961ce#7422fb67fc1c0ea37d3fcd4cdcfeecf1f6b961ce"
+source = "git+https://github.com/wrightkit/del-rs.git?rev=cb07808831dea9414360847d83f75a183844a17a#cb07808831dea9414360847d83f75a183844a17a"
 dependencies = [
  "clap",
  "clap_complete",
