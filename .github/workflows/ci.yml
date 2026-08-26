@@ -187,7 +187,7 @@ jobs:
   # Covers:
   #   - Committed compatibility evidence integrity (no live oracle needed)
   #   - N-level gate: Wright compile vs recorded reference snapshots
-  #   - Native-vs-reference differential suite (opy-rs ownership consumption)
+  #   - Owner-backed OPY adapter build/test coverage
   # -------------------------------------------------------------------------
   opy-integration:
     name: OPY integration (N-level + differential)
@@ -223,10 +223,10 @@ jobs:
         id: n_level
         run: python3 scripts/v1-gates.py
 
-      - name: Run native-vs-reference differential suite
-        id: differential
+      - name: Build and test Wright OPY adapter
+        id: adapter
         if: always()
-        run: cargo test --locked -p wright-opy --test differential
+        run: cargo test --locked -p wright-opy
 
       - name: Upload OPY integration reports
         if: always()
@@ -235,7 +235,6 @@ jobs:
           name: opy-integration-reports
           path: |
             target/v1-gates-report.json
-            target/wright-differential-report.json
 
       - name: Write step summary
         if: always()
@@ -273,22 +272,18 @@ jobs:
               echo "### N-level gate: ⚠️ report not generated"
             fi
             echo ""
-            # Differential suite result
-            if [[ "${{ steps.differential.outcome }}" == "success" ]]; then
-              echo "### OPY differential suite: ✅ PASS"
+            if [[ "${{ steps.adapter.outcome }}" == "success" ]]; then
+              echo "### OPY adapter build/test: ✅ PASS"
             else
-              echo "### OPY differential suite: ❌ FAIL (see run log for details)"
-            fi
-            if [[ -f target/wright-differential-report.json ]]; then
-              echo ""
-              echo "_Full machine-readable reports available as workflow artifacts._"
+              echo "### OPY adapter build/test: ❌ FAIL (see run log for details)"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
   # [3] DEL/OSTW INTEGRATION  (Wright's consumer contract with OSTW/del-rs)
-  # Keeps Wright's forward-compilation differential test against del-rs output.
-  # Semantic fixes belong in del-rs; this job validates the Wright integration.
+  # Keeps Wright's owner-backed OSTW adapter build/test coverage.
+  # Semantic and differential fixes belong in del-rs; this job validates the
+  # Wright integration package still compiles against the owner contract.
   # -------------------------------------------------------------------------
   del-integration:
     name: DEL/OSTW integration (differential)
@@ -314,16 +309,9 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Run OSTW forward-compilation differential suite
-        id: ostw_diff
-        run: cargo test --locked -p wright-ostw --test differential
-
-      - name: Upload DEL/OSTW differential report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: del-ostw-differential-report
-          path: target/wright-ostw-differential-report.json
+      - name: Build and test Wright OSTW adapter
+        id: adapter
+        run: cargo test --locked -p wright-ostw
 
       - name: Write step summary
         if: always()
@@ -333,14 +321,10 @@ jobs:
           {
             echo "## DEL/OSTW Integration"
             echo ""
-            if [[ "${{ steps.ostw_diff.outcome }}" == "success" ]]; then
-              echo "### OSTW differential suite: ✅ PASS"
+            if [[ "${{ steps.adapter.outcome }}" == "success" ]]; then
+              echo "### OSTW adapter build/test: ✅ PASS"
             else
-              echo "### OSTW differential suite: ❌ FAIL (see run log for details)"
-            fi
-            if [[ -f target/wright-ostw-differential-report.json ]]; then
-              echo ""
-              echo "_Full machine-readable report available as workflow artifact._"
+              echo "### OSTW adapter build/test: ❌ FAIL (see run log for details)"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
