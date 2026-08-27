@@ -97,42 +97,17 @@ jobs:
     name: Rust quality (${{ matrix.toolchain }})
     needs: paths
     if: needs.paths.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         toolchain:
           - stable
           - 1.85.0
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
-          components: clippy, rustfmt
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: false
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run Clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --locked --workspace --all-targets --all-features
+    uses: wrightkit/.github/.github/workflows/rust-quality.yml@66fff829662bf235c7322194b4bafafba2a0f97e
+    with:
+      toolchain: ${{ matrix.toolchain }}
+      cache-shared-key: linux-quality
+      all-features: true
 
   # -------------------------------------------------------------------------
   # [1a] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
