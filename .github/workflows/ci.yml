@@ -94,45 +94,20 @@ jobs:
   # All other Rust-based jobs depend on this.
   # -------------------------------------------------------------------------
   rust-quality:
-    name: Rust quality (${{ matrix.toolchain }})
+    name: Rust (${{ matrix.toolchain }})
     needs: paths
     if: needs.paths.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         toolchain:
           - stable
           - 1.85.0
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
-          components: clippy, rustfmt
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: false
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run Clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --locked --workspace --all-targets --all-features
+    uses: wrightkit/.github/.github/workflows/rust-quality.yml@a83d0f1b4cbcb5b81fb0426e3a5aea1db0899fb5
+    with:
+      toolchain: ${{ matrix.toolchain }}
+      cache-shared-key: linux-quality
+      all-features: true
 
   # -------------------------------------------------------------------------
   # [1a] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
