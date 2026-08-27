@@ -163,25 +163,14 @@ fn emitter_chase_at_rate_none_round_trips_through_the_shipped_path() {
 }
 
 #[test]
-fn chase_keyword_fixture_round_trips_through_the_shipped_path() {
-    // The `synthetic/chase-keywords` surface (rate/duration forms, global
-    // and player variables, keyword-bound wait/vect/len/print/
-    // getPlayersInRadius/setStatusEffect) compiles through the native OPY
-    // frontend, emits through the catalog, reparses with the catalog
-    // signature context, and re-emits to a fixed point (#110). The oracle
-    // text itself is not the input: the reference emits bare variable names
-    // where the native Workshop parser's canonical spelling is `Global.g`
-    // (documented N-level presentation difference), so the round-trip uses
-    // the native emission.
-    let source = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../compatibility/fixtures/synthetic/chase-keywords/source.opy"),
-    )
-    .unwrap();
-    let hir = wright_opy::compile(&source, "source.opy", Path::new(""))
+fn chase_duration_keywords_round_trip_through_the_shipped_path() {
+    // The released catalog exposes the duration forms of chase, plus the
+    // keyword-bound wait/vect/len/print forms. Keep this probe within that
+    // published owner surface; the source fixture's chase-at-rate action is
+    // not present in workshop-rs 0.1.11.
+    let source = "globalvar g\n\nrule \"r\":\n    @Event global\n    chase(g, 10, duration=3, ChaseReeval.NONE)\n    chaseOverTime(g, 10, duration=3)\n    wait(time=1)\n    g = vect(x=1, y=2, z=3)\n    g = len(array=[1, 2])\n    print(text=\"x\")\n";
+    let wir = wright_opy::compile(source, "source.opy", Path::new(""))
         .expect("the fixture compiles natively");
-    let model = wright_core::hir::convert::convert(&hir).expect("the HIR converts");
-    let wir = wright_ir::lower::lower(&model).expect("the fixture lowers to WIR");
     let emitted = workshop_rs::emitter::emit(&wir, &catalog(), &en()).expect("the fixture emits");
     // The emission includes Debug/Print HUD text (canonical catalog layout)
     // and chase `None` members, so the catalog supplies

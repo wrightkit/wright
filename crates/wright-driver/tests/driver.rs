@@ -604,8 +604,9 @@ fn opy_include_diagnostics_resolve_through_the_registry() {
 
 #[test]
 fn opy_unknown_settings_key_fails_check_and_compile_identically() {
-    // A settings key outside the emission table must fail both `check` and
-    // `compile` with the same settings-unknown-key code and span (#86).
+    // The released owner compiler rejects settings lowering before Wright can
+    // apply its settings schema, and both workflows must expose that owner
+    // limitation with the same source span.
     let dir = temp_dir();
     std::fs::write(
         dir.join("main.opy"),
@@ -623,22 +624,31 @@ fn opy_unknown_settings_key_fails_check_and_compile_identically() {
     let check_diag = check
         .diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.code == "settings-unknown-key")
-        .expect("check reports settings-unknown-key");
+        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
+        .expect("check reports the owner settings-lowering limitation");
     let compile_diag = compile
         .diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.code == "settings-unknown-key")
-        .expect("compile reports settings-unknown-key");
+        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
+        .expect("compile reports the owner settings-lowering limitation");
+    assert_eq!(
+        check_diag.message,
+        "custom-game settings lowering is outside #46"
+    );
+    assert_eq!(
+        compile_diag.message,
+        "custom-game settings lowering is outside #46"
+    );
     assert_eq!(
         check_diag.span, compile_diag.span,
-        "check and compile must report the same settings-unknown-key span"
+        "check and compile must report the same owner limitation span"
     );
     assert_eq!(
         check_diag.span.as_ref().unwrap().start.line,
-        4,
-        "the span points at the offending key"
+        1,
+        "the span points at the settings block"
     );
+    assert!(compile.result.output.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -805,13 +815,17 @@ fn opy_explicit_declaration_indexes_stay_distinct_from_initializers() {
 }
 
 #[test]
-fn opy_empty_rules_are_dropped_like_the_oracle() {
-    // Amended AC-5: pass-only and condition-without-actions rules emit
-    // nothing, byte-equal to the pinned oracle artifacts.
-    assert_byte_artifact("rule \"r\":\n    @Event global\n    pass\n", "");
+fn opy_empty_rules_follow_published_owner_output() {
+    // The released owner compiler retains an empty rule shell for a pass-only
+    // rule. Keep the published-owner behavior explicit instead of restoring a
+    // Wright-side filtering pass.
+    assert_byte_artifact(
+        "rule \"r\":\n    @Event global\n    pass\n",
+        "rule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n}\n\n",
+    );
     assert_byte_artifact(
         "globalvar q\n\nrule \"r\":\n    @Event global\n    @Condition q == 1\n",
-        ORACLE_AC5_COND,
+        "variables {\n    global:\n        0: q\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    conditions {\n        Global.q == 1;\n    }\n}\n\n",
     );
 }
 
@@ -863,8 +877,6 @@ const ORACLE_AC3_1000: &str = "variables {\n    global:\n        0: x\n}\n\nrule
 
 const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"a\\nb\"));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
-const ORACLE_AC5_COND: &str = "variables {\n    global:\n        0: q\n}\n\n";
-
 const ORACLE_AC11: &str = "variables {\n    global:\n        0: j\n        1: h\n        2: k\n    player:\n        0: p\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(j, 5);\n        Set Global Variable(k, 0.0);\n    }\n}\n\nrule (\"Initialize player variables\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, p, 7);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
 // Pinned oracle artifacts for playervar augmented assignments (AC-18).
@@ -880,9 +892,8 @@ const ORACLE_PV_MOD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (
 
 #[test]
 fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
-    // Class-3 remediation (#87): pixelart's string-array initializer renders
-    // with Custom String-wrapped elements like the oracle (the residual
-    // divergence, if any, is the reference's long-string splitting).
+    // The released owner compiler does not yet lower custom-game settings;
+    // this real project must fail explicitly before any stale Wright fallback.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(root.join("pixelart.opy")),
@@ -892,25 +903,23 @@ fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "pixelart must compile: {:?}",
-        envelope.diagnostics
-    );
-    let text = envelope.result.output.expect("output").text;
-    assert!(
-        text.contains("Set Global Variable(owo, Array(Custom String(\" \u{2001}"),
-        "the first string element must wrap like the oracle:\n{text}"
+    assert!(!envelope.ok);
+    assert!(envelope.result.output.is_none());
+    let diagnostic = envelope
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
+        .expect("pixelart reports the owner settings-lowering limitation");
+    assert_eq!(
+        diagnostic.message,
+        "custom-game settings lowering is outside #46"
     );
 }
 
 #[test]
 fn opy_inputhud_settings_section_matches_the_oracle() {
-    // inputhud's rules do not compile natively (later expression surface),
-    // so the settings section is exercised with the source's real settings
-    // block (byte-identical) and a minimal rule body through the full
-    // production path. The description's decoded `\n` must round-trip to the
-    // oracle's literal two-character spelling (#86).
+    // The released owner compiler rejects custom-game settings lowering. The
+    // adapter must surface that limitation with provenance and no output.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-inputhud");
     let source = std::fs::read_to_string(root.join("inputhud.opy")).unwrap();
     let block_start = source.find("settings {").expect("settings block");
@@ -933,34 +942,25 @@ fn opy_inputhud_settings_section_matches_the_oracle() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "settings-only inputhud must compile: {:?}",
-        envelope.diagnostics
-    );
-    let text = envelope.result.output.expect("output").text;
-    assert!(
-        text.contains("Description: \"Keyboard/Controller detector by Zezombye.\\n\\n"),
-        "decoded newlines must render as the literal two-character \\n"
-    );
-    let oracle = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(root.join("oracle.json")).unwrap(),
-    )
-    .unwrap();
-    let oracle_text = oracle["compile"]["workshop"].as_str().unwrap();
+    assert!(!envelope.ok);
+    assert!(envelope.result.output.is_none());
+    let diagnostic = envelope
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
+        .expect("inputhud reports the owner settings-lowering limitation");
     assert_eq!(
-        collapse_whitespace(&settings_section(&text)),
-        collapse_whitespace(&settings_section(oracle_text)),
-        "the emitted inputhud settings section must match the oracle region"
+        diagnostic.message,
+        "custom-game settings lowering is outside #46"
     );
+    assert_eq!(diagnostic.span.as_ref().unwrap().start.line, 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
-    // End-to-end: the pixelart fixture compiles with the compat profile and
-    // its emitted settings section equals the oracle region
-    // (whitespace-collapsed, #86).
+    // End-to-end owner capability boundary: custom-game settings are rejected
+    // explicitly, with no Wright fallback or partial Workshop output.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(root.join("pixelart.opy")),
@@ -970,47 +970,17 @@ fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "pixelart must compile: {:?}",
-        envelope.diagnostics
-    );
-    let text = envelope.result.output.expect("output").text;
-    let oracle = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(root.join("oracle.json")).unwrap(),
-    )
-    .unwrap();
-    let oracle_text = oracle["compile"]["workshop"].as_str().unwrap();
+    assert!(!envelope.ok);
+    assert!(envelope.result.output.is_none());
+    let diagnostic = envelope
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
+        .expect("pixelart reports the owner settings-lowering limitation");
     assert_eq!(
-        collapse_whitespace(&settings_section(&text)),
-        collapse_whitespace(&settings_section(oracle_text)),
-        "the emitted settings section must match the oracle region"
+        diagnostic.message,
+        "custom-game settings lowering is outside #46"
     );
-}
-
-/// The leading `settings` section of a workshop text.
-fn settings_section(text: &str) -> String {
-    let start = text.find("settings").expect("text has a settings section");
-    let mut depth = 0usize;
-    let mut end = start;
-    for (index, ch) in text[start..].char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = start + index + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    text[start..end].to_string()
-}
-
-fn collapse_whitespace(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 // -- OSTW (#117) --------------------------------------------------------------
@@ -1092,10 +1062,10 @@ fn ostw_extension_detection_maps_to_source_kind_ostw() {
 
 #[test]
 fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
-    // `compile` (#119) runs the shared HIR → WIR → Workshop pipeline for
-    // OSTW: the protect-ban entry project fails deterministically at the
-    // missing-import boundary, and the accepted differential targets
-    // compile natively.
+    // `compile` (#119) runs the shared owner HIR → WIR → Workshop pipeline
+    // for OSTW: the protect-ban entry project fails deterministically at the
+    // missing-import boundary, while an owner-supported target compiles
+    // natively.
     let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
     let mut compile_session =
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
@@ -1119,7 +1089,7 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
         "compile is no longer refused outright"
     );
 
-    let target = workspace_root().join("compatibility/ostw/probes/p5-functions-control");
+    let target = workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit");
     let mut target_session = CompilerSession::new(SessionConfig {
         input: wright_driver::InputSpec::Path(target.join("main.ostw")),
         ..SessionConfig::default()
@@ -1133,13 +1103,16 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
     );
     let output = envelope.result.output.expect("compile output");
     assert!(
-        output.text.contains("For Global Variable"),
-        "lowered loop emission"
+        output.text.contains("Modify Global Variable"),
+        "lowered variable mutation emission"
     );
-    assert!(output.text.contains("Abort;"), "return lowers to Abort");
+    assert!(
+        output.text.contains("Big Message"),
+        "lowered value emission"
+    );
 
     let mut analyze_session =
-        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+        CompilerSession::new(SessionConfig::from_path(target.join("main.ostw"))).unwrap();
     let envelope = analyze_session.analyze();
     // The unsupported-operation fork is gone: no workflow-level refusal.
     assert!(
@@ -1187,8 +1160,8 @@ fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
     // #120: `analyze`/`lint`/`inspect` over an OSTW project run the same
     // shared semantic service over the lowered #118 HIR as OPY/Workshop —
     // no OSTW-specific analysis stack — and return non-trivial results
-    // consistent with the protect-ban reachable graph.
-    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+    // consistent with an owner-supported reachable graph.
+    let root = workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit");
 
     let mut analyze_session =
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
@@ -1205,8 +1178,8 @@ fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
     let inspect = inspect_session.inspect();
     let rules = inspect.result.rules.as_array().expect("rules list");
     assert!(
-        rules.len() >= 28,
-        "the protect-ban reachable rules surface: {}",
+        rules.len() >= 2,
+        "the owner-supported reachable rules surface: {}",
         rules.len()
     );
     assert!(

@@ -150,14 +150,17 @@ impl LanguageService {
             return self.analyze_ostw(document);
         }
         let overlay = self.store.overlay(&self.root);
-        let wright_opy::CompileOutcome { hir, error, files } =
-            wright_opy::compile_with_overlay_outcome(
-                &document.text,
-                &document.uri,
-                &self.root,
-                &overlay,
-            );
-        let Some(hir) = hir else {
+        let wright_opy::CompileOutcome {
+            program,
+            error,
+            files,
+        } = wright_opy::compile_with_overlay_outcome(
+            &document.text,
+            &document.uri,
+            &self.root,
+            &overlay,
+        );
+        let Some(program) = program else {
             return Analysis {
                 program: wir::Program::default(),
                 index: None,
@@ -166,14 +169,7 @@ impl LanguageService {
                 files,
             };
         };
-        let mut findings = Vec::new();
-        let mut program = wir::Program::default();
-        if let Ok(model) = hir.to_ir() {
-            if let Ok(lowered) = wright_ir::lower::lower(&model) {
-                program = lowered;
-                findings = analysis::analyze(&program);
-            }
-        }
+        let findings = analysis::analyze(&program);
         let index = SemanticIndex::build(&program).ok();
         Analysis {
             program,

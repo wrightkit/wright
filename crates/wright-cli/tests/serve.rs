@@ -52,7 +52,7 @@ fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::V
 fn stdio_transport_serves_structured_queries() {
     let responses = run_lines(
         "stdio",
-        &corpus_opy("synthetic/declarations-rules"),
+        &corpus_opy("synthetic/control-flow"),
         &[
             r#"{"op":"capabilities"}"#,
             r#"{"op":"project"}"#,
@@ -63,7 +63,7 @@ fn stdio_transport_serves_structured_queries() {
     assert_eq!(responses.len(), 4);
     assert_eq!(responses[0]["result"]["contract"], "wright-result/v1");
     assert_eq!(responses[1]["result"]["origin"]["kind"], "opy");
-    assert_eq!(responses[2]["result"][0]["callee"], "showStatus");
+    assert!(responses[2]["result"].as_array().unwrap().is_empty());
     assert!(
         responses[3]["result"]["exact"]["emittedBytes"]
             .as_u64()
@@ -144,7 +144,7 @@ fn stdio_transport_serves_mutation_operations() {
     // #130: the stdio adapter exposes the shared mutation operations as
     // thin mappings — validated edit preview and semantic rename — with the
     // same structured all-or-nothing results as in-process consumers.
-    let input = corpus_opy("synthetic/declarations-rules");
+    let input = corpus_opy("synthetic/declarations-numbers");
     let source = std::fs::read_to_string(&input).unwrap();
     let identity = wright_driver::input_identity(&source);
     let line_count = source.lines().count().max(1) as u32;
@@ -165,7 +165,7 @@ fn stdio_transport_serves_mutation_operations() {
                     "start_line": 1, "start_col": 1,
                     "end_line": line_count, "end_col": end_col,
                 },
-                "new_text": source.replace("score", "total")
+                "new_text": source.replace("j", "total")
             }]
         }
     });
@@ -180,7 +180,7 @@ fn stdio_transport_serves_mutation_operations() {
         previews[0]["new_text"]
             .as_str()
             .unwrap()
-            .contains("globalvar total = 0"),
+            .contains("globalvar total = 5"),
         "the preview carries the validated edited text: {responses:?}"
     );
 
@@ -211,7 +211,7 @@ fn stdio_transport_serves_mutation_operations() {
 fn transports_are_equivalent_for_mutation_operations() {
     // #130: stdio and JSON-RPC map the same mutation request to the same
     // in-process behavior.
-    let input = corpus_opy("synthetic/declarations-rules");
+    let input = corpus_opy("synthetic/declarations-numbers");
     let rename = serde_json::json!({
         "op": "semanticRename",
         "sources": {

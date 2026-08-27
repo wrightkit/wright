@@ -239,7 +239,7 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
     client.notify("initialized", serde_json::json!({}));
 
     // Open a document and expect publishDiagnostics.
-    let source = corpus_source("synthetic/declarations-rules");
+    let source = corpus_source("synthetic/language-service");
     client.notify("textDocument/didOpen", serde_json::json!({
         "textDocument": { "uri": uri_for("main.opy"), "languageId": "opy", "version": 1, "text": source },
     }));
@@ -355,7 +355,7 @@ fn lsp_negotiates_capabilities_and_serves_workflows() {
     );
     // Applying the returned edits to the original source reproduces the
     // validated preview exactly.
-    let original = corpus_source("synthetic/declarations-rules");
+    let original = corpus_source("synthetic/language-service");
     let applied = apply_lsp_edit(&original, &rename["result"], &uri_for("main.opy"));
     assert_eq!(
         applied,

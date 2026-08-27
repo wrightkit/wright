@@ -14,10 +14,10 @@ repository = "https://github.com/wrightkit/wright"
 # parser, emitter, detection, validation, and Workshop IR. This is the single
 # released reference for the cutover — workspace crates consume it via
 # `workshop-rs.workspace = true`.
-workshop-rs = "=0.1.9"
-opy-rs = { git = "https://github.com/wrightkit/opy-rs.git", rev = "e319735e93344302e1b2d827d9809683997723a7" }
-opy-compiler = { git = "https://github.com/wrightkit/opy-rs.git", rev = "e319735e93344302e1b2d827d9809683997723a7" }
-del-rs = { git = "https://github.com/wrightkit/del-rs.git", rev = "cb07808831dea9414360847d83f75a183844a17a" }
+workshop-rs = "=0.1.11"
+opy-rs = "=0.1.1"
+opy-compiler = "=0.1.1"
+del-rs = { package = "deltin-rs", version = "=0.1.1" }
 libc = "0.2"
 serde = "1"
 serde_json = "1"

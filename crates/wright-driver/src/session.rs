@@ -133,8 +133,8 @@ impl CompilerSession {
                         &resolved.root,
                         &std::collections::BTreeMap::new(),
                     );
-                    let program = match outcome.hir {
-                        Some(hir) => hir,
+                    let program = match outcome.program {
+                        Some(program) => program,
                         None => {
                             let error = outcome
                                 .error
@@ -142,7 +142,11 @@ impl CompilerSession {
                             return Err(opy_diag(error, &outcome.files, &resolved));
                         }
                     };
-                    self.load_hir(program, &resolved)?
+                    self.progress(ProgressEvent::new(ProgressPhase::Lowering));
+                    program.validate().map_err(|error| {
+                        ir_diag("validation-error", Stage::Validation, error, &resolved)
+                    })?;
+                    program
                 }
             }
             SourceKind::Auto => {
@@ -1091,7 +1095,12 @@ pub(crate) fn ostw_diag(
         path: outcome
             .project
             .as_ref()
-            .and_then(|project| project.files.get(span.file.index()))
+            .and_then(|project| {
+                project
+                    .files
+                    .iter()
+                    .find(|file| file.id == span.file.index() as u32)
+            })
             .map(|file| file.path.clone())
             .unwrap_or_else(|| resolved.display.clone()),
         start: Position {

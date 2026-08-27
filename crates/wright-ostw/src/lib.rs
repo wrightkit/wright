@@ -361,7 +361,7 @@ pub fn compile_with_semantics_overlay(
         .iter()
         .map(|diagnostic| map_diagnostic(&project, diagnostic))
         .collect::<Vec<_>>();
-    let (program, lowering) = del_rs::workshop::lower_project_to_wir_best_effort(&semantic);
+    let (program, lowering) = del_rs::workshop::lower_project_to_wir(&semantic);
     diagnostics.extend(
         lowering
             .iter()

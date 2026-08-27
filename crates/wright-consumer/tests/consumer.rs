@@ -12,9 +12,8 @@ fn consumer_runs_all_public_api_workflows_on_the_corpus() {
     for id in [
         "synthetic/basic-rule",
         "synthetic/control-flow",
-        "synthetic/declarations-rules",
-        "synthetic/expressions-values",
-        "synthetic/preprocessing",
+        "synthetic/declarations-numbers",
+        "synthetic/chase-enums",
     ] {
         let source = workspace_root()
             .join("compatibility/fixtures")

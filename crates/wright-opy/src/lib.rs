@@ -140,19 +140,18 @@ fn validate_stmts(
                 validate_expr(condition, catalog)?;
                 validate_stmts(body, catalog)?;
             }
-            opy_rs::hir::Stmt::Switch {
-                value,
-                cases,
-                r#default,
-                ..
-            } => {
+            opy_rs::hir::Stmt::Switch { value, arms, .. } => {
                 validate_expr(value, catalog)?;
-                for case in cases {
-                    validate_expr(&case.value, catalog)?;
-                    validate_stmts(&case.body, catalog)?;
-                }
-                if let Some(body) = r#default {
-                    validate_stmts(body, catalog)?;
+                for arm in arms {
+                    match arm {
+                        opy_rs::hir::SwitchArm::Case { value, body, .. } => {
+                            validate_expr(value, catalog)?;
+                            validate_stmts(body, catalog)?;
+                        }
+                        opy_rs::hir::SwitchArm::Default { body, .. } => {
+                            validate_stmts(body, catalog)?;
+                        }
+                    }
                 }
             }
             opy_rs::hir::Stmt::Break { .. }
@@ -266,16 +265,32 @@ fn validate_expr(
 }
 
 pub struct CompileOutcome {
-    pub hir: Option<wright_core::hir::Program>,
+    pub program: Option<workshop_rs::wir::Program>,
     pub error: Option<OpyError>,
     pub files: Vec<preprocess::FileRecord>,
+}
+
+fn compiler_error(error: opy_compiler::IntegrationError) -> OpyError {
+    let diagnostic = error.diagnostic;
+    match diagnostic.span {
+        Some(span) => OpyError::at(
+            diagnostic.code,
+            diagnostic.message,
+            opy_rs::diag::Span::new(
+                span.file,
+                opy_rs::diag::Position::new(span.start.line, span.start.col),
+                opy_rs::diag::Position::new(span.end.line, span.end.col),
+            ),
+        ),
+        None => OpyError::new(diagnostic.code, diagnostic.message),
+    }
 }
 
 pub fn compile(
     source: &str,
     main_path: &str,
     root: &std::path::Path,
-) -> OpyResult<wright_core::hir::Program> {
+) -> OpyResult<workshop_rs::wir::Program> {
     compile_with_overlay(source, main_path, root, &std::collections::BTreeMap::new())
 }
 
@@ -284,10 +299,10 @@ pub fn compile_with_overlay(
     main_path: &str,
     root: &std::path::Path,
     overlay: &std::collections::BTreeMap<String, String>,
-) -> OpyResult<wright_core::hir::Program> {
+) -> OpyResult<workshop_rs::wir::Program> {
     let outcome = compile_with_overlay_outcome(source, main_path, root, overlay);
     outcome
-        .hir
+        .program
         .ok_or_else(|| outcome.error.expect("failed compile outcome has an error"))
 }
 
@@ -301,48 +316,38 @@ pub fn compile_with_overlay_outcome(
     let files = owner.files;
     let Some(hir) = owner.hir else {
         return CompileOutcome {
-            hir: None,
+            program: None,
             error: owner.error,
             files,
         };
     };
     if let Err(error) = validate_builtin_enum_members(&hir) {
         return CompileOutcome {
-            hir: None,
+            program: None,
             error: Some(error),
             files,
         };
     }
-    let value = match serde_json::to_value(hir) {
-        Ok(value) => value,
+
+    let compiler = match opy_compiler::Compiler::new() {
+        Ok(compiler) => compiler,
         Err(error) => {
             return CompileOutcome {
-                hir: None,
-                error: Some(OpyError::new("hir-serialization", error.to_string())),
+                program: None,
+                error: Some(compiler_error(error)),
                 files,
             };
         }
     };
-    match wright_core::hir::parse_value(value) {
-        Ok(hir) => CompileOutcome {
-            hir: Some(hir),
+    match compiler.compile_hir(&hir) {
+        Ok(artifact) => CompileOutcome {
+            program: Some(artifact.wir),
             error: None,
             files,
         },
         Err(error) => CompileOutcome {
-            hir: None,
-            error: Some(match error.span() {
-                Some(span) => OpyError::at(
-                    error.code(),
-                    error.message(),
-                    opy_rs::diag::Span::new(
-                        span.file,
-                        opy_rs::diag::Position::new(span.start.line, span.start.col),
-                        opy_rs::diag::Position::new(span.end.line, span.end.col),
-                    ),
-                ),
-                None => OpyError::new(error.code(), error.message()),
-            }),
+            program: None,
+            error: Some(compiler_error(error)),
             files,
         },
     }

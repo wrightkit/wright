@@ -562,6 +562,11 @@ pub fn semantic_rename(
                  supply the current text of every project source",
             )]);
         };
+        let current = sources
+            .get(&source)
+            .cloned()
+            .unwrap_or_else(|| main_text.clone());
+        let occurrence = exact_identifier_occurrence(occurrence, &current, &symbol.name);
         edits.entry(source).or_default().insert((
             occurrence.start.line,
             occurrence.start.col,
@@ -613,6 +618,39 @@ pub fn semantic_rename(
             diagnostics: validation.diagnostics,
             preview: None,
         }
+    }
+}
+
+/// Some released owner compilers report a call span rather than the exact
+/// callee identifier. Narrow such a span only when the source proves that it
+/// starts with the resolved symbol name; never broaden or guess an edit.
+fn exact_identifier_occurrence(
+    span: workshop_rs::source::Span,
+    source: &str,
+    name: &str,
+) -> workshop_rs::source::Span {
+    if span.start.line != span.end.line {
+        return span;
+    }
+    let Some(line) = source
+        .lines()
+        .nth(span.start.line.saturating_sub(1) as usize)
+    else {
+        return span;
+    };
+    let chars: Vec<char> = line.chars().collect();
+    let start = span.start.col.saturating_sub(1) as usize;
+    let end = span.end.col.saturating_sub(1) as usize;
+    let name_chars: Vec<char> = name.chars().collect();
+    let name_end = start.saturating_add(name_chars.len());
+    if end > name_end && chars.get(start..name_end) == Some(name_chars.as_slice()) {
+        workshop_rs::source::Span::new(
+            span.file,
+            span.start,
+            workshop_rs::source::Position::new(span.start.line, name_end as u32 + 1),
+        )
+    } else {
+        span
     }
 }
 
@@ -756,13 +794,18 @@ fn compile_project(
 ) -> Result<workshop_rs::wir::Program, Vec<Diagnostic>> {
     match kind {
         SourceKind::Opy => {
+            let main_path = resolved
+                .path
+                .as_deref()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| resolved.display.clone());
             let outcome = wright_opy::compile_with_overlay_outcome(
                 &resolved.text,
-                &resolved.display,
+                &main_path,
                 &resolved.root,
                 overlay,
             );
-            let Some(program) = outcome.hir else {
+            let Some(mut program) = outcome.program else {
                 return Err(vec![session::opy_diag(
                     outcome
                         .error
@@ -770,31 +813,6 @@ fn compile_project(
                     &outcome.files,
                     resolved,
                 )]);
-            };
-            if let Err(error) = program.validate() {
-                return Err(vec![session::hir_diag(error, resolved)]);
-            }
-            let model = match program.to_ir() {
-                Ok(model) => model,
-                Err(error) => {
-                    return Err(vec![session::ir_diag(
-                        "convert-error",
-                        crate::diag::Stage::Lowering,
-                        error,
-                        resolved,
-                    )]);
-                }
-            };
-            let mut program = match wright_ir::lower::lower(&model) {
-                Ok(program) => program,
-                Err(error) => {
-                    return Err(vec![session::ir_diag(
-                        "lower-error",
-                        crate::diag::Stage::Lowering,
-                        error,
-                        resolved,
-                    )]);
-                }
             };
             if let Err(error) = program.validate() {
                 return Err(vec![session::ir_diag(

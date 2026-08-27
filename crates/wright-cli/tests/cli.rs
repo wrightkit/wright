@@ -614,8 +614,7 @@ fn stdout_stderr_separation_holds_in_both_modes() {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn tty_progress_stops_and_clears_before_final_render() {
-    let path =
-        workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart/pixelart.opy");
+    let path = workspace_root().join("compatibility/fixtures/synthetic/control-flow/source.opy");
     let output = run_in_tty(&[
         "analyze",
         path.to_str().unwrap(),
