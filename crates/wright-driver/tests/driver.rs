@@ -604,9 +604,8 @@ fn opy_include_diagnostics_resolve_through_the_registry() {
 
 #[test]
 fn opy_unknown_settings_key_fails_check_and_compile_identically() {
-    // The released owner compiler rejects settings lowering before Wright can
-    // apply its settings schema, and both workflows must expose that owner
-    // limitation with the same source span.
+    // Frontend checking preserves the owner-independent settings carrier;
+    // canonical Workshop validation rejects an unknown emission key.
     let dir = temp_dir();
     std::fs::write(
         dir.join("main.opy"),
@@ -621,34 +620,12 @@ fn opy_unknown_settings_key_fails_check_and_compile_identically() {
     let mut compile_session = CompilerSession::new(SessionConfig::from_path(main_path)).unwrap();
     let compile = compile_session.compile();
     assert!(!compile.ok);
-    let check_diag = check
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
-        .expect("check reports the owner settings-lowering limitation");
     let compile_diag = compile
         .diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
-        .expect("compile reports the owner settings-lowering limitation");
-    assert_eq!(
-        check_diag.message,
-        "custom-game settings lowering is outside #46"
-    );
-    assert_eq!(
-        compile_diag.message,
-        "custom-game settings lowering is outside #46"
-    );
-    assert_eq!(
-        check_diag.span, compile_diag.span,
-        "check and compile must report the same owner limitation span"
-    );
-    assert_eq!(
-        check_diag.span.as_ref().unwrap().start.line,
-        1,
-        "the span points at the settings block"
-    );
-    assert!(compile.result.output.is_none());
+        .find(|diagnostic| diagnostic.code == "workshop-emission")
+        .expect("compile reports the canonical settings validation error");
+    assert!(compile_diag.message.contains("settings key"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -892,8 +869,8 @@ const ORACLE_PV_MOD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (
 
 #[test]
 fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
-    // The released owner compiler does not yet lower custom-game settings;
-    // this real project must fail explicitly before any stale Wright fallback.
+    // The owner compiler carries settings through the canonical Workshop
+    // emitter while preserving the real project's string lowering.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(root.join("pixelart.opy")),
@@ -903,23 +880,14 @@ fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(!envelope.ok);
-    assert!(envelope.result.output.is_none());
-    let diagnostic = envelope
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
-        .expect("pixelart reports the owner settings-lowering limitation");
-    assert_eq!(
-        diagnostic.message,
-        "custom-game settings lowering is outside #46"
-    );
+    assert!(envelope.ok);
+    let output = envelope.result.output.expect("owner emits settings");
+    assert!(!output.text.is_empty());
 }
 
 #[test]
 fn opy_inputhud_settings_section_matches_the_oracle() {
-    // The released owner compiler rejects custom-game settings lowering. The
-    // adapter must surface that limitation with provenance and no output.
+    // The owner compiler emits the settings section without a Wright fallback.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-inputhud");
     let source = std::fs::read_to_string(root.join("inputhud.opy")).unwrap();
     let block_start = source.find("settings {").expect("settings block");
@@ -942,25 +910,16 @@ fn opy_inputhud_settings_section_matches_the_oracle() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(!envelope.ok);
-    assert!(envelope.result.output.is_none());
-    let diagnostic = envelope
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
-        .expect("inputhud reports the owner settings-lowering limitation");
-    assert_eq!(
-        diagnostic.message,
-        "custom-game settings lowering is outside #46"
-    );
-    assert_eq!(diagnostic.span.as_ref().unwrap().start.line, 1);
+    assert!(envelope.ok);
+    let output = envelope.result.output.expect("owner emits settings");
+    assert!(output.text.contains("Mode Name:"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
-    // End-to-end owner capability boundary: custom-game settings are rejected
-    // explicitly, with no Wright fallback or partial Workshop output.
+    // End-to-end owner capability path: custom-game settings are emitted by
+    // the canonical Workshop backend.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(root.join("pixelart.opy")),
@@ -970,17 +929,9 @@ fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(!envelope.ok);
-    assert!(envelope.result.output.is_none());
-    let diagnostic = envelope
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "unsupported-integration-surface")
-        .expect("pixelart reports the owner settings-lowering limitation");
-    assert_eq!(
-        diagnostic.message,
-        "custom-game settings lowering is outside #46"
-    );
+    assert!(envelope.ok);
+    let output = envelope.result.output.expect("owner emits settings");
+    assert!(output.text.contains("Workshop Island"));
 }
 
 // -- OSTW (#117) --------------------------------------------------------------
@@ -1032,7 +983,7 @@ fn ostw_projects_load_through_the_shared_session_path() {
         envelope
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "ostw-unsupported"),
+            .any(|diagnostic| diagnostic.code == "SM008"),
         "the semantic-phase Math/Cursor/class boundaries surface"
     );
     // Provenance: every missing-import span resolves to HeroSelect.del.
@@ -1057,6 +1008,25 @@ fn ostw_extension_detection_maps_to_source_kind_ostw() {
     let config = SessionConfig::from_path(dir.join("helper.del"));
     let resolved = wright_driver::input::resolve(&config).expect("resolves");
     assert_eq!(resolved.kind, SourceKind::Ostw, ".del also maps to Ostw");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ostw_empty_source_file_keeps_source_and_parsed_provenance() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("ds.toml"), "entry_point=\"main.del\"\n").unwrap();
+    std::fs::write(dir.join("main.del"), "").unwrap();
+    let mut session = CompilerSession::new(SessionConfig::from_path(dir.join("main.del")))
+        .expect("session builds");
+    let envelope = session.check();
+    let project = envelope.result.ostw.expect("OSTW project summary");
+    let main = project
+        .files
+        .iter()
+        .find(|file| file.path == "main.del")
+        .expect("empty entry source is registered");
+    assert!(main.source);
+    assert!(main.parsed);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

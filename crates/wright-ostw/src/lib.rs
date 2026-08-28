@@ -382,12 +382,17 @@ fn project_view(project: &del_rs::project::Project) -> Project {
         .iter()
         .map(|file| {
             let source = project.sources.get(*file);
-            let has_source = !source.text.is_empty();
+            let exists = project.root.join(&source.name).is_file();
+            let parsed = exists
+                && !project.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.file == *file
+                        && matches!(diagnostic.phase, del_rs::Phase::Lex | del_rs::Phase::Parse)
+                });
             FileRecord {
                 id: file.0,
                 path: source.name.to_string_lossy().replace('\\', "/"),
-                source: has_source,
-                parsed: has_source,
+                source: exists,
+                parsed,
                 imports: project
                     .imports
                     .iter()
@@ -454,8 +459,13 @@ fn map_diagnostic(
         del_rs::Phase::Parse => "ostw-parse-error".to_string(),
         del_rs::Phase::Project if diagnostic.code == "PJ002" => "ostw-missing-import".to_string(),
         del_rs::Phase::Project => "ostw-project-error".to_string(),
-        del_rs::Phase::Semantic | del_rs::Phase::Hir | del_rs::Phase::Oracle => {
+        del_rs::Phase::Semantic | del_rs::Phase::Hir | del_rs::Phase::Oracle
+            if diagnostic.code == "HI018" =>
+        {
             "ostw-unsupported".to_string()
+        }
+        del_rs::Phase::Semantic | del_rs::Phase::Hir | del_rs::Phase::Oracle => {
+            diagnostic.code.clone()
         }
     };
     SourceError {

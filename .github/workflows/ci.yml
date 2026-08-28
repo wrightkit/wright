@@ -190,7 +190,7 @@ jobs:
   #   - Owner-backed OPY adapter build/test coverage
   # -------------------------------------------------------------------------
   opy-integration:
-    name: OPY integration (N-level + differential)
+    name: OPY integration (N-level + owner)
     needs: [paths, rust-quality]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
@@ -286,7 +286,7 @@ jobs:
   # Wright integration package still compiles against the owner contract.
   # -------------------------------------------------------------------------
   del-integration:
-    name: DEL/OSTW integration (differential)
+    name: DEL/OSTW integration (owner adapter)
     needs: [paths, rust-quality]
     if: needs.paths.outputs.del == 'true'
     runs-on: ubuntu-latest
