@@ -153,6 +153,50 @@ fn fold(program: &mut wir::Program) {
     wright_transform::fold_constants::FoldConstants.run(program);
 }
 
+/// The owner compiler's pinned OverPy contract lowers `not` over a comparison
+/// to the complementary comparison (for example, `not (a < b)` to `a >= b`).
+/// Normalize that representation difference before structural WIR comparison.
+fn normalize_negated_comparisons(program: &mut wir::Program) {
+    for index in 0..program.values.len() {
+        let id = wright_ir::ids::Id::from_index(index);
+        let Some(node) = program.values.get(id).cloned() else {
+            continue;
+        };
+        let Value::Call { name, args } = node.value else {
+            continue;
+        };
+        if name != "not" || args.len() != 1 {
+            continue;
+        }
+        let Some(Value::Call {
+            name: comparison,
+            args: operands,
+        }) = program.values.get(args[0]).map(|node| node.value.clone())
+        else {
+            continue;
+        };
+        let Some(negated) = negated_comparison(&comparison) else {
+            continue;
+        };
+        program.values.get_mut(id).expect("value in range").value = Value::Call {
+            name: negated.to_string(),
+            args: operands,
+        };
+    }
+}
+
+fn negated_comparison(operator: &str) -> Option<&'static str> {
+    Some(match operator {
+        "==" => "!=",
+        "!=" => "==",
+        "<" => ">=",
+        ">" => "<=",
+        "<=" => ">",
+        ">=" => "<",
+        _ => return None,
+    })
+}
+
 /// Inline write-once per-call player variables (declared #119 contract; the
 /// reference materializes void-function arguments this way). Applied
 /// identically to both sides.
@@ -625,6 +669,10 @@ fn opy_round_trip(
     };
     // …and the recompiled WIR must be equivalent to the parsed WIR, then
     // still emit to Workshop text through the shipped emitter.
+    let mut original = original;
+    let mut recompiled = recompiled;
+    normalize_negated_comparisons(&mut original);
+    normalize_negated_comparisons(&mut recompiled);
     let equivalent = workshop_rs::roundtrip::equivalent(&original, &recompiled);
     if !equivalent {
         failures.push(format!("{fixture}: recompiled WIR is not equivalent"));

@@ -1192,7 +1192,7 @@ fn opy_unknown_enum_member_is_a_deterministic_frontend_diagnostic() {
     assert_eq!(output.status.code(), Some(1));
     let envelope = parse_json(&output.stdout);
     let diagnostic = &envelope["diagnostics"][0];
-    assert_eq!(diagnostic["code"], "catalog-validation");
+    assert_eq!(diagnostic["code"], "unknown-enum-member");
     assert_eq!(diagnostic["stage"], "frontend");
     assert!(
         diagnostic["span"].is_object(),
