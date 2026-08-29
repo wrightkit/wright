@@ -60,6 +60,9 @@ def _collapse_hud(text: str) -> str:
 
 def normalize(text: str) -> str:
     text = _collapse_hud(text)
+    # The canonical emitter's `All Players` spelling is equivalent to
+    # OverPy's explicit `All Players(All Teams)` selector.
+    text = text.replace("All Players(All Teams)", "All Players")
     return re.sub(r"\s+", "", text)
 
 
@@ -81,7 +84,7 @@ def main() -> int:
         "wright": {"commit": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
         ).strip()},
-        "normalizer": "debug-hud-collapse + whitespace-collapse",
+        "normalizer": "debug-hud-collapse + all-players-selector + whitespace-collapse",
         "fixtures": {},
     }
     failures = []
