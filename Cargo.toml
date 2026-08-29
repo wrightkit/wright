@@ -15,8 +15,8 @@ repository = "https://github.com/wrightkit/wright"
 # released reference for the cutover — workspace crates consume it via
 # `workshop-rs.workspace = true`.
 workshop-rs = "=0.1.11"
-opy-rs = "=0.1.4"
-opy-compiler = "=0.1.4"
+opy-rs = "=0.1.5"
+opy-compiler = "=0.1.5"
 del-rs = { package = "deltin-rs", version = "=0.1.1" }
 libc = "0.2"
 serde = "1"
