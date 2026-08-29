@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.16](https://github.com/wrightkit/wright/compare/v0.2.15...v0.2.16) (2026-08-29)
+
+
+### Bug Fixes
+
+* **compat:** align OPY 0.1.4 consumer output ([1dc15d5](https://github.com/wrightkit/wright/commit/1dc15d57c32c0c07f39e94ebc3530b506cc611c7)), closes [#228](https://github.com/wrightkit/wright/issues/228)
+* **deps:** upgrade OPY owners to 0.1.3 ([d7d0a20](https://github.com/wrightkit/wright/commit/d7d0a20ee122c029a50f1819660d1452e89f4dc5)), closes [#228](https://github.com/wrightkit/wright/issues/228)
+* finish Wright source-language cutover follow-ups ([1d17c92](https://github.com/wrightkit/wright/commit/1d17c92714a7ffe0a4ec95db9beb612a4772a0f8))
+* pin published DEL owner revision ([9e9165b](https://github.com/wrightkit/wright/commit/9e9165b52e20872bf6b84296ae7c7353d237e2b9))
+* pin Windows-safe del-rs revision ([8671810](https://github.com/wrightkit/wright/commit/86718108b83c0182b13d50b23c4b91e69207db00))
+* refresh owner dependency lock metadata ([00e4e36](https://github.com/wrightkit/wright/commit/00e4e36f76f435afca7134762085af1e64ee9763))
+* run existing adapter integration targets ([7ea3a7a](https://github.com/wrightkit/wright/commit/7ea3a7a700c78a5117b6b1b53ae2f5e37d94d888))
+* **workshop:** converge on released workshop-rs surface ([1358fd7](https://github.com/wrightkit/wright/commit/1358fd7f0e436f327c2a8f2a21e64c6f09e5a54f)), closes [#191](https://github.com/wrightkit/wright/issues/191)
+
 ## [0.2.15](https://github.com/wrightkit/wright/compare/v0.2.14...v0.2.15) (2026-08-24)
 
 
