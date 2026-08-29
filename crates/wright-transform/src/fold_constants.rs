@@ -130,7 +130,7 @@ fn fold_one(program: &wir::Program, value: &Value) -> Option<Value> {
                 if let Some(operand) = number(program, args[0]) {
                     match name.as_str() {
                         "-" => return Some(folded_number(-operand)),
-                        "sqrt" => return Some(folded_number(operand.sqrt())),
+                        "sqrt" | "squareRoot" => return Some(folded_number(operand.sqrt())),
                         "abs" | "absoluteValue" => return Some(folded_number(operand.abs())),
                         _ => {}
                     }

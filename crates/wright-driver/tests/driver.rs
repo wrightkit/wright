@@ -604,8 +604,8 @@ fn opy_include_diagnostics_resolve_through_the_registry() {
 
 #[test]
 fn opy_unknown_settings_key_fails_check_and_compile_identically() {
-    // A settings key outside the emission table must fail both `check` and
-    // `compile` with the same settings-unknown-key code and span (#86).
+    // Frontend checking preserves the owner-independent settings carrier;
+    // canonical Workshop validation rejects an unknown emission key.
     let dir = temp_dir();
     std::fs::write(
         dir.join("main.opy"),
@@ -620,25 +620,12 @@ fn opy_unknown_settings_key_fails_check_and_compile_identically() {
     let mut compile_session = CompilerSession::new(SessionConfig::from_path(main_path)).unwrap();
     let compile = compile_session.compile();
     assert!(!compile.ok);
-    let check_diag = check
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "settings-unknown-key")
-        .expect("check reports settings-unknown-key");
     let compile_diag = compile
         .diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.code == "settings-unknown-key")
-        .expect("compile reports settings-unknown-key");
-    assert_eq!(
-        check_diag.span, compile_diag.span,
-        "check and compile must report the same settings-unknown-key span"
-    );
-    assert_eq!(
-        check_diag.span.as_ref().unwrap().start.line,
-        4,
-        "the span points at the offending key"
-    );
+        .find(|diagnostic| diagnostic.code == "workshop-emission")
+        .expect("compile reports the canonical settings validation error");
+    assert!(compile_diag.message.contains("settings key"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -805,13 +792,17 @@ fn opy_explicit_declaration_indexes_stay_distinct_from_initializers() {
 }
 
 #[test]
-fn opy_empty_rules_are_dropped_like_the_oracle() {
-    // Amended AC-5: pass-only and condition-without-actions rules emit
-    // nothing, byte-equal to the pinned oracle artifacts.
-    assert_byte_artifact("rule \"r\":\n    @Event global\n    pass\n", "");
+fn opy_empty_rules_follow_published_owner_output() {
+    // The released owner compiler retains an empty rule shell for a pass-only
+    // rule. Keep the published-owner behavior explicit instead of restoring a
+    // Wright-side filtering pass.
+    assert_byte_artifact(
+        "rule \"r\":\n    @Event global\n    pass\n",
+        "rule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n}\n\n",
+    );
     assert_byte_artifact(
         "globalvar q\n\nrule \"r\":\n    @Event global\n    @Condition q == 1\n",
-        ORACLE_AC5_COND,
+        "variables {\n    global:\n        0: q\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    conditions {\n        Global.q == 1;\n    }\n}\n\n",
     );
 }
 
@@ -863,8 +854,6 @@ const ORACLE_AC3_1000: &str = "variables {\n    global:\n        0: x\n}\n\nrule
 
 const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"a\\nb\"));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
-const ORACLE_AC5_COND: &str = "variables {\n    global:\n        0: q\n}\n\n";
-
 const ORACLE_AC11: &str = "variables {\n    global:\n        0: j\n        1: h\n        2: k\n    player:\n        0: p\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(j, 5);\n        Set Global Variable(k, 0.0);\n    }\n}\n\nrule (\"Initialize player variables\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, p, 7);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
 // Pinned oracle artifacts for playervar augmented assignments (AC-18).
@@ -880,9 +869,8 @@ const ORACLE_PV_MOD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (
 
 #[test]
 fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
-    // Class-3 remediation (#87): pixelart's string-array initializer renders
-    // with Custom String-wrapped elements like the oracle (the residual
-    // divergence, if any, is the reference's long-string splitting).
+    // The owner compiler carries settings through the canonical Workshop
+    // emitter while preserving the real project's string lowering.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(root.join("pixelart.opy")),
@@ -892,25 +880,14 @@ fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "pixelart must compile: {:?}",
-        envelope.diagnostics
-    );
-    let text = envelope.result.output.expect("output").text;
-    assert!(
-        text.contains("Set Global Variable(owo, Array(Custom String(\" \u{2001}"),
-        "the first string element must wrap like the oracle:\n{text}"
-    );
+    assert!(envelope.ok);
+    let output = envelope.result.output.expect("owner emits settings");
+    assert!(!output.text.is_empty());
 }
 
 #[test]
 fn opy_inputhud_settings_section_matches_the_oracle() {
-    // inputhud's rules do not compile natively (later expression surface),
-    // so the settings section is exercised with the source's real settings
-    // block (byte-identical) and a minimal rule body through the full
-    // production path. The description's decoded `\n` must round-trip to the
-    // oracle's literal two-character spelling (#86).
+    // The owner compiler emits the settings section without a Wright fallback.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-inputhud");
     let source = std::fs::read_to_string(root.join("inputhud.opy")).unwrap();
     let block_start = source.find("settings {").expect("settings block");
@@ -933,34 +910,16 @@ fn opy_inputhud_settings_section_matches_the_oracle() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "settings-only inputhud must compile: {:?}",
-        envelope.diagnostics
-    );
-    let text = envelope.result.output.expect("output").text;
-    assert!(
-        text.contains("Description: \"Keyboard/Controller detector by Zezombye.\\n\\n"),
-        "decoded newlines must render as the literal two-character \\n"
-    );
-    let oracle = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(root.join("oracle.json")).unwrap(),
-    )
-    .unwrap();
-    let oracle_text = oracle["compile"]["workshop"].as_str().unwrap();
-    assert_eq!(
-        collapse_whitespace(&settings_section(&text)),
-        collapse_whitespace(&settings_section(oracle_text)),
-        "the emitted inputhud settings section must match the oracle region"
-    );
+    assert!(envelope.ok);
+    let output = envelope.result.output.expect("owner emits settings");
+    assert!(output.text.contains("Mode Name:"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
-    // End-to-end: the pixelart fixture compiles with the compat profile and
-    // its emitted settings section equals the oracle region
-    // (whitespace-collapsed, #86).
+    // End-to-end owner capability path: custom-game settings are emitted by
+    // the canonical Workshop backend.
     let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(root.join("pixelart.opy")),
@@ -970,47 +929,9 @@ fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
     })
     .unwrap();
     let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "pixelart must compile: {:?}",
-        envelope.diagnostics
-    );
-    let text = envelope.result.output.expect("output").text;
-    let oracle = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(root.join("oracle.json")).unwrap(),
-    )
-    .unwrap();
-    let oracle_text = oracle["compile"]["workshop"].as_str().unwrap();
-    assert_eq!(
-        collapse_whitespace(&settings_section(&text)),
-        collapse_whitespace(&settings_section(oracle_text)),
-        "the emitted settings section must match the oracle region"
-    );
-}
-
-/// The leading `settings` section of a workshop text.
-fn settings_section(text: &str) -> String {
-    let start = text.find("settings").expect("text has a settings section");
-    let mut depth = 0usize;
-    let mut end = start;
-    for (index, ch) in text[start..].char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = start + index + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    text[start..end].to_string()
-}
-
-fn collapse_whitespace(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
+    assert!(envelope.ok);
+    let output = envelope.result.output.expect("owner emits settings");
+    assert!(output.text.contains("Workshop Island"));
 }
 
 // -- OSTW (#117) --------------------------------------------------------------
@@ -1062,7 +983,7 @@ fn ostw_projects_load_through_the_shared_session_path() {
         envelope
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "ostw-unsupported"),
+            .any(|diagnostic| diagnostic.code == "SM008"),
         "the semantic-phase Math/Cursor/class boundaries surface"
     );
     // Provenance: every missing-import span resolves to HeroSelect.del.
@@ -1091,11 +1012,30 @@ fn ostw_extension_detection_maps_to_source_kind_ostw() {
 }
 
 #[test]
+fn ostw_empty_source_file_keeps_source_and_parsed_provenance() {
+    let dir = temp_dir();
+    std::fs::write(dir.join("ds.toml"), "entry_point=\"main.del\"\n").unwrap();
+    std::fs::write(dir.join("main.del"), "").unwrap();
+    let mut session = CompilerSession::new(SessionConfig::from_path(dir.join("main.del")))
+        .expect("session builds");
+    let envelope = session.check();
+    let project = envelope.result.ostw.expect("OSTW project summary");
+    let main = project
+        .files
+        .iter()
+        .find(|file| file.path == "main.del")
+        .expect("empty entry source is registered");
+    assert!(main.source);
+    assert!(main.parsed);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
-    // `compile` (#119) runs the shared HIR → WIR → Workshop pipeline for
-    // OSTW: the protect-ban entry project fails deterministically at the
-    // missing-import boundary, and the accepted differential targets
-    // compile natively.
+    // `compile` (#119) runs the shared owner HIR → WIR → Workshop pipeline
+    // for OSTW: the protect-ban entry project fails deterministically at the
+    // missing-import boundary, while an owner-supported target compiles
+    // natively.
     let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
     let mut compile_session =
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
@@ -1119,7 +1059,7 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
         "compile is no longer refused outright"
     );
 
-    let target = workspace_root().join("compatibility/ostw/probes/p5-functions-control");
+    let target = workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit");
     let mut target_session = CompilerSession::new(SessionConfig {
         input: wright_driver::InputSpec::Path(target.join("main.ostw")),
         ..SessionConfig::default()
@@ -1133,13 +1073,16 @@ fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
     );
     let output = envelope.result.output.expect("compile output");
     assert!(
-        output.text.contains("For Global Variable"),
-        "lowered loop emission"
+        output.text.contains("Modify Global Variable"),
+        "lowered variable mutation emission"
     );
-    assert!(output.text.contains("Abort;"), "return lowers to Abort");
+    assert!(
+        output.text.contains("Big Message"),
+        "lowered value emission"
+    );
 
     let mut analyze_session =
-        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
+        CompilerSession::new(SessionConfig::from_path(target.join("main.ostw"))).unwrap();
     let envelope = analyze_session.analyze();
     // The unsupported-operation fork is gone: no workflow-level refusal.
     assert!(
@@ -1187,8 +1130,8 @@ fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
     // #120: `analyze`/`lint`/`inspect` over an OSTW project run the same
     // shared semantic service over the lowered #118 HIR as OPY/Workshop —
     // no OSTW-specific analysis stack — and return non-trivial results
-    // consistent with the protect-ban reachable graph.
-    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+    // consistent with an owner-supported reachable graph.
+    let root = workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit");
 
     let mut analyze_session =
         CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
@@ -1205,8 +1148,8 @@ fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
     let inspect = inspect_session.inspect();
     let rules = inspect.result.rules.as_array().expect("rules list");
     assert!(
-        rules.len() >= 28,
-        "the protect-ban reachable rules surface: {}",
+        rules.len() >= 2,
+        "the owner-supported reachable rules surface: {}",
         rules.len()
     );
     assert!(

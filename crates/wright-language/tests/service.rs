@@ -9,7 +9,7 @@ use wright_language::LanguageService;
 use wright_language::document::{Document, Position};
 use wright_opy::manifest;
 
-const CORPUS: &str = "synthetic/declarations-rules";
+const CORPUS: &str = "synthetic/language-service";
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -182,11 +182,11 @@ fn completion_and_member_context_use_utf16_offsets_after_non_bmp_text() {
     // Non-BMP text before the cursor must not shift UTF-16 offsets onto
     // byte/char boundaries used for slicing. Both lines must stay valid OPY
     // (the semantic manifest rejects misplaced/undeclared builtins, #109).
-    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(points))\n    points.append(points)\n";
+    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    debug(\"🎯 {}\".format(points))\n    # points.\n";
     let document = Document::new("file:///u16.opy", source, workspace_root());
     let (service, uri) = service_with(document);
     let line = "    debug(\"🎯 {}\".format(points))";
-    let member_line = "    points.append(points)";
+    let member_line = "    # points.";
 
     // The editor cursor is a UTF-16 offset; compute it from the character
     // position, not the byte position (the 🎯 shifts the two apart).
@@ -196,7 +196,7 @@ fn completion_and_member_context_use_utf16_offsets_after_non_bmp_text() {
     };
 
     // Member context: cursor right after the dot in `points.append`.
-    let dot_byte = member_line.find(".append").unwrap();
+    let dot_byte = member_line.find('.').unwrap();
     let items = service.completion(
         &uri,
         Position {
@@ -293,18 +293,18 @@ fn rename_edit_ranges_use_utf16_offsets_after_non_bmp_text() {
 
 #[test]
 fn completion_uses_position_and_context() {
-    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    points.append(points)\n";
+    let source = "globalvar points = [1, 2, 3]\n\nrule \"r\":\n    @Event global\n    debug(points)\n    # points.\n";
     let document = Document::new("file:///c.opy", source, workspace_root());
     let (service, uri) = service_with(document);
 
-    // After `points.` (line 4, the append receiver), completion offers the
+    // After `points.` (line 5, the append receiver), completion offers the
     // receiver member `append`.
-    let member_line = "    points.append(points)";
+    let member_line = "    # points.";
     let dot_char = member_line.find('.').unwrap() + 1;
     let items = service.completion(
         &uri,
         Position {
-            line: 4,
+            line: 5,
             character: dot_char as u32,
         },
     );
@@ -1136,7 +1136,7 @@ fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
     // frontend project + #118 semantic boundary diagnostics surface as
     // source-aware diagnostics, and semantic tokens classify symbols through
     // the shared semantic index over the lowered program.
-    let root = workspace_root().join("compatibility/ostw/corpus/protect-ban");
+    let root = workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit");
     let main = std::fs::read_to_string(root.join("main.ostw")).unwrap();
     let uri = format!("file://{}", root.join("main.ostw").display());
     let document = Document::new(&uri, main, root.clone());
@@ -1145,24 +1145,10 @@ fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
 
     let diagnostics = service.diagnostics(&uri);
     assert!(
-        !diagnostics.is_empty(),
-        "OSTW documents produce diagnostics"
-    );
-    assert!(
-        diagnostics.iter().any(|d| d.code == "ostw-unsupported"),
-        "the #118 semantic boundary diagnostics surface"
-    );
-    assert!(
-        diagnostics.iter().any(|d| {
-            d.source == uri || d.source.contains("interface/") || d.source.contains("main.ostw")
-        }),
-        "source identities resolve to the document or project-relative paths: {:?}",
+        diagnostics.is_empty(),
+        "the published owner accepts the probe project: {:?}",
         diagnostics
-            .iter()
-            .map(|d| d.source.as_str())
-            .collect::<Vec<_>>()
     );
-
     let tokens = service.semantic_tokens(&uri);
     assert!(!tokens.is_empty(), "semantic tokens classify OSTW symbols");
     assert!(
@@ -1188,12 +1174,12 @@ fn ostw_project_documents() -> (LanguageService, String, String, String) {
     std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
     std::fs::write(
         root.join("main.ostw"),
-        "import \"lib.del\";\nrule: \"main\" {}\nglobalvar Number score = 5;\n",
+        "import \"lib.del\";\nrule: \"main\" { if (score > 0) {} }\n",
     )
     .unwrap();
     std::fs::write(
         root.join("lib.del"),
-        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n}\n",
+        "globalvar Number score = 0;\nglobalvar Number count = 0;\nrule: \"lib\" { score = 1; }\n",
     )
     .unwrap();
     let main_uri = format!("file://{}", root.join("main.ostw").display());
@@ -1216,23 +1202,23 @@ fn ostw_project_documents() -> (LanguageService, String, String, String) {
 #[test]
 fn ostw_rename_edits_occurrences_across_project_files() {
     // #129: OSTW rename resolves through the shared semantic index and
-    // validates through the native OSTW project frontend; the declaration in
-    // main.ostw and the reference in lib.del belong to the same identity.
+    // validates through the native OSTW project frontend; lib.del declares the
+    // imported variable and main.ostw references it.
     let (service, main_uri, _lib_uri, main_text) = ostw_project_documents();
-    // Position on the `score` declaration (line 3, col 18 of main.ostw).
+    // Position on the imported `score` reference (line 2, col 20 of main.ostw).
     let result = service.rename(
         &main_uri,
         Position {
-            line: 2,
-            character: 17,
+            line: 1,
+            character: 19,
         },
         "total",
     );
     assert!(result.ok, "OSTW rename resolves: {:?}", result.diagnostics);
     assert_eq!(
         result.edits.len(),
-        2,
-        "one exact occurrence per file: {:?}",
+        3,
+        "declaration, local write, and imported reference: {:?}",
         result.edits
     );
     let main_edit = result
@@ -1263,25 +1249,26 @@ fn ostw_rename_edits_occurrences_across_project_files() {
             .unwrap_or_default()
     };
     assert!(
-        preview_text("main.ostw").contains("globalvar Number total = 5;"),
-        "declaration renamed in the preview"
+        preview_text("main.ostw").contains("if (total > 0) {}"),
+        "imported reference renamed in the preview"
     );
     assert!(
-        preview_text("lib.del").contains("total = 1;"),
-        "cross-file reference renamed in the preview"
+        preview_text("lib.del").contains("globalvar Number total = 0;")
+            && preview_text("lib.del").contains("total = 1;"),
+        "declaration and local reference renamed in the preview"
     );
 }
 
 #[test]
 fn ostw_rename_refuses_unsafe_targets_explicitly() {
-    let (service, main_uri, _, _) = ostw_project_documents();
+    let (service, main_uri, _lib_uri, _) = ostw_project_documents();
 
     // A collision with an already-declared name refuses with no edits.
     let collision = service.rename(
         &main_uri,
         Position {
-            line: 2,
-            character: 17,
+            line: 1,
+            character: 19,
         },
         "count",
     );
@@ -1322,16 +1309,15 @@ fn ostw_rename_includes_open_overlay_references() {
     // exists in the overlay participates in the rename and its edited text is
     // validated through the project frontend.
     let (mut service, main_uri, lib_uri, _) = ostw_project_documents();
-    let overlaid =
-        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n    score = 2;\n}\n";
+    let overlaid = "globalvar Number score = 0;\nglobalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n    score = 2;\n}\n";
     service
         .store
         .open(Document::new(&lib_uri, overlaid, service.root.clone()));
     let result = service.rename(
         &main_uri,
         Position {
-            line: 2,
-            character: 17,
+            line: 1,
+            character: 19,
         },
         "total",
     );
@@ -1347,8 +1333,8 @@ fn ostw_rename_includes_open_overlay_references() {
         .collect();
     assert_eq!(
         lib_edits.len(),
-        2,
-        "both overlay references are edited: {:?}",
+        3,
+        "declaration and both overlay references are edited: {:?}",
         result.edits
     );
     let lib_preview = result

@@ -114,7 +114,7 @@ agents consume.
 input (path | stdin)
     ↓  discovery: kind detection, locale, root, identity (wright-driver::input)
 CompilerSession (wright-driver)
-    ├─ frontend: .opy bridge | native Workshop | protocol JSON
+    ├─ source adapter: owner-side OPY/DEL | Workshop | protocol JSON
     ├─ validation (WIR)
     ├─ lowering (HIR → WIR)
     ├─ analysis (SemanticService: semantic facts, symbols, references, CFG)
@@ -156,14 +156,14 @@ stdin content (protocol JSON starts with `{`, otherwise Workshop text) and can
 be overridden with `--kind auto|opy|ostw|workshop|protocol`. `--locale`
 overrides Workshop client-locale detection; `--root` sets the include/project
 root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
-are parsed by the native OSTW frontend (`wright-ostw`), which loads the
-`ds.toml` project closure, resolves the reachable imports, and lowers the
-#118 semantic HIR through the same validate→lower→validate path as the other
-frontends; `check`, `lint`, `analyze`, and `inspect` then run the shared
-analyzer/semantic services over that program and report project-relative
-multi-file provenance and the #118 boundary diagnostics. `compile` (#119)
-lowers the reachable #118 semantic surface through the shared HIR → WIR →
-Workshop pipeline and emits en-US Workshop text; it fails deterministically
+are parsed through the `del-rs` owner adapter, which loads the project and
+resolves the reachable imports. The adapter preserves owner diagnostics and
+source-file identity, then passes owner-produced canonical WIR to the shared
+analyzer/emitter. `check`, `lint`, `analyze`, and `inspect` report the owner
+diagnostics plus project-relative provenance. DEL overlay validation is
+explicitly unsupported until the owner exposes an overlay project contract;
+it never falls back to the removed Wright implementation. `compile` (#119)
+emits en-US Workshop text from owner-produced WIR and fails deterministically
 with structured, source-located diagnostics when the reachable surface is
 outside the declared support matrix (see
 [`docs/ostw/support-matrix.md`](ostw/support-matrix.md)) or the project
@@ -178,8 +178,7 @@ a thin passthrough: it parses argv, builds the session, calls the driver
 workflow, and renders the envelope — no reconstruction logic lives in the CLI
 layer. The driver reuses its own `load()` path (kind detection, Workshop
 parsing, WIR validation) and delegates per target to the language-owned
-reconstructors, `wright_opy::reconstruct::reconstruct` and
-`wright_ostw::reconstruct::reconstruct`, unchanged.
+reconstructors from `opy-rs` and `del-rs` through the narrow Wright adapters.
 
 * The target flag is **required and explicit** (`--target opy|ostw`); a
   missing or unknown target is a usage error (exit 2), and `--target` on any
@@ -204,7 +203,7 @@ reconstructors, `wright_opy::reconstruct::reconstruct` and
 The cross-format round-trip acceptance suite lives in
 `crates/wright-driver/tests/convert.rs` and writes the machine-readable
 report `target/wright-convert-report.json` (one entry per committed fixture:
-`Workshop → convert → native frontend → HIR → WIR → Workshop` for both
+`Workshop → convert → owner source implementation → WIR → Workshop` for both
 targets, plus the deterministic rejection entries).
 
 ## `wright lint` and the lint configuration
@@ -307,7 +306,7 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
 
 The core workflows have separate contracts:
 
-* `check` is the correctness gate. It reports discovery, frontend, project,
+* `check` is the correctness gate. It reports discovery, source implementation, project,
   semantic, lowering, and validation diagnostics. Ordinary configurable lint
   findings such as `duplicate-condition` and `min-wait-loop` are not emitted
   by default.
@@ -465,14 +464,15 @@ For identical inputs and configuration, JSON output is byte-deterministic
 SHA-256 of the input bytes (`result.output.input_identity`); emitted artifacts
 carry their own SHA-256 (`result.output.sha256`).
 
-## The `.opy` frontend
+## The `.opy` source implementation
 
-`.opy` inputs are compiled by the native Rust frontend (`wright-opy`): no
-Node, no OverPy, and stdin `.opy` is supported (the include root defaults to the
-working directory for stdin, `--root` for files). The pinned OverPy adapter
-remains available only as an explicit compatibility fallback by setting
-`WRIGHT_ADAPTER_PATH`; it is never selected silently. The frontend surface is
-declared in [`opy/support-matrix.md`](opy/support-matrix.md).
+`.opy` inputs are compiled through the owner-backed `opy-rs` implementation
+through Wright's narrow adapter: no Node, no OverPy, and stdin `.opy` is
+supported (the include root defaults to the working directory for stdin,
+`--root` for files). The pinned OverPy adapter remains available only as an
+explicit compatibility fallback by setting `WRIGHT_ADAPTER_PATH`; it is never
+selected silently. The source surface is declared in
+[`opy/support-matrix.md`](opy/support-matrix.md).
 
 ## Library reuse
 

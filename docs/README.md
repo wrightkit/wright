@@ -46,7 +46,7 @@ feature or contract evolves, its living document is updated directly:
   - [`.opy` Support Matrix](opy/support-matrix.md): Supported syntax, declarations, expressions, settings, diagnostics.
   - [Workshop Support Matrix](workshop/support-matrix.md): Evidenced actions, values, events, enums, localized catalog.
 - **Protocol & Pipeline Specifications**:
-  - [Opy HIR v1 Protocol](hir/opy-hir-v1.md): JSON schema for the `.opy` frontend HIR interchange boundary.
+  - [Opy HIR v1 Protocol](hir/opy-hir-v1.md): JSON schema for the `.opy` owner-producer interchange boundary.
   - [Workshop Catalog Data Pipeline](workshop/catalog-pipeline.md): Canonical catalog generation, localization data, validation.
 
 ### 3. Architecture Decision Records (ADRs)
@@ -88,7 +88,7 @@ documents in `main`.
 | **Editor Services & LSP** | [`language-services.md`](language-services.md) | Hover, definitions, references, rename, semantic tokens, LSP framing. |
 | **Release & Packaging** | [`release.md`](release.md) | Platform targets, packaging scripts, automated release validation. |
 | **Governance & Process** | [`agent-team.md`](agent-team.md) | Role authority (PM / Architect / Engineer / QA), spec schemas, blocked routes. |
-| **OPY Language** | [`opy/support-matrix.md`](opy/support-matrix.md) | Native Rust `.opy` frontend syntax, preprocessing, resolution, settings. |
+| **OPY Language** | [`opy/support-matrix.md`](opy/support-matrix.md) | Owner-side `.opy` syntax, preprocessing, resolution, settings, and Wright adapter boundary. |
 | **OSTW Language** | [`ostw/support-matrix.md`](ostw/support-matrix.md) | Declared OSTW → Workshop compile surface (#119): accepted targets, lowering decisions, declared normalization and divergences, boundaries. |
 | **OPY Baseline** | [`opy/compatibility-baseline.md`](opy/compatibility-baseline.md) | Tiered forward-looking OPY compatibility inventory and residual evidence. |
 | **OPY Manifest** | [`opy/compat-manifest-spec.md`](opy/compat-manifest-spec.md) | Machine-readable OPY semantic compatibility manifest specification. |

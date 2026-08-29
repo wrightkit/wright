@@ -134,6 +134,32 @@ fn compat_profile_folds_constants_with_metrics() {
 }
 
 #[test]
+fn compat_profile_folds_canonical_square_root() {
+    let mut program = arithmetic_program();
+    let two = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 2.0,
+            text: "2".to_string(),
+        },
+        None,
+    ));
+    let square_root = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "squareRoot".to_string(),
+            args: vec![two],
+        },
+        None,
+    ));
+
+    run(&mut program, Profile::Compat).unwrap();
+
+    match &program.values.get(square_root).unwrap().value {
+        Value::Number { value, .. } => assert_eq!(*value, 2.0_f64.sqrt()),
+        other => panic!("canonical squareRoot should fold to a number, got {other:?}"),
+    }
+}
+
+#[test]
 fn folding_is_deterministic() {
     let mut first = arithmetic_program();
     let mut second = arithmetic_program();

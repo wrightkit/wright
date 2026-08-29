@@ -43,7 +43,7 @@ artifacts. Concretely, it serves as:
 * the reference for S (syntax), D (diagnostic), and N (normalized-output)
   evidence in the compatibility corpus (`compatibility/fixtures/**`,
   `compatibility/oracle/`);
-* the pinned frontend invoked by the adapter (`adapter/`) to produce Opy HIR
+* the pinned reference invoked by the compatibility adapter (`adapter/`) to produce Opy HIR
   v1 reference fixtures (`adapter/fixtures/**`), compared against the native
   frontend at the HIR boundary by `crates/wright-opy/tests/differential.rs`;
 * the source of systematic probe validation for the proactive compatibility
@@ -54,7 +54,7 @@ artifacts. Concretely, it serves as:
 
 | Wright surface | Use of the reference |
 | --- | --- |
-| `wright-opy` native frontend | Differential HIR parity, accept/reject agreement, structured diagnostics |
+| `opy-rs` owner implementation + `wright-opy` adapter | Differential HIR parity, accept/reject agreement, structured diagnostics |
 | `workshop-rs` catalog/emission | Canonical en-US spelling validation against oracle-emitted Workshop text; receiver-method and enum emission evidence |
 | `compatibility/` harness | Fixture snapshots, oracle identity blocks, S/D/N gate evidence |
 | Systematic baseline | Reference-validated probes for builtin action/value/member/enum/signature metadata — implemented as the OPY semantic compatibility manifest (`crates/wright-opy/src/manifest/`): every entry records the probe that validates it, and `probes/validate.py` runs the full probe set against the pinned oracle (accept/reject, normalized emission hash, diagnostic category; wired into `compatibility/tests`) |
@@ -119,8 +119,8 @@ exercised by the oracle harness (`compatibility/ostw/run_oracle.py`).
 
 ### Oracle role
 
-OSTW is the compatibility **oracle and behavior reference** for Wright's
-OSTW frontend (`wright-ostw`), per [`docs/compatibility.md`](../compatibility.md) and the
+OSTW is the compatibility **oracle and behavior reference** for the owner-side
+DEL implementation (`del-rs`), consumed through `wright-ostw`, per [`docs/compatibility.md`](../compatibility.md) and the
 extension of ADR-0007 pinning policy to a second reference. It is not a
 production runtime dependency of the Wright core and is never bundled into
 release artifacts. Concretely it serves as:
@@ -140,9 +140,9 @@ release artifacts. Concretely it serves as:
 
 | Wright surface | Use of the reference |
 | --- | --- |
-| `wright-ostw` native frontend | Accept/reject agreement, structured diagnostics, HIR semantic identity for the declared OSTW surface |
+| `del-rs` owner implementation + `wright-ostw` adapter | Accept/reject agreement, structured diagnostics, canonical WIR identity for the declared OSTW surface |
 | `workshop-rs` emitter/catalog | Canonical en-US emission cross-check against the oracle's `workshopCode` output for shared Workshop surfaces |
-| Workshop → OSTW reconstruction (future) | Reference decompiler output for the declared reconstruction surface and quality criteria |
+| Workshop → OSTW reconstruction (`del-rs`) | Reference decompiler output for the declared reconstruction surface and quality criteria |
 | `compatibility/` harness | OSTW fixture snapshots, oracle identity blocks, S/D/N gate evidence |
 
 ### Reference semantics vs Wright-owned architecture

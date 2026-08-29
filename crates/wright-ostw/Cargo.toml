@@ -4,12 +4,13 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Wright's native OSTW frontend: lexer, CST/parser, and ds.toml project model (syntax/project infrastructure only)."
+description = "Wright's narrow adapter for the owner-side del-rs implementation."
 
 [lints]
 workspace = true
 
 [dependencies]
+del-rs.workspace = true
 wright-ir.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true

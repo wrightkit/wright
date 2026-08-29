@@ -8,8 +8,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use workshop_rs::p0::{
-    P0_EXPECTATION as WORKSHOP_EXPECTATION, P0ResidualExpectation as WorkshopResidualExpectation,
+use workshop_rs::real_projects::{
+    REAL_PROJECT_EXPECTATION as WORKSHOP_EXPECTATION,
+    RealProjectResidualExpectation as WorkshopResidualExpectation,
 };
 use wright_analyzer::registry::LintRegistry;
 use wright_driver::workshop_provider::{diagnostic_code, status_for_classification};
@@ -160,7 +161,7 @@ fn real_projects_run_check_and_lint_through_wright() {
         println!(
             "WORKSHOP_CORPUS {}",
             serde_json::json!({
-                "corpus": workshop_rs::p0::P0_CORPUS_ID,
+                "corpus": workshop_rs::real_projects::REAL_PROJECT_CORPUS_ID,
                 "case": case.id,
                 "artifact": path,
                 "sourceSha256": case.source_sha256,

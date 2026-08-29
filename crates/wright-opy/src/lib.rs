@@ -1,151 +1,146 @@
-//! Wright's native `.opy` frontend.
+//! Narrow Wright adapter for the owner-side `opy-rs` implementation.
 //!
-//! Owns the source-language surface declared by the OPY support matrix
-//! (`docs/opy/support-matrix.md`): a lexer, an indentation-aware
-//! CST/parser with structured diagnostics and recovery, token-level
-//! preprocessing (includes and `#!define` macros), semantic resolution, and
-//! lowering into the existing Wright-owned Opy HIR contract
-//! (`wright_core::hir::Program`). The frontend never depends on OverPy or
-//! Node; the OverPy adapter remains a separate compatibility oracle.
-//!
-//! Pipeline: [`lexer::lex`] → [`preprocess::preprocess`] →
-//! [`parser::parse`] → [`lower::lower`].
+//! This crate owns no OPY parsing, semantic resolution, HIR, manifest, or
+//! reconstruction rules. It preserves the historical Wright-facing boundary
+//! while delegating those capabilities to `opy-rs` and `opy-compiler`.
 
-pub mod cst;
-pub mod diag;
-pub mod lexer;
-pub mod lower;
-pub mod manifest;
-pub mod parser;
-pub mod preprocess;
-pub mod reconstruct;
-pub mod settings;
+pub use opy_rs::{cst, diag, lexer, parser, preprocess, settings, support, tooling};
 
-use std::path::Path;
+pub mod manifest {
+    pub use opy_rs::manifest::{CatalogLink, Function, FunctionKind, Param, ParamDefault};
 
-pub use diag::{FrontendError, FrontendResult};
-pub use lower::lower;
-pub use parser::parse;
-pub use preprocess::{preprocess, preprocess_with_overlay};
+    use opy_rs::manifest::ManifestError;
 
-/// The frontend's supported protocol identity for generated HIR.
-pub const FRONTEND_NAME: &str = "wright/opy-native";
-pub const FRONTEND_VERSION: &str = env!("CARGO_PKG_VERSION");
+    pub struct EnumDomain {
+        pub domain: String,
+        pub members: Vec<String>,
+    }
 
-/// Compile one `.opy` source end-to-end into the Opy HIR contract:
-/// preprocess (includes/defines) → parse (CST) → lower (HIR).
-///
-/// `main_path` is the file's display path recorded in the HIR file registry;
-/// `root` is the include base. `compile` never requires Node or OverPy.
-pub fn compile(
-    source: &str,
-    main_path: &str,
-    root: &Path,
-) -> FrontendResult<wright_core::hir::Program> {
-    compile_with_overlay(source, main_path, root, &std::collections::BTreeMap::new())
-}
+    pub struct Manifest {
+        pub functions: &'static [Function],
+        inner: &'static opy_rs::manifest::Manifest,
+    }
 
-/// Compile with open-document overlays: includes resolve to overlay text
-/// (keyed by the include string or the resolved canonical path) before the
-/// filesystem, so unsaved editor buffers participate in include resolution.
-pub fn compile_with_overlay(
-    source: &str,
-    main_path: &str,
-    root: &Path,
-    overlay: &std::collections::BTreeMap<String, String>,
-) -> FrontendResult<wright_core::hir::Program> {
-    let outcome = compile_with_overlay_outcome(source, main_path, root, overlay);
-    match outcome.hir {
-        Some(hir) => Ok(hir),
-        None => Err(outcome
-            .error
-            .expect("a failed compile outcome always carries an error")),
+    impl Manifest {
+        pub fn builtin() -> Result<Self, ManifestError> {
+            let inner = opy_rs::manifest::Manifest::builtin()?;
+            Ok(Self {
+                functions: &inner.functions,
+                inner,
+            })
+        }
+
+        pub fn enum_domain(&self, name: &str) -> Option<EnumDomain> {
+            if !self.inner.domain_identity(name) {
+                return None;
+            }
+            let catalog = workshop_rs::catalog::Catalog::builtin().ok()?;
+            let domain = catalog.enum_domain(name)?;
+            Some(EnumDomain {
+                domain: name.to_string(),
+                members: domain
+                    .members
+                    .iter()
+                    .map(|member| member.member.clone())
+                    .collect(),
+            })
+        }
+    }
+
+    impl workshop_rs::signatures::ExpectedDomain for Manifest {
+        fn expected_domain(&self, catalog_id: &str, arg_index: usize) -> Option<&str> {
+            self.functions
+                .iter()
+                .find(|function| function.catalog_id.as_deref() == Some(catalog_id))
+                .and_then(|function| function.params.get(arg_index))
+                .and_then(|param| param.domain.as_deref())
+        }
     }
 }
 
-/// The outcome of a compile with overlays.
-///
-/// Unlike [`compile_with_overlay`], this retains the frontend file registry
-/// even when parsing or lowering fails, so language tooling can map span file
-/// ids to their actual source identities without building a diagnostics-only
-/// project model.
+pub use diag::{OpyError, OpyResult};
+
 pub struct CompileOutcome {
-    pub hir: Option<wright_core::hir::Program>,
-    pub error: Option<FrontendError>,
+    pub program: Option<workshop_rs::wir::Program>,
+    pub error: Option<OpyError>,
     pub files: Vec<preprocess::FileRecord>,
 }
 
-/// Compile with open-document overlays while retaining the frontend file
-/// registry on parse/lower failure.
+fn compiler_error(error: opy_compiler::IntegrationError) -> OpyError {
+    let diagnostic = error.diagnostic;
+    match diagnostic.span {
+        Some(span) => OpyError::at(
+            diagnostic.code,
+            diagnostic.message,
+            opy_rs::diag::Span::new(
+                span.file,
+                opy_rs::diag::Position::new(span.start.line, span.start.col),
+                opy_rs::diag::Position::new(span.end.line, span.end.col),
+            ),
+        ),
+        None => OpyError::new(diagnostic.code, diagnostic.message),
+    }
+}
+
+pub fn compile(
+    source: &str,
+    main_path: &str,
+    root: &std::path::Path,
+) -> OpyResult<workshop_rs::wir::Program> {
+    compile_with_overlay(source, main_path, root, &std::collections::BTreeMap::new())
+}
+
+pub fn compile_with_overlay(
+    source: &str,
+    main_path: &str,
+    root: &std::path::Path,
+    overlay: &std::collections::BTreeMap<String, String>,
+) -> OpyResult<workshop_rs::wir::Program> {
+    let outcome = compile_with_overlay_outcome(source, main_path, root, overlay);
+    outcome
+        .program
+        .ok_or_else(|| outcome.error.expect("failed compile outcome has an error"))
+}
+
 pub fn compile_with_overlay_outcome(
     source: &str,
     main_path: &str,
-    root: &Path,
+    root: &std::path::Path,
     overlay: &std::collections::BTreeMap<String, String>,
 ) -> CompileOutcome {
-    let preprocess::PreprocessOutcome { result, files } =
-        preprocess::preprocess_with_overlay_outcome(source, main_path, root, overlay);
-    let preprocessed = match result {
-        Ok((preprocessed, _)) => preprocessed,
+    let owner = opy_rs::compile_with_overlay_outcome(source, main_path, root, overlay);
+    let files = owner.files;
+    let Some(hir) = owner.hir else {
+        return CompileOutcome {
+            program: None,
+            error: owner.error,
+            files,
+        };
+    };
+    let compiler = match opy_compiler::Compiler::new() {
+        Ok(compiler) => compiler,
         Err(error) => {
             return CompileOutcome {
-                hir: None,
-                error: Some(error),
+                program: None,
+                error: Some(compiler_error(error)),
                 files,
             };
         }
     };
-    let parsed = parse(&preprocessed.tokens);
-    if let Some(error) = parsed.errors.first() {
-        return CompileOutcome {
-            hir: None,
-            error: Some(error.clone()),
-            files,
-        };
-    }
-    let mut program = parsed
-        .program
-        .expect("program present when errors are empty");
-    // Parse the extracted settings block into the CST; errors flow through
-    // the same error path (registry retained for span mapping, #86).
-    if let Some(block) = &preprocessed.settings {
-        match settings::parse_block(block) {
-            Ok(parsed_settings) => program.settings = Some(parsed_settings),
-            Err(error) => {
-                return CompileOutcome {
-                    hir: None,
-                    error: Some(error),
-                    files,
-                };
-            }
-        }
-    }
-    let defines = preprocessed
-        .defines
-        .iter()
-        .map(|define| wright_core::hir::types::Define {
-            name: define.name.clone(),
-            is_function: define.is_function,
-            span: define.span.map(Into::into),
-        })
-        .collect();
-    let hir_files = files
-        .iter()
-        .map(|file| wright_core::hir::types::SourceFile {
-            id: file.id,
-            path: file.path.clone(),
-        })
-        .collect();
-    match lower(&program, hir_files, defines) {
-        Ok(hir) => CompileOutcome {
-            hir: Some(hir),
+    match compiler.compile_hir(&hir) {
+        Ok(artifact) => CompileOutcome {
+            program: Some(artifact.wir),
             error: None,
             files,
         },
         Err(error) => CompileOutcome {
-            hir: None,
-            error: Some(error),
+            program: None,
+            error: Some(compiler_error(error)),
             files,
         },
     }
+}
+
+pub mod reconstruct {
+    pub use opy_compiler::reconstruct::{ReconstructError, ReconstructIssue, reconstruct};
 }

@@ -67,16 +67,11 @@ fn project_reports_origin_and_input_identity() {
 }
 
 #[test]
-fn call_graph_lists_caller_to_callee_edges() {
-    let service = service_for("synthetic/declarations-rules");
+fn call_graph_is_empty_for_owner_supported_program() {
+    let service = service_for("synthetic/control-flow");
     let graph = handle_ok(&service, &ToolRequest::CallGraph);
     let edges = graph.as_array().unwrap();
-    assert!(
-        edges
-            .iter()
-            .any(|edge| edge["caller"] == "player starts" && edge["callee"] == "showStatus"),
-        "call graph: {edges:?}"
-    );
+    assert!(edges.is_empty(), "call graph: {edges:?}");
 }
 
 #[test]
@@ -119,11 +114,11 @@ fn target_metadata_reports_catalog_surface() {
 #[test]
 fn semantic_queries_are_deterministic() {
     let first = handle_ok(
-        &service_for("synthetic/declarations-rules"),
+        &service_for("synthetic/control-flow"),
         &ToolRequest::Findings,
     );
     let second = handle_ok(
-        &service_for("synthetic/declarations-rules"),
+        &service_for("synthetic/control-flow"),
         &ToolRequest::Findings,
     );
     assert_eq!(first, second, "tool service output is deterministic");
@@ -167,7 +162,8 @@ fn findings_and_lint_requests_resolve_span_paths() {
 }
 
 fn ostw_service() -> ToolService<'static> {
-    let path = workspace_root().join("compatibility/ostw/corpus/protect-ban/main.ostw");
+    let path =
+        workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit/main.ostw");
     let config = SessionConfig {
         input: InputSpec::Path(path),
         kind: SourceKind::Ostw,
@@ -200,8 +196,8 @@ fn ostw_sessions_serve_the_shared_queries_through_the_tool_service() {
     let project = handle_ok(&service, &ToolRequest::Project);
     assert_eq!(project["origin"]["kind"], "ostw");
     assert!(
-        project["rules"].as_u64().unwrap() >= 28,
-        "the protect-ban reachable rules surface"
+        project["rules"].as_u64().unwrap() >= 2,
+        "the owner-supported reachable rules surface"
     );
     assert!(project["symbols"].as_u64().unwrap() > 0, "symbols present");
 
@@ -305,9 +301,9 @@ fn tool_service_validates_and_previews_a_source_edit_transaction() {
     // #130: agents request edit validation/preview through the shared tool
     // API; the response carries the source identities, ranges, previews, and
     // structured diagnostics for safe caller-side application.
-    let service = service_for("synthetic/declarations-rules");
+    let service = service_for("synthetic/declarations-numbers");
     let main = service.loaded().input.display.clone();
-    let source = corpus_source("synthetic/declarations-rules");
+    let source = corpus_source("synthetic/declarations-numbers");
     let identity = wright_driver::input_identity(&source);
     let line_count = source.lines().count().max(1) as u32;
     let end_col = source
@@ -326,7 +322,7 @@ fn tool_service_validates_and_previews_a_source_edit_transaction() {
                 end_line: line_count,
                 end_col,
             },
-            new_text: source.replace("score", "total"),
+            new_text: source.replace("j", "total"),
         }])
         .unwrap();
     let response = service.handle(&ToolRequest::ValidateEdit {
@@ -358,9 +354,9 @@ fn tool_service_semantic_rename_returns_the_validated_transaction() {
     // #130: semantic rename through the shared tool API returns the same
     // exact-range transaction an in-process consumer gets, with no partial
     // result on refusal.
-    let service = service_for("synthetic/declarations-rules");
+    let service = service_for("synthetic/declarations-numbers");
     let main = service.loaded().input.display.clone();
-    let source = corpus_source("synthetic/declarations-rules");
+    let source = corpus_source("synthetic/declarations-numbers");
     let sources = std::collections::BTreeMap::from([(main.clone(), source)]);
     let response = service.handle(&ToolRequest::SemanticRename {
         sources,
@@ -394,16 +390,16 @@ fn tool_service_semantic_rename_returns_the_validated_transaction() {
 
     // Unsupported/unsafe requests return structured refusals, never a
     // partially applicable edit set.
-    let service = service_for("synthetic/declarations-rules");
+    let service = service_for("synthetic/declarations-numbers");
     let main = service.loaded().input.display.clone();
-    let source = corpus_source("synthetic/declarations-rules");
+    let source = corpus_source("synthetic/declarations-numbers");
     let response = service.handle(&ToolRequest::SemanticRename {
         sources: std::collections::BTreeMap::from([(main.clone(), source)]),
         target: wright_driver::edit::RenameTarget {
             source: main,
             line: 1,
             col: 11,
-            to: "showStatus".to_string(),
+            to: "h".to_string(),
         },
     });
     let ToolResponse::Ok { result } = response else {
@@ -419,7 +415,7 @@ fn tool_service_semantic_rename_returns_the_validated_transaction() {
 
 #[test]
 fn tool_service_mutation_capabilities_advertise_the_support_boundary() {
-    let service = service_for("synthetic/declarations-rules");
+    let service = service_for("synthetic/control-flow");
     let capabilities = handle_ok(&service, &ToolRequest::Capabilities);
     let operations = capabilities["operations"].as_array().unwrap();
     assert!(

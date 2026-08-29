@@ -1,7 +1,7 @@
-# Native .opy Frontend Support Matrix
+# .opy Source Support Matrix
 
-Status: accepted baseline — living .opy frontend support matrix
-Scope: the `.opy` source-language surface Wright's native frontend supports,
+Status: accepted baseline — living .opy source support matrix
+Scope: the `.opy` source-language surface owned and supported by `opy-rs`,
 with production/corpus evidence for each feature and explicitly deferred
 constructs
 
@@ -14,9 +14,9 @@ reference identity behind both is recorded centrally in
 
 Every claimed feature is backed by the compatibility corpus
 (`compatibility/fixtures/**/source.opy` and pinned adapter HIR fixtures) or
-marked as investigation. The architecture is `lexer → preprocess → CST/parser →
-resolve/lower → Opy HIR` (see [`docs/architecture.md`](../architecture.md) and
-`crates/wright-opy`).
+marked as investigation. The owner architecture is `lexer → preprocess →
+CST/parser → resolve/lower → Opy HIR`; Wright consumes it through a narrow
+adapter.
 
 ## Evidence sources
 

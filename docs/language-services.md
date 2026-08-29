@@ -94,7 +94,7 @@ suppression is the authoritative contract.
   Rename delegates target resolution, edit generation, and validation to the
   shared driver refactoring contract
   (`wright_driver::edit::semantic_rename`, #129): every affected root
-  resolves through its original native frontend, the unioned exact-range
+  resolves through its original owner-backed source implementation, the unioned exact-range
   transaction is validated through the shared #128 transaction boundary
   (`wright_driver::edit::validate_transaction`), and no duplicate
   edit-validation or span-collection semantics live here.
@@ -104,25 +104,19 @@ suppression is the authoritative contract.
 
 ## OSTW documents (#120)
 
-`.ostw`/`.del` documents route through the same editor-neutral services with
-no OSTW-specific analysis stack: the native OSTW frontend loads the `ds.toml`
-project closure and resolves the #118 semantic HIR, which is lowered through
-the shared HIR→WIR path; diagnostics, findings, hover, definition,
-references, completion, and semantic tokens then come from the shared
-analyzer/semantic index exactly as for OPY/Workshop inputs. Project-level and
-#118 semantic boundary diagnostics (missing imports, Math/Cursor/class
-surfaces) surface as source-aware errors with project-relative paths.
+`.ostw`/`.del` documents route through the owner-backed adapter. `del-rs`
+loads the project closure, resolves semantics, lowers directly to canonical
+WIR, and preserves owner diagnostics and file identity. Shared analysis runs
+on successful owner WIR; owner capabilities that do not produce WIR are
+reported as structured source errors.
 
 Operations that stay unsupported for OSTW are **explicitly refused or
 documented, never emulated through upstream calls**:
 
-- **Semantic rename** — offered for OSTW symbols on the declared semantic
-  surface (globals, player variables, subroutines/functions) through the
-  shared refactoring contract (#129): resolution runs over the shared
-  semantic index of the `ds.toml` project graph, edited transactions validate
-  through the native OSTW frontend, and targets without an exact identifier
-  span (e.g. typed constants and other provenance-limited forms) refuse
-  explicitly instead of broadening to a statement span. Whole-source OSTW
+- **Semantic rename and overlays** — refused explicitly while the owner-backed
+  adapter lacks a source-edit/overlay project contract. The service never
+  invokes an upstream compiler or the removed Wright implementation as a
+  fallback.
   regeneration/emitters remain a declared non-goal (#120) — rename edits
   original OSTW source with exact identifier ranges, never reconstructed
   text.
