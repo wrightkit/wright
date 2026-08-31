@@ -52,7 +52,9 @@ workflow is the single product release path:
 1. `release-please-action` maintains one root Release PR for the Wright
    product. `release-please-config.json` uses the `simple` release type, with
    `version.txt` and `CHANGELOG.md` as its product-level version and changelog
-   files. No workspace crate is published to crates.io.
+   files. No workspace crate is published to crates.io. Every workspace
+   package explicitly sets `publish = false`, so Cargo package publication
+   cannot become an accidental release surface.
 2. The Release PR updates the shared workspace version, `Cargo.lock`, and the
    checked-in `dist/` metadata. All workspace crate changes are included in the
    product changelog decision.

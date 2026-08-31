@@ -81,6 +81,11 @@ Language repositories own source parsing, semantics, lowering, diagnostics, and
 compatibility evidence. Wright adapters translate those owner contracts into
 driver results and do not become a second implementation.
 
+The workspace Cargo packages are internal implementation boundaries for the
+Wright product. They are explicitly non-publishable; the binary/package-manager
+release flow does not imply a stable crates.io contract for `wright-core`,
+`wright-ir`, `wright-driver`, or the language adapters.
+
 ## Source-form integrations
 
 ### Raw Workshop

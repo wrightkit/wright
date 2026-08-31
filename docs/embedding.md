@@ -18,10 +18,33 @@ safe source-edit contracts, and the transport adapters
 | `wright-serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService`; MCP not implemented (no agent evidence) |
 | `wright-transform` passes | experimental per pass | Only evidence-backed passes ship in `compat`; `aggressive` is an explicit experimental marker |
 
+The Rust packages in this workspace are implementation packages for the Wright
+product, not a crates.io distribution surface. They are explicitly marked
+`publish = false`; the current public release flow is the CLI/LSP binary and
+package-manager distribution. A separately reviewed Rust embedding package
+would require an intentional public API and publication decision.
+
+## Source-language owner boundary
+
+`wright-opy` and `wright-ostw` are narrow Wright adapters. Their target
+boundary is the released `opy-rs` and `deltin-rs` owner APIs for
+source-language parsing, semantic behavior, compiler/lowering behavior,
+diagnostics, and reconstruction. Wright adapters may translate those contracts
+into driver results and compose them with canonical `workshop-rs` WIR/catalog
+APIs for Wright-owned analysis, conversion, and emission. They must not depend
+on source-language CLI packages, private compiler packages, or recreate owner
+behavior locally.
+
+The migration is release-coordinated: if an owner contract is not yet
+available in a consumable release, the adapter remains on its current released
+contract until the owner release and the canonical Workshop dependency are
+compatible. It must not introduce a local semantic workaround or a text-based
+compatibility layer just to bypass that coordination boundary.
+
 ## Embedding contract
 
-External consumers depend on `wright-driver` only (never internal crates, no
-CLI subprocess, no text scraping):
+Consumers embedding Wright from a checkout depend on `wright-driver` only
+(never internal crates, no CLI subprocess, no text scraping):
 
 ```rust
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind, Profile};
