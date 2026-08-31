@@ -37,6 +37,27 @@ def workspace_version() -> str:
     raise SystemExit("wright-cli not found in workspace metadata")
 
 
+def verify_workspace_packages_are_private() -> None:
+    metadata = subprocess.run(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    public = [
+        package["name"]
+        for package in json.loads(metadata)["packages"]
+        if package.get("publish") != []
+    ]
+    if public:
+        fail(
+            "workspace packages must set publish = false; "
+            f"public packages: {', '.join(sorted(public))}"
+        )
+    print("ok: workspace packages explicitly non-publishable")
+
+
 def load_generator():
     spec = importlib.util.spec_from_file_location(
         "wright_dist", REPO_ROOT / "scripts" / "update-dist-manifests.py"
@@ -54,6 +75,7 @@ def main() -> None:
     gen = load_generator()
     version = workspace_version()
     print(f"workspace version: {version}")
+    verify_workspace_packages_are_private()
 
     with tempfile.TemporaryDirectory() as tmp:
         generated = gen.generate(version, {}, Path(tmp))
