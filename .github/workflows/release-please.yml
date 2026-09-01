@@ -33,7 +33,7 @@ jobs:
 
       - name: Run release-please
         id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         with:
