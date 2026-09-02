@@ -412,7 +412,11 @@ impl Analysis for RepeatedValue {
                         "this value expression is evaluated {} times within the same loop scope",
                         family.len()
                     ),
-                    span: program.values.get(first).and_then(|node| node.span),
+                    span: program
+                        .values
+                        .get(first)
+                        .and_then(|node| node.span)
+                        .or_else(|| program.actions.get(action_id).and_then(Action::span)),
                     rule,
                     action: Some(action_id),
                     value: Some(first),

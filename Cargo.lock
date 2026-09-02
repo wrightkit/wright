@@ -1094,9 +1094,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "opy-compiler"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421aaecf7aa87d3928a8083a8a90d68859f8987749151a2d77d73a31c3d9915f"
+checksum = "18ae3aeeca5a8208b91587daa24a5919eef790d5b23781f2b98c425bafa496e6"
 dependencies = [
  "opy-macro-js",
  "opy-rs",
@@ -1106,9 +1106,9 @@ dependencies = [
 
 [[package]]
 name = "opy-macro-js"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb436f50f8102d6febb6e4ef979913fc4bd1964b7cb9a97d99445f414d2009fc"
+checksum = "4131e8159b8a477015177f5de32fe58c5fa9eeb148e9371346546b2ec348cb9a"
 dependencies = [
  "libquickjs-ng-sys",
  "serde_json",
@@ -1116,9 +1116,9 @@ dependencies = [
 
 [[package]]
 name = "opy-rs"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5008ab0921928ebadc4844c8a7ddfdcdf6e5d4684f0c4f213375880d1e3b4e83"
+checksum = "4bad04fade73ffa709c61aa0e673ea5e67237b77917fe5340625f41bb8ab017e"
 dependencies = [
  "opy-macro-js",
  "serde",
