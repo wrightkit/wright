@@ -144,7 +144,10 @@ impl OpyProviderResolver {
         }?;
         if matches!(
             target.as_str(),
-            "x86_64-unknown-linux-gnu" | "x86_64-apple-darwin" | "aarch64-apple-darwin"
+            "x86_64-unknown-linux-gnu"
+                | "x86_64-apple-darwin"
+                | "aarch64-apple-darwin"
+                | "x86_64-pc-windows-msvc"
         ) {
             Ok(target)
         } else {
@@ -878,11 +881,30 @@ mod tests {
         assert_eq!(archive_extension(&target), "zip");
 
         let root = test_root("windows");
-        let resolver = OpyProviderResolver::new(&root).with_target(&target);
-        let bytes = archive("1.0.0", &target, b"windows-provider");
-        resolver.install_archive("1.0.0", &target, &bytes).unwrap();
-        let executable = root.join("1.0.0").join(&target).join("opy-provider.exe");
-        assert_eq!(std::fs::read(executable).unwrap(), b"windows-provider");
+        let version = "1.0.0";
+        let bytes = archive(version, &target, b"windows-provider");
+        let checksum = format!("{}  opy-provider-{version}-{target}.zip\n", hex(&bytes));
+        let (base_url, requests, server) = test_server(
+            format!(r#"{{"tag_name":"v{version}"}}"#).into_bytes(),
+            bytes,
+            checksum.into_bytes(),
+        );
+        let resolver = OpyProviderResolver::new(&root)
+            .with_target(&target)
+            .with_release_urls(format!("{base_url}/latest"), &base_url);
+        let updated = resolver.update(None).unwrap();
+        server.join().unwrap();
+        assert_eq!(requests.load(Ordering::Relaxed), 3);
+        assert_eq!(updated.version.as_deref(), Some(version));
+        assert_eq!(
+            std::fs::read(&updated.executable).unwrap(),
+            b"windows-provider"
+        );
+        let resolved = resolver
+            .with_release_urls("http://127.0.0.1:1/latest", "http://127.0.0.1:1")
+            .resolve(None)
+            .unwrap();
+        assert_eq!(resolved, updated);
         let _ = std::fs::remove_dir_all(root);
     }
 
