@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.17](https://github.com/wrightkit/wright/compare/v0.2.16...v0.2.17) (2026-09-02)
+
+
+### Features
+
+* **driver:** add explicit source provider boundary ([#247](https://github.com/wrightkit/wright/issues/247)) ([958e137](https://github.com/wrightkit/wright/commit/958e137067196de7969f9f31b5748f16988c727a))
+* **provider:** resolve first-party OPY providers ([#248](https://github.com/wrightkit/wright/issues/248)) ([b171048](https://github.com/wrightkit/wright/commit/b1710489b36c40a28ad8b896aa909f06b6cca987))
+
 ## [0.2.16](https://github.com/wrightkit/wright/compare/v0.2.15...v0.2.16) (2026-08-29)
 
 
