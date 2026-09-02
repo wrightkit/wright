@@ -110,9 +110,11 @@ or emitter.
 ### OverPy
 
 ```text
-OPY source
+user-selected entry target
    ↓
-opy-rs semantic implementation
+Wright source-provider seam
+   ↓
+opy-rs provider owns project discovery
    ├─ standalone check / inspect / queries
    ├─ OPY-specific compiler behavior
    └─ canonical Workshop integration through workshop-rs
@@ -123,6 +125,17 @@ opy-rs semantic implementation
 Wright may consume native APIs and/or an LPP provider depending on the product
 boundary. It must not implement missing OPY syntax/semantic/compiler behavior in
 the integration layer merely to keep a Wright command working.
+
+The product seam carries only the selected source language, entry path, and
+invocation working directory. A provider owns `#!mainFile`, includes,
+preprocessing, macros, and the source closure. The driver accepts provider
+diagnostics and canonical Workshop text, validates that text through
+`workshop-rs`, and then reuses the normal lint/analyze/compile pipeline. LPP
+request/session/document types remain below the adapter. The current provider
+result is explicitly `Unmapped`: canonical-artifact diagnostics and findings
+use the `<provider-artifact>` identity until an actual canonical-to-authored
+span map can be carried and consumed. A missing or failed provider is an
+explicit failure and never selects the native OPY path.
 
 ### DEL / OSTW
 

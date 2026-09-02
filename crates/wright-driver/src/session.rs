@@ -16,7 +16,7 @@ use wright_analyzer::registry::LintConfig;
 use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService};
 
 use crate::WorkshopProvider;
-use crate::config::{SessionConfig, SourceKind};
+use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
@@ -24,6 +24,10 @@ use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
     Envelope, InspectResult, LintResult, OstwFileSummary, OstwProjectSummary, exit_code_from,
     version_info,
+};
+use crate::source_provider::{
+    SourceBackend, SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError,
+    SourceTarget,
 };
 use crate::{input_identity, opy};
 
@@ -44,6 +48,17 @@ pub struct Loaded {
     pub origin: Origin,
     /// The resolved input.
     pub input: ResolvedInput,
+    /// Whether semantic spans can be mapped to authored source files.
+    pub provenance: Provenance,
+}
+
+/// Provenance of the semantic program handed to Wright's analyzer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// The program was parsed from the source files represented by `input`.
+    Source,
+    /// The program came from an unmapped provider-returned canonical artifact.
+    Unmapped,
 }
 
 /// One reusable compiler session.
@@ -54,6 +69,7 @@ pub struct CompilerSession {
     loaded: Option<Loaded>,
     diagnostics: Vec<Diagnostic>,
     progress_observer: Option<Arc<dyn ProgressObserver>>,
+    source_provider: Option<Box<dyn SourceProvider>>,
 }
 
 impl CompilerSession {
@@ -72,7 +88,23 @@ impl CompilerSession {
             loaded: None,
             diagnostics: Vec::new(),
             progress_observer: None,
+            source_provider: None,
         })
+    }
+
+    /// Build a session whose source-language workflow must use `provider`.
+    ///
+    /// The provider is injected at the product boundary; its transport and
+    /// source project model are not visible to the session. A provider failure
+    /// is surfaced as-is and never falls back to the native OPY path.
+    pub fn with_source_provider(
+        mut config: SessionConfig,
+        provider: Box<dyn SourceProvider>,
+    ) -> Result<CompilerSession, Diagnostic> {
+        config.source_backend = SourceBackend::Provider;
+        let mut session = Self::new(config)?;
+        session.source_provider = Some(provider);
+        Ok(session)
     }
 
     /// Attach a transport-neutral observer for real workflow phase events.
@@ -100,11 +132,33 @@ impl CompilerSession {
         if let Some(loaded) = &self.loaded {
             return Ok(loaded.clone());
         }
+        if self.config.source_backend == SourceBackend::Provider
+            && matches!(self.config.input, InputSpec::Stdin)
+        {
+            return Err(SourceProviderError::Unsupported {
+                message: "provider-backed source workflows require an entry path; stdin has no entry identity".to_string(),
+            }
+            .diagnostic());
+        }
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
         let mut resolved = input::resolve(&self.config)?;
+        if self.config.source_backend == SourceBackend::Provider && resolved.kind != SourceKind::Opy
+        {
+            return Err(Diagnostic::error(
+                "source-provider-kind",
+                Stage::Discovery,
+                format!(
+                    "the provider backend currently supports only OPY input; got '{}'",
+                    resolved.kind.as_str()
+                ),
+            ));
+        }
         if resolved.kind == SourceKind::Ostw {
             self.progress(ProgressEvent::new(ProgressPhase::ProjectLoading));
             return self.load_ostw(&mut resolved);
+        }
+        if self.config.source_backend == SourceBackend::Provider {
+            return self.load_from_source_provider(&mut resolved);
         }
         let mut program = match resolved.kind {
             SourceKind::Workshop => {
@@ -174,6 +228,116 @@ impl CompilerSession {
             ostw_semantic: None,
             origin: resolved.origin.clone(),
             input: resolved,
+            provenance: Provenance::Source,
+        };
+        self.loaded = Some(loaded.clone());
+        Ok(loaded)
+    }
+
+    /// Load a source-language result through the explicit product provider
+    /// seam, then hand its canonical Workshop text to `workshop-rs`.
+    fn load_from_source_provider(
+        &mut self,
+        resolved: &mut ResolvedInput,
+    ) -> Result<Loaded, Diagnostic> {
+        let language = match resolved.kind {
+            SourceKind::Opy => SourceLanguage::Opy,
+            other => {
+                return Err(Diagnostic::error(
+                    "source-provider-kind",
+                    Stage::Discovery,
+                    format!(
+                        "the provider backend currently supports only OPY input; got '{}'",
+                        other.as_str()
+                    ),
+                ));
+            }
+        };
+        let target = SourceTarget::new(
+            language,
+            resolved
+                .path
+                .clone()
+                .unwrap_or_else(|| Path::new("<stdin>").to_path_buf()),
+            resolved.cwd.clone(),
+        );
+        let Some(provider) = self.source_provider.as_mut() else {
+            return Err(SourceProviderError::NotConfigured { language }.diagnostic());
+        };
+        if provider.language() != language {
+            return Err(Diagnostic::error(
+                "source-provider-language",
+                Stage::Discovery,
+                format!(
+                    "the injected provider serves '{}' but the selected source is '{}'",
+                    provider.language().as_str(),
+                    language.as_str()
+                ),
+            ));
+        }
+        let compilation = provider
+            .compile(&target)
+            .map_err(|error| error.diagnostic())?;
+        let mut provider_diagnostics = compilation.diagnostics;
+        if let Some(index) = provider_diagnostics
+            .iter()
+            .position(|diagnostic| diagnostic.severity == Severity::Error)
+        {
+            let first = provider_diagnostics.remove(index);
+            self.diagnostics.extend(provider_diagnostics);
+            return Err(first);
+        }
+        self.diagnostics.extend(provider_diagnostics);
+        let provenance = match compilation.provenance {
+            SourceProvenance::Unmapped => Provenance::Unmapped,
+        };
+        let Some(workshop_text) = compilation.workshop_text else {
+            return Err(Diagnostic::error(
+                "source-provider-no-artifact",
+                Stage::Frontend,
+                "the source provider returned no canonical Workshop output",
+            ));
+        };
+        let locale_name = compilation
+            .locale
+            .or_else(|| resolved.origin.locale.clone())
+            .unwrap_or_else(|| "en-US".to_string());
+        let locale = workshop_rs::catalog::Locale::new(&locale_name);
+        let program = workshop_rs::parser::parse_with_context(
+            &workshop_text,
+            &self.catalog,
+            &locale,
+            &self.catalog,
+        )
+        .map_err(|error| workshop_diag_for_unmapped_provider_artifact(error, resolved))?;
+        self.progress(ProgressEvent::new(ProgressPhase::Validation));
+        let mut program = program;
+        program.validate().map_err(|error| {
+            ir_diag_for_unmapped_provider_artifact(
+                "validation-error",
+                Stage::Validation,
+                error,
+                resolved,
+            )
+        })?;
+        if self.config.profile != wright_transform::Profile::Off {
+            self.progress(ProgressEvent::new(ProgressPhase::Lowering));
+            wright_transform::run(&mut program, self.config.profile).map_err(|error| {
+                Diagnostic::error(
+                    "transform-error",
+                    Stage::Internal,
+                    format!("WIR transformation failed: {error}"),
+                )
+            })?;
+        }
+        resolved.origin.locale = Some(locale.to_string());
+        let loaded = Loaded {
+            program: Arc::new(program),
+            ostw: None,
+            ostw_semantic: None,
+            origin: resolved.origin.clone(),
+            input: resolved.clone(),
+            provenance,
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -208,6 +372,7 @@ impl CompilerSession {
             ostw_semantic: Some(Arc::new(semantic)),
             origin: resolved.origin.clone(),
             input: resolved.clone(),
+            provenance: Provenance::Source,
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -907,29 +1072,32 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
         if !span.is_object() {
             continue;
         }
-        let path = span
-            .get("file")
-            .and_then(serde_json::Value::as_u64)
-            .map(|file| {
-                if file == 0 {
-                    root_relative(loaded.input.path.as_deref(), &loaded.input.root)
-                        .unwrap_or_else(|| loaded.input.display.clone())
-                } else {
-                    loaded
-                        .program
-                        .files
-                        .get(workshop_rs::source::FileId::from_index(file as usize))
-                        .map(|source_file| {
-                            root_relative(
-                                Some(&loaded.input.root.join(&source_file.path)),
-                                &loaded.input.root,
-                            )
+        let path = if loaded.provenance == Provenance::Unmapped {
+            "<provider-artifact>".to_string()
+        } else {
+            span.get("file")
+                .and_then(serde_json::Value::as_u64)
+                .map(|file| {
+                    if file == 0 {
+                        root_relative(loaded.input.path.as_deref(), &loaded.input.root)
+                            .unwrap_or_else(|| loaded.input.display.clone())
+                    } else {
+                        loaded
+                            .program
+                            .files
+                            .get(workshop_rs::source::FileId::from_index(file as usize))
+                            .map(|source_file| {
+                                root_relative(
+                                    Some(&loaded.input.root.join(&source_file.path)),
+                                    &loaded.input.root,
+                                )
+                                .unwrap_or_else(|| format!("<file {file}>"))
+                            })
                             .unwrap_or_else(|| format!("<file {file}>"))
-                        })
-                        .unwrap_or_else(|| format!("<file {file}>"))
-                }
-            })
-            .unwrap_or_else(|| loaded.input.display.clone());
+                    }
+                })
+                .unwrap_or_else(|| loaded.input.display.clone())
+        };
         span["path"] = serde_json::Value::String(path);
     }
 }
@@ -1043,6 +1211,25 @@ fn workshop_diag(error: workshop_rs::WorkshopError, resolved: &ResolvedInput) ->
         span,
         source: Some(resolved.origin.clone()),
     }
+}
+
+fn provider_artifact_origin(resolved: &ResolvedInput) -> Origin {
+    Origin {
+        kind: "provider-artifact".to_string(),
+        locale: resolved.origin.locale.clone(),
+    }
+}
+
+fn workshop_diag_for_unmapped_provider_artifact(
+    error: workshop_rs::WorkshopError,
+    resolved: &ResolvedInput,
+) -> Diagnostic {
+    let mut diagnostic = workshop_diag(error, resolved);
+    if let Some(span) = &mut diagnostic.span {
+        span.path = "<provider-artifact>".to_string();
+    }
+    diagnostic.source = Some(provider_artifact_origin(resolved));
+    diagnostic
 }
 
 /// Map a native frontend error to a driver diagnostic.
@@ -1255,4 +1442,15 @@ pub(crate) fn ir_diag(
         span: None,
         source: Some(resolved.origin.clone()),
     }
+}
+
+fn ir_diag_for_unmapped_provider_artifact(
+    code: &'static str,
+    stage: Stage,
+    error: wright_ir::error::IrError,
+    resolved: &ResolvedInput,
+) -> Diagnostic {
+    let mut diagnostic = ir_diag(code, stage, error, resolved);
+    diagnostic.source = Some(provider_artifact_origin(resolved));
+    diagnostic
 }
