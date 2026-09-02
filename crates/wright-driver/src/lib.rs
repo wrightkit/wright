@@ -33,7 +33,7 @@ pub use result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
     Envelope, InspectResult, LintResult, RESULT_CONTRACT,
 };
-pub use session::{CompilerSession, Loaded};
+pub use session::{CompilerSession, Loaded, Provenance};
 pub use source_provider::{
     SourceBackend, SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider,
     SourceProviderError, SourceTarget,

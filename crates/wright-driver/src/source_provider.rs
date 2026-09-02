@@ -51,10 +51,12 @@ pub struct SourceTarget {
 }
 
 /// The provenance contract for the canonical Workshop result.
+///
+/// The current provider boundary has no canonical-Workshop-to-authored-source
+/// span map, so provider results remain explicitly unmapped. A mapped variant
+/// must not be added without carrying and consuming the actual mapping data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceProvenance {
-    /// The provider has preserved a truthful mapping to authored source.
-    Mapped,
     /// The canonical artifact has no authored-source mapping.
     Unmapped,
 }

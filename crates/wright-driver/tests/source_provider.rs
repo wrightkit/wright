@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use wright_driver::source_provider::{
-    SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError,
-    SourceTarget,
+    SourceCompilation, SourceLanguage, SourceProvider, SourceProviderError, SourceTarget,
 };
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceBackend, SourceKind};
 
@@ -113,7 +112,7 @@ fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_h
     assert_eq!(target.cwd, std::env::current_dir().expect("cwd"));
     assert_eq!(
         session.load().expect("cached provider result").provenance,
-        SourceProvenance::Unmapped
+        wright_driver::Provenance::Unmapped
     );
     cleanup(dir);
 }

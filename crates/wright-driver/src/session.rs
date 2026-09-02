@@ -49,7 +49,16 @@ pub struct Loaded {
     /// The resolved input.
     pub input: ResolvedInput,
     /// Whether semantic spans can be mapped to authored source files.
-    pub provenance: SourceProvenance,
+    pub provenance: Provenance,
+}
+
+/// Provenance of the semantic program handed to Wright's analyzer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// The program was parsed from the source files represented by `input`.
+    Source,
+    /// The program came from an unmapped provider-returned canonical artifact.
+    Unmapped,
 }
 
 /// One reusable compiler session.
@@ -219,7 +228,7 @@ impl CompilerSession {
             ostw_semantic: None,
             origin: resolved.origin.clone(),
             input: resolved,
-            provenance: SourceProvenance::Mapped,
+            provenance: Provenance::Source,
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -279,7 +288,9 @@ impl CompilerSession {
             return Err(first);
         }
         self.diagnostics.extend(provider_diagnostics);
-        let provenance = compilation.provenance;
+        let provenance = match compilation.provenance {
+            SourceProvenance::Unmapped => Provenance::Unmapped,
+        };
         let Some(workshop_text) = compilation.workshop_text else {
             return Err(Diagnostic::error(
                 "source-provider-no-artifact",
@@ -298,16 +309,15 @@ impl CompilerSession {
             &locale,
             &self.catalog,
         )
-        .map_err(|error| workshop_diag_for_provenance(error, resolved, provenance))?;
+        .map_err(|error| workshop_diag_for_unmapped_provider_artifact(error, resolved))?;
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
         let mut program = program;
         program.validate().map_err(|error| {
-            ir_diag_for_provenance(
+            ir_diag_for_unmapped_provider_artifact(
                 "validation-error",
                 Stage::Validation,
                 error,
                 resolved,
-                provenance,
             )
         })?;
         if self.config.profile != wright_transform::Profile::Off {
@@ -362,7 +372,7 @@ impl CompilerSession {
             ostw_semantic: Some(Arc::new(semantic)),
             origin: resolved.origin.clone(),
             input: resolved.clone(),
-            provenance: SourceProvenance::Mapped,
+            provenance: Provenance::Source,
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -1062,7 +1072,7 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
         if !span.is_object() {
             continue;
         }
-        let path = if loaded.provenance == SourceProvenance::Unmapped {
+        let path = if loaded.provenance == Provenance::Unmapped {
             "<provider-artifact>".to_string()
         } else {
             span.get("file")
@@ -1210,18 +1220,15 @@ fn provider_artifact_origin(resolved: &ResolvedInput) -> Origin {
     }
 }
 
-fn workshop_diag_for_provenance(
+fn workshop_diag_for_unmapped_provider_artifact(
     error: workshop_rs::WorkshopError,
     resolved: &ResolvedInput,
-    provenance: SourceProvenance,
 ) -> Diagnostic {
     let mut diagnostic = workshop_diag(error, resolved);
-    if provenance == SourceProvenance::Unmapped {
-        if let Some(span) = &mut diagnostic.span {
-            span.path = "<provider-artifact>".to_string();
-        }
-        diagnostic.source = Some(provider_artifact_origin(resolved));
+    if let Some(span) = &mut diagnostic.span {
+        span.path = "<provider-artifact>".to_string();
     }
+    diagnostic.source = Some(provider_artifact_origin(resolved));
     diagnostic
 }
 
@@ -1437,16 +1444,13 @@ pub(crate) fn ir_diag(
     }
 }
 
-fn ir_diag_for_provenance(
+fn ir_diag_for_unmapped_provider_artifact(
     code: &'static str,
     stage: Stage,
     error: wright_ir::error::IrError,
     resolved: &ResolvedInput,
-    provenance: SourceProvenance,
 ) -> Diagnostic {
     let mut diagnostic = ir_diag(code, stage, error, resolved);
-    if provenance == SourceProvenance::Unmapped {
-        diagnostic.source = Some(provider_artifact_origin(resolved));
-    }
+    diagnostic.source = Some(provider_artifact_origin(resolved));
     diagnostic
 }
