@@ -33,10 +33,10 @@ pub use result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
     Envelope, InspectResult, LintResult, RESULT_CONTRACT,
 };
-pub use session::{CompilerSession, Loaded, Provenance};
+pub use session::{CompilerSession, Loaded};
 pub use source_provider::{
-    SourceBackend, SourceCompilation, SourceLanguage, SourceProvider, SourceProviderError,
-    SourceTarget,
+    SourceBackend, SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider,
+    SourceProviderError, SourceTarget,
 };
 pub use workshop_provider::WorkshopProvider;
 pub use wright_transform::Profile;

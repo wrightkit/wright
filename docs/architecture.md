@@ -131,8 +131,11 @@ invocation working directory. A provider owns `#!mainFile`, includes,
 preprocessing, macros, and the source closure. The driver accepts provider
 diagnostics and canonical Workshop text, validates that text through
 `workshop-rs`, and then reuses the normal lint/analyze/compile pipeline. LPP
-request/session/document types remain below the adapter; a missing or failed
-provider is an explicit failure and never selects the native OPY path.
+request/session/document types remain below the adapter. The result also
+declares whether canonical-artifact spans are `Mapped` to authored source or
+`Unmapped`; unmapped diagnostics and findings use the explicit
+`<provider-artifact>` identity. A missing or failed provider is an explicit
+failure and never selects the native OPY path.
 
 ### DEL / OSTW
 

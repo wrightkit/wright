@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use wright_driver::source_provider::{
-    SourceCompilation, SourceLanguage, SourceProvider, SourceProviderError, SourceTarget,
+    SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError,
+    SourceTarget,
 };
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceBackend, SourceKind};
 
@@ -112,7 +113,61 @@ fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_h
     assert_eq!(target.cwd, std::env::current_dir().expect("cwd"));
     assert_eq!(
         session.load().expect("cached provider result").provenance,
-        wright_driver::Provenance::ProviderArtifact
+        SourceProvenance::Unmapped
+    );
+    cleanup(dir);
+}
+
+#[test]
+fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
+    let config = SessionConfig {
+        input: InputSpec::Stdin,
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::new(config).expect("session");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.exit, 3);
+    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
+}
+
+#[test]
+fn unmapped_provider_artifact_errors_do_not_claim_the_opy_entry() {
+    let (dir, entry) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        compilation: Some(SourceCompilation::success(
+            "rule (\"broken\") {\n    actions {\n        UnknownAction;\n    }\n}\n",
+        )),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.diagnostics[0].code, "unknown-action");
+    assert_eq!(
+        result.diagnostics[0]
+            .span
+            .as_ref()
+            .expect("artifact span")
+            .path,
+        "<provider-artifact>"
+    );
+    assert_eq!(
+        result.diagnostics[0]
+            .source
+            .as_ref()
+            .expect("artifact origin")
+            .kind,
+        "provider-artifact"
     );
     cleanup(dir);
 }

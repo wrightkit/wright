@@ -50,6 +50,15 @@ pub struct SourceTarget {
     pub cwd: PathBuf,
 }
 
+/// The provenance contract for the canonical Workshop result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceProvenance {
+    /// The provider has preserved a truthful mapping to authored source.
+    Mapped,
+    /// The canonical artifact has no authored-source mapping.
+    Unmapped,
+}
+
 impl SourceTarget {
     /// Construct an entry target and resolve a relative path from `cwd`.
     pub fn new(
@@ -86,6 +95,8 @@ pub struct SourceCompilation {
     pub workshop_text: Option<String>,
     /// Workshop client locale for the returned canonical source.
     pub locale: Option<String>,
+    /// Whether canonical Workshop spans can be mapped to authored source.
+    pub provenance: SourceProvenance,
     /// Diagnostics already attributed to their authored source files by the
     /// provider adapter. These are preserved alongside Wright diagnostics.
     pub diagnostics: Vec<Diagnostic>,
@@ -97,6 +108,7 @@ impl SourceCompilation {
         Self {
             workshop_text: Some(workshop_text.into()),
             locale: None,
+            provenance: SourceProvenance::Unmapped,
             diagnostics: Vec::new(),
         }
     }
