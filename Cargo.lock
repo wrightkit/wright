@@ -2146,9 +2146,12 @@ dependencies = [
 name = "wright-driver"
 version = "0.2.16"
 dependencies = [
+ "flate2",
  "serde",
  "serde_json",
  "sha2",
+ "tar",
+ "ureq",
  "workshop-rs",
  "wright-analyzer",
  "wright-core",

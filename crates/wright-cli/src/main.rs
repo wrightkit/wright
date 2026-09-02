@@ -3,6 +3,7 @@
 mod cli;
 mod completion;
 mod present;
+mod provider;
 mod update;
 
 use std::io::Write;
@@ -13,7 +14,9 @@ use clap::{CommandFactory, Parser};
 use wright_driver::config::{InputSpec, OutputFormat, SessionConfig, SourceKind};
 use wright_driver::result::exit;
 
-use crate::cli::{Cli, Command, CommonArgs, ConvertTargetArg, OutputFormatArg};
+use crate::cli::{
+    Cli, Command, CommonArgs, ConvertTargetArg, OutputFormatArg, ProviderCommand, ProviderNameArg,
+};
 
 /// The CLI name and version banner.
 pub const CLI_NAME: &str = "wright";
@@ -89,6 +92,24 @@ fn main() -> ExitCode {
                 ExitCode::from(error.exit_code())
             }
         },
+        Some(Command::Provider(args)) => match args.command {
+            ProviderCommand::Update(update) => match update.provider {
+                ProviderNameArg::Opy => match provider::update(update.version.as_deref()) {
+                    Ok(resolved) => {
+                        println!(
+                            "installed first-party OPY provider {} at {}",
+                            resolved.version.as_deref().unwrap_or("local"),
+                            resolved.executable.display()
+                        );
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => {
+                        eprintln!("wright: {}: {}", error.code(), error);
+                        ExitCode::from(error.exit_code())
+                    }
+                },
+            },
+        },
         Some(command) => run_workflow(command),
     }
 }
@@ -156,7 +177,11 @@ fn run_workflow(command: Command) -> ExitCode {
             present::Presentation::from_common(&args),
             None,
         ),
-        Command::Completion(_) | Command::Update(_) | Command::Help | Command::Version => {
+        Command::Completion(_)
+        | Command::Update(_)
+        | Command::Provider(_)
+        | Command::Help
+        | Command::Version => {
             unreachable!("non-workflow command handled before run_workflow")
         }
     };
@@ -230,6 +255,10 @@ fn config_from_common(common: &CommonArgs) -> SessionConfig {
         },
         locale: common.locale.clone(),
         root: common.root.clone(),
+        opy_provider: wright_driver::OpyProviderConfig {
+            executable: common.opy_provider.clone(),
+            ..wright_driver::OpyProviderConfig::default()
+        },
         format: match common.format {
             OutputFormatArg::Text => OutputFormat::Text,
             OutputFormatArg::Json => OutputFormat::Json,

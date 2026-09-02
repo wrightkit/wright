@@ -17,6 +17,7 @@ pub mod diag;
 pub mod edit;
 pub mod input;
 pub mod opy;
+pub mod opy_provider;
 pub mod progress;
 pub mod provider_edit;
 pub mod result;
@@ -27,6 +28,9 @@ pub mod workshop_provider;
 pub use config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind};
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 pub use input::{ResolvedInput, sha256_hex};
+pub use opy_provider::{
+    OpyProviderConfig, OpyProviderError, OpyProviderResolver, ResolvedOpyProvider,
+};
 pub use progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 pub use result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,

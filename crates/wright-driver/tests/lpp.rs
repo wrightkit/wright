@@ -88,20 +88,43 @@ fn session_spawns_initializes_and_queries_a_provider() {
 
 #[test]
 fn unconfigured_language_refuses_explicitly() {
-    // "opy" here is an unconfigured opaque language id — there is no
-    // OPY-specific branch in the client; the refusal is the registry's.
+    // A non-OPY language remains an unconfigured opaque language id; the
+    // first-party OPY resolver must not change generic registry behavior.
     let session = CompilerSession::new(SessionConfig::default()).expect("session");
     let error = session
-        .language_provider("opy")
+        .language_provider("x-unconfigured-lang")
         .err()
         .expect("not configured");
     assert_eq!(error.code(), "provider-not-configured");
     assert_eq!(
         error,
         ProviderError::NotConfigured {
-            language_id: "opy".to_string(),
+            language_id: "x-unconfigured-lang".to_string(),
         }
     );
+}
+
+#[test]
+fn missing_first_party_opy_provider_is_a_structured_local_failure() {
+    let config = SessionConfig {
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(
+            workspace_root().join("does-not-exist/opy-provider"),
+        ),
+        ..SessionConfig::default()
+    };
+    let session = CompilerSession::new(config).expect("session");
+    let error = session
+        .language_provider("opy")
+        .err()
+        .expect("missing provider must be visible");
+    assert_eq!(error.code(), "provider-missing");
+    assert!(matches!(
+        error,
+        ProviderError::Local {
+            kind: wright_lpp::LocalProviderErrorKind::Missing,
+            ..
+        }
+    ));
 }
 
 #[test]
