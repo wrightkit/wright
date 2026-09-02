@@ -19,6 +19,7 @@ use crate::WorkshopProvider;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 use crate::input::{self, ResolvedInput};
+use crate::opy_provider;
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
@@ -30,6 +31,21 @@ use crate::source_provider::{
     SourceTarget,
 };
 use crate::{input_identity, opy};
+
+fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProviderErrorKind {
+    match error {
+        opy_provider::OpyProviderError::Missing(_) => wright_lpp::LocalProviderErrorKind::Missing,
+        opy_provider::OpyProviderError::UnsupportedPlatform(_) => {
+            wright_lpp::LocalProviderErrorKind::UnsupportedPlatform
+        }
+        opy_provider::OpyProviderError::Offline(_) => wright_lpp::LocalProviderErrorKind::Offline,
+        opy_provider::OpyProviderError::Download(_) => wright_lpp::LocalProviderErrorKind::Download,
+        opy_provider::OpyProviderError::Integrity(_) => {
+            wright_lpp::LocalProviderErrorKind::Integrity
+        }
+        opy_provider::OpyProviderError::Install(_) => wright_lpp::LocalProviderErrorKind::Install,
+    }
+}
 
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
@@ -395,6 +411,27 @@ impl CompilerSession {
         &self,
         language_id: &str,
     ) -> Result<Box<dyn wright_lpp::LanguageProvider>, wright_lpp::ProviderError> {
+        if language_id == opy_provider::OPY_LANGUAGE_ID
+            && !self.config.providers.contains(language_id)
+        {
+            let resolved = self.config.opy_provider.resolve().map_err(|error| {
+                wright_lpp::ProviderError::Local {
+                    kind: error_kind(&error),
+                    message: error.to_string(),
+                }
+            })?;
+            let mut providers = self.config.providers.clone();
+            providers
+                .register(wright_lpp::ProviderConfig::new(
+                    opy_provider::OPY_LANGUAGE_ID,
+                    resolved.executable,
+                    Vec::new(),
+                ))
+                .expect("the first-party OPY provider language id is not registered");
+            return providers
+                .spawn(language_id)
+                .map(|provider| Box::new(provider) as Box<dyn wright_lpp::LanguageProvider>);
+        }
         self.config
             .providers
             .spawn(language_id)

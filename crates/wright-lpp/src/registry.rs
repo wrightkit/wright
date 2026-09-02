@@ -89,6 +89,11 @@ impl ProviderRegistry {
         Ok(())
     }
 
+    /// Whether a provider has been explicitly registered for `language_id`.
+    pub fn contains(&self, language_id: &str) -> bool {
+        self.providers.contains_key(language_id)
+    }
+
     /// Spawn a fresh provider session for `language_id`.
     ///
     /// Refuses explicitly when no provider is configured for the id

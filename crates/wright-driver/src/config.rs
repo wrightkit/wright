@@ -135,6 +135,8 @@ pub struct SessionConfig {
     /// locate the mock provider through the `LPP_MOCK_PROVIDER`
     /// environment variable).
     pub providers: wright_lpp::ProviderRegistry,
+    /// First-party OPY provider resolution settings (#244).
+    pub opy_provider: crate::opy_provider::OpyProviderConfig,
 }
 
 impl Default for SessionConfig {
@@ -150,6 +152,7 @@ impl Default for SessionConfig {
             profile: wright_transform::Profile::Off,
             lint: LintConfig::default(),
             providers: wright_lpp::ProviderRegistry::default(),
+            opy_provider: crate::opy_provider::OpyProviderConfig::default(),
         }
     }
 }

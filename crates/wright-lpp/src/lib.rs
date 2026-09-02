@@ -68,7 +68,7 @@ pub const LPP_PROTOCOL_VERSION: &str = "1.0";
 pub const LPP_CLIENT_NAME: &str = "wright";
 
 pub use client::{ClientConfig, ClientPhase, JsonRpcClient};
-pub use error::{LppError, LppErrorKind, ProviderError};
+pub use error::{LocalProviderErrorKind, LppError, LppErrorKind, ProviderError};
 pub use process::ChildProcess;
 pub use provider::{LanguageProvider, NegotiatedCapabilities, StdioLanguageProvider};
 pub use registry::{ProviderConfig, ProviderRegistry, RegistryError};

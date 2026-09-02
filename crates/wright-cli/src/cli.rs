@@ -41,6 +41,7 @@ WORKFLOW OPTIONS:
     --target <TARGET>    Reconstruction target for convert: opy|ostw
     --locale <LOCALE>    Workshop client locale override
     --root <DIR>         Include/project root for source inputs
+    --opy-provider <PATH> Explicit local first-party OPY provider executable
     --profile <PROFILE>  WIR transformation policy: off|compat|aggressive
     -o, --output <PATH>  Write compiled output to PATH (compile only)
     -f, --format <FMT>   Output format: text|json
@@ -73,6 +74,8 @@ pub(crate) enum Command {
     Completion(CompletionArgs),
     /// Update a standalone installation.
     Update(UpdateArgs),
+    /// Manage first-party language providers.
+    Provider(ProviderArgs),
     /// Show the top-level help.
     Help,
     /// Show version and result-contract metadata.
@@ -111,6 +114,9 @@ pub(crate) struct CommonArgs {
     /// Include/project root for source inputs.
     #[arg(long, value_name = "DIR")]
     pub(crate) root: Option<PathBuf>,
+    /// Explicit local first-party OPY provider executable.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) opy_provider: Option<PathBuf>,
     /// WIR transformation policy.
     #[arg(long, value_enum, default_value_t = ProfileArg::Off)]
     pub(crate) profile: ProfileArg,
@@ -194,6 +200,32 @@ pub(crate) struct UpdateArgs {
     /// Install an exact version instead of the latest stable release.
     #[arg(long, value_name = "VERSION")]
     pub(crate) version: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderArgs {
+    #[command(subcommand)]
+    pub(crate) command: ProviderCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ProviderCommand {
+    /// Install or update a first-party provider.
+    Update(ProviderUpdateArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderUpdateArgs {
+    /// The provider to install.
+    pub(crate) provider: ProviderNameArg,
+    /// Install an exact release instead of the latest stable release.
+    #[arg(long, value_name = "VERSION")]
+    pub(crate) version: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ProviderNameArg {
+    Opy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

@@ -174,6 +174,35 @@ pub enum ProviderError {
         supported: Vec<String>,
         message: String,
     },
+    /// A local provider could not be resolved or installed.
+    Local {
+        kind: LocalProviderErrorKind,
+        message: String,
+    },
+}
+
+/// Machine-readable local provider resolution failure classes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalProviderErrorKind {
+    Missing,
+    UnsupportedPlatform,
+    Offline,
+    Download,
+    Integrity,
+    Install,
+}
+
+impl LocalProviderErrorKind {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Missing => "provider-missing",
+            Self::UnsupportedPlatform => "provider-unsupported-platform",
+            Self::Offline => "provider-offline",
+            Self::Download => "provider-download",
+            Self::Integrity => "provider-integrity",
+            Self::Install => "provider-install",
+        }
+    }
 }
 
 impl ProviderError {
@@ -192,6 +221,7 @@ impl ProviderError {
             ProviderError::AlreadyInitialized => "provider-already-initialized",
             ProviderError::ShutDown { .. } => "provider-shutdown",
             ProviderError::ProtocolVersionMismatch { .. } => "protocol-version-mismatch",
+            ProviderError::Local { kind, .. } => kind.code(),
         }
     }
 
@@ -277,6 +307,7 @@ impl fmt::Display for ProviderError {
                     )
                 }
             }
+            ProviderError::Local { message, .. } => write!(f, "local provider failure: {message}"),
         }
     }
 }
