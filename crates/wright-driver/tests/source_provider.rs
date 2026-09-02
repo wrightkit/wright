@@ -54,6 +54,8 @@ fn cleanup(dir: PathBuf) {
 
 struct RecordingProvider {
     target: Arc<Mutex<Option<SourceTarget>>>,
+    operations: Arc<Mutex<Vec<&'static str>>>,
+    check_compilation: Option<SourceCompilation>,
     compilation: Option<SourceCompilation>,
     failure: Option<SourceProviderError>,
 }
@@ -63,7 +65,26 @@ impl SourceProvider for RecordingProvider {
         SourceLanguage::Opy
     }
 
+    fn check(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
+        if self.check_compilation.is_none() {
+            return self.compile(target);
+        }
+        self.operations
+            .lock()
+            .expect("operation lock")
+            .push("check");
+        *self.target.lock().expect("target lock") = Some(target.clone());
+        if let Some(error) = self.failure.take() {
+            return Err(error);
+        }
+        Ok(self.check_compilation.take().expect("check result"))
+    }
+
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
+        self.operations
+            .lock()
+            .expect("operation lock")
+            .push("compile");
         *self.target.lock().expect("target lock") = Some(target.clone());
         if let Some(error) = self.failure.take() {
             return Err(error);
@@ -76,8 +97,11 @@ impl SourceProvider for RecordingProvider {
 fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_handoff() {
     let (dir, entry) = temp_entry();
     let observed = Arc::new(Mutex::new(None));
+    let operations = Arc::new(Mutex::new(Vec::new()));
     let provider = RecordingProvider {
         target: Arc::clone(&observed),
+        operations: Arc::clone(&operations),
+        check_compilation: None,
         compilation: Some(SourceCompilation::success(workshop_fixture(
             "synthetic/control-flow",
         ))),
@@ -110,9 +134,74 @@ fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_h
     assert_eq!(target.language, SourceLanguage::Opy);
     assert_eq!(target.entry, entry);
     assert_eq!(target.cwd, std::env::current_dir().expect("cwd"));
+    assert_eq!(target.project_root, Some(dir.clone()));
     assert_eq!(
         session.load().expect("cached provider result").provenance,
         wright_driver::Provenance::Unmapped
+    );
+    assert_eq!(*operations.lock().expect("operation lock"), vec!["compile"]);
+    cleanup(dir);
+}
+
+#[test]
+fn provider_backend_check_uses_the_provider_check_operation() {
+    let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::clone(&operations),
+        check_compilation: Some(SourceCompilation {
+            workshop_text: None,
+            locale: Some("zh-CN".to_string()),
+            provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+        }),
+        compilation: Some(SourceCompilation::success("unused")),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(result.ok, "provider check: {:?}", result.diagnostics);
+    assert_eq!(*operations.lock().expect("operation lock"), vec!["check"]);
+    cleanup(dir);
+}
+
+#[test]
+fn provider_backend_does_not_reuse_a_check_load_for_compile() {
+    let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::clone(&operations),
+        check_compilation: Some(SourceCompilation {
+            workshop_text: None,
+            locale: None,
+            provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+        }),
+        compilation: Some(SourceCompilation::success(workshop_fixture(
+            "synthetic/basic-rule",
+        ))),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    assert!(session.check().ok);
+    assert!(session.compile().ok);
+    assert_eq!(
+        *operations.lock().expect("operation lock"),
+        vec!["check", "compile"]
     );
     cleanup(dir);
 }
@@ -137,6 +226,8 @@ fn unmapped_provider_artifact_errors_do_not_claim_the_opy_entry() {
     let (dir, entry) = temp_entry();
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
         compilation: Some(SourceCompilation::success(
             "rule (\"broken\") {\n    actions {\n        UnknownAction;\n    }\n}\n",
         )),
@@ -149,7 +240,7 @@ fn unmapped_provider_artifact_errors_do_not_claim_the_opy_entry() {
     };
     let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
         .expect("provider session");
-    let result = session.check();
+    let result = session.compile();
     assert!(!result.ok);
     assert_eq!(result.diagnostics[0].code, "unknown-action");
     assert_eq!(
@@ -176,6 +267,8 @@ fn provider_backend_does_not_fall_back_when_the_provider_fails() {
     let (dir, entry) = temp_entry();
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
         compilation: None,
         failure: Some(SourceProviderError::Failed {
             code: "provider-exited".to_string(),
@@ -197,18 +290,21 @@ fn provider_backend_does_not_fall_back_when_the_provider_fails() {
 }
 
 #[test]
-fn provider_backend_without_injection_is_an_explicit_failure() {
+fn provider_backend_provider_resolution_failure_is_explicit() {
     let (dir, entry) = temp_entry();
     let config = SessionConfig {
         input: InputSpec::Path(entry),
         kind: SourceKind::Opy,
         source_backend: SourceBackend::Provider,
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(
+            dir.join("missing-provider"),
+        ),
         ..SessionConfig::default()
     };
     let mut session = CompilerSession::new(config).expect("session");
     let result = session.check();
     assert!(!result.ok);
     assert_eq!(result.exit, 4);
-    assert_eq!(result.diagnostics[0].code, "source-provider-not-configured");
+    assert_eq!(result.diagnostics[0].code, "provider-missing");
     cleanup(dir);
 }

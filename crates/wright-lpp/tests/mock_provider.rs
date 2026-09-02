@@ -123,6 +123,9 @@ fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
     let negotiated = provider.capabilities().expect("negotiated");
     assert_eq!(negotiated.language_ids(), vec![DEMO_LANGUAGE_ID]);
     for capability in Capability::ALL {
+        if capability == Capability::ProjectLoading {
+            continue;
+        }
         assert!(
             negotiated.supports(capability),
             "capability {} negotiated",

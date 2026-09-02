@@ -13,6 +13,7 @@ use std::sync::Arc;
 use clap::{CommandFactory, Parser};
 use wright_driver::config::{InputSpec, OutputFormat, SessionConfig, SourceKind};
 use wright_driver::result::exit;
+use wright_driver::source_provider::SourceBackend;
 
 use crate::cli::{
     Cli, Command, CommonArgs, ConvertTargetArg, OutputFormatArg, ProviderCommand, ProviderNameArg,
@@ -246,6 +247,11 @@ fn config_from_common(common: &CommonArgs) -> SessionConfig {
     };
     SessionConfig {
         input,
+        source_backend: if common.opy_provider.is_some() {
+            SourceBackend::Provider
+        } else {
+            SourceBackend::Native
+        },
         kind: match common.kind {
             cli::SourceKindArg::Auto => SourceKind::Auto,
             cli::SourceKindArg::Opy => SourceKind::Opy,
