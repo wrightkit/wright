@@ -26,6 +26,8 @@ pub struct ResolvedInput {
     pub path: Option<PathBuf>,
     /// The include root (`.opy` include base); the input's directory by default.
     pub root: PathBuf,
+    /// The invocation working directory used to resolve a relative entry.
+    pub cwd: PathBuf,
     /// A stable display identity used in diagnostics (`<stdin>` for stdin).
     pub display: String,
     /// SHA-256 hex of the input bytes (deterministic input identity).
@@ -55,7 +57,19 @@ pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
 }
 
 fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
-    let bytes = std::fs::read(path).map_err(|error| {
+    let cwd = std::env::current_dir().map_err(|error| {
+        Diagnostic::error(
+            "cwd-io",
+            Stage::Discovery,
+            format!("cannot determine the invocation working directory: {error}"),
+        )
+    })?;
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    let bytes = std::fs::read(&path).map_err(|error| {
         Diagnostic::error(
             "input-io",
             Stage::Discovery,
@@ -64,23 +78,25 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
     })?;
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let kind = match config.kind {
-        SourceKind::Auto => kind_from_extension(path)?,
+        SourceKind::Auto => kind_from_extension(&path)?,
         other => other,
     };
     let root = match &config.root {
-        Some(root) => root.clone(),
+        Some(root) if root.is_absolute() => root.clone(),
+        Some(root) => cwd.join(root),
         None => path
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from(".")),
     };
-    let display = display_path(path);
+    let display = display_path(&path);
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
         kind,
         text,
         path: Some(path.to_path_buf()),
         root,
+        cwd,
         display,
         identity: sha256_hex(&bytes),
         origin,
@@ -111,6 +127,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
         .root
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let display = "<stdin>".to_string();
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
@@ -118,6 +135,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
         text,
         path: None,
         root,
+        cwd,
         display,
         identity: sha256_hex(&bytes),
         origin,

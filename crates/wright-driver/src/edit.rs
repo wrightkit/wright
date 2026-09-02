@@ -775,6 +775,7 @@ fn resolved_input(
         text: main_text.to_string(),
         path: Some(main_path.to_path_buf()),
         root: root.to_path_buf(),
+        cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         display: crate::input::display_path(main_path),
         identity: crate::input_identity(main_text),
         origin: origin_for(kind, locale),

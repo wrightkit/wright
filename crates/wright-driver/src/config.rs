@@ -11,13 +11,14 @@ use std::path::PathBuf;
 
 pub use wright_analyzer::registry::LintConfig;
 
+use crate::source_provider::SourceBackend;
+
 /// The concrete input frontend to use, or automatic detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
     /// Detect from the input path extension or stdin content.
     Auto,
-    /// `.opy` source through the adapter bridge (the native frontend is the
-    /// default path).
+    /// `.opy` source through the explicitly selected backend.
     Opy,
     /// `.ostw` / `.del` source through the native OSTW frontend (#117).
     Ostw,
@@ -102,6 +103,10 @@ pub struct SessionConfig {
     pub input: InputSpec,
     /// Frontend selection; `Auto` detects from path/stdin.
     pub kind: SourceKind,
+    /// The source implementation selected for source-language workflows.
+    /// Raw Workshop is always handled in-process; the provider backend is
+    /// currently reserved for the first-party OPY provider.
+    pub source_backend: SourceBackend,
     /// Workshop client-locale override (bypasses auto-detection).
     pub locale: Option<String>,
     /// Include root for `.opy` inputs (defaults to the input's directory).
@@ -137,6 +142,7 @@ impl Default for SessionConfig {
         SessionConfig {
             input: InputSpec::Stdin,
             kind: SourceKind::Auto,
+            source_backend: SourceBackend::Native,
             locale: None,
             root: None,
             output: None,

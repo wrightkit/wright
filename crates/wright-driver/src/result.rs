@@ -79,6 +79,9 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if diagnostic.code == "ostw-unsupported" {
             return exit::UNSUPPORTED;
         }
+        if diagnostic.code == "source-provider-unsupported" {
+            return exit::UNSUPPORTED;
+        }
         has_source_error = true;
     }
     if has_source_error {
