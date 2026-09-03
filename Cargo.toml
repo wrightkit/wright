@@ -25,7 +25,6 @@ sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
 ureq = "2"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 wright-analyzer = { path = "crates/wright-analyzer" }
 wright-core = { path = "crates/wright-core" }
 wright-driver = { path = "crates/wright-driver" }
