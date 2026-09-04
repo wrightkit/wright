@@ -14,6 +14,5 @@ Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/wrightkit/wright/releases/download/v0.2.17/wright-0.2.17-x86_64-pc-windows-msvc.zip
     InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
-    ElevationRequirement: elevationProhibited
 ManifestType: installer
 ManifestVersion: 1.10.0

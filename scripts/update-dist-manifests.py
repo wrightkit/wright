@@ -115,7 +115,6 @@ Installers:
   - Architecture: x64
     InstallerUrl: {win_url}
     InstallerSha256: {windows_hash}
-    ElevationRequirement: elevationProhibited
 ManifestType: installer
 ManifestVersion: 1.10.0
 """

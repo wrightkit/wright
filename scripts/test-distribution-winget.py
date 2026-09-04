@@ -21,13 +21,20 @@ def target_info() -> str:
 
 
 def installed_binary(name: str) -> Path:
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if not local_app_data:
-        fail(CHANNEL, "LOCALAPPDATA is not set")
-    roots = [
-        Path(local_app_data) / "Microsoft" / "WinGet" / "Packages",
-        Path(local_app_data) / "Microsoft" / "WinGet" / "Links",
-    ]
+    roots = []
+    for variable in ("LOCALAPPDATA", "ProgramFiles", "ProgramW6432"):
+        value = os.environ.get(variable)
+        if value:
+            roots.extend(
+                [
+                    Path(value) / "Microsoft" / "WinGet" / "Packages",
+                    Path(value) / "Microsoft" / "WinGet" / "Links",
+                    Path(value) / "WinGet" / "Packages",
+                    Path(value) / "WinGet" / "Links",
+                ]
+            )
+    if not roots:
+        fail(CHANNEL, "WinGet package roots are not available")
     candidates = [path for root in roots if root.exists() for path in root.rglob(name)]
     if not candidates:
         fail(CHANNEL, f"installed package does not expose {name}")
