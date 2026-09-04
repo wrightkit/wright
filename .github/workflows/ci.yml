@@ -669,5 +669,10 @@ jobs:
         if: runner.os != 'Windows'
         run: scripts/test-install.sh
 
+      - name: Run Windows installer functional tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-install.ps1
+
       - name: Run npm distribution smoke tests
         run: python scripts/test-npm.py --binaries-dir target/debug

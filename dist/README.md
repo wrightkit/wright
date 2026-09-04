@@ -10,6 +10,7 @@ archives and their `.sha256` checksums from
 | Channel | File(s) | Consumes |
 | --- | --- | --- |
 | Unix installer | `../install.sh` (repo root) | Linux/macOS `.tar.gz` + `.sha256`, verified at install time |
+| Windows installer | `../install.ps1` (repo root) | Windows x86_64 `.zip` + `.sha256`, verified at install time |
 | Homebrew | `homebrew/wright.rb` | macOS `.tar.gz` archives (arm64 + x86_64) with per-arch `sha256` |
 | WinGet | `winget/manifests/w/WrightKit/Wright/<version>/` | Windows `.zip` with `InstallerSha256` |
 | Scoop | `scoop/wright.json` | Windows `.zip` with `hash` |

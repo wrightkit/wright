@@ -128,6 +128,23 @@ Consumers should verify the checksum before use; the recorded name inside a
 directory holding both files. Windows consumers can download the `.zip` and
 matching `.zip.sha256`, then extract with `tar -xf` or Explorer.
 
+Windows x86_64 users can install the canonical release ZIP with the first-party
+PowerShell installer:
+
+```powershell
+irm https://raw.githubusercontent.com/wrightkit/wright/main/install.ps1 | iex
+```
+
+For a pinned version or custom user-writable directory:
+
+```powershell
+& .\install.ps1 -Version 0.1.0 -InstallDir "$env:LOCALAPPDATA\Programs\Wright\bin"
+```
+
+The installer verifies the published `.zip.sha256` before extraction, installs
+both `wright.exe` and `wright-lsp.exe`, and runs both binaries directly for a
+version smoke check. It does not require Cargo, npm, or a source checkout.
+
 ### Release smoke test
 
 Each build leg smoke-tests its **packaged archive** (not workspace binaries):
@@ -170,6 +187,7 @@ secret and the per-channel publication process and boundaries.
 | Channel | Platforms | Installs | Checksum control |
 | --- | --- | --- | --- |
 | `install.sh` | Linux x86_64, macOS arm64, macOS x86_64 | `wright` + `wright-lsp` into `~/.local/bin` (or `--dir`) | script verifies the published `.sha256` before extraction |
+| `install.ps1` | Windows x86_64 | `wright.exe` + `wright-lsp.exe` into `%LOCALAPPDATA%\Programs\Wright\bin` (or `-InstallDir`) | script verifies the published `.sha256` before extraction |
 | Homebrew (`wrightkit/tap`) | macOS arm64 + Intel | `wright` + `wright-lsp` formula | per-arch `sha256` in the formula |
 | WinGet (`WrightKit.Wright`) | Windows x86_64 | `wright` + `wright-lsp` portable ZIP | `InstallerSha256` in the manifest |
 | Scoop (`wrightkit` bucket) | Windows x86_64 | `wright` + `wright-lsp` ZIP | `hash` in the manifest |
@@ -182,6 +200,13 @@ downloads the archive and checksum, verifies the SHA-256 before extracting,
 installs both binaries, and runs a post-install version smoke check. Its
 functional behavior is covered by `scripts/test-install.sh` against a mock
 release server on Linux and macOS CI.
+
+`install.ps1` is the supported Windows x86_64 installer. It resolves the latest
+stable release by default or an exact `-Version`, downloads the canonical ZIP
+and matching `.sha256`, verifies the checksum before extraction, installs both
+executables into the user-writable default directory or `-InstallDir`, and
+runs a direct native version smoke check. Its functional behavior is covered
+by `scripts/test-install.ps1` against a local test release server on Windows.
 
 ### npm distribution channel (#121)
 
