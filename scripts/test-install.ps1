@@ -61,6 +61,19 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_
         }
     }
 
+    $UnknownVersion = "0.0.0"
+    $UnknownDir = Join-Path $Work "unknown"
+    try {
+        & $Installer -Version $UnknownVersion -InstallDir $UnknownDir -BaseUrl $BaseUrl -ApiUrl $ApiUrl
+        Fail "unknown exact version was accepted or ignored"
+    } catch {
+        if ($_.Exception.Message -notmatch "failed to download") { throw }
+    }
+    if (Test-Path -LiteralPath (Join-Path $UnknownDir "wright.exe")) {
+        Fail "unknown exact version left a partial installation"
+    }
+    Write-Host "PASS: exact version selection"
+
     $PinnedDir = Join-Path $Work "pinned"
     & $Installer -Version $Version -InstallDir $PinnedDir -BaseUrl $BaseUrl -ApiUrl $ApiUrl
     if (-not (Test-Path -LiteralPath (Join-Path $PinnedDir "wright.exe")) -or

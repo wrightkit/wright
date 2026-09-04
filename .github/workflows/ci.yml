@@ -85,8 +85,9 @@ jobs:
           opy_adapter_match="$(matches "(^adapter/|${broad})")"
           echo "opy_adapter=${opy_adapter_match}" >> "$GITHUB_OUTPUT"
 
-          # Distribution validation additionally triggers on dist/ manifest changes.
-          dist_match="$(matches "(^dist/|${broad})")"
+          # Distribution validation additionally triggers on dist/ manifests and
+          # the first-party Windows installer.
+          dist_match="$(matches "(^dist/|^install\\.ps1$|${broad})")"
           echo "dist=${dist_match}" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------------
