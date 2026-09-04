@@ -12,11 +12,11 @@ use std::time::Duration;
 
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
-use zip::ZipArchive;
 
 const DEFAULT_API_URL: &str = "https://api.github.com/repos/wrightkit/opy-rs/releases/latest";
 const DEFAULT_BASE_URL: &str = "https://github.com/wrightkit/opy-rs/releases/download";
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
+const PROVIDER_ARCHIVE_EXTENSION: &str = "tar.gz";
 
 /// The LPP language id served by the first-party OPY provider.
 pub const OPY_LANGUAGE_ID: &str = "opy";
@@ -193,10 +193,7 @@ impl OpyProviderResolver {
             Some(version) => normalize_version(version)?,
             None => self.fetch_latest_version()?,
         };
-        let archive_name = format!(
-            "opy-provider-{version}-{target}.{}",
-            archive_extension(target)
-        );
+        let archive_name = format!("opy-provider-{version}-{target}.{PROVIDER_ARCHIVE_EXTENSION}");
         let archive_url = format!(
             "{}/v{version}/{archive_name}",
             self.base_url.trim_end_matches('/')
@@ -278,7 +275,7 @@ impl OpyProviderResolver {
                     staging.display()
                 ))
             })?;
-            extract_provider(archive, &staging, version, target)?;
+            extract_provider(archive, &staging, target)?;
             std::fs::create_dir_all(final_dir.parent().expect("provider target has a parent"))
                 .map_err(|error| {
                     OpyProviderError::install(format!(
@@ -568,14 +565,9 @@ fn verify_checksum(
 fn extract_provider(
     archive: &[u8],
     destination: &Path,
-    version: &str,
     target: &str,
 ) -> Result<(), OpyProviderError> {
-    let expected_root = format!("opy-provider-{version}-{target}");
     let binary = provider_binary(target);
-    if archive_extension(target) == "zip" {
-        return extract_provider_zip(archive, destination, &expected_root, binary);
-    }
     let decoder = GzDecoder::new(archive);
     let mut archive = tar::Archive::new(decoder);
     let mut found = false;
@@ -589,93 +581,12 @@ fn extract_provider(
         let path = entry.path().map_err(|error| {
             OpyProviderError::install(format!("cannot inspect OPY provider archive path: {error}"))
         })?;
-        let components: Vec<_> = path.components().collect();
-        let expected_path = Path::new(&expected_root).join(binary);
-        let is_root = components.len() == 1
-            && components[0] == std::path::Component::Normal(expected_root.as_ref());
-        if path == expected_path {
-            if !entry.header().entry_type().is_file() {
-                return Err(OpyProviderError::install(
-                    "OPY provider archive executable is not a regular file",
-                ));
-            }
-            let output = destination.join(binary);
-            let mut file = std::fs::File::create(&output).map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot create staged OPY provider '{}': {error}",
-                    output.display()
-                ))
-            })?;
-            std::io::copy(&mut entry, &mut file).map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot unpack staged OPY provider '{}': {error}",
-                    output.display()
-                ))
-            })?;
-            file.sync_all().map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot persist staged OPY provider '{}': {error}",
-                    output.display()
-                ))
-            })?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = entry.header().mode().unwrap_or(0o755) | 0o111;
-                std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode)).map_err(
-                    |error| {
-                        OpyProviderError::install(format!(
-                            "cannot make staged OPY provider executable '{}': {error}",
-                            output.display()
-                        ))
-                    },
-                )?;
-            }
-            found = true;
-        } else if !is_root {
+        if path != Path::new(binary) {
             return Err(OpyProviderError::install(
                 "OPY provider archive contains an unexpected path",
             ));
         }
-    }
-    if !found || !is_executable(&destination.join(binary)) {
-        return Err(OpyProviderError::install(
-            "OPY provider archive does not contain an executable provider",
-        ));
-    }
-    Ok(())
-}
-
-fn extract_provider_zip(
-    archive: &[u8],
-    destination: &Path,
-    expected_root: &str,
-    binary: &str,
-) -> Result<(), OpyProviderError> {
-    let mut archive = ZipArchive::new(std::io::Cursor::new(archive)).map_err(|error| {
-        OpyProviderError::install(format!("cannot read OPY provider archive: {error}"))
-    })?;
-    let expected_path = format!("{expected_root}/{binary}");
-    let mut found = false;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| {
-            OpyProviderError::install(format!("cannot read OPY provider archive entry: {error}"))
-        })?;
-        let name = entry.name();
-        if name == expected_root || name == format!("{expected_root}/") {
-            if !entry.is_dir() {
-                return Err(OpyProviderError::install(
-                    "OPY provider archive root is not a directory",
-                ));
-            }
-            continue;
-        }
-        if name != expected_path {
-            return Err(OpyProviderError::install(
-                "OPY provider archive contains an unexpected path",
-            ));
-        }
-        if entry.is_dir() {
+        if !entry.header().entry_type().is_file() {
             return Err(OpyProviderError::install(
                 "OPY provider archive executable is not a regular file",
             ));
@@ -702,7 +613,8 @@ fn extract_provider_zip(
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o755)).map_err(
+            let mode = entry.header().mode().unwrap_or(0o755) | 0o111;
+            std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode)).map_err(
                 |error| {
                     OpyProviderError::install(format!(
                         "cannot make staged OPY provider executable '{}': {error}",
@@ -729,18 +641,9 @@ fn provider_binary(target: &str) -> &'static str {
     }
 }
 
-fn archive_extension(target: &str) -> &'static str {
-    if target == "x86_64-pc-windows-msvc" {
-        "zip"
-    } else {
-        "tar.gz"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{
         Arc,
@@ -757,27 +660,14 @@ mod tests {
         root
     }
 
-    fn archive(version: &str, target: &str, body: &[u8]) -> Vec<u8> {
-        let root = format!("opy-provider-{version}-{target}");
+    fn archive(_version: &str, target: &str, body: &[u8]) -> Vec<u8> {
         let binary = provider_binary(target);
-        if archive_extension(target) == "zip" {
-            let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-            let options = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
-            writer.add_directory(format!("{root}/"), options).unwrap();
-            writer
-                .start_file(format!("{root}/{binary}"), options)
-                .unwrap();
-            writer.write_all(body).unwrap();
-            return writer.finish().unwrap().into_inner();
-        }
         let mut builder = tar::Builder::new(Vec::new());
         let mut header = tar::Header::new_gnu();
         header.set_size(body.len() as u64);
         header.set_mode(0o755);
         header.set_cksum();
-        builder
-            .append_data(&mut header, format!("{root}/{binary}"), body)
-            .unwrap();
+        builder.append_data(&mut header, binary, body).unwrap();
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(&builder.into_inner().unwrap()).unwrap();
         encoder.finish().unwrap()
@@ -874,16 +764,16 @@ mod tests {
     }
 
     #[test]
-    fn windows_target_uses_exe_and_zip_archive() {
+    fn windows_target_uses_exe_and_tar_gz_archive() {
         let target = target_for("windows", "x86_64").unwrap();
         assert_eq!(target, "x86_64-pc-windows-msvc");
         assert_eq!(provider_binary(&target), "opy-provider.exe");
-        assert_eq!(archive_extension(&target), "zip");
+        assert_eq!(PROVIDER_ARCHIVE_EXTENSION, "tar.gz");
 
         let root = test_root("windows");
         let version = "1.0.0";
         let bytes = archive(version, &target, b"windows-provider");
-        let checksum = format!("{}  opy-provider-{version}-{target}.zip\n", hex(&bytes));
+        let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
         let (base_url, requests, server) = test_server(
             format!(r#"{{"tag_name":"v{version}"}}"#).into_bytes(),
             bytes,
