@@ -86,5 +86,3 @@ jobs:
     secrets: inherit
     permissions:
       contents: write
-      id-token: write
-      packages: write
