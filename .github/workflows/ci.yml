@@ -634,6 +634,23 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Scoop
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+          Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $scoopShims = Join-Path $env:USERPROFILE "scoop\shims"
+          Add-Content -Path $env:GITHUB_PATH -Value $scoopShims
+          $env:PATH = "$scoopShims;$env:PATH"
+          scoop --version
+
+      - name: Enable WinGet local manifest installs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: winget settings --enable LocalManifestFiles
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
