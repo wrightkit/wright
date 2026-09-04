@@ -114,7 +114,7 @@ pub(crate) struct CommonArgs {
     /// Include/project root for source inputs.
     #[arg(long, value_name = "DIR")]
     pub(crate) root: Option<PathBuf>,
-    /// Explicit local first-party OPY provider executable.
+    /// Override the first-party OPY provider executable.
     #[arg(long, value_name = "PATH")]
     pub(crate) opy_provider: Option<PathBuf>,
     /// WIR transformation policy.

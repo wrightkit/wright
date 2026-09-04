@@ -466,12 +466,15 @@ carry their own SHA-256 (`result.output.sha256`).
 
 ## The `.opy` source implementation
 
-`.opy` inputs are compiled through the owner-backed `opy-rs` implementation
-through Wright's narrow adapter: no Node, no OverPy, and stdin `.opy` is
-supported (the include root defaults to the working directory for stdin,
-`--root` for files). The pinned OverPy adapter remains available only as an
-explicit compatibility fallback by setting `WRIGHT_ADAPTER_PATH`; it is never
-selected silently. The source surface is declared in
+`.opy` `check` and `compile` inputs use the owner-backed `opy-rs` implementation
+through Wright's narrow LPP 1.1 adapter: project loading is entry-based, no
+Node or OverPy is involved, and provider failures never fall back to the native
+frontend. An entry path is required for provider-backed workflows, so stdin
+`.opy` is rejected; `--root` supplies the project root for file inputs. The
+provider executable is resolved by the #244 bootstrap path and can be
+overridden with `--opy-provider`. `lint`, `analyze`, and `inspect` remain on the
+native frontend until a canonical provider WIR handoff is available. The
+source surface is declared in
 [`opy/support-matrix.md`](opy/support-matrix.md).
 
 ## Library reuse

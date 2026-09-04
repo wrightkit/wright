@@ -118,7 +118,7 @@ fn main() -> ExitCode {
 fn run_workflow(command: Command) -> ExitCode {
     let (name, config, presentation, convert_target) = match command {
         Command::Compile(args) => {
-            let mut config = config_from_common(&args.common);
+            let mut config = config_from_common(&args.common, true);
             config.output = args.output;
             (
                 "compile",
@@ -129,24 +129,24 @@ fn run_workflow(command: Command) -> ExitCode {
         }
         Command::Convert(args) => (
             "convert",
-            config_from_common(&args.common),
+            config_from_common(&args.common, false),
             present::Presentation::from_common(&args.common),
             Some(args.target),
         ),
         Command::Check(args) => (
             "check",
-            config_from_common(&args),
+            config_from_common(&args, true),
             present::Presentation::from_common(&args),
             None,
         ),
         Command::Analyze(args) => (
             "analyze",
-            config_from_common(&args),
+            config_from_common(&args, false),
             present::Presentation::from_common(&args),
             None,
         ),
         Command::Lint(args) => {
-            let mut config = config_from_common(&args.common);
+            let mut config = config_from_common(&args.common, false);
             for rule in &args.disable_rule {
                 config.lint.disable(rule);
             }
@@ -174,7 +174,7 @@ fn run_workflow(command: Command) -> ExitCode {
         }
         Command::Inspect(args) => (
             "inspect",
-            config_from_common(&args),
+            config_from_common(&args, false),
             present::Presentation::from_common(&args),
             None,
         ),
@@ -240,14 +240,16 @@ fn run_workflow(command: Command) -> ExitCode {
     ExitCode::from(code)
 }
 
-fn config_from_common(common: &CommonArgs) -> SessionConfig {
+fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionConfig {
     let input = match &common.input {
         Some(path) if path.as_os_str() != "-" => InputSpec::Path(path.clone()),
         _ => InputSpec::Stdin,
     };
     SessionConfig {
         input,
-        source_backend: if common.opy_provider.is_some() {
+        source_backend: if is_opy_input(common)
+            && (provider_workflow || common.opy_provider.is_some())
+        {
             SourceBackend::Provider
         } else {
             SourceBackend::Native
@@ -278,6 +280,19 @@ fn config_from_common(common: &CommonArgs) -> SessionConfig {
     }
 }
 
+fn is_opy_input(common: &CommonArgs) -> bool {
+    match common.kind {
+        cli::SourceKindArg::Opy => true,
+        cli::SourceKindArg::Auto => common
+            .input
+            .as_deref()
+            .and_then(|path| path.extension())
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("opy")),
+        _ => false,
+    }
+}
+
 /// Run one driver workflow and render its envelope in the CLI presentation.
 fn run_command<T: serde::Serialize>(
     session: &mut wright_driver::CompilerSession,
@@ -292,4 +307,55 @@ fn run_command<T: serde::Serialize>(
     let code = envelope.exit;
     present::render(&envelope, presentation);
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn common(input: Option<&str>, kind: cli::SourceKindArg) -> CommonArgs {
+        CommonArgs {
+            input: input.map(Into::into),
+            kind,
+            locale: None,
+            root: None,
+            opy_provider: None,
+            profile: cli::ProfileArg::Off,
+            format: cli::OutputFormatArg::Json,
+            renderer: cli::RendererArg::Plain,
+            color: cli::ColorArg::Never,
+        }
+    }
+
+    #[test]
+    fn ordinary_opy_check_and_compile_select_the_provider_backend() {
+        let opy = common(Some("main.opy"), cli::SourceKindArg::Auto);
+        assert_eq!(
+            config_from_common(&opy, true).source_backend,
+            SourceBackend::Provider
+        );
+
+        let workshop = common(Some("main.txt"), cli::SourceKindArg::Auto);
+        assert_eq!(
+            config_from_common(&workshop, true).source_backend,
+            SourceBackend::Native
+        );
+
+        let explicit_opy = common(None, cli::SourceKindArg::Opy);
+        assert_eq!(
+            config_from_common(&explicit_opy, true).source_backend,
+            SourceBackend::Provider
+        );
+        assert_eq!(
+            config_from_common(&opy, false).source_backend,
+            SourceBackend::Native
+        );
+
+        let mut explicit_provider = common(Some("main.opy"), cli::SourceKindArg::Auto);
+        explicit_provider.opy_provider = Some("opy-provider".into());
+        assert_eq!(
+            config_from_common(&explicit_provider, false).source_backend,
+            SourceBackend::Provider
+        );
+    }
 }

@@ -308,3 +308,22 @@ fn provider_backend_provider_resolution_failure_is_explicit() {
     assert_eq!(result.diagnostics[0].code, "provider-missing");
     cleanup(dir);
 }
+
+#[test]
+fn provider_backend_non_compile_workflows_refuse_without_empty_wir() {
+    let (dir, entry) = temp_entry();
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::new(config).expect("session");
+
+    let result = session.analyze();
+    assert!(!result.ok);
+    assert_eq!(result.exit, 3);
+    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
+    assert!(result.result.program.is_null());
+    cleanup(dir);
+}

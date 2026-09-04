@@ -153,6 +153,14 @@ impl CompilerSession {
     /// re-reading the input. Returns an owned snapshot so callers can hold it
     /// while mutating the session.
     pub fn load(&mut self) -> Result<Loaded, Diagnostic> {
+        if self.config.source_backend == SourceBackend::Provider
+            && self.loaded_operation != Some(ProviderOperation::Compile)
+        {
+            return Err(SourceProviderError::Unsupported {
+                message: "provider-backed load requires a canonical compile result; lint, analyze, inspect, and convert are not available on the check-only provider path".to_string(),
+            }
+            .diagnostic());
+        }
         self.load_with_operation(ProviderOperation::Check)
     }
 
@@ -365,17 +373,14 @@ impl CompilerSession {
             .unwrap_or_else(|| "en-US".to_string());
         let locale = workshop_rs::catalog::Locale::new(&locale_name);
         if operation == ProviderOperation::Check {
-            let loaded = Loaded {
+            return Ok(Loaded {
                 program: Arc::new(wir::Program::default()),
                 ostw: None,
                 ostw_semantic: None,
                 origin: resolved.origin.clone(),
                 input: resolved.clone(),
                 provenance,
-            };
-            self.loaded = Some(loaded.clone());
-            self.loaded_operation = Some(operation);
-            return Ok(loaded);
+            });
         }
         let Some(workshop_text) = compilation.workshop_text else {
             return Err(Diagnostic::error(

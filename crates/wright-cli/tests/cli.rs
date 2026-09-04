@@ -537,25 +537,18 @@ fn stdin_workshop_and_protocol_piping_work() {
 }
 
 #[test]
-fn stdin_opy_compiles_natively() {
+fn stdin_opy_requires_an_entry_for_provider_workflows() {
     let source = std::fs::read_to_string(
         workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
     )
     .unwrap();
     let output = run_with_stdin(&["compile", "-", "--kind", "opy", "-f", "json"], &source);
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "native .opy stdin: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(3));
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], true);
-    assert!(
-        envelope["result"]["output"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Disable Inspector Recording")
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "source-provider-unsupported"
     );
 }
 
@@ -1094,110 +1087,48 @@ fn github_summary_uses_step_summary_file_when_available() {
 }
 
 #[test]
-fn opy_file_compiles_through_the_native_frontend() {
+fn opy_file_does_not_fall_back_to_native_frontend() {
     let source = std::fs::read_to_string(
         workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
     )
     .unwrap();
     let path = temp_file("basic-rule.opy", &source);
-    let output = run(&["compile", path.to_str().unwrap(), "-f", "json"]);
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let missing_provider = path.parent().unwrap().join("missing-opy-provider");
+    let output = run(&[
+        "compile",
+        path.to_str().unwrap(),
+        "--opy-provider",
+        missing_provider.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(4));
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], true);
-    let oracle = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/oracle.json"),
-    )
-    .unwrap();
-    let oracle_value: serde_json::Value = serde_json::from_str(&oracle).unwrap();
-    let expected = oracle_value["compile"]["workshop"].as_str().unwrap();
-    assert_eq!(
-        envelope["result"]["output"]["text"]
-            .as_str()
-            .unwrap()
-            .trim(),
-        expected.trim(),
-        "native .opy output matches the oracle Workshop text"
-    );
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["diagnostics"][0]["code"], "provider-missing");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn opy_corpus_frontend_errors_are_structured() {
-    // Malformed `.opy` fails with a structured frontend diagnostic, not a
-    // panic, and does not fall back to the adapter silently.
-    let path = temp_file("broken.opy", "rule \"missing colon\"\n    @Event global\n");
-    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
-    assert_eq!(output.status.code(), Some(1));
+fn non_compile_opy_workflows_do_not_analyze_a_check_only_provider_result() {
+    let path = temp_file("main.opy", "rule \"r\":\n    @Event global\n");
+    let missing_provider = path.parent().unwrap().join("missing-opy-provider");
+    let output = run(&[
+        "analyze",
+        path.to_str().unwrap(),
+        "--opy-provider",
+        missing_provider.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(3));
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["diagnostics"][0]["code"], "parse-error");
-    assert_eq!(envelope["diagnostics"][0]["stage"], "frontend");
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn opy_chase_reevaluation_enums_compile_with_reference_semantics() {
-    // #105: ChaseTimeReeval.NONE (and the other reference-validated members
-    // of the ChaseTimeReeval/ChaseRateReeval domains) lower through the enum
-    // catalog data path and emit with the same Workshop value as the pinned
-    // oracle — `None`/`Destination and Duration`/`Destination and Rate`,
-    // distinct from the `Null` literal.
-    let fixture = workspace_root().join("compatibility/fixtures/synthetic/chase-enums");
-    let source = std::fs::read_to_string(fixture.join("source.opy")).unwrap();
-    let path = temp_file("chase-enums.opy", &source);
-    let output = run(&["compile", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(envelope["ok"], false);
     assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        envelope["diagnostics"][0]["code"],
+        "source-provider-unsupported"
     );
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], true);
-    let oracle = std::fs::read_to_string(fixture.join("oracle.json")).unwrap();
-    let oracle_value: serde_json::Value = serde_json::from_str(&oracle).unwrap();
-    let expected = oracle_value["compile"]["workshop"].as_str().unwrap();
-    let emitted = envelope["result"]["output"]["text"].as_str().unwrap();
-    assert_eq!(
-        emitted.trim(),
-        expected.trim(),
-        "native .opy output matches the oracle Workshop text"
-    );
-    assert!(
-        emitted.contains("None"),
-        "the NONE member emits its spelling: {emitted}"
-    );
-    assert!(emitted.contains("Destination and Duration"), "{emitted}");
-    assert!(emitted.contains("Destination and Rate"), "{emitted}");
-    assert!(
-        emitted.contains("Set Global Variable(time_reeval, None)"),
-        "the enum member emits as a bare spelling, not the Null literal: {emitted}"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn opy_unknown_enum_member_is_a_deterministic_frontend_diagnostic() {
-    // #105: enum members outside the evidenced catalog surface keep failing
-    // with a deterministic, source-located structured diagnostic.
-    let path = temp_file(
-        "unknown-member.opy",
-        "globalvar g\nrule \"r\":\n    @Event global\n    g = ChaseTimeReeval.NOPE\n",
-    );
-    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
-    assert_eq!(output.status.code(), Some(1));
-    let envelope = parse_json(&output.stdout);
-    let diagnostic = &envelope["diagnostics"][0];
-    assert_eq!(diagnostic["code"], "unknown-enum-member");
-    assert_eq!(diagnostic["stage"], "frontend");
-    assert!(
-        diagnostic["span"].is_object(),
-        "the diagnostic is source-located"
-    );
+    assert!(envelope["result"]["program"].is_null());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
