@@ -150,11 +150,19 @@ terminal. It does not require Cargo, npm, or a source checkout.
 ### Release smoke test
 
 Each build leg smoke-tests its **packaged archive** (not workspace binaries):
-it extracts the archive, runs `wright --version` and `wright-lsp --version`,
-asserts both report the tagged version, and compiles/checks the
-`synthetic/basic-rule` and `scenarios/loops` fixtures. The upload job
-re-verifies that every declared target's archive and checksum are present
-before attaching them to the draft Release.
+it extracts the archive and runs the shared `scripts/smoke-native.py` contract
+against the extracted binaries. The contract checks both version banners,
+representative OPY compile/check paths, and first-party OPY provider bootstrap
+from an empty provider store. The upload job re-verifies that every declared
+target's archive and checksum are present before attaching them to the draft
+Release.
+
+The normal CI distribution job separately stages a canonical-shaped local
+release archive and generated local metadata. It exercises `install.sh` or
+`install.ps1`, Homebrew on macOS, and Scoop plus WinGet on Windows through their
+real installation commands; each installed binary then runs the same native
+smoke. These channel checks are labelled separately from the native runtime
+smoke and do not publish or modify any external package-manager repository.
 
 ### Repository configuration
 

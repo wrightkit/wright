@@ -662,3 +662,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test-install.ps1
+
+      - name: Run native distribution channel smoke tests
+        run: python scripts/test-distribution.py
