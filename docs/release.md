@@ -157,12 +157,14 @@ from an empty provider store. The upload job re-verifies that every declared
 target's archive and checksum are present before attaching them to the draft
 Release.
 
-The normal CI distribution job separately stages a canonical-shaped local
-release archive and generated local metadata. It exercises `install.sh` or
-`install.ps1`, Homebrew on macOS, and Scoop plus WinGet on Windows through their
-real installation commands; each installed binary then runs the same native
-smoke. These channel checks are labelled separately from the native runtime
-smoke and do not publish or modify any external package-manager repository.
+The normal CI distribution validation uses independent channel legs. It stages
+a canonical-shaped local release archive and generated local metadata for
+`install.sh` on Linux/macOS, `install.ps1` on Windows, Homebrew on macOS, Scoop
+on Windows, and WinGet on Windows. Each leg provisions or configures only its
+own package-manager prerequisite, runs that channel's real installation
+command, and runs the same native smoke against the installed binaries. These
+channel checks are labelled separately from the native runtime smoke and do
+not publish or modify any external package-manager repository.
 
 ### Repository configuration
 

@@ -606,7 +606,7 @@ jobs:
   # explains which gate caused the skip.
   # -------------------------------------------------------------------------
   dist-validation:
-    name: Distribution validation (${{ matrix.os }})
+    name: Distribution validation (${{ matrix.channel }}, ${{ matrix.os }})
     needs:
       - paths
       - rust-quality
@@ -621,10 +621,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-15
-          - windows-latest
+        include:
+          - os: ubuntu-latest
+            channel: install.sh
+          - os: macos-15
+            channel: install.sh
+          - os: macos-15
+            channel: Homebrew
+          - os: windows-latest
+            channel: install.ps1
+          - os: windows-latest
+            channel: Scoop
+          - os: windows-latest
+            channel: WinGet
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -634,8 +643,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Scoop
-        if: runner.os == 'Windows'
+      - name: Install Scoop for Scoop validation
+        if: matrix.channel == 'Scoop'
         shell: pwsh
         run: |
           Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
@@ -646,8 +655,8 @@ jobs:
           $env:PATH = "$scoopShims;$env:PATH"
           scoop --version
 
-      - name: Enable WinGet local manifest installs
-        if: runner.os == 'Windows'
+      - name: Enable WinGet local manifests for WinGet validation
+        if: matrix.channel == 'WinGet'
         shell: pwsh
         run: winget settings --enable LocalManifestFiles
 
@@ -672,13 +681,22 @@ jobs:
       - name: Validate package-manager metadata and install script
         run: python scripts/verify-dist.py
 
-      - name: Run installer functional tests
-        if: runner.os != 'Windows'
+      - name: Run install.sh functional tests
+        if: matrix.channel == 'install.sh'
         run: scripts/test-install.sh
-      - name: Run Windows installer functional tests
-        if: runner.os == 'Windows'
+      - name: Run install.sh native channel smoke
+        if: matrix.channel == 'install.sh'
+        run: python scripts/test-distribution-install-sh.py
+      - name: Run install.ps1 channel validation
+        if: matrix.channel == 'install.ps1'
         shell: pwsh
         run: ./scripts/test-install.ps1
-
-      - name: Run native distribution channel smoke tests
-        run: python scripts/test-distribution.py
+      - name: Run Homebrew channel validation
+        if: matrix.channel == 'Homebrew'
+        run: python scripts/test-distribution-homebrew.py
+      - name: Run Scoop channel validation
+        if: matrix.channel == 'Scoop'
+        run: python scripts/test-distribution-scoop.py
+      - name: Run WinGet channel validation
+        if: matrix.channel == 'WinGet'
+        run: python scripts/test-distribution-winget.py
