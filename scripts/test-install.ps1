@@ -26,12 +26,12 @@ try {
     $Archive = Join-Path $Release $ArchiveName
     Compress-Archive -LiteralPath $Payload -DestinationPath $Archive -Force
     $Hash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$Hash  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline
+    "$Hash  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline -Encoding ASCII
 
     $ApiDirectory = Join-Path $Work "repos\wrightkit\wright\releases"
     New-Item -ItemType Directory -Path $ApiDirectory -Force | Out-Null
     '{"tag_name":"v' + $Version + '","draft":false,"prerelease":false}' |
-        Set-Content -LiteralPath (Join-Path $ApiDirectory "latest") -NoNewline
+        Set-Content -LiteralPath (Join-Path $ApiDirectory "latest") -NoNewline -Encoding ASCII
     $ServerCode = @'
 import http.server
 import os
@@ -47,7 +47,7 @@ os.chdir(sys.argv[2])
 http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
 '@
     $ServerScript = Join-Path $Work "server.py"
-    $ServerCode | Set-Content -LiteralPath $ServerScript -NoNewline
+    $ServerCode | Set-Content -LiteralPath $ServerScript -NoNewline -Encoding ASCII
     $Server = Start-Process -FilePath "python" -ArgumentList @($ServerScript, $Port, $Work) -PassThru -WindowStyle Hidden
     $BaseUrl = "http://127.0.0.1:$Port"
     $ApiUrl = "$BaseUrl/repos/wrightkit/wright/releases/latest"
@@ -76,7 +76,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_
     }
     Write-Host "PASS: latest-release resolution"
 
-    "$(('0' * 64) -join '')  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline
+    "$(('0' * 64) -join '')  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline -Encoding ASCII
     $CorruptDir = Join-Path $Work "corrupt"
     try {
         & $Installer -Version $Version -InstallDir $CorruptDir -BaseUrl $BaseUrl -ApiUrl $ApiUrl
