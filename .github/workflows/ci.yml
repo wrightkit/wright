@@ -648,26 +648,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
       - name: Build wright CLI and LSP
         run: cargo build --locked -p wright-cli -p wright-lsp
 
       - name: Validate package-manager metadata and install script
         run: python scripts/verify-dist.py
 
-      # #183 moved the npm tarball determinism/executable-bit regressions
-      # (#123) to scripts/tests and declared them part of distribution
-      # validation; this step is that wiring.
-      - name: Run npm packaging unit regressions (#123)
-        run: python -m unittest discover -s scripts/tests
-
       - name: Run installer functional tests
         if: runner.os != 'Windows'
         run: scripts/test-install.sh
-
-      - name: Run npm distribution smoke tests
-        run: python scripts/test-npm.py --binaries-dir target/debug

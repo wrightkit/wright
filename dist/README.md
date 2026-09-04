@@ -1,7 +1,7 @@
-# Wright Package-Manager Distribution (#108, #121)
+# Wright Package-Manager Distribution (#108)
 
-This directory holds the package-manager, installer, and npm distribution
-metadata that make the canonical GitHub Release artifacts installable through
+This directory holds the package-manager and installer metadata that make the
+canonical GitHub Release artifacts installable through
 platform-native channels. Nothing in here rebuilds Wright: every manifest and
 package consumes the published `wright-<version>-<target-triple>.<ext>`
 archives and their `.sha256` checksums from
@@ -13,7 +13,6 @@ archives and their `.sha256` checksums from
 | Homebrew | `homebrew/wright.rb` | macOS `.tar.gz` archives (arm64 + x86_64) with per-arch `sha256` |
 | WinGet | `winget/manifests/w/WrightKit/Wright/<version>/` | Windows `.zip` with `InstallerSha256` |
 | Scoop | `scoop/wright.json` | Windows `.zip` with `hash` |
-| npm / npx | `npm/wright/`, `npm/wright-*/` | Native release binaries packaged directly into platform npm packages |
 
 Standalone installs (the Unix installer or manual archives) upgrade in place
 with `wright update`, which consumes the same release archives and checksums
@@ -49,14 +48,8 @@ stages complete:
    - `wright-<version>.winget.zip` (unzip into a winget-pkgs checkout)
    - `wright-<version>.scoop.json`
 
-2. `package-npm` packages the release binaries into platform-native npm packages
-   via `scripts/package-npm.py`, runs smoke tests on the packaged artifacts,
-   attaches the `.tgz` tarballs to the draft Release, and publishes the same
-   tarballs to npmjs.org and GitHub Packages.
-
-3. `publish-release` marks the draft Release public only after the Homebrew tap
-   and registry jobs succeed. Re-running an already completed registry stage
-   skips package versions that already exist.
+2. `publish-release` marks the draft Release public after the native and
+   package-manager stages succeed.
 
 ### Homebrew
 
@@ -101,35 +94,6 @@ stages complete:
 - User experience: `scoop bucket add wrightkit
   https://github.com/wrightkit/scoop-bucket && scoop install wright`.
 
-### npm / npx (#121)
-
-Wright distributes native binaries via npm for seamless integration with Node.js
-tooling and CI environments without requiring Rust/Cargo compilation or
-postinstall download scripts.
-
-- **Meta package**: `@wrightkit/wright` exposes `wright` and `wright-lsp` CLI
-  binaries and exports `getBinaryPath()` for programmatic Node.js consumers.
-  It selects the matching native platform package via `optionalDependencies`.
-- **Platform packages**:
-  - `@wrightkit/wright-darwin-arm64` (macOS Apple Silicon)
-  - `@wrightkit/wright-darwin-x64` (macOS Intel)
-  - `@wrightkit/wright-linux-x64` (Linux x64)
-  - `@wrightkit/wright-win32-x64` (Windows x64)
-- **User experience**:
-  - Direct execution: `npx wright --version`
-  - Project dependency: `npm install @wrightkit/wright`
-- **Programmatic usage**:
-  ```javascript
-  const { getBinaryPath } = require('@wrightkit/wright');
-  const wrightBin = getBinaryPath('wright');
-  ```
-- **Boundary**: npm is strictly a package/distribution layer for the native Rust
-  CLI; there is no JavaScript reimplementation of the Wright compiler.
-- **Registries**: the release workflow publishes to npmjs.org when `NPM_TOKEN`
-  is configured, and always publishes to GitHub Packages with the workflow
-  `GITHUB_TOKEN`. GitHub Packages consumers must configure the `@wrightkit`
-  scope to use `https://npm.pkg.github.com` and authenticate with GitHub.
-
 ## Shell completions (#186)
 
 - Standalone installations (`install.sh`) automatically run `wright completion install`
@@ -143,8 +107,6 @@ postinstall download scripts.
 - CI runs `scripts/verify-dist.py` on every commit: it regenerates the
   checked-in manifests with the workspace version and fails on any mismatch,
   so a version bump without regenerated metadata is caught before merge.
-- CI also runs `scripts/test-npm.py` to package and execute clean-install smoke
-  tests across supported platforms.
 - The release workflow consumes the published `.sha256` files when generating
   the attached manifests, so the attached metadata cannot drift from the
   actual artifacts of that release.

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Validate Wright distribution metadata and the install script (#108, #121).
+"""Validate Wright distribution metadata and the install script (#108).
 
 Runs in CI and locally. It detects version drift and hand-edited metadata by
 regenerating every checked-in dist/ manifest with the workspace version and
 placeholder hashes and comparing it byte-for-byte to what is committed. It
 also validates manifest structure (hash format, artifact URLs), checks that
-install.sh covers the declared release target matrix, verifies the shell
-syntax of install.sh, and verifies the integrity of npm packages and scripts.
+install.sh covers the declared release target matrix, and verifies the shell
+syntax of install.sh.
 
 Usage: python3 scripts/verify-dist.py
 """
@@ -16,7 +16,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -128,76 +127,6 @@ def main() -> None:
         # install.sh is a Unix-only installer (checked above); on Windows the
         # `bash` on PATH is the WSL launcher, which fails without a distro.
         print("skip: install.sh shell syntax check (Unix-only, no real bash on Windows)")
-
-    # npm distribution validation (#121)
-    meta_json_path = REPO_ROOT / "dist" / "npm" / "wright" / "package.json"
-    if not meta_json_path.is_file():
-        fail("dist/npm/wright/package.json is missing")
-    meta_json = json.loads(meta_json_path.read_text())
-
-    if meta_json.get("name") != "@wrightkit/wright":
-        fail("dist/npm/wright/package.json name must be @wrightkit/wright")
-    if meta_json.get("version") != version:
-        fail(f"dist/npm/wright/package.json version {meta_json.get('version')} does not match {version}")
-
-    meta_opt_deps = meta_json.get("optionalDependencies", {})
-    for platform_key, config in gen.NPM_PLATFORM_PACKAGES.items():
-        pkg_name = config["name"]
-        if pkg_name not in meta_opt_deps:
-            fail(f"missing optional dependency {pkg_name} in @wrightkit/wright package.json")
-        if meta_opt_deps[pkg_name] != version:
-            fail(f"optional dependency {pkg_name} version {meta_opt_deps[pkg_name]} does not match {version}")
-
-        platform_dir = REPO_ROOT / "dist" / "npm" / config["dir_name"]
-        pkg_json_file = platform_dir / "package.json"
-        if not pkg_json_file.is_file():
-            fail(f"{pkg_json_file} is missing")
-        pkg_json = json.loads(pkg_json_file.read_text())
-        if pkg_json.get("name") != pkg_name:
-            fail(f"{pkg_json_file} name mismatch")
-        if pkg_json.get("version") != version:
-            fail(f"{pkg_json_file} version mismatch")
-        if pkg_json.get("os") != config["os"]:
-            fail(f"{pkg_json_file} os constraint mismatch")
-        if pkg_json.get("cpu") != config["cpu"]:
-            fail(f"{pkg_json_file} cpu constraint mismatch")
-
-        readme_file = platform_dir / "README.md"
-        if not readme_file.is_file():
-            fail(f"{readme_file} is missing")
-
-    for script_file in [
-        REPO_ROOT / "dist" / "npm" / "wright" / "bin" / "wright.js",
-        REPO_ROOT / "dist" / "npm" / "wright" / "bin" / "wright-lsp.js",
-        REPO_ROOT / "dist" / "npm" / "wright" / "index.js",
-    ]:
-        if not script_file.is_file():
-            fail(f"{script_file} is missing")
-        subprocess.run(["node", "-c", str(script_file)], check=True)
-
-    dts_file = REPO_ROOT / "dist" / "npm" / "wright" / "index.d.ts"
-    if not dts_file.is_file() or "getBinaryPath" not in dts_file.read_text():
-        fail("dist/npm/wright/index.d.ts is missing or does not export getBinaryPath")
-
-    print("ok: npm packages and wrapper scripts valid")
-
-    # Detailed tarball-mode/determinism tests are distribution regressions,
-    # not language compatibility tests. Run them once in the Linux matrix;
-    # the normal dist smoke below still runs on every supported CI platform.
-    if sys.platform.startswith("linux"):
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                str(REPO_ROOT / "scripts" / "tests"),
-            ],
-            cwd=REPO_ROOT,
-            check=True,
-        )
-        print("ok: distribution helper regression tests passed")
 
     print("dist validation passed")
 

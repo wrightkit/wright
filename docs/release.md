@@ -63,8 +63,8 @@ workflow is the single product release path:
    tag and release commit to the reusable `release.yml` workflow.
 4. The reusable workflow verifies the tag/revision and version identity, runs
    `scripts/release.sh` and `scripts/verify-dist.py`, builds and smoke-tests the
-   native matrix, attaches archives/checksums/manifests/npm tarballs to the
-   draft, publishes downstream registries and the Homebrew tap, and only then
+   native matrix, attaches archives/checksums/manifests to the draft, publishes
+   the Homebrew tap, and only then
    marks the GitHub Release public.
 
 A failure in any gate or required downstream stage leaves the same draft
@@ -141,18 +141,15 @@ before attaching them to the draft Release.
 
 Enable Actions to create and approve pull requests. The release-please workflow
 uses the repository's `GH_TOKEN` secret as `GITHUB_TOKEN` so it can create and
-update the Release PR. The reusable distribution workflow also needs
-`id-token: write` for npm provenance and `packages: write` for GitHub Packages.
+   update the Release PR.
 Create a protected `release` environment if publication approval is required;
 the final `publish-release` job is the only job that uses it.
 
 Configure these optional/required environment secrets:
 
-* `NPM_TOKEN` enables npmjs.org publication. If absent, npmjs.org is skipped.
 * `GH_TOKEN` is a fine-grained token with write access to
   `wrightkit/homebrew-tap`; it is required for automatic Homebrew tap updates.
-* The workflow's built-in `GITHUB_TOKEN` publishes GitHub Packages and updates
-  the draft GitHub Release.
+* The workflow's built-in `GITHUB_TOKEN` updates the draft GitHub Release.
 
 ## Supported installation channels
 
@@ -173,7 +170,6 @@ secret and the per-channel publication process and boundaries.
 | Homebrew (`wrightkit/tap`) | macOS arm64 + Intel | `wright` + `wright-lsp` formula | per-arch `sha256` in the formula |
 | WinGet (`WrightKit.Wright`) | Windows x86_64 | `wright` + `wright-lsp` portable ZIP | `InstallerSha256` in the manifest |
 | Scoop (`wrightkit` bucket) | Windows x86_64 | `wright` + `wright-lsp` ZIP | `hash` in the manifest |
-| npm (`@wrightkit/wright`) | Linux x86_64, macOS arm64, macOS x86_64, Windows x86_64 | `wright` + `wright-lsp` native binaries via platform npm packages | packaged binary checksums and signatures verified at release packaging |
 
 `install.sh` is the supported Unix installer: it detects the platform (with
 explicit failures for unsupported OS/architecture combinations), resolves the
@@ -182,28 +178,6 @@ downloads the archive and checksum, verifies the SHA-256 before extracting,
 installs both binaries, and runs a post-install version smoke check. Its
 functional behavior is covered by `scripts/test-install.sh` against a mock
 release server on Linux and macOS CI.
-
-### npm distribution channel (#121)
-
-Wright distributes native release binaries through npm packages for seamless
-integration with Node.js tooling, language clients, and CI agents:
-
-- **Meta package**: `@wrightkit/wright` exposes `wright` and `wright-lsp` in `bin`,
-  and exports `getBinaryPath()` for programmatic Node.js / TypeScript consumers.
-  It selects the matching native package via `optionalDependencies`.
-- **Platform packages**:
-  - `@wrightkit/wright-darwin-arm64`: macOS Apple Silicon (`aarch64-apple-darwin`)
-  - `@wrightkit/wright-darwin-x64`: macOS Intel (`x86_64-apple-darwin`)
-  - `@wrightkit/wright-linux-x64`: Linux x64 (`x86_64-unknown-linux-gnu`)
-  - `@wrightkit/wright-win32-x64`: Windows x64 (`x86_64-pc-windows-msvc`)
-- **Execution**:
-  - `npx wright --version` or `npm install @wrightkit/wright`
-  - Zero source compilation or postinstall download scripts; native binaries are packaged directly in the platform tarballs.
-  - npm is strictly a package/distribution layer for the native Rust CLI; there is no JavaScript reimplementation.
-- **Registries**: the release workflow publishes the same packages to npmjs.org
-  when `NPM_TOKEN` is available and to GitHub Packages using the workflow
-  `GITHUB_TOKEN`. GitHub Packages installs require an authenticated npm scope
-  mapping for `@wrightkit` to `https://npm.pkg.github.com`.
 
 Standalone installations are also updatable in place: `wright update`
 consumes the same release artifacts and checksums (no `install.sh`
@@ -221,9 +195,7 @@ release pipeline does not assume them. Version drift is
 detectable: CI runs `scripts/verify-dist.py`, which regenerates the checked-in
 metadata for the current workspace version and fails on any mismatch, and the
 release workflow generates the attached manifests from the release's own
-checksum files. Registry publication checks whether the exact package/version
-already exists before publishing, so rerunning the downstream stage reuses the
-same release identity.
+checksum files.
 
 ### Still deferred
 
