@@ -36,7 +36,7 @@ def target_info() -> str:
 
 
 def initialize_bucket(fixture: ReleaseFixture):
-    bucket_root = fixture.work / "scoop-bucket"
+    bucket_root = fixture.work / "buckets" / "wright-local"
     bucket = bucket_root / "bucket"
     bucket.mkdir(parents=True)
     shutil.copy2(fixture.metadata / "dist" / "scoop" / "wright.json", bucket / "wright.json")
@@ -52,9 +52,11 @@ def main() -> None:
     version = (ROOT / "version.txt").read_text().strip()
     with ReleaseFixture(CHANNEL, version, target_info(), "zip", ".exe") as fixture:
         bucket_root = initialize_bucket(fixture)
+        bucket_uri = bucket_root.as_uri()
+        run(CHANNEL, "verify local bucket Git URI", ["git", "ls-remote", bucket_uri])
         added = False
         try:
-            scoop_run("add generated local bucket", ["bucket", "add", "wright-local", bucket_root])
+            scoop_run("add generated local bucket", ["bucket", "add", "wright-local", bucket_uri])
             added = True
             scoop_run("install from generated local manifest", ["install", "wright-local/wright"])
             prefix = scoop_run("resolve installed prefix", ["prefix", "wright"]).strip()
