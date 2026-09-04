@@ -138,6 +138,19 @@ try {
     Copy-Item -LiteralPath (Join-Path $StageDir "wright-lsp.exe") -Destination (Join-Path $InstallDir "wright-lsp.exe") -Force
     Test-Version (Join-Path $InstallDir "wright.exe") $Version
     Test-Version (Join-Path $InstallDir "wright-lsp.exe") $Version
+
+    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $PathEntry = $InstallDir.TrimEnd("\")
+    $PathEntries = if ($UserPath) { $UserPath -split ";" } else { @() }
+    $PathContainsInstallDir = @($PathEntries | Where-Object {
+        $_.Trim().TrimEnd("\") -ieq $PathEntry
+    }).Count -gt 0
+    if (-not $PathContainsInstallDir) {
+        $DisplayPath = $InstallDir.Replace("'", "''")
+        Write-Host "note: '$InstallDir' is not on your user PATH; add it and open a new terminal to use wright by name:"
+        Write-Host "  `$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')"
+        Write-Host "  [Environment]::SetEnvironmentVariable('Path', (`$userPath.TrimEnd(';') + ';$DisplayPath'), 'User')"
+    }
     Write-Host "==> done: wright and wright-lsp $Version installed in $InstallDir"
 } finally {
     if (Test-Path -LiteralPath $TempRoot) {
