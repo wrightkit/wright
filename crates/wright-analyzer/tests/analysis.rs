@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use workshop_rs::wir::Program as WirProgram;
+use workshop_rs::wir::{self, Action, Event, Program as WirProgram, Rule, Value, ValueNode};
 use wright_analyzer::analysis::{self, Boundedness, EvidenceClass, Severity};
 use wright_core::hir;
 use wright_ir::lower;
@@ -125,6 +125,106 @@ fn expensive_loop_check_does_not_fire_on_the_corpus() {
             "{fixture_id} has no geometry predicate in a loop"
         );
     }
+}
+
+#[test]
+fn ordinary_create_hud_text_traverses_all_value_arguments() {
+    let mut program = WirProgram::default();
+    let zero = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 0.0,
+            text: "0".to_string(),
+        },
+        None,
+    ));
+    let one = program.values.push(ValueNode::new(
+        Value::Number {
+            value: 1.0,
+            text: "1".to_string(),
+        },
+        None,
+    ));
+    let distance = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "distance".to_string(),
+            args: vec![zero, one],
+        },
+        None,
+    ));
+    let inner_first = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "ordinaryInner".to_string(),
+            args: vec![zero],
+        },
+        None,
+    ));
+    let repeated_first = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "ordinaryOuter".to_string(),
+            args: vec![inner_first, zero],
+        },
+        None,
+    ));
+    let inner_second = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "ordinaryInner".to_string(),
+            args: vec![zero],
+        },
+        None,
+    ));
+    let repeated_second = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "ordinaryOuter".to_string(),
+            args: vec![inner_second, zero],
+        },
+        None,
+    ));
+    let variable = program.global_variables.push(wir::WorkshopVariable {
+        name: "index".to_string(),
+        index: 0,
+        span: None,
+        name_span: None,
+    });
+    let hud = program.actions.push(Action::Call {
+        name: "createHudText".to_string(),
+        args: vec![distance, repeated_first],
+        span: None,
+    });
+    let second_hud = program.actions.push(Action::Call {
+        name: "createHudText".to_string(),
+        args: vec![zero, repeated_second],
+        span: None,
+    });
+    let loop_action = program.actions.push(Action::ForGlobalVariable {
+        variable,
+        start: zero,
+        stop: one,
+        step: one,
+        body: vec![hud, second_hud],
+        span: None,
+        target_span: None,
+    });
+    program.rules.push(Rule {
+        name: "ordinary hud".to_string(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: Event::Global,
+        conditions: Vec::new(),
+        actions: vec![loop_action],
+    });
+
+    let findings = findings_by_code(&program, "expensive-loop-check");
+    assert_eq!(
+        findings.len(),
+        1,
+        "ordinary HUD calls keep all value arguments"
+    );
+    assert_eq!(
+        findings_by_code(&program, "repeated-value").len(),
+        1,
+        "ordinary HUD calls keep all repeated value arguments"
+    );
 }
 
 #[test]

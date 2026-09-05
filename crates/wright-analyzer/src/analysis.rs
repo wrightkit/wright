@@ -597,8 +597,10 @@ fn visit_action_value_roots(
         | Action::ForPlayerVariable { .. } => {
             // Nested loops are excluded from the enclosing loop's scope.
         }
-        Action::Call { name, args, .. } if name == "createHudText" => {
-            if let Some(value) = hud_text_source_value(program, args) {
+        Action::Call { name, args, .. }
+            if name == "createHudText" && is_wright_hud_text_marker(program, args) =>
+        {
+            if let Some(value) = synthetic_hud_text_source_value(program, args) {
                 visit_value_with_parent(program, value, parents, out);
             }
         }
@@ -610,7 +612,46 @@ fn visit_action_value_roots(
     }
 }
 
-fn hud_text_source_value(program: &wir::Program, args: &[ValueId]) -> Option<ValueId> {
+fn is_wright_hud_text_marker(program: &wir::Program, args: &[ValueId]) -> bool {
+    // workshop-rs 0.1.18 has no action metadata field. The exact fixed
+    // canonical shape below is therefore the marker carried by Wright's
+    // debug/print lowering; ordinary createHudText calls keep full traversal.
+    let [
+        all_players,
+        header,
+        _body,
+        subheader,
+        position,
+        sort_order,
+        header_color,
+        subheader_color,
+        text_color,
+        reevaluation,
+        visibility,
+    ] = args
+    else {
+        return false;
+    };
+    let is_all_players = matches!(
+        program.values.get(*all_players).map(|node| &node.value),
+        Some(Value::Call { name, args })
+            if name == "allPlayers"
+                && args.len() == 1
+                && value_is_enum(program, args[0], "Team", "ALL")
+    );
+    is_all_players
+        && value_is_null(program, *header)
+        && value_is_null(program, *subheader)
+        && value_is_enum(program, *position, "HudPosition", "LEFT")
+        && value_is_number(program, *sort_order, -9999.0)
+        && value_is_enum(program, *header_color, "Color", "WHITE")
+        && value_is_enum(program, *subheader_color, "Color", "WHITE")
+        && value_is_enum(program, *text_color, "Color", "WHITE")
+        && value_is_enum(program, *reevaluation, "HudReeval", "VISIBILITY_AND_STRING")
+        && value_is_enum(program, *visibility, "SpecVisibility", "DEFAULT")
+}
+
+fn synthetic_hud_text_source_value(program: &wir::Program, args: &[ValueId]) -> Option<ValueId> {
     let value = if args.get(1).is_some_and(|id| {
         matches!(
             program.values.get(*id).map(|node| &node.value),
@@ -628,6 +669,30 @@ fn hud_text_source_value(program: &wir::Program, args: &[ValueId]) -> Option<Val
     } else {
         Some(*value)
     }
+}
+
+fn value_is_null(program: &wir::Program, id: ValueId) -> bool {
+    matches!(
+        program.values.get(id).map(|node| &node.value),
+        Some(Value::Null)
+    )
+}
+
+fn value_is_enum(program: &wir::Program, id: ValueId, value_type: &str, value: &str) -> bool {
+    matches!(
+        program.values.get(id).map(|node| &node.value),
+        Some(Value::Enum {
+            value_type: actual_type,
+            value: actual_value,
+        }) if actual_type == value_type && actual_value == value
+    )
+}
+
+fn value_is_number(program: &wir::Program, id: ValueId, expected: f64) -> bool {
+    matches!(
+        program.values.get(id).map(|node| &node.value),
+        Some(Value::Number { value, .. }) if *value == expected
+    )
 }
 
 /// Collect a value and every value in its subtree into `out` (pre-order),
@@ -1147,8 +1212,10 @@ fn visit_values_in_action(program: &wir::Program, action: &Action, f: &mut impl 
             visit_value(program, *stop, f);
             visit_value(program, *step, f);
         }
-        Action::Call { name, args, .. } if name == "createHudText" => {
-            if let Some(value) = hud_text_source_value(program, args) {
+        Action::Call { name, args, .. }
+            if name == "createHudText" && is_wright_hud_text_marker(program, args) =>
+        {
+            if let Some(value) = synthetic_hud_text_source_value(program, args) {
                 visit_value(program, value, f);
             }
         }
