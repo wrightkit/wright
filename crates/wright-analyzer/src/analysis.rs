@@ -412,7 +412,11 @@ impl Analysis for RepeatedValue {
                         "this value expression is evaluated {} times within the same loop scope",
                         family.len()
                     ),
-                    span: program.values.get(first).and_then(|node| node.span),
+                    span: program
+                        .values
+                        .get(first)
+                        .and_then(|node| node.span)
+                        .or_else(|| program.actions.get(action_id).and_then(Action::span)),
                     rule,
                     action: Some(action_id),
                     value: Some(first),
@@ -570,10 +574,7 @@ fn visit_action_value_roots(
     out: &mut Vec<ValueId>,
 ) {
     match action {
-        Action::SetGlobalVariable { value, .. }
-        | Action::ModifyGlobalVariable { value, .. }
-        | Action::Debug { value, .. }
-        | Action::Print { message: value, .. } => {
+        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
             visit_value_with_parent(program, *value, parents, out);
         }
         Action::SetPlayerVariable { player, value, .. }
@@ -596,11 +597,36 @@ fn visit_action_value_roots(
         | Action::ForPlayerVariable { .. } => {
             // Nested loops are excluded from the enclosing loop's scope.
         }
+        Action::Call { name, args, .. } if name == "createHudText" => {
+            if let Some(value) = hud_text_source_value(program, args) {
+                visit_value_with_parent(program, value, parents, out);
+            }
+        }
         Action::Call { args, .. } => {
             for arg in args {
                 visit_value_with_parent(program, *arg, parents, out);
             }
         }
+    }
+}
+
+fn hud_text_source_value(program: &wir::Program, args: &[ValueId]) -> Option<ValueId> {
+    let value = if args.get(1).is_some_and(|id| {
+        matches!(
+            program.values.get(*id).map(|node| &node.value),
+            Some(Value::Null)
+        )
+    }) {
+        args.get(2)
+    } else {
+        args.get(1)
+    }?;
+    if let Some(Value::Call { name, args }) = program.values.get(*value).map(|node| &node.value)
+        && name == "customString"
+    {
+        args.get(1).copied().or(Some(*value))
+    } else {
+        Some(*value)
     }
 }
 
@@ -854,8 +880,8 @@ fn subtree_has_unprovable_loop(program: &wir::Program, actions: &[ActionId]) -> 
 /// `If`/`While`/`ForGlobalVariable` subtrees containing any of the above, and
 /// a generic `Call` whose name matches a user-defined subroutine (some
 /// frontends lower `def`-defined subroutine calls as generic calls rather
-/// than `CallSubroutine`) all count as writers. `Debug`, `Print`, and generic
-/// `Action::Call`s that are not user subroutines are documented NON-writers:
+/// than `CallSubroutine`) all count as writers. Generic `Action::Call`s that
+/// are not user subroutines are documented NON-writers:
 /// within the supported OPY/Workshop surface (docs/opy/support-matrix.md)
 /// user-variable writes lower only to `Set`/`Modify` actions (`.append`
 /// lowers to a `Modify` on the variable, so it is caught by the modify
@@ -909,7 +935,6 @@ fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -
         | Action::ForPlayerVariable { body, .. } => {
             body.iter().any(|id| subtree_writes(program, *id, variable))
         }
-        Action::Debug { .. } | Action::Print { .. } => false,
         Action::AssignMember { .. } => true,
     }
 }
@@ -1084,8 +1109,6 @@ fn visit_actions(
             | Action::SetPlayerVariable { .. }
             | Action::ModifyPlayerVariable { .. }
             | Action::CallSubroutine { .. }
-            | Action::Debug { .. }
-            | Action::Print { .. }
             | Action::AssignMember { .. }
             | Action::Call { .. } => {}
         }
@@ -1095,10 +1118,9 @@ fn visit_actions(
 /// Visit every value reachable from an action's arguments and conditions.
 fn visit_values_in_action(program: &wir::Program, action: &Action, f: &mut impl FnMut(ValueId)) {
     match action {
-        Action::SetGlobalVariable { value, .. }
-        | Action::ModifyGlobalVariable { value, .. }
-        | Action::Debug { value, .. }
-        | Action::Print { message: value, .. } => visit_value(program, *value, f),
+        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
+            visit_value(program, *value, f)
+        }
         Action::SetPlayerVariable { player, value, .. }
         | Action::ModifyPlayerVariable { player, value, .. } => {
             visit_value(program, *player, f);
@@ -1124,6 +1146,11 @@ fn visit_values_in_action(program: &wir::Program, action: &Action, f: &mut impl 
             visit_value(program, *start, f);
             visit_value(program, *stop, f);
             visit_value(program, *step, f);
+        }
+        Action::Call { name, args, .. } if name == "createHudText" => {
+            if let Some(value) = hud_text_source_value(program, args) {
+                visit_value(program, value, f);
+            }
         }
         Action::Call { args, .. } => {
             for arg in args {

@@ -526,7 +526,7 @@ fn opy_lex_error_in_included_file_names_the_included_file() {
     let dir = temp_dir();
     std::fs::write(
         dir.join("shared.opy"),
-        "rule \"shared\":\n\\\n    disableInspector()\n",
+        "rule \"shared\":\n§\n    disableInspector()\n",
     )
     .unwrap();
     std::fs::write(
@@ -643,21 +643,23 @@ fn opy_string_array_initializer_emits_custom_string_elements() {
 
 #[test]
 fn opy_long_string_initializers_split_like_the_oracle() {
-    // Amended AC-3: 300 decoded chars split 125+{0}, 125+{0}, 50; 1000 chars
-    // split into 8 segments — byte-equal to the pinned oracle artifacts.
+    // The released owner compiler now preserves long string literals as one
+    // Custom String value.
+    let oracle_300 = oracle_long_string_artifact(300);
     assert_byte_artifact(
         &format!(
             "globalvar x = \"{}\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
             "A".repeat(300)
         ),
-        ORACLE_AC3_300,
+        &oracle_300,
     );
+    let oracle_1000 = oracle_long_string_artifact(1000);
     assert_byte_artifact(
         &format!(
             "globalvar x = \"{}\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
             "A".repeat(1000)
         ),
-        ORACLE_AC3_1000,
+        &oracle_1000,
     );
 }
 
@@ -845,12 +847,15 @@ fn compile_artifact(source: &str, profile: wright_transform::Profile) -> String 
     text
 }
 
+fn oracle_long_string_artifact(length: usize) -> String {
+    format!(
+        "variables {{\n    global:\n        0: x\n}}\n\nrule (\"Initialize global variables\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(x, Custom String(\"{}\"));\n    }}\n}}\n\nrule (\"r\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Disable Inspector Recording;\n    }}\n}}\n\n",
+        "A".repeat(length)
+    )
+}
+
 // Byte-quoted pinned-oracle artifacts (overpy 9.7.10, raw CLI output).
 const ORACLE_AC1: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Array(Custom String(\"a\"), Custom String(\"b\")));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
-
-const ORACLE_AC3_300: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"))));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
-
-const ORACLE_AC3_1000: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA{0}\", Custom String(\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\")))))))));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
 const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"a\\nb\"));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 

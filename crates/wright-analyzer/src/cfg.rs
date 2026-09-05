@@ -447,8 +447,6 @@ fn action_name(program: &wir::Program, action: ActionId) -> String {
                 .map_or_else(|| "<dangling>".to_string(), |s| s.name.clone());
             format!("callSubroutine {name}")
         }
-        Some(Action::Debug { .. }) => "debug".to_string(),
-        Some(Action::Print { .. }) => "print".to_string(),
         Some(Action::SetGlobalVariable { variable, .. }) => {
             let name = program
                 .global_variables

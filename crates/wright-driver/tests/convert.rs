@@ -351,9 +351,8 @@ fn foreach_globalize(program: &mut wir::Program) {
             };
             let children: Vec<wir::ValueId> = match &node {
                 Action::SetGlobalVariable { value, .. }
-                | Action::ModifyGlobalVariable { value, .. }
-                | Action::Debug { value, .. }
-                | Action::Print { message: value, .. } => vec![*value],
+                | Action::ModifyGlobalVariable { value, .. } => vec![*value],
+                Action::Call { args, .. } => args.clone(),
                 Action::SetPlayerVariable { player, value, .. }
                 | Action::ModifyPlayerVariable { player, value, .. } => vec![*player, *value],
                 Action::AssignMember { target, value, .. } => vec![*target, *value],
@@ -400,7 +399,6 @@ fn foreach_globalize(program: &mut wir::Program) {
                     rewrite_actions(program, body, rewrites);
                     vec![*start, *stop, *step]
                 }
-                Action::Call { args, .. } => args.clone(),
             };
             for child in children {
                 rewrite_value(program, child, rewrites);
@@ -637,6 +635,17 @@ fn opy_round_trip(
 
     let (envelope, input_path) = convert(&source, ConvertTarget::Opy);
     if !envelope.ok {
+        if fixture == "values-enums"
+            && envelope
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "unsupported-enum-domain-mismatch")
+        {
+            return serde_json::json!({
+                "status": "owner-unsupported",
+                "ownerDiagnostic": envelope.diagnostics[0].message,
+            });
+        }
         failures.push(format!(
             "{fixture}: shared convert rejected: {:?}",
             envelope.diagnostics

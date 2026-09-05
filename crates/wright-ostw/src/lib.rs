@@ -464,6 +464,7 @@ fn map_diagnostic(
         {
             "ostw-unsupported".to_string()
         }
+        del_rs::Phase::Workshop => diagnostic.code.clone(),
         del_rs::Phase::Semantic | del_rs::Phase::Hir | del_rs::Phase::Oracle => {
             diagnostic.code.clone()
         }

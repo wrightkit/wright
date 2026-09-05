@@ -338,12 +338,10 @@ dependencies = [
 
 [[package]]
 name = "deltin-rs"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e1ff6576fd5fa7dc0f2533074703871f54959cc01f7458fb1cf80c6365d9232"
+checksum = "761b4e736f919e4bb330c9ad527cf874c5900834f8a23cfdfceac8db94d5f241"
 dependencies = [
- "clap",
- "clap_complete",
  "serde",
  "serde_json",
  "toml",
@@ -1115,34 +1113,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
-name = "opy-compiler"
-version = "0.1.5"
+name = "opy-rs"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421aaecf7aa87d3928a8083a8a90d68859f8987749151a2d77d73a31c3d9915f"
-dependencies = [
- "opy-macro-js",
- "opy-rs",
- "serde",
- "workshop-rs",
-]
-
-[[package]]
-name = "opy-macro-js"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb436f50f8102d6febb6e4ef979913fc4bd1964b7cb9a97d99445f414d2009fc"
+checksum = "af51684f705c321d3a5ee0dd137d3c9f37cdeb0e9efede33f27c39807d98802e"
 dependencies = [
  "libquickjs-ng-sys",
- "serde_json",
-]
-
-[[package]]
-name = "opy-rs"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5008ab0921928ebadc4844c8a7ddfdcdf6e5d4684f0c4f213375880d1e3b4e83"
-dependencies = [
- "opy-macro-js",
  "serde",
  "serde_json",
  "workshop-rs",
@@ -2150,9 +2126,9 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "0.1.11"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699bb027b5882d50d182cf84f982a2ef0ca2b3a9f3f600b740f23afed1432d98"
+checksum = "cb4bf40de43a94ed84485f9db7102fb6f0696bf883c245214338d17c11197540"
 dependencies = [
  "serde",
  "serde_json",
@@ -2286,7 +2262,6 @@ dependencies = [
 name = "wright-opy"
 version = "0.2.17"
 dependencies = [
- "opy-compiler",
  "opy-rs",
  "serde",
  "serde_json",

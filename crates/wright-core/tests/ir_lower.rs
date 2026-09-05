@@ -93,24 +93,21 @@ fn subroutine_def_lowers_to_subroutine_event_rule() {
 }
 
 #[test]
-fn debug_and_print_lower_to_typed_actions() {
+fn debug_and_print_lower_to_canonical_hud_calls() {
     let program = lower_fixture("synthetic/expressions-values");
     let dump = program.dump();
-    assert!(
-        dump.contains("print format(\"points: {}\", points)"),
-        "{dump}"
-    );
-    assert!(dump.contains("debug location"), "{dump}");
+    assert!(dump.contains("call createHudText"), "{dump}");
+    assert!(dump.contains("customString(\"{0}\", location)"), "{dump}");
 }
 
 #[test]
 fn macro_call_expands_in_value_position() {
     // `debug(double(Phase.FINISHED))` — `double(value): value + value` must
-    // expand to `$double(1)` → `+(1, 1)` in the debug action.
+    // expand to `$double(1)` → `+(1, 1)` in the canonical HUD action.
     let program = lower_fixture("synthetic/preprocessing");
     let dump = program.dump();
     assert!(
-        dump.contains("debug +(1, 1)"),
+        dump.contains("customString(\"{0}\", +(1, 1))"),
         "macro call must expand during lowering:\n{dump}"
     );
 }
