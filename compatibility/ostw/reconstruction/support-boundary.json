@@ -66,8 +66,6 @@
   },
   "rejected": [
     { "kind": "forPlayerVariable", "code": "reconstruct-unsupported-action", "reason": "The per-player loop form has no OSTW source form on the declared surface (the frontend lowers loop counters as globals)." },
-    { "kind": "debug", "code": "reconstruct-unsupported-action", "reason": "Wright's dedicated debug action has no OSTW source binding." },
-    { "kind": "print", "code": "reconstruct-unsupported-action", "reason": "Wright's dedicated print action has no OSTW source binding." },
     { "kind": "settings", "code": "reconstruct-unsupported-program-settings", "reason": "Custom-game settings (Program.settings) have no OSTW source form." },
     { "kind": "unboundAction", "code": "reconstruct-unbound-call", "reason": "An action call whose catalog id has no OSTW source binding (e.g. createBeamEffect) cannot be emitted." },
     { "kind": "unboundValue", "code": "reconstruct-unbound-call", "reason": "A value call whose catalog id has no OSTW source binding (e.g. getHealth) cannot be emitted." },

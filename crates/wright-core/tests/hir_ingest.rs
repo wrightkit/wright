@@ -429,22 +429,14 @@ fn settings_mode_subset_violations_are_rejected() {
         matches!(&error, HirError::Invalid { span: Some(_), .. }),
         "the violation carries the key span"
     );
-    // The released settings table recognizes general.roleLimit as a key but
-    // rejects the inherited `off` value at this path.
-    let payload = VALID_SETTINGS
-        .replace("__SPAN__", SPAN)
-        .replace("\"name\": \"heroLimit\"", "\"name\": \"roleLimit\"");
-    let error = hir::parse_str(&payload).unwrap_err();
-    assert_eq!(error.code(), "settings-unknown-value");
 }
 
 #[test]
-fn settings_role_limit_off_is_not_evidenced() {
-    // roleLimit "off" exists only in the not-acquired skirmish_elim source;
-    // the strict table rejects it (settings-unknown-value).
+fn settings_role_limit_off_is_evidenced() {
+    // workshop-rs 0.1.18 includes `off` in the released general role-limit
+    // settings domain.
     let payload = VALID_SETTINGS
         .replace("__SPAN__", SPAN)
         .replace("\"value\": \"2OfEachRolePerTeam\"", "\"value\": \"off\"");
-    let error = hir::parse_str(&payload).unwrap_err();
-    assert_eq!(error.code(), "settings-unknown-value");
+    hir::parse_str(&payload).expect("released roleLimit off value is valid");
 }

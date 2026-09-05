@@ -11,11 +11,11 @@ rules:
     forGlobalVariable index in 0, 3, 1 @0:5:5-5:9
       if @0:6:9-6:12
         condition ==(index, 0)
-          debug index @0:7:13-7:26
+          call createHudText(allPlayers(Team.ALL), null, customString("{0}", index), null, HudPosition.LEFT, -9999, Color.WHITE, Color.WHITE, Color.WHITE, HudReeval.VISIBILITY_AND_STRING, SpecVisibility.DEFAULT) @0:7:13-7:26
         elif condition ==(index, 1)
-          debug index @0:9:13-9:26
+          call createHudText(allPlayers(Team.ALL), null, customString("{0}", index), null, HudPosition.LEFT, -9999, Color.WHITE, Color.WHITE, Color.WHITE, HudReeval.VISIBILITY_AND_STRING, SpecVisibility.DEFAULT) @0:9:13-9:26
         else
-          debug index @0:11:13-11:26
+          call createHudText(allPlayers(Team.ALL), null, customString("{0}", index), null, HudPosition.LEFT, -9999, Color.WHITE, Color.WHITE, Color.WHITE, HudReeval.VISIBILITY_AND_STRING, SpecVisibility.DEFAULT) @0:11:13-11:26
   rule "bounded while" (id 1) @0:13:1-13:6
     event Global
     while <(index, 3) @0:15:5-15:11

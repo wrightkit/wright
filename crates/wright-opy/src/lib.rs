@@ -2,7 +2,7 @@
 //!
 //! This crate owns no OPY parsing, semantic resolution, HIR, manifest, or
 //! reconstruction rules. It preserves the historical Wright-facing boundary
-//! while delegating those capabilities to `opy-rs` and `opy-compiler`.
+//! while delegating those capabilities to `opy-rs`.
 
 pub use opy_rs::{cst, diag, lexer, parser, preprocess, settings, support, tooling};
 
@@ -66,7 +66,7 @@ pub struct CompileOutcome {
     pub files: Vec<preprocess::FileRecord>,
 }
 
-fn compiler_error(error: opy_compiler::IntegrationError) -> OpyError {
+fn compiler_error(error: opy_rs::IntegrationError) -> OpyError {
     let diagnostic = error.diagnostic;
     match diagnostic.span {
         Some(span) => OpyError::at(
@@ -117,7 +117,7 @@ pub fn compile_with_overlay_outcome(
             files,
         };
     };
-    let compiler = match opy_compiler::Compiler::new() {
+    let compiler = match opy_rs::Compiler::new() {
         Ok(compiler) => compiler,
         Err(error) => {
             return CompileOutcome {
@@ -142,5 +142,5 @@ pub fn compile_with_overlay_outcome(
 }
 
 pub mod reconstruct {
-    pub use opy_compiler::reconstruct::{ReconstructError, ReconstructIssue, reconstruct};
+    pub use opy_rs::reconstruct::{ReconstructError, ReconstructIssue, reconstruct};
 }

@@ -471,8 +471,6 @@ impl<'a> Builder<'a> {
                 }
                 Ok(())
             }
-            Action::Debug { value, .. } => self.walk_value(*value, rule, Some(action_id)),
-            Action::Print { message, .. } => self.walk_value(*message, rule, Some(action_id)),
             Action::Call { args, .. } => {
                 for arg in args {
                     self.walk_value(*arg, rule, Some(action_id))?;

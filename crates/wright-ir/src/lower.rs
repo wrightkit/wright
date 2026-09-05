@@ -24,7 +24,7 @@
 //! * `.append(receiver, value)` lowers to a modify action with
 //!   `AppendToArray`; other member calls lower to `Action::Call` with the
 //!   receiver as the first argument.
-//! * `debug(x)` and `print(s)` lower to `Action::Debug`/`Action::Print`.
+//! * `debug(x)` and `print(s)` lower to canonical `createHudText` calls.
 //! * `for` loops lower to `ForGlobalVariable`; the iterable must be a `range`
 //!   call (1-, 2-, or 3-argument forms).
 //! * Source-level macro calls in value position are expanded inline: the
@@ -612,14 +612,14 @@ impl<'a> Lowerer<'a> {
             }
         }
         let action = match expression {
-            Expr::Call { name, args, .. } if name == "debug" && args.len() == 1 => Action::Debug {
-                value: self.lower_value_with(args[0], params, out)?,
-                span,
-            },
-            Expr::Call { name, args, .. } if name == "print" && args.len() == 1 => Action::Print {
-                message: self.lower_value_with(args[0], params, out)?,
-                span,
-            },
+            Expr::Call { name, args, .. } if name == "debug" && args.len() == 1 => {
+                let value = self.lower_value_with(args[0], params, out)?;
+                self.lower_hud_text(value, true, span)
+            }
+            Expr::Call { name, args, .. } if name == "print" && args.len() == 1 => {
+                let value = self.lower_value_with(args[0], params, out)?;
+                self.lower_hud_text(value, false, span)
+            }
             Expr::ReceiverCall {
                 receiver,
                 name,
@@ -656,6 +656,77 @@ impl<'a> Lowerer<'a> {
             }
         };
         Ok(Some(action))
+    }
+
+    fn push_value(&mut self, value: Value) -> ValueId {
+        self.target.values.push(ValueNode::new(value, None))
+    }
+
+    fn lower_hud_text(&mut self, value: ValueId, is_debug: bool, span: Option<Span>) -> Action {
+        let body = if is_debug {
+            let format = self.push_value(Value::String("{0}".to_string()));
+            self.push_value(Value::Call {
+                name: "customString".to_string(),
+                args: vec![format, value],
+            })
+        } else {
+            value
+        };
+        let all_teams = self.push_value(Value::Enum {
+            value_type: "Team".to_string(),
+            value: "ALL".to_string(),
+        });
+        let all_players = self.push_value(Value::Call {
+            name: "allPlayers".to_string(),
+            args: vec![all_teams],
+        });
+        let null_header = self.push_value(Value::Null);
+        let null_subheader = self.push_value(Value::Null);
+        let position = self.push_value(Value::Enum {
+            value_type: "HudPosition".to_string(),
+            value: "LEFT".to_string(),
+        });
+        let sort_order = self.push_value(Value::Number {
+            value: -9999.0,
+            text: "-9999".to_string(),
+        });
+        let header_color = self.push_value(Value::Enum {
+            value_type: "Color".to_string(),
+            value: "WHITE".to_string(),
+        });
+        let subheader_color = self.push_value(Value::Enum {
+            value_type: "Color".to_string(),
+            value: "WHITE".to_string(),
+        });
+        let text_color = self.push_value(Value::Enum {
+            value_type: "Color".to_string(),
+            value: "WHITE".to_string(),
+        });
+        let reevaluation = self.push_value(Value::Enum {
+            value_type: "HudReeval".to_string(),
+            value: "VISIBILITY_AND_STRING".to_string(),
+        });
+        let visibility = self.push_value(Value::Enum {
+            value_type: "SpecVisibility".to_string(),
+            value: "DEFAULT".to_string(),
+        });
+        Action::Call {
+            name: "createHudText".to_string(),
+            args: vec![
+                all_players,
+                null_header,
+                body,
+                null_subheader,
+                position,
+                sort_order,
+                header_color,
+                subheader_color,
+                text_color,
+                reevaluation,
+                visibility,
+            ],
+            span,
+        }
     }
 
     /// The per-parameter-name call counter: the reference names materialized
