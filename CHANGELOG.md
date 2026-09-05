@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.18](https://github.com/wrightkit/wright/compare/v0.2.17...v0.2.18) (2026-09-05)
+
+
+### Features
+
+* **distribution:** add Windows PowerShell installer ([#257](https://github.com/wrightkit/wright/issues/257)) ([2e67354](https://github.com/wrightkit/wright/commit/2e67354acf19b7390c5cf34daaad23e09e5e45ac))
+* route OPY workflows through first-party provider ([#252](https://github.com/wrightkit/wright/issues/252)) ([7b88fc0](https://github.com/wrightkit/wright/commit/7b88fc05865b11f3a7d5db4f6e0fc1bf52d4d506))
+
+
+### Bug Fixes
+
+* **deps:** consume workshop-rs 0.1.18 ([#260](https://github.com/wrightkit/wright/issues/260)) ([64b8877](https://github.com/wrightkit/wright/commit/64b88771650c798979e6b8bface5ce4810542ab4))
+* **provider:** match opy release tarballs ([#250](https://github.com/wrightkit/wright/issues/250)) ([d0f61cb](https://github.com/wrightkit/wright/commit/d0f61cba2abac8fd07668268fe06d353e31af6fa))
+
 ## [0.2.17](https://github.com/wrightkit/wright/compare/v0.2.16...v0.2.17) (2026-09-02)
 
 
