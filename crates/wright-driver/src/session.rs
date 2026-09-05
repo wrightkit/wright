@@ -77,12 +77,19 @@ pub enum Provenance {
     Unmapped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderOperation {
+    Check,
+    Compile,
+}
+
 /// One reusable compiler session.
 pub struct CompilerSession {
     /// The session configuration (input, frontend, overrides, format).
     pub config: SessionConfig,
     catalog: workshop_rs::catalog::Catalog,
     loaded: Option<Loaded>,
+    loaded_operation: Option<ProviderOperation>,
     diagnostics: Vec<Diagnostic>,
     progress_observer: Option<Arc<dyn ProgressObserver>>,
     source_provider: Option<Box<dyn SourceProvider>>,
@@ -102,6 +109,7 @@ impl CompilerSession {
             config,
             catalog,
             loaded: None,
+            loaded_operation: None,
             diagnostics: Vec::new(),
             progress_observer: None,
             source_provider: None,
@@ -145,8 +153,29 @@ impl CompilerSession {
     /// re-reading the input. Returns an owned snapshot so callers can hold it
     /// while mutating the session.
     pub fn load(&mut self) -> Result<Loaded, Diagnostic> {
+        if self.config.source_backend == SourceBackend::Provider
+            && self.loaded_operation != Some(ProviderOperation::Compile)
+        {
+            return Err(SourceProviderError::Unsupported {
+                message: "provider-backed load requires a canonical compile result; lint, analyze, inspect, and convert are not available on the check-only provider path".to_string(),
+            }
+            .diagnostic());
+        }
+        self.load_with_operation(ProviderOperation::Check)
+    }
+
+    fn load_with_operation(
+        &mut self,
+        provider_operation: ProviderOperation,
+    ) -> Result<Loaded, Diagnostic> {
         if let Some(loaded) = &self.loaded {
-            return Ok(loaded.clone());
+            if self.config.source_backend != SourceBackend::Provider
+                || self.loaded_operation == Some(provider_operation)
+                || (self.loaded_operation == Some(ProviderOperation::Compile)
+                    && provider_operation == ProviderOperation::Check)
+            {
+                return Ok(loaded.clone());
+            }
         }
         if self.config.source_backend == SourceBackend::Provider
             && matches!(self.config.input, InputSpec::Stdin)
@@ -174,7 +203,7 @@ impl CompilerSession {
             return self.load_ostw(&mut resolved);
         }
         if self.config.source_backend == SourceBackend::Provider {
-            return self.load_from_source_provider(&mut resolved);
+            return self.load_from_source_provider(&mut resolved, provider_operation);
         }
         let mut program = match resolved.kind {
             SourceKind::Workshop => {
@@ -255,6 +284,7 @@ impl CompilerSession {
     fn load_from_source_provider(
         &mut self,
         resolved: &mut ResolvedInput,
+        operation: ProviderOperation,
     ) -> Result<Loaded, Diagnostic> {
         let language = match resolved.kind {
             SourceKind::Opy => SourceLanguage::Opy,
@@ -276,7 +306,35 @@ impl CompilerSession {
                 .clone()
                 .unwrap_or_else(|| Path::new("<stdin>").to_path_buf()),
             resolved.cwd.clone(),
-        );
+        )
+        .with_project_root(resolved.root.clone());
+        if self.source_provider.is_none() {
+            let mut provider = self
+                .language_provider(opy_provider::OPY_LANGUAGE_ID)
+                .map_err(|error| {
+                    SourceProviderError::Failed {
+                        code: error.code().to_string(),
+                        message: error.to_string(),
+                    }
+                    .diagnostic()
+                })?;
+            provider
+                .initialize_project_loading(Some(&wright_lpp::ClientInfo {
+                    name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+                    version: crate::result::DRIVER_VERSION.to_string(),
+                }))
+                .map_err(|error| {
+                    SourceProviderError::Failed {
+                        code: error.code().to_string(),
+                        message: error.to_string(),
+                    }
+                    .diagnostic()
+                })?;
+            self.source_provider = Some(Box::new(crate::source_provider::LppSourceProvider::new(
+                provider,
+                self.config.locale.clone(),
+            )));
+        }
         let Some(provider) = self.source_provider.as_mut() else {
             return Err(SourceProviderError::NotConfigured { language }.diagnostic());
         };
@@ -291,9 +349,11 @@ impl CompilerSession {
                 ),
             ));
         }
-        let compilation = provider
-            .compile(&target)
-            .map_err(|error| error.diagnostic())?;
+        let compilation = match operation {
+            ProviderOperation::Check => provider.check(&target),
+            ProviderOperation::Compile => provider.compile(&target),
+        }
+        .map_err(|error| error.diagnostic())?;
         let mut provider_diagnostics = compilation.diagnostics;
         if let Some(index) = provider_diagnostics
             .iter()
@@ -307,6 +367,21 @@ impl CompilerSession {
         let provenance = match compilation.provenance {
             SourceProvenance::Unmapped => Provenance::Unmapped,
         };
+        let locale_name = compilation
+            .locale
+            .or_else(|| resolved.origin.locale.clone())
+            .unwrap_or_else(|| "en-US".to_string());
+        let locale = workshop_rs::catalog::Locale::new(&locale_name);
+        if operation == ProviderOperation::Check {
+            return Ok(Loaded {
+                program: Arc::new(wir::Program::default()),
+                ostw: None,
+                ostw_semantic: None,
+                origin: resolved.origin.clone(),
+                input: resolved.clone(),
+                provenance,
+            });
+        }
         let Some(workshop_text) = compilation.workshop_text else {
             return Err(Diagnostic::error(
                 "source-provider-no-artifact",
@@ -314,11 +389,6 @@ impl CompilerSession {
                 "the source provider returned no canonical Workshop output",
             ));
         };
-        let locale_name = compilation
-            .locale
-            .or_else(|| resolved.origin.locale.clone())
-            .unwrap_or_else(|| "en-US".to_string());
-        let locale = workshop_rs::catalog::Locale::new(&locale_name);
         let program = workshop_rs::parser::parse_with_context(
             &workshop_text,
             &self.catalog,
@@ -356,6 +426,7 @@ impl CompilerSession {
             provenance,
         };
         self.loaded = Some(loaded.clone());
+        self.loaded_operation = Some(operation);
         Ok(loaded)
     }
 
@@ -548,7 +619,7 @@ impl CompilerSession {
     }
 
     fn compile_output(&mut self) -> Result<CompiledOutput, Diagnostic> {
-        let loaded = self.load()?;
+        let loaded = self.load_with_operation(ProviderOperation::Compile)?;
         if let Some(outcome) = &loaded.ostw {
             // OSTW (#119): the load lowered the semantic HIR into the
             // session program. Project-boundary diagnostics (missing
@@ -594,7 +665,7 @@ impl CompilerSession {
     /// correctness gate.
     pub fn check(&mut self) -> Envelope<CheckResult> {
         let command = "check";
-        let loaded = match self.load() {
+        let loaded = match self.load_with_operation(ProviderOperation::Check) {
             Ok(loaded) => loaded,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);

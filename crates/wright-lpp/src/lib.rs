@@ -61,8 +61,11 @@ pub mod provider;
 pub mod registry;
 pub mod types;
 
-/// The only LPP protocol version this client speaks.
+/// The LPP 1.0 protocol version used by document-supplied requests.
 pub const LPP_PROTOCOL_VERSION: &str = "1.0";
+
+/// The additive LPP 1.1 version that enables provider-owned project loading.
+pub const LPP_PROJECT_LOADING_PROTOCOL_VERSION: &str = "1.1";
 
 /// The client name reported in `lpp/initialize` `clientInfo`.
 pub const LPP_CLIENT_NAME: &str = "wright";
@@ -75,7 +78,7 @@ pub use registry::{ProviderConfig, ProviderRegistry, RegistryError};
 pub use types::{
     Capabilities, Capability, CheckResult, ClientInfo, CompileResult, Diagnostic,
     DiagnosticSeverity, Document, DocumentDiagnostics, DocumentEdits, DocumentSet, DocumentSymbols,
-    InitializeResult, LanguageInfo, Location, LocationsResult, Position, Range, ReconstructResult,
-    RenameResult, ServerInfo, Symbol, SymbolsResult, TextEdit, ValidateEditsResult,
-    WorkshopArtifact,
+    InitializeResult, LanguageInfo, Location, LocationsResult, Position, ProjectEntry, Range,
+    ReconstructResult, RenameResult, ServerInfo, Symbol, SymbolsResult, TextEdit,
+    ValidateEditsResult, WorkshopArtifact,
 };

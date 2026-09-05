@@ -75,6 +75,15 @@ pub struct Document {
 /// A set of documents keyed by URI, supplied with a request.
 pub type DocumentSet = BTreeMap<String, Document>;
 
+/// A client-selected entry for provider-owned filesystem project loading.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectEntry {
+    pub uri: String,
+    #[serde(rename = "languageId")]
+    pub language_id: String,
+    pub version: i64,
+}
+
 /// The severity of a provider diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -230,6 +239,7 @@ pub struct ValidateEditsResult {
 pub enum Capability {
     Check,
     Compile,
+    ProjectLoading,
     Reconstruct,
     Symbols,
     Definition,
@@ -240,9 +250,10 @@ pub enum Capability {
 
 impl Capability {
     /// Every LPP v1 capability.
-    pub const ALL: [Capability; 8] = [
+    pub const ALL: [Capability; 9] = [
         Capability::Check,
         Capability::Compile,
+        Capability::ProjectLoading,
         Capability::Reconstruct,
         Capability::Symbols,
         Capability::Definition,
@@ -256,6 +267,7 @@ impl Capability {
         match self {
             Capability::Check => "check",
             Capability::Compile => "compile",
+            Capability::ProjectLoading => "projectLoading",
             Capability::Reconstruct => "reconstruct",
             Capability::Symbols => "symbols",
             Capability::Definition => "definition",
@@ -270,6 +282,7 @@ impl Capability {
         match self {
             Capability::Check => "lpp/check",
             Capability::Compile => "lpp/compile",
+            Capability::ProjectLoading => "lpp/check",
             Capability::Reconstruct => "lpp/reconstruct",
             Capability::Symbols => "lpp/symbols",
             Capability::Definition => "lpp/definition",
@@ -286,6 +299,7 @@ impl Capability {
         Some(match name {
             "check" => Capability::Check,
             "compile" => Capability::Compile,
+            "projectLoading" => Capability::ProjectLoading,
             "reconstruct" => Capability::Reconstruct,
             "symbols" => Capability::Symbols,
             "definition" => Capability::Definition,
@@ -298,13 +312,14 @@ impl Capability {
 }
 
 /// The negotiated capability set advertised by a provider during
-/// initialization. All eight LPP v1 fields are REQUIRED on the wire, so a
-/// response missing any of them fails deserialization and surfaces as a
-/// malformed response.
+/// initialization. The LPP 1.0 fields are required; `projectLoading` is the
+/// additive LPP 1.1 capability and defaults to false for 1.0 providers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capabilities {
     pub check: bool,
     pub compile: bool,
+    #[serde(rename = "projectLoading", default)]
+    pub project_loading: bool,
     pub reconstruct: bool,
     pub symbols: bool,
     pub definition: bool,
@@ -320,6 +335,7 @@ impl Capabilities {
         match capability {
             Capability::Check => self.check,
             Capability::Compile => self.compile,
+            Capability::ProjectLoading => self.project_loading,
             Capability::Reconstruct => self.reconstruct,
             Capability::Symbols => self.symbols,
             Capability::Definition => self.definition,

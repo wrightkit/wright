@@ -63,6 +63,9 @@ def normalize(text: str) -> str:
     # The canonical emitter's `All Players` spelling is equivalent to
     # OverPy's explicit `All Players(All Teams)` selector.
     text = text.replace("All Players(All Teams)", "All Players")
+    # The provider's canonical Workshop emitter spells the unit-up vector
+    # explicitly; the pinned oracle uses the equivalent `Up` constant.
+    text = re.sub(r"\bUp\b", "Vector(0, 1, 0)", text)
     return re.sub(r"\s+", "", text)
 
 
@@ -84,7 +87,7 @@ def main() -> int:
         "wright": {"commit": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
         ).strip()},
-        "normalizer": "debug-hud-collapse + all-players-selector + whitespace-collapse",
+        "normalizer": "debug-hud-collapse + all-players-selector + up-vector-alias + whitespace-collapse",
         "fixtures": {},
     }
     failures = []

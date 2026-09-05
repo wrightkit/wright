@@ -731,6 +731,7 @@ fn capability_require_refuses_unnegotiated_capabilities() {
     let capabilities = Capabilities {
         check: true,
         compile: false,
+        project_loading: false,
         reconstruct: true,
         symbols: true,
         definition: true,
@@ -766,6 +767,7 @@ fn capability_require_refuses_unnegotiated_capabilities() {
 fn capability_ids_and_methods_match_the_spec_table() {
     assert_eq!(Capability::Check.as_str(), "check");
     assert_eq!(Capability::Compile.as_str(), "compile");
+    assert_eq!(Capability::ProjectLoading.as_str(), "projectLoading");
     assert_eq!(Capability::Reconstruct.as_str(), "reconstruct");
     assert_eq!(Capability::Symbols.as_str(), "symbols");
     assert_eq!(Capability::Definition.as_str(), "definition");
@@ -774,6 +776,7 @@ fn capability_ids_and_methods_match_the_spec_table() {
     assert_eq!(Capability::EditValidation.as_str(), "editValidation");
     assert_eq!(Capability::Check.method(), "lpp/check");
     assert_eq!(Capability::Compile.method(), "lpp/compile");
+    assert_eq!(Capability::ProjectLoading.method(), "lpp/check");
     assert_eq!(Capability::Reconstruct.method(), "lpp/reconstruct");
     assert_eq!(Capability::Symbols.method(), "lpp/symbols");
     assert_eq!(Capability::Definition.method(), "lpp/definition");
@@ -783,6 +786,10 @@ fn capability_ids_and_methods_match_the_spec_table() {
     assert_eq!(
         Capability::parse("editValidation"),
         Some(Capability::EditValidation)
+    );
+    assert_eq!(
+        Capability::parse("projectLoading"),
+        Some(Capability::ProjectLoading)
     );
     assert_eq!(Capability::parse("bogus"), None);
 }

@@ -23,8 +23,8 @@ use crate::error::ProviderError;
 use crate::process::ChildProcess;
 use crate::types::{
     Capabilities, Capability, CheckResult, ClientInfo, CompileResult, Document, DocumentSet,
-    InitializeResult, LocationsResult, Position, ReconstructResult, RenameResult, SymbolsResult,
-    TextEdit, ValidateEditsResult, WorkshopArtifact,
+    InitializeResult, LocationsResult, Position, ProjectEntry, ReconstructResult, RenameResult,
+    SymbolsResult, TextEdit, ValidateEditsResult, WorkshopArtifact,
 };
 
 /// The negotiated result of a successful `lpp/initialize`.
@@ -76,6 +76,18 @@ pub trait LanguageProvider {
         client_info: Option<&ClientInfo>,
     ) -> Result<InitializeResult, ProviderError>;
 
+    /// Initialize with LPP 1.1 for provider-owned project loading.
+    fn initialize_project_loading(
+        &mut self,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        let result = self.initialize(client_info)?;
+        Err(ProviderError::ProtocolVersionMismatch {
+            supported: vec![result.protocol_version],
+            message: "the provider client does not support LPP 1.1 project loading".to_string(),
+        })
+    }
+
     /// The negotiated capabilities, after a successful initialize.
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError>;
 
@@ -86,6 +98,21 @@ pub trait LanguageProvider {
         project_root: Option<&str>,
     ) -> Result<CheckResult, ProviderError>;
 
+    /// `lpp/check` over a provider-owned filesystem project entry.
+    fn check_entry(
+        &mut self,
+        entry: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CheckResult, ProviderError> {
+        let _ = (entry, project_root, locale);
+        Err(ProviderError::lpp(
+            crate::error::LppErrorKind::CapabilityUnavailable,
+            json!({ "capability": "projectLoading", "method": "lpp/check" }),
+            "capability 'projectLoading' is not available in this provider client",
+        ))
+    }
+
     /// `lpp/compile`: compile a document set into one opaque Workshop
     /// artifact.
     fn compile(
@@ -93,6 +120,21 @@ pub trait LanguageProvider {
         documents: &DocumentSet,
         project_root: Option<&str>,
     ) -> Result<CompileResult, ProviderError>;
+
+    /// `lpp/compile` over a provider-owned filesystem project entry.
+    fn compile_entry(
+        &mut self,
+        entry: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CompileResult, ProviderError> {
+        let _ = (entry, project_root, locale);
+        Err(ProviderError::lpp(
+            crate::error::LppErrorKind::CapabilityUnavailable,
+            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
+            "capability 'projectLoading' is not available in this provider client",
+        ))
+    }
 
     /// `lpp/reconstruct`: reconstruct source from a provider-owned artifact.
     fn reconstruct(
@@ -179,6 +221,52 @@ impl StdioLanguageProvider {
         })
     }
 
+    fn initialize_with_version(
+        &mut self,
+        protocol_version: &str,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        let mut params = json!({ "protocolVersion": protocol_version });
+        if let Some(info) = client_info {
+            params["clientInfo"] = serde_json::to_value(info).expect("client info serializes");
+        }
+        let value = match self.client.initialize(params) {
+            Ok(value) => value,
+            Err(mut error) => {
+                self.enrich_transport_error(&mut error, "lpp/initialize");
+                return Err(error);
+            }
+        };
+        let result: InitializeResult = match serde_json::from_value(value) {
+            Ok(result) => result,
+            Err(error) => {
+                self.client.reset_initialize();
+                return Err(ProviderError::Malformed {
+                    detail: format!(
+                        "lpp/initialize result is not a valid LPP v1 response: {error}"
+                    ),
+                });
+            }
+        };
+        if result.protocol_version != protocol_version {
+            self.client.reset_initialize();
+            return Err(ProviderError::ProtocolVersionMismatch {
+                supported: vec![result.protocol_version.clone()],
+                message: format!(
+                    "provider negotiated protocol version '{}' but this client requested '{protocol_version}'",
+                    result.protocol_version
+                ),
+            });
+        }
+        self.negotiated = Some(NegotiatedCapabilities {
+            protocol_version: result.protocol_version.clone(),
+            server_info: result.server_info.clone(),
+            languages: result.languages.clone(),
+            capabilities: result.capabilities.clone(),
+        });
+        Ok(result)
+    }
+
     /// Send a request through the client, enriching transport failures with
     /// the observed process status.
     fn request(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
@@ -242,45 +330,14 @@ impl LanguageProvider for StdioLanguageProvider {
         &mut self,
         client_info: Option<&ClientInfo>,
     ) -> Result<InitializeResult, ProviderError> {
-        let mut params = json!({ "protocolVersion": LPP_PROTOCOL_VERSION });
-        if let Some(info) = client_info {
-            params["clientInfo"] = serde_json::to_value(info).expect("client info serializes");
-        }
-        let value = match self.client.initialize(params) {
-            Ok(value) => value,
-            Err(mut error) => {
-                self.enrich_transport_error(&mut error, "lpp/initialize");
-                return Err(error);
-            }
-        };
-        let result: InitializeResult = match serde_json::from_value(value) {
-            Ok(result) => result,
-            Err(error) => {
-                self.client.reset_initialize();
-                return Err(ProviderError::Malformed {
-                    detail: format!(
-                        "lpp/initialize result is not a valid LPP v1 response: {error}"
-                    ),
-                });
-            }
-        };
-        if result.protocol_version != LPP_PROTOCOL_VERSION {
-            self.client.reset_initialize();
-            return Err(ProviderError::ProtocolVersionMismatch {
-                supported: vec![result.protocol_version.clone()],
-                message: format!(
-                    "provider negotiated protocol version '{}' but this client only speaks '{LPP_PROTOCOL_VERSION}'",
-                    result.protocol_version
-                ),
-            });
-        }
-        self.negotiated = Some(NegotiatedCapabilities {
-            protocol_version: result.protocol_version.clone(),
-            server_info: result.server_info.clone(),
-            languages: result.languages.clone(),
-            capabilities: result.capabilities.clone(),
-        });
-        Ok(result)
+        self.initialize_with_version(LPP_PROTOCOL_VERSION, client_info)
+    }
+
+    fn initialize_project_loading(
+        &mut self,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        self.initialize_with_version(crate::LPP_PROJECT_LOADING_PROTOCOL_VERSION, client_info)
     }
 
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError> {
@@ -301,6 +358,18 @@ impl LanguageProvider for StdioLanguageProvider {
         parse_result(value, "lpp/check")
     }
 
+    fn check_entry(
+        &mut self,
+        entry: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CheckResult, ProviderError> {
+        self.require_capability(Capability::Check)?;
+        self.require_capability(Capability::ProjectLoading)?;
+        let value = self.request("lpp/check", entry_params(entry, project_root, locale))?;
+        parse_result(value, "lpp/check")
+    }
+
     fn compile(
         &mut self,
         documents: &DocumentSet,
@@ -308,6 +377,18 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<CompileResult, ProviderError> {
         self.require_capability(Capability::Compile)?;
         let value = self.request("lpp/compile", documents_params(documents, project_root))?;
+        parse_result(value, "lpp/compile")
+    }
+
+    fn compile_entry(
+        &mut self,
+        entry: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CompileResult, ProviderError> {
+        self.require_capability(Capability::Compile)?;
+        self.require_capability(Capability::ProjectLoading)?;
+        let value = self.request("lpp/compile", entry_params(entry, project_root, locale))?;
         parse_result(value, "lpp/compile")
     }
 
@@ -419,6 +500,18 @@ fn documents_params(documents: &DocumentSet, project_root: Option<&str>) -> Valu
         json!({ "documents": serde_json::to_value(documents).expect("document set serializes") });
     if let Some(root) = project_root {
         params["projectRoot"] = json!(root);
+    }
+    params
+}
+
+fn entry_params(entry: &ProjectEntry, project_root: Option<&str>, locale: Option<&str>) -> Value {
+    let mut params =
+        json!({ "entry": serde_json::to_value(entry).expect("project entry serializes") });
+    if let Some(root) = project_root {
+        params["projectRoot"] = json!(root);
+    }
+    if let Some(locale) = locale {
+        params["locale"] = json!(locale);
     }
     params
 }
@@ -561,6 +654,13 @@ mod tests {
         })
     }
 
+    fn init_result_project_loading_json() -> Value {
+        let mut result = init_result_json();
+        result["protocolVersion"] = json!("1.1");
+        result["capabilities"]["projectLoading"] = json!(true);
+        result
+    }
+
     fn ok_response(result: Value) -> Value {
         json!({ "jsonrpc": "2.0", "id": 0, "result": result })
     }
@@ -641,5 +741,59 @@ mod tests {
         let check = provider.check(&documents, None).expect("check works");
         assert!(check.documents.is_empty());
         fake.assert_only_requests(2);
+    }
+
+    #[test]
+    fn project_loading_initialization_and_entry_requests_use_lpp_11() {
+        let (mut provider, fake) = Fake::spawn(vec![
+            FakeStep::Respond(ok_response(init_result_project_loading_json())),
+            FakeStep::Respond(ok_response(json!({ "documents": [] }))),
+            FakeStep::Respond(ok_response(json!({ "diagnostics": [], "artifact": null }))),
+        ]);
+        provider
+            .initialize_project_loading(None)
+            .expect("LPP 1.1 initialize");
+        let entry = ProjectEntry {
+            uri: "file:///project/main.opy".to_string(),
+            language_id: "opy".to_string(),
+            version: 7,
+        };
+        provider
+            .check_entry(&entry, Some("file:///project"), Some("zh-CN"))
+            .expect("entry check");
+        provider
+            .compile_entry(&entry, Some("file:///project"), Some("zh-CN"))
+            .expect("entry compile");
+        let initialize: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("initialize request"),
+        )
+        .expect("initialize JSON");
+        assert_eq!(initialize["params"]["protocolVersion"], "1.1");
+        let check: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("check request"),
+        )
+        .expect("check JSON");
+        assert_eq!(check["method"], "lpp/check");
+        assert_eq!(
+            check["params"]["entry"],
+            serde_json::to_value(&entry).unwrap()
+        );
+        assert_eq!(check["params"]["projectRoot"], "file:///project");
+        assert_eq!(check["params"]["locale"], "zh-CN");
+        let compile: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("compile request"),
+        )
+        .expect("compile JSON");
+        assert_eq!(compile["method"], "lpp/compile");
+        fake.assert_only_requests(0);
     }
 }

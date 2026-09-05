@@ -24,7 +24,7 @@ serde_json = "1"
 sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
-ureq = "2"
+ureq = { version = "2", features = ["native-certs"] }
 wright-analyzer = { path = "crates/wright-analyzer" }
 wright-core = { path = "crates/wright-core" }
 wright-driver = { path = "crates/wright-driver" }
