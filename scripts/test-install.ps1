@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Installer = Join-Path $Root "install.ps1"
+$Smoke = Join-Path $Root "scripts\smoke-native.py"
 $Version = (Get-Content (Join-Path $Root "version.txt") -Raw).Trim()
 $Target = "x86_64-pc-windows-msvc"
 $Work = Join-Path ([IO.Path]::GetTempPath()) ("wright-install-test-" + [Guid]::NewGuid().ToString("N"))
@@ -80,6 +81,11 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_
         -not (Test-Path -LiteralPath (Join-Path $PinnedDir "wright-lsp.exe"))) {
         Fail "pinned install did not install both executables"
     }
+    & python $Smoke `
+        --wright (Join-Path $PinnedDir "wright.exe") `
+        --wright-lsp (Join-Path $PinnedDir "wright-lsp.exe") `
+        --version $Version
+    if ($LASTEXITCODE -ne 0) { Fail "native post-install smoke failed" }
     Write-Host "PASS: pinned install and native smoke check"
 
     $LatestDir = Join-Path $Work "latest"

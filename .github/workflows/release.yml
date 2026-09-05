@@ -118,6 +118,11 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -170,12 +175,11 @@ jobs:
           LSP="$EXTRACT/$PAYLOAD/wright-lsp$EXE"
           test -f "$WRIGHT" || { echo "missing $WRIGHT"; exit 1; }
           test -f "$LSP" || { echo "missing $LSP"; exit 1; }
-          "$WRIGHT" --version | grep -F "$VERSION" || { echo "wright does not report $VERSION"; exit 1; }
-          "$LSP" --version | grep -F "$VERSION" || { echo "wright-lsp does not report $VERSION"; exit 1; }
-          "$WRIGHT" compile compatibility/fixtures/synthetic/basic-rule/source.opy \
-            --profile compat >/dev/null
-          "$WRIGHT" check scenarios/loops.opy --profile compat >/dev/null
-          echo "packaged $PAYLOAD executes and reports $VERSION"
+          python scripts/smoke-native.py \
+            --wright "$WRIGHT" \
+            --wright-lsp "$LSP" \
+            --version "$VERSION" \
+            --provider-bootstrap
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
