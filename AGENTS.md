@@ -32,7 +32,23 @@ Wright may integrate through narrow Rust adapters and/or LPP depending on the
 product boundary. The adapters translate owner contracts; they do not define
 language syntax, semantics, HIR, compatibility data, or lowering policy.
 
-See [`docs/adr/0010-independent-implementations-and-wright-integration.md`](docs/adr/0010-independent-implementations-and-wright-integration.md).
+## Architecture routing
+
+For substantive implementation work, resolve the relevant current contract from
+[`docs/architecture/README.md`](docs/architecture/README.md) before editing:
+
+- [`ownership.md`](docs/architecture/ownership.md) — repository/product ownership,
+  dependency direction, and capability ceiling;
+- [`integration.md`](docs/architecture/integration.md) — provider/source integration,
+  contract preservation, and failure routing;
+- [`tooling.md`](docs/architecture/tooling.md) — Wright-owned lint/analyze/inspect/edit,
+  agent/CI/LSP, and conversion UX boundaries.
+
+ADRs under `docs/adr/` record point-in-time decisions and rationale; an accepted
+ADR is not proof that current code still implements that decision. If the Issue,
+current architecture contract, owning implementation, and Wright code/tests
+disagree materially, stop and surface the mismatch rather than selecting a design
+by implementation convenience.
 
 ## Dependency direction
 
@@ -103,8 +119,7 @@ clear.
   formatting, optimizer shape, temporary variables, or upstream internals.
 - Source-oriented validated edits are preferred over full-file regeneration.
 
-Durable architecture and ADRs live under [`docs/`](docs/README.md). Current
-support claims must be grounded in the owning repositories and executable
+Current support claims must be grounded in the owning repositories and executable
 evidence, not in historical Wright monolith behavior.
 
 ## Validation

@@ -1,24 +1,17 @@
 # Architecture Decision Records
 
-ADRs record decisions that affect Wright's observable product/compiler contract
-or component boundaries. They complement, rather than replace, the normative
-contracts in [`docs/architecture.md`](../architecture.md) and
-[`docs/compatibility.md`](../compatibility.md).
+ADRs record point-in-time decisions that affected Wright's observable product/compiler contract or component boundaries. They preserve rationale and consequences; they are not a database of current implementation reality.
+
+Current architecture contracts are routed from [`docs/architecture/README.md`](../architecture/README.md). Source, Cargo metadata, tests, CI, integrations, and real-project evidence establish implementation reality. An `Accepted` ADR means the decision was approved at that point in project history; it does **not** by itself prove that current code still conforms to the decision.
 
 ## Conventions
 
-* Files use a zero-padded sequence and a short title, for example
-  `0003-ir-boundary.md`.
-* An ADR starts as `Proposed` and becomes `Accepted` when the decision is the
-  repository's current contract. `Superseded` ADRs remain for history and link
-  to the decision that replaces them.
-* An accepted ADR is not rewritten to hide history. A material change gets a
-  new ADR, and the old record links to it.
-* Decisions state their scope, consequences, compatibility impact, and open
-  questions. They describe observable constraints rather than implementation
-  guesses.
-* New ADRs should link to the affected architecture or compatibility document
-  and to any superseded or related decision.
+* Files use a zero-padded sequence and a short title, for example `0003-ir-boundary.md`.
+* An ADR starts as `Proposed` and becomes `Accepted` when the decision is approved.
+* `Superseded` ADRs remain for history and link to the decision that replaces them.
+* An accepted ADR is not rewritten to hide history. A material change gets a new ADR when the rationale/decision history is worth preserving, while the current invariant is reflected in `docs/architecture/` or another focused current contract.
+* Decisions state their scope, consequences, compatibility impact, and open questions. Historical implementation mechanisms may remain in the record without becoming current architecture authority.
+* Do not use ADR status to encode current release versions, feature counts, migration progress, or Issue/PR state.
 
 ## Index
 
