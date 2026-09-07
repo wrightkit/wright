@@ -2233,7 +2233,6 @@ dependencies = [
  "url",
  "workshop-rs",
  "wright-analyzer",
- "wright-core",
  "wright-driver",
  "wright-ir",
  "wright-opy",
@@ -2276,13 +2275,7 @@ name = "wright-ostw"
 version = "0.2.18"
 dependencies = [
  "deltin-rs",
- "serde_json",
- "sha2",
  "workshop-rs",
- "wright-core",
- "wright-ir",
- "wright-opy",
- "wright-transform",
 ]
 
 [[package]]
