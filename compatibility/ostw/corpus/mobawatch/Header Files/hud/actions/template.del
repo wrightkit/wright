@@ -1,7 +1,0 @@
-import "common.del";
-
-enum EUX_TemplateState{
-    NONE
-}
-
-Number[] templateIds: [0];

@@ -11,7 +11,7 @@ compatibility.
 ## Reference boundary
 
 Wright owns tooling and orchestration, not the durable source-language
-implementations. `opy-rs` owns OPY language semantics, `del-rs` owns the
+implementations. `opy-rs` owns OPY language semantics, `deltin-rs` owns the
 DEL/OSTW-compatible implementation, and `workshop-rs` owns canonical Workshop
 semantics and WIR. During the migration described by ADR-0009, Wright still
 contains only narrow `wright-opy` / `wright-ostw` contract adapters; source
@@ -27,7 +27,7 @@ belong to the language owner:
 
 - `opy-rs` owns the pinned OverPy oracle, OPY corpus, oracle runner,
   differential expectations, and OPY support matrix;
-- `del-rs` is the durable owner for pinned OSTW reference evidence and
+- `deltin-rs` is the durable owner for pinned OSTW reference evidence and
   DEL/OSTW compatibility claims;
 - Wright may keep immutable recorded snapshots required by its current
   migration/provider/product regressions, but those snapshots do not make
@@ -158,10 +158,10 @@ output hashes, and provenance without installing an upstream language runtime.
 
 Reference evidence changes must begin in the owning language repository. For
 OPY, refresh and review the pinned OverPy evidence in `wrightkit/opy-rs`, then
-import only the immutable result needed by a Wright consumer regression. The
-legacy OSTW reference harness currently remaining under
-`compatibility/ostw/` is migration state and must move to `wrightkit/del-rs`
-before Wright removes it.
+import only the immutable result needed by a Wright consumer regression. For
+OSTW, the pinned reference evidence and reproduction workflow are maintained
+in [`wrightkit/deltin-rs`](https://github.com/wrightkit/deltin-rs); Wright does
+not duplicate that owner infrastructure.
 
 Fixtures containing third-party code, generated output, or user data require a
 redistribution and provenance review before being committed. When a fixture
@@ -172,8 +172,7 @@ or acquisition instruction instead of shipping the content here.
 
 The following remain unresolved until the relevant implementation exists:
 
-* the final Wright-side evidence retained after the OPY and DEL provider
-  cutovers;
+* the final Wright-side evidence retained after the OPY provider cutover;
 * the machine-readable diagnostic schema and stable code registry;
 * the canonical Workshop output normalizer and its versioning policy;
 * the target/runtime used for semantic scenarios; and

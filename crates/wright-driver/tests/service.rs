@@ -161,9 +161,22 @@ fn findings_and_lint_requests_resolve_span_paths() {
     }
 }
 
-fn ostw_service() -> ToolService<'static> {
-    let path =
-        workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit/main.ostw");
+fn ostw_service() -> (ToolService<'static>, std::path::PathBuf) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "wright-driver-service-ostw-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    std::fs::write(
+        root.join("main.ostw"),
+        "globalvar Number score = 0;\nrule: \"one\" { score += 1; }\nrule: \"two\" { BigMessage(AllPlayers(), <\"<0>\", score>); }\n",
+    )
+    .unwrap();
+    let path = root.join("main.ostw");
     let config = SessionConfig {
         input: InputSpec::Path(path),
         kind: SourceKind::Ostw,
@@ -173,7 +186,7 @@ fn ostw_service() -> ToolService<'static> {
     let mut session = CompilerSession::new(config).unwrap();
     let _ = session.load().unwrap();
     let session = Box::leak(Box::new(session));
-    ToolService::new(session).unwrap()
+    (ToolService::new(session).unwrap(), root)
 }
 
 #[test]
@@ -181,7 +194,7 @@ fn ostw_sessions_serve_the_shared_queries_through_the_tool_service() {
     // #120: the tool/agent API over an OSTW session answers the same
     // project/rules/symbols/findings/lint queries through the shared
     // in-process services, and its capabilities advertise `ostw`.
-    let service = ostw_service();
+    let (service, root) = ostw_service();
 
     let capabilities = handle_ok(&service, &ToolRequest::Capabilities);
     assert!(
@@ -215,6 +228,8 @@ fn ostw_sessions_serve_the_shared_queries_through_the_tool_service() {
         lint["rules"].as_array().is_some_and(|r| !r.is_empty()),
         "lint returns shared rule metadata"
     );
+    drop(service);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 fn workshop_service() -> ToolService<'static> {
@@ -281,7 +296,10 @@ fn cross_language_shared_service_behavior_is_frontend_neutral() {
     // over OPY, Workshop, and OSTW inputs — no language-specific stack.
     assert_shared_service_surface(&service_for("synthetic/control-flow"));
     assert_shared_service_surface(&workshop_service());
-    assert_shared_service_surface(&ostw_service());
+    let (ostw, root) = ostw_service();
+    assert_shared_service_surface(&ostw);
+    drop(ostw);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 // -- #130: validated mutation through the shared tool API ----------------------

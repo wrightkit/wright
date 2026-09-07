@@ -1034,7 +1034,9 @@ fn source_artifacts_are_byte_exact_in_plain_and_github_renderers() {
                 "crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws",
             )
         } else {
-            workspace_fixture("compatibility/ostw/reconstruction/surface-basic/workshop.txt")
+            workspace_fixture(
+                "crates/wright-driver/tests/fixtures/convert/ostw/surface-basic/workshop.txt",
+            )
         };
         let expected = parse_json(
             &run(&["convert", "--target", target, &fixture, "-f", "json"]).stdout,
@@ -1163,7 +1165,9 @@ fn convert_workshop_input_to_opy_reconstructs_source() {
 #[test]
 fn convert_workshop_input_to_ostw_reconstructs_source() {
     // `wright convert --target ostw` writes the reconstructed OSTW source.
-    let fixture = workspace_fixture("compatibility/ostw/reconstruction/surface-basic/workshop.txt");
+    let fixture = workspace_fixture(
+        "crates/wright-driver/tests/fixtures/convert/ostw/surface-basic/workshop.txt",
+    );
     let output = run(&["convert", "--target", "ostw", &fixture]);
     assert_eq!(
         output.status.code(),
@@ -1221,7 +1225,7 @@ fn convert_is_byte_deterministic_across_runs() {
         ),
         (
             "ostw",
-            "compatibility/ostw/reconstruction/surface-basic/workshop.txt",
+            "crates/wright-driver/tests/fixtures/convert/ostw/surface-basic/workshop.txt",
         ),
     ] {
         let fixture = workspace_fixture(fixture);
@@ -1243,7 +1247,7 @@ fn convert_rejects_unsupported_constructs_with_exit_three() {
     for (target, fixture, expected_code) in [
         (
             "ostw",
-            "compatibility/ostw/reconstruction/reject/for-player-variable/workshop.txt",
+            "crates/wright-driver/tests/fixtures/convert/ostw/reject/for-player-variable/workshop.txt",
             "reconstruct-unsupported-action",
         ),
         (

@@ -1,6 +1,0 @@
-import "..\entity.del";
-import "base_projectile.del";
-class VelocityProjectile : Projectile 
-{
-
-}

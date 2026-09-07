@@ -1132,22 +1132,28 @@ fn stale_results_are_detected_by_version() {
 
 #[test]
 fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
-    // #120: an OSTW document routes through the shared language services —
-    // frontend project + #118 semantic boundary diagnostics surface as
-    // source-aware diagnostics, and semantic tokens classify symbols through
-    // the shared semantic index over the lowered program.
-    let root = workspace_root().join("compatibility/ostw/probes/p3a-variables-auto-explicit");
-    let main = std::fs::read_to_string(root.join("main.ostw")).unwrap();
+    // An OSTW document routes through the shared language services: semantic
+    // tokens classify symbols through the shared semantic index.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "wright-language-ostw-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
+    let main = "globalvar Number score = 0;\nrule: \"one\" { score += 1; }\nrule: \"two\" { score += 1; }\n";
+    std::fs::write(root.join("main.ostw"), main).unwrap();
     let uri = format!("file://{}", root.join("main.ostw").display());
     let document = Document::new(&uri, main, root.clone());
-    let mut service = LanguageService::new(root);
+    let mut service = LanguageService::new(root.clone());
     service.store.open(document);
 
     let diagnostics = service.diagnostics(&uri);
     assert!(
         diagnostics.is_empty(),
-        "the published owner accepts the probe project: {:?}",
-        diagnostics
+        "the OSTW source is valid: {diagnostics:?}"
     );
     let tokens = service.semantic_tokens(&uri);
     assert!(!tokens.is_empty(), "semantic tokens classify OSTW symbols");
@@ -1157,6 +1163,7 @@ fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
             .any(|t| t.token_type == "variable" || t.token_type == "class"),
         "symbol classification through the shared index"
     );
+    let _ = std::fs::remove_dir_all(root);
 }
 
 // -- #129: OSTW semantic rename through the shared contract --------------------
