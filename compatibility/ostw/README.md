@@ -23,8 +23,8 @@ JSON evidence. It never invokes the clipboard-bound default compiler path.
 Pinned P1 evidence (#118) established that the upstream LSP compiles the
 **last-opened document plus its transitive import closure**; `ds.toml.entry_point`
 is not the LSP compile selector. Every recorded observation is therefore
-produced by a session that opens exactly one document — the observation's
-explicit `root` — so the result can only be that root's compile and can never
+produced by a session that opens exactly one document (the observation's
+explicit `root`), so the result can only be that root's compile and can never
 acquire meaning from `didOpen` ordering. `corpus.json` lists the reviewable
 `roots` (with `entry-root` / `document-root` / `historical-document-root`
 roles) per project; `results.json` (schema v2) records one observation per
@@ -42,7 +42,7 @@ targets for #119.
 The langserver debounces compiles ~50 ms after the last `didOpen` and publishes
 one coherent `workshopCode`/`elementCount`/`publishDiagnostics` triple per
 compile. The runner drains until the server is quiet (`QUIET_SECONDS`, default
-3 s) and records only the LAST compile triple — deterministic because the open
+3 s) and records only the LAST compile triple. This is deterministic because the open
 set is explicit and fixed per observation. A session that drops mid-stream
 (transient container failure) is retried; the recorded triple is unchanged.
 

@@ -1,6 +1,6 @@
 # OSTW Compile Support Matrix
 
-Status: accepted baseline — first declared OSTW forward-compilation surface (#119)
+Status: accepted baseline: first declared OSTW forward-compilation surface (#119)
 Scope: the OSTW source surface Wright compiles to Workshop through the shared
 HIR → WIR → Workshop pipeline, with pinned-reference differential evidence,
 the declared normalization contract, and the known limitations/divergences
@@ -16,7 +16,7 @@ the corrected explicit-root oracle evidence model is documented there too
 The owner-side pipeline is `del-rs` (project + syntax + semantic analysis) →
 canonical WIR through the narrow `wright-ostw` adapter → canonical
 `workshop-rs` emitter (en-US), identical
-to the OPY/Workshop paths — no OSTW-specific backend exists.
+to the OPY/Workshop paths; no OSTW-specific backend exists.
 
 ## Accepted differential targets
 
@@ -95,7 +95,7 @@ arithmetic (the fold pass restores it on the Wright side).
 - Ternary → `If-Then-Else`; `<T>expr` casts are emission pass-throughs (P4).
 - Workshop calls resolve through the canonical Wright-owned catalog: named
   arguments bind by name in canonical signature order and omitted parameters
-  take the catalog's `paramDefaults` (P6) — `allPlayers` → `All Players(All
+  take the catalog's `paramDefaults` (P6): `allPlayers` → `All Players(All
   Teams)`, `wait` → `Wait(duration, Ignore Condition)`, `isButtonHeld` →
   `Is Button Held(Event Player, Button(Ability 2))`, `startCamera` Facing
   defaults to `0`, HUD-text colors default to `Color(White)`, etc.
@@ -119,7 +119,7 @@ arithmetic (the fold pass restores it on the Wright side).
   (normalized in the differential).
 - **Not claimed**: `protect-ban` entry-project compilation (its entry graph
   rejects at the three missing `../OSTWUtils/…` imports under the pinned
-  reference too — #122), classes/generics/lambdas, multi-locale output,
+  reference too, per #122), classes/generics/lambdas, multi-locale output,
   optimizer/output parity, and original-source recovery in reconstruction
   (#125 is semantic reconstruction, never comments/formatting/macros recovery).
 - The `Event Player` restricted-value diagnostic for direct uses in global
@@ -137,14 +137,14 @@ surface, the machine-readable boundary manifest, and the committed fixtures
 match exactly (`compatibility/ostw/reconstruction/`):
 
 - **Supported**: variables (`globalvar Any`/`playervar Any`, the permissive
-  universal type — the WIR carries no type info and the pinned reference
+  universal type, since the WIR carries no type info and the pinned reference
   requires a type), rules with Global/Each Player events and comparison
   conditions, subroutines (`void name() "…" { … }`), set/modify assignments
   (`=`, `+=`, `-=`, `*=`, `/=`, `%=`, `.append(value)`), `if`/`else if`/
   `else`, `while`, `for (v = start; stop; step)`, `Call Subroutine`, `return`
   (rule-level `Abort`), scalar/array/vector/enum values, global/player
   variable access, `Event Player`, arithmetic (`+ - * /` infix, the real OSTW
-  operator forms — the reference rejects callable `Add(...)`), comparison/
+  operator forms, whereas the reference rejects callable `Add(...)`), comparison/
   logical/ternary/format-string values, and the catalog actions/values named
   in the manifest (source names reverse the `signature.rs` binding table; the
   catalog is the identity source).
@@ -193,22 +193,22 @@ writes `target/wright-convert-report.json`.
 
 ## Evidence
 
-- `compatibility/ostw/probes/{p4-types-expressions,p5-functions-control,p6-catalog-signatures}/`
-  — Wright-authored probe sources, pinned reference identity
+- `compatibility/ostw/probes/{p4-types-expressions,p5-functions-control,p6-catalog-signatures}/`:
+  Wright-authored probe sources, pinned reference identity
   (`probe.json`), recorded reference diagnostics/emission
   (`result.entry-only.json`, `workshop.entry-only.txt`), and the #122
   `differential-target` designation.
-- `crates/wright-ostw/tests/differential.rs` — the CI-protected
+- `crates/wright-ostw/tests/differential.rs`: the CI-protected
   forward-compilation differential + round-trip fixed-point gate.
-- `compatibility/ostw/reconstruction/` — deterministic reconstruction
+- `compatibility/ostw/reconstruction/`: deterministic reconstruction
   fixtures (`surface-*` positive Workshop sources, `reject/` rejection
   sources) and the machine-readable `support-boundary.json` manifest; the
   #125 reverse-compilation evidence.
-- `crates/wright-ostw/tests/reconstruct.rs` — the CI-protected
+- `crates/wright-ostw/tests/reconstruct.rs`: the CI-protected
   reconstruction full-loop gate (`target/wright-ostw-reconstruct-report.json`)
   and the boundary-conformance test.
-- `workshop-rs` catalog data (`crates/workshop-rs/src/catalog/data/catalog.json`)
-  — canonical catalog with `paramDefaults` (probe-evidenced) and the `abort`
+- `workshop-rs` catalog data (`crates/workshop-rs/src/catalog/data/catalog.json`):
+  canonical catalog with `paramDefaults` (probe-evidenced) and the `abort`
   action, consumed from `workshop-rs`.
-- `docs/ostw/compatibility-baseline.md` — the explicit-root evidence model
+- `docs/ostw/compatibility-baseline.md`: the explicit-root evidence model
   and #122 correction.

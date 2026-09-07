@@ -1,6 +1,6 @@
 # Wright Embedding and Tool API
 
-Status: accepted baseline — living embedding and tool contract
+Status: accepted baseline (living embedding and tool contract)
 Scope: `wright-driver`'s embedding surface, the session-aware tool service,
 safe source-edit contracts, and the transport adapters
 
@@ -82,12 +82,12 @@ actions, values, events, enum domains, and locales.
 Agents and embedding consumers request mutation through two structured
 tool operations over the session's project:
 
-* `validateEditTransaction` — validate and preview a caller-supplied
+* `validateEditTransaction`: validate and preview a caller-supplied
   [`EditTransaction`] against the session project. The request carries the
   current text of every touched source (keyed by source identity); the
   response returns `ok`, structured diagnostics, and per-source previews
   with the edited text and its new SHA-256 identity.
-* `semanticRename` — request a semantic rename at a 1-based
+* `semanticRename`: request a semantic rename at a 1-based
   position (`source`/`line`/`col`/`to`) through the shared #129 refactoring
   contract. The response returns the validated exact-range transaction
   (`ok: true`) or structured refusal diagnostics (`ok: false`, no
@@ -97,7 +97,7 @@ Both preserve the #128 all-or-nothing semantics: an unsafe, stale,
 overlapping, colliding, or unsupported request returns structured
 diagnostics and never a partially applicable edit set. Wright
 **proposes and validates** edits; applying them to the filesystem is an
-explicit consumer responsibility — the semantic/tooling core never writes
+explicit consumer responsibility because the semantic and tooling core never writes
 files. Capability discovery advertises `validateEditTransaction` and
 `semanticRename`; the stdio/JSON-RPC adapters forward the same operations
 unchanged (behaviorally equivalent, transport-tested).
@@ -107,8 +107,8 @@ unchanged (behaviorally equivalent, transport-tested).
 Proposed edits are source-oriented ([`SourceEdit`]) and travel as
 [`EditTransaction`]s: one or more file edits with exact source ranges plus
 per-source SHA-256 identity/version preconditions. Ranges address one
-original source snapshot — per source, edits apply in descending position
-order, so an earlier replacement's length/newline changes can never shift a
+original source snapshot. Edits apply in descending position
+order per source, so an earlier replacement's length/newline changes can never shift a
 later range (`EditTransaction::apply` is the mechanical application; columns
 are strict 1-based character columns, `0` or beyond-line columns refuse, and
 order-dependent zero-width combinations at one position are refused as

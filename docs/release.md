@@ -1,6 +1,6 @@
 # Wright Release Process and Distribution Contract
 
-Status: accepted baseline — release automation and distribution contract
+Status: accepted baseline (release automation and distribution contract)
 Scope: release artifact packaging, validation gates, version stamping, and
 public distribution
 
@@ -20,15 +20,15 @@ and this script verifies and packages the host platform.
 
 ## What the release script verifies before stamping
 
-1. **Quality gates** — `cargo fmt --check`, `cargo clippy -D warnings`,
+1. **Quality gates**: `cargo fmt --check`, `cargo clippy -D warnings`,
    `cargo test --workspace --all-targets --all-features`.
-2. **N-level gate** — `scripts/v1-gates.py` against the release binary
+2. **N-level gate**: `scripts/v1-gates.py` against the release binary
    (`target/v1-gates-report.json`).
-3. **E-level scenarios** — `scripts/run-scenarios.py` against the release
+3. **E-level scenarios**: `scripts/run-scenarios.py` against the release
    binary (`target/scenarios-report.json`).
-4. **Benchmarks** — `wright-bench` with declared regression thresholds
+4. **Benchmarks**: `wright-bench` with declared regression thresholds
    (`target/wright-bench-report.json`).
-5. **Standalone proof** — the packaged binaries run `compile`/`check` over the
+5. **Standalone proof**: the packaged binaries run `compile`/`check` over the
    corpus with `PATH=/usr/bin:/bin` (Node and OverPy absent), and
    `wright-lsp --version` reports the release version.
 

@@ -59,10 +59,10 @@ and long-term ecosystem independence.
 
 Current and planned ownership:
 
-- **Vanilla Workshop** — Wright-owned canonical model, parser, emitter, and
+- **Vanilla Workshop**: Wright-owned canonical model, parser, emitter, and
   target semantics;
-- **OPY** — Wright-owned compatible semantic frontend (`wright-opy`, shipped);
-- **OSTW** — future first-class compatible semantic frontend, introduced only
+- **OPY**: Wright-owned compatible semantic frontend (`wright-opy`, shipped);
+- **OSTW**: future first-class compatible semantic frontend, introduced only
   through an evidence-backed milestone (see issue #90).
 
 Upstream compilers and language services (OverPy, OSTW) remain compatibility

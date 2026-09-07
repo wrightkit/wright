@@ -175,8 +175,8 @@ boundary is unresolved (e.g. missing imports).
 input** as canonical source for the selected target through the shared
 driver/session conversion operation (`CompilerSession::convert`). The CLI is
 a thin passthrough: it parses argv, builds the session, calls the driver
-workflow, and renders the envelope — no reconstruction logic lives in the CLI
-layer. The driver reuses its own `load()` path (kind detection, Workshop
+workflow, and renders the envelope. Reconstruction logic lives in the underlying
+language crates rather than the CLI layer. The driver reuses its own `load()` path (kind detection, Workshop
 parsing, WIR validation) and delegates per target to the language-owned
 reconstructors from `opy-rs` and `del-rs` through the narrow Wright adapters.
 

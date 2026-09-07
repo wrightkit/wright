@@ -13,18 +13,18 @@ Wright is not the durable owner of those language implementations.
 
 ## Repository ownership
 
-- **`workshop-rs`** — standalone raw Workshop implementation and canonical
-  Workshop semantics, parser, WIR, catalog, settings/localization, validation,
-  emission, and Workshop-owned gameplay/query data.
-- **`opy-rs`** — standalone OverPy implementation: syntax, preprocessing,
-  macros, semantics, diagnostics/provenance, OPY-specific compiler behavior,
-  standalone tooling, compatibility evidence, and Workshop→OPY reconstruction.
-- **`del-rs`** — standalone DEL/OSTW implementation: source/project model,
-  semantics/types, runtime/compiler lowering, diagnostics/provenance,
-  standalone tooling, compatibility evidence, and Workshop→DEL reconstruction.
-- **`language-provider-protocol`** — versioned LPP process/data contract.
-- **Wright** — unified CLI/service orchestration, cross-language diagnostics,
-  lint/static analysis, semantic query, source-edit transaction safety,
+- `workshop-rs`: standalone raw Workshop implementation and canonical Workshop
+  semantics, parser, WIR, catalog, settings/localization, validation, emission,
+  and Workshop-owned gameplay/query data.
+- `opy-rs`: standalone OverPy implementation, covering syntax, preprocessing,
+  macros, semantics, diagnostics/provenance, compiler behavior, standalone
+  tooling, and Workshop-to-OPY reconstruction.
+- `del-rs`: standalone DEL/OSTW implementation, covering source/project models,
+  semantics/types, runtime lowering, diagnostics/provenance, standalone tooling,
+  and Workshop-to-DEL reconstruction.
+- `language-provider-protocol`: versioned LPP process and data contract.
+- `wright`: unified CLI/service orchestration, cross-language diagnostics,
+  lint/static analysis, semantic queries, source-edit transaction safety,
   refactoring, agent/embedding APIs, CI presentation, editor-neutral language
   services, LSP, and integration adapters.
 
@@ -37,12 +37,12 @@ language syntax, semantics, HIR, compatibility data, or lowering policy.
 For substantive implementation work, resolve the relevant current contract from
 [`docs/architecture/README.md`](docs/architecture/README.md) before editing:
 
-- [`ownership.md`](docs/architecture/ownership.md) — repository/product ownership,
-  dependency direction, and capability ceiling;
-- [`integration.md`](docs/architecture/integration.md) — provider/source integration,
-  contract preservation, and failure routing;
-- [`tooling.md`](docs/architecture/tooling.md) — Wright-owned lint/analyze/inspect/edit,
-  agent/CI/LSP, and conversion UX boundaries.
+- [`ownership.md`](docs/architecture/ownership.md): repository and product
+  ownership, dependency direction, and capability boundaries;
+- [`integration.md`](docs/architecture/integration.md): provider/source
+  integration, contract preservation, and failure routing;
+- [`tooling.md`](docs/architecture/tooling.md): Wright-owned lint, analyze,
+  inspect, edit, agent, CI, LSP, and conversion UX boundaries.
 
 ADRs under `docs/adr/` record point-in-time decisions and rationale; an accepted
 ADR is not proof that current code still implements that decision. If the Issue,

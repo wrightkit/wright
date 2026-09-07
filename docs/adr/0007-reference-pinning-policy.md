@@ -13,11 +13,11 @@
 
 The compatibility oracle is pinned to `overpy@9.7.10` (npm content == git
 commit `889d974`, tag `v9.7.10`). M11 phase-1 evidence (issue #81/#82) flagged
-five constructs as "inconclusive on version" — it was unverified whether a
+five constructs as "inconclusive on version": it was unverified whether a
 newer OverPy accepts them. The Track B investigation (issue #82)
 installed the newest reference (npm `9.7.13`, content == master HEAD commit
-`d854bf0`) in isolation and measured every evidence construct: **every accept
-and every reject is identical across the 9.7.10 → 9.7.13 range**, with
+`d854bf0`) in isolation and measured every evidence construct: every accept
+and every reject is identical across the 9.7.10 to 9.7.13 range, with
 byte-identical diagnostics and normalized Workshop output. The only source
 differences are hero/settings schema data (`customGameSettingsSchema.json`,
 `src/data/*.ts`); no lexer, parser, preprocessor, or compiler logic changed.
@@ -35,8 +35,8 @@ reviewers should not treat the recorded `gitHead` as the content commit.
 
 ## Decision
 
-The primary oracle pin is **version-exact and content-pinned**, and it is
-changed only on **demonstrated behavioral need — never on release recency**.
+The primary oracle pin is version-exact and content-pinned, and it is
+changed only on demonstrated behavioral need, never on release recency.
 
 1. **Version-exact.** The pin is an exact npm version plus its integrity hash,
    recorded in `oracle/package.json`, `oracle/pnpm-lock.yaml`, and
@@ -45,7 +45,7 @@ changed only on **demonstrated behavioral need — never on release recency**.
    and the byte-verified git content commit. A version bump alone is not an
    oracle change.
 3. **Demonstrated need only.** "Demonstrated" means a version-sensitivity run
-   — the minimal repro plus the evidence source against candidate versions —
+   (the minimal repro plus the evidence source against candidate versions)
    showing a different accept/reject outcome or a different normalized output
    for a construct the corpus needs. Re-running the sensitivity matrix is the
    decision tool at every evaluation point; absence of measured divergence is
@@ -81,7 +81,7 @@ changed only on **demonstrated behavioral need — never on release recency**.
 ## Compatibility impact
 
 S/D/N claims for the current corpus are unaffected within the measured
-9.7.10–9.7.13 range: accept/reject outcomes, diagnostics, and normalized
+9.7.10 to 9.7.13 range: accept/reject outcomes, diagnostics, and normalized
 Workshop output are byte-identical (verified in the Track B matrix). A future
 re-baseline changes only the oracle identity block of `oracle.json` and the
 adapter `frontend` stamp; differential parity is version-insensitive because
@@ -91,10 +91,10 @@ the generator identity is stripped before comparison
 ## Open questions
 
 * Whether a post-9.7.13 OverPy release adds `"""` docstrings, `#!obfuscate`,
-  custom `_hp_*` members, or inline `if` without `else` — unresolved; the
+  custom `_hp_*` members, or inline `if` without `else` remains unresolved; the
   matrix must be re-run before any new acceptance is claimed.
-* Whether a future fixture needs hero settings newer than the pin — answered
+* Whether a future fixture needs hero settings newer than the pin is answered
   by the fixture acquisition pipeline when such a candidate appears.
 * Whether the npm `gitHead`-lags-content behavior persists in future release
-  pipelines — the content commit must be byte-verified, not assumed from the
+  pipelines: the content commit must be byte-verified, not assumed from the
   registry field.

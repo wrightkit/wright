@@ -1,4 +1,4 @@
-# ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models
+# ADR-0006: Rust IR core: typed IDs, arenas, and two-layer models
 
 - Status: Accepted
 - Date: 2026-08-12
@@ -18,8 +18,8 @@ serialized bridge contract between the frontend adapter and the core; they
 use raw strings for identity (symbol names, function names, operator
 spellings) and own no storage strategy. M3 requires a compiler-side model with
 strongly typed identity, arena storage, source provenance, and an explicit
-HIR-to-Workshop-IR boundary — without reimplementing OverPy internals and
-without speculative nodes beyond the v0.1 corpus.
+HIR-to-Workshop-IR boundary, without reimplementing OverPy internals or adding
+speculative nodes beyond the v0.1 corpus.
 
 ## Decision
 

@@ -1,6 +1,6 @@
 # .opy Source Support Matrix
 
-Status: accepted baseline — living .opy source support matrix
+Status: accepted baseline: living .opy source support matrix
 Scope: the `.opy` source-language surface owned and supported by `opy-rs`,
 with production/corpus evidence for each feature and explicitly deferred
 constructs
@@ -36,7 +36,7 @@ adapter.
 - Operators: `+ - * / // % ** == != < <= > >= = += -= *= /= //= %= and or not`,
   plus `.`/`,`/`:`/`(`/`)`/`[`/`]`/`@`. (`in` is only the `for ... in`
   header keyword; expression-level `in`/`not in` membership operators are not
-  supported — see the deferred list.)
+  supported; see the deferred list.)
 
 ### Declarations
 - `globalvar name` / `globalvar name = expr` / `globalvar name <index>`
@@ -51,18 +51,18 @@ adapter.
 - `subroutine name`.
 - `def name():` subroutine bodies (parameters are outside the declared
   surface; rejected explicitly).
-- `enum Name: MEMBER, ...` — members fold to numeric constants (`Phase.FINISHED`
+- `enum Name: MEMBER, ...`: members fold to numeric constants (`Phase.FINISHED`
   → `1`), matching the reference.
 - `macro name(params):` statement bodies with `MacroParam` references.
 
 ### Preprocessing
-- `#!include "file.opy"` — root-relative include resolution, cycle detection
+- `#!include "file.opy"`: root-relative include resolution, cycle detection
   (`include-cycle`), missing-file diagnostics (`include-not-found`), included
   files registered in the HIR file registry (reference behavior).
-- `#!define NAME value` — object-like macros; recursive expansion at use sites
+- `#!define NAME value`: object-like macros; recursive expansion at use sites
   (a define may reference earlier defines); recursion guard
   (`macro-recursion`).
-- `#!define name(args) value` — function-like macros with argument
+- `#!define name(args) value`: function-like macros with argument
   substitution (`cakeBeam(start, end, yPos) → createBeam(...)`).
 - `#!undef NAME`.
 - Unsupported directives fail explicitly (`unsupported-directive`).
@@ -74,8 +74,8 @@ adapter.
 - Statements: expression statements, `=` and augmented assignment,
   `if`/`elif`/`else`, `for x in range(...)`, `while`, `pass`.
 - `for`-loop binder resolution (#114): the loop variable must resolve to a
-  global variable — either a declared `globalvar`, or an OverPy **default
-  variable name** (`A`–`Z`, `AA`–`AZ`, …, `DA`–`DX`), which the pinned
+  global variable: either a declared `globalvar`, or an OverPy default
+  variable name (`A` to `Z`, `AA` to `AZ`, ..., `DA` to `DX`), which the pinned
   reference accepts as an implicit global at its fixed Workshop slot (e.g.
   `for I in range(0, 10):` with no declaration, the agent-lab regression).
   Nested same-name loops reuse the same implicit variable (no separate
@@ -99,7 +99,7 @@ adapter.
   parameter enum domains, and non-contextual aliases resolve through the OPY
   semantic compatibility manifest
   (`crates/wright-opy/src/manifest/data/manifest.json`, schema v1; spec in
-  [`compat-manifest-spec.md`](compat-manifest-spec.md), issue #109) — the
+  [`compat-manifest-spec.md`](compat-manifest-spec.md), issue #109): the
   single authoritative semantic table, replacing the former `KNOWN_ENUMS`
   hardcoded subset. Every manifest entry is probe-validated against the
   pinned OverPy 9.7.10 oracle (`crates/wright-opy/src/manifest/probes/`).
@@ -113,7 +113,7 @@ adapter.
   `keyword-unsupported`, `invalid-argument` for #110),
   never as emitter catalog misses.
 - Reference-validated evidence surface: `chaseOverTime(...)` (action;
-  3–4 arguments, reevaluation defaults to `DESTINATION_AND_DURATION`),
+  3 to 4 arguments, reevaluation defaults to `DESTINATION_AND_DURATION`),
   `isGameInProgress()` (value), `getPlayersInRadius(...)` (value; team
   `Team.ALL` and `LosCheck.OFF` defaults fill), `worldVector(...)` (value,
   `Transform` argument), and the enum-gated members
@@ -160,7 +160,7 @@ adapter.
   `Wait.IGNORE_CONDITION` (and `0.016` for the no-argument form); native
   matches.
 - **Named/keyword arguments** (`name = expr` call arguments, #110) bind
-  against the manifest's canonical parameter names — the pinned reference's
+  against the manifest's canonical parameter names, matching the pinned reference's
   declared names (`wait(time=1)`, `wait(waitBehavior=Wait.IGNORE_CONDITION,
   time=2)`, `chaseOverTime(g, 10, duration=3)`,
   `chaseOverTime(g, 10, 3, reevaluation=ChaseTimeReeval.NONE)`,
@@ -173,13 +173,13 @@ adapter.
   rejects positional arguments after keyword arguments
   (`positional-after-keyword`), unknown keyword names (`unknown-keyword`),
   duplicate bindings (`duplicate-argument`), and missing required arguments
-  (`missing-argument`) — all structured, source-located diagnostics. The
+  (`missing-argument`): all structured, source-located diagnostics. The
   reference's generic binder is routed around for `range`, `random.*`, and
   `.format` (keyword arguments on those fail with `keyword-unsupported`),
   and for `macro` invocations.
 - **The `chase` keyword form** (#110, reference special form):
   `chase(variable, destination, rate=…, ChaseReeval.MEMBER)` and
-  `chase(variable, destination, duration=…, ChaseReeval.MEMBER)` — exactly
+  `chase(variable, destination, duration=…, ChaseReeval.MEMBER)`: exactly
   four arguments, the 3rd passed as the `rate`/`duration` keyword and the
   4th as a bare `ChaseReeval.MEMBER` access. `ChaseReeval` resolves **only**
   in this call context: `rate=` selects the `ChaseRateReeval` domain and
@@ -216,7 +216,7 @@ adapter.
 ### Settings
 - Top-of-file `settings { ... }` custom-game-settings blocks (JSONC: quoted
   keys, `"`/`'` strings with escapes, numbers, `true`/`false`, string lists,
-  nested groups, trailing commas) — recognized and consumed before lexing
+  nested groups, trailing commas), recognized and consumed before lexing
   (scoped lexing: the block never enters the token stream and the lexer
   gains no global braces), parsed into the typed HIR `settings` payload, and
   emitted as the Workshop `settings` section before `variables`.
@@ -246,13 +246,13 @@ adapter.
   without a catalogged spelling); these fail at emission with catalog
   diagnostics, never silently.
 - Rule `disabled` markers (no corpus evidence for the source annotation).
-- Expression-level `in`/`not in` membership operators — rejected at parsing
+- Expression-level `in`/`not in` membership operators: rejected at parsing
   (`for ... in` headers are supported).
 - Backslash line continuation (`\` at end of line inside string
-  concatenations / macro bodies) — rejected at lexing.
-- Postfix increment/decrement (`++`/`--`) — rejected at parsing.
-- Dict literals (`{...}`) — rejected at lexing.
-- Triple-quoted strings / docstrings (`"""`) — rejected at lexing.
+  concatenations / macro bodies): rejected at lexing.
+- Postfix increment/decrement (`++`/`--`): rejected at parsing.
+- Dict literals (`{...}`): rejected at lexing.
+- Triple-quoted strings / docstrings (`"""`): rejected at lexing.
 - Subroutine parameters, default `@Team`/`@Slot` overrides, `raycast`
   `include=`/`exclude=` named-argument forms (no reference/corpus evidence
   in the declared surface; the reference's `raycast` special form is not
@@ -298,7 +298,7 @@ with one reconstructed OPY per fixture under `target/wright-reconstruction/`.
   (`"text".format(...)`), manifest value calls (`isGameInProgress`,
   `getPlayersInRadius`, `worldVector`, …) and manifest member-value calls
   (`eventPlayer.getPosition()`, …).
-- Set/Modify global and player variable actions (modify ops `Add`…`Raise To
+- Set/Modify global and player variable actions (modify ops `Add` to `Raise To
   Power` as `x = x <op> v`, `Append To Array` as `x.append(v)`), subroutine
   calls, `if`/`elif`/`else`, `while`, `for x in range(start, stop, step)`,
   the manifest action calls (`wait` with full arity, `disableInspector`,
@@ -348,7 +348,7 @@ fixtures above and writes `target/wright-convert-report.json`.
 
 The native frontend produces `wright_core::hir::Program` (Opy HIR v1) with the
 same protocol envelope, file registry, declarations, and rules as the
-reference adapter — verified by the differential suite at the HIR boundary
+reference adapter, as verified by the differential suite at the HIR boundary
 (spans and the producer identity normalized away). It never requires Node or
 OverPy; the adapter remains available as an explicit `WRIGHT_ADAPTER_PATH`
 fallback and as the pinned compatibility oracle.

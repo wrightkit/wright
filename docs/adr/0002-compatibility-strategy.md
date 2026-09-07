@@ -15,12 +15,12 @@ accepted syntax, diagnostics, canonical output, and runtime behavior.
 
 Wright reports compatibility at four separately named levels:
 
-* **S — syntax:** recorded accept/reject agreement for a defined corpus;
-* **D — diagnostic:** structured category and source-region agreement for
+* **S (syntax)**: recorded accept/reject agreement for a defined corpus;
+* **D (diagnostic)**: structured category and source-region agreement for
   diagnosed inputs;
-* **N — normalized output:** comparison after a versioned normalizer removes
+* **N (normalized output)**: comparison after a versioned normalizer removes
   only documented presentation or volatile differences; and
-* **E — semantic:** repeatable observable behavior for defined scenarios and a
+* **E (semantic)**: repeatable observable behavior for defined scenarios and a
   named target/runtime.
 
 Every result records the reference identity, input/corpus identity, Wright
