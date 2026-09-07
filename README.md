@@ -5,22 +5,23 @@
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/wrightkit/wright?include_prereleases)](https://github.com/wrightkit/wright/releases)
 
-Wright is WrightKit's unified tooling and integration product for Overwatch
-Workshop development. It gives users one CLI, language-service, CI, embedding,
-and agent-facing surface across raw Workshop, OverPy, and DEL/OSTW projects.
+Wright is the unified developer CLI and language tooling layer for Overwatch
+Workshop development in WrightKit. It provides diagnostics, analysis, code
+editing, and language server support across raw Workshop, OverPy, and DEL/OSTW
+projects.
 
-Wright does **not** own the complete implementation of those three source
-forms. It depends on independently usable WrightKit implementations:
+Wright delegates source parsing and semantic lowering to dedicated WrightKit
+engines instead of reimplementing them:
 
-- [`workshop-rs`](https://github.com/wrightkit/workshop-rs) — raw Workshop
-  implementation and canonical Workshop semantics/WIR/catalog;
-- [`opy-rs`](https://github.com/wrightkit/opy-rs) — standalone OverPy
-  implementation;
-- [`del-rs`](https://github.com/wrightkit/del-rs) — standalone DEL/OSTW
-  implementation.
+- [`workshop-rs`](https://github.com/wrightkit/workshop-rs): canonical Workshop
+  semantics, WIR, and catalog;
+- [`opy-rs`](https://github.com/wrightkit/opy-rs): standalone OverPy frontend and
+  compiler;
+- [`del-rs`](https://github.com/wrightkit/del-rs): standalone DEL and OSTW
+  frontend.
 
-Wright adds the integration layer and higher-level tooling that becomes more
-valuable when those implementations expose complete, reliable semantic data.
+Wright coordinates these implementations to deliver consistent developer tooling
+across languages.
 
 ```text
                     Wright
@@ -38,23 +39,22 @@ valuable when those implementations expose complete, reliable semantic data.
               canonical Workshop
 ```
 
-## Product focus
+## Core focus
 
-Wright is tooling-first. The highest-value surfaces are:
+Wright prioritizes developer tooling over compiler reimplementation:
 
 - deterministic `check` diagnostics;
-- lint and static analysis;
-- semantic inspection and query;
-- validated source edits and refactoring;
-- agent and embedding APIs;
-- CI presentation and machine-readable results;
-- Workshop stability and cost analysis;
-- compilation and conversion where the backing language implementation has
-  evidence-backed support.
+- lint rules and complexity analysis;
+- symbol inspection and semantic queries;
+- safe source rewrites and syntax-preserving refactoring;
+- agent integrations and embedding APIs;
+- machine-readable CI output;
+- server stability checks and complexity analysis;
+- compilation and format conversion when supported by the underlying engine.
 
-Compilation is important, but Wright should not duplicate source-language or
-raw Workshop semantics to make a command appear supported. Missing language
-capabilities belong in their owning implementation.
+Compilation remains essential, but Wright does not invent surrogate syntax or
+simulate missing language features. When a language capability is missing, it
+belongs in the owning engine.
 
 ## Current compatibility
 
@@ -77,20 +77,19 @@ formatting, temporary variables, optimizer shape, or internal architecture.
 
 ## Why Wright exists alongside standalone implementations
 
-The standalone implementations solve language-specific problems. Wright solves
-the cross-language product problem:
+Standalone engines focus on parsing and lowering for a single syntax. Wright
+solves developer workflow needs across formats:
 
-- one UX for checking, linting, analyzing, and inspecting different source forms;
-- shared lint/stability/cost rules that operate on semantic information;
-- source-edit transaction safety and semantic refactoring;
-- agent-facing tools and embedding interfaces;
-- CI output, GitHub Actions presentation, and stable machine-readable results;
-- editor-neutral language services and LSP integration;
-- orchestration across source-language and Workshop capabilities.
+- consistent commands for checking, linting, and inspecting source files;
+- shared performance, stability, and syntax checks that run against semantic models;
+- atomic, syntax-preserving refactoring;
+- unified interfaces for autonomous agents and external tooling;
+- consistent JSON reports and CI annotations;
+- editor-neutral language server protocols (LSP);
+- coordination across language frontends and canonical Workshop data.
 
-An LPP **provider** is an integration role that an implementation may expose to
-Wright. It is not the identity of `opy-rs` or `del-rs`, and Wright must not make
-those repositories depend on Wright tooling internals.
+An LPP provider is an integration role that an implementation may expose to
+Wright. Neither `opy-rs` nor `del-rs` depends on Wright internals.
 
 ## Installation
 
@@ -138,10 +137,9 @@ wright inspect input.opy
 wright compile input.opy
 ```
 
-The command surface is broader than the currently complete semantic support.
-When a backing implementation reports an unsupported construct, Wright should
-surface that limitation explicitly rather than silently falling back to an
-upstream runtime or claiming success.
+Commands reflect product targets. When a backing engine encounters unsupported
+syntax, Wright reports the missing feature cleanly rather than failing silently
+or falling back to unverified runtimes.
 
 Machine-readable workflows use the documented JSON contracts, for example:
 
