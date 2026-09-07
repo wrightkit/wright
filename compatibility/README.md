@@ -10,9 +10,8 @@ Repository ownership is defined by
 - [`wrightkit/opy-rs`](https://github.com/wrightkit/opy-rs) owns OPY language
   semantics and the pinned OverPy oracle/corpus used to establish OPY
   compatibility evidence;
-- [`wrightkit/del-rs`](https://github.com/wrightkit/del-rs) owns DEL/OSTW
-  language semantics and is the target owner for the pinned OSTW reference
-  evidence;
+- [`wrightkit/deltin-rs`](https://github.com/wrightkit/deltin-rs) owns DEL/OSTW
+  language semantics and the pinned OSTW reference evidence;
 - [`wrightkit/workshop-rs`](https://github.com/wrightkit/workshop-rs) owns
   canonical Workshop semantics and WIR;
 - Wright owns tooling, orchestration, provider integration, and regression
@@ -66,26 +65,13 @@ When Wright needs updated OPY evidence:
 Wright does not carry its own OverPy npm package, lockfile, live oracle runner,
 or generic owner-side differential harness.
 
-## OSTW migration state
+## OSTW owner boundary
 
-`compatibility/ostw/` is a temporary ownership exception left by the repository
-split. It still contains the pinned OSTW v3.4.0 reference metadata, explicit-root
-corpus/probes, recorded results, reconstruction evidence, and legacy oracle
-runner required by the existing `wright-ostw` migration tests.
-
-These files must move to `wrightkit/del-rs` before they are removed from Wright.
-Until that migration is complete:
-
-- do not treat Wright as the durable owner of OSTW semantics or reference
-  evidence;
-- do not expand the Wright-side oracle into new authoritative DEL/OSTW
-  contracts;
-- keep only changes needed to preserve existing migration/integration evidence;
-- do not run the upstream OSTW reference as a default Wright merge gate.
-
-After the `del-rs` owner-side migration is accepted, Wright should retain only
-those immutable DEL/OSTW snapshots that are concretely required by its provider
-or migration integration tests, then remove the remaining owner-style harness.
+`deltin-rs` is the durable owner of the pinned OSTW reference identity,
+corpus, probes, recorded observations, reconstruction boundary, provenance, and
+reproduction workflow. Wright does not carry an OSTW oracle, corpus, or live
+reference runner. Wright's OSTW integration tests use only minimal
+feature-owned inputs and do not require the upstream runtime.
 
 ## Fixture provenance
 

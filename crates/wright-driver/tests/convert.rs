@@ -40,7 +40,7 @@ const OPY_FIXTURES: &[&str] = &[
     "actions-surface",
 ];
 
-/// The committed #125 OSTW reconstruction fixtures (OSTW-surface Workshop
+/// The committed Wright OSTW reconstruction fixtures (OSTW-surface Workshop
 /// inputs).
 const OSTW_FIXTURES: &[&str] = &["surface-basic", "surface-actions", "surface-values"];
 
@@ -143,8 +143,8 @@ fn emit_workshop(
 // ---------------------------------------------------------------------------
 // The declared #119 normalization, applied identically to both sides. This is
 // the comparison contract of the OSTW differential/reconstruction suites
-// (`crates/wright-ostw/tests/{differential,reconstruct}.rs`); it is copied
-// here (test-side, not shipped reconstruction logic) so the shared-path
+// (the owner-backed OSTW adapter contract); it is copied here (test-side, not
+// shipped reconstruction logic) so the shared-path
 // integration suite compares under exactly the same contract.
 // ---------------------------------------------------------------------------
 
@@ -714,7 +714,7 @@ fn ostw_round_trip(
     failures: &mut Vec<String>,
 ) -> serde_json::Value {
     let path = workspace_root()
-        .join("compatibility/ostw/reconstruction")
+        .join("crates/wright-driver/tests/fixtures/convert/ostw")
         .join(fixture)
         .join("workshop.txt");
     let source = read(&path);
@@ -838,7 +838,7 @@ fn rejection_cases() -> Vec<(&'static str, ConvertTarget, &'static str)> {
         (
             "for-player-variable",
             ConvertTarget::Ostw,
-            "compatibility/ostw/reconstruction/reject/for-player-variable/workshop.txt",
+            "crates/wright-driver/tests/fixtures/convert/ostw/reject/for-player-variable/workshop.txt",
         ),
         (
             "opy-per-player-loop",
@@ -889,7 +889,9 @@ fn conversion_is_byte_deterministic_across_runs() {
         ),
         (
             ConvertTarget::Ostw,
-            workspace_root().join("compatibility/ostw/reconstruction/surface-basic/workshop.txt"),
+            workspace_root().join(
+                "crates/wright-driver/tests/fixtures/convert/ostw/surface-basic/workshop.txt",
+            ),
         ),
     ] {
         let source = read(&fixture);

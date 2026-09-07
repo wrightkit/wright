@@ -1,28 +1,30 @@
 # OSTW Compile Support Matrix
 
-Status: accepted baseline: first declared OSTW forward-compilation surface (#119)
+Status: accepted baseline: first declared OSTW forward-compilation surface (#119);
+authoritative compatibility evidence is maintained by `deltin-rs` after #49/#95.
 Scope: the OSTW source surface Wright compiles to Workshop through the shared
-HIR → WIR → Workshop pipeline, with pinned-reference differential evidence,
+HIR → WIR → Workshop pipeline, with owner-maintained pinned-reference
+differential evidence,
 the declared normalization contract, and the known limitations/divergences
 
 This matrix records the **declared compile surface**: what `wright compile`
-accepts for `.ostw`/`.del` inputs and what it rejects, and how the result is
-validated against the pinned OSTW v3.4.0 reference. The forward-looking tiered
-baseline lives in [`compatibility-baseline.md`](compatibility-baseline.md);
-the corrected explicit-root oracle evidence model is documented there too
-(#122). The pinned reference identity is recorded in
+accepts for `.ostw`/`.del` inputs and what it rejects. The pinned OSTW
+reference and authoritative evidence are maintained by
+[`deltin-rs`](https://github.com/wrightkit/deltin-rs); the forward-looking
+tiered baseline lives in [`compatibility-baseline.md`](compatibility-baseline.md).
+The corrected explicit-root evidence model is documented in the owner
+repository. The pinned reference identity is recorded in
 [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md).
 
-The owner-side pipeline is `del-rs` (project + syntax + semantic analysis) →
+The owner-side pipeline is `deltin-rs` (project + syntax + semantic analysis) →
 canonical WIR through the narrow `wright-ostw` adapter → canonical
 `workshop-rs` emitter (en-US), identical
 to the OPY/Workshop paths; no OSTW-specific backend exists.
 
 ## Accepted differential targets
 
-`wright compile --root <probe> <probe>/main.ostw` compiles the #122
-explicit-root accepted targets (Wright-authored pinned-reference probes under
-`compatibility/ostw/probes/`):
+The owner-side #122 explicit-root accepted targets are maintained in
+`deltin-rs` as pinned-reference probes:
 
 | Target | What it exercises | Reference element count |
 | --- | --- | --- |
@@ -30,14 +32,11 @@ explicit-root accepted targets (Wright-authored pinned-reference probes under
 | `p5-functions-control` | Typed value/void functions, parameter defaults, C-style `for`, `foreach`, `switch` (fallthrough + `break` + `default`), `return` → `Abort` | 120 |
 | `p6-catalog-signatures` | Named/default argument binding against canonical Workshop catalog signatures, user-function defaults, enums | 68 |
 
-`crates/wright-ostw/tests/differential.rs` (CI job `ostw-compile-differential`)
-compiles each target, asserts the declared round-trip fixed point
-(Wright-emitted Workshop reparses and re-emits byte-identically), parses the
-pinned reference evidence (`workshop.entry-only.txt`) through the same shared
-parser, applies the declared normalization to **both** sides, and requires
-structural equality of the rule bodies. A genuine lowering divergence (wrong
-argument binding, dropped calls, wrong ternary order) fails the gate; the
-machine-readable report lands at `target/wright-ostw-differential-report.json`.
+The `deltin-rs` owner-side compatibility workflow compiles each target and
+compares the native result with the pinned reference evidence under the
+declared normalization. Wright's integration tests exercise the adapter and
+shared driver contract separately; they do not replay or duplicate the owner
+oracle.
 
 ## Declared semantic normalization (#119)
 
@@ -133,8 +132,8 @@ The reverse direction is owned by `crates/wright-ostw/src/reconstruct.rs`:
 whose constructs lie on the declared reconstruction surface into
 deterministic canonical OSTW source, and **rejects** everything else with
 structured, machine-readable diagnostics and no partial output. The declared
-surface, the machine-readable boundary manifest, and the committed fixtures
-match exactly (`compatibility/ostw/reconstruction/`):
+surface and the committed fixtures match exactly
+(`crates/wright-driver/tests/fixtures/convert/ostw/`):
 
 - **Supported**: variables (`globalvar Any`/`playervar Any`, the permissive
   universal type, since the WIR carries no type info and the pinned reference
@@ -152,26 +151,20 @@ match exactly (`compatibility/ostw/reconstruction/`):
   `debug`/`print` actions, custom-game `Program.settings`, calls/values/enums
   with no OSTW source binding, `Raise To Power`/`Remove From Array` modify
   operations, non-comparison rule conditions, partial-arity bound calls,
-  name collisions, bodiless subroutines, and non-literal format strings
-  (`support-boundary.json` lists every kind with its diagnostic code).
+  name collisions, bodiless subroutines, and non-literal format strings.
 - **Not recovered** (non-goals): variable types/indexes, original
   formatting/comments, classes, macros, functions, and project structure.
   Variable-table identity is outside the declared #119 semantic comparison.
 - **Reference divergence**: the reconstructed `.append(value)` form (from
   the Workshop Modify-Append-To-Array action) is accepted by Wright's native
-  frontend, but the pinned OSTW v3.4.0 reference rejects member-call methods;
-  the optional oracle cross-check records exactly this one remaining
-  rejection (`target/ostw-reference`, reference-only by contract).
+  frontend. Reference-side compatibility details remain in `deltin-rs`.
 
 The full loop `Workshop → WIR → OSTW → owner source implementation → WIR →
-Workshop` is proven per committed fixture with zero frontend diagnostics, the
-declared #119 normalization applied to both sides, structural equality, and
-the round-trip fixed point (reconstructed Workshop reparses and re-emits
-byte-identically). The suite is `crates/wright-ostw/tests/reconstruct.rs`,
-writing `target/wright-ostw-reconstruct-report.json`; the boundary conformance
-test checks the manifest, the shipped classification API, and fixture
-coverage against each other. A `ds.toml` project root (`entry_point`) is
-generated in-test.
+Workshop` is exercised by the Wright-side conversion suite with zero frontend
+diagnostics, the declared normalization applied to both sides, structural
+equality, and the round-trip fixed point. A `ds.toml` project root
+(`entry_point`) is generated in-test; authoritative reference comparison
+remains in `deltin-rs`.
 
 ### Shared conversion path (#126)
 
@@ -193,20 +186,14 @@ writes `target/wright-convert-report.json`.
 
 ## Evidence
 
-- `compatibility/ostw/probes/{p4-types-expressions,p5-functions-control,p6-catalog-signatures}/`:
-  Wright-authored probe sources, pinned reference identity
-  (`probe.json`), recorded reference diagnostics/emission
-  (`result.entry-only.json`, `workshop.entry-only.txt`), and the #122
-  `differential-target` designation.
-- `crates/wright-ostw/tests/differential.rs`: the CI-protected
-  forward-compilation differential + round-trip fixed-point gate.
-- `compatibility/ostw/reconstruction/`: deterministic reconstruction
-  fixtures (`surface-*` positive Workshop sources, `reject/` rejection
-  sources) and the machine-readable `support-boundary.json` manifest; the
-  #125 reverse-compilation evidence.
-- `crates/wright-ostw/tests/reconstruct.rs`: the CI-protected
-  reconstruction full-loop gate (`target/wright-ostw-reconstruct-report.json`)
-  and the boundary-conformance test.
+- [`deltin-rs` compatibility evidence](https://github.com/wrightkit/deltin-rs/tree/main/compatibility/ostw):
+  pinned reference identity, probes, recorded observations, and the
+  owner-side differential workflow.
+- `crates/wright-driver/tests/fixtures/convert/ostw/`: Wright-owned
+  reconstruction fixtures (`surface-*` positive Workshop sources and the
+  `reject/` case) consumed by the shared conversion integration suite.
+- `crates/wright-driver/tests/convert.rs`: the Wright-side reconstruction
+  and conversion contract gate.
 - `workshop-rs` catalog data (`crates/workshop-rs/src/catalog/data/catalog.json`):
   canonical catalog with `paramDefaults` (probe-evidenced) and the `abort`
   action, consumed from `workshop-rs`.
