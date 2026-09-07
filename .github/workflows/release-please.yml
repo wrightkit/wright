@@ -3,6 +3,9 @@ name: Release-please
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 env:
   CARGO_TERM_COLOR: always
