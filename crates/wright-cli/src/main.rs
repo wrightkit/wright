@@ -6,6 +6,7 @@ mod present;
 mod provider;
 mod update;
 
+use std::io::Read;
 use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -62,6 +63,7 @@ fn main() -> ExitCode {
             println!("{}", version_banner());
             ExitCode::SUCCESS
         }
+        Some(Command::SemanticCompare(args)) => run_semantic_compare(args),
         Some(Command::Completion(args)) => match args.subcommand {
             Some(cli::CompletionSubcommand::Install(install_args)) => {
                 match completion::run_install(&install_args) {
@@ -182,7 +184,8 @@ fn run_workflow(command: Command) -> ExitCode {
         | Command::Update(_)
         | Command::Provider(_)
         | Command::Help
-        | Command::Version => {
+        | Command::Version
+        | Command::SemanticCompare(_) => {
             unreachable!("non-workflow command handled before run_workflow")
         }
     };
@@ -238,6 +241,42 @@ fn run_workflow(command: Command) -> ExitCode {
         _ => unreachable!("all workflow commands are mapped"),
     };
     ExitCode::from(code)
+}
+
+fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {
+    let expected = match std::fs::read_to_string(&args.expected) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("wright: cannot read expected Workshop text: {error}");
+            return ExitCode::from(4);
+        }
+    };
+    let actual = if args.actual.as_os_str() == "-" {
+        let mut text = String::new();
+        if let Err(error) = std::io::stdin().read_to_string(&mut text) {
+            eprintln!("wright: cannot read actual Workshop text from stdin: {error}");
+            return ExitCode::from(4);
+        }
+        text
+    } else {
+        match std::fs::read_to_string(&args.actual) {
+            Ok(text) => text,
+            Err(error) => {
+                eprintln!("wright: cannot read actual Workshop text: {error}");
+                return ExitCode::from(4);
+            }
+        }
+    };
+    let comparison = wright_driver::compare_workshop_texts(&expected, &actual);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&comparison).expect("semantic comparison serializes")
+    );
+    if comparison.equivalent {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionConfig {

@@ -80,6 +80,9 @@ pub(crate) enum Command {
     Help,
     /// Show version and result-contract metadata.
     Version,
+    /// Compare two Workshop texts using canonical WIR semantics (internal gate command).
+    #[command(name = "semantic-compare", hide = true)]
+    SemanticCompare(SemanticCompareArgs),
 }
 
 #[derive(Debug, Args)]
@@ -98,6 +101,14 @@ pub(crate) struct ConvertArgs {
     /// Reconstruction target.
     #[arg(long, value_name = "TARGET")]
     pub(crate) target: ConvertTargetArg,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SemanticCompareArgs {
+    /// Expected Workshop text path.
+    pub(crate) expected: PathBuf,
+    /// Actual Workshop text path, or `-` to read stdin.
+    pub(crate) actual: PathBuf,
 }
 
 #[derive(Debug, Args)]

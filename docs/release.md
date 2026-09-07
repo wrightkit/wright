@@ -22,8 +22,9 @@ and this script verifies and packages the host platform.
 
 1. **Quality gates**: `cargo fmt --check`, `cargo clippy -D warnings`,
    `cargo test --workspace --all-targets --all-features`.
-2. **N-level gate**: `scripts/v1-gates.py` against the release binary
-   (`target/v1-gates-report.json`).
+2. **Semantic OPY integration gate**: `scripts/v1-gates.py` against the
+   release binary (`target/v1-gates-report.json`), using the current
+   first-party provider without a manually maintained provider pin.
 3. **E-level scenarios**: `scripts/run-scenarios.py` against the release
    binary (`target/scenarios-report.json`).
 4. **Benchmarks**: `wright-bench` with declared regression thresholds

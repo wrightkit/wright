@@ -162,11 +162,11 @@ jobs:
   # [2] OPY INTEGRATION  (Wright's consumer contract with OverPy/OPY)
   # Covers:
   #   - Committed compatibility evidence integrity (no live oracle needed)
-  #   - N-level gate: Wright compile vs recorded reference snapshots
+  #   - Semantic gate: Wright compile vs recorded reference snapshots through WIR
   #   - Owner-backed OPY adapter build/test coverage
   # -------------------------------------------------------------------------
   opy-integration:
-    name: OPY integration (N-level + owner)
+    name: OPY integration (semantic + owner)
     needs: [paths, rust-quality]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
@@ -195,8 +195,8 @@ jobs:
       - name: Validate committed compatibility evidence
         run: python3 -m unittest discover -s compatibility/tests
 
-      - name: Run N-level gate (Wright compile vs recorded snapshots)
-        id: n_level
+      - name: Run semantic OPY gate (Wright compile vs recorded snapshots)
+        id: semantic_gate
         run: python3 scripts/v1-gates.py
 
       - name: Build and test Wright OPY adapter
@@ -220,7 +220,7 @@ jobs:
           {
             echo "## OPY Integration"
             echo ""
-            # N-level gate summary derived from the JSON report
+            # Semantic gate summary derived from the JSON report
             if [[ -f target/v1-gates-report.json ]]; then
               python3 - <<'PYEOF'
           import json
@@ -232,7 +232,7 @@ jobs:
           state = "PASS" if passed == total else "FAIL"
           icon = "✅" if passed == total else "❌"
 
-          print(f"### N-level gate: {icon} {state} ({passed}/{total} fixtures)")
+          print(f"### Semantic OPY gate: {icon} {state} ({passed}/{total} fixtures)")
           print("")
 
           failures = [(fid, f) for fid, f in r.get("fixtures", {}).items()
@@ -245,7 +245,7 @@ jobs:
               print("All fixtures passed.")
           PYEOF
             else
-              echo "### N-level gate: ⚠️ report not generated"
+              echo "### Semantic OPY gate: ⚠️ report not generated"
             fi
             echo ""
             if [[ "${{ steps.adapter.outcome }}" == "success" ]]; then

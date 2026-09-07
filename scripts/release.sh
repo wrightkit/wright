@@ -35,7 +35,7 @@ test -x "$BIN" || { echo "release binary missing"; exit 1; }
 test -x "$LSP_BIN" || { echo "release LSP binary missing"; exit 1; }
 test -x "$BENCH_BIN" || { echo "release benchmark binary missing"; exit 1; }
 
-echo "==> N-level gate (compat profile)"
+echo "==> semantic OPY gate (compat profile)"
 python3 scripts/v1-gates.py --wright "$BIN"
 
 echo "==> E-level scenarios"
