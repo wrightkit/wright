@@ -39,7 +39,7 @@ are discovered by opaque language id strings through `ProviderRegistry`; a
 language id such as `x-demo-lang` is just a key. When no provider is
 configured for a language id, or when a required capability was not
 negotiated, the client refuses explicitly with a structured
-`ProviderError` — there is no silent fallback to in-process compiler
+`ProviderError`. The client does not fall back to in-process compiler
 semantics.
 
 ## Capabilities
@@ -88,7 +88,7 @@ Every interaction fails deterministically into a structured
 Unit tests (`tests/unit.rs` and in-crate tests) exercise framing,
 correlation, timeouts, malformed responses, protocol mismatches, session
 phase guards, and capability refusals against a scripted fake provider over
-OS pipes — no provider binary needed.
+OS pipes, requiring no separate provider binary.
 
 The end-to-end suite (`tests/mock_provider.rs`) runs against the reference
 conformance mock provider (`x-demo-lang`) from

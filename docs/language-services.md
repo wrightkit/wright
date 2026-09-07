@@ -1,6 +1,6 @@
 # Wright Language Services and LSP
 
-Status: accepted baseline — living language services and LSP contract
+Status: accepted baseline (living language services and LSP contract)
 Scope: editor-neutral language services (`wright-language`) and the thin LSP
 adapter (`wright-lsp`)
 
@@ -24,9 +24,9 @@ analyzer contracts.
 
 ## Editor-neutral contracts
 
-* `Document` — URI identity, current text, monotonic internal `version`,
+* `Document`: URI identity, current text, monotonic internal `version`,
   project root (include base).
-* `DocumentStore` — open/change/close lifecycle with version bumping.
+* `DocumentStore`: open/change/close lifecycle with version bumping.
 * Positions and ranges are 0-based editor conventions; the service converts to
   the compiler's 1-based spans at the boundary. UTF-16 ↔ character conversion
   is centralized in `wright_language::document` (`utf16_offset_to_char`,
@@ -73,16 +73,16 @@ suppression is the authoritative contract.
 
 ## Services
 
-* **Diagnostics** — source-aware `SourceDiagnostic`s for parse errors and
+* **Diagnostics**: source-aware `SourceDiagnostic`s for parse errors and
   analyzer findings, carrying source identity, source-local range, severity,
   code, message, and source/requesting-document versions; included-file spans
   are resolved against their own source text, not the requesting document.
-* **Hover** — symbol name/kind and usage summary (reads/writes/calls/rules).
-* **Definition / References** — via the semantic index over source spans.
-* **Completion** — declared symbols, manifest-declared builtins and receiver
+* **Hover**: symbol name/kind and usage summary (reads/writes/calls/rules).
+* **Definition / References**: via the semantic index over source spans.
+* **Completion**: declared symbols, manifest-declared builtins and receiver
   members, keywords (the OPY semantic manifest is the authoritative builtin
   surface, #109).
-* **Rename** — project-wide identifier-exact rename: resolves the symbol
+* **Rename**: project-wide identifier-exact rename: resolves the symbol
   through the semantic index, unions its exact declaration/definition/reference
   identifier spans across every open root whose project includes the
   requesting document, and returns source-aware full-document edits for all
@@ -98,7 +98,7 @@ suppression is the authoritative contract.
   transaction is validated through the shared #128 transaction boundary
   (`wright_driver::edit::validate_transaction`), and no duplicate
   edit-validation or span-collection semantics live here.
-* **Semantic tokens** — classified by the native lexer/parser identity
+* **Semantic tokens**: classified by the native lexer/parser identity
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.
 
@@ -113,14 +113,13 @@ reported as structured source errors.
 Operations that stay unsupported for OSTW are **explicitly refused or
 documented, never emulated through upstream calls**:
 
-- **Semantic rename and overlays** — refused explicitly while the owner-backed
+- **Semantic rename and overlays**: refused explicitly while the owner-backed
   adapter lacks a source-edit/overlay project contract. The service never
   invokes an upstream compiler or the removed Wright implementation as a
   fallback.
-  regeneration/emitters remain a declared non-goal (#120) — rename edits
-  original OSTW source with exact identifier ranges, never reconstructed
-  text.
-- **Whole-source pretty-printing / comment-preserving regeneration** — not
+  Rename edits modify original OSTW source with exact identifier ranges, never
+  reconstructed text.
+- **Whole-source pretty-printing / comment-preserving regeneration**: not
   implemented; diagnostics and navigation are source-preserving.
 - Upstream OSTW LSP parity, classes/generics/lambdas/pattern matching beyond
   the accepted corpus boundary, and whole-source regeneration remain out of
@@ -145,7 +144,7 @@ semanticTokens/full, shutdown/exit.
 
 **Rename is a pure adapter (#131)**: the LSP layer maps the shared #129
 transaction (exact-occurrence editor edits from `wright-language`) directly
-to `WorkspaceEdit` `documentChanges`/`TextDocumentEdit` — one `TextEdit` per
+to `WorkspaceEdit` `documentChanges`/`TextDocumentEdit`, creating one `TextEdit` per
 semantic occurrence, grouped by document, with each open document identified
 at its current version and filesystem-backed sources in the unversioned
 `null` form. No symbol resolution, collision, or stale-state logic exists in

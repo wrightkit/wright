@@ -2,7 +2,7 @@
 
 ADRs record point-in-time decisions that affected Wright's observable product/compiler contract or component boundaries. They preserve rationale and consequences; they are not a database of current implementation reality.
 
-Current architecture contracts are routed from [`docs/architecture/README.md`](../architecture/README.md). Source, Cargo metadata, tests, CI, integrations, and real-project evidence establish implementation reality. An `Accepted` ADR means the decision was approved at that point in project history; it does **not** by itself prove that current code still conforms to the decision.
+Current architecture contracts are routed from [`docs/architecture/README.md`](../architecture/README.md). Source, Cargo metadata, tests, CI, integrations, and real-project evidence establish implementation reality. An `Accepted` ADR means the decision was approved at that point in project history; it does not by itself prove that current code still conforms to the decision.
 
 ## Conventions
 
@@ -21,7 +21,7 @@ Current architecture contracts are routed from [`docs/architecture/README.md`](.
 * [ADR-0003: IR boundary](0003-ir-boundary.md)
 * [ADR-0004: OverPy licensing and clean-room boundary](0004-overpy-licensing-boundary.md)
 * [ADR-0005: Opy HIR v1 frontend protocol](0005-opy-hir-v1.md)
-* [ADR-0006: Rust IR core — typed IDs, arenas, and two-layer models](0006-rust-ir-core.md)
+* [ADR-0006: Rust IR core: typed IDs, arenas, and two-layer models](0006-rust-ir-core.md)
 * [ADR-0007: OverPy reference pinning policy](0007-reference-pinning-policy.md)
 * [ADR-0008: Tooling-first semantic platform rebaseline](0008-tooling-first-semantic-platform.md)
 * [ADR-0009: Language ownership and licensing boundaries](0009-language-ownership-licensing-boundaries.md)

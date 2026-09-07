@@ -70,11 +70,11 @@ distinguishing three kinds of work:
   the MIT-licensed VS Code extension subdirectory of the OSTW repository is
   MIT.
 * **Shared permissive-core/protocol goals**: the ecosystem's shared neutral
-  layers — the canonical Workshop core (`workshop-rs`) and the Language
-  Provider Protocol (`language-provider-protocol`) — are intended to be
-  permissively usable across tools and providers. That is a project goal, not
-  a legal safe harbor; it grants no rights in third-party material and does
-  not settle how any specific distribution may be licensed.
+  layers (the canonical Workshop core `workshop-rs` and the Language Provider
+  Protocol `language-provider-protocol`) are intended to be permissively usable
+  across tools and providers. That is a project goal, not a legal safe harbor;
+  it grants no rights in third-party material and does not settle how any
+  specific distribution may be licensed.
 
 None of these categories is a legal conclusion. Process, JSON, or protocol
 separation is engineering isolation; questions that require qualified legal

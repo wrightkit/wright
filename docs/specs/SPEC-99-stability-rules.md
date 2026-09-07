@@ -12,8 +12,8 @@ freshness: live
 
 Ship a small, high-value first-party stability/performance rule set through the
 lint registry (#97) and `wright lint` path (#98), extending the existing
-three rules with exactly **two new rules** — `repeated-value` and
-`while-without-wait` — so `wright lint` reports a bounded five-rule first-party
+three rules with two new rules (`repeated-value` and
+`while-without-wait`), so `wright lint` reports a bounded five-rule first-party
 set. Every rule keeps a stable ID, default severity, evidence classification,
 documented rationale and limitations, positive/negative fixtures, and linked
 corpus evidence or an explicit documented synthetic justification. The set must
@@ -25,10 +25,10 @@ static analysis can prove.
 | Stable ID | Default severity | Evidence class | Real-project/corpus evidence |
 | --- | --- | --- | --- |
 | `min-wait-loop` (existing) | warning | static-indicator | overpy-cake fires at `source.opy:54` / workshop line 46 |
-| `duplicate-condition` (existing) | warning | exact | — (unchanged, v0.2) |
-| `expensive-loop-check` (existing) | info | heuristic | — (unchanged, v0.2) |
-| `repeated-value` (**new**) | warning | exact | overpy-santa workshop lines 108-113; overpy-parabola workshop lines 79-80 |
-| `while-without-wait` (**new**) | warning | static-indicator | none positive in corpus (documented synthetic justification; corpus-negative scan recorded) |
+| `duplicate-condition` (existing) | warning | exact | (unchanged, v0.2) |
+| `expensive-loop-check` (existing) | info | heuristic | (unchanged, v0.2) |
+| `repeated-value` (new) | warning | exact | overpy-santa workshop lines 108-113; overpy-parabola workshop lines 79-80 |
+| `while-without-wait` (new) | warning | static-indicator | none positive in corpus (documented synthetic justification; corpus-negative scan recorded) |
 
 Severity decisions: both new rules default to `warning`. `repeated-value` is an
 exact structural fact (guaranteed re-evaluation) scoped to loop bodies, where
@@ -84,8 +84,8 @@ indicator). No new `heuristic`-class rules are added in this set.
     claim.
   - Non-trivial filter (amended): a duplicated expression is in scope only if
     its subtree contains at least two `Call` value nodes (the root counting).
-    Single-call expressions — including bare `Value In Array` reads and bare
-    single-call predicates with plain operands — are never flagged. Bare
+    Single-call expressions (including bare `Value In Array` reads and bare
+    single-call predicates with plain operands) are never flagged. Bare
     literals, strings, booleans, enums, variable references, and plain
     `Vector`/`Array` constructions are likewise never flagged.
   - Negative fixtures: identical expressions used in different rules; identical
@@ -206,7 +206,7 @@ indicator). No new `heuristic`-class rules are added in this set.
   array reads) are never flagged; a finding's span is the first occurrence of
   its duplicated shape, and when source spans are assigned by macro expansion
   (e.g. OverPy `#!define` inlining), distinct shapes can share a
-  first-occurrence span — observed in overpy-cake at `38:9`, where the
+  first-occurrence span, as observed in overpy-cake at `38:9`, where the
   `cakePos[0]` and `cakePos[1]` corner shapes collide; findings remain
   distinct and are distinguished by their value/action identity in the
   structured envelope, so span identity is not a proxy for finding identity
@@ -284,16 +284,16 @@ indicator). No new `heuristic`-class rules are added in this set.
 
 ## Dependencies
 
-- **#97 (registry)** — CLOSED, implemented at `c5b46f3`
+- **#97 (registry)**: CLOSED, implemented at `c5b46f3`
   (`feat(analyzer): establish lint rule registry and configuration contract
   (M12)`); present in the current tree. Ready.
-- **#98 (lint surface)** — implementation at `a54433b`
+- **#98 (lint surface)**: implementation at `a54433b`
   (`feat(cli): add first-class lint command with shared structured results
   (M12)`), issue still OPEN; independent QA verification recorded
   in issue #98 (VERIFIED at `a54433b`); next step is PM
   acceptance of #98. The registry + lint surface exist in the current tree, so
   #99 may proceed on them.
-- **Corpus fixtures** — `../../compatibility/fixtures/real-world/` (13 pinned
+- **Corpus fixtures**: `../../compatibility/fixtures/real-world/` (13 pinned
   projects with provenance in each `fixture.json`), present. Evidence boundary
   (re-verified at spec time): only overpy-cake (1 `min-wait-loop` finding at
   `source.opy:54` / workshop line 46) and overpy-pixelart (0 findings) parse
@@ -302,12 +302,12 @@ indicator). No new `heuristic`-class rules are added in this set.
   by the canonical Workshop parser (`settings` top-level section rejected;
   settings-stripped pixelart parses with
   0 findings).
-- **Adapter** — pinned `overpy@9.7.10` adapter (`../../adapter/bin/wright-adapter.js`)
+- **Adapter**: pinned `overpy@9.7.10` adapter (`../../adapter/bin/wright-adapter.js`)
   for regenerating analyzer fixture payloads when needed.
 
 ## Unresolved questions
 
-- **Q-001 [product] — RESOLVED**: `repeated-value` reporting rule and finding
+- **Q-001 [product]: RESOLVED**: `repeated-value` reporting rule and finding
   density. Measured on the implemented rule: `wright lint` on the overpy-cake
   real-project fixture reports 62 findings (61 `repeated-value` + 1
   pre-existing `min-wait-loop`), collapsing to 15 distinct spans, with 11
@@ -323,7 +323,7 @@ indicator). No new `heuristic`-class rules are added in this set.
   while eliminating identical-span spam and single-call array-read noise.
   Verified outcome on overpy-cake (re-derived from the implemented rule):
   **10 `repeated-value` findings**, all genuinely satisfying the amended
-  contract, plus the unchanged `min-wait-loop` at `source.opy:54:5` — 1 at
+  contract, plus the unchanged `min-wait-loop` at `source.opy:54:5`: 1 at
   `32:31` (the `random.uniform(...)` shape, count 2, in the `range(28)`
   loop), 8 `cakePos[N]+vect(0,i2,0)` corner shapes at `38:9` ×2, `39:9`,
   `40:9`, `41:9`, `42:9`, `43:9`, `44:9` (each count 2, one per corner pair

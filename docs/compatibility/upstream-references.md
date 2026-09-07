@@ -38,7 +38,7 @@ OverPy 9.7.10 (pinned content) is the compatibility **oracle** and **behavior
 reference** for Wright's `.opy` frontend, per [`docs/compatibility.md`](../compatibility.md)
 and [ADR-0007](../adr/0007-reference-pinning-policy.md). It is not a production
 runtime dependency of the Wright core and is never bundled into release
-artifacts. Concretely, it serves as:
+artifacts. Specifically, it provides:
 
 * the reference for S (syntax), D (diagnostic), and N (normalized-output)
   evidence in the compatibility corpus (`compatibility/fixtures/**`,
@@ -57,7 +57,7 @@ artifacts. Concretely, it serves as:
 | `opy-rs` owner implementation + `wright-opy` adapter | Differential HIR parity, accept/reject agreement, structured diagnostics |
 | `workshop-rs` catalog/emission | Canonical en-US spelling validation against oracle-emitted Workshop text; receiver-method and enum emission evidence |
 | `compatibility/` harness | Fixture snapshots, oracle identity blocks, S/D/N gate evidence |
-| Systematic baseline | Reference-validated probes for builtin action/value/member/enum/signature metadata — implemented as the OPY semantic compatibility manifest (`crates/wright-opy/src/manifest/`): every entry records the probe that validates it, and `probes/validate.py` runs the full probe set against the pinned oracle (accept/reject, normalized emission hash, diagnostic category; wired into `compatibility/tests`) |
+| Systematic baseline | Reference-validated probes for builtin action/value/member/enum/signature metadata: implemented as the OPY semantic compatibility manifest (`crates/wright-opy/src/manifest/`), where every entry records its validating probe, and `probes/validate.py` runs probes against the pinned oracle |
 
 ### Reference semantics vs Wright-owned architecture
 
@@ -123,7 +123,7 @@ OSTW is the compatibility **oracle and behavior reference** for the owner-side
 DEL implementation (`del-rs`), consumed through `wright-ostw`, per [`docs/compatibility.md`](../compatibility.md) and the
 extension of ADR-0007 pinning policy to a second reference. It is not a
 production runtime dependency of the Wright core and is never bundled into
-release artifacts. Concretely it serves as:
+release artifacts. Specifically, it provides:
 
 * the reference for S (syntax), D (diagnostic), and N (normalized-output)
   evidence for the OSTW corpus (`compatibility/ostw/`, with oracle runner
@@ -190,8 +190,8 @@ mechanically extracted from OSTW source or data files.
   host and answers `--ping`.
 * **Emulator scope.** The upstream emulator (`Emulator/`) ticks Workshop rules
   (players, variables, arrays) and is the upstream's own behavioral oracle in
-  `Deltinteger.Tests`, but it is partial — e.g. `Wait` raises
-  `NotImplementedException`. E-level claims must state the emulator subset.
+  `Deltinteger.Tests`, but it is partial (for example, `Wait` raises
+  `NotImplementedException`). E-level claims must state the emulator subset.
 * **Reconstruction boundary.** The upstream decompiler reconstructs rules,
   actions, conditions, values, and lobby-settings imports; it does not recover
   original comments, formatting, macros, or abstractions. N-level comparison

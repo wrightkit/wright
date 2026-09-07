@@ -1,10 +1,10 @@
 # Workshop Catalog Data Pipeline
 
-Status: cutover (wright#143) — catalog ownership moved to `workshop-rs`
+Status: cutover (wright#143): catalog ownership moved to `workshop-rs`
 Scope: where the canonical Workshop catalog lives, how it is validated and
 updated, and how Wright consumes it
 
-The canonical Workshop catalog is **owned by `workshop-rs`**
+The canonical Workshop catalog is owned by `workshop-rs`
 (ADR-0001 Decision 6): the dataset lives at
 `crates/workshop-rs/src/catalog/data/catalog.json` in the `workshop-rs`
 repository, with its machine-readable provenance record embedded in the
@@ -30,7 +30,7 @@ route to `workshop-rs` and are picked up here by updating that pin.
   [`ADR-0004`](../adr/0004-overpy-licensing-boundary.md)). `workshop-rs` is
   MIT-licensed and commits only MIT-compatible data with recorded
   provenance; adding a new locale requires a permissible reference source,
-  provenance review, and the `workshop-rs` update pipeline — it is not a
+  provenance review, and the `workshop-rs` update pipeline; it is not a
   mechanical code change.
 * Every committed catalog file carries `provenance` (generator, source,
   license, reviewed status).

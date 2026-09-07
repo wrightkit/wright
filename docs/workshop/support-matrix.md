@@ -1,6 +1,6 @@
 # Workshop Support Matrix
 
-Status: accepted baseline — living Workshop support matrix
+Status: accepted baseline: living Workshop support matrix
 Scope: the evidence-backed Workshop feature and localization surface Wright
 supports for native localized Workshop input/output
 
@@ -24,25 +24,25 @@ matrix is regenerable from the repository alone.
 Sections list the surface observed in the en-US corpus Workshop text.
 
 ### Variables
-- `variables { global: <index>: <name> }` — control-flow, expressions-values.
-- `variables { player: <index>: <name> }` — declarations-rules.
+- `variables { global: <index>: <name> }`: control-flow, expressions-values.
+- `variables { player: <index>: <name> }`: declarations-rules.
 - Explicit indices and names are both evidenced.
 
 ### Subroutines
-- `subroutines { <index>: <name> }` — declarations-rules.
+- `subroutines { <index>: <name> }`: declarations-rules.
 
 ### Rules
-- `rule ("<name>") { event { ... } conditions { ... } actions { ... } }` — all
+- `rule ("<name>") { event { ... } conditions { ... } actions { ... } }`: all
   fixtures; conditions/actions blocks are optional.
 
 ### Events
-- `Ongoing - Global;` — all fixtures with `@Event global`.
-- `Ongoing - Each Player;` plus team/slot lines (`All; All;`) —
+- `Ongoing - Global;`: all fixtures with `@Event global`.
+- `Ongoing - Each Player;` plus team/slot lines (`All; All;`):
   declarations-rules.
-- `Subroutine; <name>;` — declarations-rules (def bodies).
+- `Subroutine; <name>;`: declarations-rules (def bodies).
 
 ### Conditions
-- `Has Spawned(Event Player) == True;` — declarations-rules.
+- `Has Spawned(Event Player) == True;`: declarations-rules.
 
 ### Actions
 Disable Inspector Recording, Set Global Variable, Modify Global Variable,
@@ -84,13 +84,13 @@ The bare `None` member spelling is shared by three enum domains
 `None`). The Workshop parser resolves that ambiguity context-sensitively from
 the canonical signature metadata (#109/#111): when the enclosing call's
 signature pins exactly one expected domain, the bare spelling resolves to that
-domain — `Chase Global Variable Over Time(..., None)` reparses to
+domain: `Chase Global Variable Over Time(..., None)` reparses to
 `ChaseTimeReeval.NONE`, `Chase Global Variable At Rate(..., None)` and
 `Chase Player Variable At Rate(..., None)` to `ChaseRateReeval.NONE` (the
 `chase` keyword-argument dispatch surface, #110), and `Set Invisible(..., None)`
 to `Invis.NONE`. Context-free or wrong-context `None` (e.g.
 `Set Global Variable(g, None)`) still fails deterministically with the
-`ambiguous enum member 'None'` diagnostic — no global spelling heuristics and
+`ambiguous enum member 'None'` diagnostic, with no global spelling heuristics and
 no arbitrary domain precedence.
 
 ### Settings and extensions

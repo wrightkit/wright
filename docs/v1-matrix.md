@@ -26,7 +26,7 @@ oracle, en-US locale (additional locales are a data change).
 | N: normalized output | Compiled Workshop text equals the reference after the documented normalizer | `scripts/v1-gates.py` report (`target/v1-gates-report.json`); `compat` profile | PASS with documented debug/print differences (below) |
 | E: semantic | High-risk behaviors have repeatable scenario evidence | `scripts/run-scenarios.py` (`target/scenarios-report.json`) | PASS (compile-time WIR evidence; client execution is out of scope) |
 
-The compatibility contract does **not** claim:
+The compatibility contract does not claim:
 * compatibility outside the declared corpus surface;
 * historical OverPy feature breadth beyond the declared matrix;
 * client-side runtime equivalence beyond the recorded scenario evidence.
