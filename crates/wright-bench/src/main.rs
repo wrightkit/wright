@@ -12,8 +12,8 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use wright_driver::CompilerSession;
+use wright_driver::Profile;
 use wright_driver::config::{SessionConfig, SourceKind};
-use wright_transform::Profile;
 
 /// The bench contract version (report consumers depend on it).
 const BENCH_CONTRACT: &str = "wright-bench/v1";

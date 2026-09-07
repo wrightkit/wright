@@ -272,9 +272,9 @@ fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionCo
             OutputFormatArg::Json => OutputFormat::Json,
         },
         profile: match common.profile {
-            cli::ProfileArg::Off => wright_transform::Profile::Off,
-            cli::ProfileArg::Compat => wright_transform::Profile::Compat,
-            cli::ProfileArg::Aggressive => wright_transform::Profile::Aggressive,
+            cli::ProfileArg::Off => wright_driver::Profile::Off,
+            cli::ProfileArg::Compat => wright_driver::Profile::Compat,
+            cli::ProfileArg::Aggressive => wright_driver::Profile::Aggressive,
         },
         ..SessionConfig::default()
     }

@@ -24,7 +24,6 @@ sha2.workspace = true
 tar = "0.4"
 ureq = "2"
 wright-driver.workspace = true
-wright-transform.workspace = true
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
