@@ -32,43 +32,6 @@ FIXTURES = [
 ]
 
 
-def _collapse_hud(text: str) -> str:
-    """Collapse each `Create HUD Text(...)` statement (balanced parens,
-    possibly multi-line) to a canonical marker."""
-    out = []
-    i = 0
-    while i < len(text):
-        start = text.find("Create HUD Text(", i)
-        if start == -1:
-            out.append(text[i:])
-            break
-        out.append(text[i:start])
-        depth = 0
-        j = start + len("Create HUD Text(") - 1
-        while j < len(text):
-            if text[j] == "(":
-                depth += 1
-            elif text[j] == ")":
-                depth -= 1
-                if depth == 0:
-                    break
-            j += 1
-        out.append("Create HUD Text(<debug>);")
-        i = j + 1
-    return "".join(out)
-
-
-def normalize(text: str) -> str:
-    text = _collapse_hud(text)
-    # The canonical emitter's `All Players` spelling is equivalent to
-    # OverPy's explicit `All Players(All Teams)` selector.
-    text = text.replace("All Players(All Teams)", "All Players")
-    # The provider's canonical Workshop emitter spells the unit-up vector
-    # explicitly; the pinned oracle uses the equivalent `Up` constant.
-    text = re.sub(r"\bUp\b", "Vector(0, 1, 0)", text)
-    return re.sub(r"\s+", "", text)
-
-
 def fixture_hash(fixture_id: str) -> str:
     source = (ROOT / "compatibility/fixtures" / fixture_id / "source.opy").read_bytes()
     return hashlib.sha256(source).hexdigest()
@@ -122,12 +85,8 @@ def main() -> int:
         ).strip()},
         "comparison": {
             "contract": "workshop-rs::roundtrip::equivalent",
-            "presentationAliases": [
-                "All Players(All Teams) == All Players",
-                "All Players(Team.ALL) == All Players",
-                "Up == Vector(0, 1, 0)",
-                "debug HUD display strings are presentation-only",
-            ],
+            "ownerDefinedRepresentations": "workshop-rs::roundtrip::equivalent",
+            "wrightPresentationPolicy": "debug HUD display strings are presentation-only",
         },
         "fixtures": {},
     }
@@ -192,7 +151,6 @@ def main() -> int:
         entry["semanticEquivalent"] = equal
         entry["emittedSha256"] = text_hash(got)
         entry["byteEqual"] = got.strip() == expected.strip()
-        entry["legacyNormalizedEqual"] = normalize(got) == normalize(expected)
         entry["representationOnlyDelta"] = equal and not entry["byteEqual"]
         if not equal:
             entry["semanticEvidence"] = semantic

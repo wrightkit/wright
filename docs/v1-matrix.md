@@ -53,8 +53,9 @@ The compatibility contract does not claim:
 3. **Float formatting.** Floats emit with at most 16 significant digits,
    matching the reference snapshots.
 4. **Unit-up vector spelling.** The provider's canonical Workshop emitter uses
-   `Vector(0, 1, 0)` where the recorded reference uses `Up`; the semantic
-   comparator treats these equivalent Workshop values identically.
+   `Vector(0, 1, 0)` where the recorded reference uses `Up`; the
+   `workshop-rs::roundtrip::equivalent` contract owns this Workshop
+   representation equivalence.
 
 ## Unsupported / deferred
 
