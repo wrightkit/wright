@@ -23,7 +23,7 @@ oracle, en-US locale (additional locales are a data change).
 | --- | --- | --- | --- |
 | S: syntax | Native and reference agree on accept/reject for the corpus; accepted inputs classify into the same supported subset | `crates/wright-opy/tests/differential.rs` (HIR parity, full corpus) | PASS |
 | D: diagnostics | Malformed inputs produce the same diagnostic category and source region | Diagnostics fixture (`synthetic/diagnostics`) both reject with a parse error at the same line; structured `wright-result/v1` diagnostics | PASS |
-| N: normalized output | Compiled Workshop text equals the reference after the documented normalizer | `scripts/v1-gates.py` report (`target/v1-gates-report.json`); `compat` profile | PASS with documented debug/print differences (below) |
+| N: semantic output | Compiled Workshop text parses to WIR equivalent to the reference; representation deltas remain diagnostic evidence | `scripts/v1-gates.py` report (`target/v1-gates-report.json`); `compat` profile; current first-party OPY release resolved by Wright | PASS |
 | E: semantic | High-risk behaviors have repeatable scenario evidence | `scripts/run-scenarios.py` (`target/scenarios-report.json`) | PASS (compile-time WIR evidence; client execution is out of scope) |
 
 The compatibility contract does not claim:
@@ -32,9 +32,9 @@ The compatibility contract does not claim:
 * client-side runtime equivalence beyond the recorded scenario evidence.
 
 > **Semantic Priority Note (ADR-0008):** N-level gate status reflects
-> normalized-output comparison evidence. Presentation-only N-level differences
-> (e.g. the documented `debug()`/`print()` formatting difference below) are not
-> product bugs and must not automatically create implementation work.
+> Workshop parser/WIR equivalence. Presentation-only output differences (e.g.
+> the documented `debug()`/`print()` formatting difference below) are recorded
+> as representation evidence and are not product bugs.
 > Observable Workshop behavior, valid syntax, and declared tooling contracts
 > outrank text-output identity.
 
@@ -44,17 +44,17 @@ The compatibility contract does not claim:
    type-aware `Create HUD Text` with expression source text and a padded
    layout. Wright emits a semantically equivalent but presentation-simpler
    `Create HUD Text(..., Custom String("{0}", x), ..., Visible To and String, ...)`.
-   The N-level normalizer maps both forms to a canonical marker and records
-   the difference; the emitted behavior (display the value/message as HUD
-   text) is preserved.
+   The semantic comparator ignores the presentation-only display strings while
+   preserving the HUD action and its Workshop arguments; the emitted behavior
+   (display the value/message as HUD text) is preserved.
 2. **Variable indexes.** Explicit `.opy` indexes (`globalvar x 100`) are
    honored (overpy-cake parity). Implicit indexes are assigned in
    declaration order, matching the reference for the corpus.
 3. **Float formatting.** Floats emit with at most 16 significant digits,
    matching the reference snapshots.
 4. **Unit-up vector spelling.** The provider's canonical Workshop emitter uses
-   `Vector(0, 1, 0)` where the pinned reference uses `Up`; the N-level
-   normalizer treats these equivalent Workshop values identically.
+   `Vector(0, 1, 0)` where the recorded reference uses `Up`; the semantic
+   comparator treats these equivalent Workshop values identically.
 
 ## Unsupported / deferred
 
@@ -68,12 +68,13 @@ The compatibility contract does not claim:
 
 ```sh
 cargo test --workspace --all-targets </dev/null # S/D evidence (differential suite)
-python3 scripts/v1-gates.py                     # N report -> target/v1-gates-report.json
+python3 scripts/v1-gates.py                     # refreshes latest provider; semantic N report
 python3 scripts/run-scenarios.py                # E report -> target/scenarios-report.json
 cargo build --locked -p wright-bench
 target/debug/wright-bench                       # resource/regression thresholds
 ```
 
 Each report records the corpus identity (fixture hashes), the reference
-version (pinned OverPy 9.7.10), the Wright commit, and the comparison method,
-so every claim is reproducible.
+version (recorded OverPy 9.7.10), the Wright commit, provider resolution
+without a manually maintained version pin, semantic comparison evidence, and
+representation diagnostics, so every claim is reproducible.

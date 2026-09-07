@@ -24,6 +24,7 @@ pub mod result;
 pub mod service;
 pub mod session;
 pub mod source_provider;
+pub mod workshop_compat;
 pub mod workshop_provider;
 
 pub use config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind};
@@ -41,6 +42,9 @@ pub use session::{CompilerSession, Loaded, Provenance};
 pub use source_provider::{
     SourceBackend, SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider,
     SourceProviderError, SourceTarget,
+};
+pub use workshop_compat::{
+    WorkshopSemanticComparison, WorkshopSemanticSide, compare_workshop_texts,
 };
 pub use workshop_provider::WorkshopProvider;
 pub use wright_transform::Profile;
