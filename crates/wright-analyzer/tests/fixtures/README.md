@@ -7,6 +7,10 @@ the static analyses in `wright_analyzer::analysis`:
   conditions (the `elif` can never be taken).
 * `expensive-loop.opy` — positive: a `distance()` geometry predicate
   evaluated inside a `while` body.
+* `ongoing-condition-hot-path.opy` — positive (`ongoing-condition-hot-path`):
+  geometry predicates in `Ongoing - Global` and `Ongoing - Each Player`
+  conditions, including an expensive first condition with a later
+  short-circuit gate; a cheap ongoing condition remains a negative case.
 * `repeated-value-parabola.opy` — positive (`repeated-value`, parabola
   shape): one action inside a `For Global Variable` loop containing two
   duplicated shape families (`distance(...)` twice; `time - offsets[I]`

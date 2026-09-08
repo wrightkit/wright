@@ -219,10 +219,16 @@ The following lint-only flags configure the registry and are repeatable:
 
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
-  `while-without-wait`).
+  `ongoing-condition-hot-path`, `while-without-wait`).
 * `--rule-severity <ID>:<warning|info>`: override a rule's severity.
 
 These flags are usage errors on every other command (exit 2).
+
+`ongoing-condition-hot-path` is a heuristic about the per-tick evaluation of
+an `Ongoing - Global` or `Ongoing - Each Player` rule's conditions. It does
+not claim that the rule's action block executes every tick while conditions
+remain true, measure server cost, or conclude that a later condition would be
+more selective.
 
 The `lint` result envelope carries `input_identity` (the SHA-256 source
 identity; the tool/agent API exposes the same value as `inputIdentity`),
@@ -268,6 +274,16 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
         "evidence": "heuristic",
         "tags": ["performance"],
         "knownLimits": "The expensive-call list is a fixed heuristic ..."
+      },
+      {
+        "id": "ongoing-condition-hot-path",
+        "defaultSeverity": "info",
+        "effectiveSeverity": "info",
+        "enabled": true,
+        "summary": "geometry predicate evaluated in an ongoing-rule condition",
+        "evidence": "heuristic",
+        "tags": ["performance", "stability"],
+        "knownLimits": "The geometry-predicate list is a fixed heuristic; the analysis does not measure runtime cost or infer selectivity ..."
       },
       {
         "id": "repeated-value",

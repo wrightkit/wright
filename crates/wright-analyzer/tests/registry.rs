@@ -42,7 +42,7 @@ fn local_program(name: &str) -> WirProgram {
 // ── Registry identity ─────────────────────────────────────────────────────────
 
 #[test]
-fn registry_has_five_first_party_rules_with_stable_ids() {
+fn registry_has_six_first_party_rules_with_stable_ids() {
     let registry = LintRegistry::default();
     let ids: Vec<&str> = registry.rules().map(|meta| meta.id).collect();
     assert_eq!(
@@ -51,10 +51,11 @@ fn registry_has_five_first_party_rules_with_stable_ids() {
             "min-wait-loop",
             "duplicate-condition",
             "expensive-loop-check",
+            "ongoing-condition-hot-path",
             "repeated-value",
             "while-without-wait",
         ],
-        "exactly five first-party rules, in canonical order"
+        "exactly six first-party rules, in canonical order"
     );
 }
 
@@ -121,6 +122,12 @@ fn rule_default_severities_match_known_values() {
         .unwrap();
     assert_eq!(exp_loop.1, Severity::Info);
 
+    let ongoing = severities
+        .iter()
+        .find(|(id, _)| *id == "ongoing-condition-hot-path")
+        .unwrap();
+    assert_eq!(ongoing.1, Severity::Info);
+
     let repeated = severities
         .iter()
         .find(|(id, _)| *id == "repeated-value")
@@ -157,6 +164,11 @@ fn rule_evidence_classes_are_declared() {
         evidence_of(&evidence, "expensive-loop-check"),
         EvidenceClass::Heuristic,
         "the expensive-call list is a documented fixed heuristic"
+    );
+    assert_eq!(
+        evidence_of(&evidence, "ongoing-condition-hot-path"),
+        EvidenceClass::Heuristic,
+        "ongoing condition identity is exact but the expensive-call list is heuristic"
     );
     assert_eq!(
         evidence_of(&evidence, "repeated-value"),
@@ -211,6 +223,7 @@ fn default_config_enables_all_rules() {
         "min-wait-loop",
         "duplicate-condition",
         "expensive-loop-check",
+        "ongoing-condition-hot-path",
         "repeated-value",
         "while-without-wait",
     ] {
@@ -284,6 +297,7 @@ fn all_rules_disabled_produces_empty_findings() {
     config.disable("min-wait-loop");
     config.disable("duplicate-condition");
     config.disable("expensive-loop-check");
+    config.disable("ongoing-condition-hot-path");
     config.disable("repeated-value");
     config.disable("while-without-wait");
 

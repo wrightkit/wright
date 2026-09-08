@@ -4,7 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
-use workshop_rs::wir::{self, Action, Event, Program as WirProgram, Rule, Value, ValueNode};
+use workshop_rs::catalog::{Catalog, Locale};
+use workshop_rs::parser;
+use workshop_rs::wir::{
+    self, Action, Event, EventTarget, EventTeam, PlayerEventKind, Program as WirProgram, Rule,
+    Value, ValueNode,
+};
 use wright_analyzer::analysis::{self, Boundedness, EvidenceClass, Severity};
 use wright_core::hir;
 use wright_ir::lower;
@@ -33,6 +38,52 @@ fn lower_program(path: &Path) -> WirProgram {
 
 fn corpus_program(fixture_id: &str) -> WirProgram {
     lower_program(&fixture_path(fixture_id))
+}
+
+fn corpus_workshop_rule(fixture_id: &str, rule_name: &str) -> WirProgram {
+    let oracle = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../compatibility/fixtures")
+            .join(fixture_id)
+            .join("oracle.json"),
+    )
+    .expect("real-project oracle reads");
+    let workshop = serde_json::from_str::<serde_json::Value>(&oracle)
+        .expect("real-project oracle parses")["compile"]["workshop"]
+        .as_str()
+        .expect("real-project oracle carries Workshop output")
+        .to_owned();
+    let variables_end = workshop
+        .find("\n}\n\nsubroutines")
+        .expect("real-project Workshop declares variables")
+        + 2;
+    let subroutines_start = workshop
+        .find("\nsubroutines {")
+        .expect("real-project Workshop declares subroutines");
+    let subroutines_end = workshop[subroutines_start..]
+        .find("\n}\n\nrule")
+        .map(|offset| subroutines_start + offset + 2)
+        .expect("real-project subroutine block closes before rules");
+    let rule_start = workshop
+        .find(&format!("rule (\"{rule_name}\") {{"))
+        .expect("real-project Workshop carries target rule");
+    let rule_end = workshop[rule_start..]
+        .find("\n}\n\n")
+        .map(|offset| rule_start + offset + 2)
+        .expect("target rule closes before the next rule");
+    let catalog = Catalog::builtin().expect("built-in catalog");
+    parser::parse_with_context(
+        &format!(
+            "{}\n\n{}\n\n{}",
+            &workshop[..variables_end],
+            &workshop[subroutines_start..subroutines_end],
+            &workshop[rule_start..rule_end]
+        ),
+        &catalog,
+        &Locale::new("en-US"),
+        &catalog,
+    )
+    .expect("real-project Workshop output parses")
 }
 
 fn findings_by_code(program: &WirProgram, code: &str) -> Vec<analysis::Finding> {
@@ -125,6 +176,79 @@ fn expensive_loop_check_does_not_fire_on_the_corpus() {
             "{fixture_id} has no geometry predicate in a loop"
         );
     }
+}
+
+#[test]
+fn ongoing_condition_hot_path_reports_ongoing_geometry_in_condition_order() {
+    let program = lower_program(&local_fixture_path("ongoing-condition-hot-path"));
+    let findings = findings_by_code(&program, "ongoing-condition-hot-path");
+    assert_eq!(
+        findings.len(),
+        2,
+        "one global and one each-player predicate"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.severity == Severity::Info)
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.evidence == EvidenceClass::Heuristic)
+    );
+    assert!(findings.iter().all(|finding| finding.action.is_none()));
+    assert!(findings.iter().all(|finding| finding.span.is_some()));
+    assert!(findings.iter().all(|finding| finding.value.is_some()));
+    assert!(
+        findings[0]
+            .message
+            .contains("condition 1 of 2, before 1 later short-circuit gate")
+    );
+    assert!(findings[1].message.contains("condition 1 of 1"));
+
+    let mut player_event = WirProgram::default();
+    let zero = player_event.values.push(ValueNode::new(
+        Value::Number {
+            value: 0.0,
+            text: "0".to_string(),
+        },
+        None,
+    ));
+    let distance = player_event.values.push(ValueNode::new(
+        Value::Call {
+            name: "distance".to_string(),
+            args: vec![zero, zero],
+        },
+        None,
+    ));
+    player_event.rules.push(Rule {
+        name: "non-ongoing player event".to_string(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: Event::Player {
+            kind: PlayerEventKind::Died,
+            team: EventTeam::All,
+            target: EventTarget::All,
+        },
+        conditions: vec![distance],
+        actions: Vec::new(),
+    });
+    assert!(findings_by_code(&player_event, "ongoing-condition-hot-path").is_empty());
+}
+
+#[test]
+fn ongoing_condition_hot_path_finds_a_real_project_case_outside_loop_analysis() {
+    let program = corpus_workshop_rule("real-world/overpy-cronch", "challenge 1 finished");
+    let findings = findings_by_code(&program, "ongoing-condition-hot-path");
+    assert_eq!(
+        findings.len(),
+        1,
+        "cronch has one ongoing distance condition"
+    );
+    assert!(findings[0].message.contains("condition 2 of 2"));
+    assert!(findings_by_code(&program, "expensive-loop-check").is_empty());
 }
 
 #[test]

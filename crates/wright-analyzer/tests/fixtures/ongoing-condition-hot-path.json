@@ -1,0 +1,578 @@
+{
+  "protocol": {
+    "name": "wright/opy-hir",
+    "version": "1.1.0"
+  },
+  "generator": {
+    "name": "@wright/overpy-adapter",
+    "version": "0.1.0",
+    "frontend": "overpy@9.7.10"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "ongoing-condition-hot-path.opy"
+    }
+  ],
+  "defines": [],
+  "declarations": [
+    {
+      "kind": "globalVariable",
+      "name": "pos",
+      "index": null,
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 1,
+          "col": 1
+        },
+        "end": {
+          "line": 1,
+          "col": 15
+        }
+      },
+      "initializer": {
+        "kind": "vector",
+        "x": {
+          "kind": "number",
+          "value": 0,
+          "text": "0",
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 1,
+              "col": 22
+            },
+            "end": {
+              "line": 1,
+              "col": 24
+            }
+          }
+        },
+        "y": {
+          "kind": "number",
+          "value": 0,
+          "text": "0",
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 1,
+              "col": 25
+            },
+            "end": {
+              "line": 1,
+              "col": 27
+            }
+          }
+        },
+        "z": {
+          "kind": "number",
+          "value": 0,
+          "text": "0",
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 1,
+              "col": 28
+            },
+            "end": {
+              "line": 1,
+              "col": 30
+            }
+          }
+        },
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 1,
+            "col": 17
+          },
+          "end": {
+            "line": 1,
+            "col": 31
+          }
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "name": "global expensive condition first",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 3,
+          "col": 1
+        },
+        "end": {
+          "line": 3,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 4,
+            "col": 5
+          },
+          "end": {
+            "line": 4,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [
+        {
+          "kind": "binary",
+          "op": "<",
+          "left": {
+            "kind": "call",
+            "name": "distance",
+            "args": [
+              {
+                "kind": "globalVar",
+                "name": "pos",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 5,
+                    "col": 25
+                  },
+                  "end": {
+                    "line": 5,
+                    "col": 29
+                  }
+                }
+              },
+              {
+                "kind": "vector",
+                "x": {
+                  "kind": "number",
+                  "value": 1,
+                  "text": "1",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 5,
+                      "col": 35
+                    },
+                    "end": {
+                      "line": 5,
+                      "col": 37
+                    }
+                  }
+                },
+                "y": {
+                  "kind": "number",
+                  "value": 2,
+                  "text": "2",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 5,
+                      "col": 38
+                    },
+                    "end": {
+                      "line": 5,
+                      "col": 40
+                    }
+                  }
+                },
+                "z": {
+                  "kind": "number",
+                  "value": 3,
+                  "text": "3",
+                  "span": {
+                    "file": 0,
+                    "start": {
+                      "line": 5,
+                      "col": 41
+                    },
+                    "end": {
+                      "line": 5,
+                      "col": 43
+                    }
+                  }
+                },
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 5,
+                    "col": 30
+                  },
+                  "end": {
+                    "line": 5,
+                    "col": 44
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 5,
+                "col": 16
+              },
+              "end": {
+                "line": 5,
+                "col": 45
+              }
+            }
+          },
+          "right": {
+            "kind": "number",
+            "value": 5,
+            "text": "5",
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 5,
+                "col": 47
+              },
+              "end": {
+                "line": 5,
+                "col": 49
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 5,
+              "col": 16
+            },
+            "end": {
+              "line": 5,
+              "col": 49
+            }
+          }
+        },
+        {
+          "kind": "call",
+          "name": "isGameInProgress",
+          "args": [],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 6,
+              "col": 16
+            },
+            "end": {
+              "line": 6,
+              "col": 35
+            }
+          }
+        }
+      ],
+      "actions": [
+        {
+          "kind": "expr",
+          "expr": {
+            "kind": "call",
+            "name": "debug",
+            "args": [
+              {
+                "kind": "number",
+                "value": 1,
+                "text": "1",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 7,
+                    "col": 11
+                  },
+                  "end": {
+                    "line": 7,
+                    "col": 13
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 7,
+                "col": 5
+              },
+              "end": {
+                "line": 7,
+                "col": 14
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 7,
+              "col": 5
+            },
+            "end": {
+              "line": 7,
+              "col": 14
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "each player expensive condition",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 9,
+          "col": 1
+        },
+        "end": {
+          "line": 9,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "eachPlayer",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 10,
+            "col": 5
+          },
+          "end": {
+            "line": 10,
+            "col": 23
+          }
+        }
+      },
+      "conditions": [
+        {
+          "kind": "call",
+          "name": "isInLoS",
+          "args": [
+            {
+              "kind": "receiverCall",
+              "receiver": {
+                "kind": "eventPlayer",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 11,
+                    "col": 24
+                  },
+                  "end": {
+                    "line": 11,
+                    "col": 36
+                  }
+                }
+              },
+              "name": "getPosition",
+              "args": [],
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 11,
+                  "col": 24
+                },
+                "end": {
+                  "line": 11,
+                  "col": 50
+                }
+              }
+            },
+            {
+              "kind": "globalVar",
+              "name": "pos",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 11,
+                  "col": 51
+                },
+                "end": {
+                  "line": 11,
+                  "col": 55
+                }
+              }
+            },
+            {
+              "kind": "enum",
+              "type": "BarrierLos",
+              "value": "BLOCKED_BY_ALL_BARRIERS",
+              "span": {
+                "file": 0,
+                "start": {
+                  "line": 11,
+                  "col": 67
+                },
+                "end": {
+                  "line": 11,
+                  "col": 91
+                }
+              }
+            }
+          ],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 11,
+              "col": 16
+            },
+            "end": {
+              "line": 11,
+              "col": 92
+            }
+          }
+        }
+      ],
+      "actions": [
+        {
+          "kind": "expr",
+          "expr": {
+            "kind": "call",
+            "name": "debug",
+            "args": [
+              {
+                "kind": "number",
+                "value": 2,
+                "text": "2",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 12,
+                    "col": 11
+                  },
+                  "end": {
+                    "line": 12,
+                    "col": 13
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 12,
+                "col": 5
+              },
+              "end": {
+                "line": 12,
+                "col": 14
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 12,
+              "col": 5
+            },
+            "end": {
+              "line": 12,
+              "col": 14
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cheap ongoing condition",
+      "span": {
+        "file": 0,
+        "start": {
+          "line": 14,
+          "col": 1
+        },
+        "end": {
+          "line": 14,
+          "col": 6
+        }
+      },
+      "disabled": false,
+      "event": {
+        "name": "global",
+        "args": [],
+        "span": {
+          "file": 0,
+          "start": {
+            "line": 15,
+            "col": 5
+          },
+          "end": {
+            "line": 15,
+            "col": 19
+          }
+        }
+      },
+      "conditions": [
+        {
+          "kind": "call",
+          "name": "isGameInProgress",
+          "args": [],
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 16,
+              "col": 16
+            },
+            "end": {
+              "line": 16,
+              "col": 35
+            }
+          }
+        }
+      ],
+      "actions": [
+        {
+          "kind": "expr",
+          "expr": {
+            "kind": "call",
+            "name": "debug",
+            "args": [
+              {
+                "kind": "number",
+                "value": 3,
+                "text": "3",
+                "span": {
+                  "file": 0,
+                  "start": {
+                    "line": 17,
+                    "col": 11
+                  },
+                  "end": {
+                    "line": 17,
+                    "col": 13
+                  }
+                }
+              }
+            ],
+            "span": {
+              "file": 0,
+              "start": {
+                "line": 17,
+                "col": 5
+              },
+              "end": {
+                "line": 17,
+                "col": 14
+              }
+            }
+          },
+          "span": {
+            "file": 0,
+            "start": {
+              "line": 17,
+              "col": 5
+            },
+            "end": {
+              "line": 17,
+              "col": 14
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

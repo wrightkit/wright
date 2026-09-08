@@ -10,6 +10,8 @@
 //!   evaluated twice within one rule (a later branch can never be taken).
 //! * [`ExpensiveLoopCheck`] (`expensive-loop-check`) — a geometry predicate
 //!   (`distance`, `raycast`, `isInLoS`) evaluated inside a loop body.
+//! * [`OngoingConditionHotPath`] (`ongoing-condition-hot-path`) — a geometry
+//!   predicate evaluated in an ongoing-rule condition every server tick.
 //! * [`RepeatedValue`] (`repeated-value`) — a value expression evaluated
 //!   more than once within one loop scope, reported once per maximal
 //!   duplicated shape.
@@ -37,7 +39,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use workshop_rs::source::Span;
 use workshop_rs::wir::{
-    self, Action, ActionId, GlobalVarId, ModifyOp, PlayerVarId, RuleId, Value, ValueId,
+    self, Action, ActionId, Event, GlobalVarId, ModifyOp, PlayerVarId, RuleId, Value, ValueId,
 };
 
 use crate::cfg::Cfg;
@@ -348,15 +350,92 @@ fn expensive_values_in_actions(program: &wir::Program, actions: &[ActionId]) -> 
     let mut found = Vec::new();
     visit_actions(program, actions, &mut |_, action| {
         visit_values_in_action(program, action, &mut |value_id| {
-            let node = program.values.get(value_id).expect("in range");
-            if let Value::Call { name, .. } = &node.value {
-                if EXPENSIVE_PREDICATES.contains(&name.as_str()) {
-                    found.push(value_id);
-                }
+            if is_expensive_predicate(program, value_id) {
+                found.push(value_id);
             }
         });
     });
     found
+}
+
+/// A potentially expensive predicate evaluated in an ongoing-rule condition.
+///
+/// Ongoing rule conditions are evaluated in source order on every Workshop
+/// tick. This rule reports only the established geometry-predicate heuristic;
+/// it does not infer a measured cost or that a later condition is more
+/// selective than an earlier one.
+pub struct OngoingConditionHotPath;
+
+impl Analysis for OngoingConditionHotPath {
+    fn name(&self) -> &'static str {
+        "ongoing-condition-hot-path"
+    }
+
+    fn evidence(&self) -> EvidenceClass {
+        // Ongoing-event identity and condition order are canonical WIR facts,
+        // but the expensive-call list remains a fixed heuristic.
+        EvidenceClass::Heuristic
+    }
+
+    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
+        let Some(rule_data) = program.rules.get(rule) else {
+            return Vec::new();
+        };
+        if !is_ongoing_event(&rule_data.event) {
+            return Vec::new();
+        }
+
+        let condition_count = rule_data.conditions.len();
+        let mut findings = Vec::new();
+        for (index, condition) in rule_data.conditions.iter().copied().enumerate() {
+            let later_conditions = condition_count - index - 1;
+            let mut expensive_values = Vec::new();
+            visit_value(program, condition, &mut |value_id| {
+                if is_expensive_predicate(program, value_id) {
+                    expensive_values.push(value_id);
+                }
+            });
+            for value in expensive_values {
+                let order = if later_conditions == 0 {
+                    format!("condition {} of {condition_count}", index + 1)
+                } else {
+                    format!(
+                        "condition {} of {condition_count}, before {later_conditions} later short-circuit gate{}",
+                        index + 1,
+                        if later_conditions == 1 { "" } else { "s" },
+                    )
+                };
+                findings.push(Finding {
+                    code: self.name(),
+                    severity: Severity::Info,
+                    message: format!(
+                        "geometry predicate in an ongoing-rule {order} is evaluated every server tick; its cost is heuristic, not measured runtime load"
+                    ),
+                    span: program.values.get(value).and_then(|node| node.span),
+                    rule,
+                    action: None,
+                    value: Some(value),
+                    evidence: self.evidence(),
+                    boundedness: None,
+                });
+            }
+        }
+        findings
+    }
+}
+
+fn is_ongoing_event(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Global | Event::EachPlayer | Event::EachPlayerWithFilters { .. }
+    )
+}
+
+fn is_expensive_predicate(program: &wir::Program, value: ValueId) -> bool {
+    matches!(
+        program.values.get(value).map(|node| &node.value),
+        Some(Value::Call { name, .. }) if EXPENSIVE_PREDICATES.contains(&name.as_str())
+    )
 }
 
 /// The same value expression evaluated more than once within one loop scope.

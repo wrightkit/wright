@@ -24,7 +24,7 @@ use workshop_rs::wir;
 
 use crate::analysis::{
     Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,
-    RepeatedValue, Severity, WhileWithoutWait,
+    OngoingConditionHotPath, RepeatedValue, Severity, WhileWithoutWait,
 };
 use crate::cfg::Cfg;
 
@@ -212,7 +212,8 @@ pub struct LintRegistry {
 impl Default for LintRegistry {
     /// Build the registry containing the first-party lint rules in their
     /// canonical order: `min-wait-loop`, `duplicate-condition`,
-    /// `expensive-loop-check`, `repeated-value`, `while-without-wait`.
+    /// `expensive-loop-check`, `ongoing-condition-hot-path`, `repeated-value`,
+    /// `while-without-wait`.
     fn default() -> Self {
         // Build each analysis in a local binding first so the rule metadata
         // can take its evidence class from the same implementation that
@@ -220,6 +221,7 @@ impl Default for LintRegistry {
         let min_wait: Box<dyn Analysis> = Box::new(MinWaitLoop);
         let duplicate_condition: Box<dyn Analysis> = Box::new(DuplicateCondition);
         let expensive_loop_check: Box<dyn Analysis> = Box::new(ExpensiveLoopCheck);
+        let ongoing_condition_hot_path: Box<dyn Analysis> = Box::new(OngoingConditionHotPath);
         let repeated_value: Box<dyn Analysis> = Box::new(RepeatedValue);
         let while_without_wait: Box<dyn Analysis> = Box::new(WhileWithoutWait);
         let entries = vec![
@@ -280,6 +282,37 @@ impl Default for LintRegistry {
                     tags: &["performance"],
                 },
                 analysis: expensive_loop_check,
+            },
+            RegistryEntry {
+                meta: RuleMeta {
+                    id: "ongoing-condition-hot-path",
+                    default_severity: Severity::Info,
+                    evidence: ongoing_condition_hot_path.evidence(),
+                    summary: "geometry predicate evaluated in an ongoing-rule condition",
+                    documentation: concat!(
+                        "An `Ongoing - Global` or `Ongoing - Each Player` rule evaluates a ",
+                        "geometry predicate (`distance`, `raycast`, or `isInLoS`) in one of ",
+                        "its conditions. Conditions are evaluated in source order every server ",
+                        "tick, so the finding identifies the condition's position and any later ",
+                        "short-circuit gates. This concerns condition evaluation, not a claim ",
+                        "that the action block executes every tick while conditions remain true. ",
+                        "Real-project evidence: overpy-cronch's `challenge 1 ",
+                        "finished` rule (Zezombye/overpy commit ",
+                        "`eea67adbcf6926c4004e35e25ab4be072624a44e`, GPL-3.0-only) evaluates ",
+                        "`Distance Between` in an ongoing global condition after its cheap ",
+                        "challenge-state gate.",
+                    ),
+                    known_limits: concat!(
+                        "The geometry-predicate list is a fixed heuristic and may miss other ",
+                        "costly operations or over-flag a predicate made cheap by a Workshop ",
+                        "update. The analysis reports canonical event identity, condition order, ",
+                        "and predicate presence; it does not measure runtime CPU cost, assume a ",
+                        "server population, or infer that a later condition is more selective. ",
+                        "Non-ongoing player events and subroutines are deliberately excluded.",
+                    ),
+                    tags: &["performance", "stability"],
+                },
+                analysis: ongoing_condition_hot_path,
             },
             RegistryEntry {
                 meta: RuleMeta {
