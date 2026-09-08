@@ -256,7 +256,7 @@ fn lint_rules_reports_rule_metadata_and_effective_config() {
     );
     let result = &responses[0]["result"];
     let rules = result["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 5, "all five first-party rules are reported");
+    assert_eq!(rules.len(), 6, "all six first-party rules are reported");
     for rule in rules {
         assert!(rule["id"].is_string(), "rules carry stable ids");
         assert!(rule["defaultSeverity"].is_string());
@@ -278,7 +278,7 @@ fn lint_rules_reports_rule_metadata_and_effective_config() {
     let config_rules = result["config"]["rules"].as_object().unwrap();
     assert_eq!(
         config_rules.len(),
-        5,
+        6,
         "the config summary covers every registered rule"
     );
     for rule in rules {
