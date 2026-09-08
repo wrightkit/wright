@@ -48,7 +48,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.Sim
     $LatestVersionUrl = "$BaseUrl/latest/version"
     for ($Attempt = 0; $Attempt -lt 30; $Attempt++) {
         try {
-            Invoke-RestMethod -Uri $LatestVersionUrl | Out-Null
+            Invoke-WebRequest -Uri $LatestVersionUrl -UseBasicParsing | Out-Null
             break
         } catch {
             if ($Attempt -eq 29) { Fail "local release server did not become ready" }
