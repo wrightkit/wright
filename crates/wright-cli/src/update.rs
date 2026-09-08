@@ -167,13 +167,14 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
         )));
     }
 
+    let client = update_client()?;
     let current = env!("CARGO_PKG_VERSION").to_string();
     let target_version = match requested {
         Some(version) => {
             parse_version(version)?;
             version.trim_start_matches('v').to_string()
         }
-        None => resolve_latest(&env_api_url())?,
+        None => resolve_latest(&client, &env_api_url())?,
     };
 
     match compare_versions(&current, &target_version) {
@@ -203,7 +204,13 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
     }
 
     println!("==> installing wright {current} -> {target_version}");
-    install_version(&target_version, platform, &env_base_url(), install_dir)?;
+    install_version(
+        &client,
+        &target_version,
+        platform,
+        &env_base_url(),
+        install_dir,
+    )?;
     Ok(exit::SUCCESS)
 }
 
@@ -276,8 +283,11 @@ fn detect_provenance(exe: &Path) -> Provenance {
 }
 
 /// Resolve the latest stable release version from the GitHub Releases API.
-fn resolve_latest(api_url: &str) -> Result<String, UpdateError> {
-    let body = fetch_text(api_url)?;
+fn resolve_latest(
+    client: &reqwest::blocking::Client,
+    api_url: &str,
+) -> Result<String, UpdateError> {
+    let body = fetch_text(client, api_url)?;
     let value: serde_json::Value = serde_json::from_str(&body).map_err(|error| {
         UpdateError::failed(format!(
             "could not parse the latest-release response from {api_url}: {error}"
@@ -298,6 +308,7 @@ fn resolve_latest(api_url: &str) -> Result<String, UpdateError> {
 
 /// Download, verify, extract, and atomically install the release archive.
 fn install_version(
+    client: &reqwest::blocking::Client,
     version: &str,
     platform: Platform,
     base_url: &str,
@@ -308,8 +319,8 @@ fn install_version(
     let checksum_url = format!("{archive_url}.sha256");
 
     println!("==> downloading {archive_url}");
-    let archive = fetch(&archive_url)?;
-    let checksum = fetch_text(&checksum_url)?;
+    let archive = fetch(client, &archive_url)?;
+    let checksum = fetch_text(client, &checksum_url)?;
     println!("==> verifying SHA-256 checksum");
     verify_checksum(&archive, &checksum, &archive_name)?;
 
@@ -486,25 +497,36 @@ fn check_version(exe: &Path, version: &str) -> Result<(), UpdateError> {
 }
 
 /// Fetch `url` and return the response body as UTF-8 text.
-fn fetch_text(url: &str) -> Result<String, UpdateError> {
-    let bytes = fetch(url)?;
+fn update_client() -> Result<reqwest::blocking::Client, UpdateError> {
+    reqwest::blocking::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| {
+            UpdateError::failed(format!(
+                "could not initialize HTTPS client for release downloads: {error}"
+            ))
+        })
+}
+
+fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, UpdateError> {
+    let bytes = fetch(client, url)?;
     String::from_utf8(bytes).map_err(|error| {
         UpdateError::failed(format!("could not decode the response from {url}: {error}"))
     })
 }
 
 /// Fetch `url` and return the raw response body (bounded to 128 MiB).
-fn fetch(url: &str) -> Result<Vec<u8>, UpdateError> {
-    let response = ureq::get(url)
-        .set("User-Agent", USER_AGENT)
-        .timeout(Duration::from_secs(60))
-        .call()
+fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, UpdateError> {
+    let response = client
+        .get(url)
+        .send()
         .map_err(|error| {
             UpdateError::failed(format!(
                 "could not download {url} ({error}); check the network connection or pin a version with `wright update --version`"
             ))
         })?;
-    if !(200..300).contains(&response.status()) {
+    if !response.status().is_success() {
         return Err(UpdateError::failed(format!(
             "could not download {url} (HTTP {})",
             response.status()
@@ -512,7 +534,6 @@ fn fetch(url: &str) -> Result<Vec<u8>, UpdateError> {
     }
     let mut bytes = Vec::new();
     response
-        .into_reader()
         .take(128 * 1024 * 1024)
         .read_to_end(&mut bytes)
         .map_err(|error| UpdateError::failed(format!("could not download {url}: {error}")))?;

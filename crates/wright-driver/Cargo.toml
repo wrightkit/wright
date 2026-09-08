@@ -17,7 +17,6 @@ sha2.workspace = true
 flate2.workspace = true
 tar.workspace = true
 reqwest.workspace = true
-ureq.workspace = true
 url = "2"
 wright-analyzer.workspace = true
 wright-core.workspace = true
