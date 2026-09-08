@@ -320,7 +320,7 @@ jobs:
     name: Publish formula to homebrew-tap
     needs:
       - package-manifests
-      - publish-r2
+      - publish-release
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ inputs.tag }}

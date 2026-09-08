@@ -66,7 +66,7 @@ workflow is the single product release path:
    `scripts/release.sh` and `scripts/verify-dist.py`, builds and smoke-tests the
    native matrix, attaches archives/checksums/manifests to the draft, and marks
    the GitHub Release public. It then publishes the exact verified archives and
-   checksums to R2 and updates the Homebrew tap.
+   checksums to R2 and independently updates the Homebrew tap.
 
 A failure before the GitHub Release is published leaves the same draft
 Release/tag available for a retry; it does not create a new product version.
