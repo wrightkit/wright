@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.19](https://github.com/wrightkit/wright/compare/v0.2.18...v0.2.19) (2026-09-08)
+
+
+### Features
+
+* **analyzer:** flag ongoing condition hot paths ([785c71e](https://github.com/wrightkit/wright/commit/785c71ee5b6f975b2d43e367437ae5229201da86)), closes [#263](https://github.com/wrightkit/wright/issues/263)
+* **compat:** gate OPY integration by Workshop semantics ([5b7c6d2](https://github.com/wrightkit/wright/commit/5b7c6d2ebbc3e1a4c82ef49431903d5188adf7f4)), closes [#270](https://github.com/wrightkit/wright/issues/270)
+
+
+### Bug Fixes
+
+* **analyzer:** preserve condition short circuiting ([0ba1425](https://github.com/wrightkit/wright/commit/0ba142520d22eac0ef2349b5a3470521e46784c4)), closes [#263](https://github.com/wrightkit/wright/issues/263)
+* **cli:** route profile selection through driver facade ([d8588af](https://github.com/wrightkit/wright/commit/d8588afe03a1d4f0ee25ae2e1ef6239ea9a10a6c)), closes [#267](https://github.com/wrightkit/wright/issues/267)
+* **compat:** consume Workshop-owned semantic equivalence ([c68da9f](https://github.com/wrightkit/wright/commit/c68da9f497e1d514e739909557f371658a45294f))
+* **compat:** remove synthetic Workshop equivalence ([6b49ff3](https://github.com/wrightkit/wright/commit/6b49ff323b321ae6af0c5f02550284afc0acbcbd)), closes [#270](https://github.com/wrightkit/wright/issues/270)
+
 ## [0.2.18](https://github.com/wrightkit/wright/compare/v0.2.17...v0.2.18) (2026-09-05)
 
 
