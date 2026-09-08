@@ -2,8 +2,7 @@
 param(
     [string]$Version,
     [string]$InstallDir,
-    [string]$BaseUrl,
-    [string]$ApiUrl
+    [string]$BaseUrl
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,19 +19,19 @@ function Resolve-Setting([string]$Value, [string]$EnvironmentName, [string]$Defa
     return $Default
 }
 
-function Get-Version([string]$RequestedVersion, [string]$ReleaseApiUrl) {
+function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
     if ($RequestedVersion) {
         $resolved = $RequestedVersion.TrimStart("v")
     } else {
+        $latestVersionUrl = "$($ReleaseBaseUrl.TrimEnd('/'))/latest/version"
         try {
-            $release = Invoke-RestMethod -Uri $ReleaseApiUrl -Headers @{ "User-Agent" = "wright-installer" }
-            $resolved = ([string]$release.tag_name).TrimStart("v")
+            $resolved = ([string](Invoke-RestMethod -Uri $latestVersionUrl -Headers @{ "User-Agent" = "wright-installer" })).Trim().TrimStart("v")
             if (-not $resolved) {
-                Fail "latest release response from $ReleaseApiUrl did not contain a tag; pin a version with -Version"
+                Fail "latest version response from $latestVersionUrl was empty; pin a version with -Version"
             }
         } catch {
-            if ($_.Exception.Message -like "error: latest release response*") { throw }
-            Fail "could not resolve the latest release from $ReleaseApiUrl; pin a version with -Version"
+            if ($_.Exception.Message -like "error: latest version response*") { throw }
+            Fail "could not resolve the latest release from $latestVersionUrl; pin a version with -Version"
         }
     }
     if ($resolved -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
@@ -70,9 +69,9 @@ if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.In
     Fail "unsupported CPU architecture; install.ps1 supports Windows x86_64 only"
 }
 
-$BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" "https://github.com/wrightkit/wright/releases/download"
-$ApiUrl = Resolve-Setting $ApiUrl "WRIGHT_API_URL" "https://api.github.com/repos/wrightkit/wright/releases/latest"
-$Version = Get-Version $Version $ApiUrl
+$BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" "https://releases.wrightkit.dev"
+$VersionFromLatest = -not $Version
+$Version = Get-Version $Version $BaseUrl
 if (-not $InstallDir) {
     $InstallRoot = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:USERPROFILE }
     if (-not $InstallRoot) { Fail "could not determine a user-writable install directory; pass -InstallDir" }
@@ -80,7 +79,11 @@ if (-not $InstallDir) {
 }
 
 $ArchiveName = "wright-$Version-$Target.zip"
-$ArchiveUrl = "$($BaseUrl.TrimEnd('/'))/v$Version/$ArchiveName"
+if ($VersionFromLatest) {
+    $ArchiveUrl = "$($BaseUrl.TrimEnd('/'))/latest/$ArchiveName"
+} else {
+    $ArchiveUrl = "$($BaseUrl.TrimEnd('/'))/releases/$Version/$ArchiveName"
+}
 $ChecksumUrl = "${ArchiveUrl}.sha256"
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) ("wright-install-" + [Guid]::NewGuid().ToString("N"))
 $ExtractDir = Join-Path $TempRoot "extract"
