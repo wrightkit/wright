@@ -85,7 +85,6 @@ def main() -> int:
         ).strip()},
         "comparison": {
             "contract": "workshop-rs::roundtrip::equivalent",
-            "ownerDefinedRepresentations": "workshop-rs::roundtrip::equivalent",
             "wrightPresentationPolicy": "debug HUD display strings are presentation-only",
         },
         "fixtures": {},
