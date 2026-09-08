@@ -167,14 +167,17 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
         )));
     }
 
-    let client = update_client()?;
     let current = env!("CARGO_PKG_VERSION").to_string();
-    let target_version = match requested {
+    let (target_version, client) = match requested {
         Some(version) => {
             parse_version(version)?;
-            version.trim_start_matches('v').to_string()
+            (version.trim_start_matches('v').to_string(), None)
         }
-        None => resolve_latest(&client, &env_api_url())?,
+        None => {
+            let client = update_client()?;
+            let version = resolve_latest(&client, &env_api_url())?;
+            (version, Some(client))
+        }
     };
 
     match compare_versions(&current, &target_version) {
@@ -204,6 +207,10 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
     }
 
     println!("==> installing wright {current} -> {target_version}");
+    let client = match client {
+        Some(client) => client,
+        None => update_client()?,
+    };
     install_version(
         &client,
         &target_version,
