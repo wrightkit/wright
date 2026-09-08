@@ -25,7 +25,7 @@ function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
     } else {
         $latestVersionUrl = "$($ReleaseBaseUrl.TrimEnd('/'))/latest/version"
         try {
-            $resolved = ([string](Invoke-RestMethod -Uri $latestVersionUrl -Headers @{ "User-Agent" = "wright-installer" })).Trim().TrimStart("v")
+            $resolved = ([string](Invoke-WebRequest -Uri $latestVersionUrl -UseBasicParsing).Content).Trim().TrimStart("v")
             if (-not $resolved) {
                 Fail "latest version response from $latestVersionUrl was empty; pin a version with -Version"
             }
