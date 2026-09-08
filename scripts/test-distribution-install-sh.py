@@ -35,8 +35,7 @@ def main() -> None:
             **os.environ,
             "HOME": str(home),
             "XDG_CONFIG_HOME": str(home / ".config"),
-            "WRIGHT_INSTALL_BASE_URL": fixture.base,
-            "WRIGHT_API_URL": f"{fixture.base}/repos/wrightkit/wright/releases/latest",
+            "WRIGHT_INSTALL_BASE_URL": fixture.r2_base,
         }
         run(
             CHANNEL,
@@ -52,6 +51,19 @@ def main() -> None:
             base_env,
         )
         native_smoke(CHANNEL, install_dir / "wright", install_dir / "wright-lsp", version)
+        latest_install_dir = fixture.work / "latest-install"
+        run(
+            CHANNEL,
+            "install.sh latest installation",
+            ["bash", str(ROOT / "install.sh"), "--dir", str(latest_install_dir)],
+            base_env,
+        )
+        native_smoke(
+            CHANNEL,
+            latest_install_dir / "wright",
+            latest_install_dir / "wright-lsp",
+            version,
+        )
     print(f"{CHANNEL} distribution validation passed")
 
 

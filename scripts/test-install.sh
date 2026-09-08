@@ -39,7 +39,7 @@ EOF
 
 make_archive() {
   local root="$1" triple="$2"
-  local release="$root/v$VERSION"
+  local release="$root/releases/$VERSION"
   local dir="$release/wright-$VERSION-$triple"
   local archive="$release/wright-$VERSION-$triple.tar.gz"
   mkdir -p "$dir"
@@ -66,16 +66,13 @@ wait_for_server() {
 for triple in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
   make_archive "$WORK/mock" "$triple"
 done
-
-mkdir -p "$WORK/mock/repos/wrightkit/wright/releases"
-cat > "$WORK/mock/repos/wrightkit/wright/releases/latest" <<EOF
-{"tag_name": "v$VERSION", "draft": false, "prerelease": false}
-EOF
+mkdir -p "$WORK/mock/latest"
+cp "$WORK/mock/releases/$VERSION"/* "$WORK/mock/latest/"
+printf '%s\n' "$VERSION" > "$WORK/mock/latest/version"
 
 python3 -m http.server "$PORT" --directory "$WORK/mock" >/dev/null 2>&1 &
 SERVER_PID=$!
 BASE_URL="http://127.0.0.1:$PORT"
-API_URL="$BASE_URL/repos/wrightkit/wright/releases/latest"
 wait_for_server "$BASE_URL"
 
 # --- helpers -----------------------------------------------------------------
@@ -92,9 +89,7 @@ report() {
 }
 
 run_install() {
-  WRIGHT_INSTALL_BASE_URL="$BASE_URL" \
-  WRIGHT_API_URL="$API_URL" \
-  "$INSTALLER" "$@"
+  WRIGHT_INSTALL_BASE_URL="$BASE_URL" "$INSTALLER" "$@"
 }
 
 expect_success() {
@@ -125,11 +120,11 @@ expect_failure() {
 
 expect_success "pinned install (native platform)" "$WORK/d1" --version "$VERSION"
 
-expect_success "latest-release resolution" "$WORK/d2"
+expect_success "latest release resolves without the GitHub API" "$WORK/d2"
 
 printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' \
   "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
-  > "$WORK/mock/v$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
+  > "$WORK/mock/releases/$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
    run_install --dir "$WORK/d3" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "checksum mismatch is rejected before install" fail
@@ -143,7 +138,7 @@ test ! -e "$WORK/d3/wright" \
   || report "nothing installed after checksum failure" fail
 
 printf 'not-a-hash  %s\n' "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
-  > "$WORK/mock/v$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
+  > "$WORK/mock/releases/$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
    run_install --dir "$WORK/d3b" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "malformed checksum file is rejected" fail
@@ -153,7 +148,7 @@ else
     || report "malformed checksum file is rejected" fail
 fi
 
-(cd "$WORK/mock/v$VERSION" && shasum -a 256 "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
+(cd "$WORK/mock/releases/$VERSION" && shasum -a 256 "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
   > "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256")
 
 expect_failure "unknown version fails with an actionable error" "does release" "$WORK/d4" \
@@ -200,7 +195,7 @@ else
 fi
 
 mkdir -p "$WORK/home"
-if HOME="$WORK/home" WRIGHT_INSTALL_BASE_URL="$BASE_URL" WRIGHT_API_URL="$API_URL" \
+if HOME="$WORK/home" WRIGHT_INSTALL_BASE_URL="$BASE_URL" \
    "$INSTALLER" --version "$VERSION" >/dev/null 2>&1 &&
    test -x "$WORK/home/.local/bin/wright"; then
   report "default install directory (\$HOME/.local/bin)" ok
@@ -210,7 +205,7 @@ fi
 
 # Archive-layout regression: an archive missing wright-lsp must fail cleanly.
 make_archive "$WORK/mock-broken" "x86_64-unknown-linux-gnu"
-release="$WORK/mock-broken/v$VERSION"
+release="$WORK/mock-broken/releases/$VERSION"
 rm -f "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
       "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 dir="$release/wright-$VERSION-x86_64-unknown-linux-gnu"
@@ -226,7 +221,7 @@ BROKEN_PID=$!
 BROKEN_BASE_URL="http://127.0.0.1:$((PORT + 1))"
 wait_for_server "$BROKEN_BASE_URL"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
-   WRIGHT_INSTALL_BASE_URL="$BROKEN_BASE_URL" WRIGHT_API_URL="$API_URL" \
+   WRIGHT_INSTALL_BASE_URL="$BROKEN_BASE_URL" \
    "$INSTALLER" --dir "$WORK/d9" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "archive missing wright-lsp fails cleanly" fail
 else

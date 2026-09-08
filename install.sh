@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Wright installer for Linux and macOS (#108).
 #
-# Installs the standalone `wright` and `wright-lsp` binaries from the
-# canonical Wright GitHub Release archives. It is a thin release-artifact
-# installer, not a package manager or source-build frontend: it resolves the
-# platform artifact, verifies the published SHA-256 checksum, extracts the two
-# binaries, and smoke-checks the installed version.
+# Installs the standalone `wright` and `wright-lsp` binaries from WrightKit's
+# release distribution. GitHub Releases remains the canonical release record;
+# this thin installer resolves the R2-backed release artifact, verifies its
+# SHA-256 checksum, extracts the two binaries, and smoke-checks the installed
+# version.
 #
 # Usage:
 #   install.sh                   # latest stable release into ~/.local/bin
@@ -13,19 +13,18 @@
 #   install.sh --dir ~/bin       # custom installation directory
 #
 # Environment overrides (test/advanced hooks, not the primary interface):
-#   WRIGHT_INSTALL_BASE_URL  base URL of release artifacts
-#   WRIGHT_API_URL           URL used to resolve the latest release
+#   WRIGHT_INSTALL_BASE_URL  base URL of the R2-backed release distribution
 #   WRIGHT_INSTALL_OS        override OS detection (linux | darwin)
 #   WRIGHT_INSTALL_ARCH      override CPU detection (x86_64 | aarch64)
 
 set -euo pipefail
 
-WRIGHT_INSTALL_BASE_URL="${WRIGHT_INSTALL_BASE_URL:-https://github.com/wrightkit/wright/releases/download}"
-WRIGHT_API_URL="${WRIGHT_API_URL:-https://api.github.com/repos/wrightkit/wright/releases/latest}"
+WRIGHT_INSTALL_BASE_URL="${WRIGHT_INSTALL_BASE_URL:-https://releases.wrightkit.dev}"
 
 VERSION=""
 INSTALL_DIR=""
 TMP_DIR=""
+VERSION_FROM_LATEST=false
 
 usage() {
   sed -n '2,11p' "$0" | sed 's/^# \?//'
@@ -115,16 +114,22 @@ fi
 
 if [[ -z "$VERSION" ]]; then
   echo "==> resolving latest stable release"
-  LATEST_JSON="$(curl -fsSL "$WRIGHT_API_URL" 2>/dev/null)" \
-    || fail "could not resolve the latest release from $WRIGHT_API_URL (offline or rate-limited?); pin a version with --version"
-  VERSION="$(printf '%s' "$LATEST_JSON" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  VERSION_FROM_LATEST=true
+  VERSION="$(curl -fsSL "$WRIGHT_INSTALL_BASE_URL/latest/version" 2>/dev/null)" \
+    || fail "could not resolve the latest release from $WRIGHT_INSTALL_BASE_URL/latest/version; pin a version with --version"
+  VERSION="$(printf '%s' "$VERSION" | tr -d '[:space:]')"
   VERSION="${VERSION#v}"
-  [[ -n "$VERSION" ]] || fail "could not parse the latest release tag; pin a version with --version"
+  printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' \
+    || fail "could not parse the latest release version; pin a version with --version"
   echo "    latest: $VERSION"
 fi
 
 ARCHIVE="wright-$VERSION-$TARGET.tar.gz"
-ARCHIVE_URL="$WRIGHT_INSTALL_BASE_URL/v$VERSION/$ARCHIVE"
+if [[ "$VERSION_FROM_LATEST" == true ]]; then
+  ARCHIVE_URL="$WRIGHT_INSTALL_BASE_URL/latest/$ARCHIVE"
+else
+  ARCHIVE_URL="$WRIGHT_INSTALL_BASE_URL/releases/$VERSION/$ARCHIVE"
+fi
 CHECKSUM_URL="$ARCHIVE_URL.sha256"
 EXPECTED_DIR="wright-$VERSION-$TARGET"
 

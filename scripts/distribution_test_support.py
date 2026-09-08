@@ -115,12 +115,9 @@ class ReleaseFixture:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_port}/releases/download"
+        self.r2_base = f"http://127.0.0.1:{self.server.server_port}/r2"
         self.metadata = self._generate_metadata()
-        latest = self.work / "repos" / "wrightkit" / "wright" / "releases" / "latest"
-        latest.parent.mkdir(parents=True, exist_ok=True)
-        latest.write_text(
-            f'{{"tag_name":"v{self.version}","draft":false,"prerelease":false}}\n'
-        )
+        self._stage_r2_distribution()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
@@ -155,6 +152,17 @@ class ReleaseFixture:
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         archive.with_name(f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n")
         return archive
+
+    def _stage_r2_distribution(self) -> None:
+        versioned = self.work / "r2" / "releases" / self.version
+        latest = self.work / "r2" / "latest"
+        versioned.mkdir(parents=True)
+        latest.mkdir(parents=True)
+        checksum = self.archive.with_name(f"{self.archive.name}.sha256")
+        for destination in (versioned, latest):
+            shutil.copy2(self.archive, destination / self.archive.name)
+            shutil.copy2(checksum, destination / checksum.name)
+        (latest / "version").write_text(f"{self.version}\n")
 
     def _generate_metadata(self) -> Path:
         generator = load_generator()
