@@ -19,6 +19,15 @@ on:
       GH_TOKEN:
         description: Dedicated cross-repository token with write access to wrightkit/homebrew-tap
         required: true
+      R2_ACCESS_KEY_ID:
+        description: Cloudflare R2 S3 API access key with write access to the release bucket
+        required: true
+      R2_SECRET_ACCESS_KEY:
+        description: Cloudflare R2 S3 API secret key with write access to the release bucket
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: Cloudflare account ID for the R2 S3 API endpoint
+        required: true
 
 permissions:
   contents: write
@@ -311,7 +320,7 @@ jobs:
     name: Publish formula to homebrew-tap
     needs:
       - package-manifests
-      - publish-release
+      - publish-r2
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ inputs.tag }}
@@ -369,3 +378,110 @@ jobs:
         run: >-
           gh release edit "${RELEASE_TAG}" --draft=false --latest
           --repo "${GITHUB_REPOSITORY}"
+
+  publish-r2:
+    name: Publish verified archives to R2
+    needs:
+      - upload-artifacts
+      - publish-release
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      R2_BUCKET: wrightkit-release
+      R2_PUBLIC_BASE_URL: https://releases.wrightkit.dev
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - name: Check R2 publication configuration
+        run: |
+          set -euo pipefail
+          aws --version
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wright-*
+          path: artifacts
+
+      - name: Publish immutable versioned objects, then advance latest
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          release_dir="${GITHUB_WORKSPACE}/release"
+          mkdir -p "${release_dir}"
+          for triple in x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
+            ext="tar.gz"
+            [[ "${triple}" == "x86_64-pc-windows-msvc" ]] && ext="zip"
+            archive="wright-${VERSION}-${triple}.${ext}"
+            test -f "artifacts/wright-${triple}/${archive}" || { echo "missing ${archive}" >&2; exit 1; }
+            test -f "artifacts/wright-${triple}/${archive}.sha256" || { echo "missing ${archive}.sha256" >&2; exit 1; }
+            cp "artifacts/wright-${triple}/${archive}" "${release_dir}/"
+            cp "artifacts/wright-${triple}/${archive}.sha256" "${release_dir}/"
+          done
+
+          put_immutable() {
+            local source="$1" key="$2" cache_control="$3" content_type="$4"
+            local existing
+            if aws s3api head-object --bucket "${R2_BUCKET}" --key "${key}" --endpoint-url "${R2_ENDPOINT}" >/dev/null 2>&1; then
+              existing="${GITHUB_WORKSPACE}/existing-$(basename "${key}")"
+              aws s3api get-object \
+                --bucket "${R2_BUCKET}" \
+                --key "${key}" \
+                --endpoint-url "${R2_ENDPOINT}" \
+                "${existing}" >/dev/null
+              cmp --silent "${source}" "${existing}" || {
+                echo "error: immutable R2 object ${key} differs from this release artifact" >&2
+                exit 1
+              }
+              rm -f "${existing}"
+              return
+            fi
+            aws s3api put-object \
+              --bucket "${R2_BUCKET}" \
+              --key "${key}" \
+              --body "${source}" \
+              --if-none-match '*' \
+              --cache-control "${cache_control}" \
+              --content-type "${content_type}" \
+              --endpoint-url "${R2_ENDPOINT}" >/dev/null
+          }
+
+          verify_public() {
+            local key="$1" source="$2" cache_pattern="$3"
+            local downloaded
+            downloaded="${GITHUB_WORKSPACE}/downloaded-$(basename "${key}")"
+            curl --fail --silent --show-error --location \
+              --output "${downloaded}" "${R2_PUBLIC_BASE_URL}/${key}"
+            cmp --silent "${source}" "${downloaded}"
+            curl --fail --silent --show-error --head "${R2_PUBLIC_BASE_URL}/${key}" | \
+              grep --ignore-case --extended-regexp "^cache-control:.*${cache_pattern}" >/dev/null
+            rm -f "${downloaded}"
+          }
+
+          for archive in "${release_dir}"/wright-*.tar.gz "${release_dir}"/wright-*.zip; do
+            [[ -e "${archive}" ]] || continue
+            checksum="${archive}.sha256"
+            expected_hash="$(awk 'NR == 1 { print $1 }' "${checksum}")"
+            actual_hash="$(sha256sum "${archive}" | awk 'NR == 1 { print $1 }')"
+            test "${actual_hash}" = "${expected_hash}"
+            name="$(basename "${archive}")"
+            for prefix in "releases/${VERSION}" latest; do
+              put_immutable "${archive}" "${prefix}/${name}" 'public, max-age=31536000, immutable' 'application/octet-stream'
+              put_immutable "${checksum}" "${prefix}/${name}.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
+              verify_public "${prefix}/${name}" "${archive}" 'max-age=31536000.*immutable'
+              verify_public "${prefix}/${name}.sha256" "${checksum}" 'max-age=31536000.*immutable'
+            done
+          done
+
+          printf '%s\n' "${VERSION}" > "${GITHUB_WORKSPACE}/latest-version"
+          aws s3api put-object \
+            --bucket "${R2_BUCKET}" \
+            --key latest/version \
+            --body "${GITHUB_WORKSPACE}/latest-version" \
+            --cache-control 'no-store, max-age=0' \
+            --content-type 'text/plain; charset=utf-8' \
+            --endpoint-url "${R2_ENDPOINT}" >/dev/null
+          verify_public latest/version "${GITHUB_WORKSPACE}/latest-version" 'no-store'
+          rm -f "${GITHUB_WORKSPACE}/latest-version"
