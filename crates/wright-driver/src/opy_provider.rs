@@ -189,9 +189,11 @@ impl OpyProviderResolver {
         requested_version: Option<&str>,
         target: &str,
     ) -> Result<ResolvedOpyProvider, OpyProviderError> {
+        let requested_version = requested_version.map(normalize_version).transpose()?;
+        let client = provider_client()?;
         let version = match requested_version {
-            Some(version) => normalize_version(version)?,
-            None => self.fetch_latest_version()?,
+            Some(version) => version,
+            None => self.fetch_latest_version(&client)?,
         };
         let archive_name = format!("opy-provider-{version}-{target}.{PROVIDER_ARCHIVE_EXTENSION}");
         let archive_url = format!(
@@ -199,8 +201,8 @@ impl OpyProviderResolver {
             self.base_url.trim_end_matches('/')
         );
         let checksum_url = format!("{archive_url}.sha256");
-        let archive = fetch(&archive_url)?;
-        let checksum = fetch_text(&checksum_url)?;
+        let archive = fetch(&client, &archive_url)?;
+        let checksum = fetch_text(&client, &checksum_url)?;
         verify_checksum(&archive, &checksum, &archive_name)?;
         self.install_archive(&version, target, &archive)?;
         Ok(ResolvedOpyProvider {
@@ -209,8 +211,11 @@ impl OpyProviderResolver {
         })
     }
 
-    fn fetch_latest_version(&self) -> Result<String, OpyProviderError> {
-        let body = fetch_text(&self.latest_version_url)?;
+    fn fetch_latest_version(
+        &self,
+        client: &reqwest::blocking::Client,
+    ) -> Result<String, OpyProviderError> {
+        let body = fetch_text(client, &self.latest_version_url)?;
         normalize_version(body.trim())
     }
 
@@ -473,30 +478,32 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
-fn fetch_text(url: &str) -> Result<String, OpyProviderError> {
-    let bytes = fetch(url)?;
+fn provider_client() -> Result<reqwest::blocking::Client, OpyProviderError> {
+    reqwest::blocking::Client::builder()
+        .user_agent(concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| {
+            OpyProviderError::offline(format!(
+                "cannot initialize HTTPS client for OPY provider release source: {error}"
+            ))
+        })
+}
+
+fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, OpyProviderError> {
+    let bytes = fetch(client, url)?;
     String::from_utf8(bytes).map_err(|error| {
         OpyProviderError::download(format!("cannot decode response from {url}: {error}"))
     })
 }
 
-fn fetch(url: &str) -> Result<Vec<u8>, OpyProviderError> {
-    let response = ureq::get(url)
-        .set(
-            "User-Agent",
-            concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION")),
-        )
-        .timeout(Duration::from_secs(60))
-        .call()
-        .map_err(|error| match error {
-            ureq::Error::Status(status, _) => {
-                OpyProviderError::download(format!("GET {url} failed with HTTP {status}"))
-            }
-            ureq::Error::Transport(error) => OpyProviderError::offline(format!(
-                "cannot reach OPY provider release source {url}: {error}"
-            )),
-        })?;
-    if !(200..300).contains(&response.status()) {
+fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, OpyProviderError> {
+    let response = client.get(url).send().map_err(|error| {
+        OpyProviderError::offline(format!(
+            "cannot reach OPY provider release source {url}: {error}"
+        ))
+    })?;
+    if !response.status().is_success() {
         return Err(OpyProviderError::download(format!(
             "GET {url} failed with HTTP {}",
             response.status()
@@ -504,7 +511,6 @@ fn fetch(url: &str) -> Result<Vec<u8>, OpyProviderError> {
     }
     let mut bytes = Vec::new();
     response
-        .into_reader()
         .take(MAX_DOWNLOAD_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| {
