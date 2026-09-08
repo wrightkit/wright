@@ -13,8 +13,9 @@ use std::time::Duration;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
-const DEFAULT_API_URL: &str = "https://api.github.com/repos/wrightkit/opy-rs/releases/latest";
-const DEFAULT_BASE_URL: &str = "https://github.com/wrightkit/opy-rs/releases/download";
+const DEFAULT_LATEST_VERSION_URL: &str =
+    "https://releases.wrightkit.dev/opy-rs/latest/version";
+const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/opy-rs/releases";
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 const PROVIDER_ARCHIVE_EXTENSION: &str = "tar.gz";
 
@@ -72,7 +73,7 @@ pub struct ResolvedOpyProvider {
 pub struct OpyProviderResolver {
     store_dir: PathBuf,
     target: Option<String>,
-    api_url: String,
+    latest_version_url: String,
     base_url: String,
 }
 
@@ -82,7 +83,7 @@ impl OpyProviderResolver {
         Self {
             store_dir: store_dir.into(),
             target: None,
-            api_url: DEFAULT_API_URL.to_string(),
+            latest_version_url: DEFAULT_LATEST_VERSION_URL.to_string(),
             base_url: DEFAULT_BASE_URL.to_string(),
         }
     }
@@ -97,10 +98,10 @@ impl OpyProviderResolver {
     /// Override the release endpoints without changing the artifact layout.
     pub fn with_release_urls(
         mut self,
-        api_url: impl Into<String>,
+        latest_version_url: impl Into<String>,
         base_url: impl Into<String>,
     ) -> Self {
-        self.api_url = api_url.into();
+        self.latest_version_url = latest_version_url.into();
         self.base_url = base_url.into();
         self
     }
@@ -195,7 +196,7 @@ impl OpyProviderResolver {
         };
         let archive_name = format!("opy-provider-{version}-{target}.{PROVIDER_ARCHIVE_EXTENSION}");
         let archive_url = format!(
-            "{}/v{version}/{archive_name}",
+            "{}/{version}/{archive_name}",
             self.base_url.trim_end_matches('/')
         );
         let checksum_url = format!("{archive_url}.sha256");
@@ -210,23 +211,8 @@ impl OpyProviderResolver {
     }
 
     fn fetch_latest_version(&self) -> Result<String, OpyProviderError> {
-        let body = fetch_text(&self.api_url)?;
-        let value: serde_json::Value = serde_json::from_str(&body).map_err(|error| {
-            OpyProviderError::download(format!(
-                "cannot parse the OPY release response from {}: {error}",
-                self.api_url
-            ))
-        })?;
-        let tag = value
-            .get("tag_name")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                OpyProviderError::download(format!(
-                    "the OPY release response from {} has no tag_name",
-                    self.api_url
-                ))
-            })?;
-        normalize_version(tag)
+        let body = fetch_text(&self.latest_version_url)?;
+        normalize_version(body.trim())
     }
 
     fn install_archive(
@@ -716,7 +702,10 @@ mod tests {
         let resolver = OpyProviderResolver::new(&root).with_target(target);
         let bytes = archive("2.0.0", target, b"cached");
         resolver.install_archive("2.0.0", target, &bytes).unwrap();
-        let offline = resolver.with_release_urls("http://127.0.0.1:1/latest", "http://127.0.0.1:1");
+        let offline = resolver.with_release_urls(
+            "http://127.0.0.1:1/opy-rs/latest/version",
+            "http://127.0.0.1:1/opy-rs/releases",
+        );
         let resolved = offline.resolve(None).unwrap();
         assert_eq!(resolved.version.as_deref(), Some("2.0.0"));
         assert_eq!(std::fs::read(resolved.executable).unwrap(), b"cached");
@@ -724,20 +713,23 @@ mod tests {
     }
 
     #[test]
-    fn missing_provider_bootstraps_from_release_api_and_artifacts() {
+    fn missing_provider_bootstraps_from_r2_pointer_and_artifacts() {
         let root = test_root("bootstrap");
         let target = "x86_64-unknown-linux-gnu";
         let version = "3.1.4";
         let bytes = archive(version, target, b"bootstrapped");
         let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
         let (base_url, requests, server) = test_server(
-            format!(r#"{{"tag_name":"v{version}"}}"#).into_bytes(),
+            version.as_bytes().to_vec(),
             bytes,
             checksum.into_bytes(),
         );
         let resolver = OpyProviderResolver::new(&root)
             .with_target(target)
-            .with_release_urls(format!("{base_url}/latest"), &base_url);
+            .with_release_urls(
+                format!("{base_url}/opy-rs/latest/version"),
+                format!("{base_url}/opy-rs/releases"),
+            );
         let resolved = resolver.resolve(None).unwrap();
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 3);
@@ -775,13 +767,16 @@ mod tests {
         let bytes = archive(version, &target, b"windows-provider");
         let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
         let (base_url, requests, server) = test_server(
-            format!(r#"{{"tag_name":"v{version}"}}"#).into_bytes(),
+            version.as_bytes().to_vec(),
             bytes,
             checksum.into_bytes(),
         );
         let resolver = OpyProviderResolver::new(&root)
             .with_target(&target)
-            .with_release_urls(format!("{base_url}/latest"), &base_url);
+            .with_release_urls(
+                format!("{base_url}/opy-rs/latest/version"),
+                format!("{base_url}/opy-rs/releases"),
+            );
         let updated = resolver.update(None).unwrap();
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 3);
@@ -791,7 +786,10 @@ mod tests {
             b"windows-provider"
         );
         let resolved = resolver
-            .with_release_urls("http://127.0.0.1:1/latest", "http://127.0.0.1:1")
+            .with_release_urls(
+                "http://127.0.0.1:1/opy-rs/latest/version",
+                "http://127.0.0.1:1/opy-rs/releases",
+            )
             .resolve(None)
             .unwrap();
         assert_eq!(resolved, updated);
@@ -809,7 +807,7 @@ mod tests {
     }
 
     fn test_server(
-        api: Vec<u8>,
+        latest_version: Vec<u8>,
         archive: Vec<u8>,
         checksum: Vec<u8>,
     ) -> (String, Arc<AtomicUsize>, thread::JoinHandle<()>) {
@@ -820,14 +818,14 @@ mod tests {
         let server = thread::spawn(move || {
             for _ in 0..3 {
                 let (mut stream, _) = listener.accept().unwrap();
-                respond(&mut stream, &api, &archive, &checksum);
+                respond(&mut stream, &latest_version, &archive, &checksum);
                 seen.fetch_add(1, Ordering::Relaxed);
             }
         });
         (format!("http://{address}"), requests, server)
     }
 
-    fn respond(stream: &mut TcpStream, api: &[u8], archive: &[u8], checksum: &[u8]) {
+    fn respond(stream: &mut TcpStream, latest_version: &[u8], archive: &[u8], checksum: &[u8]) {
         let mut request = Vec::new();
         let mut buffer = [0; 1024];
         while !request.windows(4).any(|window| window == b"\r\n\r\n") {
@@ -839,16 +837,18 @@ mod tests {
         }
         let request = String::from_utf8_lossy(&request);
         let path = request.split_whitespace().nth(1).unwrap_or_default();
-        let body = if path.ends_with("/latest") {
-            api
-        } else if path.ends_with(".sha256") {
-            checksum
+        let (status, body): (&str, &[u8]) = if path == "/opy-rs/latest/version" {
+            ("200 OK", latest_version)
+        } else if path.starts_with("/opy-rs/releases/") && path.ends_with(".sha256") {
+            ("200 OK", checksum)
+        } else if path.starts_with("/opy-rs/releases/") && path.ends_with(".tar.gz") {
+            ("200 OK", archive)
         } else {
-            archive
+            ("404 Not Found", b"not found")
         };
         write!(
             stream,
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         )
         .unwrap();
