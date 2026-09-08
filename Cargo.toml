@@ -15,14 +15,6 @@ repository = "https://github.com/wrightkit/wright"
 # released reference for the cutover — workspace crates consume it via
 # `workshop-rs.workspace = true`.
 workshop-rs = "=0.1.18"
-# Consume the owner PR until its next released crate is available; update this
-# exact revision to the released pin when workshop-rs#166 lands.
-workshop-rs-gate = {
-    package = "workshop-rs",
-    git = "https://github.com/wrightkit/workshop-rs.git",
-    rev = "ef73d13bbad8b746a5f67a1aa2f107aa2e7f4684",
-    version = "=0.3.1",
-}
 opy-rs = "=0.1.18"
 del-rs = { package = "deltin-rs", version = "=0.1.2" }
 libc = "0.2"
