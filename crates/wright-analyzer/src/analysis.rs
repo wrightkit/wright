@@ -11,7 +11,7 @@
 //! * [`ExpensiveLoopCheck`] (`expensive-loop-check`) — a geometry predicate
 //!   (`distance`, `raycast`, `isInLoS`) evaluated inside a loop body.
 //! * [`OngoingConditionHotPath`] (`ongoing-condition-hot-path`) — a geometry
-//!   predicate evaluated in an ongoing-rule condition every server tick.
+//!   predicate evaluated along an ongoing-rule condition path.
 //! * [`RepeatedValue`] (`repeated-value`) — a value expression evaluated
 //!   more than once within one loop scope, reported once per maximal
 //!   duplicated shape.
@@ -360,10 +360,11 @@ fn expensive_values_in_actions(program: &wir::Program, actions: &[ActionId]) -> 
 
 /// A potentially expensive predicate evaluated in an ongoing-rule condition.
 ///
-/// Ongoing rule conditions are evaluated in source order on every Workshop
-/// tick. This rule reports only the established geometry-predicate heuristic;
-/// it does not infer a measured cost or that a later condition is more
-/// selective than an earlier one.
+/// Each Workshop tick evaluates ongoing-rule conditions in source order until
+/// one condition short-circuits the rule. A predicate in a later condition is
+/// reached only when every preceding condition passes. This rule reports only
+/// the established geometry-predicate heuristic; it does not infer measured
+/// cost or the selectivity of any condition.
 pub struct OngoingConditionHotPath;
 
 impl Analysis for OngoingConditionHotPath {
@@ -388,6 +389,7 @@ impl Analysis for OngoingConditionHotPath {
         let condition_count = rule_data.conditions.len();
         let mut findings = Vec::new();
         for (index, condition) in rule_data.conditions.iter().copied().enumerate() {
+            let preceding_conditions = index;
             let later_conditions = condition_count - index - 1;
             let mut expensive_values = Vec::new();
             visit_value(program, condition, &mut |value_id| {
@@ -396,12 +398,20 @@ impl Analysis for OngoingConditionHotPath {
                 }
             });
             for value in expensive_values {
-                let order = if later_conditions == 0 {
-                    format!("condition {} of {condition_count}", index + 1)
+                let evaluation = if preceding_conditions == 0 {
+                    "is evaluated every server tick".to_string()
+                } else if preceding_conditions == 1 {
+                    "is evaluated only after 1 preceding condition passes".to_string()
                 } else {
                     format!(
-                        "condition {} of {condition_count}, before {later_conditions} later short-circuit gate{}",
-                        index + 1,
+                        "is evaluated only after {preceding_conditions} preceding conditions pass",
+                    )
+                };
+                let later_gates = if later_conditions == 0 {
+                    String::new()
+                } else {
+                    format!(
+                        ", before {later_conditions} later short-circuit gate{}",
                         if later_conditions == 1 { "" } else { "s" },
                     )
                 };
@@ -409,7 +419,8 @@ impl Analysis for OngoingConditionHotPath {
                     code: self.name(),
                     severity: Severity::Info,
                     message: format!(
-                        "geometry predicate in an ongoing-rule {order} is evaluated every server tick; its cost is heuristic, not measured runtime load"
+                        "geometry predicate in an ongoing-rule condition {} of {condition_count} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
+                        index + 1,
                     ),
                     span: program.values.get(value).and_then(|node| node.span),
                     rule,

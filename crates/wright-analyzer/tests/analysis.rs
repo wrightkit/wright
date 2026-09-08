@@ -200,11 +200,9 @@ fn ongoing_condition_hot_path_reports_ongoing_geometry_in_condition_order() {
     assert!(findings.iter().all(|finding| finding.action.is_none()));
     assert!(findings.iter().all(|finding| finding.span.is_some()));
     assert!(findings.iter().all(|finding| finding.value.is_some()));
-    assert!(
-        findings[0]
-            .message
-            .contains("condition 1 of 2, before 1 later short-circuit gate")
-    );
+    assert!(findings[0].message.contains(
+        "condition 1 of 2 is evaluated every server tick, before 1 later short-circuit gate"
+    ));
     assert!(findings[1].message.contains("condition 1 of 1"));
 
     let mut player_event = WirProgram::default();
@@ -247,7 +245,11 @@ fn ongoing_condition_hot_path_finds_a_real_project_case_outside_loop_analysis() 
         1,
         "cronch has one ongoing distance condition"
     );
-    assert!(findings[0].message.contains("condition 2 of 2"));
+    assert!(
+        findings[0]
+            .message
+            .contains("condition 2 of 2 is evaluated only after 1 preceding condition passes")
+    );
     assert!(findings_by_code(&program, "expensive-loop-check").is_empty());
 }
 
