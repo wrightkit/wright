@@ -25,11 +25,9 @@ function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
     } else {
         $latestVersionUrl = "$($ReleaseBaseUrl.TrimEnd('/'))/latest/version"
         try {
-            $response = Invoke-WebRequest -Uri $latestVersionUrl -UseBasicParsing
-            $content = if ($response.Content -is [byte[]]) {
-                [Text.Encoding]::UTF8.GetString($response.Content)
-            } else {
-                [string]$response.Content
+            $content = & curl.exe --fail --location --silent --show-error --http2 $latestVersionUrl
+            if ($LASTEXITCODE -ne 0) {
+                Fail "could not resolve the latest release from $latestVersionUrl; pin a version with -Version"
             }
             $resolved = $content.Trim().TrimStart("v")
             if (-not $resolved) {
@@ -101,8 +99,10 @@ try {
     $ChecksumPath = "$ArchivePath.sha256"
     Write-Host "==> downloading $ArchiveUrl"
     try {
-        Invoke-WebRequest -Uri $ArchiveUrl -OutFile $ArchivePath -UseBasicParsing
-        Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumPath -UseBasicParsing
+        & curl.exe --fail --location --silent --show-error --http2 --output $ArchivePath $ArchiveUrl
+        if ($LASTEXITCODE -ne 0) { throw "archive download failed" }
+        & curl.exe --fail --location --silent --show-error --http2 --output $ChecksumPath $ChecksumUrl
+        if ($LASTEXITCODE -ne 0) { throw "checksum download failed" }
     } catch {
         Fail "failed to download the release archive or checksum for v$Version from $BaseUrl"
     }

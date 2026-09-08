@@ -13,6 +13,12 @@ function Fail([string]$Message) {
 }
 
 try {
+    $InstallerText = Get-Content -LiteralPath $Installer -Raw
+    $Http2RequestCount = [regex]::Matches($InstallerText, 'curl\.exe\s+--fail\s+--location\s+--silent\s+--show-error\s+--http2').Count
+    if ($Http2RequestCount -ne 3) {
+        Fail "installer must use curl.exe with HTTP/2 for latest, archive, and checksum requests"
+    }
+
     $VersionedRelease = Join-Path $Work "releases\$Version"
     $LatestRelease = Join-Path $Work "latest"
     $Payload = Join-Path $Work "payload\wright-$Version-$Target"
