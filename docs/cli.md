@@ -225,10 +225,12 @@ The following lint-only flags configure the registry and are repeatable:
 These flags are usage errors on every other command (exit 2).
 
 `ongoing-condition-hot-path` is a heuristic about the per-tick evaluation of
-an `Ongoing - Global` or `Ongoing - Each Player` rule's conditions. It does
-not claim that the rule's action block executes every tick while conditions
-remain true, measure server cost, or conclude that a later condition would be
-more selective.
+an `Ongoing - Global` or `Ongoing - Each Player` rule's conditions. Each tick
+evaluates conditions in source order until one short-circuits the rule, so a
+predicate in a later condition is reached only after every preceding condition
+passes. It does not claim that the rule's action block executes every tick
+while conditions remain true, measure server cost, or infer the selectivity of
+any condition.
 
 The `lint` result envelope carries `input_identity` (the SHA-256 source
 identity; the tool/agent API exposes the same value as `inputIdentity`),
