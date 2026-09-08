@@ -25,7 +25,13 @@ function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
     } else {
         $latestVersionUrl = "$($ReleaseBaseUrl.TrimEnd('/'))/latest/version"
         try {
-            $resolved = ([string](Invoke-WebRequest -Uri $latestVersionUrl -UseBasicParsing).Content).Trim().TrimStart("v")
+            $response = Invoke-WebRequest -Uri $latestVersionUrl -UseBasicParsing
+            $content = if ($response.Content -is [byte[]]) {
+                [Text.Encoding]::UTF8.GetString($response.Content)
+            } else {
+                [string]$response.Content
+            }
+            $resolved = $content.Trim().TrimStart("v")
             if (-not $resolved) {
                 Fail "latest version response from $latestVersionUrl was empty; pin a version with -Version"
             }
