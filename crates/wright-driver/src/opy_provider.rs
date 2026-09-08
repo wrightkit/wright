@@ -13,8 +13,7 @@ use std::time::Duration;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
-const DEFAULT_LATEST_VERSION_URL: &str =
-    "https://releases.wrightkit.dev/opy-rs/latest/version";
+const DEFAULT_LATEST_VERSION_URL: &str = "https://releases.wrightkit.dev/opy-rs/latest/version";
 const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/opy-rs/releases";
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 const PROVIDER_ARCHIVE_EXTENSION: &str = "tar.gz";
@@ -719,11 +718,8 @@ mod tests {
         let version = "3.1.4";
         let bytes = archive(version, target, b"bootstrapped");
         let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
-        let (base_url, requests, server) = test_server(
-            version.as_bytes().to_vec(),
-            bytes,
-            checksum.into_bytes(),
-        );
+        let (base_url, requests, server) =
+            test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
         let resolver = OpyProviderResolver::new(&root)
             .with_target(target)
             .with_release_urls(
@@ -766,11 +762,8 @@ mod tests {
         let version = "1.0.0";
         let bytes = archive(version, &target, b"windows-provider");
         let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
-        let (base_url, requests, server) = test_server(
-            version.as_bytes().to_vec(),
-            bytes,
-            checksum.into_bytes(),
-        );
+        let (base_url, requests, server) =
+            test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
         let resolver = OpyProviderResolver::new(&root)
             .with_target(&target)
             .with_release_urls(
