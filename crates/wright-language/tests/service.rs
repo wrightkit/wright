@@ -1166,6 +1166,37 @@ fn ostw_documents_get_shared_diagnostics_and_symbol_classification() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn ostw_diagnostics_keep_the_neutral_analysis_contract() {
+    let (mut service, main_uri, _lib_uri, _) = ostw_project_documents();
+    let malformed = "import \"lib.del\";\nrule: \"main\" {\n";
+    assert!(service.store.change(&main_uri, malformed, 1));
+
+    let analysis = service.analyze(service.store.document(&main_uri).unwrap());
+    let error: &wright_language::SourceError = analysis
+        .parse_errors
+        .first()
+        .expect("malformed OSTW produces a structured error");
+    assert!(
+        !error.code.is_empty(),
+        "the native diagnostic code is retained"
+    );
+    assert!(
+        !error.message.is_empty(),
+        "the native diagnostic message is retained"
+    );
+    assert!(error.span.is_some());
+
+    let diagnostics = service.diagnostics(&main_uri);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.source.ends_with("main.ostw"))
+        .expect("the error remains attributed to the main OSTW source");
+    assert_eq!(diagnostic.code, error.code);
+    assert_eq!(diagnostic.message, error.message);
+    assert_eq!(diagnostic.range.start.line, 2);
+}
+
 // -- #129: OSTW semantic rename through the shared contract --------------------
 
 fn ostw_project_documents() -> (LanguageService, String, String, String) {

@@ -12,7 +12,6 @@ use serde::Serialize;
 use workshop_rs::wir;
 use wright_analyzer::analysis::{self, Finding};
 use wright_analyzer::symbols::{SemanticIndex, Symbol};
-use wright_opy::preprocess::FileRecord;
 
 use crate::document::{Document, DocumentStore, Position, Range};
 
@@ -113,15 +112,30 @@ pub struct RenameResult {
     pub diagnostics: Vec<String>,
 }
 
+/// A source-language-independent diagnostic retained by the service analysis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceError {
+    pub code: String,
+    pub message: String,
+    pub span: Option<workshop_rs::source::Span>,
+}
+
+/// A source-language-independent file identity retained by the service analysis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFile {
+    pub id: workshop_rs::source::FileId,
+    pub path: String,
+}
+
 /// The analyzed state of one document.
 pub struct Analysis {
     pub program: wir::Program,
     pub index: Option<SemanticIndex>,
     pub findings: Vec<Finding>,
-    pub parse_errors: Vec<wright_opy::OpyError>,
+    pub parse_errors: Vec<SourceError>,
     /// The frontend file registry, retained even when parsing/lowering fails
     /// so diagnostic spans can be mapped to their actual source.
-    pub files: Vec<FileRecord>,
+    pub files: Vec<SourceFile>,
 }
 
 /// The editor-neutral language service over a workspace.
@@ -160,12 +174,13 @@ impl LanguageService {
             &self.root,
             &overlay,
         );
+        let files = files.into_iter().map(opy_file).collect();
         let Some(program) = program else {
             return Analysis {
                 program: wir::Program::default(),
                 index: None,
                 findings: Vec::new(),
-                parse_errors: error.into_iter().collect(),
+                parse_errors: error.into_iter().map(opy_error).collect(),
                 files,
             };
         };
@@ -199,23 +214,23 @@ impl LanguageService {
         });
         let (outcome, semantic) =
             wright_ostw::compile_with_semantics(&document.text, relative.as_deref(), &self.root);
-        let files: Vec<FileRecord> = outcome
+        let files: Vec<SourceFile> = outcome
             .project
             .as_ref()
             .map(|project| {
                 project
                     .files
                     .iter()
-                    .map(|file| FileRecord {
-                        id: file.id,
+                    .map(|file| SourceFile {
+                        id: workshop_rs::source::FileId::from_index(file.id as usize),
                         path: file.path.clone(),
                     })
                     .collect()
             })
             .unwrap_or_default();
-        let mut parse_errors: Vec<wright_opy::OpyError> =
-            outcome.diagnostics.iter().map(ostw_error_to_opy).collect();
-        parse_errors.extend(semantic.diagnostics.iter().map(ostw_error_to_opy));
+        let mut parse_errors: Vec<SourceError> =
+            outcome.diagnostics.iter().map(ostw_error).collect();
+        parse_errors.extend(semantic.diagnostics.iter().map(ostw_error));
         let Some(program) = semantic.wir else {
             return Analysis {
                 program: wir::Program::default(),
@@ -248,7 +263,7 @@ impl LanguageService {
         let analysis = self.analyze(document);
         let mut diagnostics = Vec::new();
         for error in &analysis.parse_errors {
-            let span = error.span.as_ref().map(ir_span);
+            let span = error.span;
             let (source, range) = self.diagnostic_location(&analysis.files, document, span);
             let source_version = self.source_version(&source, document);
             diagnostics.push(SourceDiagnostic {
@@ -397,7 +412,7 @@ impl LanguageService {
     /// Map a compiler span to its source identity and 0-based range.
     fn source_location(
         &self,
-        files: &[FileRecord],
+        files: &[SourceFile],
         document: &Document,
         span: workshop_rs::source::Span,
     ) -> SourceLocation {
@@ -416,14 +431,14 @@ impl LanguageService {
     /// root).
     fn source_identity(
         &self,
-        files: &[FileRecord],
+        files: &[SourceFile],
         document: &Document,
         file_index: usize,
     ) -> String {
         if file_index == 0 {
             return document.uri.clone();
         }
-        match files.iter().find(|file| file.id as usize == file_index) {
+        match files.iter().find(|file| file.id.index() == file_index) {
             Some(file) => {
                 let path = PathBuf::from(&file.path);
                 if path.is_absolute() {
@@ -465,7 +480,7 @@ impl LanguageService {
     /// range, using the span's actual source text.
     fn diagnostic_location(
         &self,
-        files: &[FileRecord],
+        files: &[SourceFile],
         document: &Document,
         span: Option<workshop_rs::source::Span>,
     ) -> (String, Range) {
@@ -629,7 +644,7 @@ impl LanguageService {
             let mut root_sources: BTreeMap<String, String> = BTreeMap::new();
             for file in &analysis.files {
                 let identity =
-                    self.source_identity(&analysis.files, root_document, file.id as usize);
+                    self.source_identity(&analysis.files, root_document, file.id.index());
                 let canonical = self.canonical_source(&identity);
                 root_sources.insert(canonical, self.source_text(&identity, root_document));
             }
@@ -867,7 +882,7 @@ impl LanguageService {
         analysis
             .files
             .iter()
-            .filter(|file| file.id != 0)
+            .filter(|file| file.id.index() != 0)
             .any(|file| {
                 let include_path = PathBuf::from(&file.path);
                 let resolved = if include_path.is_absolute() {
@@ -997,8 +1012,22 @@ impl LanguageService {
     }
 }
 
-/// Convert a frontend span to the IR span representation.
-fn ir_span(span: &wright_opy::diag::Span) -> workshop_rs::source::Span {
+fn opy_file(file: wright_opy::preprocess::FileRecord) -> SourceFile {
+    SourceFile {
+        id: workshop_rs::source::FileId::from_index(file.id as usize),
+        path: file.path,
+    }
+}
+
+fn opy_error(error: wright_opy::OpyError) -> SourceError {
+    SourceError {
+        code: error.code,
+        message: error.message,
+        span: error.span.map(opy_span),
+    }
+}
+
+fn opy_span(span: wright_opy::diag::Span) -> workshop_rs::source::Span {
     workshop_rs::source::Span::new(
         wright_ir::ids::Id::from_index(span.file as usize),
         workshop_rs::source::Position::new(span.start.line, span.start.col),
@@ -1018,23 +1047,12 @@ fn is_ostw_document(uri: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Map an OSTW frontend error into the shared language-service error shape
-/// (same code/message/span contract; the registry ids are project ids).
-fn ostw_error_to_opy(error: &wright_ostw::SourceError) -> wright_opy::OpyError {
-    wright_opy::OpyError {
+/// Map an OSTW frontend error into the shared language-service error shape.
+fn ostw_error(error: &wright_ostw::SourceError) -> SourceError {
+    SourceError {
         code: error.code.clone(),
         message: error.message.clone(),
-        span: error.span.map(opy_span),
-    }
-}
-
-/// Convert a shared `wright_ir` span into the language service's frontend
-/// span shape.
-fn opy_span(span: workshop_rs::source::Span) -> wright_opy::diag::Span {
-    wright_opy::diag::Span {
-        file: span.file.index() as u32,
-        start: wright_opy::diag::Position::new(span.start.line, span.start.col),
-        end: wright_opy::diag::Position::new(span.end.line, span.end.col),
+        span: error.span,
     }
 }
 
