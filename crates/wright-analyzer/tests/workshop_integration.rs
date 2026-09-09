@@ -1,11 +1,9 @@
 //! Native Workshop input integration tests (#36): localized Workshop text
 //! drives the existing rule/symbol/reference/usage/CFG/finding queries and
-//! the read-only tool interface, with Workshop-origin metadata and usable
+//! the read-only semantic service, with Workshop-origin metadata and usable
 //! source spans.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use serde_json::Value;
 use workshop_rs::catalog::{Catalog, Locale};
@@ -102,72 +100,4 @@ fn workshop_input_references_preserve_source_spans() {
             .any(|reference| reference["kind"] == "write" && reference["span"].is_object()),
         "workshop input references must carry usable spans: {references:?}"
     );
-}
-
-#[test]
-fn external_tool_serves_workshop_input_with_origin_metadata() {
-    let bin = env!("CARGO_BIN_EXE_wright-tool");
-    let dir = std::env::temp_dir().join("wright-tool-workshop-test");
-    std::fs::create_dir_all(&dir).unwrap();
-    let workshop = dir.join("program.txt");
-    std::fs::write(&workshop, corpus_text("synthetic/basic-rule")).unwrap();
-
-    let mut child = Command::new(bin)
-        .args(["--workshop"])
-        .arg(&workshop)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawns");
-    let mut stdin = child.stdin.take().unwrap();
-    writeln!(stdin, r#"{{"op":"program"}}"#).unwrap();
-    writeln!(stdin, r#"{{"op":"listRules"}}"#).unwrap();
-    drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "wright-tool failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let lines: Vec<Value> = stdout
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0]["result"]["origin"]["kind"], "workshop");
-    assert_eq!(lines[0]["result"]["origin"]["locale"], "en-us");
-    let rules = lines[1]["result"].as_array().unwrap();
-    assert_eq!(rules[0]["name"], "setup");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn external_tool_honors_explicit_locale_override() {
-    let bin = env!("CARGO_BIN_EXE_wright-tool");
-    let dir = std::env::temp_dir().join("wright-tool-workshop-locale");
-    std::fs::create_dir_all(&dir).unwrap();
-    let workshop = dir.join("program.txt");
-    std::fs::write(&workshop, corpus_text("synthetic/basic-rule")).unwrap();
-
-    let mut child = Command::new(bin)
-        .arg("--workshop")
-        .arg(&workshop)
-        .args(["--locale", "en-US"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawns");
-    let mut stdin = child.stdin.take().unwrap();
-    writeln!(stdin, r#"{{"op":"version"}}"#).unwrap();
-    drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let _ = std::fs::remove_dir_all(&dir);
 }
