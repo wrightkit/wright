@@ -191,7 +191,7 @@ if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.In
     Fail "unsupported CPU architecture; install.ps1 supports Windows x86_64 only"
 }
 
-$BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" "https://releases.wrightkit.dev"
+$BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" "https://releases.wrightkit.dev/wright"
 $Version = Get-Version $Version $BaseUrl
 if (-not $InstallDir) {
     $InstallRoot = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:USERPROFILE }

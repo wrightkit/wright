@@ -1,7 +1,6 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Installer = Join-Path $Root "install.ps1"
-$BaseUrl = "https://releases.wrightkit.dev"
 $Work = Join-Path ([IO.Path]::GetTempPath()) ("wright-install-r2-test-" + [Guid]::NewGuid().ToString("N"))
 $InstallDir = Join-Path $Work "bin"
 
@@ -10,7 +9,7 @@ function Fail([string]$Message) {
 }
 
 try {
-    & $Installer -InstallDir $InstallDir -BaseUrl $BaseUrl
+    & $Installer -InstallDir $InstallDir
     $ExpectedExecutables = @("wright.exe", "wright-lsp.exe")
     if ($ExpectedExecutables.Count -ne 2 -or
         $ExpectedExecutables[0] -ne "wright.exe" -or

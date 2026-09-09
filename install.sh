@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-WRIGHT_INSTALL_BASE_URL="${WRIGHT_INSTALL_BASE_URL:-https://releases.wrightkit.dev}"
+WRIGHT_INSTALL_BASE_URL="${WRIGHT_INSTALL_BASE_URL:-https://releases.wrightkit.dev/wright}"
 
 VERSION=""
 INSTALL_DIR=""

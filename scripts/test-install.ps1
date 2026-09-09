@@ -14,7 +14,8 @@ function Fail([string]$Message) {
 
 try {
     $InstallerText = Get-Content -LiteralPath $Installer -Raw
-    if ($InstallerText -notmatch 'WinHttpSetOption\(session,\s*WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL' -or
+    if ($InstallerText -notmatch 'https://releases\.wrightkit\.dev/wright' -or
+        $InstallerText -notmatch 'WinHttpSetOption\(session,\s*WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL' -or
         $InstallerText -notmatch 'WinHttpSetOption\(request,\s*WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED' -or
         $InstallerText -notmatch 'WinHttpQueryOption\(request,\s*WINHTTP_OPTION_HTTP_PROTOCOL_USED' -or
         $InstallerText -match 'Start-BitsTransfer|curl\.exe|Invoke-(WebRequest|RestMethod)') {
@@ -25,8 +26,8 @@ try {
         Fail "installer must use WinHTTP for latest, archive, and checksum requests"
     }
 
-    $VersionedRelease = Join-Path $Work "releases\$Version"
-    $LatestRelease = Join-Path $Work "latest"
+    $VersionedRelease = Join-Path $Work "wright\releases\$Version"
+    $LatestRelease = Join-Path $Work "wright\latest"
     $Payload = Join-Path $Work "payload\wright-$Version-$Target"
     New-Item -ItemType Directory -Path $VersionedRelease, $LatestRelease, $Payload -Force | Out-Null
     foreach ($Name in @("wright.exe", "wright-lsp.exe")) {
@@ -54,7 +55,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.Sim
     $ServerScript = Join-Path $Work "server.py"
     $ServerCode | Set-Content -LiteralPath $ServerScript -NoNewline -Encoding ASCII
     $Server = Start-Process -FilePath "python" -ArgumentList @($ServerScript, $Port, $Work) -PassThru -WindowStyle Hidden
-    $BaseUrl = "http://127.0.0.1:$Port"
+    $BaseUrl = "http://127.0.0.1:$Port/wright"
     $LatestVersionUrl = "$BaseUrl/latest/version"
     for ($Attempt = 0; $Attempt -lt 30; $Attempt++) {
         try {

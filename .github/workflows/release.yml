@@ -467,19 +467,19 @@ jobs:
             actual_hash="$(sha256sum "${archive}" | awk 'NR == 1 { print $1 }')"
             test "${actual_hash}" = "${expected_hash}"
             name="$(basename "${archive}")"
-            put_immutable "${archive}" "releases/${VERSION}/${name}" 'public, max-age=31536000, immutable' 'application/octet-stream'
-            put_immutable "${checksum}" "releases/${VERSION}/${name}.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
-            verify_public "releases/${VERSION}/${name}" "${archive}" 'max-age=31536000.*immutable'
-            verify_public "releases/${VERSION}/${name}.sha256" "${checksum}" 'max-age=31536000.*immutable'
+            put_immutable "${archive}" "wright/releases/${VERSION}/${name}" 'public, max-age=31536000, immutable' 'application/octet-stream'
+            put_immutable "${checksum}" "wright/releases/${VERSION}/${name}.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
+            verify_public "wright/releases/${VERSION}/${name}" "${archive}" 'max-age=31536000.*immutable'
+            verify_public "wright/releases/${VERSION}/${name}.sha256" "${checksum}" 'max-age=31536000.*immutable'
           done
 
           printf '%s\n' "${VERSION}" > "${GITHUB_WORKSPACE}/latest-version"
           aws s3api put-object \
             --bucket "${R2_BUCKET}" \
-            --key latest/version \
+            --key wright/latest/version \
             --body "${GITHUB_WORKSPACE}/latest-version" \
             --cache-control 'no-store, max-age=0' \
             --content-type 'text/plain; charset=utf-8' \
             --endpoint-url "${R2_ENDPOINT}" >/dev/null
-          verify_public latest/version "${GITHUB_WORKSPACE}/latest-version" 'no-store'
+          verify_public wright/latest/version "${GITHUB_WORKSPACE}/latest-version" 'no-store'
           rm -f "${GITHUB_WORKSPACE}/latest-version"
