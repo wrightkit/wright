@@ -384,6 +384,7 @@ impl CompilerSession {
                 "the source provider returned no canonical Workshop output",
             ));
         };
+        self.progress(ProgressEvent::new(ProgressPhase::Parsing));
         let program = workshop_rs::parser::parse_with_context(
             &workshop_text,
             &self.catalog,
@@ -689,7 +690,7 @@ impl CompilerSession {
     /// This report deliberately does not execute or expose the lint registry.
     pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
         let command = "analyze";
-        let loaded = match self.load() {
+        let loaded = match self.load_with_operation(ProviderOperation::Compile) {
             Ok(loaded) => loaded,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
@@ -781,7 +782,7 @@ impl CompilerSession {
     /// configuration the CLI flags and programmatic consumers set.
     pub fn lint(&mut self) -> Envelope<LintResult> {
         let command = "lint";
-        let loaded = match self.load() {
+        let loaded = match self.load_with_operation(ProviderOperation::Compile) {
             Ok(loaded) => loaded,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
@@ -944,7 +945,11 @@ impl CompilerSession {
         config: LintConfig,
     ) -> Result<SemanticService<'a>, Diagnostic> {
         let origin = ServiceOrigin {
-            kind: loaded.origin.kind.clone(),
+            kind: if loaded.provenance == Provenance::Unmapped {
+                "provider-artifact".to_string()
+            } else {
+                loaded.origin.kind.clone()
+            },
             locale: loaded.origin.locale.clone(),
         };
         SemanticService::with_origin_and_config(&loaded.program, origin, config)
