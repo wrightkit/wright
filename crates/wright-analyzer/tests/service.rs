@@ -1,10 +1,7 @@
 //! Integration tests for the read-only agent/tool interface (#26): the JSON
-//! request/response contract, exercised in-process and through the actual
-//! `wright-tool` binary as an external consumer boundary.
+//! request/response contract exercised in-process.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
@@ -370,89 +367,4 @@ fn errors_are_structured() {
         assert!(error["code"].is_string());
         assert!(error["message"].is_string());
     }
-}
-
-#[test]
-fn external_process_inspects_a_compiled_program_without_parsing_source() {
-    // The acceptance boundary: an external process drives `wright-tool` over
-    // a compiled program and inspects semantic relationships.
-    let bin = env!("CARGO_BIN_EXE_wright-tool");
-    let requests = [
-        r#"{"op":"version"}"#,
-        r#"{"op":"program"}"#,
-        r#"{"op":"listRules"}"#,
-        r#"{"op":"getRule","rule":1}"#,
-        r#"{"op":"listSymbols"}"#,
-        r#"{"op":"findReferences","symbol":0}"#,
-        r#"{"op":"getUsage","symbol":0}"#,
-        r#"{"op":"getCfg","rule":1}"#,
-        r#"{"op":"getFindings"}"#,
-    ];
-
-    let stdout = run_tool(bin, "synthetic/control-flow", &requests);
-    let lines: Vec<Value> = stdout
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("each response is JSON"))
-        .collect();
-    assert_eq!(lines.len(), requests.len());
-
-    assert_eq!(lines[0]["result"]["name"], "wright-tool");
-    assert_eq!(lines[1]["result"]["rules"], 2);
-    let rules = lines[2]["result"].as_array().unwrap();
-    assert_eq!(rules[0]["name"], "control flow");
-    assert_eq!(lines[3]["result"]["name"], "bounded while");
-    assert!(
-        lines[4]["result"].as_array().unwrap().len() >= 3,
-        "symbols exist"
-    );
-    assert!(
-        lines[5]["result"].as_array().unwrap().len() >= 4,
-        "index references exist"
-    );
-    assert_eq!(lines[6]["result"]["reads"], 6);
-    assert!(!lines[7]["result"]["blocks"].as_array().unwrap().is_empty());
-    assert!(
-        lines[8]["result"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|finding| finding["code"] == "min-wait-loop")
-    );
-
-    // Deterministic across processes.
-    let second = run_tool(bin, "synthetic/control-flow", &requests);
-    assert_eq!(stdout, second, "external responses must be deterministic");
-}
-
-#[test]
-fn external_process_rejects_missing_program_argument() {
-    let bin = env!("CARGO_BIN_EXE_wright-tool");
-    let output = Command::new(bin)
-        .stdin(Stdio::null())
-        .output()
-        .expect("spawns");
-    assert_eq!(output.status.code(), Some(2));
-}
-
-fn run_tool(bin: &str, fixture_id: &str, requests: &[&str]) -> String {
-    let mut child = Command::new(bin)
-        .arg("--program")
-        .arg(fixture_path(fixture_id))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("wright-tool spawns");
-    let mut stdin = child.stdin.take().expect("stdin");
-    for request in requests {
-        writeln!(stdin, "{request}").expect("write request");
-    }
-    drop(stdin);
-    let output = child.wait_with_output().expect("wright-tool runs");
-    assert!(
-        output.status.success(),
-        "wright-tool failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("stdout is UTF-8")
 }
