@@ -111,7 +111,60 @@ jobs:
       all-features: true
 
   # -------------------------------------------------------------------------
-  # [1a] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
+  # [1a] WRIGHT CLI ARTIFACT  (stable/debug executable for compatible jobs)
+  # Build this exact workflow revision once. Consumers below need the CLI
+  # executable only; jobs with another output or test-build identity stay
+  # independent.
+  # -------------------------------------------------------------------------
+  wright-cli-build:
+    name: Build Wright CLI (stable/debug)
+    needs: [paths, rust-quality]
+    if: needs.paths.outputs.opy == 'true' || needs.paths.outputs.cli == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: false
+          cache-on-failure: false
+
+      - name: Build wright CLI (debug)
+        run: cargo build --locked -p wright-cli
+
+      - name: Upload current-run Wright CLI
+        uses: actions/upload-artifact@v7
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug/wright
+          if-no-files-found: error
+
+      - name: Record CLI artifact provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Wright CLI artifact"
+            echo ""
+            echo "- Revision: \`${GITHUB_SHA}\`"
+            echo "- Build identity: stable / debug / ubuntu-latest"
+            echo "- SHA-256: \`$(sha256sum target/debug/wright | cut -d' ' -f1)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------
+  # [1b] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
   # Runs the owner-pinned real-project inputs through the actual `wright`
   # check/lint commands. The source snapshots and residual expectations remain
   # owned by the released workshop-rs corpus.
@@ -167,7 +220,7 @@ jobs:
   # -------------------------------------------------------------------------
   opy-integration:
     name: OPY integration (semantic + owner)
-    needs: [paths, rust-quality]
+    needs: [paths, rust-quality, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -189,8 +242,14 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Build wright (debug)
-        run: cargo build --locked -p wright-cli
+      - name: Download current-run Wright CLI
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+
+      - name: Prepare Wright CLI executable
+        run: chmod +x target/debug/wright
 
       - name: Validate committed compatibility evidence
         run: python3 -m unittest discover -s compatibility/tests
@@ -363,7 +422,7 @@ jobs:
   # -------------------------------------------------------------------------
   cli-behavior:
     name: Wright CLI behavior (GitHub Actions smoke)
-    needs: [paths, rust-quality]
+    needs: [paths, rust-quality, wright-cli-build]
     if: needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -375,8 +434,14 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Build wright CLI
-        run: cargo build --locked -p wright-cli
+      - name: Download current-run Wright CLI
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+
+      - name: Prepare Wright CLI executable
+        run: chmod +x target/debug/wright
 
       - name: Exercise auto GitHub Actions renderer
         shell: bash
@@ -409,7 +474,7 @@ jobs:
   # -------------------------------------------------------------------------
   scenario-validation:
     name: Scenario validation (end-to-end)
-    needs: [paths, rust-quality]
+    needs: [paths, rust-quality, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -431,8 +496,14 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Build wright (debug)
-        run: cargo build --locked -p wright-cli
+      - name: Download current-run Wright CLI
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+
+      - name: Prepare Wright CLI executable
+        run: chmod +x target/debug/wright
 
       - name: Run compile-time scenarios
         id: scenarios
@@ -513,8 +584,8 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Build wright and bench (debug)
-        run: cargo build --locked -p wright-cli -p wright-bench
+      - name: Build benchmark (stable/debug)
+        run: cargo build --locked -p wright-bench
 
       - name: Run benchmarks
         id: bench
