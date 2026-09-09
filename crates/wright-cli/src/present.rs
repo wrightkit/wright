@@ -17,7 +17,9 @@ use std::time::Duration;
 use wright_driver::Severity;
 use wright_driver::config::OutputFormat;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
-use wright_driver::result::Envelope;
+use wright_driver::result::{
+    AnalyzeResult, CheckResult, CompileResult, ConvertResult, Envelope, InspectResult, LintResult,
+};
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
 
@@ -260,7 +262,10 @@ fn env_truthy(name: &str) -> bool {
 
 /// Render one result envelope. JSON is deliberately handled before renderer
 /// selection so it can never receive ANSI, progress, or workflow commands.
-pub(crate) fn render<T: serde::Serialize>(envelope: &Envelope<T>, presentation: Presentation) {
+pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
+    envelope: &Envelope<T>,
+    presentation: Presentation,
+) {
     if presentation.format == OutputFormat::Json {
         let mut value = serde_json::to_value(envelope).expect("envelope serializes");
         if envelope.command == "check" {
@@ -277,16 +282,15 @@ pub(crate) fn render<T: serde::Serialize>(envelope: &Envelope<T>, presentation: 
     }
 }
 
-fn render_text<T: serde::Serialize>(envelope: &Envelope<T>, color: bool) {
-    let value = serde_json::to_value(envelope).expect("envelope serializes");
+fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>, color: bool) {
     if !matches!(envelope.command.as_str(), "compile" | "convert") {
-        render_verdict(envelope, &value, color);
+        render_verdict(envelope, color);
     }
     for diagnostic in &envelope.diagnostics {
         render_diagnostic(diagnostic, color);
     }
     if envelope.command == "check" {
-        render_ostw_summary(envelope);
+        envelope.result.render_check_summary();
     }
     if !envelope.ok {
         if envelope.diagnostics.is_empty() {
@@ -295,23 +299,11 @@ fn render_text<T: serde::Serialize>(envelope: &Envelope<T>, color: bool) {
         return;
     }
 
-    match envelope.command.as_str() {
-        "compile" => render_compile(envelope),
-        "convert" => render_convert(envelope),
-        "check" => {}
-        "analyze" => render_analyze(envelope),
-        "lint" => render_lint(envelope),
-        "inspect" => render_inspect(envelope),
-        other => println!("{other}: ok"),
-    }
+    envelope.result.render_body();
 }
 
-fn render_verdict<T: serde::Serialize>(
-    envelope: &Envelope<T>,
-    value: &serde_json::Value,
-    color: bool,
-) {
-    let status = summary_status(envelope, value);
+fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>, color: bool) {
+    let status = summary_status(envelope);
     let label = if color {
         let code = match status {
             "PASS" => "32",
@@ -325,24 +317,7 @@ fn render_verdict<T: serde::Serialize>(
     println!("{label} {}", envelope.command);
     let metadata = match envelope.command.as_str() {
         "check" => format!("{} diagnostic(s)", envelope.diagnostics.len()),
-        "lint" => format!(
-            "{} finding(s) across {} rule(s)",
-            array_len(value, "/result/findings"),
-            array_len(value, "/result/rules"),
-        ),
-        "analyze" => format!(
-            "{} rule(s), {} symbol(s); ranked semantic report",
-            value
-                .pointer("/result/program")
-                .map_or(0, |program| count(program, "rules")),
-            array_len(value, "/result/facts/symbols"),
-        ),
-        "inspect" => format!(
-            "{} rule(s), {} symbol(s)",
-            array_len(value, "/result/rules"),
-            array_len(value, "/result/symbols"),
-        ),
-        _ => return,
+        _ => envelope.result.metadata().unwrap_or_default(),
     };
     println!("  {}", dim(&metadata, color));
 }
@@ -355,41 +330,24 @@ fn dim(value: &str, color: bool) -> String {
     }
 }
 
-fn array_len(value: &serde_json::Value, pointer: &str) -> usize {
-    value
-        .pointer(pointer)
-        .and_then(serde_json::Value::as_array)
-        .map_or(0, Vec::len)
-}
-
-fn render_github<T: serde::Serialize>(envelope: &Envelope<T>) {
+fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) {
     for diagnostic in &envelope.diagnostics {
         emit_diagnostic_annotation(diagnostic);
     }
-    let value = serde_json::to_value(envelope).expect("envelope serializes");
-    if let Some(findings) = value
-        .pointer("/result/findings")
-        .and_then(serde_json::Value::as_array)
-    {
-        for finding in findings {
-            emit_finding_annotation(finding);
-        }
-    }
+    envelope.result.render_github_findings();
 
     eprintln!(
         "::group::{}",
         escape_workflow_data(&format!("wright {}", envelope.command))
     );
-    if envelope.command == "compile" {
-        render_compile(envelope);
-    } else if envelope.command == "convert" {
-        render_convert(envelope);
+    if matches!(envelope.command.as_str(), "compile" | "convert") {
+        envelope.result.render_body();
     } else {
-        let status = summary_status(envelope, &value);
+        let status = summary_status(envelope);
         eprintln!("{status} {}", envelope.command);
     }
     eprintln!("::endgroup::");
-    emit_summary(envelope, &value);
+    emit_summary(envelope);
 }
 
 fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
@@ -433,22 +391,10 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
         .and_then(serde_json::Value::as_str)
         .filter(|path| is_real_source_path(path));
     let Some(path) = path else { return };
-    let line = span
-        .pointer("/start/line")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(1);
-    let col = span
-        .pointer("/start/col")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(1);
-    let end_line = span
-        .pointer("/end/line")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(line);
-    let end_col = span
-        .pointer("/end/col")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(col);
+    let line = span_position(span, "start", "line").unwrap_or(1);
+    let col = span_position(span, "start", "col").unwrap_or(1);
+    let end_line = span_position(span, "end", "line").unwrap_or(line);
+    let end_col = span_position(span, "end", "col").unwrap_or(col);
     let code = finding
         .get("code")
         .and_then(serde_json::Value::as_str)
@@ -471,7 +417,7 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum SummaryStatus {
+pub(crate) enum SummaryStatus {
     Pass,
     Warn,
     Error,
@@ -496,9 +442,99 @@ impl SummaryStatus {
     }
 }
 
-fn summary_status<T: serde::Serialize>(
+pub(crate) trait ResultPresentation {
+    fn metadata(&self) -> Option<String> {
+        None
+    }
+    fn render_body(&self);
+    fn render_check_summary(&self) {}
+    fn render_github_findings(&self) {}
+    fn update_summary_status(&self, _status: &mut SummaryStatus) {}
+}
+
+impl ResultPresentation for CompileResult {
+    fn render_body(&self) {
+        render_compile(self);
+    }
+}
+
+impl ResultPresentation for ConvertResult {
+    fn render_body(&self) {
+        render_convert(self);
+    }
+}
+
+impl ResultPresentation for CheckResult {
+    fn render_body(&self) {}
+
+    fn render_check_summary(&self) {
+        render_ostw_summary(self);
+    }
+}
+
+impl ResultPresentation for AnalyzeResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!(
+            "{} rule(s), {} symbol(s); ranked semantic report",
+            count(&self.program, "rules"),
+            self.facts.get("symbols").map_or(0, array_len),
+        ))
+    }
+
+    fn render_body(&self) {
+        render_analyze(self);
+    }
+}
+
+impl ResultPresentation for LintResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!(
+            "{} finding(s) across {} rule(s)",
+            array_len(&self.findings),
+            array_len(&self.rules),
+        ))
+    }
+
+    fn render_body(&self) {
+        render_lint(self);
+    }
+
+    fn render_github_findings(&self) {
+        if let Some(findings) = self.findings.as_array() {
+            for finding in findings {
+                emit_finding_annotation(finding);
+            }
+        }
+    }
+
+    fn update_summary_status(&self, status: &mut SummaryStatus) {
+        if let Some(findings) = self.findings.as_array() {
+            for finding in findings {
+                if let Some(severity) = finding.get("severity").and_then(serde_json::Value::as_str)
+                {
+                    *status = (*status).max(SummaryStatus::from_finding_severity(severity));
+                }
+            }
+        }
+    }
+}
+
+impl ResultPresentation for InspectResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!(
+            "{} rule(s), {} symbol(s)",
+            array_len(&self.rules),
+            array_len(&self.symbols),
+        ))
+    }
+
+    fn render_body(&self) {
+        render_inspect(self);
+    }
+}
+
+fn summary_status<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
-    value: &serde_json::Value,
 ) -> &'static str {
     let mut status = if envelope.ok {
         SummaryStatus::Pass
@@ -512,21 +548,12 @@ fn summary_status<T: serde::Serialize>(
             Severity::Info => SummaryStatus::Pass,
         });
     }
-    if let Some(findings) = value
-        .pointer("/result/findings")
-        .and_then(serde_json::Value::as_array)
-    {
-        for finding in findings {
-            if let Some(severity) = finding.get("severity").and_then(serde_json::Value::as_str) {
-                status = status.max(SummaryStatus::from_finding_severity(severity));
-            }
-        }
-    }
+    envelope.result.update_summary_status(&mut status);
     status.as_str()
 }
 
-fn emit_summary<T: serde::Serialize>(envelope: &Envelope<T>, value: &serde_json::Value) {
-    let status = summary_status(envelope, value);
+fn emit_summary<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) {
+    let status = summary_status(envelope);
     let line = format!(
         "Wright `{}`: **{status}** (exit {})",
         envelope.command, envelope.exit
@@ -570,60 +597,51 @@ fn is_real_source_path(path: &str) -> bool {
     !path.is_empty() && !path.starts_with('<')
 }
 
-fn render_compile<T: serde::Serialize>(envelope: &Envelope<T>) {
-    let value = serde_json::to_value(envelope).expect("envelope serializes");
-    let Some(output) = value.pointer("/result/output") else {
+fn span_position(span: &serde_json::Value, edge: &str, coordinate: &str) -> Option<u64> {
+    span.get(edge)
+        .and_then(serde_json::Value::as_object)
+        .and_then(|position| position.get(coordinate))
+        .and_then(serde_json::Value::as_u64)
+}
+
+fn render_compile(result: &CompileResult) {
+    let Some(output) = result.output.as_ref() else {
         eprintln!("compile: failed (no output produced)");
         return;
     };
-    let text = output
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if output.get("written_to").and_then(serde_json::Value::as_str) != Some("stdout") {
+    if output.written_to != "stdout" {
         return;
     }
-    print!("{text}");
+    print!("{}", output.text);
 }
 
-fn render_convert<T: serde::Serialize>(envelope: &Envelope<T>) {
-    let value = serde_json::to_value(envelope).expect("envelope serializes");
-    let Some(result) = value.pointer("/result") else {
-        eprintln!("convert: failed (no source produced)");
-        return;
-    };
-    let text = result
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    print!("{text}");
+fn render_convert(result: &ConvertResult) {
+    print!("{}", result.text);
 }
 
-fn render_analyze<T: serde::Serialize>(envelope: &Envelope<T>) {
-    let value = serde_json::to_value(envelope).expect("envelope serializes");
-    let program = value
-        .pointer("/result/program")
-        .cloned()
-        .unwrap_or_default();
-    let facts = value.pointer("/result/facts").cloned().unwrap_or_default();
+fn array_len(value: &serde_json::Value) -> usize {
+    value.as_array().map_or(0, Vec::len)
+}
+
+fn render_analyze(result: &AnalyzeResult) {
+    let program = &result.program;
+    let facts = &result.facts;
     let symbols = facts
         .get("symbols")
         .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .map_or(&[][..], Vec::as_slice);
     let rules = facts
         .get("rules")
         .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .map_or(&[][..], Vec::as_slice);
     println!("\nProgram overview");
     println!(
         "  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s)",
-        count(&program, "files"),
-        count(&program, "rules"),
-        count(&program, "globalVariables"),
-        count(&program, "playerVariables"),
-        count(&program, "subroutines"),
+        count(program, "files"),
+        count(program, "rules"),
+        count(program, "globalVariables"),
+        count(program, "playerVariables"),
+        count(program, "subroutines"),
     );
     println!("  evidence: [static] parsed program inventory");
 
@@ -632,7 +650,7 @@ fn render_analyze<T: serde::Serialize>(envelope: &Envelope<T>) {
     let mut total_loops = 0;
     let mut total_waits = 0;
     let mut rule_hotspots = Vec::new();
-    for rule in &rules {
+    for rule in rules {
         let flow = rule.get("controlFlow").cloned().unwrap_or_default();
         let blocks = count(&flow, "blocks");
         let edges = count(&flow, "edges");
@@ -725,13 +743,8 @@ fn count(value: &serde_json::Value, key: &str) -> usize {
         .unwrap_or(0) as usize
 }
 
-fn render_lint<T: serde::Serialize>(envelope: &Envelope<T>) {
-    let value = serde_json::to_value(envelope).expect("envelope serializes");
-    let findings = value
-        .pointer("/result/findings")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+fn render_lint(result: &LintResult) {
+    let findings = result.findings.as_array().cloned().unwrap_or_default();
     println!("\nLint findings");
     if findings.is_empty() {
         println!("  none");
@@ -768,22 +781,10 @@ fn render_lint<T: serde::Serialize>(envelope: &Envelope<T>) {
     }
 }
 
-fn render_inspect<T: serde::Serialize>(envelope: &Envelope<T>) {
-    let value = serde_json::to_value(envelope).expect("envelope serializes");
-    let program = value
-        .pointer("/result/program")
-        .cloned()
-        .unwrap_or_default();
-    let rules = value
-        .pointer("/result/rules")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let symbols = value
-        .pointer("/result/symbols")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+fn render_inspect(result: &InspectResult) {
+    let program = &result.program;
+    let rules = result.rules.as_array().cloned().unwrap_or_default();
+    let symbols = result.symbols.as_array().cloned().unwrap_or_default();
     let count = program
         .get("rules")
         .and_then(serde_json::Value::as_u64)
@@ -818,69 +819,24 @@ fn render_inspect<T: serde::Serialize>(envelope: &Envelope<T>) {
     }
 }
 
-fn render_ostw_summary<T: serde::Serialize>(envelope: &Envelope<T>) {
-    let Ok(value) = serde_json::to_value(envelope) else {
+fn render_ostw_summary(result: &CheckResult) {
+    let Some(ostw) = result.ostw.as_ref() else {
         return;
     };
-    let Some(ostw) = value.pointer("/result/ostw") else {
-        return;
-    };
-    let entry = ostw
-        .get("entry")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let files = ostw
-        .get("files")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let sources: Vec<_> = files
-        .iter()
-        .filter(|file| {
-            file.get("source")
-                .and_then(|s| s.as_bool())
-                .unwrap_or(false)
-        })
-        .collect();
-    let parsed = sources
-        .iter()
-        .filter(|file| {
-            file.get("parsed")
-                .and_then(|p| p.as_bool())
-                .unwrap_or(false)
-        })
-        .count();
-    let inventory = ostw
-        .get("inventory")
-        .and_then(serde_json::Value::as_array)
-        .map(|list| list.len())
-        .unwrap_or(0);
+    let sources: Vec<_> = ostw.files.iter().filter(|file| file.source).collect();
+    let parsed = sources.iter().filter(|file| file.parsed).count();
     println!(
-        "ostw project: entry {entry}, {parsed}/{} import-reachable sources parsed (inventory {inventory})",
-        sources.len()
+        "ostw project: entry {}, {parsed}/{} import-reachable sources parsed (inventory {})",
+        ostw.entry,
+        sources.len(),
+        ostw.inventory.len()
     );
-    for file in &files {
-        let path = file
-            .get("path")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        if !file
-            .get("source")
-            .and_then(|s| s.as_bool())
-            .unwrap_or(false)
-        {
-            println!("  {path} (project file)");
+    for file in &ostw.files {
+        if !file.source {
+            println!("  {} (project file)", file.path);
         } else {
-            let status = if file
-                .get("parsed")
-                .and_then(|p| p.as_bool())
-                .unwrap_or(false)
-            {
-                "parsed"
-            } else {
-                "parse-error"
-            };
-            println!("  {path} {status}");
+            let status = if file.parsed { "parsed" } else { "parse-error" };
+            println!("  {} {status}", file.path);
         }
     }
 }
@@ -922,14 +878,8 @@ fn print_span(span: &serde_json::Value, indent: &str) {
         .get("path")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("<span>");
-    let line = span
-        .pointer("/start/line")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let col = span
-        .pointer("/start/col")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
+    let line = span_position(span, "start", "line").unwrap_or(0);
+    let col = span_position(span, "start", "col").unwrap_or(0);
     println!("{indent}--> {path}:{line}:{col}");
     render_source_context(path, line as u32, col as u32, indent);
 }
@@ -1110,8 +1060,8 @@ mod tests {
         ok: bool,
         diagnostics: Vec<wright_driver::Diagnostic>,
         findings: serde_json::Value,
-    ) -> (Envelope<serde_json::Value>, serde_json::Value) {
-        let envelope = Envelope {
+    ) -> Envelope<LintResult> {
+        Envelope {
             wright: wright_driver::result::VersionInfo {
                 version: "test".to_string(),
                 contract: "wright-result/v1".to_string(),
@@ -1120,10 +1070,11 @@ mod tests {
             ok,
             exit: if ok { 0 } else { 1 },
             diagnostics,
-            result: serde_json::json!({"findings": findings}),
-        };
-        let value = serde_json::to_value(&envelope).unwrap();
-        (envelope, value)
+            result: LintResult {
+                findings,
+                ..LintResult::default()
+            },
+        }
     }
 
     fn diagnostic(severity: Severity) -> wright_driver::Diagnostic {
@@ -1140,7 +1091,7 @@ mod tests {
 
     #[test]
     fn summary_info_only_is_pass() {
-        let (envelope, value) = summary_envelope(
+        let envelope = summary_envelope(
             true,
             vec![diagnostic(Severity::Info)],
             serde_json::json!([
@@ -1148,22 +1099,22 @@ mod tests {
                 {"severity": "notice"}
             ]),
         );
-        assert_eq!(summary_status(&envelope, &value), "PASS");
+        assert_eq!(summary_status(&envelope), "PASS");
     }
 
     #[test]
     fn summary_warning_over_info_is_warn() {
-        let (envelope, value) = summary_envelope(
+        let envelope = summary_envelope(
             true,
             vec![diagnostic(Severity::Warning)],
             serde_json::json!([{"severity": "info"}]),
         );
-        assert_eq!(summary_status(&envelope, &value), "WARN");
+        assert_eq!(summary_status(&envelope), "WARN");
     }
 
     #[test]
     fn summary_error_over_warning_is_error() {
-        let (envelope, value) = summary_envelope(
+        let envelope = summary_envelope(
             true,
             vec![diagnostic(Severity::Error)],
             serde_json::json!([
@@ -1172,6 +1123,6 @@ mod tests {
                 {"severity": "info"}
             ]),
         );
-        assert_eq!(summary_status(&envelope, &value), "ERROR");
+        assert_eq!(summary_status(&envelope), "ERROR");
     }
 }

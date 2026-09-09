@@ -331,7 +331,7 @@ fn is_opy_input(common: &CommonArgs) -> bool {
 }
 
 /// Run one driver workflow and render its envelope in the CLI presentation.
-fn run_command<T: serde::Serialize>(
+fn run_command<T: serde::Serialize + present::ResultPresentation>(
     session: &mut wright_driver::CompilerSession,
     run: fn(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
