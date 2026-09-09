@@ -1,5 +1,3 @@
-//! The authoritative structured command model for `wright`.
-
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};

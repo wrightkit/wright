@@ -1,5 +1,3 @@
-//! Source/project discovery: input kinds, path normalization, and stdin.
-//!
 //! The driver resolves one [`SessionConfig`] into a concrete
 //! [`ResolvedInput`]: the input text, the concrete frontend kind, a stable
 //! display identity for diagnostics, an include root for `.opy`, and a

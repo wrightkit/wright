@@ -220,7 +220,7 @@ impl<'a> Lowerer<'a> {
             self.subroutines.insert(id, wir_id);
         }
 
-        // Rules. Declaration initializers become synthetic
+        // Declaration initializers become synthetic
         // "Initialize global variables" / "Initialize player variables"
         // rules here, in the profile-independent lowering path, so
         // initialization semantics never depend on an optimization profile
@@ -436,9 +436,6 @@ impl<'a> Lowerer<'a> {
         let action = match &statement {
             Stmt::Expr { expr, .. } => match self.lower_expr_stmt_with(*expr, span, out, params)? {
                 Some(action) => action,
-                // The statement inlined into `out` (void-function call or a
-                // value-function call used for its side effects); nothing
-                // further to push.
                 None => return Ok(()),
             },
             Stmt::Assign { target, value, .. } => {
@@ -520,7 +517,6 @@ impl<'a> Lowerer<'a> {
                 *variable, *start, *condition, *step, body, span, out, params,
             )?,
             Stmt::Switch { value, cases, .. } => {
-                // Pushes the dispatch and every case body into `out`.
                 return self.lower_switch(*value, cases, span, out, params);
             }
             Stmt::Return { value, .. } => {

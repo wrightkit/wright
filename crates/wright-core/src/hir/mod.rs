@@ -1,5 +1,3 @@
-//! Opy HIR v1 — the Wright-owned frontend protocol consumed by the core.
-//!
 //! The wire contract is specified in
 //! [`docs/hir/opy-hir-v1.md`](../../../../docs/hir/opy-hir-v1.md). This module
 //! provides serde protocol types, envelope and structural validation, and a

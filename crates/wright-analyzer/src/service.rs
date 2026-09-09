@@ -1,14 +1,9 @@
-//! The read-only agent/tool interface over Wright's semantic services.
-//!
 //! [`SemanticService`] answers transport-neutral JSON requests about a
 //! compiled Workshop IR program: program summary, rule/action/value lookup,
 //! symbol/reference inspection, usage, CFG inspection, and static-analysis
 //! findings. The request/response models ([`Request`], [`Response`]) are
 //! plain serde data with no transport or UI dependency, and there is no
 //! mutation or AST-editing contract in v0.2.
-//!
-//! The `wright-tool` binary wires the pipeline (protocol JSON → internal HIR
-//! → Workshop IR) into this service and serves requests over stdin/stdout.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;

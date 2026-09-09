@@ -1,5 +1,3 @@
-//! Deterministic debug/pretty dump for Opy HIR v1 programs.
-//!
 //! The dump is a stable, human-readable rendering intended for tests and
 //! issue reports. It is not part of the wire contract: the same validated
 //! payload always produces the same dump, in payload order.

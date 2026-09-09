@@ -1,34 +1,8 @@
-//! Wright's Language Provider Protocol (LPP) v1 client (#142).
-//!
 //! This crate is the Wright-owned client/runtime side of the Language
 //! Provider Protocol. The wire contract itself — message shapes, methods,
 //! error kinds, and conformance fixtures — is owned by the
 //! `language-provider-protocol` repository (spec/lpp-v1.md); this crate
 //! consumes that contract and never redefines it.
-//!
-//! # Layers
-//!
-//! ```text
-//! ToolService / language services
-//!         |
-//!         |  LanguageProvider (transport-neutral, language-neutral trait)
-//!         v
-//!  StdioLanguageProvider    -- capability guards, typed LPP data mapping
-//!         |
-//!         |  JsonRpcClient   -- framing, correlation, timeouts, session phase
-//!         v
-//!  ChildProcess             -- spawn/kill/wait a long-running stdio provider
-//!         |
-//!         v
-//!  a provider binary (any source language; the conformance reference
-//!  provider serves the deliberately foreign `x-demo-lang` language)
-//! ```
-//!
-//! `StdioLanguageProvider` implements the [`LanguageProvider`] trait, which
-//! is the stable seam ToolService and language services consume. The trait
-//! exposes provider capabilities and source-oriented operations only; JSON-
-//! RPC framing, correlation ids, process handles, and timeouts stay below
-//! it.
 //!
 //! # Language neutrality
 //!

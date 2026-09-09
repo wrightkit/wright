@@ -1,5 +1,3 @@
-//! Transformation profiles.
-
 use serde::{Deserialize, Serialize};
 
 /// The transformation policy for a session.

@@ -1,5 +1,3 @@
-//! Shell completion generation, detection, installation, and refresh (#186).
-//!
 //! Provides the authoritative lifecycle for shell completions generated from
 //! the `clap` command model. Supports pure generation (`wright completion <shell>`),
 //! automatic or explicit installation into conventional user-local locations

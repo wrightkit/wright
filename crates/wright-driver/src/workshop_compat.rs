@@ -1,5 +1,3 @@
-//! Semantic comparison used by the OPY integration gate.
-//!
 //! Workshop meaning remains owned by `workshop-rs`; this module only adapts
 //! its parser and equivalence contract to the gate's two text inputs and
 //! preserves the comparison evidence for CI reports.

@@ -1,5 +1,3 @@
-//! Transport-neutral workflow progress events.
-//!
 //! The driver reports semantic workflow boundaries without terminal strings,
 //! ANSI, timing, or presentation policy. CLI and embedding consumers may
 //! observe these events independently.

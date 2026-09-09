@@ -1,9 +1,3 @@
-//! Resolution and installation of the first-party OPY LPP provider (#244).
-//!
-//! This module owns only distribution state. The provider process and wire
-//! protocol remain owned by `wright-lpp`, and OPY project loading remains an
-//! `opy-rs` concern.
-
 use std::fmt;
 use std::io::{Read, Write};
 use std::path::Path;

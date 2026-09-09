@@ -1,5 +1,3 @@
-//! Typed result envelopes for every driver workflow.
-//!
 //! Each workflow returns a command-specific [`Envelope`] carrying the same
 //! deterministic shape: version/capability metadata, the command name, a
 //! boolean `ok`, the process exit code the CLI must use, the diagnostics, and

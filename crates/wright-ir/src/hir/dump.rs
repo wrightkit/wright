@@ -1,5 +1,3 @@
-//! Deterministic debug dump for the internal Opy HIR model.
-
 use workshop_rs::source::Span;
 
 use super::{Event, Expr, Program, Stmt, UnaryOp};

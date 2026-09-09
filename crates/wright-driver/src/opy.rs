@@ -1,5 +1,3 @@
-//! The `.opy` frontend integration for the driver.
-//!
 //! The default `.opy` path is the native Rust frontend
 //! (`wright_opy`): no Node, no OverPy, stdin supported. The pinned OverPy
 //! adapter bridge remains available as an explicit compatibility fallback

@@ -1,5 +1,3 @@
-//! Frontend-neutral source-edit transactions (#59, reconciled by #128).
-//!
 //! Tools and agents propose edits as validated, source-oriented
 //! [`SourceEdit`]s — never as mutations of Wright's internal IR. One
 //! [`EditTransaction`] carries one or more file edits with exact source

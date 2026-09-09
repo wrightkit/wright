@@ -1,6 +1,3 @@
-//! Conversion from the `wright/opy-hir` bridge protocol into the internal
-//! Opy HIR model (`wright_ir::hir`).
-//!
 //! The protocol payload is expected to be already validated (see
 //! [`super::parse_str`]); this conversion maps it onto the typed, arena-based
 //! model, resolving name references to typed IDs and rejecting operators
@@ -55,14 +52,11 @@ impl<'a> Builder<'a> {
     }
 
     fn build(mut self) -> Result<wright_ir::hir::Program, IrError> {
-        // Phase A: file registry.
         for file in &self.protocol.files {
             let id = self.target.files.push(SourceFile::new(file.path.clone()));
             self.files.insert(file.id, id);
         }
 
-        // Phase A: symbols with empty bodies; maps are populated before any
-        // body conversion so references resolve regardless of order.
         for declaration in &self.protocol.declarations {
             match declaration {
                 Declaration::GlobalVariable {
@@ -143,7 +137,6 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Phase B: merge subroutine definitions into the subroutine table.
         for entry in &self.protocol.rules {
             if let RuleEntry::SubroutineDef {
                 name,
@@ -183,7 +176,6 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Phase C: initializers, constant values, and macro bodies.
         for declaration in &self.protocol.declarations {
             match declaration {
                 Declaration::GlobalVariable {
@@ -230,7 +222,6 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Phase D: rules.
         for entry in &self.protocol.rules {
             if let RuleEntry::Rule(rule) = entry {
                 let event = wright_ir::hir::Event {
@@ -263,7 +254,6 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Phase E: the settings carrier (spans map through the registry).
         if let Some(settings) = &self.protocol.settings {
             let mut converted = Vec::with_capacity(settings.children.len());
             for child in &settings.children {

@@ -1,5 +1,3 @@
-//! The pass pipeline: ordering, profiles, metrics, and validation.
-
 use workshop_rs::wir;
 
 use crate::fold_constants::FoldConstants;

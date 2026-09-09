@@ -1,6 +1,3 @@
-//! The stdio process adapter: spawn, observe, and terminate a long-running
-//! LPP provider binary.
-//!
 //! LPP is a process boundary: the client spawns the provider as a child
 //! process and communicates over its standard input and output. The
 //! provider's standard error is reserved for human-readable logging and
