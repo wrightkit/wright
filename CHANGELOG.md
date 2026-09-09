@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.20](https://github.com/wrightkit/wright/compare/v0.2.19...v0.2.20) (2026-09-09)
+
+
+### Features
+
+* **distribution:** publish installer archives through R2 ([b75d861](https://github.com/wrightkit/wright/commit/b75d8618311439a229ad24196d690de7db3f93a7)), closes [#261](https://github.com/wrightkit/wright/issues/261)
+
+
+### Bug Fixes
+
+* **provider:** resolve OPY releases through R2 ([9173ca8](https://github.com/wrightkit/wright/commit/9173ca8833f724899c143940d0de345f05ff2ed9))
+* **provider:** use HTTP/2 release client ([cf03383](https://github.com/wrightkit/wright/commit/cf033838eb02a9a85a5a6ce8835a85d28b72655f)), closes [#288](https://github.com/wrightkit/wright/issues/288)
+* **release:** keep Homebrew publication independent ([ee20d1c](https://github.com/wrightkit/wright/commit/ee20d1c008fa24d7f266a3dd964512537ce1e69c))
+* **release:** namespace R2 publication ([7d5defa](https://github.com/wrightkit/wright/commit/7d5defaedaaa2905845458659c86772a156f597b)), closes [#283](https://github.com/wrightkit/wright/issues/283)
+* **update:** defer release client construction ([0e271c5](https://github.com/wrightkit/wright/commit/0e271c51b184d422e42798cd606227e7a8cf7d86)), closes [#288](https://github.com/wrightkit/wright/issues/288)
+* **update:** migrate self-update HTTP client ([e49e35d](https://github.com/wrightkit/wright/commit/e49e35d1e803819b2bb5549fe8232238415f72f8)), closes [#288](https://github.com/wrightkit/wright/issues/288)
+
 ## [0.2.19](https://github.com/wrightkit/wright/compare/v0.2.18...v0.2.19) (2026-09-08)
 
 
