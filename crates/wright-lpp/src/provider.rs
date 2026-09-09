@@ -1,5 +1,3 @@
-//! The transport-neutral provider abstraction and its stdio implementation.
-//!
 //! [`LanguageProvider`] is the stable seam that ToolService and language
 //! services consume: provider capabilities plus source-oriented operations,
 //! with no process, framing, or JSON-RPC details exposed. Failures surface

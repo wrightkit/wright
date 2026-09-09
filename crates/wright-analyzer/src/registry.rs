@@ -1,9 +1,3 @@
-//! Lint rule registry and configuration contract (#97).
-//!
-//! This module defines the stable rule-identity and metadata types, the
-//! [`LintRegistry`] that holds the first-party rule set, and [`LintConfig`]
-//! that controls which rules are active and at what severity.
-//!
 //! # Contract
 //!
 //! * Rule IDs are stable `&'static str` values that match the `code` field on
@@ -27,8 +21,6 @@ use crate::analysis::{
     OngoingConditionHotPath, RepeatedValue, Severity, WhileWithoutWait,
 };
 use crate::cfg::Cfg;
-
-// ── Rule metadata ─────────────────────────────────────────────────────────────
 
 /// Static metadata for one lint rule.
 ///
@@ -57,8 +49,6 @@ pub struct RuleMeta {
     /// Coarse classification tags (e.g. `"performance"`, `"correctness"`).
     pub tags: &'static [&'static str],
 }
-
-// ── Per-rule configuration ────────────────────────────────────────────────────
 
 /// Configuration applied to one rule at registry execution time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,8 +102,6 @@ impl From<Severity> for SeverityLabel {
         }
     }
 }
-
-// ── Lint configuration ────────────────────────────────────────────────────────
 
 /// The deterministic lint configuration passed to [`LintRegistry::run`].
 ///
@@ -185,8 +173,6 @@ impl LintConfig {
             .unwrap_or(meta.default_severity)
     }
 }
-
-// ── Registry ──────────────────────────────────────────────────────────────────
 
 /// One registered rule: its stable metadata and the analysis implementation.
 struct RegistryEntry {

@@ -1,12 +1,3 @@
-//! Wright's reusable compiler/session driver.
-//!
-//! One orchestration path for every frontend and workflow: input discovery →
-//! frontend selection (`opy` bridge, native Workshop, or protocol JSON) →
-//! validation → lowering → analysis → emission. The `wright` CLI is a thin
-//! presentation layer over this crate, and later tool/LSP adapters reuse the
-//! same [`CompilerSession`]. Every workflow returns a typed [`Envelope`] whose
-//! JSON serialization is the machine-readable CLI contract.
-
 // Diagnostics are the primary error type of this crate, so error-returning
 // functions legitimately carry the full `Diagnostic` value; boxing it would
 // add an allocation per error without a measured benefit.

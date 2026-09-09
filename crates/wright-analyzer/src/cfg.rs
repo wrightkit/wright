@@ -1,5 +1,3 @@
-//! Control-flow graphs over Workshop IR rules.
-//!
 //! [`Cfg`] flattens a rule's structured actions (If/While/ForGlobalVariable)
 //! into basic blocks while preserving the structured semantics: branch edges,
 //! loop back-edges, and loop exits are explicit [`EdgeKind`]s, so timing and

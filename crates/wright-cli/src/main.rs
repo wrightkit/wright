@@ -1,5 +1,3 @@
-//! `wright` — the primary Wright command-line interface.
-
 mod cli;
 mod completion;
 mod present;

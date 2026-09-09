@@ -12,11 +12,9 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     };
     let mut session = CompilerSession::new(config).map_err(|error| error.message)?;
 
-    // Check through the shared session.
     let check = session.check();
     assert!(check.ok, "check passes: {:?}", check.diagnostics);
 
-    // Compile through the shared session.
     let compile = session.compile();
     assert!(compile.ok, "compile passes: {:?}", compile.diagnostics);
     let output = compile.result.output.expect("compiled output");
@@ -27,7 +25,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         &output.sha256[..16]
     );
 
-    // Analyze through the shared session.
     let analyze = session.analyze();
     assert!(analyze.ok, "analyze passes");
     println!(
@@ -36,8 +33,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         analyze.result.facts["rules"].as_array().unwrap().len()
     );
 
-    // Lint through the shared session (#98): the same pipeline with
-    // rule metadata, effective configuration, and evidence-tagged findings.
     let lint = session.lint();
     assert!(lint.ok, "lint passes: {:?}", lint.diagnostics);
     println!(
@@ -46,7 +41,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         lint.result.rules.as_array().unwrap().len()
     );
 
-    // Session-aware tool service queries (structured owned results).
     let service = ToolService::new(&mut session).map_err(|error| error.message)?;
     let capabilities = service.handle(&ToolRequest::Capabilities);
     match capabilities {
@@ -76,8 +70,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         let response = service.handle(&request);
         match response {
             wright_driver::service::ToolResponse::Ok { result } => {
-                // The tool lint path carries the same evidence-tagged
-                // findings as the session/CLI path.
                 if matches!(request, ToolRequest::Lint) {
                     let findings = result["findings"].as_array().unwrap();
                     for finding in findings {
@@ -94,8 +86,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         }
     }
 
-    // Safe rename: propose, validate through the project transaction
-    // contract, preview (#128: the shared frontend-neutral contract).
     if input.ends_with(".opy") {
         if let Some(name) = first_global(&source) {
             let identity = wright_driver::input_identity(&source);

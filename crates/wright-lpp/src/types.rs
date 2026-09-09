@@ -1,5 +1,3 @@
-//! LPP v1 data types used by the client.
-//!
 //! These types mirror the wire shapes defined in the `language-provider-
 //! protocol` repository's LPP v1 specification (sections 6-17). The wire
 //! contract is normative there; this module is the client-side Rust view of

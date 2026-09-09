@@ -1,5 +1,3 @@
-//! Wright's product-facing source-provider boundary.
-//!
 //! The product layer selects a source target and receives source diagnostics
 //! plus canonical Workshop text. Provider transport, document synchronization,
 //! and compiler implementation types stay behind the adapter that implements

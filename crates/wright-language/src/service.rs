@@ -485,8 +485,6 @@ impl LanguageService {
         };
         let analysis = self.analyze(document);
 
-        // Position/context: the identifier being typed and whether the
-        // position follows a member-access dot.
         let prefix = word_prefix(&document.text, position);
         let member = member_receiver(&document.text, position);
 

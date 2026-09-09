@@ -1,5 +1,3 @@
-//! Newline-delimited JSON-RPC 2.0 client over a byte transport.
-//!
 //! This module owns the wire mechanics of the LPP client: newline-delimited
 //! framing (LF writes, LF/CRLF and empty-line-tolerant reads), correlation
 //! ids, request/response matching, request timeouts, the LPP session phase

@@ -1,5 +1,3 @@
-//! `wright-lsp` — the Wright language server (issue #67).
-//!
 //! A thin LSP protocol adapter over [`wright_language::LanguageService`]:
 //! all semantic logic lives in the editor-neutral service crate; this
 //! binary only maps LSP DTOs to and from it, handles the stdio

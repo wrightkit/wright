@@ -1,5 +1,3 @@
-//! Opy HIR v1 validation.
-//!
 //! Validation follows the order in `docs/hir/opy-hir-v1.md` §8: the protocol
 //! envelope is checked first (in [`super::parse_value`]), then unknown node
 //! kinds are rejected with the offending kind name and span, then the payload

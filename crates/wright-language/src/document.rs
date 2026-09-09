@@ -1,5 +1,3 @@
-//! The document/workspace model (#63).
-//!
 //! A [`Document`] is one open source file with a stable URI, its current
 //! text, and a monotonically increasing version assigned by the host on every
 //! change. A [`DocumentStore`] owns the workspace's open documents and the
@@ -163,8 +161,6 @@ impl DocumentStore {
     pub fn overlay(&self, root: &PathBuf) -> BTreeMap<String, String> {
         let mut overlay = BTreeMap::new();
         for document in self.documents.values() {
-            // Only overlay file-backed documents (skip synthetic/in-memory
-            // URIs without a filesystem path).
             let Some(path) = uri_to_path(&document.uri) else {
                 continue;
             };

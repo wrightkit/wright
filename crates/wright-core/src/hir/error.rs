@@ -1,5 +1,3 @@
-//! Structured errors for Opy HIR v1 ingestion.
-//!
 //! Every failure carries a stable code, a message, and — when the offending
 //! source position is known — a span. Human-readable wording is not part of
 //! the stable contract; `code` is.

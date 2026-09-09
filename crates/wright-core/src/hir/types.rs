@@ -1,5 +1,3 @@
-//! Serde protocol types for `wright/opy-hir` version `1.0.0`.
-//!
 //! These types mirror [`docs/hir/opy-hir-v1.md`](../../../../docs/hir/opy-hir-v1.md).
 //! Unknown fields on known nodes are tolerated so an additive producer change
 //! inside the same major version does not break the consumer; unknown node

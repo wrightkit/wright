@@ -1,5 +1,3 @@
-//! `wright-bench` — reproducible performance and resource benchmarks (#53).
-//!
 //! Measures compile latency, peak RSS, and generated-resource usage (emitted
 //! Workshop bytes, WIR node counts) for the versioned corpus through the
 //! real driver path (`CompilerSession::compile`), and enforces declared

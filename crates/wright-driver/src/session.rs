@@ -1,9 +1,4 @@
-//! The reusable compiler/session driver (issue #37).
-//!
-//! [`CompilerSession`] is the single orchestration path shared by the CLI,
-//! library consumers, and (in later milestones) tool APIs and LSP: input
-//! resolution → frontend selection → validation → lowering → analysis →
-//! emission. Frontends are selected by [`SourceKind`] behind one contract, so
+//! Frontends are selected by [`SourceKind`] behind one contract, so
 //! the native `.opy` frontend can replace the temporary adapter bridge
 //! without changing callers. Every workflow returns a typed [`Envelope`]
 //! whose JSON serialization is the machine-readable CLI contract.

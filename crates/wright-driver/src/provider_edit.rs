@@ -1,24 +1,3 @@
-//! Provider-driven source mutation (#139): language-specific semantic
-//! decisions route through LPP capabilities while Wright keeps the generic
-//! source-edit transaction guarantees.
-//!
-//! # The seam
-//!
-//! ```text
-//! ToolService / agent-facing mutation requests
-//!         |
-//!         |  ProviderRenameRequest / ProviderValidateRequest (source-oriented,
-//!         |  transport-neutral: documents + positions + current source texts)
-//!         v
-//!  provider_edit::semantic_rename / provider_edit::validate_transaction
-//!         |
-//!         |  lpp/rename            -- target resolution + edit generation
-//!         |  lpp/validateEdits     -- per-document edit application + re-parse
-//!         |  lpp/check             -- provider-owned project semantics
-//!         v
-//!  LanguageProvider (wright-lpp)   -- capability guards, typed LPP mapping
-//! ```
-//!
 //! Wright owns everything below, exactly as the shared `edit` machinery
 //! (`crate::edit`) defines it, and the guarantees are unchanged: edits carry
 //! source identity/version preconditions, the transaction orders edits
@@ -412,7 +391,6 @@ fn provider_validation(
     previews: &[SourcePreview],
     project_root: Option<&str>,
 ) -> Result<(), Refusal> {
-    // Gate 1: per-document edit validation.
     let mut grouped: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
     for edit in &transaction.edits {
         grouped.entry(edit.source.as_str()).or_default().push(edit);
@@ -479,7 +457,6 @@ fn provider_validation(
         }
     }
 
-    // Gate 2: provider-owned project semantics over the edited project.
     let mut edited = wright_lpp::DocumentSet::new();
     for (uri, document) in documents {
         let edited_text = previews

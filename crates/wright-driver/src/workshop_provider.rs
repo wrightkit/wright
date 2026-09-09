@@ -1,5 +1,3 @@
-//! In-process raw Workshop provider.
-
 use std::path::{Path, PathBuf};
 
 use wright_core::provider::{

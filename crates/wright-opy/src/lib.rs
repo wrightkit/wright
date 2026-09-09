@@ -1,9 +1,3 @@
-//! Narrow Wright adapter for the owner-side `opy-rs` implementation.
-//!
-//! This crate owns no OPY parsing, semantic resolution, HIR, manifest, or
-//! reconstruction rules. It preserves the historical Wright-facing boundary
-//! while delegating those capabilities to `opy-rs`.
-
 pub use opy_rs::{cst, diag, lexer, parser, preprocess, settings, support, tooling};
 
 pub mod manifest {

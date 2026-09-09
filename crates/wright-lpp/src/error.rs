@@ -1,5 +1,3 @@
-//! Structured client failures for LPP interactions.
-//!
 //! Every provider interaction fails deterministically into one of the
 //! [`ProviderError`] variants below. Each variant exposes a stable machine
 //! `code()` and a human-readable `Display`, so tooling layers can surface
