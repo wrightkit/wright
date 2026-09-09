@@ -1,5 +1,3 @@
-//! Symbol tables, reference indices, and usage queries over Workshop IR.
-//!
 //! [`SemanticIndex`] is the read-only semantic query surface for tooling and
 //! agents: it enumerates every symbol (global/player variables, subroutines,
 //! rules), records every reference site (declarations, reads, writes, calls,
@@ -251,7 +249,6 @@ impl<'a> Builder<'a> {
             )?;
         }
 
-        // References from rule bodies.
         for id in 0..self.program.rules.len() {
             self.walk_rule(RuleId::from_index(id))?;
         }

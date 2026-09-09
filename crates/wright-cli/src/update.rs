@@ -1,5 +1,3 @@
-//! `wright update` — self-update for standalone installations (#116).
-//!
 //! Resolves the latest stable Wright release from the canonical GitHub
 //! Release contract (the same archives and checksums `install.sh` and the
 //! package-manager manifests consume), verifies the published SHA-256

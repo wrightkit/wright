@@ -1,6 +1,3 @@
-//! `wright-serve` — thin transport adapters over the session-aware tool
-//! service (issue #60).
-//!
 //! Exposes the same operations as [`wright_driver::service::ToolService`]
 //! over two transports:
 //!
@@ -10,9 +7,8 @@
 //! * **JSON-RPC 2.0** (`--transport jsonrpc`): standard JSON-RPC envelopes
 //!   with `id`/`method`/`params` and `result`/`error` responses.
 //!
-//! Both are thin mappings: no semantic logic lives here, so behavior is
-//! identical to in-process consumers. MCP is intentionally not implemented —
-//! no agent-integration evidence justified it in v1.
+//! MCP is intentionally not implemented — no agent-integration evidence
+//! justified it in v1.
 
 use std::io::{BufRead, Write};
 use std::process::ExitCode;

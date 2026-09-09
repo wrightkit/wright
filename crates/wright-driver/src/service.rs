@@ -1,5 +1,3 @@
-//! The session-aware tool service (issues #57/#58).
-//!
 //! [`ToolService`] exposes Wright's compile/check/analyze/query workflows and
 //! agent-oriented semantic queries over stable public contracts, reusing the
 //! driver session. It is transport-neutral: the stdio/JSON-RPC adapters

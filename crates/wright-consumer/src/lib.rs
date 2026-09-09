@@ -1,5 +1,3 @@
-//! The external consumer's public API surface (issue #61).
-//!
 //! [`run_consumer`] drives every public embedding/tool workflow over one
 //! input, proving that a consumer depending only on `wright-driver` can
 //! compile/check/analyze/query and validate edits without internal IR

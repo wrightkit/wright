@@ -1,9 +1,3 @@
-//! Narrow Wright adapter for the owner-side `del-rs` implementation.
-//!
-//! `del-rs` owns OSTW/DeltinScript parsing, project loading, semantic
-//! analysis, lowering, diagnostics, and reconstruction. This crate only maps
-//! those owner contracts to the historical Wright driver boundaries.
-
 use std::path::{Path, PathBuf};
 
 use workshop_rs::source::{FileId as WorkshopFileId, Position, Span};

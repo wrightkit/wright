@@ -1,5 +1,3 @@
-//! Structured diagnostics shared by every driver workflow.
-//!
 //! A [`Diagnostic`] is the machine-readable unit of compiler feedback: a
 //! stable `code`, the pipeline `stage` that produced it, a `severity`, a
 //! human message, an optional source span, and the input's origin metadata.

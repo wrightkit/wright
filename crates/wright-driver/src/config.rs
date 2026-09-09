@@ -1,12 +1,3 @@
-//! Session configuration owned by the compiler driver.
-//!
-//! [`SessionConfig`] describes one driver run: where the input comes from,
-//! which frontend handles it, optional frontend overrides (Workshop locale,
-//! `.opy` include root), where compiled output goes, which presentation
-//! format the result is intended for, and the lint rule configuration. The
-//! CLI, library consumers, and later tool/LSP adapters all construct the
-//! same configuration type.
-
 use std::path::PathBuf;
 
 pub use wright_analyzer::registry::LintConfig;

@@ -1,5 +1,3 @@
-//! Workshop-specific static analyses over Workshop IR and CFG.
-//!
 //! Each analysis produces [`Finding`]s with a stable code, a severity, a
 //! human-readable message, and the offending rule/action/value and span. The
 //! v0.2 analysis set is deliberately small and low-false-positive:

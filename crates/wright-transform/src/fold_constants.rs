@@ -1,5 +1,3 @@
-//! The `fold-constants` compat pass.
-//!
 //! Folds constant expressions in place: `2 * 3` → `6`, `-5` → the literal
 //! `-5`, `sqrt(4)` → `2`, `1 < 2` → `True`, and boolean logic on literals.
 //! This is exactly the arithmetic the pinned OverPy reference folds before

@@ -1,5 +1,3 @@
-//! The external consumer binary (issue #61).
-
 fn main() {
     let input = std::env::args().nth(1).unwrap_or_else(|| {
         eprintln!("usage: wright-consumer <input>");

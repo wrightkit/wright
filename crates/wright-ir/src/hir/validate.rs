@@ -1,5 +1,3 @@
-//! Structural validation of the internal Opy HIR model.
-
 use crate::error::IrError;
 use workshop_rs::source::Span;
 

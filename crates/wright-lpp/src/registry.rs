@@ -1,5 +1,3 @@
-//! Provider discovery and configuration by opaque language id.
-//!
 //! A [`ProviderRegistry`] maps opaque language id strings to provider
 //! configurations. Nothing in this module (or elsewhere in the crate)
 //! branches on a particular source language: `x-demo-lang` or any other id
