@@ -95,7 +95,7 @@ pub struct Diagnostic {
     /// Provider semantic support status, when this diagnostic came from an
     /// in-process language provider.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<wright_core::provider::Status>,
+    pub status: Option<crate::provider::Status>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]

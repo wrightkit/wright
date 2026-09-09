@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use workshop_rs::real_projects::REAL_PROJECT_EXPECTATION as WORKSHOP_EXPECTATION;
 use workshop_rs::semantic::{IncompletenessKind, ResidualClassification};
-use wright_core::provider::{LanguageProvider, Status};
+use wright_driver::provider::{LanguageProvider, Status};
 use wright_driver::{WorkshopProvider, workshop_provider};
 
 #[test]

@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use wright_core::provider::LanguageProvider;
 use wright_driver::WorkshopProvider;
+use wright_driver::provider::{LanguageProvider, Status};
 
 #[test]
 fn provider_checks_a_real_workshop_fixture_without_swallowing_failure() {
@@ -21,7 +21,7 @@ fn provider_checks_a_real_workshop_fixture_without_swallowing_failure() {
     assert!(
         diagnostics
             .iter()
-            .all(|diagnostic| diagnostic.status != wright_core::provider::Status::Supported)
+            .all(|diagnostic| diagnostic.status != Status::Supported)
     );
 }
 

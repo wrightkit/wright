@@ -10,6 +10,7 @@ pub mod input;
 pub mod opy;
 pub mod opy_provider;
 pub mod progress;
+pub mod provider;
 pub mod provider_edit;
 pub mod result;
 pub mod service;
