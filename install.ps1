@@ -149,7 +149,7 @@ function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
             }
         } catch {
             if ($_.Exception.Message -like "error: latest version response*") { throw }
-            Fail "could not resolve the latest release from $latestVersionUrl: $($_.Exception.Message); pin a version with -Version"
+            Fail "could not resolve the latest release from ${latestVersionUrl}: $($_.Exception.Message); pin a version with -Version"
         } finally {
             if (Test-Path -LiteralPath $latestVersionPath) {
                 Remove-Item -LiteralPath $latestVersionPath -Force -ErrorAction SilentlyContinue
@@ -215,7 +215,7 @@ try {
         Get-RemoteFile $ArchiveUrl $ArchivePath
         Get-RemoteFile $ChecksumUrl $ChecksumPath
     } catch {
-        Fail "failed to download the release archive or checksum for v$Version from $BaseUrl: $($_.Exception.Message)"
+        Fail "failed to download the release archive or checksum for v$Version from ${BaseUrl}: $($_.Exception.Message)"
     }
 
     Write-Host "==> verifying SHA-256 checksum"
