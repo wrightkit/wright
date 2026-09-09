@@ -691,6 +691,10 @@ jobs:
         if: matrix.channel == 'install.ps1'
         shell: pwsh
         run: ./scripts/test-install.ps1
+      - name: Run install.ps1 production R2 smoke
+        if: matrix.channel == 'install.ps1'
+        shell: pwsh
+        run: ./scripts/test-install-r2.ps1
       - name: Run Homebrew channel validation
         if: matrix.channel == 'Homebrew'
         run: python scripts/test-distribution-homebrew.py
