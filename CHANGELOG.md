@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.21](https://github.com/wrightkit/wright/compare/v0.2.20...v0.2.21) (2026-09-09)
+
+
+### Bug Fixes
+
+* **cli:** render typed results without JSON reflection ([#303](https://github.com/wrightkit/wright/issues/303)) ([3689c4a](https://github.com/wrightkit/wright/commit/3689c4aa1df369b351a8ae8128bd741707ad14d8))
+* **distribution:** align Windows installer with R2 ([#285](https://github.com/wrightkit/wright/issues/285)) ([f55f3c1](https://github.com/wrightkit/wright/commit/f55f3c12ff4ec81251f137c509332d877457a891))
+* **language:** remove OPY types from shared analysis ([#302](https://github.com/wrightkit/wright/issues/302)) ([efa3831](https://github.com/wrightkit/wright/commit/efa3831b42a0b6770120db9e0f00da465d38ef81))
+
 ## [0.2.20](https://github.com/wrightkit/wright/compare/v0.2.19...v0.2.20) (2026-09-09)
 
 
