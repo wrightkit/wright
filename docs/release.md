@@ -121,10 +121,10 @@ https://releases.wrightkit.dev/releases/<version>/wright-<version>-<target-tripl
 
 Latest installs first read `https://releases.wrightkit.dev/latest/version`,
 then download the corresponding version-named archive and checksum from
-`/latest/`. The release workflow uploads and publicly verifies every versioned
-and latest archive/checksum pair before writing that `latest/version` pointer,
-so the installer cannot resolve a new version before its complete artifact set
-is available. `latest/version` uses `Cache-Control: no-store`; all archive and
+`/releases/<version>/`. The release workflow publicly verifies every versioned
+archive/checksum pair before writing that `latest/version` pointer, so the
+installer cannot resolve a new version before its complete artifact set is
+available. `latest/version` uses `Cache-Control: no-store`; all archive and
 checksum paths are version-named and use long-lived immutable caching. This
 avoids stale latest pointers without a separate Worker, API, or GitHub Releases
 API lookup.

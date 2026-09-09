@@ -19,8 +19,119 @@ function Resolve-Setting([string]$Value, [string]$EnvironmentName, [string]$Defa
     return $Default
 }
 
+if (-not ("Wright.Http2Downloader" -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Wright {
+    public static class Http2Downloader {
+        const uint WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0;
+        const uint WINHTTP_FLAG_SECURE = 0x00800000;
+        const uint WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL = 133;
+        const uint WINHTTP_OPTION_HTTP_PROTOCOL_USED = 134;
+        const uint WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED = 145;
+        const uint WINHTTP_PROTOCOL_FLAG_HTTP2 = 1;
+        const uint WINHTTP_QUERY_STATUS_CODE = 19;
+        const int ERROR_INSUFFICIENT_BUFFER = 122;
+
+        [DllImport("winhttp.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr WinHttpOpen(string agent, uint accessType, IntPtr proxy, IntPtr bypass, uint flags);
+        [DllImport("winhttp.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr WinHttpConnect(IntPtr session, string server, ushort port, uint reserved);
+        [DllImport("winhttp.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr WinHttpOpenRequest(IntPtr connection, string verb, string objectName, string version, string referrer, IntPtr acceptTypes, uint flags);
+        [DllImport("winhttp.dll", SetLastError = true)]
+        static extern bool WinHttpSetOption(IntPtr handle, uint option, ref uint buffer, uint bufferLength);
+        [DllImport("winhttp.dll", SetLastError = true)]
+        static extern bool WinHttpQueryOption(IntPtr handle, uint option, out uint buffer, ref uint bufferLength);
+        [DllImport("winhttp.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool WinHttpQueryHeaders(IntPtr request, uint infoLevel, string name, StringBuilder buffer, ref uint bufferLength, IntPtr index);
+        [DllImport("winhttp.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool WinHttpSendRequest(IntPtr request, string headers, uint headersLength, IntPtr optional, uint optionalLength, uint totalLength, IntPtr context);
+        [DllImport("winhttp.dll", SetLastError = true)]
+        static extern bool WinHttpReceiveResponse(IntPtr request, IntPtr reserved);
+        [DllImport("winhttp.dll", SetLastError = true)]
+        static extern bool WinHttpQueryDataAvailable(IntPtr request, out uint available);
+        [DllImport("winhttp.dll", SetLastError = true)]
+        static extern bool WinHttpReadData(IntPtr request, [Out] byte[] buffer, uint bytesToRead, out uint bytesRead);
+        [DllImport("winhttp.dll", SetLastError = true)]
+        static extern bool WinHttpCloseHandle(IntPtr handle);
+
+        static void Check(bool success, string operation) {
+            if (!success) throw new Win32Exception(Marshal.GetLastWin32Error(), operation);
+        }
+
+        static uint StatusCode(IntPtr request) {
+            uint length = 0;
+            WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE, null, null, ref length, IntPtr.Zero);
+            if (Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER) {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "WinHttpQueryHeaders");
+            }
+            var value = new StringBuilder((int)(length / 2));
+            Check(WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE, null, value, ref length, IntPtr.Zero), "WinHttpQueryHeaders");
+            return UInt32.Parse(value.ToString());
+        }
+
+        public static void Download(string address, string destination) {
+            var uri = new Uri(address);
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) {
+                throw new ArgumentException("only HTTP(S) URLs are supported", "address");
+            }
+            IntPtr session = IntPtr.Zero;
+            IntPtr connection = IntPtr.Zero;
+            IntPtr request = IntPtr.Zero;
+            try {
+                session = WinHttpOpen("wright-installer", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, IntPtr.Zero, IntPtr.Zero, 0);
+                if (session == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "WinHttpOpen");
+                uint http2 = WINHTTP_PROTOCOL_FLAG_HTTP2;
+                Check(WinHttpSetOption(session, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, ref http2, sizeof(uint)), "WinHttpSetOption(HTTP/2)");
+                connection = WinHttpConnect(session, uri.Host, (ushort)uri.Port, 0);
+                if (connection == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "WinHttpConnect");
+                uint flags = uri.Scheme == Uri.UriSchemeHttps ? WINHTTP_FLAG_SECURE : 0;
+                request = WinHttpOpenRequest(connection, "GET", uri.PathAndQuery, null, null, IntPtr.Zero, flags);
+                if (request == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "WinHttpOpenRequest");
+                if (uri.Scheme == Uri.UriSchemeHttps) {
+                    Check(WinHttpSetOption(request, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, ref http2, sizeof(uint)), "WinHttpSetOption(require HTTP/2)");
+                }
+                Check(WinHttpSendRequest(request, null, 0, IntPtr.Zero, 0, 0, IntPtr.Zero), "WinHttpSendRequest");
+                Check(WinHttpReceiveResponse(request, IntPtr.Zero), "WinHttpReceiveResponse");
+                if (uri.Scheme == Uri.UriSchemeHttps) {
+                    uint length = sizeof(uint);
+                    uint used;
+                    Check(WinHttpQueryOption(request, WINHTTP_OPTION_HTTP_PROTOCOL_USED, out used, ref length), "WinHttpQueryOption(HTTP protocol)");
+                    if (used != WINHTTP_PROTOCOL_FLAG_HTTP2) throw new InvalidOperationException("WinHTTP did not negotiate HTTP/2");
+                }
+                uint status = StatusCode(request);
+                if (status < 200 || status >= 300) throw new InvalidOperationException("HTTP status " + status);
+                using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None)) {
+                    while (true) {
+                        uint available;
+                        Check(WinHttpQueryDataAvailable(request, out available), "WinHttpQueryDataAvailable");
+                        if (available == 0) break;
+                        var buffer = new byte[(int)available];
+                        uint read;
+                        Check(WinHttpReadData(request, buffer, available, out read), "WinHttpReadData");
+                        if (read == 0) throw new InvalidOperationException("WinHttpReadData returned no data");
+                        output.Write(buffer, 0, (int)read);
+                    }
+                }
+            } finally {
+                if (request != IntPtr.Zero) WinHttpCloseHandle(request);
+                if (connection != IntPtr.Zero) WinHttpCloseHandle(connection);
+                if (session != IntPtr.Zero) WinHttpCloseHandle(session);
+            }
+        }
+    }
+}
+'@
+}
+
 function Get-RemoteFile([string]$Uri, [string]$Destination) {
-    Start-BitsTransfer -Source $Uri -Destination $Destination -Priority Foreground -ErrorAction Stop
+    [Wright.Http2Downloader]::Download($Uri, $Destination)
 }
 
 function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
@@ -38,7 +149,7 @@ function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
             }
         } catch {
             if ($_.Exception.Message -like "error: latest version response*") { throw }
-            Fail "could not resolve the latest release from $latestVersionUrl; pin a version with -Version"
+            Fail "could not resolve the latest release from $latestVersionUrl: $($_.Exception.Message); pin a version with -Version"
         } finally {
             if (Test-Path -LiteralPath $latestVersionPath) {
                 Remove-Item -LiteralPath $latestVersionPath -Force -ErrorAction SilentlyContinue
@@ -81,7 +192,6 @@ if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.In
 }
 
 $BaseUrl = Resolve-Setting $BaseUrl "WRIGHT_INSTALL_BASE_URL" "https://releases.wrightkit.dev"
-$VersionFromLatest = -not $Version
 $Version = Get-Version $Version $BaseUrl
 if (-not $InstallDir) {
     $InstallRoot = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:USERPROFILE }
@@ -90,11 +200,7 @@ if (-not $InstallDir) {
 }
 
 $ArchiveName = "wright-$Version-$Target.zip"
-if ($VersionFromLatest) {
-    $ArchiveUrl = "$($BaseUrl.TrimEnd('/'))/latest/$ArchiveName"
-} else {
-    $ArchiveUrl = "$($BaseUrl.TrimEnd('/'))/releases/$Version/$ArchiveName"
-}
+$ArchiveUrl = "$($BaseUrl.TrimEnd('/'))/releases/$Version/$ArchiveName"
 $ChecksumUrl = "${ArchiveUrl}.sha256"
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) ("wright-install-" + [Guid]::NewGuid().ToString("N"))
 $ExtractDir = Join-Path $TempRoot "extract"
@@ -109,7 +215,7 @@ try {
         Get-RemoteFile $ArchiveUrl $ArchivePath
         Get-RemoteFile $ChecksumUrl $ChecksumPath
     } catch {
-        Fail "failed to download the release archive or checksum for v$Version from $BaseUrl"
+        Fail "failed to download the release archive or checksum for v$Version from $BaseUrl: $($_.Exception.Message)"
     }
 
     Write-Host "==> verifying SHA-256 checksum"

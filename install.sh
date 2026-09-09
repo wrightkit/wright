@@ -24,7 +24,6 @@ WRIGHT_INSTALL_BASE_URL="${WRIGHT_INSTALL_BASE_URL:-https://releases.wrightkit.d
 VERSION=""
 INSTALL_DIR=""
 TMP_DIR=""
-VERSION_FROM_LATEST=false
 
 usage() {
   sed -n '2,11p' "$0" | sed 's/^# \?//'
@@ -114,7 +113,6 @@ fi
 
 if [[ -z "$VERSION" ]]; then
   echo "==> resolving latest stable release"
-  VERSION_FROM_LATEST=true
   VERSION="$(curl -fsSL "$WRIGHT_INSTALL_BASE_URL/latest/version" 2>/dev/null)" \
     || fail "could not resolve the latest release from $WRIGHT_INSTALL_BASE_URL/latest/version; pin a version with --version"
   VERSION="$(printf '%s' "$VERSION" | tr -d '[:space:]')"
@@ -125,11 +123,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 ARCHIVE="wright-$VERSION-$TARGET.tar.gz"
-if [[ "$VERSION_FROM_LATEST" == true ]]; then
-  ARCHIVE_URL="$WRIGHT_INSTALL_BASE_URL/latest/$ARCHIVE"
-else
-  ARCHIVE_URL="$WRIGHT_INSTALL_BASE_URL/releases/$VERSION/$ARCHIVE"
-fi
+ARCHIVE_URL="$WRIGHT_INSTALL_BASE_URL/releases/$VERSION/$ARCHIVE"
 CHECKSUM_URL="$ARCHIVE_URL.sha256"
 EXPECTED_DIR="wright-$VERSION-$TARGET"
 

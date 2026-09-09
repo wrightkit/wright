@@ -467,12 +467,10 @@ jobs:
             actual_hash="$(sha256sum "${archive}" | awk 'NR == 1 { print $1 }')"
             test "${actual_hash}" = "${expected_hash}"
             name="$(basename "${archive}")"
-            for prefix in "releases/${VERSION}" latest; do
-              put_immutable "${archive}" "${prefix}/${name}" 'public, max-age=31536000, immutable' 'application/octet-stream'
-              put_immutable "${checksum}" "${prefix}/${name}.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
-              verify_public "${prefix}/${name}" "${archive}" 'max-age=31536000.*immutable'
-              verify_public "${prefix}/${name}.sha256" "${checksum}" 'max-age=31536000.*immutable'
-            done
+            put_immutable "${archive}" "releases/${VERSION}/${name}" 'public, max-age=31536000, immutable' 'application/octet-stream'
+            put_immutable "${checksum}" "releases/${VERSION}/${name}.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
+            verify_public "releases/${VERSION}/${name}" "${archive}" 'max-age=31536000.*immutable'
+            verify_public "releases/${VERSION}/${name}.sha256" "${checksum}" 'max-age=31536000.*immutable'
           done
 
           printf '%s\n' "${VERSION}" > "${GITHUB_WORKSPACE}/latest-version"

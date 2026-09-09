@@ -67,7 +67,6 @@ for triple in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin;
   make_archive "$WORK/mock" "$triple"
 done
 mkdir -p "$WORK/mock/latest"
-cp "$WORK/mock/releases/$VERSION"/* "$WORK/mock/latest/"
 printf '%s\n' "$VERSION" > "$WORK/mock/latest/version"
 
 python3 -m http.server "$PORT" --directory "$WORK/mock" >/dev/null 2>&1 &

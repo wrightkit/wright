@@ -14,13 +14,15 @@ function Fail([string]$Message) {
 
 try {
     $InstallerText = Get-Content -LiteralPath $Installer -Raw
-    if ($InstallerText -notmatch 'Start-BitsTransfer\s+-Source\s+\$Uri\s+-Destination\s+\$Destination\s+-Priority\s+Foreground\s+-ErrorAction\s+Stop' -or
-        $InstallerText -match 'curl\.exe|Invoke-(WebRequest|RestMethod)') {
-        Fail "installer must use Windows BITS for release downloads"
+    if ($InstallerText -notmatch 'WinHttpSetOption\(session,\s*WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL' -or
+        $InstallerText -notmatch 'WinHttpSetOption\(request,\s*WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED' -or
+        $InstallerText -notmatch 'WinHttpQueryOption\(request,\s*WINHTTP_OPTION_HTTP_PROTOCOL_USED' -or
+        $InstallerText -match 'Start-BitsTransfer|curl\.exe|Invoke-(WebRequest|RestMethod)') {
+        Fail "installer must require and verify WinHTTP HTTP/2 for HTTPS release downloads"
     }
     $DownloadCount = [regex]::Matches($InstallerText, '(?m)^\s*Get-RemoteFile\s+\$').Count
     if ($DownloadCount -ne 3) {
-        Fail "installer must use BITS for latest, archive, and checksum requests"
+        Fail "installer must use WinHTTP for latest, archive, and checksum requests"
     }
 
     $VersionedRelease = Join-Path $Work "releases\$Version"
@@ -39,8 +41,6 @@ try {
     Compress-Archive -LiteralPath $Payload -DestinationPath $Archive -Force
     $Hash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     "$Hash  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline -Encoding ASCII
-    Copy-Item -LiteralPath $Archive -Destination (Join-Path $LatestRelease $ArchiveName)
-    Copy-Item -LiteralPath "${Archive}.sha256" -Destination (Join-Path $LatestRelease "$ArchiveName.sha256")
     $Version | Set-Content -LiteralPath (Join-Path $LatestRelease "version") -NoNewline -Encoding ASCII
 
     $ServerCode = @'
@@ -92,6 +92,13 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.Sim
     if ($LASTEXITCODE -ne 0) { Fail "native post-install smoke failed" }
     Write-Host "PASS: pinned install and native smoke check"
 
+    $LatestDir = Join-Path $Work "latest-install"
+    & $Installer -InstallDir $LatestDir -BaseUrl $BaseUrl
+    if (-not (Test-Path -LiteralPath (Join-Path $LatestDir "wright.exe"))) {
+        Fail "latest-release install did not install wright.exe"
+    }
+    Write-Host "PASS: latest-release versioned R2 path resolution"
+
     "$(('0' * 64) -join '')  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline -Encoding ASCII
     $CorruptDir = Join-Path $Work "corrupt"
     try {
@@ -105,13 +112,6 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.Sim
     }
     Write-Host "PASS: checksum mismatch is rejected before installation"
 
-    Remove-Item -LiteralPath $VersionedRelease -Recurse -Force
-    $LatestDir = Join-Path $Work "latest-install"
-    & $Installer -InstallDir $LatestDir -BaseUrl $BaseUrl
-    if (-not (Test-Path -LiteralPath (Join-Path $LatestDir "wright.exe"))) {
-        Fail "latest-release install did not install wright.exe"
-    }
-    Write-Host "PASS: latest-release R2 path resolution"
 } finally {
     if ($Server) { Stop-Process -Id $Server.Id -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $Work) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
