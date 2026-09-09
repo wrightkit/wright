@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use wright_core::provider::{
+use crate::provider::{
     Diagnostic as ProviderDiagnostic, LanguageProvider, ProviderError, Result as ProviderResult,
     Severity as ProviderSeverity, SourceSpan as ProviderSourceSpan, Status,
 };

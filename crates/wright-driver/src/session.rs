@@ -975,16 +975,16 @@ impl CompilerSession {
             .path
             .as_deref()
             .unwrap_or_else(|| Path::new("<stdin>"));
-        match wright_core::provider::LanguageProvider::check(&provider, &loaded.input.text, path) {
+        match crate::provider::LanguageProvider::check(&provider, &loaded.input.text, path) {
             Ok(diagnostics) => {
                 self.diagnostics
                     .extend(diagnostics.into_iter().map(|diagnostic| Diagnostic {
                         code: diagnostic.code,
                         stage: Stage::Analysis,
                         severity: match diagnostic.severity {
-                            wright_core::provider::Severity::Error => Severity::Error,
-                            wright_core::provider::Severity::Warning => Severity::Warning,
-                            wright_core::provider::Severity::Info => Severity::Info,
+                            crate::provider::Severity::Error => Severity::Error,
+                            crate::provider::Severity::Warning => Severity::Warning,
+                            crate::provider::Severity::Info => Severity::Info,
                         },
                         message: diagnostic.message,
                         span: Some(SourceSpan {
