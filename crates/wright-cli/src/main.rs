@@ -141,12 +141,12 @@ fn run_workflow(command: Command) -> ExitCode {
         ),
         Command::Analyze(args) => (
             "analyze",
-            config_from_common(&args, false),
+            config_from_common(&args, true),
             present::Presentation::from_common(&args),
             None,
         ),
         Command::Lint(args) => {
-            let mut config = config_from_common(&args.common, false);
+            let mut config = config_from_common(&args.common, true);
             for rule in &args.disable_rule {
                 config.lint.disable(rule);
             }
@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_opy_check_and_compile_select_the_provider_backend() {
+    fn ordinary_opy_provider_workflows_select_the_provider_backend() {
         let opy = common(Some("main.opy"), cli::SourceKindArg::Auto);
         assert_eq!(
             config_from_common(&opy, true).source_backend,

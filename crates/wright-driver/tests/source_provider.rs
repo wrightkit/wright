@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use wright_driver::source_provider::{
     SourceCompilation, SourceLanguage, SourceProvider, SourceProviderError, SourceTarget,
 };
-use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceBackend, SourceKind};
+use wright_driver::{
+    CompilerSession, Diagnostic, InputSpec, Origin, SessionConfig, SourceBackend, SourceKind, Stage,
+};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -207,6 +209,71 @@ fn provider_backend_does_not_reuse_a_check_load_for_compile() {
 }
 
 #[test]
+fn provider_backend_lint_and_analyze_use_the_canonical_artifact_without_opy_spans() {
+    let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::clone(&operations),
+        check_compilation: None,
+        compilation: Some(SourceCompilation {
+            workshop_text: Some(workshop_fixture("synthetic/control-flow")),
+            locale: None,
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: vec![Diagnostic {
+                code: "owner-warning".to_string(),
+                stage: Stage::Frontend,
+                severity: wright_driver::Severity::Warning,
+                message: "owner-side warning".to_string(),
+                status: None,
+                span: None,
+                source: Some(Origin {
+                    kind: "opy".to_string(),
+                    locale: None,
+                }),
+            }],
+        }),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+
+    let lint = session.lint();
+    assert!(lint.ok, "provider lint: {:?}", lint.diagnostics);
+    assert_eq!(lint.result.program["origin"]["kind"], "provider-artifact");
+    let findings = lint.result.findings.as_array().expect("finding array");
+    assert!(!findings.is_empty(), "fixture supplies a lint finding");
+    assert!(findings.iter().all(|finding| finding.pointer("/span/path")
+        == Some(&serde_json::Value::String(
+            "<provider-artifact>".to_string()
+        ))));
+    assert_eq!(lint.diagnostics[0].code, "owner-warning");
+    assert_eq!(
+        lint.diagnostics[0]
+            .source
+            .as_ref()
+            .expect("owner source")
+            .kind,
+        "opy"
+    );
+
+    let analyze = session.analyze();
+    assert!(analyze.ok, "provider analyze: {:?}", analyze.diagnostics);
+    assert_eq!(
+        analyze.result.program["origin"]["kind"],
+        "provider-artifact"
+    );
+    assert!(!analyze.result.facts.is_null());
+    assert_eq!(*operations.lock().expect("operation lock"), vec!["compile"]);
+    cleanup(dir);
+}
+
+#[test]
 fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
     let config = SessionConfig {
         input: InputSpec::Stdin,
@@ -310,7 +377,7 @@ fn provider_backend_provider_resolution_failure_is_explicit() {
 }
 
 #[test]
-fn provider_backend_non_compile_workflows_refuse_without_empty_wir() {
+fn provider_backend_inspect_remains_explicitly_unsupported() {
     let (dir, entry) = temp_entry();
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -320,7 +387,7 @@ fn provider_backend_non_compile_workflows_refuse_without_empty_wir() {
     };
     let mut session = CompilerSession::new(config).expect("session");
 
-    let result = session.analyze();
+    let result = session.inspect();
     assert!(!result.ok);
     assert_eq!(result.exit, 3);
     assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");

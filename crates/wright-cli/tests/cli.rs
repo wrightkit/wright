@@ -427,10 +427,7 @@ fn span_path_is_consistent_across_input_spellings() {
         .unwrap()
         .to_string();
 
-    assert_eq!(
-        absolute_path, "loop.opy",
-        "the absolute spelling resolves to the root-relative basename"
-    );
+    assert_eq!(absolute_path, "<provider-artifact>");
     assert_eq!(
         bare_path, absolute_path,
         "the bare-name (cwd) spelling must agree with the absolute spelling"
@@ -1112,7 +1109,7 @@ fn opy_file_does_not_fall_back_to_native_frontend() {
 }
 
 #[test]
-fn non_compile_opy_workflows_do_not_analyze_a_check_only_provider_result() {
+fn provider_backed_opy_analyze_surfaces_provider_resolution_failures() {
     let path = temp_file("main.opy", "rule \"r\":\n    @Event global\n");
     let missing_provider = path.parent().unwrap().join("missing-opy-provider");
     let output = run(&[
@@ -1123,13 +1120,10 @@ fn non_compile_opy_workflows_do_not_analyze_a_check_only_provider_result() {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(output.status.code(), Some(4));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["ok"], false);
-    assert_eq!(
-        envelope["diagnostics"][0]["code"],
-        "source-provider-unsupported"
-    );
+    assert_eq!(envelope["diagnostics"][0]["code"], "provider-missing");
     assert!(envelope["result"]["program"].is_null());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
