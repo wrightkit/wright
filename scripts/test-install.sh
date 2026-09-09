@@ -64,11 +64,10 @@ wait_for_server() {
 }
 
 for triple in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
-  make_archive "$WORK/mock" "$triple"
+  make_archive "$WORK/mock/wright" "$triple"
 done
-mkdir -p "$WORK/mock/latest"
-cp "$WORK/mock/releases/$VERSION"/* "$WORK/mock/latest/"
-printf '%s\n' "$VERSION" > "$WORK/mock/latest/version"
+mkdir -p "$WORK/mock/wright/latest"
+printf '%s\n' "$VERSION" > "$WORK/mock/wright/latest/version"
 
 python3 -m http.server "$PORT" --directory "$WORK/mock" >/dev/null 2>&1 &
 SERVER_PID=$!
@@ -88,8 +87,14 @@ report() {
   fi
 }
 
+if grep -Fq 'https://releases.wrightkit.dev/wright' "$INSTALLER"; then
+  report "namespaced R2 default base" ok
+else
+  report "namespaced R2 default base" fail
+fi
+
 run_install() {
-  WRIGHT_INSTALL_BASE_URL="$BASE_URL" "$INSTALLER" "$@"
+  WRIGHT_INSTALL_BASE_URL="$BASE_URL/wright" "$INSTALLER" "$@"
 }
 
 expect_success() {
@@ -124,7 +129,7 @@ expect_success "latest release resolves without the GitHub API" "$WORK/d2"
 
 printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' \
   "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
-  > "$WORK/mock/releases/$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
+  > "$WORK/mock/wright/releases/$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
    run_install --dir "$WORK/d3" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "checksum mismatch is rejected before install" fail
@@ -138,7 +143,7 @@ test ! -e "$WORK/d3/wright" \
   || report "nothing installed after checksum failure" fail
 
 printf 'not-a-hash  %s\n' "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
-  > "$WORK/mock/releases/$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
+  > "$WORK/mock/wright/releases/$VERSION/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
    run_install --dir "$WORK/d3b" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "malformed checksum file is rejected" fail
@@ -148,7 +153,7 @@ else
     || report "malformed checksum file is rejected" fail
 fi
 
-(cd "$WORK/mock/releases/$VERSION" && shasum -a 256 "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
+(cd "$WORK/mock/wright/releases/$VERSION" && shasum -a 256 "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
   > "wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256")
 
 expect_failure "unknown version fails with an actionable error" "does release" "$WORK/d4" \
@@ -195,7 +200,7 @@ else
 fi
 
 mkdir -p "$WORK/home"
-if HOME="$WORK/home" WRIGHT_INSTALL_BASE_URL="$BASE_URL" \
+if HOME="$WORK/home" WRIGHT_INSTALL_BASE_URL="$BASE_URL/wright" \
    "$INSTALLER" --version "$VERSION" >/dev/null 2>&1 &&
    test -x "$WORK/home/.local/bin/wright"; then
   report "default install directory (\$HOME/.local/bin)" ok
@@ -204,8 +209,8 @@ else
 fi
 
 # Archive-layout regression: an archive missing wright-lsp must fail cleanly.
-make_archive "$WORK/mock-broken" "x86_64-unknown-linux-gnu"
-release="$WORK/mock-broken/releases/$VERSION"
+make_archive "$WORK/mock-broken/wright" "x86_64-unknown-linux-gnu"
+release="$WORK/mock-broken/wright/releases/$VERSION"
 rm -f "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz" \
       "$release/wright-$VERSION-x86_64-unknown-linux-gnu.tar.gz.sha256"
 dir="$release/wright-$VERSION-x86_64-unknown-linux-gnu"
@@ -221,7 +226,7 @@ BROKEN_PID=$!
 BROKEN_BASE_URL="http://127.0.0.1:$((PORT + 1))"
 wait_for_server "$BROKEN_BASE_URL"
 if WRIGHT_INSTALL_OS=linux WRIGHT_INSTALL_ARCH=x86_64 \
-   WRIGHT_INSTALL_BASE_URL="$BROKEN_BASE_URL" \
+   WRIGHT_INSTALL_BASE_URL="$BROKEN_BASE_URL/wright" \
    "$INSTALLER" --dir "$WORK/d9" --version "$VERSION" >"$INSTALL_OUTPUT" 2>&1; then
   report "archive missing wright-lsp fails cleanly" fail
 else

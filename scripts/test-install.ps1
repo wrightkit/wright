@@ -13,9 +13,23 @@ function Fail([string]$Message) {
 }
 
 try {
-    $Release = Join-Path $Work "v$Version"
-    $Payload = Join-Path $Release "wright-$Version-$Target"
-    New-Item -ItemType Directory -Path $Payload -Force | Out-Null
+    $InstallerText = Get-Content -LiteralPath $Installer -Raw
+    if ($InstallerText -notmatch 'https://releases\.wrightkit\.dev/wright' -or
+        $InstallerText -notmatch 'WinHttpSetOption\(session,\s*WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL' -or
+        $InstallerText -notmatch 'WinHttpSetOption\(request,\s*WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED' -or
+        $InstallerText -notmatch 'WinHttpQueryOption\(request,\s*WINHTTP_OPTION_HTTP_PROTOCOL_USED' -or
+        $InstallerText -match 'Start-BitsTransfer|curl\.exe|Invoke-(WebRequest|RestMethod)') {
+        Fail "installer must require and verify WinHTTP HTTP/2 for HTTPS release downloads"
+    }
+    $DownloadCount = [regex]::Matches($InstallerText, '(?m)^\s*Get-RemoteFile\s+\$').Count
+    if ($DownloadCount -ne 3) {
+        Fail "installer must use WinHTTP for latest, archive, and checksum requests"
+    }
+
+    $VersionedRelease = Join-Path $Work "wright\releases\$Version"
+    $LatestRelease = Join-Path $Work "wright\latest"
+    $Payload = Join-Path $Work "payload\wright-$Version-$Target"
+    New-Item -ItemType Directory -Path $VersionedRelease, $LatestRelease, $Payload -Force | Out-Null
     foreach ($Name in @("wright.exe", "wright-lsp.exe")) {
         $Source = Join-Path $Root "target\debug\$Name"
         if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
@@ -24,37 +38,28 @@ try {
         Copy-Item -LiteralPath $Source -Destination (Join-Path $Payload $Name)
     }
     $ArchiveName = "wright-$Version-$Target.zip"
-    $Archive = Join-Path $Release $ArchiveName
+    $Archive = Join-Path $VersionedRelease $ArchiveName
     Compress-Archive -LiteralPath $Payload -DestinationPath $Archive -Force
     $Hash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     "$Hash  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline -Encoding ASCII
+    $Version | Set-Content -LiteralPath (Join-Path $LatestRelease "version") -NoNewline -Encoding ASCII
 
-    $ApiDirectory = Join-Path $Work "repos\wrightkit\wright\releases"
-    New-Item -ItemType Directory -Path $ApiDirectory -Force | Out-Null
-    '{"tag_name":"v' + $Version + '","draft":false,"prerelease":false}' |
-        Set-Content -LiteralPath (Join-Path $ApiDirectory "latest") -NoNewline -Encoding ASCII
     $ServerCode = @'
 import http.server
 import os
 import sys
 
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def guess_type(self, path):
-        if path.endswith("/latest"):
-            return "application/json"
-        return super().guess_type(path)
-
 os.chdir(sys.argv[2])
-http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.SimpleHTTPRequestHandler).serve_forever()
 '@
     $ServerScript = Join-Path $Work "server.py"
     $ServerCode | Set-Content -LiteralPath $ServerScript -NoNewline -Encoding ASCII
     $Server = Start-Process -FilePath "python" -ArgumentList @($ServerScript, $Port, $Work) -PassThru -WindowStyle Hidden
-    $BaseUrl = "http://127.0.0.1:$Port"
-    $ApiUrl = "$BaseUrl/repos/wrightkit/wright/releases/latest"
+    $BaseUrl = "http://127.0.0.1:$Port/wright"
+    $LatestVersionUrl = "$BaseUrl/latest/version"
     for ($Attempt = 0; $Attempt -lt 30; $Attempt++) {
         try {
-            Invoke-RestMethod -Uri $ApiUrl | Out-Null
+            Invoke-WebRequest -Uri $LatestVersionUrl -UseBasicParsing | Out-Null
             break
         } catch {
             if ($Attempt -eq 29) { Fail "local release server did not become ready" }
@@ -65,7 +70,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_
     $UnknownVersion = "0.0.0"
     $UnknownDir = Join-Path $Work "unknown"
     try {
-        & $Installer -Version $UnknownVersion -InstallDir $UnknownDir -BaseUrl $BaseUrl -ApiUrl $ApiUrl
+        & $Installer -Version $UnknownVersion -InstallDir $UnknownDir -BaseUrl $BaseUrl
         Fail "unknown exact version was accepted or ignored"
     } catch {
         if ($_.Exception.Message -notmatch "failed to download") { throw }
@@ -76,7 +81,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_
     Write-Host "PASS: exact version selection"
 
     $PinnedDir = Join-Path $Work "pinned"
-    & $Installer -Version $Version -InstallDir $PinnedDir -BaseUrl $BaseUrl -ApiUrl $ApiUrl
+    & $Installer -Version $Version -InstallDir $PinnedDir -BaseUrl $BaseUrl
     if (-not (Test-Path -LiteralPath (Join-Path $PinnedDir "wright.exe")) -or
         -not (Test-Path -LiteralPath (Join-Path $PinnedDir "wright-lsp.exe"))) {
         Fail "pinned install did not install both executables"
@@ -88,17 +93,17 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_
     if ($LASTEXITCODE -ne 0) { Fail "native post-install smoke failed" }
     Write-Host "PASS: pinned install and native smoke check"
 
-    $LatestDir = Join-Path $Work "latest"
-    & $Installer -InstallDir $LatestDir -BaseUrl $BaseUrl -ApiUrl $ApiUrl
+    $LatestDir = Join-Path $Work "latest-install"
+    & $Installer -InstallDir $LatestDir -BaseUrl $BaseUrl
     if (-not (Test-Path -LiteralPath (Join-Path $LatestDir "wright.exe"))) {
         Fail "latest-release install did not install wright.exe"
     }
-    Write-Host "PASS: latest-release resolution"
+    Write-Host "PASS: latest-release versioned R2 path resolution"
 
     "$(('0' * 64) -join '')  $ArchiveName" | Set-Content -LiteralPath "${Archive}.sha256" -NoNewline -Encoding ASCII
     $CorruptDir = Join-Path $Work "corrupt"
     try {
-        & $Installer -Version $Version -InstallDir $CorruptDir -BaseUrl $BaseUrl -ApiUrl $ApiUrl
+        & $Installer -Version $Version -InstallDir $CorruptDir -BaseUrl $BaseUrl
         Fail "checksum mismatch was accepted"
     } catch {
         if ($_.Exception.Message -notmatch "checksum verification failed") { throw }
@@ -107,6 +112,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_
         Fail "checksum failure left a partial installation"
     }
     Write-Host "PASS: checksum mismatch is rejected before installation"
+
 } finally {
     if ($Server) { Stop-Process -Id $Server.Id -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $Work) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
