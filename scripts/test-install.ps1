@@ -14,9 +14,13 @@ function Fail([string]$Message) {
 
 try {
     $InstallerText = Get-Content -LiteralPath $Installer -Raw
-    $Http2RequestCount = [regex]::Matches($InstallerText, 'curl\.exe\s+--fail\s+--location\s+--silent\s+--show-error\s+--http2').Count
-    if ($Http2RequestCount -ne 3) {
-        Fail "installer must use curl.exe with HTTP/2 for latest, archive, and checksum requests"
+    if ($InstallerText -notmatch 'Start-BitsTransfer\s+-Source\s+\$Uri\s+-Destination\s+\$Destination\s+-Priority\s+Foreground\s+-ErrorAction\s+Stop' -or
+        $InstallerText -match 'curl\.exe|Invoke-(WebRequest|RestMethod)') {
+        Fail "installer must use Windows BITS for release downloads"
+    }
+    $DownloadCount = [regex]::Matches($InstallerText, '(?m)^\s*Get-RemoteFile\s+\$').Count
+    if ($DownloadCount -ne 3) {
+        Fail "installer must use BITS for latest, archive, and checksum requests"
     }
 
     $VersionedRelease = Join-Path $Work "releases\$Version"

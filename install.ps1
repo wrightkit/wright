@@ -19,16 +19,19 @@ function Resolve-Setting([string]$Value, [string]$EnvironmentName, [string]$Defa
     return $Default
 }
 
+function Get-RemoteFile([string]$Uri, [string]$Destination) {
+    Start-BitsTransfer -Source $Uri -Destination $Destination -Priority Foreground -ErrorAction Stop
+}
+
 function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
     if ($RequestedVersion) {
         $resolved = $RequestedVersion.TrimStart("v")
     } else {
         $latestVersionUrl = "$($ReleaseBaseUrl.TrimEnd('/'))/latest/version"
+        $latestVersionPath = Join-Path ([IO.Path]::GetTempPath()) ("wright-latest-" + [Guid]::NewGuid().ToString("N"))
         try {
-            $content = & curl.exe --fail --location --silent --show-error --http2 $latestVersionUrl
-            if ($LASTEXITCODE -ne 0) {
-                Fail "could not resolve the latest release from $latestVersionUrl; pin a version with -Version"
-            }
+            Get-RemoteFile $latestVersionUrl $latestVersionPath
+            $content = Get-Content -LiteralPath $latestVersionPath -Raw
             $resolved = $content.Trim().TrimStart("v")
             if (-not $resolved) {
                 Fail "latest version response from $latestVersionUrl was empty; pin a version with -Version"
@@ -36,6 +39,10 @@ function Get-Version([string]$RequestedVersion, [string]$ReleaseBaseUrl) {
         } catch {
             if ($_.Exception.Message -like "error: latest version response*") { throw }
             Fail "could not resolve the latest release from $latestVersionUrl; pin a version with -Version"
+        } finally {
+            if (Test-Path -LiteralPath $latestVersionPath) {
+                Remove-Item -LiteralPath $latestVersionPath -Force -ErrorAction SilentlyContinue
+            }
         }
     }
     if ($resolved -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
@@ -99,10 +106,8 @@ try {
     $ChecksumPath = "$ArchivePath.sha256"
     Write-Host "==> downloading $ArchiveUrl"
     try {
-        & curl.exe --fail --location --silent --show-error --http2 --output $ArchivePath $ArchiveUrl
-        if ($LASTEXITCODE -ne 0) { throw "archive download failed" }
-        & curl.exe --fail --location --silent --show-error --http2 --output $ChecksumPath $ChecksumUrl
-        if ($LASTEXITCODE -ne 0) { throw "checksum download failed" }
+        Get-RemoteFile $ArchiveUrl $ArchivePath
+        Get-RemoteFile $ChecksumUrl $ChecksumPath
     } catch {
         Fail "failed to download the release archive or checksum for v$Version from $BaseUrl"
     }
