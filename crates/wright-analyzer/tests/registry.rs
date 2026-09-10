@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use workshop_rs::catalog::Catalog;
 use workshop_rs::wir::Program as WirProgram;
 use wright_analyzer::analysis::{EvidenceClass, Severity};
 use wright_analyzer::registry::{LintConfig, LintRegistry};
@@ -59,6 +60,11 @@ fn rule_metadata_fields_are_non_empty() {
         assert!(
             !meta.summary.is_empty(),
             "{}: summary must be non-empty",
+            meta.id
+        );
+        assert!(
+            !meta.rationale.is_empty(),
+            "{}: rationale must be non-empty",
             meta.id
         );
         assert!(
@@ -419,7 +425,7 @@ fn finding_codes_match_registered_rule_ids() {
 
     for finding in registry.run(&program, &config) {
         assert!(
-            registered_ids.contains(&finding.code),
+            registered_ids.contains(&finding.code.as_str()),
             "finding code '{}' does not match any registered rule ID",
             finding.code
         );
@@ -439,4 +445,183 @@ fn findings_carry_source_spans() {
             finding.code
         );
     }
+}
+
+#[test]
+fn declarative_rule_matches_canonical_nested_actions_and_exposes_metadata() {
+    let catalog = Catalog::builtin().expect("built-in catalog");
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            r#"
+id: community/minimum-wait
+metadata:
+  summary: loop contains a minimum wait
+  rationale: minimum waits can create high-frequency loops
+  documentation: Finds a minimum wait inside a while scope.
+  known-limits: This is a structural fact and does not measure runtime cost.
+  evidence: static-indicator
+  default-severity: info
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: Wait
+      args:
+        - number: 0.1
+      count:
+        min: 1
+"#,
+            &catalog,
+        )
+        .expect("declarative rule loads");
+
+    let findings = registry.run(&local_program("expensive-loop"), &LintConfig::default());
+    let finding = findings
+        .iter()
+        .find(|finding| finding.code == "community/minimum-wait")
+        .expect("external rule finds the nested wait action");
+    assert_eq!(finding.severity, Severity::Info);
+    assert!(
+        finding.span.is_some(),
+        "external findings preserve source spans"
+    );
+    let descriptor = registry
+        .descriptors(&LintConfig::default())
+        .into_iter()
+        .find(|rule| rule.id == "community/minimum-wait")
+        .expect("external metadata is queryable");
+    assert_eq!(descriptor.kind, "declarative");
+    assert_eq!(
+        descriptor.rationale,
+        "minimum waits can create high-frequency loops"
+    );
+
+    let mut canonical_registry = LintRegistry::default();
+    canonical_registry
+        .load_yaml_str(
+            &definition_yaml("community/canonical-wait", "wait"),
+            &catalog,
+        )
+        .expect("canonical Workshop identity loads");
+    let canonical_findings = canonical_registry
+        .run(&local_program("expensive-loop"), &LintConfig::default())
+        .into_iter()
+        .filter(|finding| finding.code == "community/canonical-wait")
+        .count();
+    assert_eq!(
+        canonical_findings, 1,
+        "canonical and localized spellings match"
+    );
+}
+
+#[test]
+fn declarative_rule_rejects_reserved_or_unscoped_ids_and_unknown_spellings() {
+    let catalog = Catalog::builtin().expect("built-in catalog");
+    let definition = |id: &str, name: &str| {
+        format!(
+            r#"
+id: {id}
+metadata:
+  summary: summary
+  rationale: rationale
+  documentation: documentation
+  known-limits: limits
+  evidence: exact
+  default-severity: warning
+  tags: [correctness]
+matcher:
+  actions:
+    - kind: call
+      name: {name}
+"#
+        )
+    };
+    for id in ["bare-id", "wright/rule", "a/b/c"] {
+        let error = registry_error(&definition(id, "Wait"), &catalog);
+        assert!(error.to_string().contains("external rule ID"));
+    }
+    let error = registry_error(
+        &definition("community/rule", "NotAWorkshopAction"),
+        &catalog,
+    );
+    assert!(error.to_string().contains("unknown action spelling"));
+}
+
+#[test]
+fn lint_config_yaml_controls_external_rules_and_bounded_options() {
+    let config = LintConfig::from_yaml_str(
+        r#"
+rules:
+  community/minimum-wait:
+    enabled: true
+    severity: info
+    options:
+      max-matches: 2
+"#,
+    )
+    .expect("project lint YAML parses");
+    assert!(config.is_enabled("community/minimum-wait"));
+    assert_eq!(
+        config.options("community/minimum-wait").max_matches,
+        Some(2)
+    );
+
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            &minimum_wait_yaml("community/minimum-wait"),
+            &Catalog::builtin().unwrap(),
+        )
+        .expect("rule loads for config execution");
+    let findings = registry.run(&local_program("expensive-loop"), &config);
+    assert_eq!(
+        findings
+            .iter()
+            .find(|finding| finding.code == "community/minimum-wait")
+            .map(|finding| finding.severity),
+        Some(Severity::Info)
+    );
+
+    let invalid_options = LintConfig::from_yaml_str(
+        "rules:\n  community/minimum-wait:\n    options:\n      unsupported: true\n",
+    );
+    assert!(invalid_options.is_err(), "unknown options are rejected");
+}
+
+fn minimum_wait_yaml(id: &str) -> String {
+    definition_yaml(id, "Wait")
+}
+
+fn definition_yaml(id: &str, name: &str) -> String {
+    format!(
+        r#"
+id: {id}
+metadata:
+  summary: loop contains a minimum wait
+  rationale: minimum waits can create high-frequency loops
+  documentation: Finds a minimum wait inside a while scope.
+  known-limits: This is a structural fact and does not measure runtime cost.
+  evidence: static-indicator
+  default-severity: info
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: {name}
+      args:
+        - number: 0.1
+      count:
+        min: 1
+"#
+    )
+}
+
+fn registry_error(yaml: &str, catalog: &Catalog) -> wright_analyzer::registry::RuleRegistryError {
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(yaml, catalog)
+        .expect_err("rule must reject")
 }

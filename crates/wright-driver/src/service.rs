@@ -435,10 +435,11 @@ impl<'a> ToolService<'a> {
             kind: self.loaded.origin.kind.clone(),
             locale: self.loaded.origin.locale.clone(),
         };
-        match wright_analyzer::service::SemanticService::with_origin_and_config(
+        match wright_analyzer::service::SemanticService::with_origin_and_config_and_registry(
             &self.loaded.program,
             origin,
             config,
+            std::sync::Arc::clone(self.session.lint_registry()),
         ) {
             Ok(service) => match service.handle(&request) {
                 wright_analyzer::service::Response::Ok { result } => ToolResponse::Ok { result },
@@ -462,10 +463,11 @@ impl<'a> ToolService<'a> {
             kind: self.loaded.origin.kind.clone(),
             locale: self.loaded.origin.locale.clone(),
         };
-        match wright_analyzer::service::SemanticService::with_origin_and_config(
+        match wright_analyzer::service::SemanticService::with_origin_and_config_and_registry(
             &self.loaded.program,
             origin,
             config,
+            std::sync::Arc::clone(self.session.lint_registry()),
         ) {
             Ok(service) => {
                 let lint_rules = match service.handle(&wright_analyzer::service::Request::LintRules)

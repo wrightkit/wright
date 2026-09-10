@@ -47,6 +47,8 @@ WORKFLOW OPTIONS:
     --color <POLICY>     ANSI color: auto|always|never
 
 LINT OPTIONS:
+    --lint-config <PATH>       Read project lint configuration YAML
+    --rule <PATH>              Load a local YAML rule file or directory (repeatable)
     --disable-rule <ID>         Disable a lint rule (repeatable)
     --rule-severity <ID>:<SEV>  Override a lint rule severity (repeatable)
 
@@ -146,6 +148,12 @@ pub(crate) struct CommonArgs {
 pub(crate) struct LintArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+    /// Read project lint configuration YAML.
+    #[arg(long = "lint-config", value_name = "PATH")]
+    pub(crate) lint_config: Option<PathBuf>,
+    /// Load a local YAML rule file or directory (repeatable).
+    #[arg(long = "rule", value_name = "PATH")]
+    pub(crate) rule: Vec<PathBuf>,
     /// Disable a lint rule (repeatable).
     #[arg(long = "disable-rule", value_name = "ID")]
     pub(crate) disable_rule: Vec<String>,

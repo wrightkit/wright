@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
-use wright_driver::config::{InputSpec, OutputFormat, SessionConfig, SourceKind};
+use wright_driver::config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind};
 use wright_driver::result::exit;
 use wright_driver::source_provider::SourceBackend;
 
@@ -147,6 +147,19 @@ fn run_workflow(command: Command) -> ExitCode {
         ),
         Command::Lint(args) => {
             let mut config = config_from_common(&args.common, true);
+            if let Some(path) = &args.lint_config {
+                config.lint = match LintConfig::from_yaml_path(path) {
+                    Ok(config) => config,
+                    Err(error) => {
+                        eprintln!(
+                            "wright: cannot read lint config {}: {error}",
+                            path.display()
+                        );
+                        return ExitCode::from(exit::USAGE);
+                    }
+                };
+            }
+            config.lint_rule_paths = args.rule.clone();
             for rule in &args.disable_rule {
                 config.lint.disable(rule);
             }

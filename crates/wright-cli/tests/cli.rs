@@ -492,6 +492,77 @@ fn lint_rule_flags_control_findings() {
 }
 
 #[test]
+fn lint_loads_local_yaml_rules_and_project_config() {
+    let input = workspace_root().join("compatibility/fixtures/synthetic/control-flow/source.opy");
+    let rule = temp_file(
+        "minimum-wait.yaml",
+        r#"
+id: community/minimum-wait
+metadata:
+  summary: loop contains a wait
+  rationale: verify local declarative rule loading
+  documentation: Matches a wait action in a loop.
+  known-limits: Structural match only.
+  evidence: exact
+  default-severity: warning
+  tags: [test]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: Wait
+      count:
+        min: 1
+"#,
+    );
+    let config = temp_file(
+        "lint.yaml",
+        r#"
+rules:
+  community/minimum-wait:
+    severity: info
+    options:
+      max-matches: 1
+"#,
+    );
+    let output = run(&[
+        "lint",
+        input.to_str().unwrap(),
+        "--kind",
+        "opy",
+        "--rule",
+        rule.to_str().unwrap(),
+        "--lint-config",
+        config.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = parse_json(&output.stdout)["result"].clone();
+    let finding = result["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["code"] == "community/minimum-wait")
+        .expect("the local rule is executed");
+    assert_eq!(finding["severity"], "info");
+    let rule_meta = result["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "community/minimum-wait")
+        .expect("the local rule is discoverable");
+    assert_eq!(rule_meta["kind"], "declarative");
+    assert_eq!(rule_meta["effectiveSeverity"], "info");
+    let _ = std::fs::remove_dir_all(rule.parent().unwrap());
+    let _ = std::fs::remove_dir_all(config.parent().unwrap());
+}
+
+#[test]
 fn lint_flags_are_usage_errors_for_other_commands() {
     for flags in [
         &["check", "--disable-rule", "min-wait-loop"][..],
@@ -736,6 +807,8 @@ fn version_and_help_are_documented_contract_surfaces() {
         "--color",
         "--disable-rule",
         "--rule-severity",
+        "--lint-config",
+        "--rule",
     ] {
         assert!(help.contains(option), "top-level help documents {option}");
     }

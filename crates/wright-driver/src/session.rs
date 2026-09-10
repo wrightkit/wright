@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use workshop_rs::wir;
-use wright_analyzer::registry::LintConfig;
+use wright_analyzer::registry::{LintConfig, LintRegistry};
 use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService};
 
 use crate::WorkshopProvider;
@@ -74,6 +74,7 @@ pub struct CompilerSession {
     /// The session configuration (input, frontend, overrides, format).
     pub config: SessionConfig,
     catalog: workshop_rs::catalog::Catalog,
+    lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
     loaded_operation: Option<ProviderOperation>,
     diagnostics: Vec<Diagnostic>,
@@ -91,9 +92,16 @@ impl CompilerSession {
                 format!("cannot load the built-in Workshop catalog: {error}"),
             )
         })?;
+        let mut lint_registry = LintRegistry::default();
+        for path in &config.lint_rule_paths {
+            lint_registry.load_path(path, &catalog).map_err(|error| {
+                Diagnostic::error("lint-rule-error", Stage::Analysis, error.to_string())
+            })?;
+        }
         Ok(CompilerSession {
             config,
             catalog,
+            lint_registry: Arc::new(lint_registry),
             loaded: None,
             loaded_operation: None,
             diagnostics: Vec::new(),
@@ -125,6 +133,10 @@ impl CompilerSession {
     /// Detach the current progress observer before a caller renders a result.
     pub fn clear_progress_observer(&mut self) {
         self.progress_observer = None;
+    }
+
+    pub(crate) fn lint_registry(&self) -> &Arc<LintRegistry> {
+        &self.lint_registry
     }
 
     fn progress(&self, event: ProgressEvent) {
@@ -840,8 +852,13 @@ impl CompilerSession {
             },
             locale: loaded.origin.locale.clone(),
         };
-        SemanticService::with_origin_and_config(&loaded.program, origin, config)
-            .map_err(|error| ir_diag("analysis-error", Stage::Analysis, error, &loaded.input))
+        SemanticService::with_origin_and_config_and_registry(
+            &loaded.program,
+            origin,
+            config,
+            Arc::clone(&self.lint_registry),
+        )
+        .map_err(|error| ir_diag("analysis-error", Stage::Analysis, error, &loaded.input))
     }
 
     /// Structural validation permits source-preserving Workshop fallbacks.

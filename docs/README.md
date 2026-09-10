@@ -43,6 +43,8 @@ Issue contract.
   and evaluation rules.
 - [Licensing/provenance boundary](licensing.md): third-party reference and
   licensing constraints.
+- [Extensible lint rules](specs/SPEC-309-extensible-lint-rules.md): canonical
+  facts, local declarative rules, metadata, and project configuration.
 - [Release/distribution](release.md): packaging and publication contract.
 - [Agent-team governance](agent-team.md): role/authority coordination where
   still applicable.

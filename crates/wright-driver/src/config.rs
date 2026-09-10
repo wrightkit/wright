@@ -116,6 +116,8 @@ pub struct SessionConfig {
     /// consumers override it here, so CLI and programmatic lint runs apply
     /// the same deterministic configuration.
     pub lint: LintConfig,
+    /// Local YAML rule files or directories loaded for this session (#309).
+    pub lint_rule_paths: Vec<PathBuf>,
     /// LPP provider configurations, keyed by opaque language id (#142).
     ///
     /// [`CompilerSession::language_provider`] spawns a provider client for a
@@ -142,6 +144,7 @@ impl Default for SessionConfig {
             format: OutputFormat::Text,
             profile: wright_transform::Profile::Off,
             lint: LintConfig::default(),
+            lint_rule_paths: Vec::new(),
             providers: wright_lpp::ProviderRegistry::default(),
             opy_provider: crate::opy_provider::OpyProviderConfig::default(),
         }
