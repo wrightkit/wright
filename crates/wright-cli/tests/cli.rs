@@ -472,7 +472,7 @@ fn lint_rule_flags_control_findings() {
         "lint",
         path.to_str().unwrap(),
         "--rule-severity",
-        "expensive-loop-check:warning",
+        "expensive-loop-check:warn",
         "-f",
         "json",
     ]);
@@ -503,8 +503,6 @@ metadata:
   rationale: verify local declarative rule loading
   documentation: Matches a wait action in a loop.
   known-limits: Structural match only.
-  evidence: exact
-  default-severity: warning
   tags: [test]
 matcher:
   scope: while
@@ -520,7 +518,7 @@ matcher:
         r#"
 rules:
   community/minimum-wait:
-    severity: info
+    severity: warn
     options:
       max-matches: 1
 "#,
@@ -549,7 +547,7 @@ rules:
         .iter()
         .find(|finding| finding["code"] == "community/minimum-wait")
         .expect("the local rule is executed");
-    assert_eq!(finding["severity"], "info");
+    assert_eq!(finding["severity"], "warning");
     let rule_meta = result["rules"]
         .as_array()
         .unwrap()
@@ -557,7 +555,7 @@ rules:
         .find(|rule| rule["id"] == "community/minimum-wait")
         .expect("the local rule is discoverable");
     assert_eq!(rule_meta["kind"], "declarative");
-    assert_eq!(rule_meta["effectiveSeverity"], "info");
+    assert_eq!(rule_meta["effectiveSeverity"], "warning");
     let _ = std::fs::remove_dir_all(rule.parent().unwrap());
     let _ = std::fs::remove_dir_all(config.parent().unwrap());
 }

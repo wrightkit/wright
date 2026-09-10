@@ -118,19 +118,22 @@ impl RuleOptions {
 
 /// A serialization-friendly severity label for use in configuration.
 ///
-/// Matches the string names used in structured findings (`"warning"`, `"info"`).
+/// Project policy labels for a rule. Finding severities remain owned by the
+/// rule implementation unless a project explicitly selects `warn` or `error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SeverityLabel {
-    Warning,
-    Info,
+    Off,
+    Warn,
+    Error,
 }
 
-impl From<SeverityLabel> for Severity {
-    fn from(label: SeverityLabel) -> Self {
-        match label {
-            SeverityLabel::Warning => Severity::Warning,
-            SeverityLabel::Info => Severity::Info,
+impl SeverityLabel {
+    fn severity(self) -> Option<Severity> {
+        match self {
+            Self::Off => None,
+            Self::Warn => Some(Severity::Warning),
+            Self::Error => Some(Severity::Error),
         }
     }
 }
@@ -138,8 +141,8 @@ impl From<SeverityLabel> for Severity {
 impl From<Severity> for SeverityLabel {
     fn from(severity: Severity) -> Self {
         match severity {
-            Severity::Warning => SeverityLabel::Warning,
-            Severity::Info => SeverityLabel::Info,
+            Severity::Warning | Severity::Info => SeverityLabel::Warn,
+            Severity::Error => SeverityLabel::Error,
         }
     }
 }
@@ -194,16 +197,20 @@ impl LintConfig {
 
     /// Override the severity of a rule from its CLI spelling.
     ///
-    /// Accepts the stable severity names `"warning"` and `"info"`. Returns
+    /// Accepts the project policy names `"off"`, `"warn"`, and `"error"`. Returns
     /// `false` when `severity` is not a known label, leaving the
     /// configuration unchanged.
     pub fn set_severity_by_name(&mut self, rule_id: &str, severity: &str) -> bool {
         let label = match severity {
-            "warning" => SeverityLabel::Warning,
-            "info" => SeverityLabel::Info,
+            "off" => SeverityLabel::Off,
+            "warn" => SeverityLabel::Warn,
+            "error" => SeverityLabel::Error,
             _ => return false,
         };
-        self.set_severity(rule_id, label.into());
+        self.rules
+            .entry(rule_id.to_string())
+            .or_default()
+            .severity_override = Some(label);
         true
     }
 
@@ -211,7 +218,9 @@ impl LintConfig {
     ///
     /// Returns `true` for unknown IDs (no config entry = enabled by default).
     pub fn is_enabled(&self, rule_id: &str) -> bool {
-        self.rules.get(rule_id).is_none_or(|config| config.enabled)
+        self.rules.get(rule_id).is_none_or(|config| {
+            config.enabled && config.severity_override != Some(SeverityLabel::Off)
+        })
     }
 
     /// Effective severity for a rule given its metadata and this config.
@@ -221,7 +230,7 @@ impl LintConfig {
         self.rules
             .get(meta.id)
             .and_then(|config| config.severity_override)
-            .map(Severity::from)
+            .and_then(SeverityLabel::severity)
             .unwrap_or(meta.default_severity)
     }
 
@@ -229,7 +238,7 @@ impl LintConfig {
         self.rules
             .get(id)
             .and_then(|config| config.severity_override)
-            .map(Severity::from)
+            .and_then(SeverityLabel::severity)
             .unwrap_or(default)
     }
 
@@ -237,7 +246,7 @@ impl LintConfig {
         self.rules
             .get(id)
             .and_then(|config| config.severity_override)
-            .map(Severity::from)
+            .and_then(SeverityLabel::severity)
     }
 
     pub fn options(&self, id: &str) -> &RuleOptions {
@@ -614,15 +623,15 @@ impl LintRegistry {
                     let metadata = rule.metadata();
                     RuleDescriptor {
                         id: rule.id().to_string(),
-                        default_severity: metadata.default_severity.into(),
+                        default_severity: rule.default_severity(),
                         effective_severity: config
-                            .effective_severity_for(rule.id(), metadata.default_severity.into()),
+                            .effective_severity_for(rule.id(), rule.default_severity()),
                         enabled: config.is_enabled(rule.id()),
                         summary: metadata.summary.clone(),
                         rationale: metadata.rationale.clone(),
                         documentation: metadata.documentation.clone(),
                         known_limits: metadata.known_limits.clone(),
-                        evidence: metadata.evidence,
+                        evidence: rule.evidence(),
                         tags: metadata.tags.clone(),
                         kind: "declarative",
                     }

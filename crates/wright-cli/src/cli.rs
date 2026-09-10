@@ -157,7 +157,7 @@ pub(crate) struct LintArgs {
     /// Disable a lint rule (repeatable).
     #[arg(long = "disable-rule", value_name = "ID")]
     pub(crate) disable_rule: Vec<String>,
-    /// Override a lint rule severity as ID:warning or ID:info (repeatable).
+    /// Override a lint rule policy as ID:off, ID:warn, or ID:error (repeatable).
     #[arg(long = "rule-severity", value_name = "ID:SEVERITY")]
     pub(crate) rule_severity: Vec<String>,
 }

@@ -612,6 +612,7 @@ impl<'a> ToolService<'a> {
 /// The canonical severity name of a finding.
 fn severity_name(severity: wright_analyzer::analysis::Severity) -> &'static str {
     match severity {
+        wright_analyzer::analysis::Severity::Error => "error",
         wright_analyzer::analysis::Severity::Warning => "warning",
         wright_analyzer::analysis::Severity::Info => "info",
     }

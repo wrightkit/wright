@@ -2,6 +2,7 @@ use std::fmt;
 
 use serde::Deserialize;
 use workshop_rs::catalog::{Catalog, Kind, Locale};
+use workshop_rs::source::Span;
 use workshop_rs::wir::{self, Action, ActionId, Event, RuleId, Value, ValueId};
 
 use crate::analysis::{EvidenceClass, Finding, Severity};
@@ -27,26 +28,7 @@ pub struct RuleMetadata {
     pub documentation: String,
     #[serde(rename = "known-limits")]
     pub known_limits: String,
-    pub evidence: EvidenceClass,
-    #[serde(rename = "default-severity")]
-    pub default_severity: SeverityLabel,
     pub tags: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SeverityLabel {
-    Warning,
-    Info,
-}
-
-impl From<SeverityLabel> for Severity {
-    fn from(value: SeverityLabel) -> Self {
-        match value {
-            SeverityLabel::Warning => Self::Warning,
-            SeverityLabel::Info => Self::Info,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -87,10 +69,20 @@ pub struct ActionPattern {
     pub name: Option<String>,
     #[serde(default)]
     pub args: Vec<ValuePattern>,
+    #[serde(default, alias = "params")]
+    pub parameters: Vec<ParameterPattern>,
     #[serde(default)]
     pub count: Count,
     #[serde(default = "default_true")]
     pub present: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterPattern {
+    pub name: String,
+    #[serde(flatten)]
+    pub value: ValuePattern,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -126,6 +118,26 @@ pub struct ValuePattern {
     pub call: Option<CallPattern>,
     #[serde(rename = "enum")]
     pub enum_value: Option<EnumPattern>,
+    pub comparison: Option<ComparisonPattern>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonPattern {
+    pub operator: ComparisonOperator,
+    pub value: Box<ValuePattern>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub enum ComparisonOperator {
+    #[serde(rename = "<")]
+    Less,
+    #[serde(rename = "<=")]
+    LessOrEqual,
+    #[serde(rename = ">")]
+    Greater,
+    #[serde(rename = ">=")]
+    GreaterOrEqual,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,9 +174,12 @@ struct CanonicalActionPattern {
     kind: Option<ActionKind>,
     name: Option<String>,
     args: Vec<CanonicalValuePattern>,
+    parameters: Vec<(usize, CanonicalValuePattern)>,
     count: Count,
     present: bool,
 }
+
+type ScopeMatch = (Option<ActionId>, Vec<ActionId>, Vec<ValueId>, Option<Span>);
 
 #[derive(Debug, Clone)]
 enum CanonicalValuePattern {
@@ -179,6 +194,10 @@ enum CanonicalValuePattern {
     Enum {
         domain: String,
         member: String,
+    },
+    Comparison {
+        operator: ComparisonOperator,
+        value: Box<CanonicalValuePattern>,
     },
 }
 
@@ -232,6 +251,17 @@ impl DeclarativeRule {
         &self.definition.metadata
     }
 
+    /// Declarative matchers only report exact structural facts from canonical
+    /// WIR; they do not claim runtime behavior.
+    pub fn evidence(&self) -> EvidenceClass {
+        EvidenceClass::Exact
+    }
+
+    /// The built-in policy default. Project configuration owns overrides.
+    pub fn default_severity(&self) -> Severity {
+        Severity::Warning
+    }
+
     pub fn run(
         &self,
         facts: &SemanticFacts<'_>,
@@ -244,7 +274,7 @@ impl DeclarativeRule {
         };
         let scopes = matching_scopes(&rule_facts, self.definition.matcher.scope);
         let mut findings = Vec::new();
-        for (scope_id, actions, anchor) in scopes {
+        for (scope_id, actions, conditions, anchor) in scopes {
             if self
                 .event
                 .as_deref()
@@ -253,11 +283,7 @@ impl DeclarativeRule {
                 continue;
             }
             if let Some(pattern) = &self.conditions {
-                let count = matching_values(
-                    &rule_facts,
-                    condition_values(&rule_facts, scope_id),
-                    &pattern.value,
-                );
+                let count = matching_values(&rule_facts, conditions, &pattern.value);
                 if !pattern.count.accepts(count) {
                     continue;
                 }
@@ -283,7 +309,7 @@ impl DeclarativeRule {
             }
             findings.push(Finding {
                 code: self.id().to_string(),
-                severity: self.metadata().default_severity.into(),
+                severity: self.default_severity(),
                 message: format!(
                     "{} (matched {matched} node{})",
                     self.metadata().summary,
@@ -293,7 +319,7 @@ impl DeclarativeRule {
                 rule,
                 action: scope_id,
                 value: None,
-                evidence: self.metadata().evidence,
+                evidence: self.evidence(),
                 boundedness: None,
                 persistent_object: None,
             });
@@ -302,18 +328,12 @@ impl DeclarativeRule {
     }
 }
 
-fn matching_scopes<'a>(
-    facts: &RuleFacts<'a>,
-    scope: Scope,
-) -> Vec<(
-    Option<ActionId>,
-    Vec<ActionId>,
-    Option<workshop_rs::source::Span>,
-)> {
+fn matching_scopes<'a>(facts: &RuleFacts<'a>, scope: Scope) -> Vec<ScopeMatch> {
     if matches!(scope, Scope::Rule) {
         return vec![(
             None,
             facts.actions().to_vec(),
+            facts.conditions().to_vec(),
             facts
                 .program()
                 .rules
@@ -333,10 +353,13 @@ fn matching_scopes<'a>(
         if !matches {
             return;
         }
-        let body = match action {
-            Action::While { body, .. }
-            | Action::ForGlobalVariable { body, .. }
-            | Action::ForPlayerVariable { body, .. } => body.clone(),
+        let (body, conditions) = match action {
+            Action::While {
+                condition, body, ..
+            } => (body.clone(), vec![*condition]),
+            Action::ForGlobalVariable { body, .. } | Action::ForPlayerVariable { body, .. } => {
+                (body.clone(), Vec::new())
+            }
             Action::If {
                 branches,
                 else_body,
@@ -349,11 +372,12 @@ fn matching_scopes<'a>(
                 if let Some(else_body) = else_body {
                     body.extend(else_body);
                 }
-                body
+                let conditions = branches.iter().map(|branch| branch.condition).collect();
+                (body, conditions)
             }
-            _ => Vec::new(),
+            _ => (Vec::new(), Vec::new()),
         };
-        result.push((Some(id), body, action.span()));
+        result.push((Some(id), body, conditions, action.span()));
     });
     result
 }
@@ -414,6 +438,9 @@ fn action_matches(
     pattern.args.iter().enumerate().all(|(index, expected)| {
         args.get(index)
             .is_some_and(|actual| value_matches(facts, *actual, expected))
+    }) && pattern.parameters.iter().all(|(index, expected)| {
+        args.get(*index)
+            .is_some_and(|actual| value_matches(facts, *actual, expected))
     })
 }
 
@@ -457,34 +484,22 @@ fn value_matches(facts: &RuleFacts<'_>, id: ValueId, pattern: &CanonicalValuePat
                     .enumerate()
                     .all(|(index, expected)| value_matches(facts, actual_args[index], expected))
         }
+        (
+            CanonicalValuePattern::Comparison { operator, value },
+            Value::Number { value: actual, .. },
+        ) => {
+            let CanonicalValuePattern::Number(expected) = value.as_ref() else {
+                return false;
+            };
+            match operator {
+                ComparisonOperator::Less => actual < expected,
+                ComparisonOperator::LessOrEqual => actual <= expected,
+                ComparisonOperator::Greater => actual > expected,
+                ComparisonOperator::GreaterOrEqual => actual >= expected,
+            }
+        }
         _ => false,
     }
-}
-
-fn condition_values(facts: &RuleFacts<'_>, scope: Option<ActionId>) -> Vec<ValueId> {
-    let mut values = if scope.is_none() {
-        facts.conditions().to_vec()
-    } else {
-        Vec::new()
-    };
-    if let Some(scope) = scope {
-        if let Some(Action::While { condition, .. }) = facts.action(scope) {
-            values.push(*condition);
-        }
-    }
-    visit_actions(facts.program(), facts.actions(), &mut |id, action| {
-        if Some(id) == scope {
-            return;
-        }
-        match action {
-            Action::If { branches, .. } => {
-                values.extend(branches.iter().map(|branch| branch.condition))
-            }
-            Action::While { condition, .. } => values.push(*condition),
-            _ => {}
-        }
-    });
-    values
 }
 
 fn visit_actions(
@@ -534,21 +549,61 @@ fn canonical_action(
     catalog: &Catalog,
     locale: &Locale,
 ) -> Result<CanonicalActionPattern, RuleError> {
+    let name = pattern
+        .name
+        .as_deref()
+        .map(|name| resolve(catalog, Kind::Action, locale, name))
+        .transpose()?;
+    let parameters = pattern
+        .parameters
+        .iter()
+        .map(|parameter| {
+            let action = name
+                .as_deref()
+                .and_then(|name| catalog.entry(Kind::Action, name))
+                .ok_or_else(|| RuleError::ParameterNeedsActionName(parameter.name.clone()))?;
+            let index = resolve_parameter(action, locale, &parameter.name).ok_or_else(|| {
+                RuleError::UnknownParameter {
+                    action: action.id.clone(),
+                    spelling: parameter.name.clone(),
+                    locale: locale.to_string(),
+                }
+            })?;
+            Ok((index, canonical_value(&parameter.value, catalog, locale)?))
+        })
+        .collect::<Result<Vec<_>, RuleError>>()?;
     Ok(CanonicalActionPattern {
         kind: pattern.kind,
-        name: pattern
-            .name
-            .as_deref()
-            .map(|name| resolve(catalog, Kind::Action, locale, name))
-            .transpose()?,
+        name,
         args: pattern
             .args
             .iter()
             .map(|value| canonical_value(value, catalog, locale))
             .collect::<Result<_, _>>()?,
+        parameters,
         count: pattern.count.clone(),
         present: pattern.present,
     })
+}
+
+fn resolve_parameter(
+    action: &workshop_rs::catalog::CatalogEntry,
+    _locale: &Locale,
+    spelling: &str,
+) -> Option<usize> {
+    let normalized = normalize_parameter_name(spelling);
+    action
+        .params
+        .iter()
+        .position(|name| normalize_parameter_name(name) == normalized)
+}
+
+fn normalize_parameter_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn canonical_value(
@@ -560,7 +615,8 @@ fn canonical_value(
         + usize::from(pattern.string.is_some())
         + usize::from(pattern.boolean.is_some())
         + usize::from(pattern.call.is_some())
-        + usize::from(pattern.enum_value.is_some());
+        + usize::from(pattern.enum_value.is_some())
+        + usize::from(pattern.comparison.is_some());
     if selected > 1 {
         return Err(RuleError::AmbiguousValuePattern);
     }
@@ -575,7 +631,7 @@ fn canonical_value(
     }
     if let Some(call) = &pattern.call {
         return Ok(CanonicalValuePattern::Call {
-            name: resolve(catalog, Kind::Value, locale, &call.name)?,
+            name: resolve_value_or_operator(catalog, locale, &call.name)?,
             args: call
                 .args
                 .iter()
@@ -595,7 +651,27 @@ fn canonical_value(
             .1;
         return Ok(CanonicalValuePattern::Enum { domain, member });
     }
+    if let Some(comparison) = &pattern.comparison {
+        let value = canonical_value(&comparison.value, catalog, locale)?;
+        if !matches!(value, CanonicalValuePattern::Number(_)) {
+            return Err(RuleError::ComparisonNeedsNumber);
+        }
+        return Ok(CanonicalValuePattern::Comparison {
+            operator: comparison.operator,
+            value: Box::new(value),
+        });
+    }
     Ok(CanonicalValuePattern::Any)
+}
+
+fn resolve_value_or_operator(
+    catalog: &Catalog,
+    locale: &Locale,
+    spelling: &str,
+) -> Result<String, RuleError> {
+    resolve(catalog, Kind::Value, locale, spelling).or_else(|value_error| {
+        resolve(catalog, Kind::Operator, locale, spelling).or(Err(value_error))
+    })
 }
 
 fn resolve(
@@ -680,7 +756,14 @@ pub enum RuleError {
         spelling: String,
         locale: String,
     },
+    UnknownParameter {
+        action: String,
+        spelling: String,
+        locale: String,
+    },
+    ParameterNeedsActionName(String),
     AmbiguousValuePattern,
+    ComparisonNeedsNumber,
 }
 
 impl fmt::Display for RuleError {
@@ -703,8 +786,22 @@ impl fmt::Display for RuleError {
                 f,
                 "unknown {kind} spelling '{spelling}' in locale '{locale}'"
             ),
+            Self::UnknownParameter {
+                action,
+                spelling,
+                locale,
+            } => write!(
+                f,
+                "unknown parameter '{spelling}' for action '{action}' in locale '{locale}'"
+            ),
+            Self::ParameterNeedsActionName(parameter) => {
+                write!(f, "parameter '{parameter}' requires an action name")
+            }
             Self::AmbiguousValuePattern => {
                 f.write_str("a value pattern must select at most one literal or call shape")
+            }
+            Self::ComparisonNeedsNumber => {
+                f.write_str("comparison patterns require a numeric literal")
             }
         }
     }

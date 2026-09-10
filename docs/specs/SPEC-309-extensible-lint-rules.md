@@ -41,8 +41,6 @@ metadata:
   rationale: minimum waits can create high-frequency loops
   documentation: Finds a minimum wait inside a while scope.
   known-limits: This is structural and does not measure runtime cost.
-  evidence: static-indicator
-  default-severity: info
   tags: [performance]
 matcher:
   scope: while
@@ -65,10 +63,13 @@ The public matcher vocabulary is intentionally Workshop-shaped:
   `for-player-variable`, or `if`. A loop/branch scope includes nested action
   nodes in its body; nested loops are also independently matched.
 - `actions` uses direct predicates: `kind`, localized or canonical `name`,
-  positional `args`, `count.min`, `count.max`, and `present: false` for an
-  absence predicate. An omitted `kind` matches any action. A call name and
-  argument shape only match call actions.
-- value patterns are one of `number`, `string`, `boolean`, `call`, or `enum`.
+  positional `args`, catalog-backed named `parameters`, `count.min`,
+  `count.max`, and `present: false` for an absence predicate. Named parameters
+  use canonical catalog labels with locale-independent normalization. An
+  omitted `kind` matches any action. A call name and argument shape only match
+  call actions.
+- value patterns are one of `number`, `string`, `boolean`, `call`, `enum`, or a
+  numeric `comparison` using `<`, `<=`, `>`, or `>=`.
   A call and enum recursively use the same canonical name/domain/member
   resolution. An empty value pattern means any value.
 - counts and options are static matched-node counts. They are evidence about
@@ -89,17 +90,20 @@ behavior:
 rules:
   community/minimum-wait:
     enabled: true
-    severity: info
+    severity: warn
     options:
       min-matches: 1
       max-matches: 10
 ```
 
-`enabled` defaults to `true`; `severity` may be `warning` or `info`; the only
-shared rule options are the bounded `min-matches` and `max-matches` limits.
+`enabled` defaults to `true`; `severity` may be `off`, `warn`, or `error`; the
+only shared rule options are the bounded `min-matches` and `max-matches`
+limits. Evidence classification and a declarative rule's default finding
+severity are assigned by Wright from the canonical matcher contract; external
+metadata cannot override them.
 Unknown configuration keys are rejected. CLI flags apply to the same
 configuration object: `wright lint --lint-config project.yaml --rule rules/
---disable-rule ID --rule-severity ID:info`.
+--disable-rule ID --rule-severity ID:warn`.
 
 ## Query and finding output
 

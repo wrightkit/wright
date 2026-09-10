@@ -372,8 +372,8 @@ fn set_severity_by_name_accepts_cli_spellings_and_rejects_unknown_labels() {
 
     let mut config = LintConfig::default();
     assert!(
-        config.set_severity_by_name("expensive-loop-check", "warning"),
-        "'warning' is a known severity label"
+        config.set_severity_by_name("expensive-loop-check", "warn"),
+        "'warn' is a known severity label"
     );
     assert_eq!(
         config.effective_severity(meta),
@@ -388,6 +388,37 @@ fn set_severity_by_name_accepts_cli_spellings_and_rejects_unknown_labels() {
         config.effective_severity(meta),
         Severity::Warning,
         "an unknown label must leave the configuration unchanged"
+    );
+}
+
+#[test]
+fn severity_policy_supports_off_warn_and_error() {
+    let program = local_program("expensive-loop");
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            &minimum_wait_yaml("community/minimum-wait"),
+            &Catalog::builtin().unwrap(),
+        )
+        .expect("rule loads for severity policy execution");
+
+    let mut config = LintConfig::default();
+    assert!(config.set_severity_by_name("community/minimum-wait", "error"));
+    assert_eq!(
+        registry
+            .run(&program, &config)
+            .into_iter()
+            .find(|finding| finding.code == "community/minimum-wait")
+            .map(|finding| finding.severity),
+        Some(Severity::Error)
+    );
+
+    assert!(config.set_severity_by_name("community/minimum-wait", "off"));
+    assert!(
+        registry
+            .run(&program, &config)
+            .into_iter()
+            .all(|finding| finding.code != "community/minimum-wait")
     );
 }
 
@@ -460,8 +491,6 @@ metadata:
   rationale: minimum waits can create high-frequency loops
   documentation: Finds a minimum wait inside a while scope.
   known-limits: This is a structural fact and does not measure runtime cost.
-  evidence: static-indicator
-  default-severity: info
   tags: [performance]
 matcher:
   scope: while
@@ -482,7 +511,7 @@ matcher:
         .iter()
         .find(|finding| finding.code == "community/minimum-wait")
         .expect("external rule finds the nested wait action");
-    assert_eq!(finding.severity, Severity::Info);
+    assert_eq!(finding.severity, Severity::Warning);
     assert!(
         finding.span.is_some(),
         "external findings preserve source spans"
@@ -517,6 +546,83 @@ matcher:
 }
 
 #[test]
+fn declarative_rule_matches_named_parameters_and_numeric_comparisons() {
+    let catalog = Catalog::builtin().expect("built-in catalog");
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            r#"
+id: community/wait-duration
+metadata:
+  summary: loop contains a long wait
+  rationale: verify action parameter matching
+  documentation: Finds a wait with a duration at least one tenth of a second.
+  known-limits: This is a structural fact.
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: Wait
+      parameters:
+        - name: duration
+          comparison:
+            operator: ">="
+            value:
+              number: 0.1
+      count:
+        min: 1
+"#,
+            &catalog,
+        )
+        .expect("named parameter rule loads");
+
+    let findings = registry.run(&local_program("expensive-loop"), &LintConfig::default());
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.code == "community/wait-duration")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn declarative_conditions_are_limited_to_the_selected_scope() {
+    let catalog = Catalog::builtin().expect("built-in catalog");
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            r#"
+id: community/outer-loop-comparison
+metadata:
+  summary: outer loop has a comparison condition
+  rationale: verify scoped condition matching
+  documentation: Finds a comparison directly belonging to a while scope.
+  known-limits: This is a structural fact.
+  tags: [correctness]
+matcher:
+  scope: while
+  conditions:
+    call:
+      name: "<"
+    count:
+      min: 1
+"#,
+            &catalog,
+        )
+        .expect("scoped condition rule loads");
+
+    let findings = registry.run(&local_program("expensive-loop"), &LintConfig::default());
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.code != "community/outer-loop-comparison"),
+        "a while matcher must not count conditions from nested if scopes"
+    );
+}
+
+#[test]
 fn declarative_rule_rejects_reserved_or_unscoped_ids_and_unknown_spellings() {
     let catalog = Catalog::builtin().expect("built-in catalog");
     let definition = |id: &str, name: &str| {
@@ -528,8 +634,6 @@ metadata:
   rationale: rationale
   documentation: documentation
   known-limits: limits
-  evidence: exact
-  default-severity: warning
   tags: [correctness]
 matcher:
   actions:
@@ -556,7 +660,7 @@ fn lint_config_yaml_controls_external_rules_and_bounded_options() {
 rules:
   community/minimum-wait:
     enabled: true
-    severity: info
+    severity: warn
     options:
       max-matches: 2
 "#,
@@ -581,7 +685,7 @@ rules:
             .iter()
             .find(|finding| finding.code == "community/minimum-wait")
             .map(|finding| finding.severity),
-        Some(Severity::Info)
+        Some(Severity::Warning)
     );
 
     let invalid_options = LintConfig::from_yaml_str(
@@ -603,8 +707,6 @@ metadata:
   rationale: minimum waits can create high-frequency loops
   documentation: Finds a minimum wait inside a while scope.
   known-limits: This is a structural fact and does not measure runtime cost.
-  evidence: static-indicator
-  default-severity: info
   tags: [performance]
 matcher:
   scope: while

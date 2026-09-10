@@ -174,7 +174,7 @@ fn run_workflow(command: Command) -> ExitCode {
                     }
                 };
                 if !config.lint.set_severity_by_name(rule_id, severity) {
-                    eprintln!("wright: unknown severity '{severity}' (expected warning|info)");
+                    eprintln!("wright: unknown severity '{severity}' (expected off|warn|error)");
                     return ExitCode::from(exit::USAGE);
                 }
             }

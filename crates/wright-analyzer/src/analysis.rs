@@ -49,6 +49,7 @@ use crate::registry::{LintConfig, LintRegistry};
 pub enum Severity {
     Warning,
     Info,
+    Error,
 }
 
 /// How strongly a finding is supported by the available evidence.

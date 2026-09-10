@@ -484,6 +484,7 @@ fn reference_kind_name(kind: ReferenceKind) -> &'static str {
 
 fn severity_name(severity: Severity) -> &'static str {
     match severity {
+        Severity::Error => "error",
         Severity::Warning => "warning",
         Severity::Info => "info",
     }
