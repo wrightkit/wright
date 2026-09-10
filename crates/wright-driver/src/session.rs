@@ -94,7 +94,7 @@ impl CompilerSession {
         })?;
         let mut lint_registry = LintRegistry::default();
         for path in &config.lint_rule_paths {
-            lint_registry.load_path(path, &catalog).map_err(|error| {
+            lint_registry.load_path(path).map_err(|error| {
                 Diagnostic::error("lint-rule-error", Stage::Analysis, error.to_string())
             })?;
         }

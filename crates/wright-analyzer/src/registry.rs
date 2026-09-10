@@ -16,6 +16,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use workshop_rs::wir;
+use workshop_rs_catalog::catalog::Catalog;
 
 use crate::analysis::{
     Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,
@@ -537,22 +538,26 @@ impl LintRegistry {
 
     /// Load one external declarative rule. The rule is canonicalized against
     /// the owning Workshop catalog before it can enter the execution registry.
-    pub fn load_yaml_str(
-        &mut self,
-        input: &str,
-        catalog: &workshop_rs::catalog::Catalog,
-    ) -> Result<(), RuleRegistryError> {
+    pub fn load_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
+        let catalog =
+            Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
         let definition = RuleDefinition::from_yaml_str(input).map_err(RuleRegistryError::Rule)?;
-        let rule = DeclarativeRule::from_definition(definition, catalog)
+        let rule = DeclarativeRule::from_definition(definition, &catalog)
             .map_err(RuleRegistryError::Rule)?;
         self.insert_declarative(rule)
     }
 
     /// Load all `.yaml`/`.yml` files in a path, or one file, in lexical order.
-    pub fn load_path(
+    pub fn load_path(&mut self, path: &Path) -> Result<(), RuleRegistryError> {
+        let catalog =
+            Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
+        self.load_path_with_catalog(path, &catalog)
+    }
+
+    fn load_path_with_catalog(
         &mut self,
         path: &Path,
-        catalog: &workshop_rs::catalog::Catalog,
+        catalog: &Catalog,
     ) -> Result<(), RuleRegistryError> {
         if path.is_dir() {
             let mut files = std::fs::read_dir(path)
@@ -568,13 +573,16 @@ impl LintRegistry {
                 .collect::<Vec<_>>();
             files.sort();
             for file in files {
-                self.load_path(&file, catalog)?;
+                self.load_path_with_catalog(&file, catalog)?;
             }
             return Ok(());
         }
         let input = std::fs::read_to_string(path)
             .map_err(|error| RuleRegistryError::Io(path.to_path_buf(), error))?;
-        self.load_yaml_str(&input, catalog)
+        let definition = RuleDefinition::from_yaml_str(&input).map_err(RuleRegistryError::Rule)?;
+        let rule = DeclarativeRule::from_definition(definition, catalog)
+            .map_err(RuleRegistryError::Rule)?;
+        self.insert_declarative(rule)
     }
 
     fn insert_declarative(&mut self, rule: DeclarativeRule) -> Result<(), RuleRegistryError> {
@@ -713,6 +721,7 @@ impl LintRegistry {
 #[derive(Debug)]
 pub enum RuleRegistryError {
     Io(std::path::PathBuf, std::io::Error),
+    Catalog(String),
     Rule(RuleError),
     DuplicateId(String),
 }
@@ -723,6 +732,7 @@ impl std::fmt::Display for RuleRegistryError {
             Self::Io(path, error) => {
                 write!(f, "cannot read rule source {}: {error}", path.display())
             }
+            Self::Catalog(error) => write!(f, "cannot load Workshop catalog: {error}"),
             Self::Rule(error) => error.fmt(f),
             Self::DuplicateId(id) => write!(f, "rule ID '{id}' is already registered"),
         }

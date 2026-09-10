@@ -1186,7 +1186,7 @@ dependencies = [
  "libquickjs-ng-sys",
  "serde",
  "serde_json",
- "workshop-rs",
+ "workshop-rs 0.1.18",
 ]
 
 [[package]]
@@ -2280,13 +2280,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "workshop-rs"
+version = "0.3.4"
+source = "git+https://github.com/wrightkit/workshop-rs.git?rev=80ec934627fa0c837accb324401b001848b4aa98#80ec934627fa0c837accb324401b001848b4aa98"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "wright-analyzer"
 version = "0.2.21"
 dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "workshop-rs",
+ "workshop-rs 0.1.18",
+ "workshop-rs 0.3.4",
  "wright-core",
  "wright-ir",
 ]
@@ -2315,7 +2326,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
- "workshop-rs",
+ "workshop-rs 0.1.18",
  "wright-analyzer",
  "wright-driver",
 ]
@@ -2334,7 +2345,7 @@ version = "0.2.21"
 dependencies = [
  "serde",
  "serde_json",
- "workshop-rs",
+ "workshop-rs 0.1.18",
  "wright-ir",
 ]
 
@@ -2349,7 +2360,7 @@ dependencies = [
  "sha2",
  "tar",
  "url",
- "workshop-rs",
+ "workshop-rs 0.1.18",
  "wright-analyzer",
  "wright-core",
  "wright-ir",
@@ -2362,7 +2373,7 @@ dependencies = [
 name = "wright-ir"
 version = "0.2.21"
 dependencies = [
- "workshop-rs",
+ "workshop-rs 0.1.18",
 ]
 
 [[package]]
@@ -2373,7 +2384,7 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
- "workshop-rs",
+ "workshop-rs 0.1.18",
  "wright-analyzer",
  "wright-driver",
  "wright-ir",
@@ -2406,7 +2417,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "workshop-rs",
+ "workshop-rs 0.1.18",
  "wright-core",
  "wright-ir",
 ]
@@ -2416,7 +2427,7 @@ name = "wright-transform"
 version = "0.2.21"
 dependencies = [
  "serde",
- "workshop-rs",
+ "workshop-rs 0.1.18",
  "wright-ir",
 ]
 

@@ -1,9 +1,9 @@
 use std::fmt;
 
 use serde::Deserialize;
-use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
 use workshop_rs::wir::{self, Action, ActionId, Event, RuleId, Value, ValueId};
+use workshop_rs_catalog::catalog::{Catalog, Kind, Locale};
 
 use crate::analysis::{EvidenceClass, Finding, Severity};
 use crate::facts::{RuleFacts, SemanticFacts};
@@ -587,23 +587,11 @@ fn canonical_action(
 }
 
 fn resolve_parameter(
-    action: &workshop_rs::catalog::CatalogEntry,
-    _locale: &Locale,
+    action: &workshop_rs_catalog::catalog::CatalogEntry,
+    locale: &Locale,
     spelling: &str,
 ) -> Option<usize> {
-    let normalized = normalize_parameter_name(spelling);
-    action
-        .params
-        .iter()
-        .position(|name| normalize_parameter_name(name) == normalized)
-}
-
-fn normalize_parameter_name(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+    action.resolve_param(locale, spelling)
 }
 
 fn canonical_value(

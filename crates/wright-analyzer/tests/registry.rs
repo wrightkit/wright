@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 
-use workshop_rs::catalog::Catalog;
 use workshop_rs::wir::Program as WirProgram;
 use wright_analyzer::analysis::{EvidenceClass, Severity};
 use wright_analyzer::registry::{LintConfig, LintRegistry};
@@ -396,10 +395,7 @@ fn severity_policy_supports_off_warn_and_error() {
     let program = local_program("expensive-loop");
     let mut registry = LintRegistry::default();
     registry
-        .load_yaml_str(
-            &minimum_wait_yaml("community/minimum-wait"),
-            &Catalog::builtin().unwrap(),
-        )
+        .load_yaml_str(&minimum_wait_yaml("community/minimum-wait"))
         .expect("rule loads for severity policy execution");
 
     let mut config = LintConfig::default();
@@ -480,7 +476,6 @@ fn findings_carry_source_spans() {
 
 #[test]
 fn declarative_rule_matches_canonical_nested_actions_and_exposes_metadata() {
-    let catalog = Catalog::builtin().expect("built-in catalog");
     let mut registry = LintRegistry::default();
     registry
         .load_yaml_str(
@@ -502,7 +497,6 @@ matcher:
       count:
         min: 1
 "#,
-            &catalog,
         )
         .expect("declarative rule loads");
 
@@ -529,10 +523,7 @@ matcher:
 
     let mut canonical_registry = LintRegistry::default();
     canonical_registry
-        .load_yaml_str(
-            &definition_yaml("community/canonical-wait", "wait"),
-            &catalog,
-        )
+        .load_yaml_str(&definition_yaml("community/canonical-wait", "wait"))
         .expect("canonical Workshop identity loads");
     let canonical_findings = canonical_registry
         .run(&local_program("expensive-loop"), &LintConfig::default())
@@ -547,7 +538,6 @@ matcher:
 
 #[test]
 fn declarative_rule_matches_named_parameters_and_numeric_comparisons() {
-    let catalog = Catalog::builtin().expect("built-in catalog");
     let mut registry = LintRegistry::default();
     registry
         .load_yaml_str(
@@ -565,7 +555,7 @@ matcher:
     - kind: call
       name: Wait
       parameters:
-        - name: duration
+        - name: Duration
           comparison:
             operator: ">="
             value:
@@ -573,7 +563,6 @@ matcher:
       count:
         min: 1
 "#,
-            &catalog,
         )
         .expect("named parameter rule loads");
 
@@ -585,11 +574,47 @@ matcher:
             .count(),
         1
     );
+
+    let mut localized_registry = LintRegistry::default();
+    localized_registry
+        .load_yaml_str(
+            r#"
+id: community/wait-duration-zh
+locale: zh-CN
+metadata:
+  summary: loop contains a long wait
+  rationale: verify localized parameter matching
+  documentation: Finds a wait with a localized duration at least one tenth of a second.
+  known-limits: This is a structural fact.
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: 等待
+      parameters:
+        - name: 持续时间
+          comparison:
+            operator: ">="
+            value:
+              number: 0.1
+      count:
+        min: 1
+"#,
+        )
+        .expect("localized named parameter rule loads");
+    assert_eq!(
+        localized_registry
+            .run(&local_program("expensive-loop"), &LintConfig::default())
+            .into_iter()
+            .filter(|finding| finding.code == "community/wait-duration-zh")
+            .count(),
+        1
+    );
 }
 
 #[test]
 fn declarative_conditions_are_limited_to_the_selected_scope() {
-    let catalog = Catalog::builtin().expect("built-in catalog");
     let mut registry = LintRegistry::default();
     registry
         .load_yaml_str(
@@ -609,7 +634,6 @@ matcher:
     count:
       min: 1
 "#,
-            &catalog,
         )
         .expect("scoped condition rule loads");
 
@@ -624,7 +648,6 @@ matcher:
 
 #[test]
 fn declarative_rule_rejects_reserved_or_unscoped_ids_and_unknown_spellings() {
-    let catalog = Catalog::builtin().expect("built-in catalog");
     let definition = |id: &str, name: &str| {
         format!(
             r#"
@@ -643,13 +666,10 @@ matcher:
         )
     };
     for id in ["bare-id", "wright/rule", "a/b/c"] {
-        let error = registry_error(&definition(id, "Wait"), &catalog);
+        let error = registry_error(&definition(id, "Wait"));
         assert!(error.to_string().contains("external rule ID"));
     }
-    let error = registry_error(
-        &definition("community/rule", "NotAWorkshopAction"),
-        &catalog,
-    );
+    let error = registry_error(&definition("community/rule", "NotAWorkshopAction"));
     assert!(error.to_string().contains("unknown action spelling"));
 }
 
@@ -674,10 +694,7 @@ rules:
 
     let mut registry = LintRegistry::default();
     registry
-        .load_yaml_str(
-            &minimum_wait_yaml("community/minimum-wait"),
-            &Catalog::builtin().unwrap(),
-        )
+        .load_yaml_str(&minimum_wait_yaml("community/minimum-wait"))
         .expect("rule loads for config execution");
     let findings = registry.run(&local_program("expensive-loop"), &config);
     assert_eq!(
@@ -721,9 +738,7 @@ matcher:
     )
 }
 
-fn registry_error(yaml: &str, catalog: &Catalog) -> wright_analyzer::registry::RuleRegistryError {
+fn registry_error(yaml: &str) -> wright_analyzer::registry::RuleRegistryError {
     let mut registry = LintRegistry::default();
-    registry
-        .load_yaml_str(yaml, catalog)
-        .expect_err("rule must reject")
+    registry.load_yaml_str(yaml).expect_err("rule must reject")
 }
