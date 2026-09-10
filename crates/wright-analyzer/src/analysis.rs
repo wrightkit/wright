@@ -111,6 +111,89 @@ pub enum Boundedness {
     Unknown,
 }
 
+/// The canonical kind of a Workshop object that remains live until destroyed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistentObjectKind {
+    HudText,
+    InWorldText,
+    Effect,
+}
+
+impl PersistentObjectKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PersistentObjectKind::HudText => "hud-text",
+            PersistentObjectKind::InWorldText => "in-world-text",
+            PersistentObjectKind::Effect => "effect",
+        }
+    }
+
+    fn identity_value(self) -> &'static str {
+        match self {
+            PersistentObjectKind::HudText | PersistentObjectKind::InWorldText => "lastTextId",
+            PersistentObjectKind::Effect => "lastCreatedEntity",
+        }
+    }
+
+    fn cleanup_action(self) -> &'static str {
+        match self {
+            PersistentObjectKind::HudText => "destroyHudText",
+            PersistentObjectKind::InWorldText => "destroyInWorldText",
+            PersistentObjectKind::Effect => "destroyEffect",
+        }
+    }
+}
+
+/// The execution scope of a persistent-object creation site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectExecutionScope {
+    Global,
+    PerPlayer,
+    Subroutine,
+}
+
+impl ObjectExecutionScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ObjectExecutionScope::Global => "global",
+            ObjectExecutionScope::PerPlayer => "per-player",
+            ObjectExecutionScope::Subroutine => "subroutine",
+        }
+    }
+}
+
+/// The statically visible audience shape of a persistent object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectVisibility {
+    AllPlayers,
+    EventPlayer,
+    ExplicitSet,
+    Dynamic,
+    Unknown,
+}
+
+impl ObjectVisibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ObjectVisibility::AllPlayers => "all-players",
+            ObjectVisibility::EventPlayer => "event-player",
+            ObjectVisibility::ExplicitSet => "explicit-set",
+            ObjectVisibility::Dynamic => "dynamic",
+            ObjectVisibility::Unknown => "unknown",
+        }
+    }
+}
+
+/// Structural lifecycle evidence attached to a persistent-object finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PersistentObject {
+    pub kind: PersistentObjectKind,
+    pub execution_scope: ObjectExecutionScope,
+    pub visibility: ObjectVisibility,
+    pub identity_retained: bool,
+    pub cleanup_observed: bool,
+}
+
 impl Boundedness {
     /// The stable serialized spelling of this class
     /// (`"obviously-unbounded"`, `"statically-bounded"`, `"unknown"`).
@@ -139,6 +222,8 @@ pub struct Finding {
     /// The boundedness evidence of a no-yield `While` loop finding
     /// (`while-without-wait` only; `None` on every other rule).
     pub boundedness: Option<Boundedness>,
+    /// Structural lifecycle evidence for `persistent-object-lifecycle` only.
+    pub persistent_object: Option<PersistentObject>,
 }
 
 /// A Workshop-specific static analysis.
@@ -203,6 +288,7 @@ impl Analysis for MinWaitLoop {
                     value: None,
                     evidence: self.evidence(),
                     boundedness: None,
+                    persistent_object: None,
                 });
             }
         });
@@ -286,6 +372,7 @@ impl Analysis for DuplicateCondition {
                         value: Some(condition),
                         evidence: self.evidence(),
                         boundedness: None,
+                        persistent_object: None,
                     });
                 } else {
                     conditions.push((condition, Some(action_id), span));
@@ -336,6 +423,7 @@ impl Analysis for ExpensiveLoopCheck {
                     value: Some(value),
                     evidence: self.evidence(),
                     boundedness: None,
+                    persistent_object: None,
                 });
             }
         });
@@ -426,6 +514,7 @@ impl Analysis for OngoingConditionHotPath {
                     value: Some(value),
                     evidence: self.evidence(),
                     boundedness: None,
+                    persistent_object: None,
                 });
             }
         }
@@ -510,6 +599,7 @@ impl Analysis for RepeatedValue {
                     value: Some(first),
                     evidence: self.evidence(),
                     boundedness: None,
+                    persistent_object: None,
                 });
             }
         });
@@ -832,6 +922,189 @@ fn visit_value_children(value: &Value, f: &mut impl FnMut(ValueId)) {
     }
 }
 
+/// Persistent Workshop objects with no evident retained identity or cleanup.
+pub struct PersistentObjectLifecycle;
+
+impl Analysis for PersistentObjectLifecycle {
+    fn name(&self) -> &'static str {
+        "persistent-object-lifecycle"
+    }
+
+    fn evidence(&self) -> EvidenceClass {
+        EvidenceClass::StaticIndicator
+    }
+
+    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
+        let Some(rule_data) = program.rules.get(rule) else {
+            return Vec::new();
+        };
+        let cleanup_actions = cleanup_actions_in_rule(program, &rule_data.actions);
+        let mut sites = Vec::new();
+        persistent_object_sites(program, &rule_data.actions, &mut sites);
+        sites
+            .into_iter()
+            .filter_map(|(action_id, next)| {
+                let action = program.actions.get(action_id)?;
+                let Action::Call { name, args, span } = action else {
+                    return None;
+                };
+                let kind = persistent_object_kind(name)?;
+                let identity_retained = next.is_some_and(|next| {
+                    action_retains_identity(program, next, kind.identity_value())
+                });
+                let cleanup_observed = cleanup_actions.iter().any(|cleanup| {
+                    program.actions.get(*cleanup).is_some_and(|action| {
+                        matches!(action, Action::Call { name, .. } if name == kind.cleanup_action())
+                    })
+                });
+                let object = PersistentObject {
+                    kind,
+                    execution_scope: object_execution_scope(&rule_data.event),
+                    visibility: object_visibility(program, args),
+                    identity_retained,
+                    cleanup_observed,
+                };
+                let risk = !identity_retained || !cleanup_observed;
+                Some(Finding {
+                    code: self.name(),
+                    severity: if risk {
+                        Severity::Warning
+                    } else {
+                        Severity::Info
+                    },
+                    message: persistent_object_message(object),
+                    span: *span,
+                    rule,
+                    action: Some(action_id),
+                    value: None,
+                    evidence: self.evidence(),
+                    boundedness: None,
+                    persistent_object: Some(object),
+                })
+            })
+            .collect()
+    }
+}
+
+fn persistent_object_kind(name: &str) -> Option<PersistentObjectKind> {
+    match name {
+        "createHudText" => Some(PersistentObjectKind::HudText),
+        "createInWorldText" => Some(PersistentObjectKind::InWorldText),
+        "createEffect" => Some(PersistentObjectKind::Effect),
+        _ => None,
+    }
+}
+
+fn object_execution_scope(event: &Event) -> ObjectExecutionScope {
+    match event {
+        Event::Global => ObjectExecutionScope::Global,
+        Event::Subroutine(_) => ObjectExecutionScope::Subroutine,
+        Event::EachPlayer | Event::EachPlayerWithFilters { .. } | Event::Player { .. } => {
+            ObjectExecutionScope::PerPlayer
+        }
+    }
+}
+
+fn object_visibility(program: &wir::Program, args: &[ValueId]) -> ObjectVisibility {
+    let Some(value) = args.first().and_then(|id| program.values.get(*id)) else {
+        return ObjectVisibility::Unknown;
+    };
+    match &value.value {
+        Value::EventPlayer => ObjectVisibility::EventPlayer,
+        Value::Array(_) => ObjectVisibility::ExplicitSet,
+        Value::Call { name, .. } if name == "allPlayers" => ObjectVisibility::AllPlayers,
+        Value::Call { .. } | Value::PlayerVariable { .. } | Value::GlobalVariable(_) => {
+            ObjectVisibility::Dynamic
+        }
+        _ => ObjectVisibility::Unknown,
+    }
+}
+
+fn persistent_object_sites(
+    program: &wir::Program,
+    actions: &[ActionId],
+    out: &mut Vec<(ActionId, Option<ActionId>)>,
+) {
+    for (index, action_id) in actions.iter().copied().enumerate() {
+        let next = actions.get(index + 1).copied();
+        let Some(action) = program.actions.get(action_id) else {
+            continue;
+        };
+        if matches!(action, Action::Call { name, .. } if persistent_object_kind(name).is_some()) {
+            out.push((action_id, next));
+        }
+        match action {
+            Action::If {
+                branches,
+                else_body,
+                ..
+            } => {
+                for branch in branches {
+                    persistent_object_sites(program, &branch.body, out);
+                }
+                if let Some(else_body) = else_body {
+                    persistent_object_sites(program, else_body, out);
+                }
+            }
+            Action::While { body, .. }
+            | Action::ForGlobalVariable { body, .. }
+            | Action::ForPlayerVariable { body, .. } => persistent_object_sites(program, body, out),
+            _ => {}
+        }
+    }
+}
+
+fn cleanup_actions_in_rule(program: &wir::Program, actions: &[ActionId]) -> Vec<ActionId> {
+    let mut cleanup = Vec::new();
+    visit_actions(program, actions, &mut |action_id, action| {
+        if matches!(action, Action::Call { name, .. } if matches!(name.as_str(), "destroyHudText" | "destroyInWorldText" | "destroyEffect"))
+        {
+            cleanup.push(action_id);
+        }
+    });
+    cleanup
+}
+
+fn action_retains_identity(program: &wir::Program, action_id: ActionId, identity: &str) -> bool {
+    let Some(action) = program.actions.get(action_id) else {
+        return false;
+    };
+    let value = match action {
+        Action::SetGlobalVariable { value, .. }
+        | Action::SetPlayerVariable { value, .. }
+        | Action::AssignMember { value, .. } => *value,
+        _ => return false,
+    };
+    matches!(
+        program.values.get(value).map(|node| &node.value),
+        Some(Value::Call { name, args }) if name == identity && args.is_empty()
+    )
+}
+
+fn persistent_object_message(object: PersistentObject) -> String {
+    let lifecycle = match (object.identity_retained, object.cleanup_observed) {
+        (true, true) => {
+            "its identity is retained immediately and the rule contains a matching cleanup action"
+        }
+        (false, false) => {
+            "its identity is not retained immediately and the rule has no matching cleanup action"
+        }
+        (false, true) => {
+            "its identity is not retained immediately, although the rule contains a matching cleanup action"
+        }
+        (true, false) => {
+            "its identity is retained immediately, but the rule has no matching cleanup action"
+        }
+    };
+    format!(
+        "persistent {} is created in {} execution with {} visibility; {}; this is structural lifecycle evidence, not a runtime object-count or aliasing proof",
+        object.kind.as_str(),
+        object.execution_scope.as_str(),
+        object.visibility.as_str(),
+        lifecycle,
+    )
+}
+
 /// A `While` loop whose body tree contains no `wait` call.
 ///
 /// Each flagged loop additionally carries a [`Boundedness`] classification
@@ -883,6 +1156,7 @@ impl Analysis for WhileWithoutWait {
                     value: None,
                     evidence: self.evidence(),
                     boundedness: Some(class),
+                    persistent_object: None,
                 });
             }
         });

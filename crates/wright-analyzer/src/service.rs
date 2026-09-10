@@ -357,6 +357,13 @@ impl<'a> SemanticService<'a> {
                             "value": finding.value.map(|value| value.index()),
                             "evidence": finding.evidence.as_str(),
                             "boundedness": finding.boundedness.map(|b| b.as_str()),
+                            "object": finding.persistent_object.map(|object| json!({
+                                "kind": object.kind.as_str(),
+                                "executionScope": object.execution_scope.as_str(),
+                                "visibility": object.visibility.as_str(),
+                                "identityRetained": object.identity_retained,
+                                "cleanupObserved": object.cleanup_observed,
+                            })),
                         })
                     })
                     .collect();

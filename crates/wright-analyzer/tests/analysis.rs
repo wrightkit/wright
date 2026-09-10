@@ -93,6 +93,97 @@ fn findings_by_code(program: &WirProgram, code: &str) -> Vec<analysis::Finding> 
         .collect()
 }
 
+fn object_lifecycle_program(retain_identity: bool, cleanup: bool) -> WirProgram {
+    let mut program = WirProgram::default();
+    let player_variable = program.player_variables.push(wir::WorkshopVariable {
+        name: "objectId".to_string(),
+        index: 0,
+        span: None,
+        name_span: None,
+    });
+    let event_player = program
+        .values
+        .push(ValueNode::new(Value::EventPlayer, None));
+    let all_players = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "allPlayers".to_string(),
+            args: Vec::new(),
+        },
+        None,
+    ));
+    let last_text_id = program.values.push(ValueNode::new(
+        Value::Call {
+            name: "lastTextId".to_string(),
+            args: Vec::new(),
+        },
+        None,
+    ));
+    let create = program.actions.push(Action::Call {
+        name: "createHudText".to_string(),
+        args: vec![all_players],
+        span: None,
+    });
+    let retain = program.actions.push(Action::SetPlayerVariable {
+        player: event_player,
+        variable: player_variable,
+        value: last_text_id,
+        span: None,
+        target_span: None,
+    });
+    let destroy = program.actions.push(Action::Call {
+        name: "destroyHudText".to_string(),
+        args: vec![last_text_id],
+        span: None,
+    });
+    let mut actions = vec![create];
+    if retain_identity {
+        actions.push(retain);
+    }
+    if cleanup {
+        actions.push(destroy);
+    }
+    program.rules.push(Rule {
+        name: "persistent object".to_string(),
+        span: None,
+        name_span: None,
+        disabled: false,
+        event: Event::EachPlayer,
+        conditions: Vec::new(),
+        actions,
+    });
+    program
+}
+
+#[test]
+fn persistent_object_lifecycle_distinguishes_evident_cleanup_from_risk() {
+    let safe = object_lifecycle_program(true, true);
+    let safe_findings = findings_by_code(&safe, "persistent-object-lifecycle");
+    assert_eq!(safe_findings.len(), 1);
+    let safe_object = safe_findings[0].persistent_object.expect("object evidence");
+    assert_eq!(safe_findings[0].severity, Severity::Info);
+    assert_eq!(safe_findings[0].evidence, EvidenceClass::StaticIndicator);
+    assert_eq!(safe_object.kind.as_str(), "hud-text");
+    assert_eq!(safe_object.execution_scope.as_str(), "per-player");
+    assert_eq!(safe_object.visibility.as_str(), "all-players");
+    assert!(safe_object.identity_retained);
+    assert!(safe_object.cleanup_observed);
+
+    let risky = object_lifecycle_program(false, false);
+    let risky_findings = findings_by_code(&risky, "persistent-object-lifecycle");
+    assert_eq!(risky_findings.len(), 1);
+    let risky_object = risky_findings[0]
+        .persistent_object
+        .expect("object evidence");
+    assert_eq!(risky_findings[0].severity, Severity::Warning);
+    assert!(!risky_object.identity_retained);
+    assert!(!risky_object.cleanup_observed);
+    assert!(
+        risky_findings[0]
+            .message
+            .contains("not a runtime object-count")
+    );
+}
+
 #[test]
 fn min_wait_loop_fires_on_hot_loops_in_the_corpus() {
     // The cake's `while true: ... wait(0.016)` and control-flow's

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use workshop_rs::catalog::{Catalog, Locale};
+use workshop_rs::parser;
 use workshop_rs::wir::Program as WirProgram;
 use wright_analyzer::analysis::Severity;
 use wright_analyzer::registry::LintConfig;
@@ -41,6 +43,18 @@ fn lowered_program(path: &Path) -> WirProgram {
     let protocol = wright_core::hir::parse_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let model = protocol.to_ir().unwrap();
     wright_ir::lower::lower(&model).unwrap()
+}
+
+fn real_world_program(fixture_id: &str) -> WirProgram {
+    let oracle_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../compatibility/fixtures")
+        .join(fixture_id)
+        .join("oracle.json");
+    let oracle: Value =
+        serde_json::from_str(&std::fs::read_to_string(oracle_path).unwrap()).unwrap();
+    let workshop = oracle["compile"]["workshop"].as_str().unwrap();
+    let catalog = Catalog::builtin().unwrap();
+    parser::parse_with_context(workshop, &catalog, &Locale::new("en-US"), &catalog).unwrap()
 }
 
 /// Build a service over a lowered program with an explicit lint config.
@@ -205,6 +219,28 @@ fn findings_are_returned_with_codes_and_spans() {
 }
 
 #[test]
+fn persistent_object_findings_expose_machine_readable_lifecycle_evidence() {
+    let program = real_world_program("real-world/overpy-broken-weapons");
+    let service = SemanticService::from_workshop(&program, "en-US").unwrap();
+    let response = handle(&service, r#"{"op":"getFindings"}"#);
+    let findings = response["result"].as_array().unwrap();
+    let finding = findings
+        .iter()
+        .find(|finding| finding["code"] == "persistent-object-lifecycle")
+        .expect("the real Workshop project creates persistent HUD text");
+    assert!(
+        finding["span"].is_object(),
+        "creation provenance is preserved"
+    );
+    assert_eq!(finding["evidence"], "static-indicator");
+    assert_eq!(finding["object"]["kind"], "hud-text");
+    assert_eq!(finding["object"]["executionScope"], "per-player");
+    assert_eq!(finding["object"]["visibility"], "all-players");
+    assert_eq!(finding["object"]["identityRetained"], false);
+    assert_eq!(finding["object"]["cleanupObserved"], false);
+}
+
+#[test]
 fn while_without_wait_findings_carry_boundedness_in_json() {
     // The machine-readable boundedness surface (issue #103): `while-without-wait`
     // findings expose the kebab-case class, every other finding exposes null.
@@ -253,7 +289,7 @@ fn lint_rules_reports_rule_metadata_and_effective_config() {
     );
     let result = &responses[0]["result"];
     let rules = result["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 6, "all six first-party rules are reported");
+    assert_eq!(rules.len(), 7, "all seven first-party rules are reported");
     for rule in rules {
         assert!(rule["id"].is_string(), "rules carry stable ids");
         assert!(rule["defaultSeverity"].is_string());
@@ -275,7 +311,7 @@ fn lint_rules_reports_rule_metadata_and_effective_config() {
     let config_rules = result["config"]["rules"].as_object().unwrap();
     assert_eq!(
         config_rules.len(),
-        6,
+        7,
         "the config summary covers every registered rule"
     );
     for rule in rules {
