@@ -44,6 +44,8 @@ pub enum ToolRequest {
     Cfg { rule: u32 },
     /// Every static-analysis finding.
     Findings,
+    /// Persistent Workshop object facts, separate from lint diagnostics.
+    PersistentObjects,
     /// Lint findings plus rule metadata and effective configuration (#98).
     Lint,
     /// The registered lint rules and the effective lint configuration.
@@ -189,6 +191,7 @@ impl<'a> ToolService<'a> {
                 "usage",
                 "cfg",
                 "findings",
+                "persistentObjects",
                 "lint",
                 "lintRules",
                 "callGraph",
@@ -244,6 +247,7 @@ impl<'a> ToolService<'a> {
                 self.semantic_query(wright_analyzer::service::Request::GetCfg { rule: *rule })
             }
             ToolRequest::Findings => self.findings(),
+            ToolRequest::PersistentObjects => self.persistent_objects(),
             ToolRequest::Lint => self.lint(),
             ToolRequest::LintRules => self.semantic_query_with_config(
                 wright_analyzer::service::Request::LintRules,
@@ -398,6 +402,18 @@ impl<'a> ToolService<'a> {
     /// across every surface (#102).
     fn findings(&self) -> ToolResponse {
         let response = self.semantic_query(wright_analyzer::service::Request::GetFindings);
+        match response {
+            ToolResponse::Ok { mut result } => {
+                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
+                ToolResponse::Ok { result }
+            }
+            other => other,
+        }
+    }
+
+    /// `persistentObjects`: persistent-object facts with resolved source paths.
+    fn persistent_objects(&self) -> ToolResponse {
+        let response = self.semantic_query(wright_analyzer::service::Request::GetPersistentObjects);
         match response {
             ToolResponse::Ok { mut result } => {
                 crate::session::resolve_finding_span_paths(&mut result, &self.loaded);

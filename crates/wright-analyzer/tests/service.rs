@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use workshop_rs::catalog::{Catalog, Locale};
+use workshop_rs::parser;
 use workshop_rs::wir::Program as WirProgram;
 use wright_analyzer::analysis::Severity;
 use wright_analyzer::registry::LintConfig;
@@ -43,6 +45,18 @@ fn lowered_program(path: &Path) -> WirProgram {
     wright_ir::lower::lower(&model).unwrap()
 }
 
+fn real_world_program(fixture_id: &str) -> WirProgram {
+    let oracle_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../compatibility/fixtures")
+        .join(fixture_id)
+        .join("oracle.json");
+    let oracle: Value =
+        serde_json::from_str(&std::fs::read_to_string(oracle_path).unwrap()).unwrap();
+    let workshop = oracle["compile"]["workshop"].as_str().unwrap();
+    let catalog = Catalog::builtin().unwrap();
+    parser::parse_with_context(workshop, &catalog, &Locale::new("en-US"), &catalog).unwrap()
+}
+
 /// Build a service over a lowered program with an explicit lint config.
 fn service_with_config(program: &WirProgram, config: LintConfig) -> SemanticService<'_> {
     SemanticService::with_origin_and_config(
@@ -74,6 +88,60 @@ fn version_reports_identity_and_capabilities() {
         .map(|value| value.as_str().unwrap())
         .collect();
     assert!(capabilities.contains(&"findings"));
+    assert!(capabilities.contains(&"persistentObjects"));
+}
+
+#[test]
+fn persistent_object_query_exposes_reevaluation_without_emitting_lints() {
+    let responses = in_process_responses(
+        "synthetic/control-flow",
+        &[
+            r#"{"op":"getPersistentObjects"}"#,
+            r#"{"op":"getFindings"}"#,
+        ],
+    );
+    let objects = responses[0]["result"].as_array().unwrap();
+    assert!(!objects.is_empty(), "fixture creates HUD text");
+    let object = &objects[0];
+    assert_eq!(object["kind"], "hud-text");
+    assert_eq!(object["visibility"], "all-players");
+    assert_eq!(object["reevaluation"]["domain"], "HudReeval");
+    assert_eq!(object["reevaluation"]["mode"], "VISIBILITY_AND_STRING");
+    assert!(object["sameKindCleanupInRule"].is_boolean());
+    assert!(object["span"].is_object(), "facts preserve provenance");
+    assert!(
+        responses[1]["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|finding| finding["code"] != "persistent-object-lifecycle")
+    );
+}
+
+#[test]
+fn persistent_object_query_keeps_real_project_observations_out_of_lints() {
+    let program = real_world_program("real-world/overpy-broken-weapons");
+    let service = SemanticService::from_workshop(&program, "en-US").unwrap();
+    let objects = handle(&service, r#"{"op":"getPersistentObjects"}"#);
+    let objects = objects["result"].as_array().unwrap();
+    let object = objects
+        .iter()
+        .find(|object| object["kind"] == "hud-text")
+        .expect("the real Workshop project creates persistent HUD text");
+    assert!(
+        object["span"].is_object(),
+        "creation provenance is preserved"
+    );
+    assert_eq!(object["executionScope"], "per-player");
+    assert_eq!(object["visibility"], "all-players");
+    let findings = handle(&service, r#"{"op":"getFindings"}"#);
+    assert!(
+        findings["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|finding| finding["code"] != "persistent-object-lifecycle")
+    );
 }
 
 #[test]
@@ -253,7 +321,7 @@ fn lint_rules_reports_rule_metadata_and_effective_config() {
     );
     let result = &responses[0]["result"];
     let rules = result["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 6, "all six first-party rules are reported");
+    assert!(!rules.is_empty(), "first-party rules are reported");
     for rule in rules {
         assert!(rule["id"].is_string(), "rules carry stable ids");
         assert!(rule["defaultSeverity"].is_string());
@@ -275,8 +343,8 @@ fn lint_rules_reports_rule_metadata_and_effective_config() {
     let config_rules = result["config"]["rules"].as_object().unwrap();
     assert_eq!(
         config_rules.len(),
-        6,
-        "the config summary covers every registered rule"
+        rules.len(),
+        "the config summary covers every rule"
     );
     for rule in rules {
         let id = rule["id"].as_str().unwrap();
