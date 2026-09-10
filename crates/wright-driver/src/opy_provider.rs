@@ -235,7 +235,7 @@ impl OpyProviderResolver {
                     final_executable.display()
                 )));
             }
-            return self.activate(version);
+            return self.activate(version, target);
         }
         if final_dir.exists() {
             return Err(OpyProviderError::install(format!(
@@ -244,44 +244,68 @@ impl OpyProviderResolver {
             )));
         }
 
-        let staging = self.store_dir.join(format!(
-            ".opy-provider-{version}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default()
-        ));
+        let staging = self.staging_dir(version)?;
         let result = (|| -> Result<(), OpyProviderError> {
-            std::fs::create_dir_all(&staging).map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot create OPY provider staging directory '{}': {error}",
-                    staging.display()
-                ))
-            })?;
             extract_provider(archive, &staging, target)?;
-            std::fs::create_dir_all(final_dir.parent().expect("provider target has a parent"))
-                .map_err(|error| {
-                    OpyProviderError::install(format!(
-                        "cannot create OPY provider version directory '{}': {error}",
-                        final_dir.display()
-                    ))
-                })?;
-            std::fs::rename(&staging, &final_dir).map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot activate staged OPY provider '{}': {error}",
-                    final_dir.display()
-                ))
-            })?;
-            self.activate(version)
+            self.promote_staging(&staging, version, target)
         })();
-        if result.is_err() {
-            let _ = std::fs::remove_dir_all(&staging);
-        }
+        let _ = std::fs::remove_dir_all(&staging);
         result
     }
 
-    fn activate(&self, version: &str) -> Result<(), OpyProviderError> {
+    fn promote_staging(
+        &self,
+        staging: &Path,
+        version: &str,
+        target: &str,
+    ) -> Result<(), OpyProviderError> {
+        let final_dir = self.store_dir.join(version).join(target);
+        let final_executable = final_dir.join(provider_binary(target));
+        std::fs::create_dir_all(final_dir.parent().expect("provider target has a parent"))
+            .map_err(|error| {
+                OpyProviderError::install(format!(
+                    "cannot create OPY provider version directory '{}': {error}",
+                    final_dir.display()
+                ))
+            })?;
+        match std::fs::rename(staging, &final_dir) {
+            Ok(()) => self.activate(version, target),
+            Err(_) if is_executable(&final_executable) => self.activate(version, target),
+            Err(error) => Err(OpyProviderError::install(format!(
+                "cannot activate staged OPY provider '{}': {error}",
+                final_dir.display()
+            ))),
+        }
+    }
+
+    fn staging_dir(&self, version: &str) -> Result<PathBuf, OpyProviderError> {
+        for attempt in 0..1024 {
+            let staging = self.store_dir.join(format!(
+                ".opy-provider-{version}-{}-{}-{attempt}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default()
+            ));
+            match std::fs::create_dir(&staging) {
+                Ok(()) => return Ok(staging),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(OpyProviderError::install(format!(
+                        "cannot create OPY provider staging directory '{}': {error}",
+                        staging.display()
+                    )));
+                }
+            }
+        }
+        Err(OpyProviderError::install(format!(
+            "cannot reserve an OPY provider staging directory in '{}'",
+            self.store_dir.display()
+        )))
+    }
+
+    fn activate(&self, version: &str, target: &str) -> Result<(), OpyProviderError> {
         let temporary = self.store_dir.join(format!(
             "active.{}.{}",
             std::process::id(),
@@ -309,11 +333,15 @@ impl OpyProviderResolver {
                     temporary.display()
                 ))
             })?;
-            std::fs::rename(&temporary, self.store_dir.join("active")).map_err(|error| {
-                OpyProviderError::install(format!(
+            match std::fs::rename(&temporary, self.store_dir.join("active")) {
+                Ok(()) => Ok(()),
+                Err(_) if matches!(self.active_provider(target)?, Some((active, _)) if active == version) => {
+                    Ok(())
+                }
+                Err(error) => Err(OpyProviderError::install(format!(
                     "cannot atomically activate OPY provider {version}: {error}"
-                ))
-            })
+                ))),
+            }
         })();
         if result.is_err() {
             let _ = std::fs::remove_file(&temporary);
@@ -631,7 +659,7 @@ mod tests {
     use super::*;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{
-        Arc,
+        Arc, Barrier,
         atomic::{AtomicUsize, Ordering},
     };
     use std::thread;
@@ -734,6 +762,44 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(root.join("active")).unwrap(),
             version
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_bootstrap_promotion_reuses_the_winning_local_install() {
+        let root = test_root("concurrent-bootstrap");
+        let target = "x86_64-unknown-linux-gnu";
+        let version = "3.1.4";
+        let archive = archive(version, target, b"bootstrapped");
+        let resolver = OpyProviderResolver::new(&root).with_target(target);
+        let first_staging = resolver.staging_dir(version).unwrap();
+        let second_staging = resolver.staging_dir(version).unwrap();
+        extract_provider(&archive, &first_staging, target).unwrap();
+        extract_provider(&archive, &second_staging, target).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let first_resolver = resolver.clone();
+        let first_barrier = Arc::clone(&barrier);
+        let first = thread::spawn(move || {
+            first_barrier.wait();
+            first_resolver.promote_staging(&first_staging, version, target)
+        });
+        let second_resolver = resolver.clone();
+        let second_barrier = Arc::clone(&barrier);
+        let second = thread::spawn(move || {
+            second_barrier.wait();
+            second_resolver.promote_staging(&second_staging, version, target)
+        });
+
+        first.join().unwrap().unwrap();
+        second.join().unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("active")).unwrap(),
+            version
+        );
+        assert_eq!(
+            std::fs::read(resolver.provider_path(version, target)).unwrap(),
+            b"bootstrapped"
         );
         let _ = std::fs::remove_dir_all(root);
     }

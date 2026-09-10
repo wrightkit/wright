@@ -124,6 +124,15 @@ fn parse_json(output: &[u8]) -> serde_json::Value {
     serde_json::from_slice(output).expect("stdout is one JSON envelope")
 }
 
+fn command_result(output: &std::process::Output) -> String {
+    format!(
+        "status: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
 #[test]
 fn compile_over_workshop_file_emits_correct_text() {
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
@@ -368,66 +377,54 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
 #[test]
 fn span_path_is_consistent_across_input_spellings() {
     // Lint resolves the same root-relative `span.path` for the absolute,
-    // bare-name (cwd), and dir-relative spellings of the same file.
+    // bare-name (cwd), and dir-relative spellings of the same Workshop file.
     // Each subprocess gets its own cwd, so the bare-name spelling is
     // exercised end-to-end exactly as in the issue.
     let dir = temp_dir();
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     std::fs::write(
-        dir.join("sub").join("loop.opy"),
-        "rule \"loop\":\n    @Event eachPlayer\n    while (true):\n        wait(0.016)\n",
+        dir.join("sub").join("loop.txt"),
+        corpus_workshop("synthetic/control-flow"),
     )
     .unwrap();
 
     let absolute = run(&[
         "lint",
-        dir.join("sub").join("loop.opy").to_str().unwrap(),
+        dir.join("sub").join("loop.txt").to_str().unwrap(),
         "-f",
         "json",
     ]);
-    assert!(
-        absolute.status.success(),
-        "{}",
-        String::from_utf8_lossy(&absolute.stderr)
-    );
+    assert!(absolute.status.success(), "{}", command_result(&absolute));
     let absolute_path = parse_json(&absolute.stdout)["result"]["findings"][0]["span"]["path"]
         .as_str()
         .unwrap()
         .to_string();
 
     let bare = Command::new(wright())
-        .args(["lint", "loop.opy", "-f", "json"])
+        .args(["lint", "loop.txt", "-f", "json"])
         .current_dir(dir.join("sub"))
         .stdin(Stdio::null())
         .output()
         .expect("wright runs");
-    assert!(
-        bare.status.success(),
-        "{}",
-        String::from_utf8_lossy(&bare.stderr)
-    );
+    assert!(bare.status.success(), "{}", command_result(&bare));
     let bare_path = parse_json(&bare.stdout)["result"]["findings"][0]["span"]["path"]
         .as_str()
         .unwrap()
         .to_string();
 
     let relative = Command::new(wright())
-        .args(["lint", "sub/loop.opy", "-f", "json"])
+        .args(["lint", "sub/loop.txt", "-f", "json"])
         .current_dir(&dir)
         .stdin(Stdio::null())
         .output()
         .expect("wright runs");
-    assert!(
-        relative.status.success(),
-        "{}",
-        String::from_utf8_lossy(&relative.stderr)
-    );
+    assert!(relative.status.success(), "{}", command_result(&relative));
     let relative_path = parse_json(&relative.stdout)["result"]["findings"][0]["span"]["path"]
         .as_str()
         .unwrap()
         .to_string();
 
-    assert_eq!(absolute_path, "<provider-artifact>");
+    assert_eq!(absolute_path, "loop.txt");
     assert_eq!(
         bare_path, absolute_path,
         "the bare-name (cwd) spelling must agree with the absolute spelling"
