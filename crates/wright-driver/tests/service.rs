@@ -175,6 +175,7 @@ fn persistent_object_queries_resolve_span_paths_without_lint_diagnostics() {
     let objects = objects.as_array().unwrap();
     assert!(!objects.is_empty());
     assert_eq!(objects[0]["reevaluation"]["domain"], "HudReeval");
+    assert!(objects[0]["sameKindCleanupInRule"].is_boolean());
     assert_eq!(objects[0]["span"]["path"], "source.opy");
     let findings = handle_ok(&service, &ToolRequest::Findings);
     assert!(

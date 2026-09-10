@@ -195,7 +195,7 @@ fn persistent_object_facts_distinguish_observations_without_linting() {
     assert_eq!(reevaluation.domain, "HudReeval");
     assert_eq!(reevaluation.mode, "VISIBILITY_AND_STRING");
     assert!(safe_object.identity_retained);
-    assert!(safe_object.cleanup_observed);
+    assert!(safe_object.same_kind_cleanup_in_rule);
 
     let risky = object_lifecycle_program(false, false);
     assert!(
@@ -210,11 +210,15 @@ fn persistent_object_facts_distinguish_observations_without_linting() {
         .expect("object evidence");
     assert_eq!(risky_findings[0].severity, Severity::Info);
     assert!(!risky_object.identity_retained);
-    assert!(!risky_object.cleanup_observed);
+    assert!(!risky_object.same_kind_cleanup_in_rule);
     assert!(
         risky_findings[0]
             .message
             .contains("not a runtime object-count")
+    );
+    assert!(
+        risky_findings[0].message.contains("cleanup-correlation"),
+        "same-kind destroy evidence must not claim object-site cleanup"
     );
 }
 

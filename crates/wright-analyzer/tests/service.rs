@@ -107,6 +107,7 @@ fn persistent_object_query_exposes_reevaluation_without_emitting_lints() {
     assert_eq!(object["visibility"], "all-players");
     assert_eq!(object["reevaluation"]["domain"], "HudReeval");
     assert_eq!(object["reevaluation"]["mode"], "VISIBILITY_AND_STRING");
+    assert!(object["sameKindCleanupInRule"].is_boolean());
     assert!(object["span"].is_object(), "facts preserve provenance");
     assert!(
         responses[1]["result"]

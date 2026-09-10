@@ -200,7 +200,10 @@ pub struct PersistentObject {
     /// The canonical reevaluation enum when the creation call provides one.
     pub reevaluation: Option<ObjectReevaluation>,
     pub identity_retained: bool,
-    pub cleanup_observed: bool,
+    /// Whether the enclosing rule contains a destroy action for this object
+    /// kind. This does not establish that the action consumes this site's
+    /// identity or that it is reachable.
+    pub same_kind_cleanup_in_rule: bool,
 }
 
 impl Boundedness {
@@ -974,7 +977,7 @@ impl Analysis for PersistentObjectLifecycle {
                 let identity_retained = next.is_some_and(|next| {
                     action_retains_identity(program, next, kind.identity_value())
                 });
-                let cleanup_observed = cleanup_actions.iter().any(|cleanup| {
+                let same_kind_cleanup_in_rule = cleanup_actions.iter().any(|cleanup| {
                     program.actions.get(*cleanup).is_some_and(|action| {
                         matches!(action, Action::Call { name, .. } if name == kind.cleanup_action())
                     })
@@ -985,7 +988,7 @@ impl Analysis for PersistentObjectLifecycle {
                     visibility: object_visibility(program, args),
                     reevaluation: object_reevaluation(program, args, kind),
                     identity_retained,
-                    cleanup_observed,
+                    same_kind_cleanup_in_rule,
                 };
                 Some(Finding {
                     code: self.name(),
@@ -1119,22 +1122,22 @@ fn action_retains_identity(program: &wir::Program, action_id: ActionId, identity
 }
 
 fn persistent_object_message(object: &PersistentObject) -> String {
-    let lifecycle = match (object.identity_retained, object.cleanup_observed) {
+    let lifecycle = match (object.identity_retained, object.same_kind_cleanup_in_rule) {
         (true, true) => {
-            "its identity is retained immediately and the rule contains a matching cleanup action"
+            "its identity is retained immediately and the rule contains a same-kind destroy action"
         }
         (false, false) => {
-            "its identity is not retained immediately and the rule has no matching cleanup action"
+            "its identity is not retained immediately and the rule has no same-kind destroy action"
         }
         (false, true) => {
-            "its identity is not retained immediately, although the rule contains a matching cleanup action"
+            "its identity is not retained immediately, although the rule contains a same-kind destroy action"
         }
         (true, false) => {
-            "its identity is retained immediately, but the rule has no matching cleanup action"
+            "its identity is retained immediately, but the rule has no same-kind destroy action"
         }
     };
     format!(
-        "persistent {} is created in {} execution with {} visibility; {}; this is structural lifecycle evidence, not a runtime object-count or aliasing proof",
+        "persistent {} is created in {} execution with {} visibility; {}; this is structural evidence, not a runtime object-count, aliasing, cleanup-correlation, or reachability proof",
         object.kind.as_str(),
         object.execution_scope.as_str(),
         object.visibility.as_str(),

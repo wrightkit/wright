@@ -479,7 +479,7 @@ fn persistent_object_value(finding: &Finding) -> serde_json::Value {
             "mode": reevaluation.mode,
         })),
         "identityRetained": object.identity_retained,
-        "cleanupObserved": object.cleanup_observed,
+        "sameKindCleanupInRule": object.same_kind_cleanup_in_rule,
         "span": span_value(finding.span),
         "rule": finding.rule.index(),
         "action": finding.action.map(|action| action.index()),
