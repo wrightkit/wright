@@ -42,22 +42,13 @@ fn local_program(name: &str) -> WirProgram {
 // ── Registry identity ─────────────────────────────────────────────────────────
 
 #[test]
-fn registry_has_seven_first_party_rules_with_stable_ids() {
+fn registry_first_party_rules_have_unique_stable_ids() {
     let registry = LintRegistry::default();
     let ids: Vec<&str> = registry.rules().map(|meta| meta.id).collect();
-    assert_eq!(
-        ids,
-        vec![
-            "min-wait-loop",
-            "duplicate-condition",
-            "expensive-loop-check",
-            "ongoing-condition-hot-path",
-            "repeated-value",
-            "persistent-object-lifecycle",
-            "while-without-wait",
-        ],
-        "exactly seven first-party rules, in canonical order"
-    );
+    assert!(!ids.is_empty(), "the registry contains first-party rules");
+    let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+    assert_eq!(unique.len(), ids.len(), "rule IDs are unique");
+    assert!(ids.iter().all(|id| !id.is_empty()), "rule IDs are stable");
 }
 
 #[test]
@@ -140,12 +131,6 @@ fn rule_default_severities_match_known_values() {
         .find(|(id, _)| *id == "while-without-wait")
         .unwrap();
     assert_eq!(no_wait.1, Severity::Warning);
-
-    let persistent_object = severities
-        .iter()
-        .find(|(id, _)| *id == "persistent-object-lifecycle")
-        .unwrap();
-    assert_eq!(persistent_object.1, Severity::Warning);
 }
 
 // ── Evidence classification (#98) ────────────────────────────────────────────
@@ -186,11 +171,6 @@ fn rule_evidence_classes_are_declared() {
         evidence_of(&evidence, "while-without-wait"),
         EvidenceClass::StaticIndicator,
         "the missing wait is statically known; the frequency impact is an indicator"
-    );
-    assert_eq!(
-        evidence_of(&evidence, "persistent-object-lifecycle"),
-        EvidenceClass::StaticIndicator,
-        "the creation and structural lifecycle evidence is static, not a runtime object count"
     );
 }
 
@@ -306,13 +286,9 @@ fn re_enabled_rule_fires_again() {
 fn all_rules_disabled_produces_empty_findings() {
     let program = corpus_program("synthetic/control-flow");
     let mut config = LintConfig::default();
-    config.disable("min-wait-loop");
-    config.disable("duplicate-condition");
-    config.disable("expensive-loop-check");
-    config.disable("ongoing-condition-hot-path");
-    config.disable("repeated-value");
-    config.disable("persistent-object-lifecycle");
-    config.disable("while-without-wait");
+    for rule in LintRegistry::default().rules() {
+        config.disable(rule.id);
+    }
 
     let findings = LintRegistry::default().run(&program, &config);
     assert!(

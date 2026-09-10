@@ -118,9 +118,29 @@ fn object_lifecycle_program(retain_identity: bool, cleanup: bool) -> WirProgram 
         },
         None,
     ));
+    let null = program.values.push(ValueNode::new(Value::Null, None));
+    let reevaluation = program.values.push(ValueNode::new(
+        Value::Enum {
+            value_type: "HudReeval".to_string(),
+            value: "VISIBILITY_AND_STRING".to_string(),
+        },
+        None,
+    ));
     let create = program.actions.push(Action::Call {
         name: "createHudText".to_string(),
-        args: vec![all_players],
+        args: vec![
+            all_players,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            reevaluation,
+            null,
+        ],
         span: None,
     });
     let retain = program.actions.push(Action::SetPlayerVariable {
@@ -155,26 +175,40 @@ fn object_lifecycle_program(retain_identity: bool, cleanup: bool) -> WirProgram 
 }
 
 #[test]
-fn persistent_object_lifecycle_distinguishes_evident_cleanup_from_risk() {
+fn persistent_object_facts_distinguish_observations_without_linting() {
     let safe = object_lifecycle_program(true, true);
-    let safe_findings = findings_by_code(&safe, "persistent-object-lifecycle");
+    let safe_findings = analysis::persistent_objects(&safe);
     assert_eq!(safe_findings.len(), 1);
-    let safe_object = safe_findings[0].persistent_object.expect("object evidence");
+    let safe_object = safe_findings[0]
+        .persistent_object
+        .as_ref()
+        .expect("object evidence");
     assert_eq!(safe_findings[0].severity, Severity::Info);
     assert_eq!(safe_findings[0].evidence, EvidenceClass::StaticIndicator);
     assert_eq!(safe_object.kind.as_str(), "hud-text");
     assert_eq!(safe_object.execution_scope.as_str(), "per-player");
     assert_eq!(safe_object.visibility.as_str(), "all-players");
+    let reevaluation = safe_object
+        .reevaluation
+        .as_ref()
+        .expect("reevaluation fact");
+    assert_eq!(reevaluation.domain, "HudReeval");
+    assert_eq!(reevaluation.mode, "VISIBILITY_AND_STRING");
     assert!(safe_object.identity_retained);
     assert!(safe_object.cleanup_observed);
 
     let risky = object_lifecycle_program(false, false);
-    let risky_findings = findings_by_code(&risky, "persistent-object-lifecycle");
+    assert!(
+        findings_by_code(&risky, "persistent-object-lifecycle").is_empty(),
+        "persistent-object observations must not enter the built-in lint set"
+    );
+    let risky_findings = analysis::persistent_objects(&risky);
     assert_eq!(risky_findings.len(), 1);
     let risky_object = risky_findings[0]
         .persistent_object
+        .as_ref()
         .expect("object evidence");
-    assert_eq!(risky_findings[0].severity, Severity::Warning);
+    assert_eq!(risky_findings[0].severity, Severity::Info);
     assert!(!risky_object.identity_retained);
     assert!(!risky_object.cleanup_observed);
     assert!(

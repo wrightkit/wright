@@ -219,8 +219,7 @@ The following lint-only flags configure the registry and are repeatable:
 
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
-  `ongoing-condition-hot-path`, `persistent-object-lifecycle`,
-  `while-without-wait`).
+  `ongoing-condition-hot-path`, `while-without-wait`).
 * `--rule-severity <ID>:<warning|info>`: override a rule's severity.
 
 These flags are usage errors on every other command (exit 2).
@@ -232,14 +231,6 @@ predicate in a later condition is reached only after every preceding condition
 passes. It does not claim that the rule's action block executes every tick
 while conditions remain true, measure server cost, or infer the selectivity of
 any condition.
-
-`persistent-object-lifecycle` reports canonical HUD text, in-world text, and
-effect creation sites. Its `object` payload describes the exact object kind,
-event execution scope, and visible audience shape, plus whether the next
-action evidently retains `Last Text ID`/`Last Created Entity` and whether the
-same rule contains a matching destroy action. A missing retention or cleanup
-signal is a static lifecycle risk, not a proof of a leak, alias relationship,
-runtime object count, or fixed server population.
 
 The `lint` result envelope carries `input_identity` (the SHA-256 source
 identity; the tool/agent API exposes the same value as `inputIdentity`),
@@ -305,16 +296,6 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
         "evidence": "exact",
         "tags": ["performance", "stability"],
         "knownLimits": "Detection is rule-local and structural ..."
-      },
-      {
-        "id": "persistent-object-lifecycle",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "persistent object creation has structural lifecycle and fan-out evidence",
-        "evidence": "static-indicator",
-        "tags": ["stability", "lifecycle", "fan-out"],
-        "knownLimits": "The analysis is rule-local and structural; it does not prove aliases, path reachability, cross-rule cleanup, or runtime population ..."
       },
       {
         "id": "while-without-wait",
@@ -386,14 +367,6 @@ finding:
 ```
 
 Non-`while-without-wait` findings carry `"boundedness": null`.
-
-`persistent-object-lifecycle` findings carry an `object` payload such as:
-
-```json
-{ "kind": "hud-text", "executionScope": "per-player", "visibility": "all-players", "identityRetained": false, "cleanupObserved": false }
-```
-
-All other findings carry `"object": null`.
 
 ## Exit codes
 

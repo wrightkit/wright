@@ -184,12 +184,21 @@ impl ObjectVisibility {
     }
 }
 
-/// Structural lifecycle evidence attached to a persistent-object finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The canonical reevaluation mode attached to a persistent-object creation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectReevaluation {
+    pub domain: String,
+    pub mode: String,
+}
+
+/// Structural lifecycle evidence attached to a persistent-object fact.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistentObject {
     pub kind: PersistentObjectKind,
     pub execution_scope: ObjectExecutionScope,
     pub visibility: ObjectVisibility,
+    /// The canonical reevaluation enum when the creation call provides one.
+    pub reevaluation: Option<ObjectReevaluation>,
     pub identity_retained: bool,
     pub cleanup_observed: bool,
 }
@@ -222,7 +231,7 @@ pub struct Finding {
     /// The boundedness evidence of a no-yield `While` loop finding
     /// (`while-without-wait` only; `None` on every other rule).
     pub boundedness: Option<Boundedness>,
-    /// Structural lifecycle evidence for `persistent-object-lifecycle` only.
+    /// Structural lifecycle evidence for persistent-object facts only.
     pub persistent_object: Option<PersistentObject>,
 }
 
@@ -922,8 +931,21 @@ fn visit_value_children(value: &Value, f: &mut impl FnMut(ValueId)) {
     }
 }
 
-/// Persistent Workshop objects with no evident retained identity or cleanup.
+/// Persistent Workshop object facts.
 pub struct PersistentObjectLifecycle;
+
+/// Collect persistent-object facts without classifying any site as a lint.
+pub fn persistent_objects(program: &wir::Program) -> Vec<Finding> {
+    let analysis = PersistentObjectLifecycle;
+    let mut facts = Vec::new();
+    for index in 0..program.rules.len() {
+        let rule = RuleId::from_index(index);
+        if let Ok(cfg) = Cfg::build(program, rule) {
+            facts.extend(analysis.run(program, rule, &cfg));
+        }
+    }
+    facts
+}
 
 impl Analysis for PersistentObjectLifecycle {
     fn name(&self) -> &'static str {
@@ -961,18 +983,14 @@ impl Analysis for PersistentObjectLifecycle {
                     kind,
                     execution_scope: object_execution_scope(&rule_data.event),
                     visibility: object_visibility(program, args),
+                    reevaluation: object_reevaluation(program, args, kind),
                     identity_retained,
                     cleanup_observed,
                 };
-                let risk = !identity_retained || !cleanup_observed;
                 Some(Finding {
                     code: self.name(),
-                    severity: if risk {
-                        Severity::Warning
-                    } else {
-                        Severity::Info
-                    },
-                    message: persistent_object_message(object),
+                    severity: Severity::Info,
+                    message: persistent_object_message(&object),
                     span: *span,
                     rule,
                     action: Some(action_id),
@@ -1018,6 +1036,25 @@ fn object_visibility(program: &wir::Program, args: &[ValueId]) -> ObjectVisibili
         }
         _ => ObjectVisibility::Unknown,
     }
+}
+
+fn object_reevaluation(
+    program: &wir::Program,
+    args: &[ValueId],
+    kind: PersistentObjectKind,
+) -> Option<ObjectReevaluation> {
+    let index = match kind {
+        PersistentObjectKind::HudText => 9,
+        PersistentObjectKind::InWorldText | PersistentObjectKind::Effect => 5,
+    };
+    let value = program.values.get(*args.get(index)?)?;
+    let Value::Enum { value_type, value } = &value.value else {
+        return None;
+    };
+    Some(ObjectReevaluation {
+        domain: value_type.clone(),
+        mode: value.clone(),
+    })
 }
 
 fn persistent_object_sites(
@@ -1081,7 +1118,7 @@ fn action_retains_identity(program: &wir::Program, action_id: ActionId, identity
     )
 }
 
-fn persistent_object_message(object: PersistentObject) -> String {
+fn persistent_object_message(object: &PersistentObject) -> String {
     let lifecycle = match (object.identity_retained, object.cleanup_observed) {
         (true, true) => {
             "its identity is retained immediately and the rule contains a matching cleanup action"

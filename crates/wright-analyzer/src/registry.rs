@@ -18,7 +18,7 @@ use workshop_rs::wir;
 
 use crate::analysis::{
     Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,
-    OngoingConditionHotPath, PersistentObjectLifecycle, RepeatedValue, Severity, WhileWithoutWait,
+    OngoingConditionHotPath, RepeatedValue, Severity, WhileWithoutWait,
 };
 use crate::cfg::Cfg;
 
@@ -199,7 +199,7 @@ impl Default for LintRegistry {
     /// Build the registry containing the first-party lint rules in their
     /// canonical order: `min-wait-loop`, `duplicate-condition`,
     /// `expensive-loop-check`, `ongoing-condition-hot-path`, `repeated-value`,
-    /// `persistent-object-lifecycle`, `while-without-wait`.
+    /// `while-without-wait`.
     fn default() -> Self {
         // Build each analysis in a local binding first so the rule metadata
         // can take its evidence class from the same implementation that
@@ -209,7 +209,6 @@ impl Default for LintRegistry {
         let expensive_loop_check: Box<dyn Analysis> = Box::new(ExpensiveLoopCheck);
         let ongoing_condition_hot_path: Box<dyn Analysis> = Box::new(OngoingConditionHotPath);
         let repeated_value: Box<dyn Analysis> = Box::new(RepeatedValue);
-        let persistent_object_lifecycle: Box<dyn Analysis> = Box::new(PersistentObjectLifecycle);
         let while_without_wait: Box<dyn Analysis> = Box::new(WhileWithoutWait);
         let entries = vec![
             RegistryEntry {
@@ -339,31 +338,6 @@ impl Default for LintRegistry {
                     tags: &["performance", "stability"],
                 },
                 analysis: repeated_value,
-            },
-            RegistryEntry {
-                meta: RuleMeta {
-                    id: "persistent-object-lifecycle",
-                    default_severity: Severity::Warning,
-                    evidence: persistent_object_lifecycle.evidence(),
-                    summary: "persistent object creation has structural lifecycle and fan-out evidence",
-                    documentation: concat!(
-                        "Reports canonical HUD text, in-world text, and effect creation sites with ",
-                        "their event execution scope, visible audience shape, immediate identity ",
-                        "retention, and whether the same rule contains a matching destroy action. ",
-                        "A missing retained identity or cleanup action is a lifecycle risk because ",
-                        "the object can remain live or be recreated without an evident cleanup path.",
-                    ),
-                    known_limits: concat!(
-                        "The analysis is rule-local and structural. It recognizes only an immediately ",
-                        "following assignment of `Last Text ID` or `Last Created Entity`, and a matching ",
-                        "destroy action anywhere in the same rule; it does not prove aliases, path reachability, ",
-                        "cross-rule/subroutine cleanup, object replacement, or runtime population. `all-players` ",
-                        "visibility and `per-player` execution describe fan-out dimensions, not a measured ",
-                        "object count or a fixed server population.",
-                    ),
-                    tags: &["stability", "lifecycle", "fan-out"],
-                },
-                analysis: persistent_object_lifecycle,
             },
             RegistryEntry {
                 meta: RuleMeta {

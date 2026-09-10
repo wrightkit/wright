@@ -45,6 +45,13 @@ fn capabilities_negotiate_version_and_operations() {
     assert_eq!(capabilities["name"], "wright-tool-service");
     assert!(capabilities["operations"].as_array().unwrap().len() >= 10);
     assert!(
+        capabilities["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|operation| operation == "persistentObjects")
+    );
+    assert!(
         capabilities["languages"]
             .as_array()
             .unwrap()
@@ -159,6 +166,24 @@ fn findings_and_lint_requests_resolve_span_paths() {
             "Findings and Lint must agree on span.path"
         );
     }
+}
+
+#[test]
+fn persistent_object_queries_resolve_span_paths_without_lint_diagnostics() {
+    let service = service_for("synthetic/control-flow");
+    let objects = handle_ok(&service, &ToolRequest::PersistentObjects);
+    let objects = objects.as_array().unwrap();
+    assert!(!objects.is_empty());
+    assert_eq!(objects[0]["reevaluation"]["domain"], "HudReeval");
+    assert_eq!(objects[0]["span"]["path"], "source.opy");
+    let findings = handle_ok(&service, &ToolRequest::Findings);
+    assert!(
+        findings
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|finding| finding["code"] != "persistent-object-lifecycle")
+    );
 }
 
 fn ostw_service() -> (ToolService<'static>, std::path::PathBuf) {

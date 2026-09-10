@@ -12,7 +12,7 @@ use workshop_rs::source::Span;
 use workshop_rs::wir;
 use wright_ir::error::IrError;
 
-use crate::analysis::{Finding, Severity};
+use crate::analysis::{self, Finding, PersistentObject, Severity};
 use crate::cfg::Cfg;
 use crate::registry::{LintConfig, LintRegistry};
 use crate::symbols::{ReferenceKind, SemanticIndex, SymbolId, SymbolKind};
@@ -44,6 +44,8 @@ pub enum Request {
     GetCfg { rule: u32 },
     /// Every static-analysis finding.
     GetFindings,
+    /// Persistent Workshop object facts, separate from lint diagnostics.
+    GetPersistentObjects,
     /// The registered lint rules and the effective lint configuration
     /// (#98).
     LintRules,
@@ -84,6 +86,7 @@ pub struct SemanticService<'a> {
     program: &'a wir::Program,
     index: SemanticIndex,
     findings: Vec<Finding>,
+    persistent_objects: Vec<Finding>,
     origin: Origin,
     config: LintConfig,
 }
@@ -152,10 +155,12 @@ impl<'a> SemanticService<'a> {
     ) -> Result<SemanticService<'a>, IrError> {
         let index = SemanticIndex::build(program)?;
         let findings = LintRegistry::default().run(program, &config);
+        let persistent_objects = analysis::persistent_objects(program);
         Ok(SemanticService {
             program,
             index,
             findings,
+            persistent_objects,
             origin,
             config,
         })
@@ -180,7 +185,7 @@ impl<'a> SemanticService<'a> {
                 result: json!({
                     "name": SERVICE_NAME,
                     "version": SERVICE_VERSION,
-                    "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "lintRules"],
+                    "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"],
                 }),
             },
             Request::Program => Response::Ok {
@@ -357,13 +362,6 @@ impl<'a> SemanticService<'a> {
                             "value": finding.value.map(|value| value.index()),
                             "evidence": finding.evidence.as_str(),
                             "boundedness": finding.boundedness.map(|b| b.as_str()),
-                            "object": finding.persistent_object.map(|object| json!({
-                                "kind": object.kind.as_str(),
-                                "executionScope": object.execution_scope.as_str(),
-                                "visibility": object.visibility.as_str(),
-                                "identityRetained": object.identity_retained,
-                                "cleanupObserved": object.cleanup_observed,
-                            })),
                         })
                     })
                     .collect();
@@ -371,6 +369,14 @@ impl<'a> SemanticService<'a> {
                     result: json!(findings),
                 }
             }
+            Request::GetPersistentObjects => Response::Ok {
+                result: json!(
+                    self.persistent_objects
+                        .iter()
+                        .map(persistent_object_value)
+                        .collect::<Vec<_>>()
+                ),
+            },
             Request::LintRules => {
                 // Deterministic: iterate the registry in its canonical order
                 // and resolve every rule's effective configuration from the
@@ -457,6 +463,29 @@ fn severity_name(severity: Severity) -> &'static str {
         Severity::Warning => "warning",
         Severity::Info => "info",
     }
+}
+
+fn persistent_object_value(finding: &Finding) -> serde_json::Value {
+    let object: &PersistentObject = finding
+        .persistent_object
+        .as_ref()
+        .expect("persistent-object query contains object facts");
+    json!({
+        "kind": object.kind.as_str(),
+        "executionScope": object.execution_scope.as_str(),
+        "visibility": object.visibility.as_str(),
+        "reevaluation": object.reevaluation.as_ref().map(|reevaluation| json!({
+            "domain": reevaluation.domain,
+            "mode": reevaluation.mode,
+        })),
+        "identityRetained": object.identity_retained,
+        "cleanupObserved": object.cleanup_observed,
+        "span": span_value(finding.span),
+        "rule": finding.rule.index(),
+        "action": finding.action.map(|action| action.index()),
+        "evidence": finding.evidence.as_str(),
+        "message": finding.message,
+    })
 }
 
 fn cfg_kind_name(kind: &crate::cfg::BlockKind) -> &'static str {
