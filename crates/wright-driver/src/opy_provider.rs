@@ -247,26 +247,35 @@ impl OpyProviderResolver {
         let staging = self.staging_dir(version)?;
         let result = (|| -> Result<(), OpyProviderError> {
             extract_provider(archive, &staging, target)?;
-            std::fs::create_dir_all(final_dir.parent().expect("provider target has a parent"))
-                .map_err(|error| {
-                    OpyProviderError::install(format!(
-                        "cannot create OPY provider version directory '{}': {error}",
-                        final_dir.display()
-                    ))
-                })?;
-            match std::fs::rename(&staging, &final_dir) {
-                Ok(()) => self.activate(version, target),
-                Err(_) if is_executable(&final_executable) => self.activate(version, target),
-                Err(error) => Err(OpyProviderError::install(format!(
-                    "cannot activate staged OPY provider '{}': {error}",
-                    final_dir.display()
-                ))),
-            }
+            self.promote_staging(&staging, version, target)
         })();
-        if result.is_err() {
-            let _ = std::fs::remove_dir_all(&staging);
-        }
+        let _ = std::fs::remove_dir_all(&staging);
         result
+    }
+
+    fn promote_staging(
+        &self,
+        staging: &Path,
+        version: &str,
+        target: &str,
+    ) -> Result<(), OpyProviderError> {
+        let final_dir = self.store_dir.join(version).join(target);
+        let final_executable = final_dir.join(provider_binary(target));
+        std::fs::create_dir_all(final_dir.parent().expect("provider target has a parent"))
+            .map_err(|error| {
+                OpyProviderError::install(format!(
+                    "cannot create OPY provider version directory '{}': {error}",
+                    final_dir.display()
+                ))
+            })?;
+        match std::fs::rename(staging, &final_dir) {
+            Ok(()) => self.activate(version, target),
+            Err(_) if is_executable(&final_executable) => self.activate(version, target),
+            Err(error) => Err(OpyProviderError::install(format!(
+                "cannot activate staged OPY provider '{}': {error}",
+                final_dir.display()
+            ))),
+        }
     }
 
     fn staging_dir(&self, version: &str) -> Result<PathBuf, OpyProviderError> {
@@ -758,25 +767,28 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_bootstrap_reuses_the_winning_local_install() {
+    fn concurrent_bootstrap_promotion_reuses_the_winning_local_install() {
         let root = test_root("concurrent-bootstrap");
         let target = "x86_64-unknown-linux-gnu";
         let version = "3.1.4";
         let archive = archive(version, target, b"bootstrapped");
         let resolver = OpyProviderResolver::new(&root).with_target(target);
+        let first_staging = resolver.staging_dir(version).unwrap();
+        let second_staging = resolver.staging_dir(version).unwrap();
+        extract_provider(&archive, &first_staging, target).unwrap();
+        extract_provider(&archive, &second_staging, target).unwrap();
         let barrier = Arc::new(Barrier::new(2));
         let first_resolver = resolver.clone();
         let first_barrier = Arc::clone(&barrier);
-        let first_archive = archive.clone();
         let first = thread::spawn(move || {
             first_barrier.wait();
-            first_resolver.install_archive(version, target, &first_archive)
+            first_resolver.promote_staging(&first_staging, version, target)
         });
         let second_resolver = resolver.clone();
         let second_barrier = Arc::clone(&barrier);
         let second = thread::spawn(move || {
             second_barrier.wait();
-            second_resolver.install_archive(version, target, &archive)
+            second_resolver.promote_staging(&second_staging, version, target)
         });
 
         first.join().unwrap().unwrap();
