@@ -268,6 +268,22 @@ pub struct RuleDescriptor {
     pub kind: &'static str,
 }
 
+/// A rule that was not executed because its canonical semantic input was not
+/// available for one Workshop rule.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedRule {
+    pub id: String,
+    pub rule: usize,
+    pub reason: String,
+}
+
+/// The findings and explicit unavailable/skip statuses from one registry run.
+#[derive(Debug, Clone, Default)]
+pub struct LintRun {
+    pub findings: Vec<Finding>,
+    pub skipped: Vec<SkippedRule>,
+}
+
 /// One registered rule: its stable metadata and the analysis implementation.
 struct RegistryEntry {
     meta: Option<RuleMeta>,
@@ -621,11 +637,31 @@ impl LintRegistry {
     /// Output order is deterministic: rules execute in registry order, over
     /// Workshop rules in program index order.
     pub fn run(&self, program: &wir::Program, config: &LintConfig) -> Vec<Finding> {
-        let mut findings = Vec::new();
+        self.run_report(program, config).findings
+    }
+
+    /// Run the registry while retaining machine-readable unavailable/skip
+    /// statuses for rules whose canonical input cannot be analyzed.
+    pub fn run_report(&self, program: &wir::Program, config: &LintConfig) -> LintRun {
+        let mut report = LintRun::default();
         for (index, _) in program.rules.iter().enumerate() {
             let rule = wir::RuleId::from_index(index);
             let Ok(cfg) = Cfg::build(program, rule) else {
-                continue; // invalid rule skipped; cannot be analyzed
+                for entry in &self.entries {
+                    let id = entry
+                        .meta
+                        .as_ref()
+                        .map(|meta| meta.id.to_string())
+                        .or_else(|| entry.declarative.as_ref().map(|rule| rule.id().to_string()));
+                    if let Some(id) = id.filter(|id| config.is_enabled(id)) {
+                        report.skipped.push(SkippedRule {
+                            id,
+                            rule: index,
+                            reason: "canonical CFG unavailable".to_string(),
+                        });
+                    }
+                }
+                continue;
             };
             let facts = SemanticFacts::new(program);
             for entry in &self.entries {
@@ -658,10 +694,10 @@ impl LintRegistry {
                         finding.severity = effective;
                     }
                 }
-                findings.extend(rule_findings);
+                report.findings.extend(rule_findings);
             }
         }
-        findings
+        report
     }
 }
 

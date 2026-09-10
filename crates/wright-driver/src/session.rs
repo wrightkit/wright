@@ -733,7 +733,7 @@ impl CompilerSession {
         ));
         let mut findings = service_response(&service, &Request::GetFindings);
         resolve_finding_span_paths(&mut findings, &loaded);
-        let (rules, config) = match lint_rules {
+        let (rules, config, skipped) = match lint_rules {
             serde_json::Value::Object(mut object) => (
                 object
                     .remove("rules")
@@ -741,8 +741,15 @@ impl CompilerSession {
                 object
                     .remove("config")
                     .unwrap_or_else(|| serde_json::json!({})),
+                object
+                    .remove("skipped")
+                    .unwrap_or_else(|| serde_json::json!([])),
             ),
-            _ => (serde_json::json!([]), serde_json::json!({})),
+            _ => (
+                serde_json::json!([]),
+                serde_json::json!({}),
+                serde_json::json!([]),
+            ),
         };
         self.finish(
             command,
@@ -752,6 +759,7 @@ impl CompilerSession {
                 rules,
                 config,
                 findings,
+                skipped,
             },
         )
     }

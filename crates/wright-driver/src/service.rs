@@ -486,6 +486,7 @@ impl<'a> ToolService<'a> {
                     "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
                     "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
                     "findings": findings,
+                    "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
                 }))
             }
             Err(error) => self.error("analysis-error", error.to_string()),

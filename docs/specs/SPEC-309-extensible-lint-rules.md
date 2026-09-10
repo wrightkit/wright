@@ -116,11 +116,11 @@ it does not authorize source edits or automatic fixes.
 
 Rules run only after their canonical semantic dependencies have been loaded.
 The analyzer never fabricates a finding when a required owner fact is absent;
-the loading/source boundary reports the failure as a structured diagnostic
-(`lint-rule-error` for an invalid local definition). Future owner capabilities
-must extend this boundary with an explicit machine-readable unavailable/skip
-reason rather than turning missing evidence into a lint failure or guessed
-finding.
+the lint result exposes an additive `skipped` array containing the rule ID,
+Workshop rule index, and machine-readable reason. Invalid local definitions
+remain structured `lint-rule-error` diagnostics at load time. Future owner
+capabilities must use the same unavailable/skip boundary rather than turning
+missing evidence into a lint failure or guessed finding.
 
 ## Scope boundaries
 

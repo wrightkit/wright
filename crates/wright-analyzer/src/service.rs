@@ -15,7 +15,7 @@ use wright_ir::error::IrError;
 
 use crate::analysis::{self, Finding, PersistentObject, Severity};
 use crate::cfg::Cfg;
-use crate::registry::{LintConfig, LintRegistry};
+use crate::registry::{LintConfig, LintRegistry, SkippedRule};
 use crate::symbols::{ReferenceKind, SemanticIndex, SymbolId, SymbolKind};
 
 /// A semantic query request.
@@ -87,6 +87,7 @@ pub struct SemanticService<'a> {
     program: &'a wir::Program,
     index: SemanticIndex,
     findings: Vec<Finding>,
+    skipped: Vec<SkippedRule>,
     persistent_objects: Vec<Finding>,
     origin: Origin,
     config: LintConfig,
@@ -170,12 +171,13 @@ impl<'a> SemanticService<'a> {
         registry: Arc<LintRegistry>,
     ) -> Result<SemanticService<'a>, IrError> {
         let index = SemanticIndex::build(program)?;
-        let findings = registry.run(program, &config);
+        let report = registry.run_report(program, &config);
         let persistent_objects = analysis::persistent_objects(program);
         Ok(SemanticService {
             program,
             index,
-            findings,
+            findings: report.findings,
+            skipped: report.skipped,
             persistent_objects,
             origin,
             config,
@@ -434,6 +436,7 @@ impl<'a> SemanticService<'a> {
                     result: json!({
                         "rules": rules,
                         "config": { "rules": config_rules },
+                        "skipped": self.skipped,
                     }),
                 }
             }
