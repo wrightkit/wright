@@ -34,7 +34,7 @@ pub enum Stage {
     Emission,
     /// Semantic analysis.
     Analysis,
-    /// Source reconstruction (Workshop → OPY/OSTW, #126).
+    /// Source reconstruction (Workshop → OPY, with OSTW at a provider boundary).
     Reconstruction,
     /// Driver/CLI internal or environment failures.
     Internal,

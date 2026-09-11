@@ -11,7 +11,7 @@ pub enum SourceKind {
     Auto,
     /// `.opy` source through the explicitly selected backend.
     Opy,
-    /// `.ostw` / `.del` source through the native OSTW frontend (#117).
+    /// `.ostw` / `.del` source through a configured provider.
     Ostw,
     /// Localized vanilla Workshop text (native frontend).
     Workshop,

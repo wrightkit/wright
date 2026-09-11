@@ -104,10 +104,10 @@ its [`docs/compatibility.md`](https://github.com/wrightkit/deltin-rs/blob/main/d
 [`docs/provenance.md`](https://github.com/wrightkit/deltin-rs/blob/main/docs/provenance.md),
 and [`compatibility/ostw/README.md`](https://github.com/wrightkit/deltin-rs/blob/main/compatibility/ostw/README.md).
 
-Wright does not execute or duplicate that owner-side oracle infrastructure. Its
-`wright-ostw` adapter and driver tests cover only Wright-owned integration
-contracts with minimal local inputs; they do not make compatibility claims for
-the DEL/OSTW language or require the upstream runtime in Wright CI.
+Wright does not execute or duplicate that owner-side oracle infrastructure. The
+Wright DEL/OSTW boundary is provider-backed and currently unavailable; it does
+not make compatibility claims for the DEL/OSTW language or require the
+upstream runtime in Wright CI.
 
 ## Related decisions and documents
 

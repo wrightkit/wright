@@ -34,7 +34,6 @@ jobs:
     outputs:
       rust_core: ${{ steps.f.outputs.rust_core }}
       opy: ${{ steps.f.outputs.opy }}
-      del: ${{ steps.f.outputs.del }}
       lpp: ${{ steps.f.outputs.lpp }}
       cli: ${{ steps.f.outputs.cli }}
       opy_adapter: ${{ steps.f.outputs.opy_adapter }}
@@ -54,7 +53,6 @@ jobs:
           if [[ "${{ github.event_name }}" == "push" ]]; then
             echo "rust_core=true"   >> "$GITHUB_OUTPUT"
             echo "opy=true"         >> "$GITHUB_OUTPUT"
-            echo "del=true"         >> "$GITHUB_OUTPUT"
             echo "lpp=true"         >> "$GITHUB_OUTPUT"
             echo "cli=true"         >> "$GITHUB_OUTPUT"
             echo "opy_adapter=true" >> "$GITHUB_OUTPUT"
@@ -76,7 +74,6 @@ jobs:
 
           echo "rust_core=${broad_match}"   >> "$GITHUB_OUTPUT"
           echo "opy=${broad_match}"         >> "$GITHUB_OUTPUT"
-          echo "del=${broad_match}"         >> "$GITHUB_OUTPUT"
           echo "lpp=${broad_match}"         >> "$GITHUB_OUTPUT"
           echo "cli=${broad_match}"         >> "$GITHUB_OUTPUT"
 
@@ -315,56 +312,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
-  # [3] DEL/OSTW INTEGRATION  (Wright's consumer contract with OSTW/del-rs)
-  # Keeps Wright's owner-backed OSTW adapter build/test coverage.
-  # Semantic and differential fixes belong in del-rs; this job validates the
-  # Wright integration package still compiles against the owner contract.
-  # -------------------------------------------------------------------------
-  del-integration:
-    name: DEL/OSTW integration (owner adapter)
-    needs: [paths, rust-quality]
-    if: needs.paths.outputs.del == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
-
-      - name: Build and test Wright OSTW adapter
-        id: adapter
-        run: cargo test --locked -p wright-ostw
-
-      - name: Write step summary
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "## DEL/OSTW Integration"
-            echo ""
-            if [[ "${{ steps.adapter.outcome }}" == "success" ]]; then
-              echo "### OSTW adapter build/test: ✅ PASS"
-            else
-              echo "### OSTW adapter build/test: ❌ FAIL (see run log for details)"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # -------------------------------------------------------------------------
-  # [4] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)
+  # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)
   # -------------------------------------------------------------------------
   lpp-integration:
     name: LPP client integration (#142, #139)
@@ -415,7 +363,7 @@ jobs:
           cargo test --locked -p wright-driver --test provider_edit
 
   # -------------------------------------------------------------------------
-  # [5] CLI BEHAVIOR  (Wright CLI GitHub Actions renderer smoke test)
+  # [4] CLI BEHAVIOR  (Wright CLI GitHub Actions renderer smoke test)
   # Validates CLI output format in a real GitHub Actions environment.
   # Related to #164 (user-facing GHA renderer); this job validates the
   # repository CI integration, not the renderer semantics layer.
@@ -468,7 +416,7 @@ jobs:
           grep -Fq 'Wright `check`: **PASS** (exit 0)' "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
-  # [6] SCENARIO VALIDATION  (end-to-end compile-time scenario regression)
+  # [5] SCENARIO VALIDATION  (end-to-end compile-time scenario regression)
   # Proves Wright compile-time WIR/emission contracts for declared scenarios.
   # Depends on rust-quality (fundamental gate).
   # -------------------------------------------------------------------------
@@ -556,7 +504,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
-  # [7] BENCHMARK  (performance evidence)
+  # [6] BENCHMARK  (performance evidence)
   # Non-blocking on PRs; records regression-detectable output as artifact.
   # Depends on rust-quality so a fundamental failure skips benchmark time.
   # -------------------------------------------------------------------------
@@ -636,7 +584,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
-  # [8] OPY ADAPTER  (OverPy-to-HIR TypeScript adapter)
+  # [7] OPY ADAPTER  (OverPy-to-HIR TypeScript adapter)
   # Independent of Rust quality; only triggered by adapter/ or broad changes.
   # -------------------------------------------------------------------------
   opy-adapter:
@@ -669,7 +617,7 @@ jobs:
         working-directory: adapter
 
   # -------------------------------------------------------------------------
-  # [9] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
+  # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
   # Gated on rust-quality + opy-integration + lpp-integration so a
   # fundamental or integration failure prevents wasting cross-platform runner
   # time on packages whose source has already failed.

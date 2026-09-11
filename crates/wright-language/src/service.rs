@@ -156,12 +156,10 @@ impl LanguageService {
 
     /// Analyze one document: preprocess → parse → lower → semantic index.
     /// Open-document overlays (unsaved editor buffers) participate in include
-    /// resolution before the filesystem. OSTW documents (`.ostw`/`.del`)
-    /// route through the same shared lower/analyze/index path over the #118
-    /// semantic HIR instead of a separate tool stack.
+    /// resolution before the filesystem.
     pub fn analyze(&self, document: &Document) -> Analysis {
         if is_ostw_document(&document.uri) {
-            return self.analyze_ostw(document);
+            return unavailable_ostw_analysis();
         }
         let overlay = self.store.overlay(&self.root);
         let wright_opy::CompileOutcome {
@@ -191,65 +189,6 @@ impl LanguageService {
             index,
             findings,
             parse_errors: Vec::new(),
-            files,
-        }
-    }
-
-    /// Analyze an OSTW document through the shared services: the native
-    /// frontend loads the project and resolves the #118 semantic HIR, which
-    /// is lowered through the shared HIR→WIR path; diagnostics and the
-    /// semantic index then come from the same shared code OPY/Workshop use.
-    fn analyze_ostw(&self, document: &Document) -> Analysis {
-        let relative = crate::document::uri_to_path(&document.uri).and_then(|path| {
-            let relative = path
-                .strip_prefix(&self.root)
-                .ok()
-                .map(PathBuf::from)
-                .or_else(|| {
-                    let root = self.root.canonicalize().ok()?;
-                    let path = path.canonicalize().ok()?;
-                    path.strip_prefix(root).ok().map(PathBuf::from)
-                })?;
-            Some(relative.to_string_lossy().replace('\\', "/"))
-        });
-        let (outcome, semantic) =
-            wright_ostw::compile_with_semantics(&document.text, relative.as_deref(), &self.root);
-        let files: Vec<SourceFile> = outcome
-            .project
-            .as_ref()
-            .map(|project| {
-                project
-                    .files
-                    .iter()
-                    .map(|file| SourceFile {
-                        id: workshop_rs::source::FileId::from_index(file.id as usize),
-                        path: file.path.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut parse_errors: Vec<SourceError> =
-            outcome.diagnostics.iter().map(ostw_error).collect();
-        parse_errors.extend(semantic.diagnostics.iter().map(ostw_error));
-        let Some(program) = semantic.wir else {
-            return Analysis {
-                program: wir::Program::default(),
-                index: None,
-                findings: Vec::new(),
-                parse_errors,
-                files,
-            };
-        };
-        let mut findings = Vec::new();
-        if program.validate().is_ok() {
-            findings = analysis::analyze(&program);
-        }
-        let index = SemanticIndex::build(&program).ok();
-        Analysis {
-            program,
-            index,
-            findings,
-            parse_errors,
             files,
         }
     }
@@ -575,7 +514,7 @@ impl LanguageService {
     /// the shared semantic index, and the union of the resulting exact-range
     /// transactions — deduplicated by (source, range) — is validated through
     /// `wright_driver::edit::validate_transaction` against every affected
-    /// root with the original project kind (OPY or OSTW). No whole-word scan
+    /// root with the original OPY project kind. No whole-word scan
     /// or document-local rename semantics exist here. Every refusal — an
     /// unresolvable symbol, an unestablished source identity, a target
     /// collision, an affected source that changed relative to the validated
@@ -605,6 +544,18 @@ impl LanguageService {
                 )],
             };
         };
+        if is_ostw_document(uri) {
+            return RenameResult {
+                document_version: requesting.version,
+                ok: false,
+                edits: Vec::new(),
+                previews: Vec::new(),
+                diagnostics: vec![
+                    "source-provider-unavailable: DEL/OSTW provider support is not currently shipped with Wright"
+                        .to_string(),
+                ],
+            };
+        }
         let (line, col) = requesting.to_line_col(position);
         let requesting_canonical = self.canonical_source(&requesting.uri);
 
@@ -651,8 +602,8 @@ impl LanguageService {
             let config = wright_driver::SessionConfig {
                 input: wright_driver::InputSpec::Path(root_path.clone()),
                 // The driver detects the original project kind from the root
-                // document extension (OPY or OSTW), so validation runs through
-                // the correct native frontend.
+                // document extension, so validation runs through the owner
+                // frontend.
                 kind: wright_driver::SourceKind::Auto,
                 root: Some(self.root.clone()),
                 ..wright_driver::SessionConfig::default()
@@ -796,9 +747,8 @@ impl LanguageService {
     /// snapshot are the same).
     ///
     /// Validation routes through the shared driver transaction contract
-    /// (#128) with the root's original source kind detected from its
-    /// extension, so OPY and OSTW projects validate through their own native
-    /// frontend; no duplicate edit-validation semantics live here.
+    /// (#128) with the root's source kind detected from its extension; no
+    /// duplicate edit-validation semantics live here.
     fn validate_renamed_project(
         &self,
         requesting_uri: &str,
@@ -837,8 +787,8 @@ impl LanguageService {
             let config = wright_driver::SessionConfig {
                 input: wright_driver::InputSpec::Path(path),
                 // The original project kind is detected from the root document
-                // extension so the edited project validates through the
-                // correct native frontend.
+                // extension so the edited project validates through the owner
+                // frontend.
                 kind: wright_driver::SourceKind::Auto,
                 root: Some(self.root.clone()),
                 ..wright_driver::SessionConfig::default()
@@ -900,7 +850,7 @@ impl LanguageService {
             return Vec::new();
         };
         if is_ostw_document(uri) {
-            return self.semantic_tokens_ostw(document);
+            return Vec::new();
         }
         let analysis = self.analyze(document);
         // Token classification needs the raw lexer stream plus the semantic
@@ -918,44 +868,6 @@ impl LanguageService {
                 continue;
             }
             let token_type = classify_token(token, analysis.index.as_ref());
-            if token_type.is_empty() {
-                continue;
-            }
-            result.push(SemanticToken {
-                line: token.span.start.line.saturating_sub(1),
-                character: crate::document::char_offset_to_utf16(
-                    document
-                        .text
-                        .lines()
-                        .nth(token.span.start.line.saturating_sub(1) as usize)
-                        .unwrap_or_default(),
-                    token.span.start.col.saturating_sub(1) as usize,
-                ) as u32,
-                length: crate::document::utf16_len(&token.text).max(1) as u32,
-                token_type,
-            });
-        }
-        result
-    }
-
-    /// Semantic tokens for an OSTW document: the OSTW frontend lexer
-    /// supplies the token stream; symbol classification goes through the
-    /// shared semantic index over the lowered program, exactly like OPY.
-    fn semantic_tokens_ostw(&self, document: &Document) -> Vec<SemanticToken> {
-        let analysis = self.analyze(document);
-        let tokens = match wright_ostw::lexer::lex(wright_ostw::lexer::LexInput {
-            file_id: wright_ir::ids::Id::from_index(0),
-            text: &document.text,
-        }) {
-            Ok(tokens) => tokens,
-            Err(_) => return Vec::new(),
-        };
-        let mut result = Vec::new();
-        for token in &tokens {
-            if token.kind == wright_ostw::lexer::TokenKind::Eof {
-                continue;
-            }
-            let token_type = classify_ostw_token(token, analysis.index.as_ref());
             if token_type.is_empty() {
                 continue;
             }
@@ -1047,12 +959,17 @@ fn is_ostw_document(uri: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Map an OSTW frontend error into the shared language-service error shape.
-fn ostw_error(error: &wright_ostw::SourceError) -> SourceError {
-    SourceError {
-        code: error.code.clone(),
-        message: error.message.clone(),
-        span: error.span,
+fn unavailable_ostw_analysis() -> Analysis {
+    Analysis {
+        program: wir::Program::default(),
+        index: None,
+        findings: Vec::new(),
+        parse_errors: vec![SourceError {
+            code: "source-provider-unavailable".to_string(),
+            message: "DEL/OSTW provider support is not currently shipped with Wright".to_string(),
+            span: None,
+        }],
+        files: Vec::new(),
     }
 }
 
@@ -1223,44 +1140,6 @@ fn classify_token(token: &wright_opy::lexer::Token, index: Option<&SemanticIndex
         TokenKind::Directive => "macro".to_string(),
         TokenKind::At => "attribute".to_string(),
         TokenKind::Newline | TokenKind::Indent(_) => String::new(),
-        _ => "operator".to_string(),
-    }
-}
-
-/// Classify one OSTW lexer token through the shared semantic index: the
-/// identifier/keyword/builtin logic is identical to the OPY path, only the
-/// token-kind surface differs (each frontend owns its lexer).
-fn classify_ostw_token(token: &wright_ostw::lexer::Token, index: Option<&SemanticIndex>) -> String {
-    use wright_ostw::lexer::TokenKind;
-    match token.kind {
-        TokenKind::Ident => {
-            if KEYWORDS.contains(&token.text.as_str()) {
-                return "keyword".to_string();
-            }
-            if let Some(index) = index {
-                if let Some(kind) =
-                    symbol_kind_at(index, token.span.start.line, token.span.start.col)
-                {
-                    return match kind {
-                        wright_analyzer::symbols::SymbolKind::GlobalVariable
-                        | wright_analyzer::symbols::SymbolKind::PlayerVariable => {
-                            "variable".to_string()
-                        }
-                        wright_analyzer::symbols::SymbolKind::Subroutine => "function".to_string(),
-                        wright_analyzer::symbols::SymbolKind::Rule => "class".to_string(),
-                    };
-                }
-            }
-            if builtin_names().contains(&token.text.as_str()) {
-                "function".to_string()
-            } else {
-                "identifier".to_string()
-            }
-        }
-        TokenKind::Number => "number".to_string(),
-        TokenKind::String | TokenKind::VerbatimString => "string".to_string(),
-        TokenKind::At => "attribute".to_string(),
-        TokenKind::Eof => String::new(),
         _ => "operator".to_string(),
     }
 }

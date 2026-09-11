@@ -3,12 +3,10 @@
 //! [`EditTransaction`] carries one or more file edits with exact source
 //! ranges plus per-source identity/version preconditions, and
 //! [`validate_transaction`] rejects stale versions, overlapping edits, and
-//! out-of-range spans, then runs the edited project through the *correct*
-//! native frontend for its original source kind (`.opy` through the OPY
-//! frontend, `.ostw`/`.del` through the OSTW project frontend) with the
-//! edited files supplied as in-memory overlays — no synthetic `edit.opy`
-//! path, no OPY hard-coding, and no filesystem write. Unsupported/unsafe
-//! edits fail explicitly with structured diagnostics and no partial preview.
+//! out-of-range spans, then runs edited OPY projects through the owner
+//! frontend with the edited files supplied as in-memory overlays. Unsupported
+//! source kinds fail explicitly with structured diagnostics and no partial
+//! preview.
 //!
 //! Validation is atomic: a transaction either applies and previews in full
 //! or is refused with diagnostics; the caller decides whether to write any
@@ -197,13 +195,11 @@ pub struct EditValidation {
 /// the identity/version preconditions can be verified and the edited project
 /// compiled without reading or rewriting the user's files.
 ///
-/// The edited project is validated through the correct native frontend and
-/// project semantics (never a forced `.opy`): OPY projects compile with the
-/// edited files as include overlays; OSTW projects load their `ds.toml`
-/// project graph with the edited files as overlays. Refusals are atomic and
-/// structured: stale sources, overlapping/unknown edits, unsupported input
-/// kinds, and compiled errors produce source-located diagnostics and no
-/// partial preview.
+/// The edited project is validated through the OPY owner frontend with edited
+/// files as include overlays. DEL/OSTW and other unsupported input kinds are
+/// refused explicitly. Refusals are atomic and structured: stale sources,
+/// overlapping/unknown edits, unsupported input kinds, and compiled errors
+/// produce source-located diagnostics and no partial preview.
 pub fn validate_transaction(
     config: &SessionConfig,
     sources: &BTreeMap<String, String>,
@@ -654,8 +650,8 @@ fn exact_identifier_occurrence(
 
 /// The program file id whose registry path matches a caller source identity.
 ///
-/// Matching walks the program file registry (never assuming the main source
-/// is file 0 — the OSTW project registry reserves file 0 for `ds.toml`) and
+/// Matching walks the program file registry without assuming a fixed main
+/// source file id and
 /// tries the registry path as given, root-joined, and canonicalized, so
 /// display-relative spellings (e.g. the driver's cwd-relative display paths)
 /// and project-relative spellings both match.
@@ -780,110 +776,66 @@ fn resolved_input(
     }
 }
 
-/// Compile a project through its original native frontend (OPY with include
-/// overlays, OSTW with the `ds.toml` project graph and overlays) and the
-/// shared HIR→IR→lower→validate chain, applying the session's transformation
-/// profile for OPY exactly as `CompilerSession::load` does. Returns the
-/// validated WIR program or every structured source-located diagnostic.
+/// Compile an OPY project through the owner frontend with include overlays and
+/// the shared validation chain, applying the session's transformation profile
+/// exactly as `CompilerSession::load` does.
 fn compile_project(
     kind: SourceKind,
     resolved: &ResolvedInput,
     overlay: &BTreeMap<String, String>,
     profile: crate::Profile,
 ) -> Result<workshop_rs::wir::Program, Vec<Diagnostic>> {
-    match kind {
-        SourceKind::Opy => {
-            let main_path = resolved
-                .path
-                .as_deref()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_else(|| resolved.display.clone());
-            let outcome = wright_opy::compile_with_overlay_outcome(
-                &resolved.text,
-                &main_path,
-                &resolved.root,
-                overlay,
-            );
-            let Some(mut program) = outcome.program else {
-                return Err(vec![session::opy_diag(
-                    outcome
-                        .error
-                        .expect("a failed compile outcome always carries an error"),
-                    &outcome.files,
-                    resolved,
-                )]);
-            };
-            if let Err(error) = program.validate() {
-                return Err(vec![session::ir_diag(
-                    "validation-error",
-                    crate::diag::Stage::Validation,
-                    error,
-                    resolved,
-                )]);
-            }
-            if profile != crate::Profile::Off {
-                if let Err(error) = wright_transform::run(&mut program, profile) {
-                    return Err(vec![Diagnostic::error(
-                        "transform-error",
-                        crate::diag::Stage::Internal,
-                        format!("WIR transformation failed: {error}"),
-                    )]);
-                }
-            }
-            Ok(program)
-        }
-        SourceKind::Ostw => {
-            let relative = resolved
-                .path
-                .as_ref()
-                .and_then(|path| path.strip_prefix(&resolved.root).ok())
-                .map(|relative| relative.to_string_lossy().replace('\\', "/"));
-            let (outcome, semantic) = wright_ostw::compile_with_semantics_overlay(
-                &resolved.text,
-                relative.as_deref(),
-                &resolved.root,
-                overlay,
-            );
-            let mut diagnostics = Vec::new();
-            if let Some(error) = &outcome.error {
-                diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
-            }
-            for error in &outcome.diagnostics {
-                diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
-            }
-            for error in &semantic.diagnostics {
-                diagnostics.push(session::ostw_diag(error.clone(), &outcome, resolved));
-            }
-            if has_error(&diagnostics) {
-                return Err(diagnostics);
-            }
-            let Some(program) = semantic.wir else {
-                // The frontend outcome carries no reachable semantic HIR and
-                // no diagnostics: the session path treats this as an empty
-                // program (check succeeds), so rename finds no symbols.
-                return Ok(workshop_rs::wir::Program::default());
-            };
-            if let Err(error) = program.validate() {
-                return Err(vec![session::ir_diag(
-                    "validation-error",
-                    crate::diag::Stage::Validation,
-                    error,
-                    resolved,
-                )]);
-            }
-            Ok(program)
-        }
-        _ => unreachable!("compile_project only runs for OPY/OSTW"),
+    if kind != SourceKind::Opy {
+        return Err(vec![source_provider_unavailable()]);
     }
+    let main_path = resolved
+        .path
+        .as_deref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| resolved.display.clone());
+    let outcome = wright_opy::compile_with_overlay_outcome(
+        &resolved.text,
+        &main_path,
+        &resolved.root,
+        overlay,
+    );
+    let Some(mut program) = outcome.program else {
+        return Err(vec![session::opy_diag(
+            outcome
+                .error
+                .expect("a failed compile outcome always carries an error"),
+            &outcome.files,
+            resolved,
+        )]);
+    };
+    if let Err(error) = program.validate() {
+        return Err(vec![session::ir_diag(
+            "validation-error",
+            crate::diag::Stage::Validation,
+            error,
+            resolved,
+        )]);
+    }
+    if profile != crate::Profile::Off {
+        if let Err(error) = wright_transform::run(&mut program, profile) {
+            return Err(vec![Diagnostic::error(
+                "transform-error",
+                crate::diag::Stage::Internal,
+                format!("WIR transformation failed: {error}"),
+            )]);
+        }
+    }
+    Ok(program)
 }
 
 /// The concrete source kind to validate against: the configured kind, or
-/// detection from the main file extension for `Auto`. Only the source
-/// frontends OPY and OSTW are declared edit targets; Workshop/Protocol
-/// inputs refuse explicitly.
+/// detection from the main file extension for `Auto`. DEL/OSTW, Workshop, and
+/// Protocol inputs refuse explicitly because no corresponding edit provider is
+/// available in Wright.
 fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, Diagnostic> {
     match config.kind {
-        SourceKind::Opy | SourceKind::Ostw => Ok(config.kind),
+        SourceKind::Opy => Ok(SourceKind::Opy),
+        SourceKind::Ostw => Err(source_provider_unavailable()),
         SourceKind::Auto => match main_path
             .extension()
             .and_then(|extension| extension.to_str())
@@ -891,13 +843,13 @@ fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, 
             .as_deref()
         {
             Some("opy") => Ok(SourceKind::Opy),
-            Some("ostw" | "del") => Ok(SourceKind::Ostw),
+            Some("ostw" | "del") => Err(source_provider_unavailable()),
             _ => Err(Diagnostic::error(
                 "edit-unsupported-kind",
                 Stage::Discovery,
                 format!(
                     "cannot detect the source kind of '{}' for edit validation; \
-                     pass an explicit `opy` or `ostw` source kind",
+                     pass an explicit `opy` source kind",
                     main_path.display()
                 ),
             )),
@@ -906,7 +858,7 @@ fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, 
             "edit-unsupported-kind",
             Stage::Discovery,
             format!(
-                "edit validation is declared over the OPY and OSTW source frontends; \
+                "edit validation is declared over the OPY source frontend; \
                  '{}' input is not an editable source kind",
                 other.as_str()
             ),
@@ -935,15 +887,13 @@ fn same_file(a: &str, b: &Path) -> bool {
     }
 }
 
-/// Build the in-memory overlay of non-main sources, keyed for the project's
-/// native frontend.
+/// Build the in-memory overlay of non-main OPY sources, keyed for the owner's
+/// frontend.
 ///
 /// OPY includes resolve against the include root by include string and by
 /// canonical path; the overlay carries the as-given, canonical, root-relative,
 /// and basename spellings (the same spellings the language service overlays
-/// use). OSTW sources resolve by normalized project-relative path; the
-/// overlay carries the as-given and root-relative normalized spellings. The
-/// main source is never overlaid (its text is passed to the frontend
+/// use). The main source is never overlaid (its text is passed to the frontend
 /// directly).
 fn build_overlay<'a>(
     kind: SourceKind,
@@ -956,39 +906,29 @@ fn build_overlay<'a>(
         if same_file(source, main_path) {
             continue;
         }
-        match kind {
-            SourceKind::Opy => {
-                let path = PathBuf::from(source);
-                overlay.insert(path.to_string_lossy().into_owned(), text.to_string());
-                if let Ok(canonical) = path.canonicalize() {
-                    overlay.insert(canonical.to_string_lossy().into_owned(), text.to_string());
-                }
-                if let Ok(relative) = path.strip_prefix(root) {
-                    overlay.insert(relative.to_string_lossy().into_owned(), text.to_string());
-                }
-                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                    overlay.insert(name.to_string(), text.to_string());
-                }
+        if kind == SourceKind::Opy {
+            let path = PathBuf::from(source);
+            overlay.insert(path.to_string_lossy().into_owned(), text.to_string());
+            if let Ok(canonical) = path.canonicalize() {
+                overlay.insert(canonical.to_string_lossy().into_owned(), text.to_string());
             }
-            SourceKind::Ostw => {
-                overlay.insert(normalize_relative(source), text.to_string());
-                if let Ok(relative) = Path::new(source).strip_prefix(root) {
-                    overlay.insert(
-                        relative.to_string_lossy().replace('\\', "/"),
-                        text.to_string(),
-                    );
-                }
+            if let Ok(relative) = path.strip_prefix(root) {
+                overlay.insert(relative.to_string_lossy().into_owned(), text.to_string());
             }
-            _ => {}
+            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                overlay.insert(name.to_string(), text.to_string());
+            }
         }
     }
     overlay
 }
 
-/// A normalized project-relative spelling of a path (`\` separators become
-/// `/`, matching the OSTW project registry).
-fn normalize_relative(path: &str) -> String {
-    path.replace('\\', "/")
+fn source_provider_unavailable() -> Diagnostic {
+    Diagnostic::error(
+        "source-provider-unavailable",
+        Stage::Internal,
+        "DEL/OSTW provider support is not currently shipped with Wright",
+    )
 }
 
 /// Apply every edit of a transaction to the caller-provided current texts,

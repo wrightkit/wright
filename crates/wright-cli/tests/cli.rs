@@ -1019,16 +1019,10 @@ fn source_artifacts_are_byte_exact_in_plain_and_github_renderers() {
         assert_eq!(output.stdout, expected, "{renderer} must preserve bytes");
     }
 
-    for target in ["opy", "ostw"] {
-        let fixture = if target == "opy" {
-            workspace_fixture(
-                "crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws",
-            )
-        } else {
-            workspace_fixture(
-                "crates/wright-driver/tests/fixtures/convert/ostw/surface-basic/workshop.txt",
-            )
-        };
+    for target in ["opy"] {
+        let fixture = workspace_fixture(
+            "crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws",
+        );
         let expected = parse_json(
             &run(&["convert", "--target", target, &fixture, "-f", "json"]).stdout,
         )["result"]["text"]
@@ -1151,25 +1145,26 @@ fn convert_workshop_input_to_opy_reconstructs_source() {
 }
 
 #[test]
-fn convert_workshop_input_to_ostw_reconstructs_source() {
-    // `wright convert --target ostw` writes the reconstructed OSTW source.
-    let fixture = workspace_fixture(
-        "crates/wright-driver/tests/fixtures/convert/ostw/surface-basic/workshop.txt",
-    );
-    let output = run(&["convert", "--target", "ostw", &fixture]);
+fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
+    // `wright convert --target ostw` is a recognized provider boundary.
+    let fixture =
+        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
+    let output = run(&["convert", "--target", "ostw", &fixture, "-f", "json"]);
     assert_eq!(
         output.status.code(),
-        Some(0),
+        Some(4),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for anchor in ["globalvar Any", "playervar Any", "rule: \"", "void "] {
-        assert!(
-            stdout.contains(anchor),
-            "missing OSTW anchor {anchor:?}:\n{stdout}"
-        );
-    }
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["exit"], 4);
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "source-provider-unavailable"
+    );
+    assert_eq!(envelope["diagnostics"][0]["stage"], "internal");
+    assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
 }
 
 #[test]
@@ -1206,25 +1201,16 @@ fn convert_json_envelope_reports_command_result_and_target() {
 
 #[test]
 fn convert_is_byte_deterministic_across_runs() {
-    for (target, fixture) in [
-        (
-            "opy",
-            "crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws",
-        ),
-        (
-            "ostw",
-            "crates/wright-driver/tests/fixtures/convert/ostw/surface-basic/workshop.txt",
-        ),
-    ] {
-        let fixture = workspace_fixture(fixture);
-        let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
-        let second = run(&["convert", "--target", target, &fixture, "-f", "json"]);
-        assert_eq!(
-            first.stdout, second.stdout,
-            "convert --target {target} must be byte-deterministic"
-        );
-        assert!(!first.stdout.is_empty());
-    }
+    let target = "opy";
+    let fixture =
+        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
+    let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
+    let second = run(&["convert", "--target", target, &fixture, "-f", "json"]);
+    assert_eq!(
+        first.stdout, second.stdout,
+        "convert --target {target} must be byte-deterministic"
+    );
+    assert!(!first.stdout.is_empty());
 }
 
 #[test]
@@ -1232,18 +1218,11 @@ fn convert_rejects_unsupported_constructs_with_exit_three() {
     // Non-representable Workshop constructs fail deterministically with the
     // reconstructor's stable code, the documented unsupported exit code (3),
     // and no partial source — identically on every run.
-    for (target, fixture, expected_code) in [
-        (
-            "ostw",
-            "crates/wright-driver/tests/fixtures/convert/ostw/reject/for-player-variable/workshop.txt",
-            "reconstruct-unsupported-action",
-        ),
-        (
-            "opy",
-            "crates/wright-driver/tests/fixtures/convert/reject-opy-per-player-loop.ws",
-            "unsupported-per-player-loop",
-        ),
-    ] {
+    for (target, fixture, expected_code) in [(
+        "opy",
+        "crates/wright-driver/tests/fixtures/convert/reject-opy-per-player-loop.ws",
+        "unsupported-per-player-loop",
+    )] {
         let fixture = workspace_fixture(fixture);
         let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
         let second = run(&["convert", "--target", target, &fixture, "-f", "json"]);
