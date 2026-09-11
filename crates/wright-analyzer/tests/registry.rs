@@ -593,7 +593,7 @@ matcher:
     - kind: call
       name: 等待
       parameters:
-        - name: 持续时间
+        - name: 时间
           comparison:
             operator: ">="
             value:

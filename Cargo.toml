@@ -12,10 +12,9 @@ repository = "https://github.com/wrightkit/wright"
 [workspace.dependencies]
 # Canonical Workshop core (wright#143): the 0.1.18 release remains the shared
 # WIR/parser contract for the existing provider crates. The analyzer's
-# catalog-only locale contract is consumed from the owner PR until it is
-# released by workshop-rs.
+# catalog-only locale contract is consumed from the released 0.3.6 catalog API.
 workshop-rs = "=0.1.18"
-workshop-rs-catalog = { package = "workshop-rs", git = "https://github.com/wrightkit/workshop-rs.git", rev = "80ec934627fa0c837accb324401b001848b4aa98", version = "0.3.4" }
+workshop-rs-catalog = { package = "workshop-rs", version = "=0.3.6" }
 opy-rs = "=0.1.18"
 libc = "0.2"
 serde = "1"
