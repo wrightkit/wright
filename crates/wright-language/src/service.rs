@@ -997,6 +997,7 @@ fn empty_range() -> Range {
 
 fn severity_name(severity: analysis::Severity) -> &'static str {
     match severity {
+        analysis::Severity::Error => "error",
         analysis::Severity::Warning => "warning",
         analysis::Severity::Info => "info",
     }

@@ -486,7 +486,8 @@ fn ordinary_create_hud_text_traverses_all_value_arguments() {
 fn analyze_aggregates_all_shipped_analyses() {
     let control_flow = corpus_program("synthetic/control-flow");
     let findings = analysis::analyze(&control_flow);
-    let codes: std::collections::BTreeSet<&str> = findings.iter().map(|f| f.code).collect();
+    let codes: std::collections::BTreeSet<&str> =
+        findings.iter().map(|f| f.code.as_str()).collect();
     assert!(
         codes.contains("min-wait-loop"),
         "aggregate run must include min-wait-loop: {codes:?}"

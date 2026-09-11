@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+serde_yaml.workspace = true
 wright-core.workspace = true
 wright-ir.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
+workshop-rs-catalog.workspace = true

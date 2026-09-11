@@ -10,15 +10,16 @@ license = "AGPL-3.0-or-later"
 repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
-# Canonical Workshop core (wright#143): workshop-rs owns the Workshop catalog,
-# parser, emitter, detection, validation, and Workshop IR. This is the single
-# released reference for the cutover — workspace crates consume it via
-# `workshop-rs.workspace = true`.
+# Canonical Workshop core (wright#143): the 0.1.18 release remains the shared
+# WIR/parser contract for the existing provider crates. The analyzer's
+# catalog-only locale contract is consumed from the released 0.3.6 catalog API.
 workshop-rs = "=0.1.18"
+workshop-rs-catalog = { package = "workshop-rs", version = "=0.3.6" }
 opy-rs = "=0.1.18"
 libc = "0.2"
 serde = "1"
 serde_json = "1"
+serde_yaml = "0.9"
 sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"

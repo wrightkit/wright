@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 
 use workshop_rs::source::Span;
 use workshop_rs::wir;
@@ -14,7 +15,7 @@ use wright_ir::error::IrError;
 
 use crate::analysis::{self, Finding, PersistentObject, Severity};
 use crate::cfg::Cfg;
-use crate::registry::{LintConfig, LintRegistry};
+use crate::registry::{LintConfig, LintRegistry, SkippedRule};
 use crate::symbols::{ReferenceKind, SemanticIndex, SymbolId, SymbolKind};
 
 /// A semantic query request.
@@ -86,9 +87,11 @@ pub struct SemanticService<'a> {
     program: &'a wir::Program,
     index: SemanticIndex,
     findings: Vec<Finding>,
+    skipped: Vec<SkippedRule>,
     persistent_objects: Vec<Finding>,
     origin: Origin,
     config: LintConfig,
+    registry: Arc<LintRegistry>,
 }
 
 impl<'a> SemanticService<'a> {
@@ -153,16 +156,32 @@ impl<'a> SemanticService<'a> {
         origin: Origin,
         config: LintConfig,
     ) -> Result<SemanticService<'a>, IrError> {
+        Self::with_origin_and_config_and_registry(
+            program,
+            origin,
+            config,
+            Arc::new(LintRegistry::default()),
+        )
+    }
+
+    pub fn with_origin_and_config_and_registry(
+        program: &'a wir::Program,
+        origin: Origin,
+        config: LintConfig,
+        registry: Arc<LintRegistry>,
+    ) -> Result<SemanticService<'a>, IrError> {
         let index = SemanticIndex::build(program)?;
-        let findings = LintRegistry::default().run(program, &config);
+        let report = registry.run_report(program, &config);
         let persistent_objects = analysis::persistent_objects(program);
         Ok(SemanticService {
             program,
             index,
-            findings,
+            findings: report.findings,
+            skipped: report.skipped,
             persistent_objects,
             origin,
             config,
+            registry,
         })
     }
 
@@ -381,30 +400,34 @@ impl<'a> SemanticService<'a> {
                 // Deterministic: iterate the registry in its canonical order
                 // and resolve every rule's effective configuration from the
                 // service config, so rule metadata and findings always agree.
-                let registry = LintRegistry::default();
-                let rules: Vec<serde_json::Value> = registry
-                    .rules()
+                let descriptors = self.registry.descriptors(&self.config);
+                let rules: Vec<serde_json::Value> = descriptors
+                    .iter()
                     .map(|meta| {
                         json!({
                             "id": meta.id,
                             "defaultSeverity": severity_name(meta.default_severity),
-                            "effectiveSeverity": severity_name(self.config.effective_severity(meta)),
-                            "enabled": self.config.is_enabled(meta.id),
+                            "effectiveSeverity": severity_name(meta.effective_severity),
+                            "enabled": meta.enabled,
                             "summary": meta.summary,
+                            "rationale": meta.rationale,
+                            "documentation": meta.documentation,
                             "evidence": meta.evidence.as_str(),
                             "tags": meta.tags,
                             "knownLimits": meta.known_limits,
+                            "kind": meta.kind,
                         })
                     })
                     .collect();
-                let config_rules: serde_json::Map<String, serde_json::Value> = registry
-                    .rules()
+                let config_rules: serde_json::Map<String, serde_json::Value> = descriptors
+                    .iter()
                     .map(|meta| {
                         (
-                            meta.id.to_string(),
+                            meta.id.clone(),
                             json!({
-                                "enabled": self.config.is_enabled(meta.id),
-                                "severity": severity_name(self.config.effective_severity(meta)),
+                                "enabled": meta.enabled,
+                                "severity": severity_name(meta.effective_severity),
+                                "options": self.config.options(&meta.id),
                             }),
                         )
                     })
@@ -413,6 +436,7 @@ impl<'a> SemanticService<'a> {
                     result: json!({
                         "rules": rules,
                         "config": { "rules": config_rules },
+                        "skipped": self.skipped,
                     }),
                 }
             }
@@ -460,6 +484,7 @@ fn reference_kind_name(kind: ReferenceKind) -> &'static str {
 
 fn severity_name(severity: Severity) -> &'static str {
     match severity {
+        Severity::Error => "error",
         Severity::Warning => "warning",
         Severity::Info => "info",
     }

@@ -149,6 +149,8 @@ pub struct LintResult {
     /// Lint findings, each carrying a stable code, severity, evidence class,
     /// message, and source span (from the `getFindings` request).
     pub findings: serde_json::Value,
+    /// Rules skipped because canonical semantic evidence was unavailable.
+    pub skipped: serde_json::Value,
 }
 
 /// The reconstruction target of a `convert` run (#126): which language-owned

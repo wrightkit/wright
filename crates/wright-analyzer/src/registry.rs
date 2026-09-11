@@ -12,15 +12,19 @@
 //!   not affect registered rules and do not prevent execution.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use workshop_rs::wir;
+use workshop_rs_catalog::catalog::Catalog;
 
 use crate::analysis::{
     Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,
     OngoingConditionHotPath, RepeatedValue, Severity, WhileWithoutWait,
 };
 use crate::cfg::Cfg;
+use crate::declarative::{DeclarativeRule, RuleDefinition, RuleError};
+use crate::facts::SemanticFacts;
 
 /// Static metadata for one lint rule.
 ///
@@ -41,6 +45,8 @@ pub struct RuleMeta {
     pub evidence: EvidenceClass,
     /// One-line human-readable description of what the rule detects.
     pub summary: &'static str,
+    /// Why this rule is useful to a Workshop author.
+    pub rationale: &'static str,
     /// Longer explanation, suitable for documentation or CLI `--explain` output.
     pub documentation: &'static str,
     /// Documented conditions under which the rule may produce false positives
@@ -52,14 +58,23 @@ pub struct RuleMeta {
 
 /// Configuration applied to one rule at registry execution time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuleConfig {
     /// When `false` the rule is skipped entirely and produces no findings.
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// When `Some`, replaces the rule's [`RuleMeta::default_severity`] in
     /// every finding produced during this run.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "severity",
+        alias = "severity_override",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub severity_override: Option<SeverityLabel>,
+    /// Bounded rule-specific match-count options.
+    #[serde(default, skip_serializing_if = "RuleOptions::is_empty")]
+    pub options: RuleOptions,
 }
 
 impl Default for RuleConfig {
@@ -67,6 +82,7 @@ impl Default for RuleConfig {
         Self {
             enabled: true,
             severity_override: None,
+            options: RuleOptions::default(),
         }
     }
 }
@@ -75,21 +91,50 @@ fn default_true() -> bool {
     true
 }
 
+/// The intentionally small option surface shared by declarative rules.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuleOptions {
+    /// Require at least this many matched nodes.
+    #[serde(
+        rename = "min-matches",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub min_matches: Option<usize>,
+    /// Require at most this many matched nodes.
+    #[serde(
+        rename = "max-matches",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_matches: Option<usize>,
+}
+
+impl RuleOptions {
+    fn is_empty(&self) -> bool {
+        self.min_matches.is_none() && self.max_matches.is_none()
+    }
+}
+
 /// A serialization-friendly severity label for use in configuration.
 ///
-/// Matches the string names used in structured findings (`"warning"`, `"info"`).
+/// Project policy labels for a rule. Finding severities remain owned by the
+/// rule implementation unless a project explicitly selects `warn` or `error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SeverityLabel {
-    Warning,
-    Info,
+    Off,
+    Warn,
+    Error,
 }
 
-impl From<SeverityLabel> for Severity {
-    fn from(label: SeverityLabel) -> Self {
-        match label {
-            SeverityLabel::Warning => Severity::Warning,
-            SeverityLabel::Info => Severity::Info,
+impl SeverityLabel {
+    fn severity(self) -> Option<Severity> {
+        match self {
+            Self::Off => None,
+            Self::Warn => Some(Severity::Warning),
+            Self::Error => Some(Severity::Error),
         }
     }
 }
@@ -97,8 +142,8 @@ impl From<SeverityLabel> for Severity {
 impl From<Severity> for SeverityLabel {
     fn from(severity: Severity) -> Self {
         match severity {
-            Severity::Warning => SeverityLabel::Warning,
-            Severity::Info => SeverityLabel::Info,
+            Severity::Warning | Severity::Info => SeverityLabel::Warn,
+            Severity::Error => SeverityLabel::Error,
         }
     }
 }
@@ -115,6 +160,17 @@ pub struct LintConfig {
 }
 
 impl LintConfig {
+    /// Parse a project lint configuration from the stable YAML surface.
+    pub fn from_yaml_str(input: &str) -> Result<Self, serde_yaml::Error> {
+        serde_yaml::from_str(input)
+    }
+
+    /// Read and parse a project lint configuration from YAML.
+    pub fn from_yaml_path(path: &Path) -> Result<Self, std::io::Error> {
+        let input = std::fs::read_to_string(path)?;
+        serde_yaml::from_str(&input).map_err(std::io::Error::other)
+    }
+
     /// Disable a rule by its stable ID.
     ///
     /// Has no effect on other rules. Silently accepted for unknown IDs.
@@ -142,16 +198,20 @@ impl LintConfig {
 
     /// Override the severity of a rule from its CLI spelling.
     ///
-    /// Accepts the stable severity names `"warning"` and `"info"`. Returns
+    /// Accepts the project policy names `"off"`, `"warn"`, and `"error"`. Returns
     /// `false` when `severity` is not a known label, leaving the
     /// configuration unchanged.
     pub fn set_severity_by_name(&mut self, rule_id: &str, severity: &str) -> bool {
         let label = match severity {
-            "warning" => SeverityLabel::Warning,
-            "info" => SeverityLabel::Info,
+            "off" => SeverityLabel::Off,
+            "warn" => SeverityLabel::Warn,
+            "error" => SeverityLabel::Error,
             _ => return false,
         };
-        self.set_severity(rule_id, label.into());
+        self.rules
+            .entry(rule_id.to_string())
+            .or_default()
+            .severity_override = Some(label);
         true
     }
 
@@ -159,7 +219,9 @@ impl LintConfig {
     ///
     /// Returns `true` for unknown IDs (no config entry = enabled by default).
     pub fn is_enabled(&self, rule_id: &str) -> bool {
-        self.rules.get(rule_id).is_none_or(|config| config.enabled)
+        self.rules.get(rule_id).is_none_or(|config| {
+            config.enabled && config.severity_override != Some(SeverityLabel::Off)
+        })
     }
 
     /// Effective severity for a rule given its metadata and this config.
@@ -169,15 +231,74 @@ impl LintConfig {
         self.rules
             .get(meta.id)
             .and_then(|config| config.severity_override)
-            .map(Severity::from)
+            .and_then(SeverityLabel::severity)
             .unwrap_or(meta.default_severity)
     }
+
+    pub fn effective_severity_for(&self, id: &str, default: Severity) -> Severity {
+        self.rules
+            .get(id)
+            .and_then(|config| config.severity_override)
+            .and_then(SeverityLabel::severity)
+            .unwrap_or(default)
+    }
+
+    pub fn severity_override(&self, id: &str) -> Option<Severity> {
+        self.rules
+            .get(id)
+            .and_then(|config| config.severity_override)
+            .and_then(SeverityLabel::severity)
+    }
+
+    pub fn options(&self, id: &str) -> &RuleOptions {
+        self.rules
+            .get(id)
+            .map_or(&EMPTY_OPTIONS, |config| &config.options)
+    }
+}
+
+static EMPTY_OPTIONS: RuleOptions = RuleOptions {
+    min_matches: None,
+    max_matches: None,
+};
+
+/// Owned metadata used by CLI, agent, embedding, and documentation consumers.
+#[derive(Debug, Clone, Serialize)]
+pub struct RuleDescriptor {
+    pub id: String,
+    pub default_severity: Severity,
+    pub effective_severity: Severity,
+    pub enabled: bool,
+    pub summary: String,
+    pub rationale: String,
+    pub documentation: String,
+    pub known_limits: String,
+    pub evidence: EvidenceClass,
+    pub tags: Vec<String>,
+    pub kind: &'static str,
+}
+
+/// A rule that was not executed because its canonical semantic input was not
+/// available for one Workshop rule.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedRule {
+    pub id: String,
+    pub rule: usize,
+    pub reason: String,
+}
+
+/// The findings and explicit unavailable/skip statuses from one registry run.
+#[derive(Debug, Clone, Default)]
+pub struct LintRun {
+    pub findings: Vec<Finding>,
+    pub skipped: Vec<SkippedRule>,
 }
 
 /// One registered rule: its stable metadata and the analysis implementation.
 struct RegistryEntry {
-    meta: RuleMeta,
-    analysis: Box<dyn Analysis>,
+    meta: Option<RuleMeta>,
+    analysis: Option<Box<dyn Analysis>>,
+    declarative: Option<DeclarativeRule>,
 }
 
 /// The Wright lint rule registry.
@@ -212,11 +333,12 @@ impl Default for LintRegistry {
         let while_without_wait: Box<dyn Analysis> = Box::new(WhileWithoutWait);
         let entries = vec![
             RegistryEntry {
-                meta: RuleMeta {
+                meta: Some(RuleMeta {
                     id: "min-wait-loop",
                     default_severity: Severity::Warning,
                     evidence: min_wait.evidence(),
                     summary: "loop body waits at the workshop minimum rate",
+                    rationale: "Avoid sustained maximum-frequency loop execution.",
                     documentation: concat!(
                         "A loop whose body contains a `wait` call at the minimum Workshop ",
                         "duration (~0.016 s) runs at maximum server frequency. Sustained ",
@@ -227,15 +349,17 @@ impl Default for LintRegistry {
                         "are treated as not-minimum and do not trigger this rule.",
                     ),
                     tags: &["performance", "stability"],
-                },
-                analysis: min_wait,
+                }),
+                analysis: Some(min_wait),
+                declarative: None,
             },
             RegistryEntry {
-                meta: RuleMeta {
+                meta: Some(RuleMeta {
                     id: "duplicate-condition",
                     default_severity: Severity::Warning,
                     evidence: duplicate_condition.evidence(),
                     summary: "condition is evaluated more than once within one rule",
+                    rationale: "Avoid unreachable or redundant conditional branches.",
                     documentation: concat!(
                         "The same condition appears in two or more branches of the same rule. ",
                         "Because Workshop conditions are evaluated sequentially, a later branch ",
@@ -246,15 +370,17 @@ impl Default for LintRegistry {
                         "structurally identical conditions in different rules are not compared.",
                     ),
                     tags: &["correctness"],
-                },
-                analysis: duplicate_condition,
+                }),
+                analysis: Some(duplicate_condition),
+                declarative: None,
             },
             RegistryEntry {
-                meta: RuleMeta {
+                meta: Some(RuleMeta {
                     id: "expensive-loop-check",
                     default_severity: Severity::Info,
                     evidence: expensive_loop_check.evidence(),
                     summary: "geometry predicate evaluated inside a loop body",
+                    rationale: "Surface expensive per-iteration geometry work.",
                     documentation: concat!(
                         "A geometry predicate (`distance`, `raycast`, or `isInLoS`) is called ",
                         "inside a loop body. These predicates may be expensive per evaluation ",
@@ -266,15 +392,17 @@ impl Default for LintRegistry {
                         "Workshop update.",
                     ),
                     tags: &["performance"],
-                },
-                analysis: expensive_loop_check,
+                }),
+                analysis: Some(expensive_loop_check),
+                declarative: None,
             },
             RegistryEntry {
-                meta: RuleMeta {
+                meta: Some(RuleMeta {
                     id: "ongoing-condition-hot-path",
                     default_severity: Severity::Info,
                     evidence: ongoing_condition_hot_path.evidence(),
                     summary: "geometry predicate evaluated in an ongoing-rule condition",
+                    rationale: "Make high-frequency condition evaluation visible.",
                     documentation: concat!(
                         "An `Ongoing - Global` or `Ongoing - Each Player` rule evaluates a ",
                         "geometry predicate (`distance`, `raycast`, or `isInLoS`) in one of ",
@@ -299,15 +427,17 @@ impl Default for LintRegistry {
                         "Non-ongoing player events and subroutines are deliberately excluded.",
                     ),
                     tags: &["performance", "stability"],
-                },
-                analysis: ongoing_condition_hot_path,
+                }),
+                analysis: Some(ongoing_condition_hot_path),
+                declarative: None,
             },
             RegistryEntry {
-                meta: RuleMeta {
+                meta: Some(RuleMeta {
                     id: "repeated-value",
                     default_severity: Severity::Warning,
                     evidence: repeated_value.evidence(),
                     summary: "identical value expression evaluated more than once in one loop scope",
+                    rationale: "Avoid repeated evaluation of the same loop-local expression.",
                     documentation: concat!(
                         "A structurally identical value expression appears more than once within one ",
                         "loop scope, so it is re-evaluated every iteration even though one ",
@@ -336,15 +466,17 @@ impl Default for LintRegistry {
                         "`For Global Variable` only; `For Player Variable` loops are not modeled.",
                     ),
                     tags: &["performance", "stability"],
-                },
-                analysis: repeated_value,
+                }),
+                analysis: Some(repeated_value),
+                declarative: None,
             },
             RegistryEntry {
-                meta: RuleMeta {
+                meta: Some(RuleMeta {
                     id: "while-without-wait",
                     default_severity: Severity::Warning,
                     evidence: while_without_wait.evidence(),
                     summary: "while loop body contains no wait call",
+                    rationale: "Ensure a loop can yield to the Workshop scheduler.",
                     documentation: concat!(
                         "A `While` loop whose body contains no `wait` call cannot yield to the ",
                         "server while its condition holds. Each finding carries the loop's ",
@@ -389,8 +521,9 @@ impl Default for LintRegistry {
                         "WIR has no break/goto action.",
                     ),
                     tags: &["stability"],
-                },
-                analysis: while_without_wait,
+                }),
+                analysis: Some(while_without_wait),
+                declarative: None,
             },
         ];
         Self { entries }
@@ -400,7 +533,119 @@ impl Default for LintRegistry {
 impl LintRegistry {
     /// Iterate over the metadata of every registered rule in registry order.
     pub fn rules(&self) -> impl Iterator<Item = &RuleMeta> {
-        self.entries.iter().map(|entry| &entry.meta)
+        self.entries.iter().filter_map(|entry| entry.meta.as_ref())
+    }
+
+    /// Load one external declarative rule. The rule is canonicalized against
+    /// the owning Workshop catalog before it can enter the execution registry.
+    pub fn load_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
+        let catalog =
+            Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
+        let definition = RuleDefinition::from_yaml_str(input).map_err(RuleRegistryError::Rule)?;
+        let rule = DeclarativeRule::from_definition(definition, &catalog)
+            .map_err(RuleRegistryError::Rule)?;
+        self.insert_declarative(rule)
+    }
+
+    /// Load all `.yaml`/`.yml` files in a path, or one file, in lexical order.
+    pub fn load_path(&mut self, path: &Path) -> Result<(), RuleRegistryError> {
+        let catalog =
+            Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
+        self.load_path_with_catalog(path, &catalog)
+    }
+
+    fn load_path_with_catalog(
+        &mut self,
+        path: &Path,
+        catalog: &Catalog,
+    ) -> Result<(), RuleRegistryError> {
+        if path.is_dir() {
+            let mut files = std::fs::read_dir(path)
+                .map_err(|error| RuleRegistryError::Io(path.to_path_buf(), error))?
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    matches!(
+                        path.extension().and_then(|e| e.to_str()),
+                        Some("yaml" | "yml")
+                    )
+                })
+                .collect::<Vec<_>>();
+            files.sort();
+            for file in files {
+                self.load_path_with_catalog(&file, catalog)?;
+            }
+            return Ok(());
+        }
+        let input = std::fs::read_to_string(path)
+            .map_err(|error| RuleRegistryError::Io(path.to_path_buf(), error))?;
+        let definition = RuleDefinition::from_yaml_str(&input).map_err(RuleRegistryError::Rule)?;
+        let rule = DeclarativeRule::from_definition(definition, catalog)
+            .map_err(RuleRegistryError::Rule)?;
+        self.insert_declarative(rule)
+    }
+
+    fn insert_declarative(&mut self, rule: DeclarativeRule) -> Result<(), RuleRegistryError> {
+        let id = rule.id().to_string();
+        if self.entries.iter().any(|entry| {
+            entry.meta.as_ref().is_some_and(|meta| meta.id == id)
+                || entry
+                    .declarative
+                    .as_ref()
+                    .is_some_and(|other| other.id() == id)
+        }) {
+            return Err(RuleRegistryError::DuplicateId(id));
+        }
+        self.entries.push(RegistryEntry {
+            meta: None,
+            analysis: None,
+            declarative: Some(rule),
+        });
+        Ok(())
+    }
+
+    /// Return metadata for native and declarative rules in deterministic order.
+    pub fn descriptors(&self, config: &LintConfig) -> Vec<RuleDescriptor> {
+        self.entries
+            .iter()
+            .map(|entry| {
+                if let Some(meta) = &entry.meta {
+                    RuleDescriptor {
+                        id: meta.id.to_string(),
+                        default_severity: meta.default_severity,
+                        effective_severity: config.effective_severity(meta),
+                        enabled: config.is_enabled(meta.id),
+                        summary: meta.summary.to_string(),
+                        rationale: meta.rationale.to_string(),
+                        documentation: meta.documentation.to_string(),
+                        known_limits: meta.known_limits.to_string(),
+                        evidence: meta.evidence,
+                        tags: meta.tags.iter().map(|tag| (*tag).to_string()).collect(),
+                        kind: "native",
+                    }
+                } else {
+                    let rule = entry
+                        .declarative
+                        .as_ref()
+                        .expect("registry entry has a rule");
+                    let metadata = rule.metadata();
+                    RuleDescriptor {
+                        id: rule.id().to_string(),
+                        default_severity: rule.default_severity(),
+                        effective_severity: config
+                            .effective_severity_for(rule.id(), rule.default_severity()),
+                        enabled: config.is_enabled(rule.id()),
+                        summary: metadata.summary.clone(),
+                        rationale: metadata.rationale.clone(),
+                        documentation: metadata.documentation.clone(),
+                        known_limits: metadata.known_limits.clone(),
+                        evidence: rule.evidence(),
+                        tags: metadata.tags.clone(),
+                        kind: "declarative",
+                    }
+                }
+            })
+            .collect()
     }
 
     /// Run every enabled rule over every Workshop rule in `program` and return
@@ -409,31 +654,89 @@ impl LintRegistry {
     /// Output order is deterministic: rules execute in registry order, over
     /// Workshop rules in program index order.
     pub fn run(&self, program: &wir::Program, config: &LintConfig) -> Vec<Finding> {
-        let mut findings = Vec::new();
+        self.run_report(program, config).findings
+    }
+
+    /// Run the registry while retaining machine-readable unavailable/skip
+    /// statuses for rules whose canonical input cannot be analyzed.
+    pub fn run_report(&self, program: &wir::Program, config: &LintConfig) -> LintRun {
+        let mut report = LintRun::default();
         for (index, _) in program.rules.iter().enumerate() {
             let rule = wir::RuleId::from_index(index);
             let Ok(cfg) = Cfg::build(program, rule) else {
-                continue; // invalid rule skipped; cannot be analyzed
-            };
-            for entry in &self.entries {
-                if !config.is_enabled(entry.meta.id) {
-                    continue;
-                }
-                let mut rule_findings = entry.analysis.run(program, rule, &cfg);
-                // Apply the severity override configured for this rule.
-                let effective = config
-                    .rules
-                    .get(entry.meta.id)
-                    .and_then(|c| c.severity_override);
-                if let Some(label) = effective {
-                    let sv = Severity::from(label);
-                    for finding in &mut rule_findings {
-                        finding.severity = sv;
+                for entry in &self.entries {
+                    let id = entry
+                        .meta
+                        .as_ref()
+                        .map(|meta| meta.id.to_string())
+                        .or_else(|| entry.declarative.as_ref().map(|rule| rule.id().to_string()));
+                    if let Some(id) = id.filter(|id| config.is_enabled(id)) {
+                        report.skipped.push(SkippedRule {
+                            id,
+                            rule: index,
+                            reason: "canonical CFG unavailable".to_string(),
+                        });
                     }
                 }
-                findings.extend(rule_findings);
+                continue;
+            };
+            let facts = SemanticFacts::new(program);
+            for entry in &self.entries {
+                let (id, mut rule_findings) =
+                    if let (Some(meta), Some(analysis)) = (&entry.meta, &entry.analysis) {
+                        if !config.is_enabled(meta.id) {
+                            continue;
+                        }
+                        (meta.id.to_string(), analysis.run(program, rule, &cfg))
+                    } else {
+                        let declarative = entry
+                            .declarative
+                            .as_ref()
+                            .expect("registry entry has a rule");
+                        if !config.is_enabled(declarative.id()) {
+                            continue;
+                        }
+                        (
+                            declarative.id().to_string(),
+                            declarative.run(
+                                &facts,
+                                rule,
+                                config.options(declarative.id()).min_matches,
+                                config.options(declarative.id()).max_matches,
+                            ),
+                        )
+                    };
+                if let Some(effective) = config.severity_override(&id) {
+                    for finding in &mut rule_findings {
+                        finding.severity = effective;
+                    }
+                }
+                report.findings.extend(rule_findings);
             }
         }
-        findings
+        report
     }
 }
+
+#[derive(Debug)]
+pub enum RuleRegistryError {
+    Io(std::path::PathBuf, std::io::Error),
+    Catalog(String),
+    Rule(RuleError),
+    DuplicateId(String),
+}
+
+impl std::fmt::Display for RuleRegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(path, error) => {
+                write!(f, "cannot read rule source {}: {error}", path.display())
+            }
+            Self::Catalog(error) => write!(f, "cannot load Workshop catalog: {error}"),
+            Self::Rule(error) => error.fmt(f),
+            Self::DuplicateId(id) => write!(f, "rule ID '{id}' is already registered"),
+        }
+    }
+}
+
+impl std::error::Error for RuleRegistryError {}

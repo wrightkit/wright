@@ -62,6 +62,11 @@ fn rule_metadata_fields_are_non_empty() {
             meta.id
         );
         assert!(
+            !meta.rationale.is_empty(),
+            "{}: rationale must be non-empty",
+            meta.id
+        );
+        assert!(
             !meta.documentation.is_empty(),
             "{}: documentation must be non-empty",
             meta.id
@@ -366,8 +371,8 @@ fn set_severity_by_name_accepts_cli_spellings_and_rejects_unknown_labels() {
 
     let mut config = LintConfig::default();
     assert!(
-        config.set_severity_by_name("expensive-loop-check", "warning"),
-        "'warning' is a known severity label"
+        config.set_severity_by_name("expensive-loop-check", "warn"),
+        "'warn' is a known severity label"
     );
     assert_eq!(
         config.effective_severity(meta),
@@ -382,6 +387,34 @@ fn set_severity_by_name_accepts_cli_spellings_and_rejects_unknown_labels() {
         config.effective_severity(meta),
         Severity::Warning,
         "an unknown label must leave the configuration unchanged"
+    );
+}
+
+#[test]
+fn severity_policy_supports_off_warn_and_error() {
+    let program = local_program("expensive-loop");
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(&minimum_wait_yaml("community/minimum-wait"))
+        .expect("rule loads for severity policy execution");
+
+    let mut config = LintConfig::default();
+    assert!(config.set_severity_by_name("community/minimum-wait", "error"));
+    assert_eq!(
+        registry
+            .run(&program, &config)
+            .into_iter()
+            .find(|finding| finding.code == "community/minimum-wait")
+            .map(|finding| finding.severity),
+        Some(Severity::Error)
+    );
+
+    assert!(config.set_severity_by_name("community/minimum-wait", "off"));
+    assert!(
+        registry
+            .run(&program, &config)
+            .into_iter()
+            .all(|finding| finding.code != "community/minimum-wait")
     );
 }
 
@@ -419,7 +452,7 @@ fn finding_codes_match_registered_rule_ids() {
 
     for finding in registry.run(&program, &config) {
         assert!(
-            registered_ids.contains(&finding.code),
+            registered_ids.contains(&finding.code.as_str()),
             "finding code '{}' does not match any registered rule ID",
             finding.code
         );
@@ -439,4 +472,273 @@ fn findings_carry_source_spans() {
             finding.code
         );
     }
+}
+
+#[test]
+fn declarative_rule_matches_canonical_nested_actions_and_exposes_metadata() {
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            r#"
+id: community/minimum-wait
+metadata:
+  summary: loop contains a minimum wait
+  rationale: minimum waits can create high-frequency loops
+  documentation: Finds a minimum wait inside a while scope.
+  known-limits: This is a structural fact and does not measure runtime cost.
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: Wait
+      args:
+        - number: 0.1
+      count:
+        min: 1
+"#,
+        )
+        .expect("declarative rule loads");
+
+    let findings = registry.run(&local_program("expensive-loop"), &LintConfig::default());
+    let finding = findings
+        .iter()
+        .find(|finding| finding.code == "community/minimum-wait")
+        .expect("external rule finds the nested wait action");
+    assert_eq!(finding.severity, Severity::Warning);
+    assert!(
+        finding.span.is_some(),
+        "external findings preserve source spans"
+    );
+    let descriptor = registry
+        .descriptors(&LintConfig::default())
+        .into_iter()
+        .find(|rule| rule.id == "community/minimum-wait")
+        .expect("external metadata is queryable");
+    assert_eq!(descriptor.kind, "declarative");
+    assert_eq!(
+        descriptor.rationale,
+        "minimum waits can create high-frequency loops"
+    );
+
+    let mut canonical_registry = LintRegistry::default();
+    canonical_registry
+        .load_yaml_str(&definition_yaml("community/canonical-wait", "wait"))
+        .expect("canonical Workshop identity loads");
+    let canonical_findings = canonical_registry
+        .run(&local_program("expensive-loop"), &LintConfig::default())
+        .into_iter()
+        .filter(|finding| finding.code == "community/canonical-wait")
+        .count();
+    assert_eq!(
+        canonical_findings, 1,
+        "canonical and localized spellings match"
+    );
+}
+
+#[test]
+fn declarative_rule_matches_named_parameters_and_numeric_comparisons() {
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            r#"
+id: community/wait-duration
+metadata:
+  summary: loop contains a long wait
+  rationale: verify action parameter matching
+  documentation: Finds a wait with a duration at least one tenth of a second.
+  known-limits: This is a structural fact.
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: Wait
+      parameters:
+        - name: Duration
+          comparison:
+            operator: ">="
+            value:
+              number: 0.1
+      count:
+        min: 1
+"#,
+        )
+        .expect("named parameter rule loads");
+
+    let findings = registry.run(&local_program("expensive-loop"), &LintConfig::default());
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.code == "community/wait-duration")
+            .count(),
+        1
+    );
+
+    let mut localized_registry = LintRegistry::default();
+    localized_registry
+        .load_yaml_str(
+            r#"
+id: community/wait-duration-zh
+locale: zh-CN
+metadata:
+  summary: loop contains a long wait
+  rationale: verify localized parameter matching
+  documentation: Finds a wait with a localized duration at least one tenth of a second.
+  known-limits: This is a structural fact.
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: 等待
+      parameters:
+        - name: 时间
+          comparison:
+            operator: ">="
+            value:
+              number: 0.1
+      count:
+        min: 1
+"#,
+        )
+        .expect("localized named parameter rule loads");
+    assert_eq!(
+        localized_registry
+            .run(&local_program("expensive-loop"), &LintConfig::default())
+            .into_iter()
+            .filter(|finding| finding.code == "community/wait-duration-zh")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn declarative_conditions_are_limited_to_the_selected_scope() {
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            r#"
+id: community/outer-loop-comparison
+metadata:
+  summary: outer loop has a comparison condition
+  rationale: verify scoped condition matching
+  documentation: Finds a comparison directly belonging to a while scope.
+  known-limits: This is a structural fact.
+  tags: [correctness]
+matcher:
+  scope: while
+  conditions:
+    call:
+      name: "<"
+    count:
+      min: 1
+"#,
+        )
+        .expect("scoped condition rule loads");
+
+    let findings = registry.run(&local_program("expensive-loop"), &LintConfig::default());
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.code != "community/outer-loop-comparison"),
+        "a while matcher must not count conditions from nested if scopes"
+    );
+}
+
+#[test]
+fn declarative_rule_rejects_reserved_or_unscoped_ids_and_unknown_spellings() {
+    let definition = |id: &str, name: &str| {
+        format!(
+            r#"
+id: {id}
+metadata:
+  summary: summary
+  rationale: rationale
+  documentation: documentation
+  known-limits: limits
+  tags: [correctness]
+matcher:
+  actions:
+    - kind: call
+      name: {name}
+"#
+        )
+    };
+    for id in ["bare-id", "wright/rule", "a/b/c"] {
+        let error = registry_error(&definition(id, "Wait"));
+        assert!(error.to_string().contains("external rule ID"));
+    }
+    let error = registry_error(&definition("community/rule", "NotAWorkshopAction"));
+    assert!(error.to_string().contains("unknown action spelling"));
+}
+
+#[test]
+fn lint_config_yaml_controls_external_rules_and_bounded_options() {
+    let config = LintConfig::from_yaml_str(
+        r#"
+rules:
+  community/minimum-wait:
+    enabled: true
+    severity: warn
+    options:
+      max-matches: 2
+"#,
+    )
+    .expect("project lint YAML parses");
+    assert!(config.is_enabled("community/minimum-wait"));
+    assert_eq!(
+        config.options("community/minimum-wait").max_matches,
+        Some(2)
+    );
+
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(&minimum_wait_yaml("community/minimum-wait"))
+        .expect("rule loads for config execution");
+    let findings = registry.run(&local_program("expensive-loop"), &config);
+    assert_eq!(
+        findings
+            .iter()
+            .find(|finding| finding.code == "community/minimum-wait")
+            .map(|finding| finding.severity),
+        Some(Severity::Warning)
+    );
+
+    let invalid_options = LintConfig::from_yaml_str(
+        "rules:\n  community/minimum-wait:\n    options:\n      unsupported: true\n",
+    );
+    assert!(invalid_options.is_err(), "unknown options are rejected");
+}
+
+fn minimum_wait_yaml(id: &str) -> String {
+    definition_yaml(id, "Wait")
+}
+
+fn definition_yaml(id: &str, name: &str) -> String {
+    format!(
+        r#"
+id: {id}
+metadata:
+  summary: loop contains a minimum wait
+  rationale: minimum waits can create high-frequency loops
+  documentation: Finds a minimum wait inside a while scope.
+  known-limits: This is a structural fact and does not measure runtime cost.
+  tags: [performance]
+matcher:
+  scope: while
+  actions:
+    - kind: call
+      name: {name}
+      args:
+        - number: 0.1
+      count:
+        min: 1
+"#
+    )
+}
+
+fn registry_error(yaml: &str) -> wright_analyzer::registry::RuleRegistryError {
+    let mut registry = LintRegistry::default();
+    registry.load_yaml_str(yaml).expect_err("rule must reject")
 }

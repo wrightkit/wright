@@ -217,7 +217,7 @@ The following lint-only flags configure the registry and are repeatable:
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
   `ongoing-condition-hot-path`, `while-without-wait`).
-* `--rule-severity <ID>:<warning|info>`: override a rule's severity.
+* `--rule-severity <ID>:<off|warn|error>`: override a rule's project policy.
 
 These flags are usage errors on every other command (exit 2).
 

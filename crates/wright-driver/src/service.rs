@@ -435,10 +435,11 @@ impl<'a> ToolService<'a> {
             kind: self.loaded.origin.kind.clone(),
             locale: self.loaded.origin.locale.clone(),
         };
-        match wright_analyzer::service::SemanticService::with_origin_and_config(
+        match wright_analyzer::service::SemanticService::with_origin_and_config_and_registry(
             &self.loaded.program,
             origin,
             config,
+            std::sync::Arc::clone(self.session.lint_registry()),
         ) {
             Ok(service) => match service.handle(&request) {
                 wright_analyzer::service::Response::Ok { result } => ToolResponse::Ok { result },
@@ -462,10 +463,11 @@ impl<'a> ToolService<'a> {
             kind: self.loaded.origin.kind.clone(),
             locale: self.loaded.origin.locale.clone(),
         };
-        match wright_analyzer::service::SemanticService::with_origin_and_config(
+        match wright_analyzer::service::SemanticService::with_origin_and_config_and_registry(
             &self.loaded.program,
             origin,
             config,
+            std::sync::Arc::clone(self.session.lint_registry()),
         ) {
             Ok(service) => {
                 let lint_rules = match service.handle(&wright_analyzer::service::Request::LintRules)
@@ -484,6 +486,7 @@ impl<'a> ToolService<'a> {
                     "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
                     "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
                     "findings": findings,
+                    "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
                 }))
             }
             Err(error) => self.error("analysis-error", error.to_string()),
@@ -609,6 +612,7 @@ impl<'a> ToolService<'a> {
 /// The canonical severity name of a finding.
 fn severity_name(severity: wright_analyzer::analysis::Severity) -> &'static str {
     match severity {
+        wright_analyzer::analysis::Severity::Error => "error",
         wright_analyzer::analysis::Severity::Warning => "warning",
         wright_analyzer::analysis::Severity::Info => "info",
     }

@@ -49,6 +49,7 @@ use crate::registry::{LintConfig, LintRegistry};
 pub enum Severity {
     Warning,
     Info,
+    Error,
 }
 
 /// How strongly a finding is supported by the available evidence.
@@ -222,7 +223,7 @@ impl Boundedness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     /// Stable machine-readable code, e.g. `min-wait-loop`.
-    pub code: &'static str,
+    pub code: String,
     pub severity: Severity,
     pub message: String,
     pub span: Option<Span>,
@@ -239,7 +240,7 @@ pub struct Finding {
 }
 
 /// A Workshop-specific static analysis.
-pub trait Analysis {
+pub trait Analysis: Send + Sync {
     /// The stable analysis name (also the finding code).
     fn name(&self) -> &'static str;
     /// The evidence class of this rule's findings (single source of truth
@@ -290,7 +291,7 @@ impl Analysis for MinWaitLoop {
             };
             if body_has_min_wait(program, body) {
                 findings.push(Finding {
-                    code: self.name(),
+                    code: self.name().to_string(),
                     severity: Severity::Warning,
                     message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency"
                         .to_string(),
@@ -374,7 +375,7 @@ impl Analysis for DuplicateCondition {
                     .any(|(earlier, _, _)| structurally_equal(program, *earlier, condition));
                 if duplicate {
                     findings.push(Finding {
-                        code: self.name(),
+                        code: self.name().to_string(),
                         severity: Severity::Warning,
                         message: "condition is evaluated more than once in this rule; a later branch can never be taken"
                             .to_string(),
@@ -425,7 +426,7 @@ impl Analysis for ExpensiveLoopCheck {
             };
             for value in expensive_values_in_actions(program, body) {
                 findings.push(Finding {
-                    code: self.name(),
+                    code: self.name().to_string(),
                     severity: Severity::Info,
                     message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
                         .to_string(),
@@ -514,7 +515,7 @@ impl Analysis for OngoingConditionHotPath {
                     )
                 };
                 findings.push(Finding {
-                    code: self.name(),
+                    code: self.name().to_string(),
                     severity: Severity::Info,
                     message: format!(
                         "geometry predicate in an ongoing-rule condition {} of {condition_count} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
@@ -595,7 +596,7 @@ impl Analysis for RepeatedValue {
             for family in duplicated_shapes(program, &scope, &parents) {
                 let first = family[0];
                 findings.push(Finding {
-                    code: self.name(),
+                    code: self.name().to_string(),
                     severity: Severity::Warning,
                     message: format!(
                         "this value expression is evaluated {} times within the same loop scope",
@@ -991,7 +992,7 @@ impl Analysis for PersistentObjectLifecycle {
                     same_kind_cleanup_in_rule,
                 };
                 Some(Finding {
-                    code: self.name(),
+                    code: self.name().to_string(),
                     severity: Severity::Info,
                     message: persistent_object_message(&object),
                     span: *span,
@@ -1184,7 +1185,7 @@ impl Analysis for WhileWithoutWait {
             if !body_has_wait(program, body) {
                 let class = boundedness_of(program, *condition, body);
                 findings.push(Finding {
-                    code: self.name(),
+                    code: self.name().to_string(),
                     severity: match class {
                         Boundedness::StaticallyBounded => Severity::Info,
                         Boundedness::ObviouslyUnbounded | Boundedness::Unknown => Severity::Warning,
