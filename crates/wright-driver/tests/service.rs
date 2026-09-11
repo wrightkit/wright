@@ -187,77 +187,6 @@ fn persistent_object_queries_resolve_span_paths_without_lint_diagnostics() {
     );
 }
 
-fn ostw_service() -> (ToolService<'static>, std::path::PathBuf) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let root = std::env::temp_dir().join(format!(
-        "wright-driver-service-ostw-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
-    std::fs::write(
-        root.join("main.ostw"),
-        "globalvar Number score = 0;\nrule: \"one\" { score += 1; }\nrule: \"two\" { BigMessage(AllPlayers(), <\"<0>\", score>); }\n",
-    )
-    .unwrap();
-    let path = root.join("main.ostw");
-    let config = SessionConfig {
-        input: InputSpec::Path(path),
-        kind: SourceKind::Ostw,
-        profile: Profile::Compat,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::new(config).unwrap();
-    let _ = session.load().unwrap();
-    let session = Box::leak(Box::new(session));
-    (ToolService::new(session).unwrap(), root)
-}
-
-#[test]
-fn ostw_sessions_serve_the_shared_queries_through_the_tool_service() {
-    // #120: the tool/agent API over an OSTW session answers the same
-    // project/rules/symbols/findings/lint queries through the shared
-    // in-process services, and its capabilities advertise `ostw`.
-    let (service, root) = ostw_service();
-
-    let capabilities = handle_ok(&service, &ToolRequest::Capabilities);
-    assert!(
-        capabilities["languages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|language| language == "ostw"),
-        "capabilities advertise ostw"
-    );
-
-    let project = handle_ok(&service, &ToolRequest::Project);
-    assert_eq!(project["origin"]["kind"], "ostw");
-    assert!(
-        project["rules"].as_u64().unwrap() >= 2,
-        "the owner-supported reachable rules surface"
-    );
-    assert!(project["symbols"].as_u64().unwrap() > 0, "symbols present");
-
-    let rules = handle_ok(&service, &ToolRequest::Rules);
-    assert!(rules.as_array().is_some_and(|r| !r.is_empty()));
-
-    let symbols = handle_ok(&service, &ToolRequest::Symbols { kind: None });
-    assert!(symbols.as_array().is_some_and(|s| !s.is_empty()));
-
-    let findings = handle_ok(&service, &ToolRequest::Findings);
-    assert!(findings.as_array().is_some());
-
-    let lint = handle_ok(&service, &ToolRequest::Lint);
-    assert!(
-        lint["rules"].as_array().is_some_and(|r| !r.is_empty()),
-        "lint returns shared rule metadata"
-    );
-    drop(service);
-    let _ = std::fs::remove_dir_all(root);
-}
-
 fn workshop_service() -> ToolService<'static> {
     let oracle = serde_json::from_str::<serde_json::Value>(
         &std::fs::read_to_string(
@@ -319,13 +248,9 @@ fn assert_shared_service_surface(service: &ToolService<'_>) {
 #[test]
 fn cross_language_shared_service_behavior_is_frontend_neutral() {
     // #120 acceptance 5: the same shared semantic-service assertions hold
-    // over OPY, Workshop, and OSTW inputs — no language-specific stack.
+    // over OPY and Workshop inputs — no language-specific stack.
     assert_shared_service_surface(&service_for("synthetic/control-flow"));
     assert_shared_service_surface(&workshop_service());
-    let (ostw, root) = ostw_service();
-    assert_shared_service_surface(&ostw);
-    drop(ostw);
-    let _ = std::fs::remove_dir_all(root);
 }
 
 // -- #130: validated mutation through the shared tool API ----------------------
@@ -469,75 +394,5 @@ fn tool_service_mutation_capabilities_advertise_the_support_boundary() {
     assert!(
         operations.iter().any(|op| op == "semanticRename"),
         "semanticRename advertised: {operations:?}"
-    );
-}
-
-#[test]
-fn tool_service_ostw_mutation_uses_the_ostw_project_frontend() {
-    // #130: an OSTW session serves validated edit previews and semantic
-    // rename through the same tool operations, validated by the native OSTW
-    // project frontend (equivalent to the in-process contract).
-    //
-    // A clean temp project is used because a project with pre-existing
-    // boundary diagnostics (like the protect-ban corpus) cannot pass edit
-    // validation — consistent with `check` failing on those diagnostics.
-    let root = std::env::temp_dir().join(format!("wright-tool-ostw-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
-    std::fs::write(
-        root.join("main.ostw"),
-        "import \"lib.del\";\nrule: \"main\" {}\nglobalvar Number score = 5;\n",
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("lib.del"),
-        "globalvar Number count = 0;\nrule: \"lib\" {\n    score = 1;\n}\n",
-    )
-    .unwrap();
-    let main_path = root.join("main.ostw");
-    let main = main_path.to_string_lossy().into_owned();
-    let config = SessionConfig {
-        input: InputSpec::Path(main_path),
-        kind: SourceKind::Ostw,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::new(config).unwrap();
-    let _ = session.load().unwrap();
-    let session = Box::leak(Box::new(session));
-    let service = ToolService::new(session).unwrap();
-    let source = std::fs::read_to_string(root.join("main.ostw")).unwrap();
-    let lib_source = std::fs::read_to_string(root.join("lib.del")).unwrap();
-    let sources = std::collections::BTreeMap::from([
-        (main.clone(), source),
-        (
-            root.join("lib.del").to_string_lossy().into_owned(),
-            lib_source,
-        ),
-    ]);
-
-    // Semantic rename of the `score` global: the declaration is on line 3 of
-    // main.ostw, name starts at column 18.
-    let response = service.handle(&ToolRequest::SemanticRename {
-        sources,
-        target: wright_driver::edit::RenameTarget {
-            source: main,
-            line: 3,
-            col: 18,
-            to: "total".to_string(),
-        },
-    });
-    let ToolResponse::Ok { result } = response else {
-        panic!("OSTW semanticRename must return a structured result");
-    };
-    assert_eq!(result["ok"], true, "OSTW rename resolves: {result}");
-    let previews = result["preview"].as_array().unwrap();
-    assert_eq!(previews.len(), 2, "both project files previewed");
-    assert!(
-        previews.iter().any(|preview| preview["new_text"]
-            .as_str()
-            .unwrap()
-            .contains("globalvar Number total = 5;")),
-        "the OSTW declaration is renamed in the preview: {result}"
     );
 }

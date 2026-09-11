@@ -18,8 +18,7 @@ use crate::opy_provider;
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use crate::result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
-    Envelope, InspectResult, LintResult, OstwFileSummary, OstwProjectSummary, exit_code_from,
-    version_info,
+    Envelope, InspectResult, LintResult, exit_code_from, version_info,
 };
 use crate::source_provider::{
     SourceBackend, SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError,
@@ -45,16 +44,8 @@ fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProvid
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
 pub struct Loaded {
-    /// The validated Workshop IR program. Empty for OSTW loads that did not
-    /// reach a semantic HIR (the frontend outcome is carried in [`Loaded::ostw`]).
+    /// The validated Workshop IR program.
     pub program: Arc<wir::Program>,
-    /// The native OSTW frontend outcome, present only for `.ostw`/`.del`
-    /// inputs (#117).
-    pub ostw: Option<Arc<wright_ostw::OstwOutcome>>,
-    /// The #118 semantic-phase outcome (frontend-neutral HIR plus its
-    /// structured boundary diagnostics), present only for OSTW inputs that
-    /// loaded their project.
-    pub ostw_semantic: Option<Arc<wright_ostw::SemanticOutcome>>,
     /// Origin metadata carried into diagnostics and results.
     pub origin: Origin,
     /// The resolved input.
@@ -182,6 +173,11 @@ impl CompilerSession {
         }
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
         let mut resolved = input::resolve(&self.config)?;
+        if self.config.source_backend == SourceBackend::Provider
+            && resolved.kind == SourceKind::Ostw
+        {
+            return Err(source_provider_unavailable());
+        }
         if self.config.source_backend == SourceBackend::Provider && resolved.kind != SourceKind::Opy
         {
             return Err(Diagnostic::error(
@@ -194,8 +190,7 @@ impl CompilerSession {
             ));
         }
         if resolved.kind == SourceKind::Ostw {
-            self.progress(ProgressEvent::new(ProgressPhase::ProjectLoading));
-            return self.load_ostw(&mut resolved);
+            return Err(source_provider_unavailable());
         }
         if self.config.source_backend == SourceBackend::Provider {
             return self.load_from_source_provider(&mut resolved, provider_operation);
@@ -250,7 +245,7 @@ impl CompilerSession {
                     "input kind could not be detected; pass `--kind opy|ostw|workshop|protocol`",
                 ));
             }
-            SourceKind::Ostw => unreachable!("OSTW dispatches to load_ostw above"),
+            SourceKind::Ostw => unreachable!("OSTW is rejected before native dispatch"),
         };
         // Apply the selected transformation profile (validated before/after).
         if self.config.profile != wright_transform::Profile::Off {
@@ -264,8 +259,6 @@ impl CompilerSession {
         }
         let loaded = Loaded {
             program: Arc::new(program),
-            ostw: None,
-            ostw_semantic: None,
             origin: resolved.origin.clone(),
             input: resolved,
             provenance: Provenance::Source,
@@ -370,8 +363,6 @@ impl CompilerSession {
         if operation == ProviderOperation::Check {
             return Ok(Loaded {
                 program: Arc::new(wir::Program::default()),
-                ostw: None,
-                ostw_semantic: None,
                 origin: resolved.origin.clone(),
                 input: resolved.clone(),
                 provenance,
@@ -415,49 +406,12 @@ impl CompilerSession {
         resolved.origin.locale = Some(locale.to_string());
         let loaded = Loaded {
             program: Arc::new(program),
-            ostw: None,
-            ostw_semantic: None,
             origin: resolved.origin.clone(),
             input: resolved.clone(),
             provenance,
         };
         self.loaded = Some(loaded.clone());
         self.loaded_operation = Some(operation);
-        Ok(loaded)
-    }
-
-    /// Load an OSTW project through the shared session path: the native
-    /// frontend parses the `ds.toml` project closure, resolves imports, and
-    /// runs the #118 semantic phase; the resolved HIR is lowered through the
-    /// shared validate→lower→validate path into the session program, and the
-    /// project outcome (file registry + project and semantic diagnostics) is
-    /// retained on the session so spans keep their multi-file provenance.
-    fn load_ostw(&mut self, resolved: &mut ResolvedInput) -> Result<Loaded, Diagnostic> {
-        self.progress(ProgressEvent::new(ProgressPhase::Parsing));
-        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-        let relative = resolved
-            .path
-            .as_ref()
-            .and_then(|path| path.strip_prefix(&resolved.root).ok())
-            .map(|relative| relative.to_string_lossy().replace('\\', "/"));
-        let (outcome, semantic) = wright_ostw::compile_with_semantics(
-            &resolved.text,
-            relative.as_deref(),
-            &resolved.root,
-        );
-        if let Some(error) = &outcome.error {
-            return Err(ostw_diag(error.clone(), &outcome, resolved));
-        }
-        let program = semantic.wir.clone().unwrap_or_default();
-        let loaded = Loaded {
-            program: Arc::new(program),
-            ostw: Some(Arc::new(outcome)),
-            ostw_semantic: Some(Arc::new(semantic)),
-            origin: resolved.origin.clone(),
-            input: resolved.clone(),
-            provenance: Provenance::Source,
-        };
-        self.loaded = Some(loaded.clone());
         Ok(loaded)
     }
 
@@ -616,27 +570,6 @@ impl CompilerSession {
 
     fn compile_output(&mut self) -> Result<CompiledOutput, Diagnostic> {
         let loaded = self.load_with_operation(ProviderOperation::Compile)?;
-        if let Some(outcome) = &loaded.ostw {
-            // OSTW (#119): the load lowered the semantic HIR into the
-            // session program. Project-boundary diagnostics (missing
-            // imports) and semantic-boundary diagnostics are errors — an
-            // unsupported or unresolved reachable form fails compilation
-            // with a deterministic, structured, source-located diagnostic
-            // instead of being deferred to emission.
-            let semantic = loaded.ostw_semantic.as_ref();
-            let error = outcome
-                .diagnostics
-                .iter()
-                .chain(
-                    semantic
-                        .map(|semantic| semantic.diagnostics.as_slice())
-                        .unwrap_or_default(),
-                )
-                .next();
-            if let Some(error) = error {
-                return Err(ostw_diag(error.clone(), outcome, &loaded.input));
-            }
-        }
         let locale = loaded
             .origin
             .locale
@@ -665,25 +598,12 @@ impl CompilerSession {
             Ok(loaded) => loaded,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
-                return self.finish(command, CheckResult { ostw: None });
+                return self.finish(command, CheckResult {});
             }
         };
-        if let Some(outcome) = &loaded.ostw {
-            // OSTW: report the frontend project + #118 semantic boundary
-            // diagnostics through the shared diagnostics contract, and carry
-            // the project summary (#117).
-            self.push_ostw_diagnostics(&loaded);
-            let summary = ostw_project_summary(outcome);
-            return self.finish(
-                command,
-                CheckResult {
-                    ostw: Some(summary),
-                },
-            );
-        }
         self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
         self.attach_workshop_completeness(&loaded);
-        self.finish(command, CheckResult { ostw: None })
+        self.finish(command, CheckResult {})
     }
 
     /// `analyze`: load and produce the semantic summary and structural facts.
@@ -697,11 +617,6 @@ impl CompilerSession {
                 return self.finish(command, AnalyzeResult::default());
             }
         };
-        if loaded.ostw.is_some() {
-            // OSTW: surface the frontend + semantic boundary diagnostics,
-            // then run the shared semantic service over the lowered program.
-            self.push_ostw_diagnostics(&loaded);
-        }
         let service = match self.service(&loaded) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -730,11 +645,6 @@ impl CompilerSession {
                 return self.finish(command, InspectResult::default());
             }
         };
-        if loaded.ostw.is_some() {
-            // OSTW: surface the frontend + semantic boundary diagnostics,
-            // then run the shared semantic service over the lowered program.
-            self.push_ostw_diagnostics(&loaded);
-        }
         let service = match self.service(&loaded) {
             Ok(service) => service,
             Err(diagnostic) => {
@@ -789,11 +699,6 @@ impl CompilerSession {
                 return self.finish(command, LintResult::default());
             }
         };
-        if loaded.ostw.is_some() {
-            // OSTW: surface the frontend + semantic boundary diagnostics,
-            // then run the shared semantic service over the lowered program.
-            self.push_ostw_diagnostics(&loaded);
-        }
         self.attach_workshop_completeness(&loaded);
         let service = match self.service_with(&loaded, self.config.lint.clone()) {
             Ok(service) => service,
@@ -839,17 +744,15 @@ impl CompilerSession {
         )
     }
 
-    /// `convert`: load validated Workshop input and reconstruct canonical
-    /// source for an explicit target (`opy` | `ostw`) through the
-    /// language-owned reconstructors (#126).
+    /// `convert`: load validated Workshop input and reconstruct canonical OPY
+    /// source, or refuse the unavailable OSTW provider target (#126).
     ///
     /// The operation is the shared driver/session conversion contract: it
     /// reuses the [`CompilerSession::load`] path to obtain the validated
     /// Workshop WIR program and delegates per target to
-    /// `wright_opy::reconstruct::reconstruct` /
-    /// `wright_ostw::reconstruct::reconstruct` — no reconstruction logic
-    /// lives in the driver, and there is no generic transpiler matrix or
-    /// direct OPY ↔ OSTW path. Non-representable constructs fail
+    /// `wright_opy::reconstruct::reconstruct` — no reconstruction logic lives
+    /// in the driver, and there is no generic transpiler matrix or direct OPY
+    /// ↔ OSTW path. Non-representable constructs fail
     /// deterministically with the reconstructor's stable structured
     /// diagnostics (stage `reconstruction`, unsupported exit code 3) and
     /// never produce partial source. Non-Workshop inputs are rejected
@@ -878,7 +781,10 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::Conversion));
         let text = match target {
             ConvertTarget::Opy => self.convert_opy(&loaded),
-            ConvertTarget::Ostw => self.convert_ostw(&loaded),
+            ConvertTarget::Ostw => {
+                self.diagnostics.push(source_provider_unavailable());
+                Err(())
+            }
         };
         match text {
             Ok(text) => {
@@ -906,24 +812,6 @@ impl CompilerSession {
                         issue.code,
                         &issue.message,
                         issue.span,
-                        loaded,
-                    ));
-                }
-                Err(())
-            }
-        }
-    }
-
-    /// Reconstruct canonical OSTW source for a loaded Workshop program.
-    fn convert_ostw(&mut self, loaded: &Loaded) -> Result<String, ()> {
-        match wright_ostw::reconstruct::reconstruct(&loaded.program, &self.catalog) {
-            Ok(text) => Ok(text),
-            Err(errors) => {
-                for error in &errors {
-                    self.diagnostics.push(reconstruct_diag(
-                        error.code,
-                        &error.message,
-                        error.span,
                         loaded,
                     ));
                 }
@@ -1033,26 +921,6 @@ impl CompilerSession {
             exit,
             diagnostics,
             result,
-        }
-    }
-
-    /// Surface the OSTW frontend project diagnostics plus the #118
-    /// semantic-phase boundary diagnostics through the shared diagnostic
-    /// contract, so every workflow reports the same structured,
-    /// source-located boundary signals as the OPY/Workshop frontends.
-    fn push_ostw_diagnostics(&mut self, loaded: &Loaded) {
-        let Some(outcome) = &loaded.ostw else {
-            return;
-        };
-        for diagnostic in &outcome.diagnostics {
-            self.diagnostics
-                .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
-        }
-        if let Some(semantic) = &loaded.ostw_semantic {
-            for diagnostic in &semantic.diagnostics {
-                self.diagnostics
-                    .push(ostw_diag(diagnostic.clone(), outcome, &loaded.input));
-            }
         }
     }
 }
@@ -1376,48 +1244,6 @@ pub(crate) fn opy_diag(
     }
 }
 
-/// Map a native OSTW frontend error to a driver diagnostic.
-///
-/// Span paths resolve through the OSTW project registry, so a failure inside
-/// an imported file names that file with its project-relative path.
-pub(crate) fn ostw_diag(
-    error: wright_ostw::SourceError,
-    outcome: &wright_ostw::OstwOutcome,
-    resolved: &ResolvedInput,
-) -> Diagnostic {
-    let span = error.span.map(|span| SourceSpan {
-        file: span.file.index(),
-        path: outcome
-            .project
-            .as_ref()
-            .and_then(|project| {
-                project
-                    .files
-                    .iter()
-                    .find(|file| file.id == span.file.index() as u32)
-            })
-            .map(|file| file.path.clone())
-            .unwrap_or_else(|| resolved.display.clone()),
-        start: Position {
-            line: span.start.line,
-            col: span.start.col,
-        },
-        end: Position {
-            line: span.end.line,
-            col: span.end.col,
-        },
-    });
-    Diagnostic {
-        code: error.code,
-        stage: Stage::Frontend,
-        severity: crate::diag::Severity::Error,
-        message: error.message,
-        status: None,
-        span,
-        source: Some(resolved.origin.clone()),
-    }
-}
-
 /// Map a reconstructor rejection (shared shape: stable code, message,
 /// optional WIR span) into the driver diagnostic contract (#126).
 ///
@@ -1465,44 +1291,12 @@ fn reconstruct_diag(
     }
 }
 
-/// The `check`-result summary of an OSTW project outcome.
-fn ostw_project_summary(outcome: &wright_ostw::OstwOutcome) -> OstwProjectSummary {
-    let Some(project) = &outcome.project else {
-        return OstwProjectSummary {
-            entry: String::new(),
-            files: Vec::new(),
-            inventory: Vec::new(),
-        };
-    };
-    let path_by_id: std::collections::BTreeMap<u32, String> = project
-        .files
-        .iter()
-        .map(|file| (file.id, file.path.clone()))
-        .collect();
-    let files = project
-        .files
-        .iter()
-        .map(|file| OstwFileSummary {
-            path: file.path.clone(),
-            id: file.id,
-            source: file.source,
-            parsed: file.parsed,
-            imports: file
-                .imports
-                .iter()
-                .filter_map(|import| {
-                    import
-                        .target
-                        .and_then(|target| path_by_id.get(&target).cloned())
-                })
-                .collect(),
-        })
-        .collect();
-    OstwProjectSummary {
-        entry: project.entry.clone(),
-        files,
-        inventory: project.inventory.clone(),
-    }
+fn source_provider_unavailable() -> Diagnostic {
+    Diagnostic::error(
+        "source-provider-unavailable",
+        Stage::Frontend,
+        "DEL/OSTW workflows are unavailable until a source provider is configured",
+    )
 }
 
 /// Map an Opy HIR ingestion error to a driver diagnostic.

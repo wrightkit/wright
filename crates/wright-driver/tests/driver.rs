@@ -147,18 +147,6 @@ fn temp_dir() -> PathBuf {
     dir
 }
 
-fn write_ostw_project(files: &[(&str, &str)]) -> PathBuf {
-    let root = temp_dir();
-    for (relative, contents) in files {
-        let path = root.join(relative);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::write(path, contents).unwrap();
-    }
-    root
-}
-
 /// The path of `path` expressed relative to the process cwd, so a test can
 /// address the same file through a relative spelling (as a shell would) and
 /// prove input-spelling independence without changing the cwd.
@@ -951,318 +939,30 @@ fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
     assert!(output.text.contains("Workshop Island"));
 }
 
-// -- OSTW (#117) --------------------------------------------------------------
-
 #[test]
-fn ostw_projects_load_through_the_shared_session_path() {
-    // `.ostw` extension detection maps to SourceKind::Ostw and the shared
-    // CompilerSession load path invokes the native OSTW frontend, carrying
-    // the multi-file registry/provenance into the check result.
-    let root = write_ostw_project(&[
-        ("ds.toml", "entry_point=\"main.ostw\"\n"),
-        ("main.ostw", "import \"interface/entry.del\";\n"),
-        (
-            "interface/entry.del",
-            "import \"../missing/OnScreenText.del\";\nimport \"../missing/Cursor.del\";\nimport \"../missing/StringSorting.del\";\nglobalvar Number score = 0;\nrule: \"entry\" { score = 1; }\n",
-        ),
-    ]);
-    let mut session = CompilerSession::new(SessionConfig::from_path(root.join("main.ostw")))
-        .expect("session builds");
-    let envelope = session.check();
-    let project = envelope
-        .result
-        .ostw
-        .expect("check carries the OSTW project summary");
-    assert_eq!(project.entry, "main.ostw", "ds.toml entry_point");
-    let sources: Vec<_> = project.files.iter().filter(|file| file.source).collect();
-    assert_eq!(
-        sources.len(),
-        2,
-        "the import-reachable closure is two files"
-    );
-    assert!(
-        sources.iter().all(|file| file.parsed),
-        "every import-reachable source file parses"
-    );
-    assert_eq!(
-        project.inventory.len(),
-        2,
-        "the project inventory is explicit"
-    );
-    // Missing imports are structured, source-located diagnostics.
-    let missing_imports: Vec<_> = envelope
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.code == "ostw-missing-import")
-        .collect();
-    assert_eq!(missing_imports.len(), 3);
-    for diagnostic in &missing_imports {
-        assert!(diagnostic.span.is_some(), "missing imports carry spans");
+fn ostw_requests_fail_as_provider_unavailable() {
+    for extension in ["ostw", "del"] {
+        let dir = temp_dir();
+        let path = dir.join(format!("main.{extension}"));
+        std::fs::write(&path, "rule: \"r\" {}\n").unwrap();
+        macro_rules! assert_unavailable {
+            ($method:ident) => {
+                let mut session = CompilerSession::new(SessionConfig::from_path(&path)).unwrap();
+                let envelope = session.$method();
+                assert_eq!(envelope.diagnostics.len(), 1);
+                assert_eq!(envelope.diagnostics[0].code, "source-provider-unavailable");
+                assert_eq!(
+                    envelope.diagnostics[0].stage,
+                    wright_driver::Stage::Frontend
+                );
+                assert_eq!(envelope.exit, exit::UNSUPPORTED);
+            };
+        }
+        assert_unavailable!(check);
+        assert_unavailable!(compile);
+        assert_unavailable!(analyze);
+        assert_unavailable!(inspect);
+        assert_unavailable!(lint);
+        let _ = std::fs::remove_dir_all(dir);
     }
-    // Provenance: every missing-import span resolves to the imported file.
-    let paths: std::collections::BTreeSet<_> = missing_imports
-        .iter()
-        .filter_map(|diagnostic| diagnostic.span.as_ref().map(|span| span.path.clone()))
-        .collect();
-    assert_eq!(
-        paths,
-        std::collections::BTreeSet::from(["interface/entry.del".to_string()])
-    );
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn ostw_extension_detection_maps_to_source_kind_ostw() {
-    let dir = temp_dir();
-    std::fs::write(dir.join("main.ostw"), "rule: \"r\" {}\n").unwrap();
-    let config = SessionConfig::from_path(dir.join("main.ostw"));
-    let resolved = wright_driver::input::resolve(&config).expect("resolves");
-    assert_eq!(resolved.kind, SourceKind::Ostw);
-    std::fs::write(dir.join("helper.del"), "Number x: 1;\n").unwrap();
-    let config = SessionConfig::from_path(dir.join("helper.del"));
-    let resolved = wright_driver::input::resolve(&config).expect("resolves");
-    assert_eq!(resolved.kind, SourceKind::Ostw, ".del also maps to Ostw");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn ostw_empty_source_file_keeps_source_and_parsed_provenance() {
-    let dir = temp_dir();
-    std::fs::write(dir.join("ds.toml"), "entry_point=\"main.del\"\n").unwrap();
-    std::fs::write(dir.join("main.del"), "").unwrap();
-    let mut session = CompilerSession::new(SessionConfig::from_path(dir.join("main.del")))
-        .expect("session builds");
-    let envelope = session.check();
-    let project = envelope.result.ostw.expect("OSTW project summary");
-    let main = project
-        .files
-        .iter()
-        .find(|file| file.path == "main.del")
-        .expect("empty entry source is registered");
-    assert!(main.source);
-    assert!(main.parsed);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn ostw_compile_runs_the_shared_pipeline_through_the_declared_boundary() {
-    // `compile` runs the shared owner HIR → WIR → Workshop pipeline for OSTW:
-    // a missing import is a structured rejection, while a supported project
-    // compiles natively.
-    let root = write_ostw_project(&[
-        ("ds.toml", "entry_point=\"main.ostw\"\n"),
-        (
-            "main.ostw",
-            "import \"missing.del\";\nrule: \"missing\" {}\n",
-        ),
-    ]);
-    let mut compile_session =
-        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
-    let envelope = compile_session.compile();
-    assert!(
-        !envelope.ok,
-        "the entry graph rejects on its missing imports"
-    );
-    assert!(
-        envelope
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "ostw-missing-import"),
-        "the missing-import boundary is the structured rejection"
-    );
-    assert!(
-        !envelope
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "ostw-unsupported"),
-        "compile is no longer refused outright"
-    );
-
-    let target = write_ostw_project(&[
-        ("ds.toml", "entry_point=\"main.ostw\"\n"),
-        (
-            "main.ostw",
-            "globalvar Number i = 0;\nglobalvar Number a = 1;\nrule: \"mutate\" {\n    i += a;\n    BigMessage(AllPlayers(), <\"<0>\", i>);\n}\n",
-        ),
-    ]);
-    let mut target_session = CompilerSession::new(SessionConfig {
-        input: wright_driver::InputSpec::Path(target.join("main.ostw")),
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let envelope = target_session.compile();
-    assert!(
-        envelope.ok,
-        "the accepted target compiles natively: {:?}",
-        envelope.diagnostics
-    );
-    let output = envelope.result.output.expect("compile output");
-    assert!(
-        output.text.contains("Modify Global Variable"),
-        "lowered variable mutation emission"
-    );
-    assert!(
-        output.text.contains("Big Message"),
-        "lowered value emission"
-    );
-
-    let mut analyze_session =
-        CompilerSession::new(SessionConfig::from_path(target.join("main.ostw"))).unwrap();
-    let envelope = analyze_session.analyze();
-    // The unsupported-operation fork is gone: no workflow-level refusal.
-    assert!(
-        !envelope
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("is not implemented for OSTW")),
-        "analyze no longer refuses OSTW"
-    );
-    assert!(
-        envelope
-            .result
-            .program
-            .as_object()
-            .is_some_and(|program| !program.is_empty()),
-        "analyze carries the shared program summary"
-    );
-    assert!(envelope.result.facts["rules"].as_array().is_some());
-    let _ = std::fs::remove_dir_all(root);
-    let _ = std::fs::remove_dir_all(target);
-}
-
-#[test]
-fn ostw_negative_project_fails_through_the_shared_path() {
-    // A malformed project fails with a structured, source-located frontend
-    // diagnostic through the shared session path.
-    let dir = temp_dir();
-    std::fs::write(dir.join("ds.toml"), "entry_point=\"main.ostw\"\n").unwrap();
-    std::fs::write(dir.join("main.ostw"), "globalvar Number x = ;\n").unwrap();
-    let mut session =
-        CompilerSession::new(SessionConfig::from_path(dir.join("main.ostw"))).unwrap();
-    let envelope = session.check();
-    assert!(!envelope.ok);
-    let parse = envelope
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "ostw-parse-error")
-        .expect("malformed syntax yields ostw-parse-error");
-    let span = parse.span.as_ref().expect("parse error carries a span");
-    assert_eq!(span.path, "main.ostw");
-    assert_eq!(span.start.line, 1);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn ostw_analyze_lint_inspect_run_the_shared_semantic_service() {
-    // `analyze`/`lint`/`inspect` over an OSTW project run the same shared
-    // semantic service as OPY/Workshop and return non-trivial results.
-    let root = write_ostw_project(&[
-        ("ds.toml", "entry_point=\"main.ostw\"\n"),
-        (
-            "main.ostw",
-            "globalvar Number i = 0;\nrule: \"one\" { i += 1; }\nrule: \"two\" { BigMessage(AllPlayers(), <\"<0>\", i>); }\n",
-        ),
-    ]);
-
-    let mut analyze_session =
-        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
-    let analyze = analyze_session.analyze();
-    assert!(
-        analyze.result.facts["rules"]
-            .as_array()
-            .is_some_and(|rules| !rules.is_empty()),
-        "analyze returns semantic rule measurements"
-    );
-
-    let mut inspect_session =
-        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
-    let inspect = inspect_session.inspect();
-    let rules = inspect.result.rules.as_array().expect("rules list");
-    assert!(
-        rules.len() >= 2,
-        "the owner-supported reachable rules surface: {}",
-        rules.len()
-    );
-    assert!(
-        inspect
-            .result
-            .symbols
-            .as_array()
-            .is_some_and(|symbols| !symbols.is_empty()),
-        "shared symbols surface"
-    );
-    assert!(
-        inspect
-            .result
-            .references
-            .as_array()
-            .is_some_and(|references| !references.is_empty()),
-        "shared references surface"
-    );
-
-    let mut lint_session =
-        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
-    let lint = lint_session.lint();
-    assert!(
-        lint.result
-            .rules
-            .as_array()
-            .is_some_and(|rules| !rules.is_empty()),
-        "lint returns registered rule metadata from the shared registry"
-    );
-    assert!(
-        lint.result.findings.as_array().is_some(),
-        "lint carries the findings list"
-    );
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn ostw_multi_file_provenance_survives_through_shared_workflows() {
-    // Diagnostics and finding spans resolve to project-relative source paths
-    // through the same conventions OPY/Workshop use.
-    let root = write_ostw_project(&[
-        ("ds.toml", "entry_point=\"main.ostw\"\n"),
-        (
-            "main.ostw",
-            "import \"interface/lib.del\";\nrule: \"main\" {}\n",
-        ),
-        (
-            "interface/lib.del",
-            "import \"../missing.del\";\nglobalvar Number score = 0;\nrule: \"lib\" { score = 1; }\n",
-        ),
-    ]);
-    let mut session =
-        CompilerSession::new(SessionConfig::from_path(root.join("main.ostw"))).unwrap();
-    let envelope = session.analyze();
-
-    // A missing-import diagnostic inside an imported file names that file with
-    // its project-relative path.
-    let imported: Vec<_> = envelope
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            diagnostic
-                .span
-                .as_ref()
-                .is_some_and(|span| span.path.starts_with("interface/"))
-        })
-        .collect();
-    assert!(
-        !imported.is_empty(),
-        "imported-file diagnostics carry project-relative paths"
-    );
-    for diagnostic in &imported {
-        let span = diagnostic.span.as_ref().expect("span");
-        assert!(
-            span.path.starts_with("interface/") || span.path == "main.ostw",
-            "root-relative path, got {}",
-            span.path
-        );
-    }
-
-    // Analyze facts are structural and intentionally do not expose lint
-    // findings; provenance remains on the frontend diagnostics above.
-    assert!(envelope.result.facts["rules"].as_array().is_some());
-    let _ = std::fs::remove_dir_all(root);
 }

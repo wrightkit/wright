@@ -45,9 +45,11 @@ provenance. It deliberately has no Node, .NET, OverPy, or OSTW runtime
 dependency.
 
 Current Wright-native differential and release-gate tests may consume selected
-recorded snapshots while `wright-opy` / `wright-ostw` remain migration paths.
-Those tests protect Wright's current integration behavior; they are not the
-authoritative language compatibility suite.
+recorded snapshots while `wright-opy` remains the shipped source adapter.
+DEL/OSTW compatibility evidence stays in `deltin-rs`; Wright has no static
+DEL/OSTW integration and reports an unavailable provider boundary. These tests
+protect Wright's current integration behavior; they are not the authoritative
+language compatibility suite.
 
 ## Updating OPY reference evidence
 
@@ -69,9 +71,9 @@ or generic owner-side differential harness.
 
 `deltin-rs` is the durable owner of the pinned OSTW reference identity,
 corpus, probes, recorded observations, reconstruction boundary, provenance, and
-reproduction workflow. Wright does not carry an OSTW oracle, corpus, or live
-reference runner. Wright's OSTW integration tests use only minimal
-feature-owned inputs and do not require the upstream runtime.
+reproduction workflow. Wright does not carry an OSTW oracle, corpus, live
+reference runner, or static OSTW integration. DEL/OSTW inputs are covered only
+by the explicit `source-provider-unavailable` boundary.
 
 ## Fixture provenance
 

@@ -9,7 +9,7 @@ thresholds, unsupported constructs, and intentional differences
 | Surface | Owner | Documented by |
 | --- | --- | --- |
 | Native `.opy` (lexer/preprocess/parser/resolve/lower/settings) | `wright-opy` | [`opy/support-matrix.md`](opy/support-matrix.md) |
-| Native OSTW (lexer/parser/CST/project/lower) | `wright-ostw` | [`ostw/support-matrix.md`](ostw/support-matrix.md), [`ostw/compatibility-baseline.md`](ostw/compatibility-baseline.md) |
+| DEL / OSTW provider boundary | `deltin-rs` or a configured provider | Wright recognizes `.del`/`.ostw` but returns `source-provider-unavailable`; no static adapter is shipped |
 | Localized Workshop text (catalog/lexer/parser/emitter) | `workshop-rs` | [`workshop/support-matrix.md`](workshop/support-matrix.md) |
 | Driver/CLI result contract | `wright-driver`/`wright-cli` | [`cli.md`](cli.md) |
 

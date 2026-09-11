@@ -74,7 +74,7 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if diagnostic.code == "adapter-stdin-unsupported" {
             return exit::UNSUPPORTED;
         }
-        if diagnostic.code == "ostw-unsupported" {
+        if diagnostic.code == "source-provider-unavailable" {
             return exit::UNSUPPORTED;
         }
         if diagnostic.code == "source-provider-unsupported" {
@@ -114,41 +114,7 @@ pub struct CompileResult {
 /// The result of a `check` run (the envelope's `ok` and `diagnostics` carry
 /// the verdict).
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct CheckResult {
-    /// The OSTW project outcome summary, present only for `.ostw`/`.del`
-    /// inputs (#117). Syntax/project infrastructure only: no semantic or
-    /// emission claim.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ostw: Option<OstwProjectSummary>,
-}
-
-/// The OSTW frontend/project outcome reported by `check`.
-#[derive(Debug, Clone, Serialize)]
-pub struct OstwProjectSummary {
-    /// The `ds.toml` `entry_point` value.
-    pub entry: String,
-    /// The compilation graph: `ds.toml` (id 0) then the entry-point
-    /// import-reachable closure.
-    pub files: Vec<OstwFileSummary>,
-    /// The independent workspace/source inventory (every `.ostw`/`.del`
-    /// under the root) — tooling only, never compilation membership.
-    pub inventory: Vec<String>,
-}
-
-/// One project file's parse outcome.
-#[derive(Debug, Clone, Serialize)]
-pub struct OstwFileSummary {
-    /// The project-relative path.
-    pub path: String,
-    /// The registry id used by span provenance.
-    pub id: u32,
-    /// Whether this is a source file (`.ostw`/`.del`); `false` for `ds.toml`.
-    pub source: bool,
-    /// Whether the source file parsed cleanly.
-    pub parsed: bool,
-    /// Resolved in-closure import targets (project-relative paths).
-    pub imports: Vec<String>,
-}
+pub struct CheckResult {}
 
 /// The result of an `analyze` run: program summary and semantic facts.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -196,7 +162,8 @@ pub enum ConvertTarget {
     /// Reconstruct canonical OPY source (`wright_opy::reconstruct`).
     #[default]
     Opy,
-    /// Reconstruct canonical OSTW source (`wright_ostw::reconstruct`).
+    /// Recognized OSTW reconstruction target; unavailable until a DEL/OSTW
+    /// provider is available.
     Ostw,
 }
 

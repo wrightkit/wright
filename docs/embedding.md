@@ -26,13 +26,12 @@ would require an intentional public API and publication decision.
 
 ## Source-language owner boundary
 
-`wright-opy` and `wright-ostw` are narrow Wright adapters. Their target
-boundary is the released `opy-rs` and `deltin-rs` owner APIs for
-source-language parsing, semantic behavior, compiler/lowering behavior,
-diagnostics, and reconstruction. Wright adapters may translate those contracts
-into driver results and compose them with canonical `workshop-rs` WIR/catalog
-APIs for Wright-owned analysis, conversion, and emission. They must not depend
-on source-language CLI packages, private compiler packages, or recreate owner
+`wright-opy` is the shipped narrow Wright adapter. Its target boundary is the
+released `opy-rs` owner API for source-language parsing, semantic behavior,
+compiler/lowering behavior, diagnostics, and reconstruction. `.ostw`/`.del`
+remain recognized source kinds, but their provider boundary is explicit:
+without a configured provider, Wright returns `source-provider-unavailable`.
+Wright must not depend on a static DEL implementation or recreate owner
 behavior locally.
 
 The migration is release-coordinated: if an owner contract is not yet
@@ -119,9 +118,9 @@ returns the previewed edited sources atomically (any failed validation returns
 `ok = false` and no validated preview). Validation runs through the
 owner-backed project/session semantics (`SessionConfig` kind/root,
 transformation profile): OPY projects compile through `opy-rs` with edited
-includes as in-memory overlays. DEL/OSTW overlays refuse explicitly because
-`del-rs` has not exposed an equivalent overlay project contract. Workshop and
-Protocol inputs also refuse explicitly. The first evidence-backed refactoring
+includes as in-memory overlays. DEL/OSTW inputs refuse explicitly with
+`source-provider-unavailable`; Workshop and Protocol inputs also refuse
+explicitly. The first evidence-backed refactoring
 is symbol rename
 ([`rename_symbol`]) with whole-word replacement and transaction validation.
 Raw HIR/WIR mutation is never public, and application/writing stays an

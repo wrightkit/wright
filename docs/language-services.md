@@ -102,31 +102,18 @@ suppression is the authoritative contract.
   (keywords, variables, identifiers, strings, numbers, operators, macros,
   attributes), not textual heuristics.
 
-## OSTW documents (#120)
+## DEL/OSTW documents (#120)
 
-`.ostw`/`.del` documents route through the owner-backed adapter. `del-rs`
-loads the project closure, resolves semantics, lowers directly to canonical
-WIR, and preserves owner diagnostics and file identity. Shared analysis runs
-on successful owner WIR; owner capabilities that do not produce WIR are
-reported as structured source errors.
+`.ostw`/`.del` documents remain recognized entrypoints for a future source
+provider, but Wright no longer carries a static DEL/OSTW implementation. The
+service reports `source-provider-unavailable` as a structured source error and
+does not produce semantic tokens, navigation, or rename edits for these
+documents. It never invokes an upstream compiler or a removed Wright
+implementation as a fallback.
 
-Operations that stay unsupported for OSTW are **explicitly refused or
-documented, never emulated through upstream calls**:
-
-- **Semantic rename and overlays**: refused explicitly while the owner-backed
-  adapter lacks a source-edit/overlay project contract. The service never
-  invokes an upstream compiler or the removed Wright implementation as a
-  fallback.
-  Rename edits modify original OSTW source with exact identifier ranges, never
-  reconstructed text.
-- **Whole-source pretty-printing / comment-preserving regeneration**: not
-  implemented; diagnostics and navigation are source-preserving.
-- Upstream OSTW LSP parity, classes/generics/lambdas/pattern matching beyond
-  the accepted corpus boundary, and whole-source regeneration remain out of
-  scope for the language service (the corpus boundary defines what resolves).
-  Workshop → OPY/OSTW semantic reconstruction is available through the CLI
-  and driver conversion command (`wright convert --target opy|ostw`, #126),
-  not through the language-service surface.
+Workshop → OPY reconstruction remains available through the CLI and driver;
+Workshop → OSTW is refused at the provider boundary until a provider is
+configured.
 
 ## LSP adapter
 
@@ -152,8 +139,8 @@ the protocol layer; unsupported rename targets surface the shared refusal as
 an explicit LSP error, never a textual fallback. The end-to-end
 harness (`wright-lsp/tests/lsp.rs`) drives the real binary and verifies
 capability negotiation, lifecycle, navigation, completion, rename (OPY
-multi-document and supported OSTW rename, UTF-16/non-BMP ranges, version
-preconditions), semantic tokens, and stale-version suppression.
+multi-document and UTF-16/non-BMP ranges, version preconditions), semantic
+tokens, and stale-version suppression.
 
 ## Out of scope (recorded)
 

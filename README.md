@@ -7,8 +7,9 @@
 
 Wright is the unified developer CLI and language tooling layer for Overwatch
 Workshop development in WrightKit. It provides diagnostics, analysis, code
-editing, and language server support across raw Workshop, OverPy, and DEL/OSTW
-projects.
+editing, and language server support across raw Workshop, OverPy, and
+provider-backed DEL/OSTW projects. DEL/OSTW entrypoints are recognized, but
+their Wright workflow requires a configured source provider.
 
 Wright delegates source parsing and semantic lowering to dedicated WrightKit
 engines instead of reimplementing them:
@@ -18,7 +19,7 @@ engines instead of reimplementing them:
 - [`opy-rs`](https://github.com/wrightkit/opy-rs): standalone OverPy frontend and
   compiler;
 - [`del-rs`](https://github.com/wrightkit/del-rs): standalone DEL and OSTW
-  frontend.
+  frontend, consumed by Wright through a provider boundary.
 
 Wright coordinates these implementations to deliver consistent developer tooling
 across languages.
@@ -31,9 +32,9 @@ across languages.
                       │
         ┌─────────────┼─────────────┐
         ▼             ▼             ▼
-     opy-rs         del-rs      workshop-rs
-     OverPy         DEL/OSTW      Workshop
- implementation  implementation  implementation
+     opy-rs       provider     workshop-rs
+     OverPy      boundary       Workshop
+ implementation  DEL/OSTW    implementation
         │             │             ▲
         └─────────────┴─────────────┘
               canonical Workshop
@@ -66,7 +67,7 @@ underlying language surface is complete.
 | --- | --- | --- |
 | Raw Workshop | `workshop-rs` | ✅ Canonical parsing/WIR/validation/emission baseline is available |
 | OverPy (`.opy`) | `opy-rs` | 🟡 Standalone source analysis exists; builtin/member/catalog breadth and end-to-end compilation are still being closed |
-| DEL / OSTW (`.del`, `.ostw`) | `del-rs` | 🟡 Standalone parsing/semantic/HIR support is substantial; advanced runtime/project lowering and end-to-end compilation remain partial |
+| DEL / OSTW (`.del`, `.ostw`) | `del-rs` via provider | ⚪ Recognized by Wright, but unavailable until a source provider is configured; no static DEL dependency |
 
 Workshop → OPY and Workshop → DEL reconstruction are not treated as supported
 WrightKit capabilities until the owning language implementations provide and

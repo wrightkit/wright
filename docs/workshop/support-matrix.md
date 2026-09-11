@@ -131,7 +131,8 @@ locale. Cross-locale behavior is not inferred from English-only fixtures.
   cross-locale equivalence, additional events.
 - **Explicitly out of scope:** original-source recovery (comments/formatting)
   in the Workshop emitter; reconstruction directions are owned by the
-  language frontends (`wright-opy`/`wright-ostw`) through the shared driver
+  language frontends (`wright-opy`; DEL/OSTW through a configured provider)
+  through the shared driver
   conversion operation (see
   [`../opy/support-matrix.md`](../opy/support-matrix.md) and
   [`../ostw/support-matrix.md`](../ostw/support-matrix.md)); OverPy

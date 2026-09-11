@@ -11,11 +11,11 @@ first declared OSTW → Workshop compile surface #119, tooling/language-service
 integration #120, Workshop → OSTW reconstruction #125, and the shared
 driver/session conversion integration #126)
 Status note: Native AST/parser, project settings (`ds.toml`), import-closure
-resolution, and the Wright OSTW adapter are implemented in
-`crates/wright-ostw`. The first declared OSTW → Workshop compile surface is
-implemented (#119); authoritative explicit-root comparison evidence is now
-maintained by `deltin-rs`. The declared Wright surface and integration limits
-live in [`support-matrix.md`](support-matrix.md).
+resolution, and the former Wright OSTW adapter are historical implementation
+evidence. The static OSTW path was removed; current `.ostw`/`.del` requests
+return `source-provider-unavailable`. Authoritative explicit-root comparison
+evidence is maintained by `deltin-rs`; current provider limits live in
+[`support-matrix.md`](support-matrix.md).
 The reverse direction (Workshop → OSTW reconstruction) is implemented by
 #125 (`wright_ostw::reconstruct`) and integrated end-to-end by #126 behind
 the same shared driver/session conversion contract as the #124 Workshop → OPY

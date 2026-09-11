@@ -1,14 +1,15 @@
-# OSTW Compile Support Matrix
+# OSTW Compile Support Matrix (historical/provider boundary)
 
-Status: accepted baseline: first declared OSTW forward-compilation surface (#119);
-authoritative compatibility evidence is maintained by `deltin-rs` after #49/#95.
+Status: historical record. Wright no longer ships the static OSTW adapter;
+`.ostw`/`.del` requests return `source-provider-unavailable`. Authoritative
+compatibility evidence is maintained by `deltin-rs` after #49/#95.
 Scope: the OSTW source surface Wright compiles to Workshop through the shared
 HIR → WIR → Workshop pipeline, with owner-maintained pinned-reference
 differential evidence,
 the declared normalization contract, and the known limitations/divergences
 
-This matrix records the **declared compile surface**: what `wright compile`
-accepts for `.ostw`/`.del` inputs and what it rejects. The pinned OSTW
+This matrix records the former **declared compile surface**. Current Wright
+does not compile `.ostw`/`.del` inputs without a configured provider; the pinned OSTW
 reference and authoritative evidence are maintained by
 [`deltin-rs`](https://github.com/wrightkit/deltin-rs); the forward-looking
 tiered baseline lives in [`compatibility-baseline.md`](compatibility-baseline.md).
@@ -16,10 +17,10 @@ The corrected explicit-root evidence model is documented in the owner
 repository. The pinned reference identity is recorded in
 [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md).
 
-The owner-side pipeline is `deltin-rs` (project + syntax + semantic analysis) →
-canonical WIR through the narrow `wright-ostw` adapter → canonical
-`workshop-rs` emitter (en-US), identical
-to the OPY/Workshop paths; no OSTW-specific backend exists.
+The historical owner-side pipeline was `deltin-rs` (project + syntax + semantic
+analysis) → canonical WIR through a narrow adapter → canonical `workshop-rs`
+emitter. That static path is removed from Wright; a future provider must own
+the integration boundary.
 
 ## Accepted differential targets
 

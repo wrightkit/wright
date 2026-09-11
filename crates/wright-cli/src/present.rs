@@ -467,9 +467,7 @@ impl ResultPresentation for ConvertResult {
 impl ResultPresentation for CheckResult {
     fn render_body(&self) {}
 
-    fn render_check_summary(&self) {
-        render_ostw_summary(self);
-    }
+    fn render_check_summary(&self) {}
 }
 
 impl ResultPresentation for AnalyzeResult {
@@ -816,28 +814,6 @@ fn render_inspect(result: &InspectResult) {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("<unnamed>");
         println!("  {kind} {id}: {name}");
-    }
-}
-
-fn render_ostw_summary(result: &CheckResult) {
-    let Some(ostw) = result.ostw.as_ref() else {
-        return;
-    };
-    let sources: Vec<_> = ostw.files.iter().filter(|file| file.source).collect();
-    let parsed = sources.iter().filter(|file| file.parsed).count();
-    println!(
-        "ostw project: entry {}, {parsed}/{} import-reachable sources parsed (inventory {})",
-        ostw.entry,
-        sources.len(),
-        ostw.inventory.len()
-    );
-    for file in &ostw.files {
-        if !file.source {
-            println!("  {} (project file)", file.path);
-        } else {
-            let status = if file.parsed { "parsed" } else { "parse-error" };
-            println!("  {} {status}", file.path);
-        }
     }
 }
 
