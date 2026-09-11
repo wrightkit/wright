@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.22](https://github.com/wrightkit/wright/compare/v0.2.21...v0.2.22) (2026-09-11)
+
+
+### Features
+
+* analyze persistent Workshop object lifecycle ([#308](https://github.com/wrightkit/wright/issues/308)) ([43d6052](https://github.com/wrightkit/wright/commit/43d605268e45ff6216c41b82e76a11a651bb5cbc))
+* **analyzer:** add declarative lint rule contract ([#310](https://github.com/wrightkit/wright/issues/310)) ([db25c08](https://github.com/wrightkit/wright/commit/db25c085c8c6fa88e6e4abfe092cece7f942c2c6))
+* **driver:** run OPY lint and analyze through provider ([#304](https://github.com/wrightkit/wright/issues/304)) ([95f0b22](https://github.com/wrightkit/wright/commit/95f0b222c0f3aba01010a826f74b814a0a591374)), closes [#246](https://github.com/wrightkit/wright/issues/246)
+
+
+### Bug Fixes
+
+* **provider:** make OPY bootstrap concurrency-safe ([#307](https://github.com/wrightkit/wright/issues/307)) ([8d8b4da](https://github.com/wrightkit/wright/commit/8d8b4dafc325cb91034e4bae77fdeebdc73a1ae6))
+
 ## [0.2.21](https://github.com/wrightkit/wright/compare/v0.2.20...v0.2.21) (2026-09-09)
 
 
