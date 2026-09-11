@@ -158,15 +158,16 @@ overrides Workshop client-locale detection; `--root` sets the include/project
 root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
 remain recognized source kinds for a future provider, but Wright does not ship
 a static DEL/OSTW adapter. Every DEL/OSTW workflow fails with the structured
-`source-provider-unavailable` diagnostic (exit 3), without partial output or
-an upstream/static fallback. OPY, Workshop, and protocol inputs continue
-through their existing owner-backed paths.
+`source-provider-unavailable` diagnostic (exit 4), without partial output or
+an upstream/static fallback. DEL/OSTW provider support is not currently
+shipped with Wright and is outside this contract. OPY, Workshop, and protocol
+inputs continue through their existing owner-backed paths.
 
 ## `wright convert` and the reconstruction surface (#126)
 
 `wright convert [INPUT] --target opy|ostw` reconstructs **validated Workshop
-input** as canonical OPY source, or refuses the recognized OSTW target until a
-source provider is configured, through the shared
+input** as canonical OPY source, or refuses the recognized OSTW target because
+DEL/OSTW provider support is not currently shipped, through the shared
 driver/session conversion operation (`CompilerSession::convert`). The CLI is
 a thin passthrough: it parses argv, builds the session, calls the driver
 workflow, and renders the envelope. Reconstruction logic lives in the underlying
@@ -179,8 +180,8 @@ Wright implementation.
   missing or unknown target is a usage error (exit 2), and `--target` on any
   other command is a usage error too.
 * Only Workshop input is accepted: the available conversion surface is
-  Workshop → OPY. Workshop → OSTW is recognized but unavailable until a source
-  provider is configured, with **no direct OPY ↔ OSTW path**.
+  Workshop → OPY. Workshop → OSTW is recognized but unavailable because no
+  DEL/OSTW provider is shipped, with **no direct OPY ↔ OSTW path**.
   A non-Workshop input fails with the structured `convert-input-kind`
   diagnostic (exit 1).
 * The result is **canonical reconstructed source** for the selected target
@@ -454,7 +455,8 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `lower-error` (lowering), `validation-error` (validation), `input-*`/
 `stdin-*` (discovery), `output-io` (emission), analysis findings reuse the
 analyzer's codes, and `*-internal` / `*-unavailable` (internal).
-`source-provider-unavailable` marks the explicit DEL/OSTW provider boundary.
+`source-provider-unavailable` marks the explicit DEL/OSTW provider boundary
+and is reported at the internal stage.
 A `convert`
 reconstruction rejection carries the language-owned reconstructor's stable
 code (e.g. `unsupported-per-player-loop` from `wright-opy`,

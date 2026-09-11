@@ -59,7 +59,8 @@ pub(crate) enum Command {
     /// Parse, lower, validate, and emit Workshop text.
     Compile(CompileArgs),
     /// Reconstruct validated Workshop input as canonical OPY source; OSTW is
-    /// recognized but unavailable until a source provider is configured.
+    /// recognized but unavailable because DEL/OSTW provider support is not
+    /// currently shipped.
     Convert(ConvertArgs),
     /// Check frontend, project, semantic, and validation correctness.
     Check(CommonArgs),

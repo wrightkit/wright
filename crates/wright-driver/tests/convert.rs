@@ -288,13 +288,17 @@ fn ostw_conversion_refuses_without_partial_source() {
     );
     let (envelope, input_path) = convert(&source, ConvertTarget::Ostw);
     assert!(!envelope.ok);
-    assert_eq!(envelope.exit, 3);
+    assert_eq!(envelope.exit, 4);
     assert!(envelope.result.text.is_empty());
     assert!(
         envelope
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "source-provider-unavailable")
+    );
+    assert_eq!(
+        envelope.diagnostics[0].stage,
+        wright_driver::Stage::Internal
     );
     let _ = std::fs::remove_dir_all(input_path.parent().unwrap());
 }

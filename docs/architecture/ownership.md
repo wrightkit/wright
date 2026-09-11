@@ -6,7 +6,7 @@ Wright is WrightKit's user-facing tooling and integration product. It does not o
 
 - `workshop-rs` owns canonical raw Workshop semantics, parser, WIR, catalog, settings/localization, validation, emission, and Workshop-owned gameplay/query data.
 - `opy-rs` owns OverPy syntax, preprocessing/macros, semantic resolution/HIR, diagnostics/provenance, OverPy-specific compiler/lowering behavior, standalone tooling, compatibility evidence, and Workshop→OPY reconstruction.
-- `deltin-rs` owns DEL/OSTW project/source/type/runtime semantics, typed HIR, diagnostics/provenance, DEL-specific compiler/lowering behavior, standalone tooling, compatibility evidence, and Workshop→DEL/OSTW reconstruction. Wright consumes that capability only through a configured provider; no static DEL adapter is shipped.
+- `deltin-rs` owns DEL/OSTW project/source/type/runtime semantics, typed HIR, diagnostics/provenance, DEL-specific compiler/lowering behavior, standalone tooling, compatibility evidence, and Workshop→DEL/OSTW reconstruction. Wright has no shipped DEL/OSTW provider; future provider integration remains outside this boundary.
 - `language-provider-protocol` owns the process/data wire contract.
 - Wright owns the unified tooling/product layer: orchestration, cross-language diagnostics, lint/static analysis, semantic query, source-edit transaction safety/refactoring, agent/embedding APIs, CI presentation, editor-neutral language services/LSP, and integration adapters.
 

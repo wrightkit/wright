@@ -551,7 +551,7 @@ impl LanguageService {
                 edits: Vec::new(),
                 previews: Vec::new(),
                 diagnostics: vec![
-                    "source-provider-unavailable: DEL/OSTW workflows are unavailable until a source provider is configured"
+                    "source-provider-unavailable: DEL/OSTW provider support is not currently shipped with Wright"
                         .to_string(),
                 ],
             };
@@ -966,8 +966,7 @@ fn unavailable_ostw_analysis() -> Analysis {
         findings: Vec::new(),
         parse_errors: vec![SourceError {
             code: "source-provider-unavailable".to_string(),
-            message: "DEL/OSTW workflows are unavailable until a source provider is configured"
-                .to_string(),
+            message: "DEL/OSTW provider support is not currently shipped with Wright".to_string(),
             span: None,
         }],
         files: Vec::new(),

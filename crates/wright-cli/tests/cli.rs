@@ -1152,17 +1152,18 @@ fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
     let output = run(&["convert", "--target", "ostw", &fixture, "-f", "json"]);
     assert_eq!(
         output.status.code(),
-        Some(3),
+        Some(4),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["exit"], 3);
+    assert_eq!(envelope["exit"], 4);
     assert_eq!(
         envelope["diagnostics"][0]["code"],
         "source-provider-unavailable"
     );
+    assert_eq!(envelope["diagnostics"][0]["stage"], "internal");
     assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
 }
 

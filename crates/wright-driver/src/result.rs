@@ -74,9 +74,6 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if diagnostic.code == "adapter-stdin-unsupported" {
             return exit::UNSUPPORTED;
         }
-        if diagnostic.code == "source-provider-unavailable" {
-            return exit::UNSUPPORTED;
-        }
         if diagnostic.code == "source-provider-unsupported" {
             return exit::UNSUPPORTED;
         }

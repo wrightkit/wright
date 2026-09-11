@@ -926,8 +926,8 @@ fn build_overlay<'a>(
 fn source_provider_unavailable() -> Diagnostic {
     Diagnostic::error(
         "source-provider-unavailable",
-        Stage::Frontend,
-        "DEL/OSTW workflows are unavailable until a source provider is configured",
+        Stage::Internal,
+        "DEL/OSTW provider support is not currently shipped with Wright",
     )
 }
 

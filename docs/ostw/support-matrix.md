@@ -9,7 +9,7 @@ differential evidence,
 the declared normalization contract, and the known limitations/divergences
 
 This matrix records the former **declared compile surface**. Current Wright
-does not compile `.ostw`/`.del` inputs without a configured provider; the pinned OSTW
+does not compile `.ostw`/`.del` inputs because no DEL/OSTW provider is shipped; the pinned OSTW
 reference and authoritative evidence are maintained by
 [`deltin-rs`](https://github.com/wrightkit/deltin-rs); the forward-looking
 tiered baseline lives in [`compatibility-baseline.md`](compatibility-baseline.md).

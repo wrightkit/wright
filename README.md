@@ -9,7 +9,7 @@ Wright is the unified developer CLI and language tooling layer for Overwatch
 Workshop development in WrightKit. It provides diagnostics, analysis, code
 editing, and language server support across raw Workshop, OverPy, and
 provider-backed DEL/OSTW projects. DEL/OSTW entrypoints are recognized, but
-their Wright workflow requires a configured source provider.
+DEL/OSTW provider support is not currently shipped with Wright.
 
 Wright delegates source parsing and semantic lowering to dedicated WrightKit
 engines instead of reimplementing them:
@@ -67,7 +67,7 @@ underlying language surface is complete.
 | --- | --- | --- |
 | Raw Workshop | `workshop-rs` | ✅ Canonical parsing/WIR/validation/emission baseline is available |
 | OverPy (`.opy`) | `opy-rs` | 🟡 Standalone source analysis exists; builtin/member/catalog breadth and end-to-end compilation are still being closed |
-| DEL / OSTW (`.del`, `.ostw`) | `del-rs` via provider | ⚪ Recognized by Wright, but unavailable until a source provider is configured; no static DEL dependency |
+| DEL / OSTW (`.del`, `.ostw`) | `del-rs` via future provider | ⚪ Recognized by Wright, but provider support is not currently shipped; no static DEL dependency |
 
 Workshop → OPY and Workshop → DEL reconstruction are not treated as supported
 WrightKit capabilities until the owning language implementations provide and

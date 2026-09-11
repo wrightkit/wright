@@ -953,9 +953,9 @@ fn ostw_requests_fail_as_provider_unavailable() {
                 assert_eq!(envelope.diagnostics[0].code, "source-provider-unavailable");
                 assert_eq!(
                     envelope.diagnostics[0].stage,
-                    wright_driver::Stage::Frontend
+                    wright_driver::Stage::Internal
                 );
-                assert_eq!(envelope.exit, exit::UNSUPPORTED);
+                assert_eq!(envelope.exit, exit::INTERNAL);
             };
         }
         assert_unavailable!(check);

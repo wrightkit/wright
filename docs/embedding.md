@@ -30,7 +30,8 @@ would require an intentional public API and publication decision.
 released `opy-rs` owner API for source-language parsing, semantic behavior,
 compiler/lowering behavior, diagnostics, and reconstruction. `.ostw`/`.del`
 remain recognized source kinds, but their provider boundary is explicit:
-without a configured provider, Wright returns `source-provider-unavailable`.
+provider support is not currently shipped and Wright returns
+`source-provider-unavailable`.
 Wright must not depend on a static DEL implementation or recreate owner
 behavior locally.
 
