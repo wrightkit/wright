@@ -56,7 +56,7 @@ Durable dependencies point toward the owning implementation, never back from a
 language/core repository into Wright tooling internals:
 
 ```text
-Wright ─────► opy-rs
+Wright ─────► LPP provider ─────► opy-rs
 Wright ─────► del-rs
 Wright ─────► workshop-rs
 opy-rs ─────► workshop-rs

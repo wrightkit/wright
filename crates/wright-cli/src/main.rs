@@ -300,7 +300,7 @@ fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionCo
     let provider_requested = provider_workflow || common.opy_provider.is_some() || directory_target;
     SessionConfig {
         input,
-        source_backend: if is_opy_input(common) && provider_requested {
+        source_backend: if is_opy_input(common) {
             SourceBackend::Provider
         } else if provider_requested && common.kind == cli::SourceKindArg::Auto && directory_target
         {
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_opy_provider_workflows_select_the_provider_backend() {
+    fn every_opy_workflow_selects_the_provider_backend() {
         let opy = common(Some("main.opy"), cli::SourceKindArg::Auto);
         assert_eq!(
             config_from_common(&opy, true).source_backend,
@@ -411,7 +411,7 @@ mod tests {
         );
         assert_eq!(
             config_from_common(&opy, false).source_backend,
-            SourceBackend::Native
+            SourceBackend::Provider
         );
 
         let mut explicit_provider = common(Some("main.opy"), cli::SourceKindArg::Auto);

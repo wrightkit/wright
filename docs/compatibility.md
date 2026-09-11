@@ -14,8 +14,8 @@ Wright owns tooling and orchestration, not the durable source-language
 implementations. `opy-rs` owns OPY language semantics, `deltin-rs` owns the
 DEL/OSTW-compatible implementation, and `workshop-rs` owns canonical Workshop
 semantics and WIR. During the migration described by ADR-0009, Wright still
-contains only the narrow `wright-opy` contract adapter; `.ostw`/`.del` remain
-an explicit provider boundary with no static Wright adapter. Source-language
+consumes OPY through the LPP provider boundary; `.ostw`/`.del` remain an
+explicit provider boundary with no static Wright adapter. Source-language
 ownership and regression evidence live in the owner repositories
 (the `wright-workshop` re-export adapter was removed once call sites consumed
 `workshop-rs` directly). Upstream OverPy and OSTW compilers/language services

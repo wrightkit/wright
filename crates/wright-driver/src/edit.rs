@@ -3,8 +3,8 @@
 //! [`EditTransaction`] carries one or more file edits with exact source
 //! ranges plus per-source identity/version preconditions, and
 //! [`validate_transaction`] rejects stale versions, overlapping edits, and
-//! out-of-range spans, then runs edited OPY projects through the owner
-//! frontend with the edited files supplied as in-memory overlays. Unsupported
+//! out-of-range spans, then routes source-language validation through the
+//! owner provider. Unsupported
 //! source kinds fail explicitly with structured diagnostics and no partial
 //! preview.
 //!
@@ -25,7 +25,6 @@ use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 use crate::input::ResolvedInput;
 use crate::result::exit_code_from;
-use crate::session;
 
 /// One proposed source edit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,18 +187,17 @@ pub struct EditValidation {
 /// Validate and preview a source-edit transaction against one project.
 ///
 /// `config` is the *original* project/session configuration of the edited
-/// code: its source kind selects the native frontend, its root is preserved,
+/// code: its source kind selects the provider boundary, its root is preserved,
 /// and its transformation profile (when set) applies exactly as the session
 /// would apply it. `sources` supplies the current text of every source the
 /// transaction touches, keyed by the same source identity the edits carry, so
 /// the identity/version preconditions can be verified and the edited project
 /// compiled without reading or rewriting the user's files.
 ///
-/// The edited project is validated through the OPY owner frontend with edited
-/// files as include overlays. DEL/OSTW and other unsupported input kinds are
-/// refused explicitly. Refusals are atomic and structured: stale sources,
-/// overlapping/unknown edits, unsupported input kinds, and compiled errors
-/// produce source-located diagnostics and no partial preview.
+/// The edited project is validated through the OPY provider boundary with
+/// edited files as include overlays. Refusals are atomic and structured:
+/// stale sources, overlapping/unknown edits, unavailable providers, and
+/// provider errors produce diagnostics and no partial preview.
 pub fn validate_transaction(
     config: &SessionConfig,
     sources: &BTreeMap<String, String>,
@@ -293,8 +291,8 @@ pub fn validate_transaction(
         },
     };
 
-    // Edited non-main sources become in-memory overlays keyed for the native
-    // frontend of the project's original source kind.
+    // Edited non-main sources become in-memory overlays keyed for the
+    // provider of the project's original source kind.
     let overlay = build_overlay(
         kind,
         &root,
@@ -380,7 +378,7 @@ pub struct SemanticRename {
 /// `config` and `sources` are the project and current-source snapshot of the
 /// *unmodified* code, exactly as [`validate_transaction`] takes them. The
 /// target symbol is resolved through the shared semantic index of the
-/// project compiled through its original native frontend; only occurrences
+/// project compiled through its original provider; only occurrences
 /// belonging to that resolved semantic identity (the declaration identifier,
 /// the definition identifier, and every reference identifier) are edited,
 /// each as an exact-range edit carrying the source's identity precondition.
@@ -744,11 +742,7 @@ fn declaration_occurrences(
 /// tries the registry path as given, root-joined, and canonicalized, so
 /// display-relative spellings (e.g. the driver's cwd-relative display paths)
 /// and project-relative spellings both match.
-fn file_id_for_source(
-    files: &[wright_opy::preprocess::FileRecord],
-    root: &Path,
-    source: &str,
-) -> Option<usize> {
+fn file_id_for_source(files: &[SourceFile], root: &Path, source: &str) -> Option<usize> {
     files.iter().find_map(|file| {
         registry_path_matches(source, root, &file.path).then_some(file.id as usize)
     })
@@ -763,7 +757,7 @@ fn registry_path_matches(source: &str, root: &Path, registry_path: &str) -> bool
 /// The caller's source identity (a `sources` key) for a program file id,
 /// matching file registry paths against the provided current texts.
 fn source_key_for_file(
-    files: &[wright_opy::preprocess::FileRecord],
+    files: &[SourceFile],
     root: &Path,
     main_path: &Path,
     sources: &BTreeMap<String, String>,
@@ -899,63 +893,26 @@ fn resolved_input(
     }
 }
 
-/// Compile an OPY project through the owner frontend with include overlays and
-/// the shared validation chain, applying the session's transformation profile
-/// exactly as `CompilerSession::load` does.
+/// Validate an OPY project through the provider boundary with include overlays
+/// and the shared validation configuration.
+#[derive(Debug, Clone)]
+struct SourceFile {
+    id: u32,
+    path: String,
+}
+
 fn compile_project(
     kind: SourceKind,
     resolved: &ResolvedInput,
     overlay: &BTreeMap<String, String>,
     profile: crate::Profile,
-) -> Result<
-    (
-        workshop_rs::Program,
-        Vec<wright_opy::preprocess::FileRecord>,
-    ),
-    Vec<Diagnostic>,
-> {
-    if kind != SourceKind::Opy {
-        return Err(vec![source_provider_unavailable()]);
-    }
-    let main_path = resolved
-        .path
-        .as_deref()
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|| resolved.display.clone());
-    let outcome = wright_opy::compile_with_overlay_outcome(
-        &resolved.text,
-        &main_path,
-        &resolved.root,
-        overlay,
-    );
-    let Some(mut program) = outcome.program else {
-        return Err(vec![session::opy_diag(
-            outcome
-                .error
-                .expect("a failed compile outcome always carries an error"),
-            &outcome.files,
-            resolved,
-        )]);
-    };
-    if let Err(error) = program.validate() {
-        return Err(vec![session::workshop_diag(error, resolved)]);
-    }
-    if profile != crate::Profile::Off {
-        if let Err(error) = wright_transform::run_canonical(&mut program, profile) {
-            return Err(vec![Diagnostic::error(
-                "transform-error",
-                crate::diag::Stage::Internal,
-                format!("Workshop transformation failed: {error}"),
-            )]);
-        }
-    }
-    Ok((program, outcome.files))
+) -> Result<(workshop_rs::Program, Vec<SourceFile>), Vec<Diagnostic>> {
+    let _ = (kind, resolved, overlay, profile);
+    Err(vec![source_provider_unavailable()])
 }
 
 /// The concrete source kind to validate against: the configured kind, or
-/// detection from the main file extension for `Auto`. DEL/OSTW, Workshop, and
-/// Protocol inputs refuse explicitly because no corresponding edit provider is
-/// available in Wright.
+/// detection from the main file extension for `Auto`.
 fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, Diagnostic> {
     match config.kind {
         SourceKind::Opy => Ok(SourceKind::Opy),
@@ -982,7 +939,7 @@ fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, 
             "edit-unsupported-kind",
             Stage::Discovery,
             format!(
-                "edit validation is declared over the OPY source frontend; \
+                "edit validation is declared over the OPY source provider; \
                  '{}' input is not an editable source kind",
                 other.as_str()
             ),
@@ -1011,14 +968,12 @@ fn same_file(a: &str, b: &Path) -> bool {
     }
 }
 
-/// Build the in-memory overlay of non-main OPY sources, keyed for the owner's
-/// frontend.
+/// Build the in-memory overlay of non-main OPY sources, keyed for the provider.
 ///
 /// OPY includes resolve against the include root by include string and by
 /// canonical path; the overlay carries the as-given, canonical, root-relative,
 /// and basename spellings (the same spellings the language service overlays
-/// use). The main source is never overlaid (its text is passed to the frontend
-/// directly).
+/// use). The main source is never overlaid.
 fn build_overlay<'a>(
     kind: SourceKind,
     root: &Path,
@@ -1051,7 +1006,7 @@ fn source_provider_unavailable() -> Diagnostic {
     Diagnostic::error(
         "source-provider-unavailable",
         Stage::Internal,
-        "DEL/OSTW provider support is not currently shipped with Wright",
+        "the requested source-provider workflow is not currently shipped with Wright",
     )
 }
 
@@ -1544,25 +1499,15 @@ mod tests {
     }
 
     #[test]
-    fn rename_validates_through_the_pipeline() {
+    fn rename_validation_refuses_without_provider() {
         let sources = BTreeMap::from([("program.opy".to_string(), SOURCE.to_string())]);
         let validation = rename(rename_edit(SOURCE, "score", "total"), &sources);
-        assert!(
-            validation.ok,
-            "the renamed source must compile: {:?}",
-            validation.diagnostics
-        );
-        let preview = validation.preview.as_ref().unwrap();
-        assert_eq!(preview.len(), 1, "one affected source");
-        assert!(
-            preview[0].new_text.contains("globalvar total"),
-            "preview shows the renamed source"
-        );
+        assert!(!validation.ok);
         assert_eq!(
-            preview[0].source_identity,
-            crate::input_identity(&preview[0].new_text),
-            "the preview carries the new-source identity"
+            validation.diagnostics[0].code,
+            "source-provider-unavailable"
         );
+        assert!(validation.preview.is_none(), "no partial preview");
     }
 
     #[test]
@@ -1589,13 +1534,11 @@ mod tests {
             &EditTransaction::new(vec![edit]).unwrap(),
         );
         assert!(!validation.ok, "a rename that breaks the source refuses");
-        assert!(
-            validation.diagnostics.iter().any(
-                |diagnostic| diagnostic.code == "lex-error" || diagnostic.code == "parse-error"
-            ),
-            "the refusal carries the compile diagnostic: {:?}",
-            validation.diagnostics
+        assert_eq!(
+            validation.diagnostics[0].code,
+            "source-provider-unavailable"
         );
+        assert!(validation.preview.is_none(), "no partial preview");
     }
 
     #[test]

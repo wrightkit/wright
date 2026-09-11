@@ -16,8 +16,6 @@ serde_json.workspace = true
 url = "2"
 wright-analyzer.workspace = true
 wright-driver.workspace = true
-wright-ir.workspace = true
-wright-opy.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
 

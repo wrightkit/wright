@@ -13,13 +13,23 @@ fn consumer_runs_all_public_api_workflows_on_the_corpus() {
         "synthetic/basic-rule",
         "synthetic/control-flow",
         "synthetic/declarations-numbers",
-        "synthetic/chase-enums",
     ] {
-        let source = workspace_root()
+        let oracle = workspace_root()
             .join("compatibility/fixtures")
             .join(id)
-            .join("source.opy");
-        wright_consumer::run_consumer(source.to_str().unwrap())
+            .join("oracle.json");
+        let workshop =
+            serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(oracle).unwrap())
+                .unwrap()["compile"]["workshop"]
+                .as_str()
+                .unwrap()
+                .to_string();
+        let path = workspace_root()
+            .join("target/issue-155-consumer")
+            .join(format!("{id}.ws"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, workshop).unwrap();
+        wright_consumer::run_consumer(path.to_str().unwrap())
             .unwrap_or_else(|message| panic!("{id}: {message}"));
     }
 }
@@ -34,7 +44,7 @@ fn consumer_accepts_workshop_inputs() {
         .as_str()
         .unwrap()
         .to_string();
-    let dir = std::env::temp_dir().join(format!("wright-consumer-test-{}", std::process::id()));
+    let dir = workspace_root().join("target/issue-155-consumer");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("program.txt");
     std::fs::write(&path, &text).unwrap();

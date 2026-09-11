@@ -7,7 +7,6 @@ pub mod config;
 pub mod diag;
 pub mod edit;
 pub mod input;
-pub mod opy;
 pub mod opy_provider;
 pub mod progress;
 pub mod provider;

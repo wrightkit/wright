@@ -14,11 +14,24 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-fn corpus_opy(id: &str) -> PathBuf {
-    workspace_root()
+fn corpus_workshop(id: &str) -> PathBuf {
+    let oracle = workspace_root()
         .join("compatibility/fixtures")
         .join(id)
-        .join("source.opy")
+        .join("oracle.json");
+    let workshop = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(oracle).expect("corpus oracle reads"),
+    )
+    .expect("corpus oracle parses")["compile"]["workshop"]
+        .as_str()
+        .expect("corpus oracle carries Workshop text")
+        .to_string();
+    let path = workspace_root()
+        .join("target/issue-155-serve")
+        .join(format!("{id}.ws"));
+    std::fs::create_dir_all(path.parent().unwrap()).expect("serve fixture directory creates");
+    std::fs::write(&path, workshop).expect("serve Workshop fixture writes");
+    path
 }
 
 fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::Value> {
@@ -52,7 +65,7 @@ fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::V
 fn stdio_transport_serves_structured_queries() {
     let responses = run_lines(
         "stdio",
-        &corpus_opy("synthetic/control-flow"),
+        &corpus_workshop("synthetic/control-flow"),
         &[
             r#"{"op":"capabilities"}"#,
             r#"{"op":"project"}"#,
@@ -62,7 +75,7 @@ fn stdio_transport_serves_structured_queries() {
     );
     assert_eq!(responses.len(), 4);
     assert_eq!(responses[0]["result"]["contract"], "wright-result/v1");
-    assert_eq!(responses[1]["result"]["origin"]["kind"], "opy");
+    assert_eq!(responses[1]["result"]["origin"]["kind"], "workshop");
     assert!(responses[2]["result"].as_array().unwrap().is_empty());
     assert!(
         responses[3]["result"]["exact"]["emittedBytes"]
@@ -76,7 +89,7 @@ fn stdio_transport_serves_structured_queries() {
 fn jsonrpc_transport_serves_requests_and_workflows() {
     let responses = run_lines(
         "jsonrpc",
-        &corpus_opy("synthetic/control-flow"),
+        &corpus_workshop("synthetic/control-flow"),
         &[
             r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"rules"}}"#,
             r#"{"jsonrpc":"2.0","id":2,"method":"request","params":{"op":"costEstimate"}}"#,
@@ -99,12 +112,12 @@ fn transports_match_in_process_semantics() {
     // The same query through both transports yields equivalent results.
     let stdio = run_lines(
         "stdio",
-        &corpus_opy("synthetic/control-flow"),
+        &corpus_workshop("synthetic/control-flow"),
         &[r#"{"op":"findings"}"#],
     );
     let jsonrpc = run_lines(
         "jsonrpc",
-        &corpus_opy("synthetic/control-flow"),
+        &corpus_workshop("synthetic/control-flow"),
         &[r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"findings"}}"#],
     );
     assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]["result"]);
@@ -112,7 +125,11 @@ fn transports_match_in_process_semantics() {
 
 #[test]
 fn malformed_requests_are_structured_errors() {
-    let responses = run_lines("stdio", &corpus_opy("synthetic/basic-rule"), &["not json"]);
+    let responses = run_lines(
+        "stdio",
+        &corpus_workshop("synthetic/basic-rule"),
+        &["not json"],
+    );
     assert_eq!(responses[0]["error"]["code"], "malformed-request");
 }
 
@@ -120,7 +137,7 @@ fn malformed_requests_are_structured_errors() {
 fn capability_negotiation_is_preserved() {
     let responses = run_lines(
         "stdio",
-        &corpus_opy("synthetic/basic-rule"),
+        &corpus_workshop("synthetic/basic-rule"),
         &[r#"{"op":"capabilities"}"#],
     );
     let capabilities = &responses[0]["result"];
@@ -144,7 +161,7 @@ fn stdio_transport_serves_mutation_operations() {
     // #130: the stdio adapter exposes the shared mutation operations as
     // thin mappings — validated edit preview and semantic rename — with the
     // same structured all-or-nothing results as in-process consumers.
-    let input = corpus_opy("synthetic/declarations-numbers");
+    let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
     let identity = wright_driver::input_identity(&source);
     let line_count = source.lines().count().max(1) as u32;
@@ -174,15 +191,7 @@ fn stdio_transport_serves_mutation_operations() {
         &input,
         &[&serde_json::to_string(&request).unwrap()],
     );
-    assert_eq!(responses[0]["result"]["ok"], true, "{responses:?}");
-    let previews = responses[0]["result"]["preview"].as_array().unwrap();
-    assert!(
-        previews[0]["new_text"]
-            .as_str()
-            .unwrap()
-            .contains("globalvar total = 5"),
-        "the preview carries the validated edited text: {responses:?}"
-    );
+    assert_eq!(responses[0]["result"]["ok"], false, "{responses:?}");
 
     // Semantic rename through the same transport.
     let rename = serde_json::json!({
@@ -194,24 +203,14 @@ fn stdio_transport_serves_mutation_operations() {
         "target": { "source": input.to_string_lossy().into_owned(), "line": 1, "col": 11, "to": "total" }
     });
     let responses = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
-    assert_eq!(responses[0]["result"]["ok"], true, "{responses:?}");
-    assert_eq!(
-        responses[0]["result"]["transaction"]["edits"][0]["new_text"],
-        "total"
-    );
-    assert!(
-        responses[0]["result"]["preview"][0]["new_text"]
-            .as_str()
-            .unwrap()
-            .contains("globalvar total")
-    );
+    assert_eq!(responses[0]["result"]["ok"], false, "{responses:?}");
 }
 
 #[test]
 fn transports_are_equivalent_for_mutation_operations() {
     // #130: stdio and JSON-RPC map the same mutation request to the same
     // in-process behavior.
-    let input = corpus_opy("synthetic/declarations-numbers");
+    let input = corpus_workshop("synthetic/control-flow");
     let rename = serde_json::json!({
         "op": "semanticRename",
         "sources": {

@@ -37,7 +37,6 @@ jobs:
       opy: ${{ steps.f.outputs.opy }}
       lpp: ${{ steps.f.outputs.lpp }}
       cli: ${{ steps.f.outputs.cli }}
-      opy_adapter: ${{ steps.f.outputs.opy_adapter }}
       dist: ${{ steps.f.outputs.dist }}
     steps:
       - name: Check out repository
@@ -55,7 +54,6 @@ jobs:
             echo "opy=true"         >> "$GITHUB_OUTPUT"
             echo "lpp=true"         >> "$GITHUB_OUTPUT"
             echo "cli=true"         >> "$GITHUB_OUTPUT"
-            echo "opy_adapter=true" >> "$GITHUB_OUTPUT"
             echo "dist=true"        >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -81,11 +79,6 @@ jobs:
           echo "opy=${broad_match}"         >> "$GITHUB_OUTPUT"
           echo "lpp=${broad_match}"         >> "$GITHUB_OUTPUT"
           echo "cli=${broad_match}"         >> "$GITHUB_OUTPUT"
-
-          # OPY adapter is TypeScript-only; only changes in adapter/ trigger it
-          # unless a broad change already forces everything.
-          opy_adapter_match="$(matches "(^adapter/|${broad})")"
-          echo "opy_adapter=${opy_adapter_match}" >> "$GITHUB_OUTPUT"
 
           # Distribution validation additionally triggers on dist/ manifests and
           # the first-party Windows installer.
@@ -260,7 +253,7 @@ jobs:
   # Covers:
   #   - Committed compatibility evidence integrity (no live oracle needed)
   #   - Semantic gate: Wright compile vs recorded reference snapshots through WIR
-  #   - Owner-backed OPY adapter build/test coverage
+  #   - Provider-backed OPY consumer contract coverage
   # -------------------------------------------------------------------------
   opy-integration:
     name: OPY integration (semantic + owner)
@@ -301,11 +294,6 @@ jobs:
       - name: Run semantic OPY gate (Wright compile vs recorded snapshots)
         id: semantic_gate
         run: python3 scripts/v1-gates.py
-
-      - name: Build and test Wright OPY adapter
-        id: adapter
-        if: always()
-        run: cargo test --locked -p wright-opy
 
       - name: Upload OPY integration reports
         if: always()
@@ -351,11 +339,6 @@ jobs:
               echo "### Semantic OPY gate: ⚠️ report not generated"
             fi
             echo ""
-            if [[ "${{ steps.adapter.outcome }}" == "success" ]]; then
-              echo "### OPY adapter build/test: ✅ PASS"
-            else
-              echo "### OPY adapter build/test: ❌ FAIL (see run log for details)"
-            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
@@ -629,39 +612,6 @@ jobs:
               echo "_Full machine-readable report available as workflow artifact._"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-
-  # -------------------------------------------------------------------------
-  # [7] OPY ADAPTER  (OverPy-to-HIR TypeScript adapter)
-  # Independent of Rust quality; only triggered by adapter/ or broad changes.
-  # -------------------------------------------------------------------------
-  opy-adapter:
-    name: OverPy-to-HIR adapter
-    needs: paths
-    if: needs.paths.outputs.opy_adapter == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 11.10.0
-
-      - name: Install Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: adapter/pnpm-lock.yaml
-
-      - name: Install adapter dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: adapter
-
-      - name: Run adapter tests
-        run: pnpm test
-        working-directory: adapter
 
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)

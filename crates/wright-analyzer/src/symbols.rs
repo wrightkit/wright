@@ -6,13 +6,13 @@
 
 use std::collections::HashSet;
 
+use workshop_rs::arena::Arena;
+use workshop_rs::ids::Id;
 use workshop_rs::source::Span;
+use workshop_rs::wir::error::IrError;
 use workshop_rs::wir::{
     self, Action, ActionId, GlobalVarId, PlayerVarId, RuleId, SubroutineId, Value, ValueId,
 };
-use wright_ir::arena::Arena;
-use wright_ir::error::IrError;
-use wright_ir::ids::Id;
 
 /// A typed ID referencing a [`Symbol`].
 pub type SymbolId = Id<Symbol>;

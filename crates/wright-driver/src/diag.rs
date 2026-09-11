@@ -76,7 +76,7 @@ pub struct SourceSpan {
 /// The origin of a loaded program (mirrors the semantic-service origin).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Origin {
-    /// `workshop`, `protocol`, or `opy` (adapter bridge).
+    /// `workshop`, `protocol`, or `opy` (provider bridge).
     pub kind: String,
     /// The Workshop client locale for workshop-origin programs.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,7 +105,7 @@ pub struct Diagnostic {
 /// Build a source span from the IR source model, resolving the file path.
 pub fn span_from_ir(
     span: Option<workshop_rs::source::Span>,
-    files: &wright_ir::arena::Arena<workshop_rs::source::SourceFile>,
+    files: &workshop_rs::arena::Arena<workshop_rs::source::SourceFile>,
 ) -> Option<SourceSpan> {
     let span = span?;
     let file = span.file.index();

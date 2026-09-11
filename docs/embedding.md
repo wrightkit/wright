@@ -26,14 +26,13 @@ would require an intentional public API and publication decision.
 
 ## Source-language owner boundary
 
-`wright-opy` is the shipped narrow Wright adapter. Its target boundary is the
-released `opy-rs` owner API for source-language parsing, semantic behavior,
-compiler/lowering behavior, diagnostics, and reconstruction. `.ostw`/`.del`
-remain recognized source kinds, but their provider boundary is explicit:
+OPY is integrated through the LPP provider boundary. Wright owns the session,
+diagnostic, artifact, and tooling contracts; `opy-rs` owns source semantics,
+project loading, compilation, and reconstruction behind the provider. `.ostw`/
+`.del` remain recognized source kinds, but their provider boundary is explicit:
 provider support is not currently shipped and Wright returns
-`source-provider-unavailable`.
-Wright must not depend on a static DEL implementation or recreate owner
-behavior locally.
+`source-provider-unavailable`. Wright has no static OPY or DEL implementation
+fallback.
 
 The migration is release-coordinated: if an owner contract is not yet
 available in a consumable release, the adapter remains on its current released
@@ -117,9 +116,10 @@ order-dependent zero-width combinations at one position are refused as
 overlapping/conflicting edits, invalid ranges, and compilation errors, and
 returns the previewed edited sources atomically (any failed validation returns
 `ok = false` and no validated preview). Validation runs through the
-owner-backed project/session semantics (`SessionConfig` kind/root,
-transformation profile): OPY projects compile through `opy-rs` with edited
-includes as in-memory overlays. DEL/OSTW inputs refuse explicitly with
+provider-backed project/session semantics where the provider negotiates edit
+validation. OPY edit validation currently refuses explicitly because the
+first-party provider has no edit capability; it never invokes a removed static
+frontend. DEL/OSTW inputs refuse explicitly with
 `source-provider-unavailable`; Workshop and Protocol inputs also refuse
 explicitly. The first evidence-backed refactoring
 is symbol rename

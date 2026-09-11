@@ -9,11 +9,11 @@ adapter (`wright-lsp`)
 ```text
 document/workspace model (Document, DocumentStore)
    → LanguageService (editor-neutral, no LSP types)
-       ├─ diagnostics (parse errors + semantic findings)
-       ├─ hover / definition / references
-       ├─ completion (symbols + builtins + keywords)
-       ├─ rename (identifier-exact, pipeline-validated)
-       └─ semantic tokens (native lexer classification)
+       ├─ diagnostics (provider capability or explicit refusal)
+       ├─ hover / definition / references (provider capability)
+       ├─ completion (provider capability)
+       ├─ rename (provider capability)
+       └─ semantic tokens (provider capability)
             ↓
   wright-lsp (thin protocol adapter, Content-Length stdio framing)
 ```
@@ -43,10 +43,9 @@ analyzer contracts.
 ## Incremental behavior
 
 Reanalysis is a deterministic full recomputation over the changed document.
-The committed language-service perf harness (`wright-language/tests/perf.rs`)
-measures the heaviest corpus fixture: analyze ≈1.0 ms, diagnostics ≈0.9 ms,
-hover ≈0.9 ms, peak RSS ≈7 MB (`target/language-service-perf.json`). Each
-workflow is bounded far below interactive latency.
+Provider capabilities are not reimplemented locally for latency or feature-
+matrix symmetry. The document/version and transport contracts remain local to
+Wright and continue to work when a provider returns an explicit refusal.
 
 ## Responsiveness contract
 
@@ -73,15 +72,11 @@ suppression is the authoritative contract.
 
 ## Services
 
-* **Diagnostics**: source-aware `SourceDiagnostic`s for parse errors and
-  analyzer findings, carrying source identity, source-local range, severity,
-  code, message, and source/requesting-document versions; included-file spans
-  are resolved against their own source text, not the requesting document.
-* **Hover**: symbol name/kind and usage summary (reads/writes/calls/rules).
-* **Definition / References**: via the semantic index over source spans.
-* **Completion**: declared symbols, manifest-declared builtins and receiver
-  members, keywords (the OPY semantic manifest is the authoritative builtin
-  surface, #109).
+* **Diagnostics**: source-aware `SourceDiagnostic`s, including explicit
+  `source-provider-unavailable` when no provider editor capability is
+  negotiated.
+* **Hover / Definition / References / Completion**: provider-owned; Wright
+  does not duplicate OPY parsing, manifests, or semantic indexes.
 * **Rename**: project-wide identifier-exact rename: resolves the symbol
   through the semantic index, unions its exact declaration/definition/reference
   identifier spans across every open root whose project includes the
@@ -98,9 +93,7 @@ suppression is the authoritative contract.
   transaction is validated through the shared #128 transaction boundary
   (`wright_driver::edit::validate_transaction`), and no duplicate
   edit-validation or span-collection semantics live here.
-* **Semantic tokens**: classified by the native lexer/parser identity
-  (keywords, variables, identifiers, strings, numbers, operators, macros,
-  attributes), not textual heuristics.
+* **Semantic tokens**: provider-owned; no static lexer fallback is shipped.
 
 ## DEL/OSTW documents (#120)
 
@@ -111,9 +104,9 @@ does not produce semantic tokens, navigation, or rename edits for these
 documents. It never invokes an upstream compiler or a removed Wright
 implementation as a fallback.
 
-Workshop → OPY reconstruction remains available through the CLI and driver;
-Workshop → OSTW is refused at the provider boundary until a provider is
-configured.
+Workshop → OPY reconstruction is available only when the provider negotiates
+`reconstruct`; Workshop → OSTW is refused at the provider boundary until a
+provider is configured.
 
 ## LSP adapter
 
@@ -137,10 +130,9 @@ at its current version and filesystem-backed sources in the unversioned
 `null` form. No symbol resolution, collision, or stale-state logic exists in
 the protocol layer; unsupported rename targets surface the shared refusal as
 an explicit LSP error, never a textual fallback. The end-to-end
-harness (`wright-lsp/tests/lsp.rs`) drives the real binary and verifies
-capability negotiation, lifecycle, navigation, completion, rename (OPY
-multi-document and UTF-16/non-BMP ranges, version preconditions), semantic
-tokens, and stale-version suppression.
+  harness (`wright-lsp/tests/lsp.rs`) drives the real binary and verifies
+  capability negotiation, lifecycle, refusal routing, and stale-version
+  suppression.
 
 ## Out of scope (recorded)
 

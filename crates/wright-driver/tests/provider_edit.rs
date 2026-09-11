@@ -448,31 +448,14 @@ fn semantic_validation_failure_is_atomic_across_documents() {
 
 #[test]
 fn unconfigured_language_id_refuses_explicitly() {
-    // No mock provider needed: an unconfigured language id is refused by
-    // the session's registry before anything is spawned.
+    // The source session itself refuses before any static frontend can be
+    // selected; provider edit requests therefore cannot inherit a fallback.
     let mut session = session_with_providers(wright_lpp::ProviderRegistry::new());
-    let _ = session.load().expect("loads");
-    let session = Box::leak(Box::new(session));
-    let service = ToolService::new(session).expect("service");
-    let documents = single_document_set();
-    let mutation = handle(
-        &service,
-        &rename_request(
-            documents,
-            URI,
-            DOUBLE_POSITION,
-            "twice",
-            sources_of(&single_document_set()),
-        ),
-    );
-    assert!(!mutation.ok);
-    assert_eq!(mutation.diagnostics[0].code, "provider-error");
-    assert_eq!(
-        mutation.provider_code.as_deref(),
-        Some("provider-not-configured")
-    );
-    assert!(mutation.transaction.is_none());
-    assert!(mutation.preview.is_none());
+    let diagnostic = match session.load() {
+        Ok(_) => panic!("missing source provider must refuse"),
+        Err(diagnostic) => diagnostic,
+    };
+    assert_eq!(diagnostic.code, "source-provider-unavailable");
 }
 
 // ---------------------------------------------------------------------------

@@ -236,7 +236,8 @@ indicator). No new `heuristic`-class rules are added in this set.
 - Adding more than the two new rules in this set (the shipped first-party set is
   exactly five rules; the issue explicitly rejects large rule-count targets).
 - OPY/OSTW frontend or compatibility expansion so that overpy-santa,
-  overpy-parabola, or other corpus projects parse through the native frontend
+  overpy-parabola, or other corpus projects parse through a Wright-owned
+  frontend; source-language support belongs to the provider repositories
   (per issue non-goals; corpus evidence for `repeated-value` is textual and
   linked, not a firing path).
 - Treating community "anti-crash" advice (e.g., `Server Load` thresholds, slow
@@ -302,8 +303,9 @@ indicator). No new `heuristic`-class rules are added in this set.
   by the canonical Workshop parser (`settings` top-level section rejected;
   settings-stripped pixelart parses with
   0 findings).
-- **Adapter**: pinned `overpy@9.7.10` adapter (`../../adapter/bin/wright-adapter.js`)
-  for regenerating analyzer fixture payloads when needed.
+- **Provider evidence**: OPY syntax and semantic fixtures are generated and
+  maintained by `opy-rs`; Wright tests consume canonical Workshop or provider
+  results without a local adapter.
 
 ## Unresolved questions
 
