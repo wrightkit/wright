@@ -6,18 +6,17 @@
 
 ## Context
 
-Wright is at the project-bootstrap stage. It needs a stable responsibility
-boundary before compiler packages, compatibility tooling, or generated output
-are implemented. Existing OverPy supplies the `.opy` frontend/parser and the
-initial compatibility oracle.
+Wright began with a need for a stable responsibility boundary before compiler
+packages, compatibility tooling, or generated output were implemented. Existing
+OverPy supplied the `.opy` frontend/parser and the initial compatibility oracle.
 
 ## Decision
 
-Wright v1 is an independently implemented Rust compiler core for an
+Wright v1 was defined as an independently implemented Rust compiler core for an
 OverPy-compatible workflow. The core owns its bridge, HIR, Workshop IR,
-lowering contracts, diagnostics, and backends. Existing OverPy remains an
-external frontend/parser and oracle until a separately approved native frontend
-milestone.
+lowering contracts, diagnostics, and backends. At the time of this decision,
+Existing OverPy served as the external frontend/parser and oracle; this ADR did
+not authorize a native frontend or a change to that boundary.
 
 The v1 non-goals are:
 
@@ -29,11 +28,12 @@ The v1 non-goals are:
 
 ## Consequences
 
-Future components must cross an explicit Wright-owned boundary. This keeps
-frontend-specific representation out of the core and allows compatibility to be
+Components under this decision cross an explicit Wright-owned boundary. This keeps
+frontend-specific representations out of the core and allows compatibility to be
 measured without treating an external implementation as Wright's architecture.
-The first workspace may therefore contain only core contracts and libraries;
-future adapters and backends are added when their contracts are needed.
+The initial workspace scope was therefore limited to core contracts and
+libraries; adapters and backends cross the same boundary when their contracts
+are defined.
 
 ## Compatibility impact
 
@@ -43,7 +43,7 @@ does not claim syntax, diagnostic, normalized-output, or semantic parity.
 
 ## Historical note
 
-The v1 non-goal "a native Rust `.opy` parser" has been achieved: `wright-opy`
-was shipped under the M7 milestone. The remaining non-goals (no new language,
-no OverPy-internal parity) are carried forward in ADR-0008. The OverPy
-openquestions (versions, Workshop target) were resolved in later ADRs.
+When ADR-0008 superseded this record, the v1 non-goal "a native Rust `.opy`
+parser" was treated as historical. ADR-0008 retained the non-goals regarding
+a new language and OverPy-internal parity. The questions about versions and
+Workshop targets were addressed by later decision records.

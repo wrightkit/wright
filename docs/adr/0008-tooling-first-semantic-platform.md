@@ -11,27 +11,27 @@
 
 ## Context
 
-ADR-0001 defined Wright at bootstrap as "an OverPy-compatible Rust compiler
-core" with OverPy as the external `.opy` frontend until a later native frontend
-milestone. The v1 non-goals explicitly listed "a native Rust `.opy` parser".
+ADR-0001 defined Wright at project start as "an OverPy-compatible Rust
+compiler core" with OverPy as the external `.opy` frontend until a separately
+approved native frontend decision. The v1 non-goals explicitly listed "a
+native Rust `.opy` parser".
 
-The implemented repository has since grown to include a native `.opy` semantic
-frontend (`wright-opy`), native Workshop parsing and emission, WIR/HIR,
+The implementation state that led to this rebaseline included a native `.opy`
+semantic frontend (`wright-opy`), native Workshop parsing and emission, WIR/HIR,
 semantic analysis, tool APIs, language services, and an LSP. ADR-0001's
-non-goals are therefore factually contradicted by the current codebase.
+non-goals no longer described that implementation state.
 
-`ARCHITECTURE.md` carries the same contradiction: the project-boundary section
-still calls OverPy "the `.opy` frontend/parser" until "a later native frontend
-milestone", while the Frontend section describes `wright-opy` as the v1 native
-frontend.
+At the time of this decision, `ARCHITECTURE.md` carried the same contradiction:
+its project-boundary section called OverPy "the `.opy` frontend/parser" until a
+native frontend decision, while its Frontend section described `wright-opy` as
+the v1 native frontend.
 
-M11 also produced evidence that treating every reference-output difference as
-product-critical compatibility work can consume roadmap capacity without a
-proportionate gain in real user value. That risk is a product-priority signal,
-not a one-off exception.
+Compatibility work preceding this decision showed that treating every
+reference-output difference as product-critical work can consume planning
+capacity without a proportionate gain in real user value. That risk is a
+product-priority signal, not a one-off exception.
 
-This ADR corrects the record and establishes the boundary for post-M11 roadmap
-work.
+This ADR corrects the record and establishes the product-priority boundary.
 
 ## Decision
 
@@ -47,23 +47,22 @@ Wright's primary product surface is semantic tooling:
 - Workshop cost and stability reasoning.
 
 Compilation and conversion are required infrastructure and user capabilities,
-but compiler parity work must not consume the roadmap by default when it does
-not block real compilation, analysis, source tooling, or a declared semantic
-contract.
+but compiler parity work is secondary when it does not block real compilation,
+analysis, source tooling, or a declared semantic contract.
 
 ### 2. Semantic frontend ownership
 
-Wright owns independent semantic frontends where required for standalone
-compilation, source-aware analysis, agent source editing, CI, WASM/embedding,
-and long-term ecosystem independence.
+At the time of this decision, Wright's scope included independent semantic
+frontends for standalone compilation, source-aware analysis, agent source
+editing, CI, WASM/embedding, and long-term ecosystem independence.
 
-Current and planned ownership:
+The implementation areas considered by this decision were:
 
 - **Vanilla Workshop**: Wright-owned canonical model, parser, emitter, and
   target semantics;
-- **OPY**: Wright-owned compatible semantic frontend (`wright-opy`, shipped);
-- **OSTW**: future first-class compatible semantic frontend, introduced only
-  through an evidence-backed milestone (see issue #90).
+- **OPY**: an independently implemented compatible semantic frontend;
+- **OSTW**: a first-class compatible semantic frontend only after a separate,
+  evidence-backed decision.
 
 Upstream compilers and language services (OverPy, OSTW) remain compatibility
 oracles, behavior references, and test inputs. They are not production runtime
@@ -75,7 +74,7 @@ The compatibility contract is **semantic compatibility**, not compiler-output
 identity.
 
 Byte-identical output, identical temporary-variable allocation, identical
-optimizer output, or identical formatting are not goals unless a difference
+optimizer output, and identical formatting are not goals unless a difference
 affects:
 
 - observable Workshop or game behavior;
@@ -143,10 +142,9 @@ Runtime-sensitive claims require separate evidence.
 
 ### On ADR-0001
 
-ADR-0001 is superseded. Its "native Rust `.opy` parser" non-goal is now
-historical; `wright-opy` was shipped under the M7 milestone. The remaining
-non-goals from ADR-0001 (no new language, no OverPy-internal parity) are
-preserved in this ADR and in `ARCHITECTURE.md`.
+ADR-0001 is superseded. When this occurred, its "native Rust `.opy` parser"
+non-goal was historical. The non-goals regarding a new language and OverPy-
+internal parity are preserved in this ADR and in `ARCHITECTURE.md`.
 
 ### On ADR-0002 / COMPATIBILITY.md
 
@@ -158,31 +156,29 @@ and documented compatibility surface before creating implementation work.
 
 ### On ARCHITECTURE.md
 
-The project-boundary section is rewritten to reflect the current tooling-first
-product surface and Wright's ownership of its semantic frontends. The
-contradiction between the "project boundary" text and the "Frontend" section is
-resolved in favor of the implemented state.
+The project-boundary section was rewritten to align with the tooling-first
+product surface and the frontend scope described by this decision. The
+contradiction between the "project boundary" text and the "Frontend" section
+was resolved in favor of the implementation state at that time.
 
-### On roadmap
+### On execution planning
 
-Issues #89 (M12 lint platform) and #90 (M13 OSTW) are the next roadmap items.
-Both are consistent with this rebaseline. #89 makes the tooling-first direction
-concrete; #90 adds a second semantic frontend through an evidence-backed
-milestone, consistent with decision 2 above.
+This ADR does not set roadmap ordering, release sequencing, or Issue priority.
+Execution planning belongs to Issues and release planning; a new semantic
+frontend or tooling surface requires its own scope and evidence.
 
 ## Compatibility impact
 
 No compatibility level is removed or weakened. The S/D/N/E levels from ADR-0002
 remain normative. The priority clarification (semantic over text-identity)
-affects roadmap triage and issue prioritization, not the measurement contracts
+affects how output differences are evaluated, not the measurement contracts
 themselves.
 
-## Open questions
+## Scope boundaries
 
-- Which Workshop output targets and runtime versions will be covered by E-level
-  scenarios beyond the current corpus (tracked in COMPATIBILITY.md open
-  questions)?
-- What corpus-licensing and local-generation process applies to future OSTW
-  fixtures?
-- What extension mechanism for third-party lint rules is justified by evidence
-  (tracked in issue #89)?
+- This ADR does not choose Workshop output targets or runtime versions for E-level
+  scenarios beyond the declared corpus.
+- Corpus licensing and local-generation processes for OSTW fixtures are outside
+  this ADR's scope.
+- Third-party lint-rule extension mechanisms require a separate,
+  evidence-backed decision.

@@ -5,8 +5,8 @@
 - Amends: [ADR-0008: Tooling-first semantic platform rebaseline](0008-tooling-first-semantic-platform.md)
   (frontend-ownership wording only)
 - Related: [Issue #136](https://github.com/wrightkit/wright/issues/136),
-  [Issue #135](https://github.com/wrightkit/wright/issues/135) (v0.2 release
-  coordination), [docs/architecture.md](../architecture.md),
+  [Issue #135](https://github.com/wrightkit/wright/issues/135),
+  [docs/architecture.md](../architecture.md),
   [docs/licensing.md](../licensing.md),
   [language-provider-protocol#1](https://github.com/wrightkit/language-provider-protocol/issues/1)
 
@@ -18,20 +18,14 @@ compilation, source-aware analysis, agent source editing, CI, WASM/embedding,
 and long-term ecosystem independence", listing Vanilla Workshop, OPY, and OSTW
 as Wright-owned frontends.
 
-The ecosystem has since created dedicated repositories for these
-responsibilities: `workshop-rs` (canonical Workshop core), `opy-rs` (OPY
-provider), `del-rs` (independent DEL/OSTW-compatible provider), and
-`language-provider-protocol` (neutral provider contract). Release coordination
-[#135](https://github.com/wrightkit/wright/issues/135) makes the
-multi-repository architecture the v0.2 target: Wright consumes `workshop-rs`
-and LPP-conformant providers, with OPY and DEL provider cutover following in
-v0.3 and v0.4.
+The ecosystem created dedicated repositories for these responsibilities:
+`workshop-rs` (canonical Workshop core), `opy-rs` (OPY provider), `del-rs`
+(independent DEL/OSTW-compatible provider), and
+`language-provider-protocol` (neutral provider contract). This decision places
+Wright's integration boundary at `workshop-rs` and LPP-conformant providers.
 
-The current in-repo crates (`crates/wright-opy`, `crates/wright-ostw`,
-`crates/wright-ir`; the `crates/wright-workshop` cutover adapter was removed
-after its call-site migration completed) are a migration state: they
-coexist inside this repository until extraction completes. They do not define
-the target ownership.
+Repository layout is not an ownership authority. In-repository implementation
+locations and extraction work do not change the ownership declared below.
 
 Licensing facts differ per upstream reference (recorded in
 [`docs/compatibility/upstream-references.md`](../compatibility/upstream-references.md)):
@@ -71,9 +65,7 @@ an LPP client; providers implement an LPP server.
 
 Providers and the canonical core must not depend back on Wright tooling
 internals. Wright consumes provider contracts and `workshop-rs` public
-contracts; it must not leak tooling internals into them. During the migration
-period the same rule applies to the in-repo frontend crates: they stay
-decoupled from tooling internals and must not gain new dependencies on them.
+contracts; it must not leak tooling internals into them.
 
 ### 4. Amendment of ADR-0008 decision 2
 
@@ -105,7 +97,7 @@ repository-wide frontend licensing assumption:
   be read for behavior but must not be copied, imported, or redistributed;
   only the MIT-licensed VS Code extension subdirectory is MIT.
 - **`workshop-rs`** must not import Blizzard-IP-adjacent game-derived data
-  (for example OSTW `Elements.json`) into its canonical catalog; catalog
+  (such as OSTW `Elements.json`) into its canonical catalog; catalog
   provenance and version boundaries are its own contracts.
 - **Wright** remains AGPL-3.0-or-later until a provenance and contributor
   audit enables a different license; final Wright relicensing is not decided
@@ -117,7 +109,7 @@ be combined or distributed.
 
 ### 6. Unlicensed upstream internals are not an implementation source
 
-Unlicensed upstream implementation internals (for example the OSTW compiler)
+Unlicensed upstream implementation internals (such as the OSTW compiler)
 are not an implementation source for independently compatible providers.
 Behavior observed through documented, lawful compatibility tests and pinned
 oracles is a permitted input; copying or mechanically translating unlicensed
@@ -128,11 +120,10 @@ implementation internals is not.
 - ADR-0008's frontend-ownership wording is amended; its tooling-first and
   semantic-compatibility decisions remain normative.
 - [`docs/architecture.md`](../architecture.md) and
-  [`docs/licensing.md`](../licensing.md) distinguish the current migration
-  state (in-repo crates under AGPL-3.0-or-later) from the target ownership
-  (independent provider repositories with their own provenance records).
-- Extraction and cutover proceed per release coordination #135: `workshop-rs`
-  cutover in v0.2, `opy-rs` in v0.3, `del-rs` in v0.4.
+  [`docs/licensing.md`](../licensing.md) distinguish repository ownership from
+  implementation location and provider provenance.
+- Repository extraction and provider cutover are execution concerns; they do
+  not alter the ownership or dependency direction in this ADR.
 - LPP request/response schema design belongs to `language-provider-protocol`
   (issue language-provider-protocol#1), not to Wright.
 
@@ -145,12 +136,9 @@ to `opy-rs` and `del-rs`. Tooling-first priority, semantic compatibility over
 output identity, Workshop-centered interoperability, and source-oriented
 mutation are unchanged.
 
-## Open questions
+## Scope boundaries
 
-- Which licenses will `opy-rs` and `del-rs` adopt, and when does each
-  provenance and contributor audit complete (owner: the respective
-  repository)?
-- When does final Wright relicensing proceed, and under what terms (owner:
-  Wright product leadership, after the provenance and contributor audit)?
-- Which LPP v1 schema and conformance requirements are accepted (owner:
-  `language-provider-protocol`, issue language-provider-protocol#1)?
+- License selection and relicensing are outside this ADR; each repository or
+  product owner must decide them from its provenance and contributor evidence.
+- LPP v1 schema and conformance requirements belong to
+  `language-provider-protocol` and are outside this ownership decision.

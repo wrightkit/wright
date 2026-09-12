@@ -11,12 +11,12 @@
 
 ## Context
 
-M3 must establish Wright's durable Rust IR so later analysis, lowering,
-optimization, emission, and tooling can share one data model. The protocol
+Wright needs a durable Rust IR so analysis, lowering, optimization, emission,
+and tooling can share one data model. The protocol
 types from ADR-0005 (`wright/opy-hir` v1, in `wright-core::hir`) are the
 serialized bridge contract between the frontend adapter and the core; they
 use raw strings for identity (symbol names, function names, operator
-spellings) and own no storage strategy. M3 requires a compiler-side model with
+spellings) and own no storage strategy. The compiler-side model requires
 strongly typed identity, arena storage, source provenance, and an explicit
 HIR-to-Workshop-IR boundary, without reimplementing OverPy internals or adding
 speculative nodes beyond the v0.1 corpus.
@@ -27,7 +27,7 @@ A new `wright-ir` crate owns the compiler IR. It is protocol-agnostic and has
 no dependencies.
 
 1. **Typed IDs and arenas.** Every stable identity is a `wright_ir::ids::Id<T>`
-   newtype index into an `wright_ir::arena::Arena<T>`: files, global/player
+   newtype index into a `wright_ir::arena::Arena<T>`: files, global/player
    variables, subroutines, constants, macros, rules, statements, expressions,
    workshop values, and workshop actions. IDs are opaque, comparable, and
    type-safe: an `ExprId` cannot be passed where a `RuleId` is expected.
@@ -42,7 +42,7 @@ no dependencies.
    (`GlobalVarId`, `PlayerVarId`, `SubroutineId`, `ConstantId`, `MacroId`)
    instead of name strings, a typed `BinaryOp`/`UnaryOp` instead of operator
    strings, and arena storage for statements and expressions.
-   `wright_ir::wir` is the Workshop IR: workshop program structure (variables
+   `wright_ir::wir` is the Workshop IR: Workshop program structure (variables
    with indexes, subroutines with indexes, rules with events, conditions,
    actions, and values) with Wright-owned action/value nodes and a documented
    name policy (§Names below).
@@ -57,11 +57,11 @@ no dependencies.
 Workshop IR keeps Wright's source-level function names (`len`, `debug`,
 `wait`, `createBeam`, `range`) as the `name` on call/value nodes. Mapping
 those to Workshop presentation names (`Count Of`, `Create HUD Text`, …) is an
-emission concern for a later milestone, not IR content. Exceptions: `debug`
+emission concern for a separate emission layer, not IR content. Exceptions: `debug`
 and `print` lower to first-class `Action::Debug`/`Action::Print` nodes, and
 `.append` lowers to `ModifyGlobalVariable`/`ModifyPlayerVariable` with an
 `AppendToArray` op, because those express distinct source intents that the
-workshop expresses as structured ops.
+Workshop expresses as structured ops.
 
 ## Consequences
 
@@ -77,11 +77,11 @@ IR equality is not semantic evidence (ADR-0003). This ADR defines the model
 behind S/D-level evidence only; no N/E-level claim is made. The v0.1 corpus
 must convert and lower without lossy catch-all nodes.
 
-## Open questions
+## Scope boundaries
 
-* Whether `debug`/`print` should become HUD actions in the Workshop IR once an
-  emitter exists, and where the function-name mapping table should live.
-* Whether call names need interning once analysis (M4) needs identity
-  comparisons at scale.
-* How user-defined enums (folded by the frontend today) should be represented
-  once a native frontend milestone exists.
+* Whether `debug`/`print` should become HUD actions in the Workshop IR and where
+  the function-name mapping table should live are outside this IR decision.
+* Call-name interning is outside this decision; it requires evidence that
+  analysis needs identity comparisons at scale.
+* User-defined enum representation is outside this decision and requires a
+  frontend contract that preserves those declarations.

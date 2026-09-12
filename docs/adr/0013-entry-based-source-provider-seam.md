@@ -18,8 +18,8 @@ those changes landed.
 
 ## Context
 
-Source languages have different project models. Raw Workshop is a single
-source, OPY owns `#!mainFile`, includes, preprocessing, and source closure,
+Source languages have different project models: raw Workshop is a single
+source; OPY owns `#!mainFile`, includes, preprocessing, and source closure;
 and DEL/OSTW owns its project discovery and imports. A Wright-side generic
 workspace scanner or client-supplied full document set would make Wright a
 second source-language owner.
@@ -53,8 +53,8 @@ Provider-returned canonical Workshop is parsed and validated through the
 canonical Workshop owner. Canonical evidence is mapped back to authored source
 only when the contract carries a real mapping. Otherwise it is explicitly
 unmapped/generated/provider-artifact evidence; Wright never fabricates source
-locations. Provider-backed stdin is refused when the entry-based contract
-cannot represent it rather than being assigned a synthetic path.
+locations. Provider-backed stdin is rejected when the entry-based contract cannot
+represent it, rather than being assigned a synthetic path.
 
 ## Alternatives considered
 
@@ -86,10 +86,9 @@ source-span mapping when the owner/provider cannot supply one. LPP wire
 versions and coordinate encodings remain owned by the protocol and adapter,
 not by this product-level ADR.
 
-## Open questions
+## Scope boundaries
 
-- A future source-map contract may provide authored-source attribution for
-  more canonical evidence; it requires owner/protocol evidence before being
-  added.
-- DEL/OSTW provider delivery remains a future owner-backed integration and is
-  not inferred from the OPY implementation.
+- This ADR does not define a source-map contract for authored-source
+  attribution; adding one requires owner/protocol evidence.
+- This ADR does not decide DEL/OSTW provider delivery; any such integration
+  requires owner-backed evidence and a separate decision when material.

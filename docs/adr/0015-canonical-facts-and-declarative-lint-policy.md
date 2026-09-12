@@ -18,12 +18,12 @@ extension architecture. This ADR did not exist when those changes landed.
 
 ## Context
 
-Wright's built-in lint rules should remain small and low false-positive, while
-users need reusable Workshop-oriented policy across raw Workshop and
-owner-backed source languages. Analysis becomes contextual quickly: a
-persistent object or loop pattern can be legitimate depending on reevaluation,
-lifecycle, and cleanup behavior. Encoding every heuristic as a built-in rule
-would make the analyzer both brittle and hard to extend.
+Wright's built-in lint rules should remain focused and maintain a low
+false-positive rate, while users need reusable Workshop-oriented policy across
+raw Workshop and owner-backed source languages. Analysis becomes contextual
+quickly: a persistent object or loop pattern can be legitimate depending on
+reevaluation, lifecycle, and cleanup behavior. Encoding every heuristic as a
+built-in rule would make the analyzer both brittle and hard to extend.
 
 Workshop semantics, identities, and locale mappings already have canonical
 owners. Wright needs a policy boundary that consumes those facts without
@@ -46,10 +46,10 @@ Wright separates four responsibilities:
    reasons when an owner fact is missing.
 
 Rules canonicalize localized or canonical Workshop spellings through
-`workshop-rs`. The YAML vocabulary is intentionally bounded and Workshop
-shaped; it is not a general query language, plugin ABI, package registry, or
-automatic edit contract. Native rules remain valid where a declarative matcher
-would distort a richer analysis.
+`workshop-rs`. The YAML vocabulary is intentionally bounded and
+Workshop-shaped; it is not a general query language, plugin ABI, package
+registry, or automatic edit contract. Native rules remain valid where a
+declarative matcher would distort a richer analysis.
 
 External rules use a namespaced identity; Wright-owned built-ins retain their
 existing bare stable IDs and reserve the `wright` namespace. Declarative
@@ -81,7 +81,7 @@ correctness or override Wright's evidence classification.
 - The rule and project configuration surfaces are stable enough for CLI,
   agent, embedding, query, and documentation consumers, while execution and
   source edits remain Wright-owned concerns.
-- Future programmable extensions require a separate evidence-backed decision.
+- Programmable extensions require a separate evidence-backed decision.
 
 ## Compatibility impact
 
@@ -90,9 +90,9 @@ between semantic facts, rule definitions, and project severity; it does not
 move Workshop or source-language semantics into Wright. JSON remains the
 machine-readable output form, while YAML is the local authoring form.
 
-## Open questions
+## Scope boundaries
 
-- Additional facts and matcher capabilities should be added only when real
-  rules and owner evidence demonstrate the need.
-- A remote rule distribution or programmable runtime is not accepted by this
-  ADR and requires a future decision.
+- Additional facts and matcher capabilities require evidence from real rules
+  and owner-backed workflows.
+- Remote rule distribution and programmable runtimes are outside this ADR and
+  require a separate decision.

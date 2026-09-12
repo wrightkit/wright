@@ -53,7 +53,7 @@ record; R2 is an exact installer distribution copy.
 
 The same repository-namespace/latest-pointer/versioned-artifact shape is used
 for first-party provider releases where the owner repository publishes that
-contract, but Wright's binary release and provider release remain separate
+contract, but Wright's binary releases and provider releases remain separately
 owned products.
 
 ## Alternatives considered
@@ -86,10 +86,10 @@ and canonical release provenance remain unchanged. The R2 object layout is the
 supported installer contract; the superseded root-level and duplicate latest
 artifact paths are not retained as a second supported route.
 
-## Open questions
+## Scope boundaries
 
-- Cache policy and infrastructure enforcement remain operational concerns of
-  the R2 deployment, while the pointer-versus-immutable-object distinction is
-  part of this contract.
-- Additional repositories may adopt the same shape only when their own owner
-  and release evidence justify it.
+- Cache policy and infrastructure enforcement are operational concerns of the
+  R2 deployment; the pointer-versus-immutable-object distinction is part of
+  this contract.
+- This ADR does not decide whether additional repositories adopt the same
+  shape; each adoption requires its own owner and release evidence.

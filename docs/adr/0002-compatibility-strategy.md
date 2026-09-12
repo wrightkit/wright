@@ -41,14 +41,14 @@ semantic evidence, and a successful build is not compatibility evidence. The
 release gates and fixture requirements are normative in
 [`docs/compatibility.md`](../compatibility.md).
 
-[ADR-0008](0008-tooling-first-semantic-platform.md) adds a priority rule over
+[ADR-0008](0008-tooling-first-semantic-platform.md) adds a priority rule to
 this framework: **E-level observable semantics outrank N-level output-text
 identity**. Presentation-only N-level differences must be evaluated against the
 declared observable and documented compatibility surface before creating
 implementation work; they are not automatically product bugs.
 
-## Open questions
+## Scope boundaries
 
-The project still needs to choose its supported OverPy versions, diagnostic
-schema, canonical normalizer, semantic test runtime, and redistributable corpus
-policy.
+This ADR does not choose the supported OverPy versions, diagnostic schema,
+canonical normalizer, semantic test runtime, or redistributable corpus policy.
+Each choice requires its own evidence and decision.

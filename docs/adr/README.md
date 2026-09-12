@@ -10,11 +10,12 @@ Current architecture contracts are routed from [`docs/architecture/README.md`](.
 * An ADR starts as `Proposed` and becomes `Accepted` when the decision is approved.
 * `Superseded` ADRs remain for history and link to the decision that replaces them.
 * An accepted ADR is not rewritten to hide history. A material change gets a new ADR when the rationale/decision history is worth preserving, while the current invariant is reflected in `docs/architecture/` or another focused current contract.
-* Decisions state their scope, consequences, compatibility impact, and open questions. Historical implementation mechanisms may remain in the record without becoming current architecture authority.
+* Decisions state their scope, consequences, compatibility impact, and scope boundaries. Historical implementation mechanisms may remain in the record without becoming current architecture authority.
 * Do not use ADR status to encode current release versions, feature counts, migration progress, or Issue/PR state.
 
 The [post-ADR-0010 decision inventory](post-0010-inventory.md) records the
-candidate classification and evidence for the latest backfill set.
+candidate classification and evidence for the backfill set covered by its
+audit date.
 
 ## Index
 
