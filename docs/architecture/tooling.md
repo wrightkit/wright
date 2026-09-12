@@ -2,6 +2,11 @@
 
 Wright owns cross-language product tooling over semantic information supplied by the owning implementations and canonical Workshop.
 
+Decision history: the distinct command workflows are recorded in
+[ADR-0011](../adr/0011-distinct-tooling-workflows.md), and the canonical-facts
+and lint-policy split is recorded in
+[ADR-0015](../adr/0015-canonical-facts-and-declarative-lint-policy.md).
+
 ## Tooling surfaces
 
 Wright owns:

@@ -2,6 +2,10 @@
 
 Wright is WrightKit's user-facing tooling and integration product. It does not own the raw Workshop, OverPy, or DEL/OSTW language implementations.
 
+Decision history: [ADR-0010](../adr/0010-independent-implementations-and-wright-integration.md)
+records the independent-implementation and Wright product boundary. The
+post-ADR-0010 audit is indexed in the [ADR history](../adr/README.md).
+
 ## Repository ownership
 
 - `workshop-rs` owns canonical raw Workshop semantics, parser, WIR, catalog, settings/localization, validation, emission, and Workshop-owned gameplay/query data.

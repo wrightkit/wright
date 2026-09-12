@@ -2,6 +2,11 @@
 
 Wright integrates independently usable language/Workshop implementations into one product surface. Integration must preserve owner semantics rather than reimplement them.
 
+Decision history: the entry-based product seam and canonical/provenance
+handoff are recorded in
+[ADR-0013](../adr/0013-entry-based-source-provider-seam.md), building on
+[ADR-0010](../adr/0010-independent-implementations-and-wright-integration.md).
+
 ## Integration flow
 
 For a source-language workflow:

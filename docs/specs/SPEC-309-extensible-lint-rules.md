@@ -8,6 +8,9 @@ owner: Wright
 freshness: live
 ---
 
+Decision history: [ADR-0015](../adr/0015-canonical-facts-and-declarative-lint-policy.md)
+records the rationale for this live contract.
+
 ## Goal
 
 Provide a small, local, and stable contract for adding analysis and lint
