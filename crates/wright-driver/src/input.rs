@@ -225,9 +225,9 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
     if ostw_project {
         kinds.push(SourceKind::Ostw);
     }
-    // A conventional OPY/DEL project may contain generated Workshop files;
-    // only consider raw Workshop when no source-owner project candidate exists.
-    if kinds.is_empty() && workshop_project {
+    // A Workshop file cannot be distinguished from an owner-generated artifact
+    // during Wright's minimum inspection, so retain it as an ambiguity signal.
+    if workshop_project {
         kinds.push(SourceKind::Workshop);
     }
     match kinds.as_slice() {
@@ -418,5 +418,38 @@ fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
             kind: "auto".to_string(),
             locale: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn directory_detection_reports_workshop_and_opy_as_ambiguous() {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let directory = std::env::temp_dir().join(format!(
+            "wright-input-mixed-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&directory).expect("create test directory");
+        std::fs::write(directory.join("main.opy"), "rule \"main\":\n    pass\n")
+            .expect("write OPY source");
+        std::fs::write(directory.join("generated.txt"), "rule (\"generated\") {}\n")
+            .expect("write Workshop source");
+
+        let config = SessionConfig {
+            input: InputSpec::Path(directory.clone()),
+            kind: SourceKind::Auto,
+            ..SessionConfig::default()
+        };
+        let error = resolve(&config).expect_err("mixed source kinds must be ambiguous");
+        assert_eq!(error.code, "input-kind-ambiguous");
+        assert!(error.message.contains("opy"));
+        assert!(error.message.contains("workshop"));
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
     }
 }
