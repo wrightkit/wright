@@ -293,14 +293,19 @@ fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {
 fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionConfig {
     let input = match &common.input {
         Some(path) if path.as_os_str() != "-" => InputSpec::Path(path.clone()),
-        _ => InputSpec::Stdin,
+        Some(_) => InputSpec::Stdin,
+        None => InputSpec::Path(".".into()),
     };
+    let provider_requested = provider_workflow || common.opy_provider.is_some();
     SessionConfig {
         input,
-        source_backend: if is_opy_input(common)
-            && (provider_workflow || common.opy_provider.is_some())
-        {
+        source_backend: if is_opy_input(common) && provider_requested {
             SourceBackend::Provider
+        } else if provider_requested
+            && common.kind == cli::SourceKindArg::Auto
+            && is_directory_input(common)
+        {
+            SourceBackend::Auto
         } else {
             SourceBackend::Native
         },
@@ -340,6 +345,15 @@ fn is_opy_input(common: &CommonArgs) -> bool {
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| extension.eq_ignore_ascii_case("opy")),
         _ => false,
+    }
+}
+
+fn is_directory_input(common: &CommonArgs) -> bool {
+    match common.input.as_deref() {
+        None => true,
+        Some(path) if path.as_os_str() == "." => true,
+        Some(path) if path.as_os_str() == "-" => false,
+        Some(path) => std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()),
     }
 }
 
@@ -406,6 +420,26 @@ mod tests {
         assert_eq!(
             config_from_common(&explicit_provider, false).source_backend,
             SourceBackend::Provider
+        );
+    }
+
+    #[test]
+    fn omitted_input_targets_the_current_directory_and_dash_stays_stdin() {
+        let omitted = common(None, cli::SourceKindArg::Auto);
+        assert_eq!(
+            config_from_common(&omitted, true).input,
+            InputSpec::Path(".".into())
+        );
+        assert_eq!(
+            config_from_common(&omitted, true).source_backend,
+            SourceBackend::Auto
+        );
+
+        let stdin = common(Some("-"), cli::SourceKindArg::Auto);
+        assert_eq!(config_from_common(&stdin, true).input, InputSpec::Stdin);
+        assert_eq!(
+            config_from_common(&stdin, true).source_backend,
+            SourceBackend::Native
         );
     }
 }

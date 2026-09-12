@@ -13,6 +13,13 @@ use sha2::{Digest, Sha256};
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Stage};
 
+/// Whether a resolved input is a single source file or a project target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputTarget {
+    File,
+    Directory,
+}
+
 /// A resolved, ready-to-load input.
 #[derive(Debug, Clone)]
 pub struct ResolvedInput {
@@ -22,6 +29,8 @@ pub struct ResolvedInput {
     pub text: String,
     /// The on-disk path, when the input came from a file.
     pub path: Option<PathBuf>,
+    /// The resolved filesystem target shape.
+    pub target: InputTarget,
     /// The include root (`.opy` include base); the input's directory by default.
     pub root: PathBuf,
     /// The invocation working directory used to resolve a relative entry.
@@ -67,7 +76,25 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
     } else {
         cwd.join(path)
     };
-    let bytes = std::fs::read(&path).map_err(|error| {
+    let metadata = std::fs::metadata(&path).map_err(|error| {
+        Diagnostic::error(
+            "input-io",
+            Stage::Discovery,
+            format!("cannot read input '{}': {error}", path.display()),
+        )
+    })?;
+    if metadata.is_dir() {
+        return resolve_directory(&path, config, cwd);
+    }
+    resolve_file(&path, config, cwd)
+}
+
+fn resolve_file(
+    path: &Path,
+    config: &SessionConfig,
+    cwd: PathBuf,
+) -> Result<ResolvedInput, Diagnostic> {
+    let bytes = std::fs::read(path).map_err(|error| {
         Diagnostic::error(
             "input-io",
             Stage::Discovery,
@@ -76,7 +103,7 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
     })?;
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let kind = match config.kind {
-        SourceKind::Auto => kind_from_extension(&path)?,
+        SourceKind::Auto => kind_from_extension(path)?,
         other => other,
     };
     let root = match &config.root {
@@ -87,18 +114,178 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from(".")),
     };
-    let display = display_path(&path);
+    let display = display_path(path);
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
         kind,
         text,
         path: Some(path.to_path_buf()),
+        target: InputTarget::File,
         root,
         cwd,
         display,
         identity: sha256_hex(&bytes),
         origin,
     })
+}
+
+fn resolve_directory(
+    path: &Path,
+    config: &SessionConfig,
+    cwd: PathBuf,
+) -> Result<ResolvedInput, Diagnostic> {
+    let kind = match config.kind {
+        SourceKind::Auto => detect_directory_kind(path)?,
+        SourceKind::Workshop => {
+            let files = source_files(path, SourceKind::Workshop);
+            if files.len() != 1 {
+                return Err(directory_source_count_error(
+                    path,
+                    SourceKind::Workshop,
+                    &files,
+                ));
+            }
+            return resolve_file(&files[0], config, cwd);
+        }
+        SourceKind::Protocol => {
+            return Err(Diagnostic::error(
+                "input-kind-directory-unsupported",
+                Stage::Discovery,
+                format!(
+                    "protocol input '{}' must name a file, not a directory",
+                    path.display()
+                ),
+            ));
+        }
+        other => other,
+    };
+    if kind == SourceKind::Workshop {
+        let files = source_files(path, SourceKind::Workshop);
+        if files.len() != 1 {
+            return Err(directory_source_count_error(
+                path,
+                SourceKind::Workshop,
+                &files,
+            ));
+        }
+        return resolve_file(&files[0], config, cwd);
+    }
+    if kind == SourceKind::Auto {
+        return Err(Diagnostic::error(
+            "input-kind-unknown",
+            Stage::Discovery,
+            format!(
+                "cannot detect a source owner in directory '{}'; pass `--kind opy|ostw|workshop` or target a file",
+                path.display()
+            ),
+        ));
+    }
+    let root = config
+        .root
+        .as_ref()
+        .map(|root| absolute_from(&cwd, root))
+        .unwrap_or_else(|| path.to_path_buf());
+    let display = display_path(path);
+    let origin = origin_for(kind, config.locale.as_deref());
+    Ok(ResolvedInput {
+        kind,
+        text: String::new(),
+        path: Some(path.to_path_buf()),
+        target: InputTarget::Directory,
+        root,
+        cwd,
+        display,
+        identity: sha256_hex(path.to_string_lossy().as_bytes()),
+        origin,
+    })
+}
+
+fn absolute_from(cwd: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
+}
+
+fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
+    let mut kinds = Vec::new();
+    for kind in [SourceKind::Opy, SourceKind::Ostw, SourceKind::Workshop] {
+        if !source_files(path, kind).is_empty() {
+            kinds.push(kind);
+        }
+    }
+    match kinds.as_slice() {
+        [kind] => Ok(*kind),
+        [] => Err(Diagnostic::error(
+            "input-kind-unknown",
+            Stage::Discovery,
+            format!(
+                "cannot detect a source owner in directory '{}'; pass `--kind opy|ostw|workshop` or target a file",
+                path.display()
+            ),
+        )),
+        _ => Err(Diagnostic::error(
+            "input-kind-ambiguous",
+            Stage::Discovery,
+            format!(
+                "directory '{}' contains multiple source kinds ({}); pass `--kind opy|ostw|workshop` or target a file",
+                path.display(),
+                kinds
+                    .iter()
+                    .map(|kind| kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )),
+    }
+}
+
+fn source_files(path: &Path, kind: SourceKind) -> Vec<PathBuf> {
+    let mut pending = vec![path.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            let name = entry.file_name();
+            if entry_path.is_dir() {
+                if name != ".git" && name != "target" && name != "node_modules" {
+                    pending.push(entry_path);
+                }
+            } else if entry_path.is_file() && kind_from_extension(&entry_path).ok() == Some(kind) {
+                files.push(entry_path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+fn directory_source_count_error(path: &Path, kind: SourceKind, files: &[PathBuf]) -> Diagnostic {
+    let detail = if files.is_empty() {
+        "no matching source file was found".to_string()
+    } else {
+        format!(
+            "multiple matching source files were found: {}",
+            files
+                .iter()
+                .map(|file| file.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    Diagnostic::error(
+        "input-kind-ambiguous",
+        Stage::Discovery,
+        format!(
+            "Workshop directory '{}' must contain exactly one source file; {detail}; pass an explicit file path",
+            path.display()
+        )
+        .replace("Workshop directory", &format!("{} directory", kind.as_str())),
+    )
 }
 
 fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
@@ -132,6 +319,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
         kind,
         text,
         path: None,
+        target: InputTarget::File,
         root,
         cwd,
         display,

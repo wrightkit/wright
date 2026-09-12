@@ -16,6 +16,13 @@ pub enum SourceLanguage {
     Opy,
 }
 
+/// The filesystem target shape handed to a source owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceTargetKind {
+    File,
+    Directory,
+}
+
 impl SourceLanguage {
     /// The stable product spelling.
     pub const fn as_str(self) -> &'static str {
@@ -33,6 +40,8 @@ pub enum SourceBackend {
     /// Use the implementation linked into Wright for the selected source kind.
     #[default]
     Native,
+    /// Select the provider only after the resolved target's source owner is known.
+    Auto,
     /// Require the explicitly injected source provider.
     Provider,
 }
@@ -44,6 +53,8 @@ pub struct SourceTarget {
     pub language: SourceLanguage,
     /// The one path selected by the user, resolved relative to [`cwd`].
     pub entry: PathBuf,
+    /// Whether `entry` names a file entry or a project directory.
+    pub kind: SourceTargetKind,
     /// The invocation working directory used to resolve relative CLI paths.
     pub cwd: PathBuf,
     /// The CLI-supplied project root, when one was provided.
@@ -78,9 +89,21 @@ impl SourceTarget {
         Self {
             language,
             entry,
+            kind: SourceTargetKind::File,
             cwd,
             project_root: None,
         }
+    }
+
+    /// Construct a directory target and resolve it from `cwd`.
+    pub fn directory(
+        language: SourceLanguage,
+        directory: impl Into<PathBuf>,
+        cwd: impl Into<PathBuf>,
+    ) -> Self {
+        let mut target = Self::new(language, directory, cwd);
+        target.kind = SourceTargetKind::Directory;
+        target
     }
 
     /// Attach the CLI-supplied project root without changing owner-side
@@ -93,6 +116,11 @@ impl SourceTarget {
     /// The entry path as a [`Path`].
     pub fn entry_path(&self) -> &Path {
         &self.entry
+    }
+
+    /// Whether this target delegates entry discovery to the source owner.
+    pub fn is_directory(&self) -> bool {
+        self.kind == SourceTargetKind::Directory
     }
 }
 
@@ -219,6 +247,11 @@ impl LppSourceProvider {
             uri,
             language_id: SourceLanguage::Opy.as_str().to_string(),
             version: 1,
+            kind: if target.is_directory() {
+                wright_lpp::ProjectTargetKind::Directory
+            } else {
+                wright_lpp::ProjectTargetKind::File
+            },
         })
     }
 
@@ -235,14 +268,20 @@ impl LppSourceProvider {
         target: &SourceTarget,
     ) -> Result<SourceCompilation, SourceProviderError> {
         let entry = self.entry(target)?;
-        let result = self
-            .provider
-            .check_entry(
+        let result = if target.is_directory() {
+            self.provider.check_target(
                 &entry,
                 Self::project_root_uri(target).as_deref(),
                 self.locale.as_deref(),
             )
-            .map_err(provider_error)?;
+        } else {
+            self.provider.check_entry(
+                &entry,
+                Self::project_root_uri(target).as_deref(),
+                self.locale.as_deref(),
+            )
+        }
+        .map_err(provider_error)?;
         Ok(SourceCompilation {
             workshop_text: None,
             locale: self.locale.clone(),
@@ -269,14 +308,20 @@ impl SourceProvider for LppSourceProvider {
 
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
         let entry = self.entry(target)?;
-        let result = self
-            .provider
-            .compile_entry(
+        let result = if target.is_directory() {
+            self.provider.compile_target(
                 &entry,
                 Self::project_root_uri(target).as_deref(),
                 self.locale.as_deref(),
             )
-            .map_err(provider_error)?;
+        } else {
+            self.provider.compile_entry(
+                &entry,
+                Self::project_root_uri(target).as_deref(),
+                self.locale.as_deref(),
+            )
+        }
+        .map_err(provider_error)?;
         let workshop_text = match result.artifact {
             Some(artifact) if artifact.format == "workshop-rs/text-v1" => Some(artifact.content),
             Some(artifact) => {

@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use wright_driver::source_provider::{
     SourceCompilation, SourceLanguage, SourceProvider, SourceProviderError, SourceTarget,
+    SourceTargetKind,
 };
 use wright_driver::{
     CompilerSession, Diagnostic, InputSpec, Origin, SessionConfig, SourceBackend, SourceKind, Stage,
@@ -143,6 +144,34 @@ fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_h
     );
     assert_eq!(*operations.lock().expect("operation lock"), vec!["compile"]);
     cleanup(dir);
+}
+
+#[test]
+fn provider_backend_delegates_directory_discovery_to_the_source_owner() {
+    let (dir, _) = temp_entry();
+    let target = Arc::new(Mutex::new(None));
+    let provider = RecordingProvider {
+        target: target.clone(),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: Some(SourceCompilation::success(workshop_fixture(
+            "real-world/overpy-cronch",
+        ))),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(dir.clone()),
+        kind: SourceKind::Auto,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(result.ok, "provider check: {:?}", result.diagnostics);
+    let selected = target.lock().expect("target lock").clone().expect("target");
+    assert_eq!(selected.kind, SourceTargetKind::Directory);
+    assert_eq!(selected.entry, dir);
+    cleanup(selected.entry);
 }
 
 #[test]

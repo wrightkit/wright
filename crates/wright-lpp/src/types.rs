@@ -73,13 +73,29 @@ pub struct Document {
 /// A set of documents keyed by URI, supplied with a request.
 pub type DocumentSet = BTreeMap<String, Document>;
 
-/// A client-selected entry for provider-owned filesystem project loading.
+/// A client-selected file entry or directory target for provider-owned
+/// filesystem project loading.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectEntry {
     pub uri: String,
     #[serde(rename = "languageId")]
     pub language_id: String,
     pub version: i64,
+    #[serde(default, skip_serializing_if = "project_target_is_file")]
+    pub kind: ProjectTargetKind,
+}
+
+/// The filesystem target shape introduced by LPP 1.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectTargetKind {
+    #[default]
+    File,
+    Directory,
+}
+
+fn project_target_is_file(kind: &ProjectTargetKind) -> bool {
+    matches!(kind, ProjectTargetKind::File)
 }
 
 /// The severity of a provider diagnostic.
