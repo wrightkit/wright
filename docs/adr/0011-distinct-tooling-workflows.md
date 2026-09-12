@@ -82,9 +82,9 @@ contract change: `analyze` reports facts, while `lint` owns findings and rule
 metadata. Existing owner semantics and canonical Workshop ownership are
 unchanged.
 
-## Open questions
+## Scope boundaries
 
-- Which additional semantic measurements justify promotion into the bounded
-  `analyze` report remains evidence-driven.
-- Runtime behavior and server cost remain separate from static analysis
-  evidence, as described by the current tooling contract.
+- Additional semantic measurements may enter the bounded `analyze` report only
+  with evidence from real rules and workflows.
+- Runtime behavior and server cost are outside static-analysis evidence and are
+  governed by the tooling contract.

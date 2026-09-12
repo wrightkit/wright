@@ -31,8 +31,8 @@ Backends consume Workshop IR and do not reparse source or depend on frontend
 
 Frontend and backend changes are isolated behind named contracts, and the
 semantic meaning of a program can be tested independently of output formatting.
-The exact fields, versioning policy, and first supported construct set must be
-defined when the first implementation path requires them.
+The exact fields, versioning policy, and first supported construct set belong to
+the contract that introduces an executable implementation path.
 
 ## Compatibility impact
 
@@ -41,8 +41,8 @@ equality alone does not establish semantic compatibility. Provenance and
 determinism are part of the transformation contract and should be covered by
 tests as the representations become executable.
 
-## Open questions
+## Scope boundaries
 
-The initial HIR/Workshop IR schema, identity rules, diagnostic code set, and
-versioning policy are intentionally deferred until a concrete compiler slice is
-implemented.
+This ADR does not define the initial HIR/Workshop IR schema, identity rules,
+diagnostic code set, or versioning policy. An executable implementation path
+must define those details at its own contract boundary.

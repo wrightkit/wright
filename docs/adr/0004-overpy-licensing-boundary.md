@@ -30,9 +30,8 @@ documented boundaries and translate into Wright-owned representations.
 
 Reference fixtures and generated artifacts require provenance and a
 redistribution review before they enter the repository or a release. No
-OverPy-dependent component is currently allow-listed in the checkout; a future
-component must identify its license, owner, invocation method, and distribution
-status before use.
+OverPy-dependent component may be used without identifying and reviewing its
+license, owner, invocation method, and distribution status.
 
 ## Consequences
 
@@ -54,9 +53,9 @@ permission to copy or redistribute OverPy. Reference identity, fixture
 provenance, and the invocation or comparison method remain part of the evidence
 record.
 
-## Open questions
+## Scope boundaries
 
-Qualified legal advice is still required before bundling or linking OverPy,
+Qualified legal advice is required before bundling or linking OverPy,
 distributing generated reference artifacts, or selecting a hosted-service
-model. The exact license and notices for every OverPy version used must also be
+model. The exact license and notices for every OverPy version used must be
 verified before release.

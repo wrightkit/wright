@@ -47,8 +47,8 @@ identity**. Presentation-only N-level differences must be evaluated against the
 declared observable and documented compatibility surface before creating
 implementation work; they are not automatically product bugs.
 
-## Open questions
+## Scope boundaries
 
-The project still needs to choose its supported OverPy versions, diagnostic
-schema, canonical normalizer, semantic test runtime, and redistributable corpus
-policy.
+This ADR does not choose the supported OverPy versions, diagnostic schema,
+canonical normalizer, semantic test runtime, or redistributable corpus policy.
+Each choice requires its own evidence and decision.

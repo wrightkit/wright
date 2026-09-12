@@ -23,7 +23,8 @@ Describe the direct benefits, costs, constraints, and follow-up work.
 State which syntax, diagnostic, normalized-output, or semantic compatibility
 claims are affected, and what evidence is required.
 
-## Open questions
+## Scope boundaries
 
-List unresolved questions and identify which future milestone or authority can
-answer them. Do not present a question requiring legal advice as settled.
+List unresolved questions that are outside this decision and identify the
+separate decision or authority that can answer them. Do not present a question
+requiring legal advice as settled.

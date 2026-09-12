@@ -81,7 +81,7 @@ correctness or override Wright's evidence classification.
 - The rule and project configuration surfaces are stable enough for CLI,
   agent, embedding, query, and documentation consumers, while execution and
   source edits remain Wright-owned concerns.
-- Future programmable extensions require a separate evidence-backed decision.
+- Programmable extensions require a separate evidence-backed decision.
 
 ## Compatibility impact
 
@@ -90,9 +90,9 @@ between semantic facts, rule definitions, and project severity; it does not
 move Workshop or source-language semantics into Wright. JSON remains the
 machine-readable output form, while YAML is the local authoring form.
 
-## Open questions
+## Scope boundaries
 
-- Additional facts and matcher capabilities should be added only when real
-  rules and owner evidence demonstrate the need.
-- A remote rule distribution or programmable runtime is not accepted by this
-  ADR and requires a future decision.
+- Additional facts and matcher capabilities require evidence from real rules
+  and owner-backed workflows.
+- Remote rule distribution and programmable runtimes are outside this ADR and
+  require a separate decision.
