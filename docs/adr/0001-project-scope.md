@@ -14,9 +14,9 @@ OverPy supplied the `.opy` frontend/parser and the initial compatibility oracle.
 
 Wright v1 was defined as an independently implemented Rust compiler core for an
 OverPy-compatible workflow. The core owns its bridge, HIR, Workshop IR,
-lowering contracts, diagnostics, and backends. Existing OverPy remains an
-external frontend/parser and oracle until a separately approved native frontend
-decision changes that boundary.
+lowering contracts, diagnostics, and backends. At the time of this decision,
+Existing OverPy served as the external frontend/parser and oracle; this ADR did
+not authorize a native frontend or a change to that boundary.
 
 The v1 non-goals are:
 
