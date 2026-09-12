@@ -30,11 +30,13 @@ the observable boundary between these three workflows.
 Wright exposes three distinct workflows over shared owner-backed semantic
 inputs:
 
-1. **`check`** is the correctness gate. It loads the selected source,
-   performs parsing/project loading, semantic resolution, lowering, and
-   canonical validation, and reports frontend, project, semantic, and
-   validation diagnostics. Ordinary configurable lint findings are not part
-   of this gate by default.
+1. **`check`** is the correctness gate for the stages exposed by the selected
+   owner/workflow. It loads the selected source and reports frontend, project,
+   and semantic diagnostics; when the workflow provides lowering and
+   canonical validation, their diagnostics are included as well. A complete
+   compiler backend is not a prerequisite for diagnostic `check`, and an
+   unavailable requested stage remains an explicit owner/provider outcome.
+   Ordinary configurable lint findings are not part of this gate by default.
 2. **`lint`** applies configurable Wright or local rules to semantic facts and
    reports rule findings. Findings retain stable rule identity, effective
    severity, evidence classification, boundedness where applicable, and
