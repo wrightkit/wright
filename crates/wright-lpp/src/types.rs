@@ -184,6 +184,12 @@ pub struct CheckResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompileResult {
     pub diagnostics: Vec<DocumentDiagnostics>,
+    #[serde(
+        rename = "sourceIdentity",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_identity: Option<String>,
     pub artifact: Option<WorkshopArtifact>,
 }
 

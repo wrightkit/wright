@@ -137,7 +137,7 @@ fn resolve_directory(
     let kind = match config.kind {
         SourceKind::Auto => detect_directory_kind(path)?,
         SourceKind::Workshop => {
-            let files = source_files(path, SourceKind::Workshop);
+            let files = direct_source_files(path, SourceKind::Workshop);
             if files.len() != 1 {
                 return Err(directory_source_count_error(
                     path,
@@ -160,7 +160,7 @@ fn resolve_directory(
         other => other,
     };
     if kind == SourceKind::Workshop {
-        let files = source_files(path, SourceKind::Workshop);
+        let files = direct_source_files(path, SourceKind::Workshop);
         if files.len() != 1 {
             return Err(directory_source_count_error(
                 path,
@@ -195,7 +195,10 @@ fn resolve_directory(
         root,
         cwd,
         display,
-        identity: sha256_hex(path.to_string_lossy().as_bytes()),
+        // A directory has no Wright-owned source bytes. Provider-backed
+        // compile results replace this placeholder with the owner-selected
+        // primary source identity before it reaches result contracts.
+        identity: String::new(),
         origin,
     })
 }
@@ -209,11 +212,23 @@ fn absolute_from(cwd: &Path, path: &Path) -> PathBuf {
 }
 
 fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
+    let opy_project = [path.join("main.opy"), path.join("src/main.opy")]
+        .iter()
+        .any(|candidate| candidate.is_file());
+    let ostw_project =
+        path.join("ds.toml").is_file() || !direct_source_files(path, SourceKind::Ostw).is_empty();
+    let workshop_project = !direct_source_files(path, SourceKind::Workshop).is_empty();
     let mut kinds = Vec::new();
-    for kind in [SourceKind::Opy, SourceKind::Ostw, SourceKind::Workshop] {
-        if !source_files(path, kind).is_empty() {
-            kinds.push(kind);
-        }
+    if opy_project {
+        kinds.push(SourceKind::Opy);
+    }
+    if ostw_project {
+        kinds.push(SourceKind::Ostw);
+    }
+    // A conventional OPY/DEL project may contain generated Workshop files;
+    // only consider raw Workshop when no source-owner project candidate exists.
+    if kinds.is_empty() && workshop_project {
+        kinds.push(SourceKind::Workshop);
     }
     match kinds.as_slice() {
         [kind] => Ok(*kind),
@@ -241,23 +256,15 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
     }
 }
 
-fn source_files(path: &Path, kind: SourceKind) -> Vec<PathBuf> {
-    let mut pending = vec![path.to_path_buf()];
+fn direct_source_files(path: &Path, kind: SourceKind) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    while let Some(directory) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let entry_path = entry.path();
-            let name = entry.file_name();
-            if entry_path.is_dir() {
-                if name != ".git" && name != "target" && name != "node_modules" {
-                    pending.push(entry_path);
-                }
-            } else if entry_path.is_file() && kind_from_extension(&entry_path).ok() == Some(kind) {
-                files.push(entry_path);
-            }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return files;
+    };
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if entry_path.is_file() && kind_from_extension(&entry_path).ok() == Some(kind) {
+            files.push(entry_path);
         }
     }
     files.sort();

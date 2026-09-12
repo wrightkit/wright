@@ -296,14 +296,13 @@ fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionCo
         Some(_) => InputSpec::Stdin,
         None => InputSpec::Path(".".into()),
     };
-    let provider_requested = provider_workflow || common.opy_provider.is_some();
+    let directory_target = is_directory_input(common);
+    let provider_requested = provider_workflow || common.opy_provider.is_some() || directory_target;
     SessionConfig {
         input,
         source_backend: if is_opy_input(common) && provider_requested {
             SourceBackend::Provider
-        } else if provider_requested
-            && common.kind == cli::SourceKindArg::Auto
-            && is_directory_input(common)
+        } else if provider_requested && common.kind == cli::SourceKindArg::Auto && directory_target
         {
             SourceBackend::Auto
         } else {

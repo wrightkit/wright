@@ -482,8 +482,10 @@ source-located). Named/keyword argument binding adds `unknown-keyword`,
 
 For identical inputs and configuration, JSON output is byte-deterministic
 (no timestamps, no environment-dependent ordering). Input identity is the
-SHA-256 of the input bytes (`result.output.input_identity`); emitted artifacts
-carry their own SHA-256 (`result.output.sha256`).
+SHA-256 of the input bytes (`result.output.input_identity`); for provider-backed
+directory targets, the owner supplies the identity of its selected primary
+source text. Emitted artifacts carry their own SHA-256
+(`result.output.sha256`).
 
 ## The `.opy` source implementation
 
@@ -500,7 +502,9 @@ locations. An entry path is required for provider-backed workflows, so stdin
 `.opy` is rejected; `--root` supplies the project root for file and directory
 inputs. The
 provider executable is resolved by the #244 bootstrap path and can be
-overridden with `--opy-provider`. `inspect` remains on the native frontend.
+overridden with `--opy-provider`. `inspect` remains on the native frontend for
+explicit OPY file targets; OPY directory targets use the owner-backed compile
+path so the owner selects the project entry.
 The source surface is declared in
 [`opy/support-matrix.md`](opy/support-matrix.md).
 

@@ -151,7 +151,7 @@ impl CompilerSession {
     /// re-reading the input. Returns an owned snapshot so callers can hold it
     /// while mutating the session.
     pub fn load(&mut self) -> Result<Loaded, Diagnostic> {
-        if self.config.source_backend != SourceBackend::Native
+        if self.config.source_backend == SourceBackend::Provider
             && self.loaded_operation != Some(ProviderOperation::Compile)
         {
             return Err(SourceProviderError::Unsupported {
@@ -374,6 +374,25 @@ impl CompilerSession {
             ProviderOperation::Compile => provider.compile(&target),
         }
         .map_err(|error| error.diagnostic())?;
+        if operation == ProviderOperation::Compile && resolved.target == InputTarget::Directory {
+            let Some(source_identity) = compilation.source_identity.as_ref() else {
+                return Err(Diagnostic::error(
+                    "source-provider-identity",
+                    Stage::Frontend,
+                    "the source provider returned no source identity for the directory target",
+                ));
+            };
+            if source_identity.len() != 64
+                || !source_identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(Diagnostic::error(
+                    "source-provider-identity",
+                    Stage::Frontend,
+                    "the source provider returned an invalid SHA-256 source identity",
+                ));
+            }
+            resolved.identity = source_identity.clone();
+        }
         let mut provider_diagnostics = compilation.diagnostics;
         if let Some(index) = provider_diagnostics
             .iter()

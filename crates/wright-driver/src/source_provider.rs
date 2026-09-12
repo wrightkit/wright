@@ -138,6 +138,8 @@ pub struct SourceCompilation {
     /// Diagnostics already attributed to their authored source files by the
     /// provider adapter. These are preserved alongside Wright diagnostics.
     pub diagnostics: Vec<Diagnostic>,
+    /// SHA-256 identity of the provider-selected primary source text.
+    pub source_identity: Option<String>,
 }
 
 impl SourceCompilation {
@@ -148,6 +150,7 @@ impl SourceCompilation {
             locale: None,
             provenance: SourceProvenance::Unmapped,
             diagnostics: Vec::new(),
+            source_identity: None,
         }
     }
 }
@@ -287,6 +290,7 @@ impl LppSourceProvider {
             locale: self.locale.clone(),
             provenance: SourceProvenance::Unmapped,
             diagnostics: provider_diagnostics(result.documents, self.locale.as_deref()),
+            source_identity: None,
         })
     }
 }
@@ -340,6 +344,7 @@ impl SourceProvider for LppSourceProvider {
             locale: self.locale.clone(),
             provenance: SourceProvenance::Unmapped,
             diagnostics: provider_diagnostics(result.diagnostics, self.locale.as_deref()),
+            source_identity: result.source_identity,
         })
     }
 }
