@@ -74,7 +74,7 @@ The compatibility contract is **semantic compatibility**, not compiler-output
 identity.
 
 Byte-identical output, identical temporary-variable allocation, identical
-optimizer output, or identical formatting are not goals unless a difference
+optimizer output, and identical formatting are not goals unless a difference
 affects:
 
 - observable Workshop or game behavior;
@@ -143,7 +143,7 @@ Runtime-sensitive claims require separate evidence.
 ### On ADR-0001
 
 ADR-0001 is superseded. When this occurred, its "native Rust `.opy` parser"
-non-goal was historical. The non-goals concerning a new language and OverPy-
+non-goal was historical. The non-goals regarding a new language and OverPy-
 internal parity are preserved in this ADR and in `ARCHITECTURE.md`.
 
 ### On ADR-0002 / COMPATIBILITY.md

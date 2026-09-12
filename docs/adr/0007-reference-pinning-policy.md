@@ -25,10 +25,10 @@ unsuitable for a reproducible oracle.
 ### Provenance nuance
 
 The npm registry `gitHead` field lags the tarball content by one release
-(release pipeline bumps the version, builds, publishes, then commits and
-tags). For the pinned oracle: content == `889d974` (tag `v9.7.10`), while the
-recorded `gitHead` `1e268895` is the `v9.7.9` tag commit. The integrity hash
-in `oracle-metadata.json` pins the content and makes reproduction safe;
+(the release pipeline bumps the version, builds, publishes, and then commits
+and tags). For the pinned oracle: content == `889d974` (tag `v9.7.10`), while
+the recorded `gitHead` `1e268895` is the `v9.7.9` tag commit. The integrity
+hash in `oracle-metadata.json` pins the content and makes reproduction safe;
 reviewers should not treat the recorded `gitHead` as the content commit.
 
 ## Decision

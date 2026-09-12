@@ -22,7 +22,7 @@ The Wright core may not link to OverPy, copy its source or internal types, or
 compile against its generated artifacts. HIR, Workshop IR, diagnostics, and
 backend APIs expose Wright-owned types only.
 
-OverPy invocation and any inspection of reference behavior is confined to an
+OverPy invocation and any inspection of reference behavior are confined to an
 explicitly isolated compatibility harness or development/CI tool. The harness
 may use a separately installed and pinned OverPy version, but its presence is
 not required for the core to build or run. Adapters consume reviewed,
@@ -38,8 +38,8 @@ license, owner, invocation method, and distribution status.
 The core remains independently inspectable and can be distributed under its own
 license without silently absorbing OverPy implementation details. Compatibility
 work has an explicit setup and may require an external oracle. Contributors
-must preserve provenance and stop when a dependency or fixture's terms are
-unclear.
+must preserve provenance and stop when the licensing terms of a dependency or
+fixture are unclear.
 
 This policy may require duplicated boundary types or a reviewed interchange
 format. That cost is intentional because a third-party representation is not a
@@ -48,7 +48,7 @@ Wright public contract.
 ## Compatibility impact
 
 The policy permits S/D/N/E compatibility evidence under
-[`docs/compatibility.md`](../compatibility.md), but none of those levels grants
+[`docs/compatibility.md`](../compatibility.md), but no compatibility level grants
 permission to copy or redistribute OverPy. Reference identity, fixture
 provenance, and the invocation or comparison method remain part of the evidence
 record.

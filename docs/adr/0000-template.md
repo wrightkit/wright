@@ -25,6 +25,6 @@ claims are affected, and what evidence is required.
 
 ## Scope boundaries
 
-List unresolved questions that are outside this decision and identify the
-separate decision or authority that can answer them. Do not present a question
-requiring legal advice as settled.
+List unresolved questions or excluded concerns that fall outside this decision,
+and identify the separate decision or authority needed to address them. Do not
+present a question requiring legal advice as settled.

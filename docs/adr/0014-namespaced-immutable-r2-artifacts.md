@@ -53,7 +53,7 @@ record; R2 is an exact installer distribution copy.
 
 The same repository-namespace/latest-pointer/versioned-artifact shape is used
 for first-party provider releases where the owner repository publishes that
-contract, but Wright's binary release and provider release remain separate
+contract, but Wright's binary releases and provider releases remain separately
 owned products.
 
 ## Alternatives considered

@@ -18,12 +18,12 @@ extension architecture. This ADR did not exist when those changes landed.
 
 ## Context
 
-Wright's built-in lint rules should remain small and low false-positive, while
-users need reusable Workshop-oriented policy across raw Workshop and
-owner-backed source languages. Analysis becomes contextual quickly: a
-persistent object or loop pattern can be legitimate depending on reevaluation,
-lifecycle, and cleanup behavior. Encoding every heuristic as a built-in rule
-would make the analyzer both brittle and hard to extend.
+Wright's built-in lint rules should remain focused and maintain a low
+false-positive rate, while users need reusable Workshop-oriented policy across
+raw Workshop and owner-backed source languages. Analysis becomes contextual
+quickly: a persistent object or loop pattern can be legitimate depending on
+reevaluation, lifecycle, and cleanup behavior. Encoding every heuristic as a
+built-in rule would make the analyzer both brittle and hard to extend.
 
 Workshop semantics, identities, and locale mappings already have canonical
 owners. Wright needs a policy boundary that consumes those facts without
@@ -46,10 +46,10 @@ Wright separates four responsibilities:
    reasons when an owner fact is missing.
 
 Rules canonicalize localized or canonical Workshop spellings through
-`workshop-rs`. The YAML vocabulary is intentionally bounded and Workshop
-shaped; it is not a general query language, plugin ABI, package registry, or
-automatic edit contract. Native rules remain valid where a declarative matcher
-would distort a richer analysis.
+`workshop-rs`. The YAML vocabulary is intentionally bounded and
+Workshop-shaped; it is not a general query language, plugin ABI, package
+registry, or automatic edit contract. Native rules remain valid where a
+declarative matcher would distort a richer analysis.
 
 External rules use a namespaced identity; Wright-owned built-ins retain their
 existing bare stable IDs and reserve the `wright` namespace. Declarative

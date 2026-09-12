@@ -23,9 +23,9 @@ Wright uses two owned intermediate boundaries:
    Workshop backend.
 
 Backends consume Workshop IR and do not reparse source or depend on frontend
-   internals. Neither IR exposes an external AST type. Unsupported constructs
-   remain explicit diagnostics or documented rejection at the earliest boundary
-   that can identify them.
+internals. Neither IR exposes an external AST type. Unsupported constructs
+are reported as explicit diagnostics or documented rejections at the earliest
+boundary that can identify them.
 
 ## Consequences
 

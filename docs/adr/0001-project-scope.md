@@ -29,7 +29,7 @@ The v1 non-goals are:
 ## Consequences
 
 Components under this decision cross an explicit Wright-owned boundary. This keeps
-frontend-specific representation out of the core and allows compatibility to be
+frontend-specific representations out of the core and allows compatibility to be
 measured without treating an external implementation as Wright's architecture.
 The initial workspace scope was therefore limited to core contracts and
 libraries; adapters and backends cross the same boundary when their contracts
@@ -44,6 +44,6 @@ does not claim syntax, diagnostic, normalized-output, or semantic parity.
 ## Historical note
 
 When ADR-0008 superseded this record, the v1 non-goal "a native Rust `.opy`
-parser" was treated as historical. ADR-0008 retained the non-goals concerning
+parser" was treated as historical. ADR-0008 retained the non-goals regarding
 a new language and OverPy-internal parity. The questions about versions and
 Workshop targets were addressed by later decision records.

@@ -41,7 +41,7 @@ semantic evidence, and a successful build is not compatibility evidence. The
 release gates and fixture requirements are normative in
 [`docs/compatibility.md`](../compatibility.md).
 
-[ADR-0008](0008-tooling-first-semantic-platform.md) adds a priority rule over
+[ADR-0008](0008-tooling-first-semantic-platform.md) adds a priority rule to
 this framework: **E-level observable semantics outrank N-level output-text
 identity**. Presentation-only N-level differences must be evaluated against the
 declared observable and documented compatibility surface before creating

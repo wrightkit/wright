@@ -18,7 +18,7 @@ compilation, source-aware analysis, agent source editing, CI, WASM/embedding,
 and long-term ecosystem independence", listing Vanilla Workshop, OPY, and OSTW
 as Wright-owned frontends.
 
-The ecosystem had created dedicated repositories for these responsibilities:
+The ecosystem created dedicated repositories for these responsibilities:
 `workshop-rs` (canonical Workshop core), `opy-rs` (OPY provider), `del-rs`
 (independent DEL/OSTW-compatible provider), and
 `language-provider-protocol` (neutral provider contract). This decision places
@@ -97,7 +97,7 @@ repository-wide frontend licensing assumption:
   be read for behavior but must not be copied, imported, or redistributed;
   only the MIT-licensed VS Code extension subdirectory is MIT.
 - **`workshop-rs`** must not import Blizzard-IP-adjacent game-derived data
-  (for example OSTW `Elements.json`) into its canonical catalog; catalog
+  (such as OSTW `Elements.json`) into its canonical catalog; catalog
   provenance and version boundaries are its own contracts.
 - **Wright** remains AGPL-3.0-or-later until a provenance and contributor
   audit enables a different license; final Wright relicensing is not decided
@@ -109,7 +109,7 @@ be combined or distributed.
 
 ### 6. Unlicensed upstream internals are not an implementation source
 
-Unlicensed upstream implementation internals (for example the OSTW compiler)
+Unlicensed upstream implementation internals (such as the OSTW compiler)
 are not an implementation source for independently compatible providers.
 Behavior observed through documented, lawful compatibility tests and pinned
 oracles is a permitted input; copying or mechanically translating unlicensed

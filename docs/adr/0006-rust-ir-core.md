@@ -27,7 +27,7 @@ A new `wright-ir` crate owns the compiler IR. It is protocol-agnostic and has
 no dependencies.
 
 1. **Typed IDs and arenas.** Every stable identity is a `wright_ir::ids::Id<T>`
-   newtype index into an `wright_ir::arena::Arena<T>`: files, global/player
+   newtype index into a `wright_ir::arena::Arena<T>`: files, global/player
    variables, subroutines, constants, macros, rules, statements, expressions,
    workshop values, and workshop actions. IDs are opaque, comparable, and
    type-safe: an `ExprId` cannot be passed where a `RuleId` is expected.
@@ -42,7 +42,7 @@ no dependencies.
    (`GlobalVarId`, `PlayerVarId`, `SubroutineId`, `ConstantId`, `MacroId`)
    instead of name strings, a typed `BinaryOp`/`UnaryOp` instead of operator
    strings, and arena storage for statements and expressions.
-   `wright_ir::wir` is the Workshop IR: workshop program structure (variables
+   `wright_ir::wir` is the Workshop IR: Workshop program structure (variables
    with indexes, subroutines with indexes, rules with events, conditions,
    actions, and values) with Wright-owned action/value nodes and a documented
    name policy (§Names below).
@@ -61,7 +61,7 @@ emission concern for a separate emission layer, not IR content. Exceptions: `deb
 and `print` lower to first-class `Action::Debug`/`Action::Print` nodes, and
 `.append` lowers to `ModifyGlobalVariable`/`ModifyPlayerVariable` with an
 `AppendToArray` op, because those express distinct source intents that the
-workshop expresses as structured ops.
+Workshop expresses as structured ops.
 
 ## Consequences
 

@@ -39,7 +39,7 @@ Wright resolves a first-party OPY provider executable in this order:
    published by `opy-rs`.
 
 Downloaded artifacts are verified with their published SHA-256 checksum,
-installed into versioned temporary/final state, and activated only after the
+installed into a versioned temporary/final state, and activated only after the
 complete installation succeeds. An unsuccessful download, integrity check, or
 installation cannot replace the previous active provider.
 
@@ -82,7 +82,7 @@ not silently fall back to a static source-language implementation.
 ## Compatibility impact
 
 This decision changes packaging and process ownership, not OPY or Workshop
-semantics. The provider must satisfy the owner-published LPP contract and
+semantics. The provider must satisfy the owner-published LPP contract, and
 Wright must preserve structured diagnostics and provenance across the handoff.
 Provider target matrices and release versions are implementation details outside
 this ADR.
