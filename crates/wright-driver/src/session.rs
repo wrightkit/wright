@@ -13,7 +13,7 @@ use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService
 use crate::WorkshopProvider;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
-use crate::input::{self, ResolvedInput};
+use crate::input::{self, InputTarget, ResolvedInput};
 use crate::opy_provider;
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use crate::result::{
@@ -159,7 +159,11 @@ impl CompilerSession {
             }
             .diagnostic());
         }
-        self.load_with_operation(ProviderOperation::Check)
+        self.load_with_operation(if self.config.source_backend == SourceBackend::Native {
+            ProviderOperation::Check
+        } else {
+            ProviderOperation::Compile
+        })
     }
 
     fn load_with_operation(
@@ -167,7 +171,9 @@ impl CompilerSession {
         provider_operation: ProviderOperation,
     ) -> Result<Loaded, Diagnostic> {
         if let Some(loaded) = &self.loaded {
-            if self.config.source_backend != SourceBackend::Provider
+            let provider_backend = self.config.source_backend != SourceBackend::Native
+                && loaded.input.kind == SourceKind::Opy;
+            if !provider_backend
                 || self.loaded_operation == Some(provider_operation)
                 || (self.loaded_operation == Some(ProviderOperation::Compile)
                     && provider_operation == ProviderOperation::Check)
@@ -185,9 +191,12 @@ impl CompilerSession {
         }
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
         let mut resolved = input::resolve(&self.config)?;
-        if self.config.source_backend == SourceBackend::Provider
-            && resolved.kind == SourceKind::Ostw
-        {
+        let provider_backend = match self.config.source_backend {
+            SourceBackend::Native => false,
+            SourceBackend::Provider => true,
+            SourceBackend::Auto => resolved.kind == SourceKind::Opy,
+        };
+        if provider_backend && resolved.kind == SourceKind::Ostw {
             return Err(source_provider_unavailable());
         }
         if self.config.source_backend == SourceBackend::Provider && resolved.kind != SourceKind::Opy
@@ -204,7 +213,7 @@ impl CompilerSession {
         if resolved.kind == SourceKind::Ostw {
             return Err(source_provider_unavailable());
         }
-        if self.config.source_backend == SourceBackend::Provider {
+        if provider_backend {
             return self.load_from_source_provider(&mut resolved, provider_operation);
         }
         let mut program = match resolved.kind {
@@ -299,14 +308,16 @@ impl CompilerSession {
                 ));
             }
         };
-        let target = SourceTarget::new(
-            language,
-            resolved
-                .path
-                .clone()
-                .unwrap_or_else(|| Path::new("<stdin>").to_path_buf()),
-            resolved.cwd.clone(),
-        )
+        let entry = resolved
+            .path
+            .clone()
+            .unwrap_or_else(|| Path::new("<stdin>").to_path_buf());
+        let target = match resolved.target {
+            InputTarget::File => SourceTarget::new(language, entry, resolved.cwd.clone()),
+            InputTarget::Directory => {
+                SourceTarget::directory(language, entry, resolved.cwd.clone())
+            }
+        }
         .with_project_root(resolved.root.clone());
         if self.source_provider.is_none() {
             let mut provider = self
@@ -318,18 +329,27 @@ impl CompilerSession {
                     }
                     .diagnostic()
                 })?;
-            provider
-                .initialize_project_loading(Some(&wright_lpp::ClientInfo {
-                    name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-                    version: crate::result::DRIVER_VERSION.to_string(),
-                }))
-                .map_err(|error| {
-                    SourceProviderError::Failed {
-                        code: error.code().to_string(),
-                        message: error.to_string(),
-                    }
-                    .diagnostic()
-                })?;
+            let initialize = match resolved.target {
+                InputTarget::File => {
+                    provider.initialize_project_loading(Some(&wright_lpp::ClientInfo {
+                        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+                        version: crate::result::DRIVER_VERSION.to_string(),
+                    }))
+                }
+                InputTarget::Directory => {
+                    provider.initialize_project_target(Some(&wright_lpp::ClientInfo {
+                        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+                        version: crate::result::DRIVER_VERSION.to_string(),
+                    }))
+                }
+            };
+            initialize.map_err(|error| {
+                SourceProviderError::Failed {
+                    code: error.code().to_string(),
+                    message: error.to_string(),
+                }
+                .diagnostic()
+            })?;
             self.source_provider = Some(Box::new(crate::source_provider::LppSourceProvider::new(
                 provider,
                 self.config.locale.clone(),
@@ -354,6 +374,25 @@ impl CompilerSession {
             ProviderOperation::Compile => provider.compile(&target),
         }
         .map_err(|error| error.diagnostic())?;
+        if operation == ProviderOperation::Compile && resolved.target == InputTarget::Directory {
+            let Some(source_identity) = compilation.source_identity.as_ref() else {
+                return Err(Diagnostic::error(
+                    "source-provider-identity",
+                    Stage::Frontend,
+                    "the source provider returned no source identity for the directory target",
+                ));
+            };
+            if source_identity.len() != 64
+                || !source_identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(Diagnostic::error(
+                    "source-provider-identity",
+                    Stage::Frontend,
+                    "the source provider returned an invalid SHA-256 source identity",
+                ));
+            }
+            resolved.identity = source_identity.clone();
+        }
         let mut provider_diagnostics = compilation.diagnostics;
         if let Some(index) = provider_diagnostics
             .iter()

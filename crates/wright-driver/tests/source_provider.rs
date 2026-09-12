@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use wright_driver::source_provider::{
     SourceCompilation, SourceLanguage, SourceProvider, SourceProviderError, SourceTarget,
+    SourceTargetKind,
 };
 use wright_driver::{
     CompilerSession, Diagnostic, InputSpec, Origin, SessionConfig, SourceBackend, SourceKind, Stage,
@@ -146,6 +147,70 @@ fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_h
 }
 
 #[test]
+fn provider_backend_delegates_directory_discovery_to_the_source_owner() {
+    let (dir, _) = temp_entry();
+    let target = Arc::new(Mutex::new(None));
+    let provider = RecordingProvider {
+        target: target.clone(),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: Some(SourceCompilation::success(workshop_fixture(
+            "real-world/overpy-cronch",
+        ))),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(dir.clone()),
+        kind: SourceKind::Auto,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(result.ok, "provider check: {:?}", result.diagnostics);
+    let selected = target.lock().expect("target lock").clone().expect("target");
+    assert_eq!(selected.kind, SourceTargetKind::Directory);
+    assert_eq!(selected.entry, dir);
+    cleanup(selected.entry);
+}
+
+#[test]
+fn directory_provider_compile_uses_the_owner_source_identity() {
+    let (dir, _) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: Some(SourceCompilation {
+            workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
+            locale: None,
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+            source_identity: Some(wright_driver::input_identity("owner-selected source")),
+        }),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(dir.clone()),
+        kind: SourceKind::Auto,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.compile();
+    assert!(result.ok, "provider compile: {:?}", result.diagnostics);
+    assert_eq!(
+        result
+            .result
+            .output
+            .expect("compiled output")
+            .input_identity,
+        wright_driver::input_identity("owner-selected source")
+    );
+    cleanup(dir);
+}
+
+#[test]
 fn provider_backend_check_uses_the_provider_check_operation() {
     let (dir, entry) = temp_entry();
     let operations = Arc::new(Mutex::new(Vec::new()));
@@ -157,6 +222,7 @@ fn provider_backend_check_uses_the_provider_check_operation() {
             locale: Some("zh-CN".to_string()),
             provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
             diagnostics: Vec::new(),
+            source_identity: None,
         }),
         compilation: Some(SourceCompilation::success("unused")),
         failure: None,
@@ -186,6 +252,7 @@ fn provider_backend_does_not_reuse_a_check_load_for_compile() {
             locale: None,
             provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
             diagnostics: Vec::new(),
+            source_identity: None,
         }),
         compilation: Some(SourceCompilation::success(workshop_fixture(
             "synthetic/basic-rule",
@@ -232,6 +299,7 @@ fn provider_backend_lint_and_analyze_use_the_canonical_artifact_without_opy_span
                     locale: None,
                 }),
             }],
+            source_identity: None,
         }),
         failure: None,
     };

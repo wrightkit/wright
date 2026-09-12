@@ -768,6 +768,7 @@ fn resolved_input(
         kind,
         text: main_text.to_string(),
         path: Some(main_path.to_path_buf()),
+        target: crate::input::InputTarget::File,
         root: root.to_path_buf(),
         cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         display: crate::input::display_path(main_path),
