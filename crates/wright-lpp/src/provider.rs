@@ -15,7 +15,6 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::LPP_PROTOCOL_VERSION;
 use crate::client::{ClientConfig, JsonRpcClient};
 use crate::error::ProviderError;
 use crate::process::ChildProcess;
@@ -24,6 +23,7 @@ use crate::types::{
     InitializeResult, LocationsResult, Position, ProjectEntry, ReconstructResult, RenameResult,
     SymbolsResult, TextEdit, ValidateEditsResult, WorkshopArtifact,
 };
+use crate::{LPP_DIRECTORY_TARGET_PROTOCOL_VERSION, LPP_PROTOCOL_VERSION};
 
 /// The negotiated result of a successful `lpp/initialize`.
 #[derive(Debug, Clone)]
@@ -86,6 +86,18 @@ pub trait LanguageProvider {
         })
     }
 
+    /// Initialize with LPP 1.2 for provider-owned file or directory targets.
+    fn initialize_project_target(
+        &mut self,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        let result = self.initialize_project_loading(client_info)?;
+        Err(ProviderError::ProtocolVersionMismatch {
+            supported: vec![result.protocol_version],
+            message: "the provider client does not support LPP 1.2 directory targets".to_string(),
+        })
+    }
+
     /// The negotiated capabilities, after a successful initialize.
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError>;
 
@@ -111,6 +123,21 @@ pub trait LanguageProvider {
         ))
     }
 
+    /// `lpp/check` over an LPP 1.2 file or directory target.
+    fn check_target(
+        &mut self,
+        target: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CheckResult, ProviderError> {
+        let _ = (target, project_root, locale);
+        Err(ProviderError::lpp(
+            crate::error::LppErrorKind::CapabilityUnavailable,
+            json!({ "capability": "projectLoading", "method": "lpp/check" }),
+            "capability 'projectLoading' is not available in this provider client",
+        ))
+    }
+
     /// `lpp/compile`: compile a document set into one opaque Workshop
     /// artifact.
     fn compile(
@@ -127,6 +154,21 @@ pub trait LanguageProvider {
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
         let _ = (entry, project_root, locale);
+        Err(ProviderError::lpp(
+            crate::error::LppErrorKind::CapabilityUnavailable,
+            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
+            "capability 'projectLoading' is not available in this provider client",
+        ))
+    }
+
+    /// `lpp/compile` over an LPP 1.2 file or directory target.
+    fn compile_target(
+        &mut self,
+        target: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CompileResult, ProviderError> {
+        let _ = (target, project_root, locale);
         Err(ProviderError::lpp(
             crate::error::LppErrorKind::CapabilityUnavailable,
             json!({ "capability": "projectLoading", "method": "lpp/compile" }),
@@ -338,6 +380,13 @@ impl LanguageProvider for StdioLanguageProvider {
         self.initialize_with_version(crate::LPP_PROJECT_LOADING_PROTOCOL_VERSION, client_info)
     }
 
+    fn initialize_project_target(
+        &mut self,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        self.initialize_with_version(LPP_DIRECTORY_TARGET_PROTOCOL_VERSION, client_info)
+    }
+
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError> {
         self.negotiated
             .as_ref()
@@ -368,6 +417,18 @@ impl LanguageProvider for StdioLanguageProvider {
         parse_result(value, "lpp/check")
     }
 
+    fn check_target(
+        &mut self,
+        target: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CheckResult, ProviderError> {
+        self.require_capability(Capability::Check)?;
+        self.require_capability(Capability::ProjectLoading)?;
+        let value = self.request("lpp/check", entry_params(target, project_root, locale))?;
+        parse_result(value, "lpp/check")
+    }
+
     fn compile(
         &mut self,
         documents: &DocumentSet,
@@ -387,6 +448,18 @@ impl LanguageProvider for StdioLanguageProvider {
         self.require_capability(Capability::Compile)?;
         self.require_capability(Capability::ProjectLoading)?;
         let value = self.request("lpp/compile", entry_params(entry, project_root, locale))?;
+        parse_result(value, "lpp/compile")
+    }
+
+    fn compile_target(
+        &mut self,
+        target: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<CompileResult, ProviderError> {
+        self.require_capability(Capability::Compile)?;
+        self.require_capability(Capability::ProjectLoading)?;
+        let value = self.request("lpp/compile", entry_params(target, project_root, locale))?;
         parse_result(value, "lpp/compile")
     }
 
@@ -659,6 +732,12 @@ mod tests {
         result
     }
 
+    fn init_result_directory_target_json() -> Value {
+        let mut result = init_result_project_loading_json();
+        result["protocolVersion"] = json!("1.2");
+        result
+    }
+
     fn ok_response(result: Value) -> Value {
         json!({ "jsonrpc": "2.0", "id": 0, "result": result })
     }
@@ -755,6 +834,7 @@ mod tests {
             uri: "file:///project/main.opy".to_string(),
             language_id: "opy".to_string(),
             version: 7,
+            kind: crate::types::ProjectTargetKind::File,
         };
         provider
             .check_entry(&entry, Some("file:///project"), Some("zh-CN"))
@@ -793,5 +873,46 @@ mod tests {
         .expect("compile JSON");
         assert_eq!(compile["method"], "lpp/compile");
         fake.assert_only_requests(0);
+    }
+
+    #[test]
+    fn directory_target_requests_use_lpp_12_and_preserve_target_kind() {
+        let (mut provider, fake) = Fake::spawn(vec![
+            FakeStep::Respond(ok_response(init_result_directory_target_json())),
+            FakeStep::Respond(ok_response(json!({ "documents": [] }))),
+            FakeStep::Respond(ok_response(json!({ "diagnostics": [], "artifact": null }))),
+        ]);
+        provider
+            .initialize_project_target(None)
+            .expect("LPP 1.2 initialize");
+        let target = ProjectEntry {
+            uri: "file:///project".to_string(),
+            language_id: "opy".to_string(),
+            version: 7,
+            kind: crate::types::ProjectTargetKind::Directory,
+        };
+        provider
+            .check_target(&target, None, None)
+            .expect("directory check");
+        provider
+            .compile_target(&target, None, None)
+            .expect("directory compile");
+        let initialize: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("initialize request"),
+        )
+        .expect("initialize JSON");
+        assert_eq!(initialize["params"]["protocolVersion"], "1.2");
+        let check: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("check request"),
+        )
+        .expect("check JSON");
+        assert_eq!(check["params"]["entry"]["kind"], "directory");
+        fake.assert_only_requests(1);
     }
 }

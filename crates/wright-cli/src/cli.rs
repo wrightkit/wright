@@ -115,7 +115,7 @@ pub(crate) struct SemanticCompareArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct CommonArgs {
-    /// Input path, or `-`/omitted for standard input.
+    /// Input path; `-` reads standard input and an omitted path uses the current directory.
     #[arg(value_name = "INPUT")]
     pub(crate) input: Option<PathBuf>,
     /// Input frontend.

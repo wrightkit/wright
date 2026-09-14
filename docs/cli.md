@@ -111,7 +111,7 @@ agents consume.
 ## Architecture
 
 ```text
-input (path | stdin)
+input (file | directory | `-` stdin)
     ↓  discovery: kind detection, locale, root, identity (wright-driver::input)
 CompilerSession (wright-driver)
     ├─ source adapter: OPY | Workshop | protocol JSON
@@ -150,10 +150,13 @@ banner (`wright <version> (wright-driver <version>)`); the version is the
 single authoritative workspace implementation version and is also reported
 inside every `wright-result/v1` envelope.
 
-All commands accept a file path or `-`/omitted for stdin. Input kind is
-detected from the extension (`.opy`, `.ostw`/`.del`, `.json`, `.txt`/`.ws`) or
-stdin content (protocol JSON starts with `{`, otherwise Workshop text) and can
-be overridden with `--kind auto|opy|ostw|workshop|protocol`. `--locale`
+All commands accept a file path, a project directory, or `-` for stdin. An
+omitted input uses the current directory. Input kind is detected from the
+extension (`.opy`, `.ostw`/`.del`, `.json`, `.txt`/`.ws`) or, for a directory,
+from the source files it contains; mixed source kinds fail with structured
+ambiguity guidance. Stdin content is auto-detected (protocol JSON starts with
+`{`, otherwise Workshop text). Detection can be overridden with
+`--kind auto|opy|ostw|workshop|protocol`. `--locale`
 overrides Workshop client-locale detection; `--root` sets the include/project
 root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
 remain recognized source kinds for a future provider, but Wright does not ship
@@ -479,23 +482,29 @@ source-located). Named/keyword argument binding adds `unknown-keyword`,
 
 For identical inputs and configuration, JSON output is byte-deterministic
 (no timestamps, no environment-dependent ordering). Input identity is the
-SHA-256 of the input bytes (`result.output.input_identity`); emitted artifacts
-carry their own SHA-256 (`result.output.sha256`).
+SHA-256 of the input bytes (`result.output.input_identity`); for provider-backed
+directory targets, the owner supplies the identity of its selected primary
+source text. Emitted artifacts carry their own SHA-256
+(`result.output.sha256`).
 
 ## The `.opy` source implementation
 
 `.opy` `check`, `compile`, `lint`, and `analyze` inputs use the owner-backed
-`opy-rs` implementation through Wright's narrow LPP 1.1 adapter: project
-loading is entry-based, no Node or OverPy is involved, and provider failures
+`opy-rs` implementation through Wright's narrow LPP adapter. File targets use
+LPP 1.1; directory targets use LPP 1.2 so `opy-rs` owns project entry
+discovery. No Node or OverPy is involved, and provider failures
 never fall back to the native frontend. `lint` and `analyze` parse the
 provider's canonical Workshop artifact through `workshop-rs` and reuse the
 existing Wright analyzer and lint registry. Provider artifacts have no OPY
 span map, so their analysis origin and lint spans are explicitly
 `provider-artifact` / `<provider-artifact>` rather than fabricated OPY
 locations. An entry path is required for provider-backed workflows, so stdin
-`.opy` is rejected; `--root` supplies the project root for file inputs. The
+`.opy` is rejected; `--root` supplies the project root for file and directory
+inputs. The
 provider executable is resolved by the #244 bootstrap path and can be
-overridden with `--opy-provider`. `inspect` remains on the native frontend.
+overridden with `--opy-provider`. `inspect` remains on the native frontend for
+explicit OPY file targets; OPY directory targets use the owner-backed compile
+path so the owner selects the project entry.
 The source surface is declared in
 [`opy/support-matrix.md`](opy/support-matrix.md).
 

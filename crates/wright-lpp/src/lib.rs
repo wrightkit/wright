@@ -41,6 +41,9 @@ pub const LPP_PROTOCOL_VERSION: &str = "1.0";
 /// The additive LPP 1.1 version that enables provider-owned project loading.
 pub const LPP_PROJECT_LOADING_PROTOCOL_VERSION: &str = "1.1";
 
+/// The LPP 1.2 version that adds provider-owned directory targets.
+pub const LPP_DIRECTORY_TARGET_PROTOCOL_VERSION: &str = "1.2";
+
 /// The client name reported in `lpp/initialize` `clientInfo`.
 pub const LPP_CLIENT_NAME: &str = "wright";
 
@@ -52,7 +55,7 @@ pub use registry::{ProviderConfig, ProviderRegistry, RegistryError};
 pub use types::{
     Capabilities, Capability, CheckResult, ClientInfo, CompileResult, Diagnostic,
     DiagnosticSeverity, Document, DocumentDiagnostics, DocumentEdits, DocumentSet, DocumentSymbols,
-    InitializeResult, LanguageInfo, Location, LocationsResult, Position, ProjectEntry, Range,
-    ReconstructResult, RenameResult, ServerInfo, Symbol, SymbolsResult, TextEdit,
-    ValidateEditsResult, WorkshopArtifact,
+    InitializeResult, LanguageInfo, Location, LocationsResult, Position, ProjectEntry,
+    ProjectTargetKind, Range, ReconstructResult, RenameResult, ServerInfo, Symbol, SymbolsResult,
+    TextEdit, ValidateEditsResult, WorkshopArtifact,
 };

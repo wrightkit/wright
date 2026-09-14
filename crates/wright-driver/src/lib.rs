@@ -21,7 +21,7 @@ pub mod workshop_provider;
 
 pub use config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind};
 pub use diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
-pub use input::{ResolvedInput, sha256_hex};
+pub use input::{InputTarget, ResolvedInput, sha256_hex};
 pub use opy_provider::{
     OpyProviderConfig, OpyProviderError, OpyProviderResolver, ResolvedOpyProvider,
 };
@@ -33,7 +33,7 @@ pub use result::{
 pub use session::{CompilerSession, Loaded, Provenance};
 pub use source_provider::{
     SourceBackend, SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider,
-    SourceProviderError, SourceTarget,
+    SourceProviderError, SourceTarget, SourceTargetKind,
 };
 pub use workshop_compat::{
     WorkshopSemanticComparison, WorkshopSemanticSide, compare_workshop_texts,
