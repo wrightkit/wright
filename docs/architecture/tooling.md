@@ -53,7 +53,7 @@ Normal source tooling does not require full-file regeneration. Preserve comments
 
 CLI, LSP, agent/MCP-style adapters, embedding, and CI should reuse common Wright-owned semantic/query/edit services rather than each implementing language-specific logic independently.
 
-On-demand domain intelligence follows the same rule: Wright composes owner-backed semantic identities and facts with separately provenance-bearing guidance and project policy through the shared query service. It does not copy canonical Workshop facts into an agent-specific knowledge store. See [`domain-intelligence.md`](domain-intelligence.md).
+On-demand domain intelligence follows the same rule: Wright composes owner-backed semantic identities and facts with separately provenance-bearing Wright-curated guidance through the shared query surface. Direct canonical queries do not require source-project state; source-position queries may use project/provider context. Wright does not copy canonical Workshop facts into an agent-specific knowledge store. See [`domain-intelligence.md`](domain-intelligence.md).
 
 Machine-readable contracts are versioned and deterministic when declared. Presentation layers must not alter semantic outcomes.
 
