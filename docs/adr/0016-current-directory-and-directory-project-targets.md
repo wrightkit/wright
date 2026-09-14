@@ -5,7 +5,8 @@
 - Clarifies: [ADR-0013: Entry-based source-provider integration seam](0013-entry-based-source-provider-seam.md)
 - Related: [Issue #317](https://github.com/wrightkit/wright/issues/317),
   [PR #318](https://github.com/wrightkit/wright/pull/318),
-  [language-provider-protocol #36](https://github.com/wrightkit/language-provider-protocol/issues/36)
+  [LPP ADR-0002: Directory project targets](https://github.com/wrightkit/language-provider-protocol/blob/main/docs/adr/0002-directory-project-targets.md),
+  [LPP ADR-0003: Owner-selected source identity](https://github.com/wrightkit/language-provider-protocol/blob/main/docs/adr/0003-owner-selected-source-identity.md)
 
 ## Historical note
 
@@ -48,8 +49,10 @@ selection, project-root interpretation, source closure, and project semantics.
 Provider-backed directory targets cross the owner/provider boundary as
 filesystem targets; Wright does not introduce a Wright workspace, manifest,
 or generic project graph. The protocol's wire representation and owner-selected
-source-identity rationale remain owned by the
-[language-provider-protocol decision history](https://github.com/wrightkit/language-provider-protocol/issues/36).
+source-identity rationale remain owned by
+[LPP ADR-0002: Directory project targets](https://github.com/wrightkit/language-provider-protocol/blob/main/docs/adr/0002-directory-project-targets.md)
+and
+[LPP ADR-0003: Owner-selected source identity](https://github.com/wrightkit/language-provider-protocol/blob/main/docs/adr/0003-owner-selected-source-identity.md).
 Wright preserves that owner identity in its result contract rather than
 reconstructing it from a directory path.
 
