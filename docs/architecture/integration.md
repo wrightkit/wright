@@ -4,8 +4,10 @@ Wright integrates independently usable language/Workshop implementations into on
 
 Decision history: the entry-based product seam and canonical/provenance
 handoff are recorded in
-[ADR-0013](../adr/0013-entry-based-source-provider-seam.md), building on
-[ADR-0010](../adr/0010-independent-implementations-and-wright-integration.md).
+[ADR-0013](../adr/0013-entry-based-source-provider-seam.md), and its
+current-directory and directory-target extension is recorded in
+[ADR-0016](../adr/0016-current-directory-and-directory-project-targets.md),
+building on [ADR-0010](../adr/0010-independent-implementations-and-wright-integration.md).
 
 ## Integration flow
 

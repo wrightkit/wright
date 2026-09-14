@@ -166,6 +166,10 @@ an upstream/static fallback. DEL/OSTW provider support is not currently
 shipped with Wright and is outside this contract. OPY, Workshop, and protocol
 inputs continue through their existing owner-backed paths.
 
+The rationale for current-directory defaults, directory targets, and explicit
+ownership ambiguity is recorded in
+[`ADR-0016`](adr/0016-current-directory-and-directory-project-targets.md).
+
 ## `wright convert` and the reconstruction surface (#126)
 
 `wright convert [INPUT] --target opy|ostw` reconstructs **validated Workshop
