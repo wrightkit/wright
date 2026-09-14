@@ -415,19 +415,11 @@ fn workshop_inspect_returns_structural_model() {
 
 #[test]
 fn protocol_input_runs_all_workflows() {
-    for fixture_id in [
-        "synthetic/basic-rule",
-        "synthetic/control-flow",
-        "synthetic/declarations-rules",
-    ] {
-        let path = adapter_fixture(fixture_id);
-        let mut session = CompilerSession::new(SessionConfig::from_path(path)).unwrap();
-        assert!(session.check().ok, "{fixture_id} check");
-        assert!(session.analyze().ok, "{fixture_id} analyze");
-        let inspect = session.inspect();
-        assert!(inspect.ok, "{fixture_id} inspect");
-        assert_eq!(inspect.result.program["origin"]["kind"], "protocol");
-    }
+    let path = adapter_fixture("synthetic/basic-rule");
+    let mut session = CompilerSession::new(SessionConfig::from_path(path)).unwrap();
+    let check = session.check();
+    assert!(!check.ok, "retired protocol input is refused");
+    assert_eq!(check.diagnostics[0].code, "input-kind-unsupported");
 }
 
 #[test]
@@ -859,7 +851,7 @@ const ORACLE_AC1: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"I
 
 const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"a\\nb\"));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
-const ORACLE_AC11: &str = "variables {\n    global:\n        0: j\n        1: h\n        2: k\n    player:\n        0: p\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(j, 5);\n        Set Global Variable(k, 0.0);\n    }\n}\n\nrule (\"Initialize player variables\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, p, 7);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
+const ORACLE_AC11: &str = "variables {\n    global:\n        0: j\n        1: h\n        2: k\n    player:\n        0: p\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(j, 5);\n        Set Global Variable(k, 0);\n    }\n}\n\nrule (\"Initialize player variables\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, p, 7);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
 
 // Pinned oracle artifacts for playervar augmented assignments (AC-18).
 const ORACLE_PV_ADD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Add, 2);\n    }\n}\n\n";

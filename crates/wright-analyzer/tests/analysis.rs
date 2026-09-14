@@ -72,7 +72,7 @@ fn corpus_workshop_rule(fixture_id: &str, rule_name: &str) -> WirProgram {
         .map(|offset| rule_start + offset + 2)
         .expect("target rule closes before the next rule");
     let catalog = Catalog::builtin().expect("built-in catalog");
-    parser::parse_with_context(
+    parser::parse_wir_with_context(
         &format!(
             "{}\n\n{}\n\n{}",
             &workshop[..variables_end],

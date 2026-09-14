@@ -158,7 +158,7 @@ pub struct LintResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConvertTarget {
-    /// Reconstruct canonical OPY source (`wright_opy::reconstruct`).
+    /// Reconstruct canonical OPY source through the owner reconstructor.
     #[default]
     Opy,
     /// Recognized OSTW reconstruction target; unavailable until a DEL/OSTW

@@ -7,7 +7,7 @@
 //! Capability/version negotiation is provided by [`Capabilities`]; cost and
 //! resource inspection ([`ToolRequest::CostEstimate`]) consumes the
 //! Wright-owned generated-resource semantics established by the `wright-bench`
-//! harness (emitted bytes, WIR node counts, action/rule counts) and
+//! harness (emitted bytes, canonical program counts, action/rule counts) and
 //! distinguishes exact counts from static findings.
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,8 @@ use serde_json::json;
 use crate::diag::Diagnostic;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
 use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
+use wright_analyzer::canonical::{SemanticIndex, SemanticService};
+use wright_analyzer::service::{Origin, Request, Response};
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
@@ -27,7 +29,7 @@ pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum ToolRequest {
     /// Service identity, contract, and supported operations.
     Capabilities,
-    /// The loaded program summary (origin, files, counts, findings).
+    /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
     /// Every rule.
     Rules,
@@ -171,7 +173,7 @@ impl<'a> ToolService<'a> {
         Ok(ToolService { session, loaded })
     }
 
-    /// The loaded program snapshot (origin, input identity, WIR program).
+    /// The loaded program snapshot (origin, input identity, canonical program).
     pub fn loaded(&self) -> &Loaded {
         &self.loaded
     }
@@ -225,30 +227,22 @@ impl<'a> ToolService<'a> {
                 result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
             },
             ToolRequest::Project => self.ok(self.project()),
-            ToolRequest::Rules => self.semantic_query(wright_analyzer::service::Request::ListRules),
+            ToolRequest::Rules => self.semantic_query(Request::ListRules),
             ToolRequest::Symbols { kind } => {
-                self.semantic_query(wright_analyzer::service::Request::ListSymbols {
-                    kind: kind.clone(),
-                })
+                self.semantic_query(Request::ListSymbols { kind: kind.clone() })
             }
             ToolRequest::References { symbol } => {
-                self.semantic_query(wright_analyzer::service::Request::FindReferences {
-                    symbol: *symbol,
-                })
+                self.semantic_query(Request::FindReferences { symbol: *symbol })
             }
             ToolRequest::Usage { symbol } => {
-                self.semantic_query(wright_analyzer::service::Request::GetUsage { symbol: *symbol })
+                self.semantic_query(Request::GetUsage { symbol: *symbol })
             }
-            ToolRequest::Cfg { rule } => {
-                self.semantic_query(wright_analyzer::service::Request::GetCfg { rule: *rule })
-            }
+            ToolRequest::Cfg { rule } => self.semantic_query(Request::GetCfg { rule: *rule }),
             ToolRequest::Findings => self.findings(),
             ToolRequest::PersistentObjects => self.persistent_objects(),
             ToolRequest::Lint => self.lint(),
-            ToolRequest::LintRules => self.semantic_query_with_config(
-                wright_analyzer::service::Request::LintRules,
-                self.session.config.lint.clone(),
-            ),
+            ToolRequest::LintRules => self
+                .semantic_query_with_config(Request::LintRules, self.session.config.lint.clone()),
             ToolRequest::CallGraph => self.ok(self.call_graph()),
             ToolRequest::CostEstimate => self.ok(self.cost_estimate()),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
@@ -382,22 +376,13 @@ impl<'a> ToolService<'a> {
         ToolResponse::Ok { result }
     }
 
-    fn error(&self, code: &str, message: String) -> ToolResponse {
-        ToolResponse::Error {
-            error: ToolErrorInfo {
-                code: code.to_string(),
-                message,
-            },
-        }
-    }
-
     /// `findings`: every static-analysis finding with resolved span paths.
     ///
     /// The tool/agent surface resolves `span.path` exactly like the CLI
     /// `analyze`/`lint` workflows, so one file identity holds per finding
     /// across every surface (#102).
     fn findings(&self) -> ToolResponse {
-        let response = self.semantic_query(wright_analyzer::service::Request::GetFindings);
+        let response = self.semantic_query(Request::GetFindings);
         match response {
             ToolResponse::Ok { mut result } => {
                 crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
@@ -409,7 +394,7 @@ impl<'a> ToolService<'a> {
 
     /// `persistentObjects`: persistent-object facts with resolved source paths.
     fn persistent_objects(&self) -> ToolResponse {
-        let response = self.semantic_query(wright_analyzer::service::Request::GetPersistentObjects);
+        let response = self.semantic_query(Request::GetPersistentObjects);
         match response {
             ToolResponse::Ok { mut result } => {
                 crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
@@ -420,7 +405,7 @@ impl<'a> ToolService<'a> {
     }
 
     /// Run one semantic query over the loaded program.
-    fn semantic_query(&self, request: wright_analyzer::service::Request) -> ToolResponse {
+    fn semantic_query(&self, request: Request) -> ToolResponse {
         self.semantic_query_with_config(request, wright_analyzer::registry::LintConfig::default())
     }
 
@@ -428,29 +413,27 @@ impl<'a> ToolService<'a> {
     /// configuration.
     fn semantic_query_with_config(
         &self,
-        request: wright_analyzer::service::Request,
+        request: Request,
         config: wright_analyzer::registry::LintConfig,
     ) -> ToolResponse {
-        let origin = wright_analyzer::service::Origin {
+        let origin = Origin {
             kind: self.loaded.origin.kind.clone(),
             locale: self.loaded.origin.locale.clone(),
         };
-        match wright_analyzer::service::SemanticService::with_origin_and_config_and_registry(
+        let service = SemanticService::with_origin_and_config_and_registry(
             &self.loaded.program,
             origin,
             config,
             std::sync::Arc::clone(self.session.lint_registry()),
-        ) {
-            Ok(service) => match service.handle(&request) {
-                wright_analyzer::service::Response::Ok { result } => ToolResponse::Ok { result },
-                wright_analyzer::service::Response::Error { error } => ToolResponse::Error {
-                    error: ToolErrorInfo {
-                        code: error.code,
-                        message: error.message,
-                    },
+        );
+        match service.handle(&request) {
+            Response::Ok { result } => ToolResponse::Ok { result },
+            Response::Error { error } => ToolResponse::Error {
+                error: ToolErrorInfo {
+                    code: error.code,
+                    message: error.message,
                 },
             },
-            Err(error) => self.error("analysis-error", error.to_string()),
         }
     }
 
@@ -459,56 +442,55 @@ impl<'a> ToolService<'a> {
     /// `lint` workflow (no duplicated rule execution, #98).
     fn lint(&self) -> ToolResponse {
         let config = self.session.config.lint.clone();
-        let origin = wright_analyzer::service::Origin {
+        let origin = Origin {
             kind: self.loaded.origin.kind.clone(),
             locale: self.loaded.origin.locale.clone(),
         };
-        match wright_analyzer::service::SemanticService::with_origin_and_config_and_registry(
-            &self.loaded.program,
-            origin,
-            config,
-            std::sync::Arc::clone(self.session.lint_registry()),
-        ) {
-            Ok(service) => {
-                let lint_rules = match service.handle(&wright_analyzer::service::Request::LintRules)
-                {
-                    wright_analyzer::service::Response::Ok { result } => result,
-                    wright_analyzer::service::Response::Error { .. } => serde_json::json!({}),
-                };
-                let mut findings =
-                    match service.handle(&wright_analyzer::service::Request::GetFindings) {
-                        wright_analyzer::service::Response::Ok { result } => result,
-                        wright_analyzer::service::Response::Error { .. } => serde_json::json!([]),
-                    };
-                crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
-                self.ok(json!({
-                    "inputIdentity": self.loaded.input.identity,
-                    "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
-                    "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
-                    "findings": findings,
-                    "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
-                }))
-            }
-            Err(error) => self.error("analysis-error", error.to_string()),
+        {
+            let service = SemanticService::with_origin_and_config_and_registry(
+                &self.loaded.program,
+                origin,
+                config,
+                std::sync::Arc::clone(self.session.lint_registry()),
+            );
+            let lint_rules = match service.handle(&Request::LintRules) {
+                Response::Ok { result } => result,
+                Response::Error { .. } => serde_json::json!({}),
+            };
+            let mut findings = match service.handle(&Request::GetFindings) {
+                Response::Ok { result } => result,
+                Response::Error { .. } => serde_json::json!([]),
+            };
+            crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
+            self.ok(json!({
+                "inputIdentity": self.loaded.input.identity,
+                "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
+                "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
+                "findings": findings,
+                "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
+            }))
         }
     }
 
     /// Program summary with origin and source identity.
     fn project(&self) -> serde_json::Value {
-        let index = wright_analyzer::symbols::SemanticIndex::build(&self.loaded.program);
-        let findings = wright_analyzer::analysis::analyze(&self.loaded.program);
+        let index = SemanticIndex::build(&self.loaded.program);
+        let findings = wright_analyzer::canonical::analyze(
+            &self.loaded.program,
+            &wright_analyzer::registry::LintConfig::default(),
+        );
         json!({
             "origin": {
                 "kind": self.loaded.origin.kind,
                 "locale": self.loaded.origin.locale,
             },
             "inputIdentity": self.loaded.input.identity,
-            "files": self.loaded.program.files.len(),
+            "files": self.loaded.source_files.len().max(1),
             "globalVariables": self.loaded.program.global_variables.len(),
             "playerVariables": self.loaded.program.player_variables.len(),
             "subroutines": self.loaded.program.subroutines.len(),
             "rules": self.loaded.program.rules.len(),
-            "symbols": index.map(|i| i.symbols().count()).unwrap_or(0),
+            "symbols": index.symbols().count(),
             "findings": findings.len(),
         })
     }
@@ -518,19 +500,10 @@ impl<'a> ToolService<'a> {
         let mut edges: Vec<serde_json::Value> = Vec::new();
         for rule in self.loaded.program.rules.iter() {
             for action in &rule.actions {
-                if let Some(workshop_rs::wir::Action::CallSubroutine { subroutine, .. }) =
-                    self.loaded.program.actions.get(*action)
-                {
-                    let callee = self
-                        .loaded
-                        .program
-                        .subroutines
-                        .get(*subroutine)
-                        .map(|s| s.name.clone())
-                        .unwrap_or_else(|| "<dangling>".to_string());
+                if let workshop_rs::Action::CallSubroutine { subroutine } = action {
                     edges.push(json!({
                         "caller": rule.name,
-                        "callee": callee,
+                        "callee": subroutine,
                     }));
                 }
             }
@@ -540,7 +513,7 @@ impl<'a> ToolService<'a> {
 
     /// Generated-resource cost estimates.
     ///
-    /// Exact counts: emitted bytes, WIR value/action/rule counts, and wait
+    /// Exact counts: emitted bytes, canonical value/action/rule counts, and wait
     /// actions. Static indicators: analysis findings (e.g. `min-wait-loop`).
     /// Compiler-host performance is measured by the `wright-bench` harness, not
     /// in-process.
@@ -558,19 +531,22 @@ impl<'a> ToolService<'a> {
         let waits = self
             .loaded
             .program
-            .actions
+            .rules
             .iter()
-            .filter(|action| {
-                matches!(action, workshop_rs::wir::Action::Call { name, .. } if name == "wait")
-            })
+            .flat_map(|rule| rule.actions.iter())
+            .filter(
+                |action| matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait"),
+            )
             .count();
-        let findings = wright_analyzer::analysis::analyze(&self.loaded.program);
+        let findings = wright_analyzer::canonical::analyze(
+            &self.loaded.program,
+            &wright_analyzer::registry::LintConfig::default(),
+        );
         json!({
             "exact": {
                 "emittedBytes": text.len(),
-                "wirValues": self.loaded.program.values.len(),
-                "wirActions": self.loaded.program.actions.len(),
-                "wirRules": self.loaded.program.rules.len(),
+                "programActions": self.loaded.program.rules.iter().map(|rule| rule.actions.len()).sum::<usize>(),
+                "programRules": self.loaded.program.rules.len(),
                 "waitActions": waits,
             },
             "findings": findings.iter().map(|finding| json!({

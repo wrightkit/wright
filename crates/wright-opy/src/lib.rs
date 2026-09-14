@@ -1,4 +1,4 @@
-pub use opy_rs::{cst, diag, lexer, parser, preprocess, settings, support, tooling};
+pub use opy_rs::{cst, diag, lexer, parser, preprocess, settings, tooling};
 
 pub mod manifest {
     pub use opy_rs::manifest::{CatalogLink, Function, FunctionKind, Param, ParamDefault};
@@ -55,7 +55,7 @@ pub mod manifest {
 pub use diag::{OpyError, OpyResult};
 
 pub struct CompileOutcome {
-    pub program: Option<workshop_rs::wir::Program>,
+    pub program: Option<workshop_rs::Program>,
     pub error: Option<OpyError>,
     pub files: Vec<preprocess::FileRecord>,
 }
@@ -80,7 +80,7 @@ pub fn compile(
     source: &str,
     main_path: &str,
     root: &std::path::Path,
-) -> OpyResult<workshop_rs::wir::Program> {
+) -> OpyResult<workshop_rs::Program> {
     compile_with_overlay(source, main_path, root, &std::collections::BTreeMap::new())
 }
 
@@ -89,7 +89,7 @@ pub fn compile_with_overlay(
     main_path: &str,
     root: &std::path::Path,
     overlay: &std::collections::BTreeMap<String, String>,
-) -> OpyResult<workshop_rs::wir::Program> {
+) -> OpyResult<workshop_rs::Program> {
     let outcome = compile_with_overlay_outcome(source, main_path, root, overlay);
     outcome
         .program
@@ -133,8 +133,4 @@ pub fn compile_with_overlay_outcome(
             files,
         },
     }
-}
-
-pub mod reconstruct {
-    pub use opy_rs::reconstruct::{ReconstructError, ReconstructIssue, reconstruct};
 }

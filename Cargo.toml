@@ -10,12 +10,9 @@ license = "AGPL-3.0-or-later"
 repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
-# Canonical Workshop core (wright#143): the 0.1.18 release remains the shared
-# WIR/parser contract for the existing provider crates. The analyzer's
-# catalog-only locale contract is consumed from the released 0.3.6 catalog API.
-workshop-rs = "=0.1.18"
-workshop-rs-catalog = { package = "workshop-rs", version = "=0.3.6" }
-opy-rs = "=0.1.18"
+# Canonical Workshop core and OPY owner releases for the Program API migration.
+workshop-rs = "=0.3.9"
+opy-rs = "=0.1.36"
 libc = "0.2"
 serde = "1"
 serde_json = "1"

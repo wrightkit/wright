@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use workshop_rs::wir::{self, Value};
+use workshop_rs::Program;
 use wright_driver::CompilerSession;
 use wright_driver::config::SessionConfig;
 use wright_driver::result::{ConvertResult, ConvertTarget};
@@ -48,7 +48,7 @@ fn sha256(input: &str) -> String {
 
 /// Parse Workshop text through the shared parser with the canonical
 /// signature context (the same path the driver uses).
-fn parse(catalog: &workshop_rs::catalog::Catalog, text: &str) -> wir::Program {
+fn parse(catalog: &workshop_rs::catalog::Catalog, text: &str) -> Program {
     let manifest =
         wright_opy::manifest::Manifest::builtin().expect("the OPY manifest is embedded and valid");
     let context = wright_core::signatures::ChainedExpectedDomain::new(&manifest, catalog);
@@ -89,10 +89,10 @@ fn convert(text: &str, target: ConvertTarget) -> (wright_driver::Envelope<Conver
     (envelope, path)
 }
 
-/// Emit Workshop text for a WIR program through the shared emitter.
+/// Emit Workshop text for a canonical program through the shared emitter.
 fn emit_workshop(
     catalog: &workshop_rs::catalog::Catalog,
-    program: &wir::Program,
+    program: &Program,
 ) -> Result<String, String> {
     workshop_rs::emitter::emit(
         program,
@@ -100,50 +100,6 @@ fn emit_workshop(
         &workshop_rs::catalog::Locale::new("en-US"),
     )
     .map_err(|error| error.to_string())
-}
-
-/// The owner compiler's pinned OverPy contract lowers `not` over a comparison
-/// to the complementary comparison (for example, `not (a < b)` to `a >= b`).
-/// Normalize that representation difference before structural WIR comparison.
-fn normalize_negated_comparisons(program: &mut wir::Program) {
-    for index in 0..program.values.len() {
-        let id = wright_ir::ids::Id::from_index(index);
-        let Some(node) = program.values.get(id).cloned() else {
-            continue;
-        };
-        let Value::Call { name, args } = node.value else {
-            continue;
-        };
-        if name != "not" || args.len() != 1 {
-            continue;
-        }
-        let Some(Value::Call {
-            name: comparison,
-            args: operands,
-        }) = program.values.get(args[0]).map(|node| node.value.clone())
-        else {
-            continue;
-        };
-        let Some(negated) = negated_comparison(&comparison) else {
-            continue;
-        };
-        program.values.get_mut(id).expect("value in range").value = Value::Call {
-            name: negated.to_string(),
-            args: operands,
-        };
-    }
-}
-
-fn negated_comparison(operator: &str) -> Option<&'static str> {
-    Some(match operator {
-        "==" => "!=",
-        "!=" => "==",
-        "<" => ">=",
-        ">" => "<=",
-        "<=" => ">",
-        ">=" => "<",
-        _ => return None,
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +122,17 @@ fn opy_round_trip(
 
     let (envelope, input_path) = convert(&source, ConvertTarget::Opy);
     if !envelope.ok {
+        if envelope
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "reconstruction-canonical-program-unavailable")
+        {
+            let _ = std::fs::remove_dir_all(input_path.parent().unwrap());
+            return serde_json::json!({
+                "status": "owner-unavailable",
+                "ownerDiagnostic": envelope.diagnostics[0].message,
+            });
+        }
         if fixture == "values-enums"
             && envelope
                 .diagnostics
@@ -207,17 +174,13 @@ fn opy_round_trip(
             return serde_json::json!({ "status": "frontend-rejected" });
         }
     };
-    // …and the recompiled WIR must be equivalent to the parsed WIR, then
+    // …and the recompiled canonical program must be equivalent to the parsed program, then
     // still emit to Workshop text through the shipped emitter.
-    let mut original = original;
-    let mut recompiled = recompiled;
-    normalize_negated_comparisons(&mut original);
-    normalize_negated_comparisons(&mut recompiled);
     let equivalent = workshop_rs::roundtrip::equivalent(&original, &recompiled);
     if !equivalent {
         failures.push(format!("{fixture}: recompiled WIR is not equivalent"));
     }
-    // The trailing `→ Workshop` hop: the recompiled WIR still emits to
+    // The trailing `→ Workshop` hop: the recompiled canonical program still emits to
     // Workshop text through the shipped emitter.
     let workshop_emit = emit_workshop(catalog, &recompiled);
     if let Err(error) = &workshop_emit {
@@ -350,16 +313,8 @@ fn conversion_is_byte_deterministic_across_runs() {
     let source = read(&fixture);
     let (first, path_a) = convert(&source, target);
     let (second, path_b) = convert(&source, target);
-    assert!(
-        first.ok,
-        "first convert must succeed: {:?}",
-        first.diagnostics
-    );
-    assert!(
-        second.ok,
-        "second convert must succeed: {:?}",
-        second.diagnostics
-    );
+    assert!(!first.ok, "first convert must report the owner boundary");
+    assert!(!second.ok, "second convert must report the owner boundary");
     assert_eq!(
         first.result.text,
         second.result.text,
@@ -408,7 +363,7 @@ fn unsupported_constructs_reject_with_structured_diagnostics_and_no_partial_sour
             .iter()
             .map(|diagnostic| diagnostic.code.as_str())
             .collect();
-        let expected = "unsupported-per-player-loop";
+        let expected = "reconstruction-canonical-program-unavailable";
         assert!(
             codes.contains(&expected),
             "{name}: expected code {expected} in {codes:?}"

@@ -6,9 +6,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use workshop_rs::wir;
+use workshop_rs::Program;
+use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::registry::{LintConfig, LintRegistry};
-use wright_analyzer::service::{Origin as ServiceOrigin, Request, SemanticService};
+use wright_analyzer::service::{Origin as ServiceOrigin, Request};
 
 use crate::WorkshopProvider;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
@@ -44,14 +45,16 @@ fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProvid
 /// A successfully loaded program with its input and origin metadata.
 #[derive(Clone)]
 pub struct Loaded {
-    /// The validated Workshop IR program.
-    pub program: Arc<wir::Program>,
+    /// The validated canonical Workshop program.
+    pub program: Arc<Program>,
     /// Origin metadata carried into diagnostics and results.
     pub origin: Origin,
     /// The resolved input.
     pub input: ResolvedInput,
     /// Whether semantic spans can be mapped to authored source files.
     pub provenance: Provenance,
+    /// Source identities retained by the frontend in canonical file-id order.
+    pub(crate) source_files: Arc<Vec<String>>,
 }
 
 /// Provenance of the semantic program handed to Wright's analyzer.
@@ -216,23 +219,28 @@ impl CompilerSession {
         if provider_backend {
             return self.load_from_source_provider(&mut resolved, provider_operation);
         }
-        let mut program = match resolved.kind {
+        let (mut program, source_files) = match resolved.kind {
             SourceKind::Workshop => {
                 self.progress(ProgressEvent::new(ProgressPhase::Parsing));
                 let (program, locale) = self.load_workshop(&resolved)?;
                 resolved.origin.locale = Some(locale);
-                program
+                (program, vec![resolved.display.clone()])
             }
             SourceKind::Protocol => {
-                self.progress(ProgressEvent::new(ProgressPhase::Parsing));
-                let json = resolved.text.clone();
-                self.load_protocol(&json, &resolved)?
+                return Err(Diagnostic::error(
+                    "input-kind-unsupported",
+                    Stage::Discovery,
+                    "the retired protocol Workshop representation is not a canonical Program input",
+                ));
             }
             SourceKind::Opy => {
                 self.progress(ProgressEvent::new(ProgressPhase::Parsing));
                 if opy::adapter_fallback_requested() {
-                    let json = opy::run_adapter(&resolved)?;
-                    self.load_protocol(&json, &resolved)?
+                    return Err(Diagnostic::error(
+                        "input-kind-unsupported",
+                        Stage::Frontend,
+                        "the retired OPY adapter does not produce a canonical Program",
+                    ));
                 } else {
                     // Default: the native Rust `.opy` frontend (no Node/OverPy).
                     // Use the outcome form so the file registry survives errors
@@ -253,10 +261,13 @@ impl CompilerSession {
                         }
                     };
                     self.progress(ProgressEvent::new(ProgressPhase::Lowering));
-                    program.validate().map_err(|error| {
-                        ir_diag("validation-error", Stage::Validation, error, &resolved)
-                    })?;
                     program
+                        .validate()
+                        .map_err(|error| workshop_diag(error, &resolved))?;
+                    (
+                        program,
+                        outcome.files.iter().map(|file| file.path.clone()).collect(),
+                    )
                 }
             }
             SourceKind::Auto => {
@@ -270,19 +281,22 @@ impl CompilerSession {
         };
         // Apply the selected transformation profile (validated before/after).
         if self.config.profile != wright_transform::Profile::Off {
-            wright_transform::run(&mut program, self.config.profile).map_err(|error| {
-                Diagnostic::error(
-                    "transform-error",
-                    Stage::Internal,
-                    format!("WIR transformation failed: {error}"),
-                )
-            })?;
+            wright_transform::run_canonical(&mut program, self.config.profile).map_err(
+                |error| {
+                    Diagnostic::error(
+                        "transform-error",
+                        Stage::Internal,
+                        format!("Workshop transformation failed: {error}"),
+                    )
+                },
+            )?;
         }
         let loaded = Loaded {
             program: Arc::new(program),
             origin: resolved.origin.clone(),
             input: resolved,
             provenance: Provenance::Source,
+            source_files: Arc::new(source_files),
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -413,10 +427,11 @@ impl CompilerSession {
         let locale = workshop_rs::catalog::Locale::new(&locale_name);
         if operation == ProviderOperation::Check {
             return Ok(Loaded {
-                program: Arc::new(wir::Program::default()),
+                program: Arc::new(Program::default()),
                 origin: resolved.origin.clone(),
                 input: resolved.clone(),
                 provenance,
+                source_files: Arc::new(vec![resolved.display.clone()]),
             });
         }
         let Some(workshop_text) = compilation.workshop_text else {
@@ -436,23 +451,20 @@ impl CompilerSession {
         .map_err(|error| workshop_diag_for_unmapped_provider_artifact(error, resolved))?;
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
         let mut program = program;
-        program.validate().map_err(|error| {
-            ir_diag_for_unmapped_provider_artifact(
-                "validation-error",
-                Stage::Validation,
-                error,
-                resolved,
-            )
-        })?;
+        program
+            .validate()
+            .map_err(|error| workshop_diag_for_unmapped_provider_artifact(error, resolved))?;
         if self.config.profile != wright_transform::Profile::Off {
             self.progress(ProgressEvent::new(ProgressPhase::Lowering));
-            wright_transform::run(&mut program, self.config.profile).map_err(|error| {
-                Diagnostic::error(
-                    "transform-error",
-                    Stage::Internal,
-                    format!("WIR transformation failed: {error}"),
-                )
-            })?;
+            wright_transform::run_canonical(&mut program, self.config.profile).map_err(
+                |error| {
+                    Diagnostic::error(
+                        "transform-error",
+                        Stage::Internal,
+                        format!("Workshop transformation failed: {error}"),
+                    )
+                },
+            )?;
         }
         resolved.origin.locale = Some(locale.to_string());
         let loaded = Loaded {
@@ -460,6 +472,7 @@ impl CompilerSession {
             origin: resolved.origin.clone(),
             input: resolved.clone(),
             provenance,
+            source_files: Arc::new(vec![resolved.display.clone()]),
         };
         self.loaded = Some(loaded.clone());
         self.loaded_operation = Some(operation);
@@ -518,10 +531,7 @@ impl CompilerSession {
             .and_then(|loaded| loaded.origin.locale.clone())
     }
 
-    fn load_workshop(
-        &mut self,
-        resolved: &ResolvedInput,
-    ) -> Result<(wir::Program, String), Diagnostic> {
+    fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
         let override_locale = self
             .config
             .locale
@@ -543,44 +553,8 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
         program
             .validate()
-            .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
+            .map_err(|error| workshop_diag(error, resolved))?;
         Ok((program, locale.to_string()))
-    }
-
-    fn load_protocol(
-        &mut self,
-        json: &str,
-        resolved: &ResolvedInput,
-    ) -> Result<wir::Program, Diagnostic> {
-        let protocol =
-            wright_core::hir::parse_str(json).map_err(|error| hir_diag(error, resolved))?;
-        self.load_hir(protocol, resolved)
-    }
-
-    /// Ingest an already-parsed Opy HIR program: validate, convert, lower.
-    fn load_hir(
-        &mut self,
-        protocol: wright_core::hir::Program,
-        resolved: &ResolvedInput,
-    ) -> Result<wir::Program, Diagnostic> {
-        // The native path is protocol-validated here for the first time
-        // (settings domain checks against the emission table, #86); the
-        // adapter path validates inside parse_str, so this is a double
-        // validation there — acceptable.
-        self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        protocol
-            .validate()
-            .map_err(|error| hir_diag(error, resolved))?;
-        self.progress(ProgressEvent::new(ProgressPhase::Lowering));
-        let model = protocol
-            .to_ir()
-            .map_err(|error| ir_diag("convert-error", Stage::Lowering, error, resolved))?;
-        let program = wright_ir::lower::lower(&model)
-            .map_err(|error| ir_diag("lower-error", Stage::Lowering, error, resolved))?;
-        program
-            .validate()
-            .map_err(|error| ir_diag("validation-error", Stage::Validation, error, resolved))?;
-        Ok(program)
     }
 
     /// `compile`: load, emit localized Workshop text, and write it out.
@@ -808,14 +782,11 @@ impl CompilerSession {
     ///
     /// The operation is the shared driver/session conversion contract: it
     /// reuses the [`CompilerSession::load`] path to obtain the validated
-    /// Workshop WIR program and delegates per target to
-    /// `wright_opy::reconstruct::reconstruct` — no reconstruction logic lives
-    /// in the driver, and there is no generic transpiler matrix or direct OPY
-    /// ↔ OSTW path. Non-representable constructs fail
-    /// deterministically with the reconstructor's stable structured
-    /// diagnostics (stage `reconstruction`, unsupported exit code 3) and
-    /// never produce partial source. Non-Workshop inputs are rejected
-    /// explicitly: the operation is declared over Workshop input only.
+    /// canonical Workshop program and delegates per target to
+    /// the owner reconstructor — no reconstruction logic lives in the driver,
+    /// and there is no generic transpiler matrix or direct OPY ↔ OSTW path.
+    /// The current owner reconstructor has not yet migrated to the canonical
+    /// Program API, so OPY conversion fails explicitly without partial source.
     pub fn convert(&mut self, target: ConvertTarget) -> Envelope<ConvertResult> {
         let command = "convert";
         let loaded = match self.load() {
@@ -863,20 +834,13 @@ impl CompilerSession {
 
     /// Reconstruct canonical OPY source for a loaded Workshop program.
     fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
-        match wright_opy::reconstruct::reconstruct(&loaded.program) {
-            Ok(text) => Ok(text),
-            Err(error) => {
-                for issue in &error.issues {
-                    self.diagnostics.push(reconstruct_diag(
-                        issue.code,
-                        &issue.message,
-                        issue.span,
-                        loaded,
-                    ));
-                }
-                Err(())
-            }
-        }
+        let _ = loaded;
+        self.diagnostics.push(Diagnostic::error(
+            "reconstruction-canonical-program-unavailable",
+            Stage::Reconstruction,
+            "the OPY reconstructor has not migrated to the canonical Workshop Program API",
+        ));
+        Err(())
     }
 
     /// Build the semantic service over a loaded program.
@@ -899,13 +863,12 @@ impl CompilerSession {
             },
             locale: loaded.origin.locale.clone(),
         };
-        SemanticService::with_origin_and_config_and_registry(
+        Ok(SemanticService::with_origin_and_config_and_registry(
             &loaded.program,
             origin,
             config,
             Arc::clone(&self.lint_registry),
-        )
-        .map_err(|error| ir_diag("analysis-error", Stage::Analysis, error, &loaded.input))
+        ))
     }
 
     /// Structural validation permits source-preserving Workshop fallbacks.
@@ -1097,10 +1060,9 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
 ///
 /// File 0 is the main input and resolves root-relative to the include root
 /// (`--root`, defaulting to the input's directory); other files resolve from
-/// the program file registry, joined with the root when the registry path is
-/// relative. `<file N>` is the fallback when no registry entry resolves
-/// (matching the [`span_from_json`] convention), and stdin inputs fall back
-/// to their display identity (`<stdin>`).
+/// the retained frontend file registry. `<file N>` is the fallback when no
+/// registry entry resolves (matching the [`span_from_json`] convention), and
+/// stdin inputs fall back to their display identity (`<stdin>`).
 pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loaded: &Loaded) {
     let Some(list) = findings.as_array_mut() else {
         return;
@@ -1118,23 +1080,28 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
             span.get("file")
                 .and_then(serde_json::Value::as_u64)
                 .map(|file| {
-                    if file == 0 {
-                        root_relative(loaded.input.path.as_deref(), &loaded.input.root)
-                            .unwrap_or_else(|| loaded.input.display.clone())
-                    } else {
-                        loaded
-                            .program
-                            .files
-                            .get(workshop_rs::source::FileId::from_index(file as usize))
-                            .map(|source_file| {
-                                root_relative(
-                                    Some(&loaded.input.root.join(&source_file.path)),
-                                    &loaded.input.root,
-                                )
-                                .unwrap_or_else(|| format!("<file {file}>"))
+                    loaded
+                        .source_files
+                        .get(file as usize)
+                        .map(|source| {
+                            let path = if file == 0 {
+                                loaded
+                                    .input
+                                    .path
+                                    .as_deref()
+                                    .or_else(|| Some(Path::new(source)))
+                            } else if Path::new(source).is_absolute() {
+                                Some(Path::new(source))
+                            } else {
+                                None
+                            };
+                            path.map(|path| {
+                                root_relative(Some(path), &loaded.input.root)
+                                    .unwrap_or_else(|| source.clone())
                             })
-                            .unwrap_or_else(|| format!("<file {file}>"))
-                    }
+                            .unwrap_or_else(|| source.clone())
+                        })
+                        .unwrap_or_else(|| format!("<file {file}>"))
                 })
                 .unwrap_or_else(|| loaded.input.display.clone())
         };
@@ -1166,7 +1133,10 @@ fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
 }
 
 /// Map a Workshop-language error to a driver diagnostic.
-fn workshop_diag(error: workshop_rs::WorkshopError, resolved: &ResolvedInput) -> Diagnostic {
+pub(crate) fn workshop_diag(
+    error: workshop_rs::WorkshopError,
+    resolved: &ResolvedInput,
+) -> Diagnostic {
     let (code, stage, span) = match &error {
         workshop_rs::WorkshopError::Catalog(catalog) => {
             return Diagnostic::error(
@@ -1308,115 +1278,10 @@ pub(crate) fn opy_diag(
     }
 }
 
-/// Map a reconstructor rejection (shared shape: stable code, message,
-/// optional WIR span) into the driver diagnostic contract (#126).
-///
-/// The reconstructor's stable code is preserved verbatim; the stage is
-/// `reconstruction` (the "recognized but unsupported" class, exit code 3).
-/// A manifest/catalog load failure is an environment failure, not a
-/// reconstruction rejection, so it maps to the internal stage. Span paths
-/// resolve through the program file registry, falling back to the input
-/// display path.
-fn reconstruct_diag(
-    code: &str,
-    message: &str,
-    span: Option<workshop_rs::source::Span>,
-    loaded: &Loaded,
-) -> Diagnostic {
-    let stage = match code {
-        "manifest-error" | "catalog-error" => Stage::Internal,
-        _ => Stage::Reconstruction,
-    };
-    let span = span.map(|span| SourceSpan {
-        file: span.file.index(),
-        path: loaded
-            .program
-            .files
-            .get(span.file)
-            .map(|file| file.path.clone())
-            .unwrap_or_else(|| loaded.input.display.clone()),
-        start: Position {
-            line: span.start.line,
-            col: span.start.col,
-        },
-        end: Position {
-            line: span.end.line,
-            col: span.end.col,
-        },
-    });
-    Diagnostic {
-        code: code.to_string(),
-        stage,
-        severity: crate::diag::Severity::Error,
-        message: message.to_string(),
-        status: None,
-        span,
-        source: Some(loaded.origin.clone()),
-    }
-}
-
 fn source_provider_unavailable() -> Diagnostic {
     Diagnostic::error(
         "source-provider-unavailable",
         Stage::Internal,
         "DEL/OSTW provider support is not currently shipped with Wright",
     )
-}
-
-/// Map an Opy HIR ingestion error to a driver diagnostic.
-pub(crate) fn hir_diag(error: wright_core::hir::HirError, resolved: &ResolvedInput) -> Diagnostic {
-    let stage = match &error {
-        wright_core::hir::HirError::Invalid { .. } => Stage::Validation,
-        _ => Stage::Frontend,
-    };
-    let span = error.span().map(|span| SourceSpan {
-        file: span.file as usize,
-        path: resolved.display.clone(),
-        start: Position {
-            line: span.start.line,
-            col: span.start.col,
-        },
-        end: Position {
-            line: span.end.line,
-            col: span.end.col,
-        },
-    });
-    Diagnostic {
-        code: error.code().to_string(),
-        stage,
-        severity: crate::diag::Severity::Error,
-        message: error.message(),
-        status: None,
-        span,
-        source: Some(resolved.origin.clone()),
-    }
-}
-
-/// Map an IR error to a driver diagnostic.
-pub(crate) fn ir_diag(
-    code: &'static str,
-    stage: Stage,
-    error: wright_ir::error::IrError,
-    resolved: &ResolvedInput,
-) -> Diagnostic {
-    Diagnostic {
-        code: code.to_string(),
-        stage,
-        severity: crate::diag::Severity::Error,
-        message: error.to_string(),
-        status: None,
-        span: None,
-        source: Some(resolved.origin.clone()),
-    }
-}
-
-fn ir_diag_for_unmapped_provider_artifact(
-    code: &'static str,
-    stage: Stage,
-    error: wright_ir::error::IrError,
-    resolved: &ResolvedInput,
-) -> Diagnostic {
-    let mut diagnostic = ir_diag(code, stage, error, resolved);
-    diagnostic.source = Some(provider_artifact_origin(resolved));
-    diagnostic
 }

@@ -20,5 +20,5 @@ pub mod fold_constants;
 pub mod pipeline;
 pub mod profile;
 
-pub use pipeline::{PassResult, PassStats, run};
+pub use pipeline::{PassResult, PassStats, run, run_canonical};
 pub use profile::Profile;

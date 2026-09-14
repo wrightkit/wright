@@ -1,11 +1,13 @@
 use std::fmt;
 
 use serde::Deserialize;
+use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
 use workshop_rs::wir::{self, Action, ActionId, Event, RuleId, Value, ValueId};
-use workshop_rs_catalog::catalog::{Catalog, Kind, Locale};
+use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
-use crate::analysis::{EvidenceClass, Finding, Severity};
+use crate::analysis::{EvidenceClass, Finding as LegacyFinding, Severity};
+use crate::canonical::Finding as CanonicalFinding;
 use crate::facts::{RuleFacts, SemanticFacts};
 
 const DEFAULT_LOCALE: &str = "en-US";
@@ -268,7 +270,7 @@ impl DeclarativeRule {
         rule: RuleId,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<Finding> {
+    ) -> Vec<LegacyFinding> {
         let Some(rule_facts) = facts.rule(rule) else {
             return Vec::new();
         };
@@ -307,7 +309,7 @@ impl DeclarativeRule {
             {
                 continue;
             }
-            findings.push(Finding {
+            findings.push(LegacyFinding {
                 code: self.id().to_string(),
                 severity: self.default_severity(),
                 message: format!(
@@ -325,6 +327,227 @@ impl DeclarativeRule {
             });
         }
         findings
+    }
+
+    /// Run a declarative matcher over the canonical public Workshop program.
+    /// This keeps custom lint rules on the same public semantic boundary as
+    /// first-party analysis; the WIR matcher above remains for legacy tests
+    /// and internal consumers.
+    pub fn run_canonical(
+        &self,
+        program: &PublicProgram,
+        rule: usize,
+        min_matches: Option<usize>,
+        max_matches: Option<usize>,
+    ) -> Vec<CanonicalFinding> {
+        let Some(rule_data) = program.rules.get(rule) else {
+            return Vec::new();
+        };
+        if self
+            .event
+            .as_deref()
+            .is_some_and(|event| event != public_event_id(&rule_data.event))
+        {
+            return Vec::new();
+        }
+        let scopes = public_scopes(rule_data);
+        let mut findings = Vec::new();
+        for (scope_id, actions, values, anchor) in scopes {
+            if let Some(pattern) = &self.conditions {
+                let count = values
+                    .iter()
+                    .filter(|value| public_value_matches(value, &pattern.value))
+                    .count();
+                if !pattern.count.accepts(count) {
+                    continue;
+                }
+            }
+            let mut counts = Vec::new();
+            if self.actions.iter().any(|pattern| {
+                let count = actions
+                    .iter()
+                    .filter(|action| public_action_matches(action, pattern))
+                    .count();
+                let accepted = if pattern.present {
+                    pattern.count.accepts(count)
+                } else {
+                    count == 0 && pattern.count.accepts(0)
+                };
+                counts.push(count);
+                !accepted
+            }) {
+                continue;
+            }
+            let matched = counts.iter().copied().max().unwrap_or(1);
+            if min_matches.is_some_and(|min| matched < min)
+                || max_matches.is_some_and(|max| matched > max)
+            {
+                continue;
+            }
+            findings.push(CanonicalFinding {
+                code: self.id().to_string(),
+                severity: self.default_severity(),
+                message: format!(
+                    "{} (matched {matched} node{})",
+                    self.metadata().summary,
+                    if matched == 1 { "" } else { "s" }
+                ),
+                span: anchor,
+                rule,
+                action: scope_id,
+                value: None,
+                evidence: self.evidence(),
+                boundedness: None,
+            });
+        }
+        findings
+    }
+}
+
+type PublicScope<'a> = (
+    Option<usize>,
+    Vec<&'a PublicAction>,
+    Vec<&'a PublicValue>,
+    Option<Span>,
+);
+
+fn public_scopes(rule: &workshop_rs::Rule) -> Vec<PublicScope<'_>> {
+    match rule.actions.iter().enumerate().find(|(_, action)| {
+        matches!(
+            action,
+            PublicAction::While { .. }
+                | PublicAction::ForGlobalVariable { .. }
+                | PublicAction::ForPlayerVariable { .. }
+        )
+    }) {
+        Some((index, _)) => {
+            let mut depth = 0;
+            let end = rule.actions[index + 1..]
+                .iter()
+                .enumerate()
+                .find_map(|(offset, action)| {
+                    match action {
+                        PublicAction::If { .. }
+                        | PublicAction::While { .. }
+                        | PublicAction::ForGlobalVariable { .. }
+                        | PublicAction::ForPlayerVariable { .. } => depth += 1,
+                        PublicAction::End if depth == 0 => return Some(index + 1 + offset),
+                        PublicAction::End => depth -= 1,
+                        _ => {}
+                    }
+                    None
+                })
+                .unwrap_or(rule.actions.len());
+            vec![(
+                Some(index),
+                rule.actions[index + 1..end].iter().collect(),
+                rule.conditions
+                    .iter()
+                    .map(|condition| &condition.value)
+                    .collect(),
+                None,
+            )]
+        }
+        None => vec![(
+            None,
+            rule.actions.iter().collect(),
+            rule.conditions
+                .iter()
+                .map(|condition| &condition.value)
+                .collect(),
+            None,
+        )],
+    }
+}
+
+fn public_action_matches(action: &PublicAction, pattern: &CanonicalActionPattern) -> bool {
+    let kind_matches = match pattern.kind {
+        None | Some(ActionKind::Any) => true,
+        Some(ActionKind::Call) => matches!(action, PublicAction::Call { .. }),
+        Some(ActionKind::While) => matches!(action, PublicAction::While { .. }),
+        Some(ActionKind::ForGlobalVariable) => {
+            matches!(action, PublicAction::ForGlobalVariable { .. })
+        }
+        Some(ActionKind::ForPlayerVariable) => {
+            matches!(action, PublicAction::ForPlayerVariable { .. })
+        }
+        Some(ActionKind::If) => matches!(action, PublicAction::If { .. }),
+    };
+    if !kind_matches {
+        return false;
+    }
+    let PublicAction::Call { name, args } = action else {
+        return pattern.name.is_none() && pattern.args.is_empty();
+    };
+    if pattern
+        .name
+        .as_deref()
+        .is_some_and(|expected| expected != name)
+    {
+        return false;
+    }
+    pattern.args.iter().enumerate().all(|(index, expected)| {
+        args.get(index)
+            .is_some_and(|actual| public_value_matches(actual, expected))
+    }) && pattern.parameters.iter().all(|(index, expected)| {
+        args.get(*index)
+            .is_some_and(|actual| public_value_matches(actual, expected))
+    })
+}
+
+fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) -> bool {
+    match (pattern, value) {
+        (CanonicalValuePattern::Any, _) => true,
+        (CanonicalValuePattern::Number(expected), PublicValue::Number(actual)) => {
+            expected == actual
+        }
+        (CanonicalValuePattern::String(expected), PublicValue::String(actual))
+        | (CanonicalValuePattern::String(expected), PublicValue::LocalizedString(actual)) => {
+            expected == actual
+        }
+        (CanonicalValuePattern::Boolean(expected), PublicValue::Bool(actual)) => expected == actual,
+        (
+            CanonicalValuePattern::Enum { domain, member },
+            PublicValue::Enum { value_type, value },
+        ) => domain == value_type && member == value,
+        (
+            CanonicalValuePattern::Call { name, args },
+            PublicValue::Call {
+                name: actual,
+                args: actual_args,
+            },
+        ) => {
+            name == actual
+                && args.len() <= actual_args.len()
+                && args
+                    .iter()
+                    .enumerate()
+                    .all(|(index, expected)| public_value_matches(&actual_args[index], expected))
+        }
+        _ => false,
+    }
+}
+
+fn public_event_id(event: &workshop_rs::Event) -> &str {
+    match event {
+        workshop_rs::Event::Global => "global",
+        workshop_rs::Event::EachPlayer | workshop_rs::Event::EachPlayerWithFilters { .. } => {
+            "eachPlayer"
+        }
+        workshop_rs::Event::Player { kind, .. } => match kind {
+            workshop_rs::PlayerEventKind::DealtDamage => "playerDealtDamage",
+            workshop_rs::PlayerEventKind::DealtFinalBlow => "playerDealtFinalBlow",
+            workshop_rs::PlayerEventKind::DealtHealing => "playerDealtHealing",
+            workshop_rs::PlayerEventKind::DealtKnockback => "playerDealtKnockback",
+            workshop_rs::PlayerEventKind::Died => "playerDied",
+            workshop_rs::PlayerEventKind::EarnedElimination => "playerEarnedElimination",
+            workshop_rs::PlayerEventKind::Joined => "playerJoined",
+            workshop_rs::PlayerEventKind::Left => "playerLeft",
+            workshop_rs::PlayerEventKind::ReceivedHealing => "playerReceivedHealing",
+            workshop_rs::PlayerEventKind::ReceivedKnockback => "playerReceivedKnockback",
+            workshop_rs::PlayerEventKind::TookDamage => "playerTookDamage",
+        },
+        workshop_rs::Event::Subroutine(_) => "subroutine",
     }
 }
 
@@ -587,7 +810,7 @@ fn canonical_action(
 }
 
 fn resolve_parameter(
-    action: &workshop_rs_catalog::catalog::CatalogEntry,
+    action: &workshop_rs::catalog::CatalogEntry,
     locale: &Locale,
     spelling: &str,
 ) -> Option<usize> {

@@ -23,7 +23,7 @@ fn en() -> Locale {
 
 fn parse_with_catalog(text: &str) -> wir::Program {
     let catalog = catalog();
-    parser::parse_with_context(text, &catalog, &en(), &catalog).expect("catalog context parses")
+    parser::parse_wir_with_context(text, &catalog, &en(), &catalog).expect("catalog context parses")
 }
 
 fn round_trip_with_catalog(text: &str) -> roundtrip::RoundTripRecord {

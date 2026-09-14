@@ -1179,14 +1179,14 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opy-rs"
-version = "0.1.18"
+version = "0.1.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af51684f705c321d3a5ee0dd137d3c9f37cdeb0e9efede33f27c39807d98802e"
+checksum = "08724bc25252128d1985f9ff2591458d8c8cf20ee13c157a6d5649b7acf23fde"
 dependencies = [
  "libquickjs-ng-sys",
  "serde",
  "serde_json",
- "workshop-rs 0.1.18",
+ "workshop-rs",
 ]
 
 [[package]]
@@ -2270,20 +2270,9 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "0.1.18"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4bf40de43a94ed84485f9db7102fb6f0696bf883c245214338d17c11197540"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "workshop-rs"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91acfa21642b5e92432adf4653f3db00a6e58c2091eab2ac5f388b7221630130"
+checksum = "6c7a9444568024d9a957719fe73e350413b427d87e1acb26eb7bebfc561c7035"
 dependencies = [
  "serde",
  "serde_json",
@@ -2297,8 +2286,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "workshop-rs 0.1.18",
- "workshop-rs 0.3.6",
+ "workshop-rs",
  "wright-core",
  "wright-ir",
 ]
@@ -2310,6 +2298,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "workshop-rs",
  "wright-driver",
 ]
 
@@ -2327,7 +2316,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
- "workshop-rs 0.1.18",
+ "workshop-rs",
  "wright-analyzer",
  "wright-driver",
 ]
@@ -2346,7 +2335,7 @@ version = "0.2.22"
 dependencies = [
  "serde",
  "serde_json",
- "workshop-rs 0.1.18",
+ "workshop-rs",
  "wright-ir",
 ]
 
@@ -2361,7 +2350,7 @@ dependencies = [
  "sha2",
  "tar",
  "url",
- "workshop-rs 0.1.18",
+ "workshop-rs",
  "wright-analyzer",
  "wright-core",
  "wright-ir",
@@ -2374,7 +2363,7 @@ dependencies = [
 name = "wright-ir"
 version = "0.2.22"
 dependencies = [
- "workshop-rs 0.1.18",
+ "workshop-rs",
 ]
 
 [[package]]
@@ -2385,7 +2374,7 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
- "workshop-rs 0.1.18",
+ "workshop-rs",
  "wright-analyzer",
  "wright-driver",
  "wright-ir",
@@ -2418,9 +2407,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "workshop-rs 0.1.18",
- "wright-core",
- "wright-ir",
+ "workshop-rs",
 ]
 
 [[package]]
@@ -2428,7 +2415,7 @@ name = "wright-transform"
 version = "0.2.22"
 dependencies = [
  "serde",
- "workshop-rs 0.1.18",
+ "workshop-rs",
  "wright-ir",
 ]
 
