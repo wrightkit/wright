@@ -74,20 +74,19 @@ fn catalog_signature_resolves_ambiguous_none_for_set_invisible() {
 }
 
 #[test]
-fn mismatched_catalog_signature_keeps_ambiguity_rejected() {
+fn mismatched_catalog_signature_keeps_ambiguity_preserved() {
     // A signature pinning a *different* domain than the ambiguous member's
     // candidates must not resolve it: `Wait(...)` expects `Wait` (which has
     // no `None` member), so the bare `None` stays ambiguous — no guessing,
     // no arbitrary precedence.
     let text = "rule (\"x\") { event { Ongoing - Global; } actions { Wait(0.016, None); } }";
     let catalog = catalog();
-    let error = parser::parse_with_context(text, &catalog, &en(), &catalog)
-        .expect_err("a non-matching expected domain must keep the ambiguity");
-    assert!(
-        matches!(error, workshop_rs::WorkshopError::Unsupported { .. }),
-        "expected a structured ambiguity: {error}"
-    );
-    assert!(error.to_string().contains("ambiguous enum member 'None'"));
+    let program = parser::parse_wir_with_context(text, &catalog, &en(), &catalog)
+        .expect("a non-matching expected domain must preserve the ambiguity");
+    assert!(matches!(
+        enum_value_of_first_action(&program, 0),
+        wir::Value::Call { name, .. } if name == "__ambiguous_enum"
+    ));
 }
 
 #[test]
@@ -186,14 +185,16 @@ fn chase_duration_keywords_round_trip_through_the_shipped_path() {
 
 #[test]
 fn context_free_parser_preserves_ambiguous_none_boundary() {
-    // Without a signature pin the ambiguity stays rejected: the same input
-    // through the plain (context-free) round-trip fails at parse, keeping the
-    // pre-#111 boundary deterministic.
+    // Without a signature pin the ambiguity remains structured: the same
+    // input through the plain (context-free) round-trip preserves all of its
+    // canonical candidates instead of fabricating a domain.
     let text = "variables { global: 0: g }\nrule (\"chase\") { event { Ongoing - Global; } actions { Chase Global Variable Over Time(Global.g, 0, 30, None); } }";
     let record = roundtrip::round_trip(text, &catalog(), &en());
-    assert!(!record.parse_ok, "context-free None must stay rejected");
-    let error = record.error.expect("a parse failure is recorded");
-    assert!(error.contains("ambiguous enum member 'None'"), "{error}");
+    assert!(record.parse_ok && record.emit_ok && record.reparse_ok);
+    assert!(
+        record.equivalent,
+        "context-free None candidates must round-trip"
+    );
 }
 
 #[test]
