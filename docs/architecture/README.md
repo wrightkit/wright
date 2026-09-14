@@ -16,6 +16,7 @@ Keep these evidence classes separate:
 | Product/repository ownership and dependency direction | [`ownership.md`](ownership.md) |
 | Language/provider integration and failure routing | [`integration.md`](integration.md) |
 | Wright-owned lint/analyze/inspect/edit/agent/CI/LSP tooling model | [`tooling.md`](tooling.md) |
+| On-demand Workshop domain intelligence for agent/embedding consumers | [`domain-intelligence.md`](domain-intelligence.md) |
 | CLI/driver behavior | [`../cli.md`](../cli.md) |
 | Embedding/tool API | [`../embedding.md`](../embedding.md) |
 | Language services/LSP | [`../language-services.md`](../language-services.md) |
