@@ -90,7 +90,11 @@ fn collect_files(root: &Path, files: &mut Vec<PathBuf>) {
         let kind = entry.file_type().expect("inspect corpus entry");
         if kind.is_dir() {
             collect_files(&path, files);
-        } else if kind.is_file() {
+        } else if kind.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("ow"))
+        {
             files.push(path);
         }
     }
