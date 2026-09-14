@@ -3,9 +3,11 @@
 Wright owns cross-language product tooling over semantic information supplied by the owning implementations and canonical Workshop.
 
 Decision history: the distinct command workflows are recorded in
-[ADR-0011](../adr/0011-distinct-tooling-workflows.md), and the canonical-facts
+[ADR-0011](../adr/0011-distinct-tooling-workflows.md), the canonical-facts
 and lint-policy split is recorded in
-[ADR-0015](../adr/0015-canonical-facts-and-declarative-lint-policy.md).
+[ADR-0015](../adr/0015-canonical-facts-and-declarative-lint-policy.md), and
+on-demand domain-intelligence composition is recorded in
+[ADR-0016](../adr/0016-domain-intelligence-query-contract.md).
 
 ## Tooling surfaces
 
@@ -50,6 +52,8 @@ Normal source tooling does not require full-file regeneration. Preserve comments
 ## Shared services
 
 CLI, LSP, agent/MCP-style adapters, embedding, and CI should reuse common Wright-owned semantic/query/edit services rather than each implementing language-specific logic independently.
+
+On-demand domain intelligence follows the same rule: Wright composes owner-backed semantic identities and facts with separately provenance-bearing guidance and project policy through the shared query service. It does not copy canonical Workshop facts into an agent-specific knowledge store. See [`domain-intelligence.md`](domain-intelligence.md).
 
 Machine-readable contracts are versioned and deterministic when declared. Presentation layers must not alter semantic outcomes.
 
