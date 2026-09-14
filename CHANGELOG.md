@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.23](https://github.com/wrightkit/wright/compare/v0.2.22...v0.2.23) (2026-09-14)
+
+
+### Features
+
+* **input:** support current-directory project targets ([#318](https://github.com/wrightkit/wright/issues/318)) ([98bec23](https://github.com/wrightkit/wright/commit/98bec238026c2cd1ab951258cfa59ffa6f93b11d))
+* **wright:** migrate to canonical workshop-rs Program API ([#324](https://github.com/wrightkit/wright/issues/324)) ([167fecc](https://github.com/wrightkit/wright/commit/167feccdf7b6df63f1234d70e2b64f8864896a1a))
+
 ## [0.2.22](https://github.com/wrightkit/wright/compare/v0.2.21...v0.2.22) (2026-09-11)
 
 
