@@ -1179,9 +1179,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opy-rs"
-version = "0.1.36"
+version = "0.1.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08724bc25252128d1985f9ff2591458d8c8cf20ee13c157a6d5649b7acf23fde"
+checksum = "2a8571d8e2117f3fc6e3b15d5181f19c0faacd07fcad3ee536fb973b20e0b08c"
 dependencies = [
  "libquickjs-ng-sys",
  "serde",
@@ -2270,9 +2270,9 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c7a9444568024d9a957719fe73e350413b427d87e1acb26eb7bebfc561c7035"
+checksum = "9477afc48be4221ade20b9c8a2304f9093b7b75838f327297d1f19ae18d9546d"
 dependencies = [
  "serde",
  "serde_json",
