@@ -485,7 +485,7 @@ impl<'a> ToolService<'a> {
                 "locale": self.loaded.origin.locale,
             },
             "inputIdentity": self.loaded.input.identity,
-            "files": 1,
+            "files": self.loaded.source_files.len().max(1),
             "globalVariables": self.loaded.program.global_variables.len(),
             "playerVariables": self.loaded.program.player_variables.len(),
             "subroutines": self.loaded.program.subroutines.len(),

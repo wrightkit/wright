@@ -53,6 +53,8 @@ pub struct Loaded {
     pub input: ResolvedInput,
     /// Whether semantic spans can be mapped to authored source files.
     pub provenance: Provenance,
+    /// Source identities retained by the frontend in canonical file-id order.
+    pub(crate) source_files: Arc<Vec<String>>,
 }
 
 /// Provenance of the semantic program handed to Wright's analyzer.
@@ -217,12 +219,12 @@ impl CompilerSession {
         if provider_backend {
             return self.load_from_source_provider(&mut resolved, provider_operation);
         }
-        let mut program = match resolved.kind {
+        let (mut program, source_files) = match resolved.kind {
             SourceKind::Workshop => {
                 self.progress(ProgressEvent::new(ProgressPhase::Parsing));
                 let (program, locale) = self.load_workshop(&resolved)?;
                 resolved.origin.locale = Some(locale);
-                program
+                (program, vec![resolved.display.clone()])
             }
             SourceKind::Protocol => {
                 return Err(Diagnostic::error(
@@ -262,7 +264,10 @@ impl CompilerSession {
                     program
                         .validate()
                         .map_err(|error| workshop_diag(error, &resolved))?;
-                    program
+                    (
+                        program,
+                        outcome.files.iter().map(|file| file.path.clone()).collect(),
+                    )
                 }
             }
             SourceKind::Auto => {
@@ -291,6 +296,7 @@ impl CompilerSession {
             origin: resolved.origin.clone(),
             input: resolved,
             provenance: Provenance::Source,
+            source_files: Arc::new(source_files),
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -425,6 +431,7 @@ impl CompilerSession {
                 origin: resolved.origin.clone(),
                 input: resolved.clone(),
                 provenance,
+                source_files: Arc::new(vec![resolved.display.clone()]),
             });
         }
         let Some(workshop_text) = compilation.workshop_text else {
@@ -465,6 +472,7 @@ impl CompilerSession {
             origin: resolved.origin.clone(),
             input: resolved.clone(),
             provenance,
+            source_files: Arc::new(vec![resolved.display.clone()]),
         };
         self.loaded = Some(loaded.clone());
         self.loaded_operation = Some(operation);
@@ -1052,10 +1060,9 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
 ///
 /// File 0 is the main input and resolves root-relative to the include root
 /// (`--root`, defaulting to the input's directory); other files resolve from
-/// the program file registry, joined with the root when the registry path is
-/// relative. `<file N>` is the fallback when no registry entry resolves
-/// (matching the [`span_from_json`] convention), and stdin inputs fall back
-/// to their display identity (`<stdin>`).
+/// the retained frontend file registry. `<file N>` is the fallback when no
+/// registry entry resolves (matching the [`span_from_json`] convention), and
+/// stdin inputs fall back to their display identity (`<stdin>`).
 pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loaded: &Loaded) {
     let Some(list) = findings.as_array_mut() else {
         return;
@@ -1073,12 +1080,28 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
             span.get("file")
                 .and_then(serde_json::Value::as_u64)
                 .map(|file| {
-                    if file == 0 {
-                        root_relative(loaded.input.path.as_deref(), &loaded.input.root)
-                            .unwrap_or_else(|| loaded.input.display.clone())
-                    } else {
-                        format!("<file {file}>")
-                    }
+                    loaded
+                        .source_files
+                        .get(file as usize)
+                        .map(|source| {
+                            let path = if file == 0 {
+                                loaded
+                                    .input
+                                    .path
+                                    .as_deref()
+                                    .or_else(|| Some(Path::new(source)))
+                            } else if Path::new(source).is_absolute() {
+                                Some(Path::new(source))
+                            } else {
+                                None
+                            };
+                            path.map(|path| {
+                                root_relative(Some(path), &loaded.input.root)
+                                    .unwrap_or_else(|| source.clone())
+                            })
+                            .unwrap_or_else(|| source.clone())
+                        })
+                        .unwrap_or_else(|| format!("<file {file}>"))
                 })
                 .unwrap_or_else(|| loaded.input.display.clone())
         };

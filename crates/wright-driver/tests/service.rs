@@ -74,6 +74,34 @@ fn project_reports_origin_and_input_identity() {
 }
 
 #[test]
+fn project_and_findings_retain_multi_file_opy_provenance() {
+    let root = workspace_root().join("crates/wright-language/tests/fixtures/semantic-include");
+    let config = SessionConfig {
+        input: InputSpec::Path(root.join("main.opy")),
+        kind: SourceKind::Opy,
+        profile: Profile::Compat,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::new(config).unwrap();
+    session.load().unwrap();
+    let session = Box::leak(Box::new(session));
+    let service = ToolService::new(session).unwrap();
+
+    let project = handle_ok(&service, &ToolRequest::Project);
+    assert_eq!(project["files"], 2, "main file plus included source");
+
+    let findings = handle_ok(&service, &ToolRequest::Findings);
+    assert!(
+        findings.as_array().unwrap().iter().any(|finding| {
+            finding["span"]["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("shared.opy"))
+        }),
+        "included findings retain shared.opy attribution: {findings}"
+    );
+}
+
+#[test]
 fn call_graph_is_empty_for_owner_supported_program() {
     let service = service_for("synthetic/control-flow");
     let graph = handle_ok(&service, &ToolRequest::CallGraph);
