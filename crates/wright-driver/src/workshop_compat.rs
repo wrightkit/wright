@@ -1,6 +1,6 @@
 //! Workshop meaning remains owned by `workshop-rs`; this module only adapts
-//! its parser and equivalence contract to the gate's two text inputs and
-//! preserves the comparison evidence for CI reports.
+//! its canonical parser and equivalence contract to the gate's two text
+//! inputs and preserves comparison evidence for CI reports.
 
 use serde::Serialize;
 
@@ -20,16 +20,16 @@ pub struct WorkshopSemanticSide {
     pub dump: Option<String>,
 }
 
-/// Compare two emitted Workshop texts using canonical WIR equivalence.
+/// Compare two emitted Workshop texts using canonical `Program` equivalence.
 pub fn compare_workshop_texts(expected: &str, actual: &str) -> WorkshopSemanticComparison {
     let catalog = match workshop_rs::catalog::Catalog::builtin() {
         Ok(catalog) => catalog,
         Err(error) => return catalog_failure(error.to_string()),
     };
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    let mut expected = parse_side(expected, &catalog, &locale);
-    let mut actual = parse_side(actual, &catalog, &locale);
-    let equivalent = match (expected.program.as_mut(), actual.program.as_mut()) {
+    let expected = parse_side(expected, &catalog, &locale);
+    let actual = parse_side(actual, &catalog, &locale);
+    let equivalent = match (&expected.program, &actual.program) {
         (Some(expected), Some(actual)) => workshop_rs::roundtrip::equivalent(expected, actual),
         _ => false,
     };
@@ -42,7 +42,7 @@ pub fn compare_workshop_texts(expected: &str, actual: &str) -> WorkshopSemanticC
 
 struct ParsedSide {
     side: WorkshopSemanticSide,
-    program: Option<workshop_rs::wir::Program>,
+    program: Option<workshop_rs::Program>,
 }
 
 fn parse_side(
@@ -50,8 +50,7 @@ fn parse_side(
     catalog: &workshop_rs::catalog::Catalog,
     locale: &workshop_rs::catalog::Locale,
 ) -> ParsedSide {
-    let mut program = match workshop_rs::parser::parse_with_context(text, catalog, locale, catalog)
-    {
+    let program = match workshop_rs::parser::parse_with_context(text, catalog, locale, catalog) {
         Ok(program) => program,
         Err(error) => {
             return ParsedSide {
@@ -74,7 +73,6 @@ fn parse_side(
             program: None,
         };
     }
-    canonicalize_debug_hud(&mut program);
     let dump = program.dump();
     ParsedSide {
         side: WorkshopSemanticSide {
@@ -96,92 +94,6 @@ fn catalog_failure(error: String) -> WorkshopSemanticComparison {
         equivalent: false,
         expected: side.clone(),
         actual: side,
-    }
-}
-
-fn canonicalize_debug_hud(program: &mut workshop_rs::wir::Program) {
-    for index in 0..program.actions.len() {
-        let action_id = workshop_rs::ids::Id::from_index(index);
-        let Some(workshop_rs::wir::Action::Call { name, args, .. }) =
-            program.actions.get(action_id)
-        else {
-            continue;
-        };
-        if name != "createHudText" || args.len() < 3 {
-            continue;
-        }
-        let [_, label, text, ..] = args.as_slice() else {
-            continue;
-        };
-        let is_debug_label = program
-            .values
-            .get(*label)
-            .is_some_and(|node| matches!(node.value, workshop_rs::wir::Value::Null));
-        if !is_debug_label {
-            continue;
-        }
-        let Some(workshop_rs::wir::ValueNode {
-            value: workshop_rs::wir::Value::Call { name, args },
-            ..
-        }) = program.values.get(*text)
-        else {
-            continue;
-        };
-        if name != "customString" || args.is_empty() {
-            continue;
-        }
-        let mut string_ids = Vec::new();
-        let mut visited = vec![false; program.values.len()];
-        collect_string_ids(program, *text, &mut visited, &mut string_ids);
-        for string_id in string_ids {
-            if let Some(workshop_rs::wir::ValueNode {
-                value: workshop_rs::wir::Value::String(value),
-                ..
-            }) = program.values.get_mut(string_id)
-            {
-                *value = "<wright-debug-string>".to_string();
-            }
-        }
-    }
-}
-
-fn collect_string_ids(
-    program: &workshop_rs::wir::Program,
-    id: workshop_rs::wir::ValueId,
-    visited: &mut [bool],
-    string_ids: &mut Vec<workshop_rs::wir::ValueId>,
-) {
-    if id.index() >= visited.len() || visited[id.index()] {
-        return;
-    }
-    visited[id.index()] = true;
-    let Some(node) = program.values.get(id) else {
-        return;
-    };
-    match &node.value {
-        workshop_rs::wir::Value::String(_) => string_ids.push(id),
-        workshop_rs::wir::Value::Array(values)
-        | workshop_rs::wir::Value::Call { args: values, .. } => {
-            for value in values {
-                collect_string_ids(program, *value, visited, string_ids);
-            }
-        }
-        workshop_rs::wir::Value::Vector { x, y, z } => {
-            collect_string_ids(program, *x, visited, string_ids);
-            collect_string_ids(program, *y, visited, string_ids);
-            collect_string_ids(program, *z, visited, string_ids);
-        }
-        workshop_rs::wir::Value::PlayerVariable { player, .. } => {
-            collect_string_ids(program, *player, visited, string_ids);
-        }
-        workshop_rs::wir::Value::Number { .. }
-        | workshop_rs::wir::Value::LocalizedString(_)
-        | workshop_rs::wir::Value::Bool(_)
-        | workshop_rs::wir::Value::Null
-        | workshop_rs::wir::Value::Enum { .. }
-        | workshop_rs::wir::Value::GlobalVariable(_)
-        | workshop_rs::wir::Value::Subroutine(_)
-        | workshop_rs::wir::Value::EventPlayer => {}
     }
 }
 

@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use workshop_rs::catalog::Catalog;
 use workshop_rs::wir;
-use workshop_rs_catalog::catalog::Catalog;
 
 use crate::analysis::{
     Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,
@@ -655,6 +655,40 @@ impl LintRegistry {
     /// Workshop rules in program index order.
     pub fn run(&self, program: &wir::Program, config: &LintConfig) -> Vec<Finding> {
         self.run_report(program, config).findings
+    }
+
+    /// Run custom declarative rules over the canonical public Workshop model.
+    /// First-party rules are owned by `canonical::analyze`; this method only
+    /// supplies the registry-owned extension entries.
+    pub fn run_canonical_custom(
+        &self,
+        program: &workshop_rs::Program,
+        config: &LintConfig,
+    ) -> Vec<crate::canonical::Finding> {
+        let mut findings = Vec::new();
+        for rule in 0..program.rules.len() {
+            for entry in &self.entries {
+                let Some(declarative) = &entry.declarative else {
+                    continue;
+                };
+                if !config.is_enabled(declarative.id()) {
+                    continue;
+                }
+                let mut rule_findings = declarative.run_canonical(
+                    program,
+                    rule,
+                    config.options(declarative.id()).min_matches,
+                    config.options(declarative.id()).max_matches,
+                );
+                let severity =
+                    config.effective_severity_for(declarative.id(), declarative.default_severity());
+                for finding in &mut rule_findings {
+                    finding.severity = severity;
+                }
+                findings.extend(rule_findings);
+            }
+        }
+        findings
     }
 
     /// Run the registry while retaining machine-readable unavailable/skip

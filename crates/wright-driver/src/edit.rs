@@ -457,24 +457,30 @@ pub fn semantic_rename(
         config.locale.as_deref(),
     );
 
-    let program = match compile_project(kind, &resolved, &overlay, config.profile) {
-        Ok(program) => program,
+    let (program, files) = match compile_project(kind, &resolved, &overlay, config.profile) {
+        Ok(result) => result,
         Err(diagnostics) => return refuse(diagnostics),
     };
-    let index = match wright_analyzer::symbols::SemanticIndex::build(&program) {
-        Ok(index) => index,
-        Err(error) => {
-            return refuse(vec![Diagnostic::error(
-                "analysis-error",
-                Stage::Analysis,
-                format!("cannot build the semantic index for rename: {error}"),
-            )]);
-        }
-    };
+    let source_texts = files
+        .iter()
+        .filter_map(|file| {
+            let source = source_key_for_file(&files, &root, &main_path, sources, file.id as usize)?;
+            let text = sources
+                .get(&source)
+                .cloned()
+                .or_else(|| (file.id == 0).then_some(main_text.clone()))?;
+            Some((
+                workshop_rs::source::FileId::from_index(file.id as usize),
+                text,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let index =
+        wright_analyzer::canonical::SemanticIndex::build_with_sources(&program, &source_texts);
 
     // The position names one file of the compiled project; refuse when the
     // source is not part of it (e.g. an include outside the project closure).
-    let Some(file_id) = file_id_for_source(&program, &root, &target.source) else {
+    let Some(file_id) = file_id_for_source(&files, &root, &target.source) else {
         return refuse(vec![Diagnostic::error(
             "rename-unresolved",
             Stage::Discovery,
@@ -485,7 +491,14 @@ pub fn semantic_rename(
             ),
         )]);
     };
-    let Some(symbol) = symbol_at(&index, file_id, target.line, target.col) else {
+    let declaration_source = source_key_for_file(&files, &root, &main_path, sources, file_id)
+        .and_then(|source| sources.get(&source).cloned())
+        .or_else(|| (file_id == 0).then_some(main_text.clone()));
+    let Some(symbol) = symbol_at(&index, file_id, target.line, target.col).or_else(|| {
+        declaration_source
+            .as_deref()
+            .and_then(|source| declaration_symbol_at(&index, target.line, target.col, source))
+    }) else {
         return refuse(vec![Diagnostic::error(
             "rename-unresolved",
             Stage::Discovery,
@@ -521,15 +534,11 @@ pub fn semantic_rename(
     for reference in index.references(symbol.id) {
         match (reference.occurrence, reference.span) {
             (Some(occurrence), _) => occurrences.push(occurrence),
-            (None, Some(span)) => {
+            (None, Some(_span)) => {
                 // A reference with a source location but no exact identifier
                 // occurrence: an exact target cannot be established, so the
                 // rename refuses rather than broadening to a statement span.
-                let path = program
-                    .files
-                    .get(span.file)
-                    .map(|file| file.path.clone())
-                    .unwrap_or_else(|| target.source.clone());
+                let path = target.source.clone();
                 return refuse(vec![Diagnostic::error(
                     "rename-unresolved-target",
                     Stage::Discovery,
@@ -542,13 +551,29 @@ pub fn semantic_rename(
             (None, None) => {}
         }
     }
+    for file in &files {
+        let file_id = file.id as usize;
+        let Some(source) = source_key_for_file(&files, &root, &main_path, sources, file_id) else {
+            continue;
+        };
+        let current = sources
+            .get(&source)
+            .cloned()
+            .unwrap_or_else(|| main_text.clone());
+        occurrences.extend(declaration_occurrences(
+            file_id,
+            &current,
+            symbol.kind,
+            &symbol.name,
+        ));
+    }
 
     // One exact-range edit per occurrence, carrying the current text's
     // identity precondition; the transaction orders and overlap-checks them.
     let mut edits: BTreeMap<String, BTreeSet<(u32, u32, u32, u32)>> = BTreeMap::new();
     for occurrence in occurrences {
         let file = occurrence.file.index();
-        let Some(source) = source_key_for_file(&program, &root, &main_path, sources, file) else {
+        let Some(source) = source_key_for_file(&files, &root, &main_path, sources, file) else {
             return refuse(vec![Diagnostic::error(
                 "edit-unknown-source",
                 Stage::Discovery,
@@ -560,13 +585,14 @@ pub fn semantic_rename(
             .get(&source)
             .cloned()
             .unwrap_or_else(|| main_text.clone());
-        let occurrence = exact_identifier_occurrence(occurrence, &current, &symbol.name);
-        edits.entry(source).or_default().insert((
-            occurrence.start.line,
-            occurrence.start.col,
-            occurrence.end.line,
-            occurrence.end.col,
-        ));
+        for occurrence in exact_identifier_occurrences(occurrence, &current, &symbol.name) {
+            edits.entry(source.clone()).or_default().insert((
+                occurrence.start.line,
+                occurrence.start.col,
+                occurrence.end.line,
+                occurrence.end.col,
+            ));
+        }
     }
     let mut source_edits = Vec::new();
     for (source, ranges) in edits {
@@ -615,37 +641,100 @@ pub fn semantic_rename(
     }
 }
 
-/// Some released owner compilers report a call span rather than the exact
-/// callee identifier. Narrow such a span only when the source proves that it
-/// starts with the resolved symbol name; never broaden or guess an edit.
-fn exact_identifier_occurrence(
+/// Narrow an owner-provided semantic span to exact identifier occurrences
+/// proven by the corresponding source text.
+fn exact_identifier_occurrences(
     span: workshop_rs::source::Span,
     source: &str,
     name: &str,
-) -> workshop_rs::source::Span {
-    if span.start.line != span.end.line {
-        return span;
-    }
-    let Some(line) = source
-        .lines()
-        .nth(span.start.line.saturating_sub(1) as usize)
-    else {
-        return span;
-    };
-    let chars: Vec<char> = line.chars().collect();
-    let start = span.start.col.saturating_sub(1) as usize;
-    let end = span.end.col.saturating_sub(1) as usize;
+) -> Vec<workshop_rs::source::Span> {
     let name_chars: Vec<char> = name.chars().collect();
-    let name_end = start.saturating_add(name_chars.len());
-    if end > name_end && chars.get(start..name_end) == Some(name_chars.as_slice()) {
-        workshop_rs::source::Span::new(
-            span.file,
-            span.start,
-            workshop_rs::source::Position::new(span.start.line, name_end as u32 + 1),
-        )
-    } else {
-        span
+    if name_chars.is_empty() {
+        return Vec::new();
     }
+    let lines: Vec<&str> = source.lines().collect();
+    let mut occurrences = Vec::new();
+    for line_number in span.start.line..=span.end.line {
+        let Some(line) = lines.get(line_number.saturating_sub(1) as usize) else {
+            continue;
+        };
+        let chars: Vec<char> = line.chars().collect();
+        let lower = if line_number == span.start.line {
+            span.start.col.saturating_sub(1) as usize
+        } else {
+            0
+        };
+        let upper = if line_number == span.end.line {
+            span.end.col.saturating_sub(1) as usize
+        } else {
+            chars.len()
+        };
+        for start in lower.min(chars.len())..=upper.min(chars.len()) {
+            let end = start.saturating_add(name_chars.len());
+            if end > upper || chars.get(start..end) != Some(name_chars.as_slice()) {
+                continue;
+            }
+            let before = start.checked_sub(1).and_then(|index| chars.get(index));
+            let after = chars.get(end);
+            if before.is_some_and(|character| character.is_alphanumeric() || *character == '_')
+                || after.is_some_and(|character| character.is_alphanumeric() || *character == '_')
+            {
+                continue;
+            }
+            occurrences.push(workshop_rs::source::Span::new(
+                span.file,
+                workshop_rs::source::Position::new(line_number, start as u32 + 1),
+                workshop_rs::source::Position::new(line_number, end as u32 + 1),
+            ));
+        }
+    }
+    occurrences
+}
+
+fn declaration_occurrences(
+    file: usize,
+    source: &str,
+    kind: wright_analyzer::canonical::SymbolKind,
+    name: &str,
+) -> Vec<workshop_rs::source::Span> {
+    let prefix = match kind {
+        wright_analyzer::canonical::SymbolKind::GlobalVariable => "globalvar ",
+        wright_analyzer::canonical::SymbolKind::PlayerVariable => "playervar ",
+        wright_analyzer::canonical::SymbolKind::Subroutine => "subroutine ",
+        wright_analyzer::canonical::SymbolKind::Rule => "rule ",
+    };
+    source
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let start = line.find(prefix)? + prefix.len();
+            let line = &line[start..];
+            let name_start = line.find(name)?;
+            let before = name_start
+                .checked_sub(1)
+                .and_then(|position| line.as_bytes().get(position));
+            let after = line.as_bytes().get(name_start + name.len());
+            if before
+                .is_some_and(|character| character.is_ascii_alphanumeric() || *character == b'_')
+                || after.is_some_and(|character| {
+                    character.is_ascii_alphanumeric() || *character == b'_'
+                })
+            {
+                return None;
+            }
+            Some(workshop_rs::source::Span::new(
+                workshop_rs::source::FileId::from_index(file),
+                workshop_rs::source::Position::new(
+                    index as u32 + 1,
+                    (start + name_start) as u32 + 1,
+                ),
+                workshop_rs::source::Position::new(
+                    index as u32 + 1,
+                    (start + name_start + name.len()) as u32 + 1,
+                ),
+            ))
+        })
+        .collect()
 }
 
 /// The program file id whose registry path matches a caller source identity.
@@ -656,35 +745,25 @@ fn exact_identifier_occurrence(
 /// display-relative spellings (e.g. the driver's cwd-relative display paths)
 /// and project-relative spellings both match.
 fn file_id_for_source(
-    program: &workshop_rs::wir::Program,
+    files: &[wright_opy::preprocess::FileRecord],
     root: &Path,
     source: &str,
 ) -> Option<usize> {
-    program
-        .files
-        .iter()
-        .enumerate()
-        .find_map(|(index, file)| registry_path_matches(source, root, &file.path).then_some(index))
+    files.iter().find_map(|file| {
+        registry_path_matches(source, root, &file.path).then_some(file.id as usize)
+    })
 }
 
-/// Whether a source identity names the same file as a registry path
-/// spelling: exact equality, the root-joined spelling, or the spelling as
-/// given (resolved against the working directory).
+/// Whether a source identity names the same file as a registry path spelling.
 fn registry_path_matches(source: &str, root: &Path, registry_path: &str) -> bool {
     let path = Path::new(registry_path);
-    if same_file(source, path) {
-        return true;
-    }
-    if path.is_relative() {
-        return same_file(source, &root.join(path));
-    }
-    false
+    same_file(source, path) || (path.is_relative() && same_file(source, &root.join(path)))
 }
 
 /// The caller's source identity (a `sources` key) for a program file id,
 /// matching file registry paths against the provided current texts.
 fn source_key_for_file(
-    program: &workshop_rs::wir::Program,
+    files: &[wright_opy::preprocess::FileRecord],
     root: &Path,
     main_path: &Path,
     sources: &BTreeMap<String, String>,
@@ -697,10 +776,11 @@ fn source_key_for_file(
             .cloned()
             .or_else(|| Some(main_path.to_string_lossy().into_owned()));
     }
-    let registry_path = program
-        .files
-        .get(workshop_rs::source::FileId::from_index(file))
-        .map(|source_file| &source_file.path)?;
+    let registry_path = files
+        .iter()
+        .find(|record| record.id as usize == file)?
+        .path
+        .as_str();
     sources
         .keys()
         .find(|key| registry_path_matches(key, root, registry_path))
@@ -710,11 +790,11 @@ fn source_key_for_file(
 /// The symbol whose declaration or reference occurrence span in `file_id`
 /// contains a 1-based line/column; spans in other files are never considered.
 fn symbol_at(
-    index: &wright_analyzer::symbols::SemanticIndex,
+    index: &wright_analyzer::canonical::SemanticIndex,
     file_id: usize,
     line: u32,
     col: u32,
-) -> Option<wright_analyzer::symbols::Symbol> {
+) -> Option<wright_analyzer::canonical::Symbol> {
     for symbol in index.symbols() {
         let symbol_id = symbol.id;
         if let Some(span) = symbol.span {
@@ -729,6 +809,48 @@ fn symbol_at(
                 }
             }
         }
+    }
+    None
+}
+
+fn declaration_symbol_at(
+    index: &wright_analyzer::canonical::SemanticIndex,
+    line: u32,
+    col: u32,
+    source: &str,
+) -> Option<wright_analyzer::canonical::Symbol> {
+    let line_text = source.lines().nth(line.saturating_sub(1) as usize)?;
+    for (prefix, kind) in [
+        (
+            "globalvar ",
+            wright_analyzer::canonical::SymbolKind::GlobalVariable,
+        ),
+        (
+            "playervar ",
+            wright_analyzer::canonical::SymbolKind::PlayerVariable,
+        ),
+        (
+            "subroutine ",
+            wright_analyzer::canonical::SymbolKind::Subroutine,
+        ),
+        ("rule ", wright_analyzer::canonical::SymbolKind::Rule),
+    ] {
+        let Some(name_start) = line_text.strip_prefix(prefix).map(|_| prefix.len()) else {
+            continue;
+        };
+        let name = line_text[name_start..]
+            .split_whitespace()
+            .next()
+            .map(|name| name.trim_matches('"'))?;
+        let start = name_start as u32 + 1;
+        let end = start + name.chars().count() as u32;
+        if !(start..end).contains(&col) {
+            continue;
+        }
+        return index
+            .symbols()
+            .find(|symbol| symbol.kind == kind && symbol.name == name)
+            .cloned();
     }
     None
 }
@@ -785,7 +907,13 @@ fn compile_project(
     resolved: &ResolvedInput,
     overlay: &BTreeMap<String, String>,
     profile: crate::Profile,
-) -> Result<workshop_rs::wir::Program, Vec<Diagnostic>> {
+) -> Result<
+    (
+        workshop_rs::Program,
+        Vec<wright_opy::preprocess::FileRecord>,
+    ),
+    Vec<Diagnostic>,
+> {
     if kind != SourceKind::Opy {
         return Err(vec![source_provider_unavailable()]);
     }
@@ -810,23 +938,18 @@ fn compile_project(
         )]);
     };
     if let Err(error) = program.validate() {
-        return Err(vec![session::ir_diag(
-            "validation-error",
-            crate::diag::Stage::Validation,
-            error,
-            resolved,
-        )]);
+        return Err(vec![session::workshop_diag(error, resolved)]);
     }
     if profile != crate::Profile::Off {
-        if let Err(error) = wright_transform::run(&mut program, profile) {
+        if let Err(error) = wright_transform::run_canonical(&mut program, profile) {
             return Err(vec![Diagnostic::error(
                 "transform-error",
                 crate::diag::Stage::Internal,
-                format!("WIR transformation failed: {error}"),
+                format!("Workshop transformation failed: {error}"),
             )]);
         }
     }
-    Ok(program)
+    Ok((program, outcome.files))
 }
 
 /// The concrete source kind to validate against: the configured kind, or

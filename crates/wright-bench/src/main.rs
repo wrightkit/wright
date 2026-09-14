@@ -1,5 +1,5 @@
 //! Measures compile latency, peak RSS, and generated-resource usage (emitted
-//! Workshop bytes, WIR node counts) for the versioned corpus through the
+//! Workshop bytes and canonical Program counts for the versioned corpus through the
 //! real driver path (`CompilerSession::compile`), and enforces declared
 //! regression thresholds. Output is versioned machine-readable JSON:
 //! `target/wright-bench-report.json`. Exits non-zero when a threshold is
@@ -192,7 +192,7 @@ fn run() -> Result<bool, String> {
 }
 
 /// Compile one corpus source through the real driver path (compat profile)
-/// and return the emitted text plus WIR node counts.
+/// and return the emitted text plus canonical program node counts.
 fn compile(
     source: &str,
     fixture: &str,
@@ -220,12 +220,66 @@ fn compile(
     let output = envelope.result.output.expect("compiled output");
     let loaded = session.load().map_err(|error| error.message)?;
     let nodes = (
-        loaded.program.values.len(),
-        loaded.program.actions.len(),
+        loaded
+            .program
+            .rules
+            .iter()
+            .flat_map(|rule| {
+                rule.conditions
+                    .iter()
+                    .map(|condition| count_value(&condition.value))
+                    .chain(rule.actions.iter().map(count_action))
+            })
+            .sum(),
+        loaded
+            .program
+            .rules
+            .iter()
+            .map(|rule| rule.actions.len())
+            .sum(),
         loaded.program.rules.len(),
     );
     let _ = std::fs::remove_file(&path);
     Ok((output.text, nodes))
+}
+
+fn count_value(value: &workshop_rs::Value) -> usize {
+    1 + match value {
+        workshop_rs::Value::Array(values) | workshop_rs::Value::Call { args: values, .. } => {
+            values.iter().map(count_value).sum()
+        }
+        workshop_rs::Value::Vector { x, y, z } => count_value(x) + count_value(y) + count_value(z),
+        workshop_rs::Value::PlayerVariable { player, .. } => count_value(player),
+        _ => 0,
+    }
+}
+
+fn count_action(action: &workshop_rs::Action) -> usize {
+    1 + match action {
+        workshop_rs::Action::SetGlobalVariable { value, .. }
+        | workshop_rs::Action::ModifyGlobalVariable { value, .. } => count_value(value),
+        workshop_rs::Action::SetPlayerVariable { player, value, .. }
+        | workshop_rs::Action::ModifyPlayerVariable { player, value, .. } => {
+            count_value(player) + count_value(value)
+        }
+        workshop_rs::Action::AssignMember { target, value, .. } => {
+            count_value(target) + count_value(value)
+        }
+        workshop_rs::Action::If { condition }
+        | workshop_rs::Action::ElseIf { condition }
+        | workshop_rs::Action::While { condition } => count_value(condition),
+        workshop_rs::Action::ForGlobalVariable {
+            start, stop, step, ..
+        }
+        | workshop_rs::Action::ForPlayerVariable {
+            start, stop, step, ..
+        } => count_value(start) + count_value(stop) + count_value(step),
+        workshop_rs::Action::Disabled { action } => count_action(action),
+        workshop_rs::Action::Call { args, .. } => args.iter().map(count_value).sum(),
+        workshop_rs::Action::CallSubroutine { .. }
+        | workshop_rs::Action::Else
+        | workshop_rs::Action::End => 0,
+    }
 }
 
 fn mean(latencies: &[Duration]) -> f64 {

@@ -87,7 +87,7 @@ fn cost_estimate_distinguishes_exact_counts_from_findings() {
     let cost = handle_ok(&service, &ToolRequest::CostEstimate);
     let exact = &cost["exact"];
     assert!(exact["emittedBytes"].as_u64().unwrap() > 0);
-    assert!(exact["wirActions"].as_u64().unwrap() >= 1);
+    assert!(exact["programActions"].as_u64().unwrap() >= 1);
     assert!(
         exact["waitActions"].as_u64().unwrap() >= 1,
         "wait() present"

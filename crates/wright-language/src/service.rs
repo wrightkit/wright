@@ -9,9 +9,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::Serialize;
-use workshop_rs::wir;
-use wright_analyzer::analysis::{self, Finding};
-use wright_analyzer::symbols::{SemanticIndex, Symbol};
+use workshop_rs::Program;
+use wright_analyzer::analysis;
+use wright_analyzer::canonical::Finding;
+use wright_analyzer::canonical::{self, SemanticIndex, Symbol};
 
 use crate::document::{Document, DocumentStore, Position, Range};
 
@@ -129,7 +130,7 @@ pub struct SourceFile {
 
 /// The analyzed state of one document.
 pub struct Analysis {
-    pub program: wir::Program,
+    pub program: Program,
     pub index: Option<SemanticIndex>,
     pub findings: Vec<Finding>,
     pub parse_errors: Vec<SourceError>,
@@ -175,15 +176,23 @@ impl LanguageService {
         let files = files.into_iter().map(opy_file).collect();
         let Some(program) = program else {
             return Analysis {
-                program: wir::Program::default(),
+                program: Program::default(),
                 index: None,
                 findings: Vec::new(),
                 parse_errors: error.into_iter().map(opy_error).collect(),
                 files,
             };
         };
-        let findings = analysis::analyze(&program);
-        let index = SemanticIndex::build(&program).ok();
+        let findings =
+            canonical::analyze(&program, &wright_analyzer::registry::LintConfig::default());
+        let source_texts = files
+            .iter()
+            .map(|file| {
+                let source = self.source_identity(&files, document, file.id.index());
+                (file.id, self.source_text(&source, document))
+            })
+            .collect::<Vec<_>>();
+        let index = Some(SemanticIndex::build_with_sources(&program, &source_texts));
         Analysis {
             program,
             index,
@@ -313,7 +322,7 @@ impl LanguageService {
                     .references(symbol.id)
                     .iter()
                     .find(|reference| {
-                        reference.kind == wright_analyzer::symbols::ReferenceKind::Definition
+                        reference.kind == wright_analyzer::canonical::ReferenceKind::Definition
                     })
                     .and_then(|reference| reference.span)
             })
@@ -961,7 +970,7 @@ fn is_ostw_document(uri: &str) -> bool {
 
 fn unavailable_ostw_analysis() -> Analysis {
     Analysis {
-        program: wir::Program::default(),
+        program: Program::default(),
         index: None,
         findings: Vec::new(),
         parse_errors: vec![SourceError {
@@ -1003,12 +1012,12 @@ fn severity_name(severity: analysis::Severity) -> &'static str {
     }
 }
 
-fn symbol_kind_name(kind: wright_analyzer::symbols::SymbolKind) -> &'static str {
+fn symbol_kind_name(kind: wright_analyzer::canonical::SymbolKind) -> &'static str {
     match kind {
-        wright_analyzer::symbols::SymbolKind::GlobalVariable => "globalVariable",
-        wright_analyzer::symbols::SymbolKind::PlayerVariable => "playerVariable",
-        wright_analyzer::symbols::SymbolKind::Subroutine => "subroutine",
-        wright_analyzer::symbols::SymbolKind::Rule => "rule",
+        wright_analyzer::canonical::SymbolKind::GlobalVariable => "globalVariable",
+        wright_analyzer::canonical::SymbolKind::PlayerVariable => "playerVariable",
+        wright_analyzer::canonical::SymbolKind::Subroutine => "subroutine",
+        wright_analyzer::canonical::SymbolKind::Rule => "rule",
     }
 }
 
@@ -1121,12 +1130,14 @@ fn classify_token(token: &wright_opy::lexer::Token, index: Option<&SemanticIndex
                     symbol_kind_at(index, token.span.start.line, token.span.start.col)
                 {
                     return match kind {
-                        wright_analyzer::symbols::SymbolKind::GlobalVariable
-                        | wright_analyzer::symbols::SymbolKind::PlayerVariable => {
+                        wright_analyzer::canonical::SymbolKind::GlobalVariable
+                        | wright_analyzer::canonical::SymbolKind::PlayerVariable => {
                             "variable".to_string()
                         }
-                        wright_analyzer::symbols::SymbolKind::Subroutine => "function".to_string(),
-                        wright_analyzer::symbols::SymbolKind::Rule => "class".to_string(),
+                        wright_analyzer::canonical::SymbolKind::Subroutine => {
+                            "function".to_string()
+                        }
+                        wright_analyzer::canonical::SymbolKind::Rule => "class".to_string(),
                     };
                 }
             }
@@ -1151,7 +1162,7 @@ fn symbol_kind_at(
     index: &SemanticIndex,
     line: u32,
     col: u32,
-) -> Option<wright_analyzer::symbols::SymbolKind> {
+) -> Option<wright_analyzer::canonical::SymbolKind> {
     for symbol in index.symbols() {
         if symbol
             .span

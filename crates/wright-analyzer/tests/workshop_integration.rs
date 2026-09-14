@@ -33,7 +33,7 @@ fn workshop_service(fixture_id: &str) -> SemanticService<'static> {
     // catalog's enum domains (#118).
     let text = corpus_text(fixture_id);
     let catalog = Catalog::builtin().unwrap();
-    let program = parser::parse_with_context(&text, &catalog, &Locale::new("en-US"), &catalog)
+    let program = parser::parse_wir_with_context(&text, &catalog, &Locale::new("en-US"), &catalog)
         .unwrap_or_else(|error| panic!("{fixture_id} must parse: {error}"));
     let program = Box::leak(Box::new(program));
     SemanticService::from_workshop(program, "en-US").unwrap()

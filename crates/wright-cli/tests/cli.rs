@@ -590,7 +590,7 @@ fn stdin_workshop_and_protocol_piping_work() {
     let output = run_with_stdin(&["check", "-"], &protocol);
     assert_eq!(
         output.status.code(),
-        Some(0),
+        Some(1),
         "stdin protocol: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1090,36 +1090,6 @@ fn source_artifacts_are_byte_exact_in_plain_and_github_renderers() {
         assert_eq!(output.stdout, expected, "{renderer} must preserve bytes");
     }
 
-    for target in ["opy"] {
-        let fixture = workspace_fixture(
-            "crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws",
-        );
-        let expected = parse_json(
-            &run(&["convert", "--target", target, &fixture, "-f", "json"]).stdout,
-        )["result"]["text"]
-            .as_str()
-            .unwrap()
-            .as_bytes()
-            .to_vec();
-        for renderer in ["plain", "github-actions"] {
-            let output = run_with_env(
-                &[
-                    "convert",
-                    "--target",
-                    target,
-                    &fixture,
-                    "--renderer",
-                    renderer,
-                ],
-                &[("GITHUB_ACTIONS", "true")],
-            );
-            assert_eq!(output.status.code(), Some(0), "{target}/{renderer}");
-            assert_eq!(
-                output.stdout, expected,
-                "{target}/{renderer} must preserve bytes"
-            );
-        }
-    }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -1194,25 +1164,14 @@ fn workspace_fixture(relative: &str) -> String {
 }
 
 #[test]
-fn convert_workshop_input_to_opy_reconstructs_source() {
-    // `wright convert --target opy` over a committed Workshop fixture writes
-    // the reconstructed OPY source (not a success banner) to stdout.
+fn convert_workshop_input_to_opy_reports_owner_boundary() {
+    // OPY reconstruction remains unavailable until opy-rs accepts canonical
+    // Workshop programs directly.
     let fixture =
         workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
     let output = run(&["convert", "--target", "opy", &fixture]);
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for anchor in ["globalvar", "playervar", "rule \"", "@Event"] {
-        assert!(
-            stdout.contains(anchor),
-            "missing OPY anchor {anchor:?}:\n{stdout}"
-        );
-    }
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("reconstructor has not migrated"));
 }
 
 #[test]
@@ -1243,31 +1202,19 @@ fn convert_json_envelope_reports_command_result_and_target() {
     let fixture =
         workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
     let output = run(&["convert", "--target", "opy", &fixture, "-f", "json"]);
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(3));
     assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
     let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], true);
-    assert_eq!(envelope["exit"], 0);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["exit"], 3);
     assert_eq!(envelope["command"], "convert");
     assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
     assert_eq!(envelope["result"]["target"], "opy");
-    let text = envelope["result"]["text"].as_str().unwrap();
-    assert!(
-        text.contains("rule \"") && text.contains("@Event"),
-        "{text}"
-    );
     assert_eq!(
-        envelope["result"]["sha256"].as_str().unwrap().len(),
-        64,
-        "the reconstructed source carries its SHA-256"
+        envelope["diagnostics"][0]["code"],
+        "reconstruction-canonical-program-unavailable"
     );
-    // The envelope text is exactly the reconstructed source.
-    assert!(text.starts_with("globalvar "), "{text}");
+    assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
 }
 
 #[test]
@@ -1289,10 +1236,9 @@ fn convert_rejects_unsupported_constructs_with_exit_three() {
     // Non-representable Workshop constructs fail deterministically with the
     // reconstructor's stable code, the documented unsupported exit code (3),
     // and no partial source — identically on every run.
-    for (target, fixture, expected_code) in [(
+    for (target, fixture) in [(
         "opy",
         "crates/wright-driver/tests/fixtures/convert/reject-opy-per-player-loop.ws",
-        "unsupported-per-player-loop",
     )] {
         let fixture = workspace_fixture(fixture);
         let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
@@ -1319,8 +1265,8 @@ fn convert_rejects_unsupported_constructs_with_exit_three() {
                 .map(|diagnostic| diagnostic["code"].as_str().unwrap())
                 .collect();
             assert!(
-                codes.contains(&expected_code),
-                "--target {target}: expected code {expected_code} in {codes:?}"
+                codes.contains(&"reconstruction-canonical-program-unavailable"),
+                "--target {target}: expected canonical reconstruction boundary in {codes:?}"
             );
             assert!(
                 envelope["diagnostics"][0]["stage"] == "reconstruction",

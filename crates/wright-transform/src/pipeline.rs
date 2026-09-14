@@ -58,6 +58,107 @@ pub fn run(
     Ok(results)
 }
 
+/// Run the semantics-preserving transform profile over the canonical public
+/// Workshop program model.
+pub fn run_canonical(
+    program: &mut workshop_rs::Program,
+    profile: Profile,
+) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
+    program.validate()?;
+    if profile == Profile::Off {
+        return Ok(Vec::new());
+    }
+    let mut changed = 0;
+    for rule in &mut program.rules {
+        for condition in &mut rule.conditions {
+            changed += changed_value(&mut condition.value);
+        }
+        for action in &mut rule.actions {
+            changed += fold_action(action);
+        }
+    }
+    program.validate()?;
+    Ok(vec![PassResult {
+        stats: PassStats {
+            pass: "fold-constants".to_string(),
+            changed,
+            nodes_before: 0,
+            nodes_after: 0,
+        },
+    }])
+}
+
+fn fold_action(action: &mut workshop_rs::Action) -> usize {
+    use workshop_rs::Action;
+    match action {
+        Action::SetGlobalVariable { value, .. }
+        | Action::ModifyGlobalVariable { value, .. }
+        | Action::If { condition: value }
+        | Action::ElseIf { condition: value }
+        | Action::While { condition: value } => changed_value(value),
+        Action::SetPlayerVariable { player, value, .. }
+        | Action::ModifyPlayerVariable { player, value, .. } => {
+            changed_value(player) + changed_value(value)
+        }
+        Action::AssignMember { target, value, .. } => changed_value(target) + changed_value(value),
+        Action::ForGlobalVariable {
+            start, stop, step, ..
+        }
+        | Action::ForPlayerVariable {
+            start, stop, step, ..
+        } => changed_value(start) + changed_value(stop) + changed_value(step),
+        Action::Disabled { action } => fold_action(action),
+        Action::Call { args, .. } => args.iter_mut().map(changed_value).sum(),
+        Action::CallSubroutine { .. } | Action::Else | Action::End => 0,
+    }
+}
+
+fn changed_value(value: &mut workshop_rs::Value) -> usize {
+    usize::from(fold_value(value))
+}
+
+fn fold_value(value: &mut workshop_rs::Value) -> bool {
+    use workshop_rs::Value;
+    match value {
+        Value::Array(values) => values.iter_mut().any(fold_value),
+        Value::Vector { x, y, z } => fold_value(x) || fold_value(y) || fold_value(z),
+        Value::PlayerVariable { player, .. } => fold_value(player),
+        Value::Call { name, args } => {
+            let mut changed = args.iter_mut().any(fold_value);
+            if args.len() == 2 {
+                if let (Value::Number(left), Value::Number(right)) = (&args[0], &args[1]) {
+                    let result = match name.as_str() {
+                        "+" | "add" => Some(left + right),
+                        "-" | "subtract" => Some(left - right),
+                        "*" | "multiply" => Some(left * right),
+                        "/" | "divide" => Some(left / right),
+                        _ => None,
+                    };
+                    if let Some(result) = result {
+                        *value = Value::Number(result);
+                        changed = true;
+                    }
+                }
+            } else if args.len() == 1 {
+                if let Value::Number(number) = args[0] {
+                    let result = match name.as_str() {
+                        "-" => Some(-number),
+                        "sqrt" | "squareRoot" => Some(number.sqrt()),
+                        "abs" | "absoluteValue" => Some(number.abs()),
+                        _ => None,
+                    };
+                    if let Some(result) = result {
+                        *value = Value::Number(result);
+                        changed = true;
+                    }
+                }
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

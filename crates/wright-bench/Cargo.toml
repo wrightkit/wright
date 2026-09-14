@@ -18,4 +18,5 @@ path = "src/main.rs"
 libc.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+workshop-rs.workspace = true
 wright-driver.workspace = true

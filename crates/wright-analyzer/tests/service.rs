@@ -54,7 +54,7 @@ fn real_world_program(fixture_id: &str) -> WirProgram {
         serde_json::from_str(&std::fs::read_to_string(oracle_path).unwrap()).unwrap();
     let workshop = oracle["compile"]["workshop"].as_str().unwrap();
     let catalog = Catalog::builtin().unwrap();
-    parser::parse_with_context(workshop, &catalog, &Locale::new("en-US"), &catalog).unwrap()
+    parser::parse_wir_with_context(workshop, &catalog, &Locale::new("en-US"), &catalog).unwrap()
 }
 
 /// Build a service over a lowered program with an explicit lint config.

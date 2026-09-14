@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod canonical;
 pub mod cfg;
 pub mod declarative;
 pub mod facts;

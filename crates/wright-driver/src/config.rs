@@ -106,7 +106,7 @@ pub struct SessionConfig {
     pub output: Option<PathBuf>,
     /// The requested result presentation format.
     pub format: OutputFormat,
-    /// The WIR transformation policy (`off` by default; `compat`/`aggressive`
+    /// The canonical-program transformation policy (`off` by default; `compat`/`aggressive`
     /// opt into evidence-backed passes).
     pub profile: wright_transform::Profile,
     /// The lint rule configuration used by `lint` (#97/#98).
