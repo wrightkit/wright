@@ -7,7 +7,7 @@ Decision history: the distinct command workflows are recorded in
 and lint-policy split is recorded in
 [ADR-0015](../adr/0015-canonical-facts-and-declarative-lint-policy.md), and
 on-demand domain-intelligence composition is recorded in
-[ADR-0016](../adr/0016-domain-intelligence-query-contract.md).
+[ADR-0017](../adr/0017-domain-intelligence-query-contract.md).
 
 ## Tooling surfaces
 

@@ -7,6 +7,7 @@
   [PR #247](https://github.com/wrightkit/wright/pull/247),
   [Issue #246](https://github.com/wrightkit/wright/issues/246),
   [PR #304](https://github.com/wrightkit/wright/pull/304),
+  [ADR-0016: Current-directory and directory project targets](0016-current-directory-and-directory-project-targets.md),
   [language-provider-protocol #16](https://github.com/wrightkit/language-provider-protocol/issues/16)
 
 ## Historical note

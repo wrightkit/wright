@@ -35,5 +35,6 @@ audit date.
 * [ADR-0013: Entry-based source-provider integration seam](0013-entry-based-source-provider-seam.md)
 * [ADR-0014: Repository-namespaced immutable R2 release artifacts](0014-namespaced-immutable-r2-artifacts.md)
 * [ADR-0015: Canonical facts, declarative lint rules, and project policy](0015-canonical-facts-and-declarative-lint-policy.md)
-* [ADR-0016: Domain-intelligence query contract](0016-domain-intelligence-query-contract.md)
+* [ADR-0016: Current-directory and directory project targets](0016-current-directory-and-directory-project-targets.md)
+* [ADR-0017: Domain-intelligence query contract](0017-domain-intelligence-query-contract.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)

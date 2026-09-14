@@ -2,7 +2,7 @@
 
 Wright exposes Workshop domain intelligence as a composed query over existing semantic owners. It does not own a second Workshop catalog or a source-language semantic model.
 
-Decision history: [ADR-0016](../adr/0016-domain-intelligence-query-contract.md).
+Decision history: [ADR-0017](../adr/0017-domain-intelligence-query-contract.md).
 
 ## Purpose
 

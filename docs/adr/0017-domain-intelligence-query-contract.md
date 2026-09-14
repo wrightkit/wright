@@ -1,4 +1,4 @@
-# ADR-0016: Domain-intelligence query contract
+# ADR-0017: Domain-intelligence query contract
 
 - Status: Proposed
 - Date: 2026-09-14
