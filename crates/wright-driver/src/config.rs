@@ -13,9 +13,9 @@ pub enum SourceKind {
     Opy,
     /// `.ostw` / `.del` source through a configured provider.
     Ostw,
-    /// Localized vanilla Workshop text (native frontend).
+    /// Localized vanilla Workshop text handled in-process by workshop-rs.
     Workshop,
-    /// An Opy HIR v1 protocol payload (JSON).
+    /// A legacy Opy HIR v1 protocol payload (JSON), recognized and refused.
     Protocol,
 }
 

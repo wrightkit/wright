@@ -24,11 +24,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use wright_driver::CompilerSession;
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::edit::{EditRange, EditTransaction, SourceEdit};
 use wright_driver::provider_edit::ProviderMutation;
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
-use wright_driver::{CompilerSession, Profile};
 use wright_lpp::{Document, DocumentSet, Position};
 
 /// The reference mock provider's deliberately foreign language id.
@@ -47,6 +47,17 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
+fn workshop_path() -> PathBuf {
+    let oracle = workspace_root().join("compatibility/fixtures/synthetic/control-flow/oracle.json");
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(oracle).unwrap()).unwrap();
+    let text = value["compile"]["workshop"].as_str().unwrap();
+    let path = workspace_root().join("target/issue-155-provider-edit/control-flow.ws");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
 fn mock_provider_path() -> Option<PathBuf> {
     match std::env::var("LPP_MOCK_PROVIDER") {
         Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
@@ -61,15 +72,12 @@ fn mock_provider_path() -> Option<PathBuf> {
     }
 }
 
-/// A session configured with an OPY input (the tool service loads a project
-/// eagerly) plus the given provider registry.
+/// A tool session with the given provider registry and no unrelated source
+/// project to load.
 fn session_with_providers(providers: wright_lpp::ProviderRegistry) -> CompilerSession {
     let config = SessionConfig {
-        input: InputSpec::Path(
-            workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-        ),
-        kind: SourceKind::Opy,
-        profile: Profile::Compat,
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
         providers,
         ..SessionConfig::default()
     };
@@ -93,8 +101,7 @@ fn tool_service(without: &[&str]) -> ToolService<'static> {
             args,
         ))
         .expect("registered");
-    let mut session = session_with_providers(registry);
-    let _ = session.load().expect("loads");
+    let session = session_with_providers(registry);
     let session = Box::leak(Box::new(session));
     ToolService::new(session).expect("service")
 }
@@ -448,31 +455,21 @@ fn semantic_validation_failure_is_atomic_across_documents() {
 
 #[test]
 fn unconfigured_language_id_refuses_explicitly() {
-    // No mock provider needed: an unconfigured language id is refused by
-    // the session's registry before anything is spawned.
-    let mut session = session_with_providers(wright_lpp::ProviderRegistry::new());
-    let _ = session.load().expect("loads");
-    let session = Box::leak(Box::new(session));
-    let service = ToolService::new(session).expect("service");
-    let documents = single_document_set();
-    let mutation = handle(
-        &service,
-        &rename_request(
-            documents,
-            URI,
-            DOUBLE_POSITION,
-            "twice",
-            sources_of(&single_document_set()),
+    // The source session itself refuses before any static frontend can be
+    // selected; provider edit requests therefore cannot inherit a fallback.
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(
+            workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
         ),
-    );
-    assert!(!mutation.ok);
-    assert_eq!(mutation.diagnostics[0].code, "provider-error");
-    assert_eq!(
-        mutation.provider_code.as_deref(),
-        Some("provider-not-configured")
-    );
-    assert!(mutation.transaction.is_none());
-    assert!(mutation.preview.is_none());
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    })
+    .expect("session");
+    let diagnostic = match session.load() {
+        Ok(_) => panic!("missing source provider must refuse"),
+        Err(diagnostic) => diagnostic,
+    };
+    assert_eq!(diagnostic.code, "source-provider-unavailable");
 }
 
 // ---------------------------------------------------------------------------

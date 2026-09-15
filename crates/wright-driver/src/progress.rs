@@ -11,7 +11,7 @@ pub enum ProgressPhase {
     InputResolution,
     /// Load a multi-file project boundary.
     ProjectLoading,
-    /// Parse source or protocol input.
+    /// Resolve source or protocol input.
     Parsing,
     /// Validate a parsed model.
     Validation,

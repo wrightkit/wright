@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/wright-core", "crates/wright-ir", "crates/wright-analyzer", "crates/wright-driver", "crates/wright-cli", "crates/wright-opy", "crates/wright-transform", "crates/wright-bench", "crates/wright-consumer", "crates/wright-language", "crates/wright-lsp", "crates/wright-lpp"]
+members = ["crates/wright-analyzer", "crates/wright-driver", "crates/wright-cli", "crates/wright-transform", "crates/wright-bench", "crates/wright-consumer", "crates/wright-language", "crates/wright-lsp", "crates/wright-lpp"]
 resolver = "3"
 
 [workspace.package]
@@ -12,7 +12,6 @@ repository = "https://github.com/wrightkit/wright"
 [workspace.dependencies]
 # Canonical Workshop core and OPY owner releases for the Program API migration.
 workshop-rs = "=0.3.10"
-opy-rs = "=0.1.38"
 libc = "0.2"
 serde = "1"
 serde_json = "1"
@@ -22,10 +21,7 @@ flate2 = "1"
 tar = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "http2", "rustls-tls-native-roots"] }
 wright-analyzer = { path = "crates/wright-analyzer" }
-wright-core = { path = "crates/wright-core" }
 wright-driver = { path = "crates/wright-driver" }
-wright-ir = { path = "crates/wright-ir" }
-wright-opy = { path = "crates/wright-opy" }
 wright-transform = { path = "crates/wright-transform" }
 
 [workspace.lints.rust]

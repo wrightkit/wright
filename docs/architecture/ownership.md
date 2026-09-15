@@ -17,7 +17,7 @@ post-ADR-0010 audit is indexed in the [ADR history](../adr/README.md).
 ## Dependency direction
 
 ```text
-Wright ─────► opy-rs ─────► workshop-rs
+Wright ─────► LPP provider ─────► opy-rs ─────► workshop-rs
    │
    └───────────────────────► workshop-rs
 
@@ -26,7 +26,7 @@ DEL/OSTW ── provider boundary ──► deltin-rs
 
 LPP may provide a process boundary and does not require a cross-repository Rust dependency.
 
-Language/core repositories must not depend back on Wright tooling internals. Wright adapters translate owner contracts; they do not become a second language implementation.
+Language/core repositories must not depend back on Wright tooling internals. Wright's LPP integration translates owner contracts; it does not become a second language implementation.
 
 ## Capability ceiling
 

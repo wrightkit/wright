@@ -1,5 +1,5 @@
 //! Frontends are selected by [`SourceKind`] behind one contract, so
-//! the native `.opy` frontend can replace the temporary adapter bridge
+//! the provider-backed `.opy` workflow can replace the retired adapter bridge
 //! without changing callers. Every workflow returns a typed [`Envelope`]
 //! whose JSON serialization is the machine-readable CLI contract.
 
@@ -15,6 +15,7 @@ use crate::WorkshopProvider;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 use crate::input::{self, InputTarget, ResolvedInput};
+use crate::input_identity;
 use crate::opy_provider;
 use crate::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use crate::result::{
@@ -25,7 +26,6 @@ use crate::source_provider::{
     SourceBackend, SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError,
     SourceTarget,
 };
-use crate::{input_identity, opy};
 
 fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProviderErrorKind {
     match error {
@@ -117,7 +117,7 @@ impl CompilerSession {
     ///
     /// The provider is injected at the product boundary; its transport and
     /// source project model are not visible to the session. A provider failure
-    /// is surfaced as-is and never falls back to the native OPY path.
+    /// is surfaced as-is and never falls back to an in-process OPY path.
     pub fn with_source_provider(
         mut config: SessionConfig,
         provider: Box<dyn SourceProvider>,
@@ -234,41 +234,7 @@ impl CompilerSession {
                 ));
             }
             SourceKind::Opy => {
-                self.progress(ProgressEvent::new(ProgressPhase::Parsing));
-                if opy::adapter_fallback_requested() {
-                    return Err(Diagnostic::error(
-                        "input-kind-unsupported",
-                        Stage::Frontend,
-                        "the retired OPY adapter does not produce a canonical Program",
-                    ));
-                } else {
-                    // Default: the native Rust `.opy` frontend (no Node/OverPy).
-                    // Use the outcome form so the file registry survives errors
-                    // and diagnostics can name included files (#83).
-                    let outcome = wright_opy::compile_with_overlay_outcome(
-                        &resolved.text,
-                        &resolved.display,
-                        &resolved.root,
-                        &std::collections::BTreeMap::new(),
-                    );
-                    let program = match outcome.program {
-                        Some(program) => program,
-                        None => {
-                            let error = outcome
-                                .error
-                                .expect("a failed compile outcome always carries an error");
-                            return Err(opy_diag(error, &outcome.files, &resolved));
-                        }
-                    };
-                    self.progress(ProgressEvent::new(ProgressPhase::Lowering));
-                    program
-                        .validate()
-                        .map_err(|error| workshop_diag(error, &resolved))?;
-                    (
-                        program,
-                        outcome.files.iter().map(|file| file.path.clone()).collect(),
-                    )
-                }
+                return Err(source_provider_unavailable());
             }
             SourceKind::Auto => {
                 return Err(Diagnostic::error(
@@ -778,15 +744,14 @@ impl CompilerSession {
     }
 
     /// `convert`: load validated Workshop input and reconstruct canonical OPY
-    /// source, or refuse the unavailable OSTW provider target (#126).
+    /// source through the negotiated provider, or refuse the unavailable OSTW
+    /// provider target (#126).
     ///
     /// The operation is the shared driver/session conversion contract: it
     /// reuses the [`CompilerSession::load`] path to obtain the validated
     /// canonical Workshop program and delegates per target to
     /// the owner reconstructor — no reconstruction logic lives in the driver,
     /// and there is no generic transpiler matrix or direct OPY ↔ OSTW path.
-    /// The current owner reconstructor has not yet migrated to the canonical
-    /// Program API, so OPY conversion fails explicitly without partial source.
     pub fn convert(&mut self, target: ConvertTarget) -> Envelope<ConvertResult> {
         let command = "convert";
         let loaded = match self.load() {
@@ -832,15 +797,45 @@ impl CompilerSession {
         }
     }
 
-    /// Reconstruct canonical OPY source for a loaded Workshop program.
+    /// Reconstruct canonical OPY source through the negotiated provider.
     fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
-        let _ = loaded;
-        self.diagnostics.push(Diagnostic::error(
-            "reconstruction-canonical-program-unavailable",
-            Stage::Reconstruction,
-            "the OPY reconstructor has not migrated to the canonical Workshop Program API",
-        ));
-        Err(())
+        let locale = loaded
+            .origin
+            .locale
+            .as_deref()
+            .map(workshop_rs::catalog::Locale::new)
+            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        let artifact = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
+            .map_err(|error| {
+                self.diagnostics.push(Diagnostic::error(
+                    "workshop-emission",
+                    Stage::Emission,
+                    error.to_string(),
+                ));
+            })?;
+        let mut provider = self
+            .language_provider(opy_provider::OPY_LANGUAGE_ID)
+            .map_err(|error| {
+                self.diagnostics.push(provider_error_diagnostic(error));
+            })?;
+        provider
+            .initialize(Some(&wright_lpp::ClientInfo {
+                name: crate::result::DRIVER_VERSION.to_string(),
+                version: crate::result::DRIVER_VERSION.to_string(),
+            }))
+            .map_err(|error| {
+                self.diagnostics.push(provider_error_diagnostic(error));
+            })?;
+        let result = provider
+            .reconstruct(&wright_lpp::WorkshopArtifact {
+                format: "workshop-rs/text-v1".to_string(),
+                content: artifact,
+            })
+            .map_err(|error| {
+                self.diagnostics.push(provider_error_diagnostic(error));
+            })?;
+        let _ = provider.shutdown();
+        Ok(result.source)
     }
 
     /// Build the semantic service over a loaded program.
@@ -1242,46 +1237,30 @@ fn workshop_diag_for_unmapped_provider_artifact(
     diagnostic
 }
 
-/// Map a native frontend error to a driver diagnostic.
-///
-/// Span paths resolve through the frontend file registry so a failure inside
-/// an included file names that file; file 0 (the main file) carries the
-/// resolved display path by construction (#83).
-pub(crate) fn opy_diag(
-    error: wright_opy::OpyError,
-    files: &[wright_opy::preprocess::FileRecord],
-    resolved: &ResolvedInput,
-) -> Diagnostic {
-    let span = error.span.map(|span| SourceSpan {
-        file: span.file as usize,
-        path: files
-            .get(span.file as usize)
-            .map(|file| file.path.clone())
-            .unwrap_or_else(|| resolved.display.clone()),
-        start: Position {
-            line: span.start.line,
-            col: span.start.col,
+fn provider_error_diagnostic(error: wright_lpp::ProviderError) -> Diagnostic {
+    let unsupported = matches!(
+        &error,
+        wright_lpp::ProviderError::Lpp(lpp)
+            if matches!(
+                lpp.kind,
+                wright_lpp::LppErrorKind::CapabilityUnavailable | wright_lpp::LppErrorKind::Refusal
+            )
+    );
+    Diagnostic::error(
+        error.code(),
+        if unsupported {
+            Stage::Frontend
+        } else {
+            Stage::Internal
         },
-        end: Position {
-            line: span.end.line,
-            col: span.end.col,
-        },
-    });
-    Diagnostic {
-        code: error.code,
-        stage: Stage::Frontend,
-        severity: crate::diag::Severity::Error,
-        message: error.message,
-        status: None,
-        span,
-        source: Some(resolved.origin.clone()),
-    }
+        error.to_string(),
+    )
 }
 
 fn source_provider_unavailable() -> Diagnostic {
     Diagnostic::error(
         "source-provider-unavailable",
         Stage::Internal,
-        "DEL/OSTW provider support is not currently shipped with Wright",
+        "the requested source-provider workflow is not currently shipped with Wright",
     )
 }

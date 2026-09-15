@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use workshop_rs::source::Span;
 use workshop_rs::wir;
-use wright_ir::error::IrError;
+use workshop_rs::wir::error::IrError;
 
 use crate::analysis::{self, Finding, PersistentObject, Severity};
 use crate::cfg::Cfg;

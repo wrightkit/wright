@@ -44,8 +44,8 @@ expected status, snapshot structure, output hashes, and imported-source
 provenance. It deliberately has no Node, .NET, OverPy, or OSTW runtime
 dependency.
 
-Current Wright-native differential and release-gate tests may consume selected
-recorded snapshots while `wright-opy` remains the shipped source adapter.
+Current Wright consumer and release-gate tests may consume selected recorded
+snapshots while OPY execution remains owned by the LPP provider.
 DEL/OSTW compatibility evidence stays in `deltin-rs`; Wright has no static
 DEL/OSTW integration and reports an unavailable provider boundary. These tests
 protect Wright's current integration behavior; they are not the authoritative

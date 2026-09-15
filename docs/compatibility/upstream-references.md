@@ -43,9 +43,8 @@ artifacts. Specifically, it provides:
 * the reference for S (syntax), D (diagnostic), and N (normalized-output)
   evidence in the compatibility corpus (`compatibility/fixtures/**`,
   `compatibility/oracle/`);
-* the pinned reference invoked by the compatibility adapter (`adapter/`) to produce Opy HIR
-  v1 reference fixtures (`adapter/fixtures/**`), compared against the native
-  frontend at the HIR boundary by `crates/wright-opy/tests/differential.rs`;
+* the pinned reference and corpus used by `opy-rs`; Wright consumes only
+  provider-owned results and immutable consumer fixtures;
 * the source of systematic probe validation for the proactive compatibility
   baseline (see [`docs/opy/compatibility-baseline.md`](../opy/compatibility-baseline.md)
   and [`docs/opy/compat-manifest-spec.md`](../opy/compat-manifest-spec.md)).
@@ -54,10 +53,10 @@ artifacts. Specifically, it provides:
 
 | Wright surface | Use of the reference |
 | --- | --- |
-| `opy-rs` owner implementation + `wright-opy` adapter | Differential HIR parity, accept/reject agreement, structured diagnostics |
+| `opy-rs` owner implementation | Differential language evidence, accept/reject agreement, structured diagnostics |
 | `workshop-rs` catalog/emission | Canonical en-US spelling validation against oracle-emitted Workshop text; receiver-method and enum emission evidence |
 | `compatibility/` harness | Fixture snapshots, oracle identity blocks, S/D/N gate evidence |
-| Systematic baseline | Reference-validated probes for builtin action/value/member/enum/signature metadata: implemented as the OPY semantic compatibility manifest (`crates/wright-opy/src/manifest/`), where every entry records its validating probe, and `probes/validate.py` runs probes against the pinned oracle |
+| Systematic baseline | Reference-validated OPY probes and compatibility manifest maintained by `opy-rs` |
 
 ### Reference semantics vs Wright-owned architecture
 
@@ -68,7 +67,7 @@ and [`docs/licensing.md`](../licensing.md), the Wright core:
 * never links to, copies source from, or imports internal types of OverPy;
 * keeps HIR, Workshop IR, diagnostics, and backend APIs Wright-owned;
 * treats observed reference behavior (through documented compatibility tests
-  and the adapter boundary) as a permitted input, not as permission to copy an
+  and the provider boundary) as a permitted input, not as permission to copy an
   implementation.
 
 The Wright-owned, reference-validated manifest described in

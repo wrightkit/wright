@@ -1,6 +1,6 @@
 //! Measures compile latency, peak RSS, and generated-resource usage (emitted
-//! Workshop bytes and canonical Program counts for the versioned corpus through the
-//! real driver path (`CompilerSession::compile`), and enforces declared
+//! Workshop bytes and canonical Program counts for the versioned Workshop corpus
+//! through the real driver path (`CompilerSession::compile`), and enforces declared
 //! regression thresholds. Output is versioned machine-readable JSON:
 //! `target/wright-bench-report.json`. Exits non-zero when a threshold is
 //! exceeded.
@@ -63,7 +63,7 @@ fn corpus_cases() -> Vec<(&'static str, PathBuf)> {
             workspace_root()
                 .join("compatibility/fixtures")
                 .join(id)
-                .join("source.opy"),
+                .join("oracle.json"),
         )
     })
     .collect()
@@ -102,8 +102,14 @@ fn run() -> Result<bool, String> {
     let mut regressions = Vec::new();
 
     for (id, path) in corpus_cases() {
-        let source = std::fs::read_to_string(&path)
+        let oracle = std::fs::read_to_string(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let source = serde_json::from_str::<serde_json::Value>(&oracle)
+            .map_err(|error| format!("cannot parse {}: {error}", path.display()))?["compile"]
+            ["workshop"]
+            .as_str()
+            .ok_or_else(|| format!("{} has no compile.workshop oracle", path.display()))?
+            .to_string();
         let root = path
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -191,7 +197,7 @@ fn run() -> Result<bool, String> {
     Ok(regressions.is_empty())
 }
 
-/// Compile one corpus source through the real driver path (compat profile)
+/// Compile one canonical Workshop source through the real driver path (compat profile)
 /// and return the emitted text plus canonical program node counts.
 fn compile(
     source: &str,
@@ -199,12 +205,16 @@ fn compile(
     root: &Path,
 ) -> Result<(String, (usize, usize, usize)), String> {
     let safe_name = fixture.replace('/', "-");
-    let path =
-        std::env::temp_dir().join(format!("wright-bench-{}-{safe_name}", std::process::id()));
+    let input_dir = workspace_root().join("target/wright-bench-inputs");
+    std::fs::create_dir_all(&input_dir).map_err(|error| error.to_string())?;
+    let path = input_dir.join(format!(
+        "wright-bench-{}-{safe_name}.ws",
+        std::process::id()
+    ));
     std::fs::write(&path, source).map_err(|error| error.to_string())?;
     let mut session = CompilerSession::new(SessionConfig {
         input: wright_driver::config::InputSpec::Path(path.clone()),
-        kind: SourceKind::Opy,
+        kind: SourceKind::Workshop,
         root: Some(root.to_path_buf()),
         profile: Profile::Compat,
         ..SessionConfig::default()

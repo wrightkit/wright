@@ -1,960 +1,108 @@
-//! Reusable driver tests (#37/#41): the compiler/session driver serves every
-//! core workflow over both Workshop and protocol inputs without the CLI, and
-//! CLI and library consumers share this single orchestration path.
+//! Driver contract tests after the OPY provider cutover.
+//!
+//! Raw Workshop remains an in-process product path. OPY source behavior is
+//! exercised at the provider boundary; these tests ensure a missing provider
+//! cannot silently select a removed static frontend.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
-use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
-use wright_driver::result::exit;
-use wright_driver::{
-    CompilerSession, ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit,
-};
+use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceBackend, SourceKind};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-fn fixture(fixture_id: &str) -> PathBuf {
-    workspace_root()
+fn legacy_protocol() -> &'static str {
+    r#"{"protocol":{"name":"wright/opy-hir","version":"1.1.0"}}"#
+}
+
+fn workshop_fixture(id: &str) -> PathBuf {
+    let oracle = workspace_root()
         .join("compatibility/fixtures")
-        .join(fixture_id)
-        .join("oracle.json")
-}
-
-fn adapter_fixture(fixture_id: &str) -> PathBuf {
-    workspace_root()
-        .join("adapter/fixtures")
-        .join(format!("{fixture_id}.json"))
-}
-
-fn corpus_workshop_text(fixture_id: &str) -> String {
-    let oracle = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(fixture(fixture_id)).unwrap(),
-    )
-    .unwrap();
-    oracle["compile"]["workshop"].as_str().unwrap().to_string()
-}
-
-fn corpus_source_opy(fixture_id: &str) -> String {
-    std::fs::read_to_string(
-        workspace_root()
-            .join("compatibility/fixtures")
-            .join(fixture_id)
-            .join("source.opy"),
-    )
-    .unwrap()
-}
-
-#[derive(Default)]
-struct RecordingProgress(Mutex<Vec<ProgressEvent>>);
-
-impl ProgressObserver for RecordingProgress {
-    fn on_progress(&self, event: ProgressEvent) {
-        self.0.lock().unwrap().push(event);
-    }
-}
-
-#[test]
-fn progress_events_follow_the_real_workflow_boundaries() {
-    let path = temp_file("progress.opy", &corpus_source_opy("synthetic/control-flow"));
-    let observer = Arc::new(RecordingProgress::default());
-    let mut analyze = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    analyze.set_progress_observer(observer.clone());
-    assert!(analyze.analyze().ok);
-    let analyze_events = observer.0.lock().unwrap().clone();
-    assert!(
-        analyze_events
-            .iter()
-            .any(|event| event.phase == ProgressPhase::InputResolution)
-    );
-    assert!(
-        analyze_events
-            .iter()
-            .any(|event| event.phase == ProgressPhase::Parsing)
-    );
-    assert!(
-        analyze_events
-            .iter()
-            .any(|event| event.phase == ProgressPhase::SemanticAnalysis)
-    );
-    let input_index = analyze_events
-        .iter()
-        .position(|event| event.phase == ProgressPhase::InputResolution)
-        .unwrap();
-    let parsing_index = analyze_events
-        .iter()
-        .position(|event| event.phase == ProgressPhase::Parsing)
-        .unwrap();
-    let semantics_index = analyze_events
-        .iter()
-        .position(|event| event.phase == ProgressPhase::SemanticAnalysis)
-        .unwrap();
-    assert!(input_index < parsing_index && parsing_index < semantics_index);
-    assert!(
-        !analyze_events
-            .iter()
-            .any(|event| event.phase == ProgressPhase::Linting)
-    );
-
-    let lint_observer = Arc::new(RecordingProgress::default());
-    let mut lint = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    lint.set_progress_observer(lint_observer.clone());
-    assert!(lint.lint().ok);
-    let lint_events = lint_observer.0.lock().unwrap().clone();
-    let linting = lint_events
-        .iter()
-        .find(|event| event.phase == ProgressPhase::Linting)
-        .expect("lint emits a linting phase");
-    let lint_semantics_index = lint_events
-        .iter()
-        .position(|event| event.phase == ProgressPhase::SemanticAnalysis)
-        .unwrap();
-    let linting_index = lint_events
-        .iter()
-        .position(|event| event.phase == ProgressPhase::Linting)
-        .unwrap();
-    assert!(lint_semantics_index < linting_index);
-    assert_eq!(linting.unit, Some(ProgressUnit::Rules));
-    assert!(linting.count.is_some());
-    assert_ne!(analyze_events, lint_events);
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-fn temp_file(name: &str, content: &str) -> PathBuf {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "wright-driver-file-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(name);
-    std::fs::write(&path, content).unwrap();
+        .join(id)
+        .join("oracle.json");
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(oracle).expect("oracle reads"))
+            .expect("oracle parses");
+    let text = value["compile"]["workshop"]
+        .as_str()
+        .expect("oracle carries Workshop output");
+    let path = workspace_root()
+        .join("target/issue-155-driver")
+        .join(format!("{id}.ws"));
+    std::fs::create_dir_all(path.parent().unwrap()).expect("fixture directory creates");
+    std::fs::write(&path, text).expect("Workshop fixture writes");
     path
 }
 
-fn temp_dir() -> PathBuf {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "wright-driver-dir-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-/// The path of `path` expressed relative to the process cwd, so a test can
-/// address the same file through a relative spelling (as a shell would) and
-/// prove input-spelling independence without changing the cwd.
-fn cwd_relative(path: &Path) -> PathBuf {
-    let cwd = std::env::current_dir().expect("cwd is readable");
-    let mut path_parts = path.components().peekable();
-    let mut cwd_parts = cwd.components().peekable();
-    while let (Some(path_component), Some(cwd_component)) = (path_parts.peek(), cwd_parts.peek()) {
-        if path_component == cwd_component {
-            path_parts.next();
-            cwd_parts.next();
-        } else {
-            break;
-        }
-    }
-    let mut out = PathBuf::new();
-    for _ in cwd_parts {
-        out.push("..");
-    }
-    for component in path_parts {
-        out.push(component);
-    }
-    out
-}
-
-fn workshop_session(text: &str) -> CompilerSession {
-    let path = temp_file("program.txt", text);
-    CompilerSession::new(SessionConfig::from_path(path)).unwrap()
-}
-
 #[test]
-fn workshop_compile_emits_corpus_text() {
-    let text = corpus_workshop_text("synthetic/basic-rule");
-    let mut session = workshop_session(&text);
-    let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "compile must succeed: {:?}",
-        envelope.diagnostics
-    );
-    let output = envelope.result.output.expect("compiled output");
-    assert_eq!(output.locale, "en-us");
-    assert_eq!(output.input_identity.len(), 64);
-    assert_eq!(output.sha256.len(), 64);
-    assert!(
-        output.text.contains("Disable Inspector Recording"),
-        "emitted text: {}",
-        output.text
-    );
-    // Compilation to a file path uses the same driver path as stdout.
-    let out_path = temp_file("out.txt", "");
-    let mut session = workshop_session(&text);
-    session.config.output = Some(out_path.clone());
-    let envelope = session.compile();
-    assert!(envelope.ok);
-    let stored = std::fs::read_to_string(&out_path).unwrap();
-    assert_eq!(stored, output.text);
-    let _ = std::fs::remove_dir_all(out_path.parent().unwrap());
-}
-
-#[test]
-fn workshop_check_excludes_configurable_lint_findings() {
-    let text = corpus_workshop_text("synthetic/control-flow");
-    let mut session = workshop_session(&text);
-    let envelope = session.check();
-    assert!(envelope.ok, "check passes with warnings only");
-    assert!(
-        envelope
-            .diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.code != "min-wait-loop")
-    );
-    assert_eq!(envelope.exit, exit::SUCCESS);
-}
-
-#[test]
-fn workshop_analyze_reports_program_and_semantic_facts() {
-    let text = corpus_workshop_text("synthetic/control-flow");
-    let mut session = workshop_session(&text);
-    let envelope = session.analyze();
-    assert!(envelope.ok);
-    assert_eq!(envelope.result.program["origin"]["kind"], "workshop");
-    assert_eq!(envelope.result.program["origin"]["locale"], "en-us");
-    assert_eq!(envelope.result.program["rules"], 2);
-    assert!(envelope.result.program.get("findings").is_none());
-    assert!(
-        !envelope.result.facts["symbols"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        !envelope.result.facts["rules"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-}
-
-// ── Lint (#98) ───────────────────────────────────────────────────────────────
-
-#[test]
-fn workshop_lint_reports_structured_findings_rules_and_config() {
-    let text = corpus_workshop_text("synthetic/control-flow");
-    let path = temp_file("flow.txt", &text);
-    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    let envelope = session.lint();
-    assert!(envelope.ok, "lint must succeed: {:?}", envelope.diagnostics);
-    assert_eq!(
-        envelope.result.input_identity.len(),
-        64,
-        "input identity is the SHA-256 hex digest"
-    );
-    assert_eq!(envelope.result.program["rules"], 2);
-    let rules = envelope.result.rules.as_array().unwrap();
-    assert!(!rules.is_empty(), "first-party rules are reported");
-    let config_rules = envelope.result.config["rules"].as_object().unwrap();
-    assert_eq!(
-        config_rules.len(),
-        rules.len(),
-        "the config summary covers every rule"
-    );
-    let findings = envelope.result.findings.as_array().unwrap();
-    let min_wait = findings
-        .iter()
-        .find(|finding| finding["code"] == "min-wait-loop")
-        .expect("control-flow fires min-wait-loop");
-    assert_eq!(
-        min_wait["evidence"], "static-indicator",
-        "findings carry the rule's evidence class"
-    );
-    let span = min_wait["span"].as_object().expect("findings carry spans");
-    assert_eq!(
-        span["path"], "flow.txt",
-        "file-0 spans resolve root-relative to the include root, not the display path"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn analyze_and_lint_have_distinct_result_surfaces() {
-    let text = corpus_workshop_text("synthetic/control-flow");
-    let path = temp_file("flow.txt", &text);
-    let mut analyze_session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    let analyze = analyze_session.analyze();
-    assert!(analyze.ok, "analyze: {:?}", analyze.diagnostics);
-    let mut lint_session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    let lint = lint_session.lint();
-    assert!(lint.ok, "lint: {:?}", lint.diagnostics);
-    let lint_findings = lint.result.findings.as_array().unwrap();
-    assert!(
-        !lint_findings.is_empty(),
-        "control-flow produces lint findings"
-    );
-    assert!(
-        analyze.result.facts["rules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule["controlFlow"]["loopBlocks"].as_u64().unwrap_or(0) > 0)
-    );
-    assert!(analyze.result.facts.get("findings").is_none());
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn span_path_is_consistent_across_input_spellings() {
-    // The issue's inconsistency (#102): an absolute input collapsed to the
-    // basename while a relative input kept the path as given. Both spellings
-    // of the same file must resolve to the same root-relative span.path, and
-    // `analyze` must report the same value as `lint` (the issue's `rule
-    // "loop"` repro fires a min-wait-loop finding).
-    let dir = temp_dir();
-    let loop_source =
-        "rule \"loop\":\n    @Event eachPlayer\n    while (true):\n        wait(0.016)\n";
-    std::fs::write(dir.join("loop.opy"), loop_source).unwrap();
-    let absolute = dir.join("loop.opy");
-    let relative = cwd_relative(&absolute);
-
-    let mut abs_session = CompilerSession::new(SessionConfig::from_path(absolute.clone())).unwrap();
-    let abs_lint = abs_session.lint();
-    assert!(abs_lint.ok, "absolute lint: {:?}", abs_lint.diagnostics);
-    let mut rel_session = CompilerSession::new(SessionConfig::from_path(relative.clone())).unwrap();
-    let rel_lint = rel_session.lint();
-    assert!(rel_lint.ok, "relative lint: {:?}", rel_lint.diagnostics);
-    let mut analyze_session = CompilerSession::new(SessionConfig::from_path(absolute)).unwrap();
-    let analyze = analyze_session.analyze();
-    assert!(analyze.ok, "analyze: {:?}", analyze.diagnostics);
-
-    let abs_findings = abs_lint.result.findings.as_array().unwrap();
-    let rel_findings = rel_lint.result.findings.as_array().unwrap();
-    assert!(!abs_findings.is_empty(), "loop.opy fires min-wait-loop");
-    assert_eq!(abs_findings.len(), rel_findings.len());
-    for (a, b) in abs_findings.iter().zip(rel_findings) {
-        assert_eq!(
-            a["span"]["path"], "loop.opy",
-            "the absolute spelling resolves to the root-relative basename"
-        );
-        assert_eq!(
-            a["span"]["path"], b["span"]["path"],
-            "absolute and relative input spellings must agree"
-        );
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn lint_respects_configured_rule_disabling() {
-    let text = corpus_workshop_text("synthetic/control-flow");
-    let path = temp_file("flow.txt", &text);
-    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    session.config.lint.disable("min-wait-loop");
-    let envelope = session.lint();
-    assert!(envelope.ok);
-    let findings = envelope.result.findings.as_array().unwrap();
-    assert!(
-        findings
-            .iter()
-            .all(|finding| finding["code"] != "min-wait-loop"),
-        "the disabled rule must produce no findings"
-    );
-    let rules = envelope.result.rules.as_array().unwrap();
-    let min_wait = rules
-        .iter()
-        .find(|rule| rule["id"] == "min-wait-loop")
-        .expect("the disabled rule is still reported in the rules summary");
-    assert_eq!(min_wait["enabled"], false);
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn opy_input_lints_through_the_native_frontend() {
-    // Supported OPY input lints through the shared native frontend path.
-    let source = corpus_source_opy("synthetic/control-flow");
-    let path = temp_file("control-flow.opy", &source);
-    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    let envelope = session.lint();
-    assert!(
-        envelope.ok,
-        "opy lint must succeed: {:?}",
-        envelope.diagnostics
-    );
-    let findings = envelope.result.findings.as_array().unwrap();
-    assert!(
-        findings
-            .iter()
-            .any(|finding| finding["code"] == "min-wait-loop"),
-        "opy control-flow fires min-wait-loop"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn workshop_inspect_returns_structural_model() {
-    let text = corpus_workshop_text("synthetic/declarations-rules");
-    let mut session = workshop_session(&text);
-    let envelope = session.inspect();
-    assert!(envelope.ok);
-    let rules = envelope.result.rules.as_array().unwrap();
-    assert!(!rules.is_empty(), "inspect lists rules");
-    let symbols = envelope.result.symbols.as_array().unwrap();
-    assert!(!symbols.is_empty(), "inspect lists symbols");
-    let references = envelope.result.references.as_array().unwrap();
-    assert_eq!(references.len(), symbols.len(), "references per symbol");
-}
-
-#[test]
-fn protocol_input_runs_all_workflows() {
-    let path = adapter_fixture("synthetic/basic-rule");
-    let mut session = CompilerSession::new(SessionConfig::from_path(path)).unwrap();
-    let check = session.check();
-    assert!(!check.ok, "retired protocol input is refused");
-    assert_eq!(check.diagnostics[0].code, "input-kind-unsupported");
-}
-
-#[test]
-fn opy_input_compiles_through_the_native_frontend() {
-    let source = corpus_source_opy("synthetic/basic-rule");
-    let path = temp_file("basic-rule.opy", &source);
-    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    let envelope = session.compile();
-    assert!(envelope.ok, "opy compile: {:?}", envelope.diagnostics);
-    let output = envelope.result.output.expect("output");
-    let oracle = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(fixture("synthetic/basic-rule")).unwrap(),
-    )
-    .unwrap();
-    let expected = oracle["compile"]["workshop"].as_str().unwrap();
-    assert_eq!(
-        output.text.trim(),
-        expected.trim(),
-        "the native .opy path must reproduce the oracle Workshop text"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn malformed_workshop_input_fails_structurally() {
-    // Enough locale evidence to pass detection, then a syntax error.
-    let mut session =
-        workshop_session("rule (\"broken\") { event { Ongoing - Global; } actions { If(True); }");
-    let envelope = session.check();
-    assert!(!envelope.ok);
-    assert_eq!(envelope.exit, exit::SOURCE_ERROR);
-    let diagnostic = &envelope.diagnostics[0];
-    assert!(diagnostic.span.is_some(), "parse errors carry spans");
-    assert_eq!(diagnostic.source.as_ref().unwrap().kind, "workshop");
-}
-
-#[test]
-fn explicit_locale_override_wins() {
-    let text = corpus_workshop_text("synthetic/basic-rule");
-    let path = temp_file("program.txt", &text);
-    let mut session = CompilerSession::new(SessionConfig::from_path(path.clone())).unwrap();
-    session.config.locale = Some("en-US".to_string());
-    let envelope = session.check();
-    assert!(envelope.ok, "explicit locale: {:?}", envelope.diagnostics);
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn stdin_opy_is_a_supported_kind() {
-    // `.opy` on stdin is no longer rejected: the native frontend owns it.
-    // (The driver reads the process stdin at load time; an empty stdin fails
-    // with `stdin-empty`, proving the kind check no longer blocks `.opy`.)
+fn workshop_runs_all_product_workflows() {
+    let path = workshop_fixture("synthetic/control-flow");
     let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Stdin,
+        input: InputSpec::Path(path),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+
+    assert!(session.check().ok, "check: {:?}", session.diagnostics());
+    assert!(session.compile().ok, "compile: {:?}", session.diagnostics());
+    assert!(session.analyze().ok, "analyze: {:?}", session.diagnostics());
+    assert!(session.lint().ok, "lint: {:?}", session.diagnostics());
+    assert!(session.inspect().ok, "inspect: {:?}", session.diagnostics());
+}
+
+#[test]
+fn workshop_compile_is_deterministic_and_idempotent() {
+    let path = workshop_fixture("synthetic/basic-rule");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    let first = session.compile();
+    let second = session.compile();
+    assert!(
+        first.ok && second.ok,
+        "compile diagnostics: {:?}",
+        session.diagnostics()
+    );
+    assert_eq!(
+        first.result.output.as_ref().map(|output| &output.text),
+        second.result.output.as_ref().map(|output| &output.text)
+    );
+}
+
+#[test]
+fn legacy_protocol_input_is_refused_without_hir_lowering() {
+    let path = workspace_root()
+        .join("target/issue-155-driver")
+        .join("legacy.json");
+    std::fs::create_dir_all(path.parent().unwrap()).expect("fixture directory creates");
+    std::fs::write(&path, legacy_protocol()).expect("legacy fixture writes");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path),
+        kind: SourceKind::Auto,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.diagnostics[0].code, "input-kind-unsupported");
+}
+
+#[test]
+fn opy_source_never_falls_back_to_a_static_frontend() {
+    let path = workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path),
         kind: SourceKind::Opy,
+        source_backend: SourceBackend::Native,
         ..SessionConfig::default()
     })
-    .unwrap();
-    let envelope = session.check();
-    assert!(
-        !envelope
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "stdin-opy-unsupported"),
-        "stdin .opy is supported by the native frontend"
-    );
-}
-
-#[test]
-fn loading_is_idempotent() {
-    let text = corpus_workshop_text("synthetic/basic-rule");
-    let mut session = workshop_session(&text);
-    let first = session.load().unwrap();
-    let identity = first.input.identity.clone();
-    let second = session.load().unwrap();
-    assert_eq!(second.input.identity, identity);
-    assert_eq!(second.program.rules.len(), 1);
-}
-
-#[test]
-fn compiled_output_is_deterministic() {
-    let text = corpus_workshop_text("synthetic/declarations-rules");
-    let mut first = workshop_session(&text);
-    let mut second = workshop_session(&text);
-    let a = first.compile().result.output.unwrap();
-    let b = second.compile().result.output.unwrap();
-    assert_eq!(a.text, b.text);
-    assert_eq!(a.sha256, b.sha256);
-    assert_eq!(a.input_identity, b.input_identity);
-}
-
-#[test]
-fn opy_lex_error_in_included_file_names_the_included_file() {
-    // A lex error inside an included file must be reported under that file's
-    // path (and position), not the root file's path (#83).
-    let dir = temp_dir();
-    std::fs::write(
-        dir.join("shared.opy"),
-        "rule \"shared\":\n§\n    disableInspector()\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join("main.opy"),
-        "#!include \"shared.opy\"\nrule \"main\":\n    disableInspector()\n",
-    )
-    .unwrap();
-    let mut session = CompilerSession::new(SessionConfig::from_path(dir.join("main.opy"))).unwrap();
-    let envelope = session.compile();
-    assert!(!envelope.ok, "the included lex error must fail the compile");
-    let diagnostic = envelope
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "lex-error")
-        .expect("a lex-error diagnostic is reported");
-    let span = diagnostic.span.as_ref().expect("lex errors carry spans");
-    assert_eq!(
-        span.path, "shared.opy",
-        "the diagnostic must name the included file"
-    );
-    assert_eq!(span.start.line, 2);
-    assert_eq!(span.start.col, 1);
-    let shared = std::fs::read_to_string(dir.join("shared.opy")).unwrap();
-    let line = shared
-        .lines()
-        .nth(span.start.line as usize - 1)
-        .unwrap_or("");
-    assert!(
-        (span.start.col as usize) <= line.len() + 1,
-        "the reported position ({}:{}) must exist in shared.opy",
-        span.start.line,
-        span.start.col
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn opy_include_diagnostics_resolve_through_the_registry() {
-    // Include directives keep resolving their span path through the registry
-    // after the identity fix (#83): the main file keeps its display path,
-    // while a directive inside an included file names that file.
-    let dir = temp_dir();
-    let main_path = dir.join("main.opy");
-    std::fs::write(&main_path, "#!include \"missing.opy\"\n").unwrap();
-    let mut session = CompilerSession::new(SessionConfig::from_path(main_path.clone())).unwrap();
-    let envelope = session.check();
-    assert!(!envelope.ok);
-    let not_found = envelope
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "include-not-found")
-        .expect("include-not-found is reported");
-    assert_eq!(
-        not_found.span.as_ref().unwrap().path,
-        main_path.display().to_string(),
-        "include-not-found from the main file keeps the main path"
-    );
-
-    std::fs::write(&main_path, "#!include \"main.opy\"\n").unwrap();
-    let mut session = CompilerSession::new(SessionConfig::from_path(main_path.clone())).unwrap();
-    let envelope = session.check();
-    assert!(!envelope.ok);
-    let cycle = envelope
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "include-cycle")
-        .expect("include-cycle is reported");
-    assert_eq!(
-        cycle.span.as_ref().unwrap().path,
-        "main.opy",
-        "the cycle-closing directive lives in the included copy of main.opy"
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn opy_unknown_settings_key_fails_check_and_compile_identically() {
-    // Frontend checking preserves the owner-independent settings carrier;
-    // canonical Workshop validation rejects an unknown emission key.
-    let dir = temp_dir();
-    std::fs::write(
-        dir.join("main.opy"),
-        "settings {\n    \"gamemodes\": {\n        \"general\": {\n            \"scoreToWin\": 3\n        }\n    }\n}\nrule \"r\":\n    pass\n",
-    )
-    .unwrap();
-    let main_path = dir.join("main.opy");
-    let mut check_session =
-        CompilerSession::new(SessionConfig::from_path(main_path.clone())).unwrap();
-    let check = check_session.check();
-    assert!(!check.ok);
-    let mut compile_session = CompilerSession::new(SessionConfig::from_path(main_path)).unwrap();
-    let compile = compile_session.compile();
-    assert!(!compile.ok);
-    let compile_diag = compile
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "workshop-emission")
-        .expect("compile reports the canonical settings validation error");
-    assert!(compile_diag.message.contains("settings key"));
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn opy_string_array_initializer_emits_custom_string_elements() {
-    // Class-3 remediation (#87): string values in value positions render as
-    // `Custom String("...")`, the pinned oracle's spelling. The minimal
-    // repro with a real action body must be byte-identical to the pinned
-    // oracle artifact (amended AC-1).
-    assert_byte_artifact(
-        "globalvar x = [\"a\", \"b\"]\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
-        ORACLE_AC1,
-    );
-}
-
-#[test]
-fn opy_long_string_initializers_split_like_the_oracle() {
-    // The released owner compiler now preserves long string literals as one
-    // Custom String value.
-    let oracle_300 = oracle_long_string_artifact(300);
-    assert_byte_artifact(
-        &format!(
-            "globalvar x = \"{}\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
-            "A".repeat(300)
-        ),
-        &oracle_300,
-    );
-    let oracle_1000 = oracle_long_string_artifact(1000);
-    assert_byte_artifact(
-        &format!(
-            "globalvar x = \"{}\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
-            "A".repeat(1000)
-        ),
-        &oracle_1000,
-    );
-}
-
-#[test]
-fn opy_escaped_value_strings_round_trip_the_oracle_spelling() {
-    // Amended AC-4: a decoded newline re-escapes to the literal two-character
-    // `\n` (0x5C 0x6E), byte-equal to the pinned oracle artifact.
-    assert_byte_artifact(
-        "globalvar x = \"a\\nb\"\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
-        ORACLE_AC4,
-    );
-}
-
-#[test]
-fn opy_playervar_augmented_assignments_match_the_oracle_artifacts() {
-    // Amended AC-18: playervar augmented assignments lower to
-    // `Modify Player Variable(Event Player, p, <op>, 2)` for the oracle's
-    // evidenced operator set (+= -= *= /= %=), byte-equal to the pinned
-    // oracle artifacts. `//=` is a parse error in both frontends (not an
-    // OverPy operator).
-    for (op, artifact) in [
-        ("+=", ORACLE_PV_ADD),
-        ("-=", ORACLE_PV_SUB),
-        ("*=", ORACLE_PV_MUL),
-        ("/=", ORACLE_PV_DIV),
-        ("%=", ORACLE_PV_MOD),
-    ] {
-        assert_byte_artifact(
-            &format!(
-                "playervar p\n\nrule \"r\":\n    @Event eachPlayer\n    eventPlayer.p {op} 2\n"
-            ),
-            artifact,
-        );
-    }
-    let dir = temp_dir();
-    let main = dir.join("fdiv.opy");
-    std::fs::write(
-        &main,
-        "playervar p\n\nrule \"r\":\n    @Event eachPlayer\n    eventPlayer.p //= 2\n",
-    )
-    .unwrap();
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(main),
-        root: Some(dir.clone()),
-        profile: wright_transform::Profile::Compat,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let envelope = session.compile();
-    assert!(
-        !envelope.ok,
-        "//= is rejected like the pinned oracle (not an OverPy operator)"
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn opy_numeric_initializers_match_the_oracle_artifact() {
-    // Amended AC-11: non-zero and non-integer numeric initializers are
-    // preserved (`j = 5`, `k = 0.0` with the source spelling, `playervar
-    // p = 7` in the player Initialize rule); integer-`0` (`h = 0`) is
-    // dropped. Byte-equal to the pinned oracle artifact.
-    assert_byte_artifact(
-        "globalvar j = 5\nglobalvar h = 0\nglobalvar k = 0.0\nplayervar p = 7\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
-        ORACLE_AC11,
-    );
-}
-
-#[test]
-fn opy_initializer_semantics_are_profile_independent() {
-    // #112: declaration initializer semantics are owned by the
-    // profile-independent HIR → WIR lowering, so `off`, `compat`, and
-    // `aggressive` must all emit the same Initialize rules byte-identical to
-    // the pinned oracle. Previously the default `off` profile silently
-    // dropped initializers because the synthesis lived in a compat-only
-    // transformation pass.
-    for profile in [
-        wright_transform::Profile::Off,
-        wright_transform::Profile::Compat,
-        wright_transform::Profile::Aggressive,
-    ] {
-        assert_byte_artifact_with_profile(
-            "globalvar j = 5\nglobalvar h = 0\nglobalvar k = 0.0\nplayervar p = 7\n\nrule \"r\":\n    @Event global\n    disableInspector()\n",
-            ORACLE_AC11,
-            profile,
-        );
-    }
-}
-
-#[test]
-fn opy_explicit_declaration_indexes_stay_distinct_from_initializers() {
-    // #112: the bare-integer declaration form (`globalvar idx 3`,
-    // `playervar q 1`) is an explicit Workshop variable index and must stay
-    // distinct from initializer syntax (`globalvar j = 5`). The table keeps
-    // the explicit index, only the initializer forms produce Initialize-rule
-    // actions, and every profile agrees.
-    let source = "globalvar j = 5\nglobalvar idx 3\nplayervar p = 7\nplayervar q 1\n\nrule \"r\":\n    @Event global\n    disableInspector()\n";
-    let mut artifacts = Vec::new();
-    for profile in [
-        wright_transform::Profile::Off,
-        wright_transform::Profile::Compat,
-        wright_transform::Profile::Aggressive,
-    ] {
-        let artifact = compile_artifact(source, profile);
-        assert!(
-            artifact.contains("        3: idx"),
-            "explicit global index must appear in the table:\n{artifact}"
-        );
-        assert!(
-            artifact.contains("        1: q"),
-            "explicit player index must appear in the table:\n{artifact}"
-        );
-        assert!(
-            artifact.contains("Set Global Variable(j, 5)"),
-            "initializer form produces an Initialize action:\n{artifact}"
-        );
-        assert!(
-            artifact.contains("Set Player Variable(Event Player, p, 7)"),
-            "player initializer form produces an Initialize action:\n{artifact}"
-        );
-        assert!(
-            !artifact.contains("Set Global Variable(idx,")
-                && !artifact.contains("Set Player Variable(Event Player, q,"),
-            "explicit index forms must never become Initialize actions:\n{artifact}"
-        );
-        artifacts.push(artifact);
-    }
-    assert!(
-        artifacts.windows(2).all(|pair| pair[0] == pair[1]),
-        "all profiles must emit byte-identical artifacts:\n{artifacts:?}"
-    );
-}
-
-#[test]
-fn opy_empty_rules_follow_published_owner_output() {
-    // The released owner compiler retains an empty rule shell for a pass-only
-    // rule. Keep the published-owner behavior explicit instead of restoring a
-    // Wright-side filtering pass.
-    assert_byte_artifact(
-        "rule \"r\":\n    @Event global\n    pass\n",
-        "rule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n}\n\n",
-    );
-    assert_byte_artifact(
-        "globalvar q\n\nrule \"r\":\n    @Event global\n    @Condition q == 1\n",
-        "variables {\n    global:\n        0: q\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    conditions {\n        Global.q == 1;\n    }\n}\n\n",
-    );
-}
-
-/// Compile `.opy` source with the compat profile and assert the emitted
-/// artifact is byte-identical to the quoted pinned-oracle artifact.
-fn assert_byte_artifact(source: &str, artifact: &str) {
-    assert_byte_artifact_with_profile(source, artifact, wright_transform::Profile::Compat);
-}
-
-/// Compile `.opy` source with an explicit profile and assert the emitted
-/// artifact is byte-identical to the quoted pinned-oracle artifact.
-fn assert_byte_artifact_with_profile(
-    source: &str,
-    artifact: &str,
-    profile: wright_transform::Profile,
-) {
-    assert_eq!(compile_artifact(source, profile), artifact);
-}
-
-/// Compile `.opy` source with the given profile and return the emitted text.
-fn compile_artifact(source: &str, profile: wright_transform::Profile) -> String {
-    let dir = temp_dir();
-    let main = dir.join("repro.opy");
-    std::fs::write(&main, source).unwrap();
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(main),
-        root: Some(dir.clone()),
-        profile,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let envelope = session.compile();
-    assert!(
-        envelope.ok,
-        "repro must compile: {:?}",
-        envelope.diagnostics
-    );
-    let text = envelope.result.output.expect("output").text;
-    let _ = std::fs::remove_dir_all(&dir);
-    text
-}
-
-fn oracle_long_string_artifact(length: usize) -> String {
-    format!(
-        "variables {{\n    global:\n        0: x\n}}\n\nrule (\"Initialize global variables\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(x, Custom String(\"{}\"));\n    }}\n}}\n\nrule (\"r\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Disable Inspector Recording;\n    }}\n}}\n\n",
-        "A".repeat(length)
-    )
-}
-
-// Byte-quoted pinned-oracle artifacts (overpy 9.7.10, raw CLI output).
-const ORACLE_AC1: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Array(Custom String(\"a\"), Custom String(\"b\")));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
-
-const ORACLE_AC4: &str = "variables {\n    global:\n        0: x\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(x, Custom String(\"a\\nb\"));\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
-
-const ORACLE_AC11: &str = "variables {\n    global:\n        0: j\n        1: h\n        2: k\n    player:\n        0: p\n}\n\nrule (\"Initialize global variables\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(j, 5);\n        Set Global Variable(k, 0);\n    }\n}\n\nrule (\"Initialize player variables\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Player Variable(Event Player, p, 7);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Disable Inspector Recording;\n    }\n}\n\n";
-
-// Pinned oracle artifacts for playervar augmented assignments (AC-18).
-const ORACLE_PV_ADD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Add, 2);\n    }\n}\n\n";
-
-const ORACLE_PV_SUB: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Subtract, 2);\n    }\n}\n\n";
-
-const ORACLE_PV_MUL: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Multiply, 2);\n    }\n}\n\n";
-
-const ORACLE_PV_DIV: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Divide, 2);\n    }\n}\n\n";
-
-const ORACLE_PV_MOD: &str = "variables {\n    player:\n        0: p\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Modify Player Variable(Event Player, p, Modulo, 2);\n    }\n}\n\n";
-
-#[test]
-fn opy_pixelart_array_strings_match_the_oracle_wrapping() {
-    // The owner compiler carries settings through the canonical Workshop
-    // emitter while preserving the real project's string lowering.
-    let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(root.join("pixelart.opy")),
-        root: Some(root.clone()),
-        profile: wright_transform::Profile::Compat,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let envelope = session.compile();
-    assert!(envelope.ok);
-    let output = envelope.result.output.expect("owner emits settings");
-    assert!(!output.text.is_empty());
-}
-
-#[test]
-fn opy_inputhud_settings_section_matches_the_oracle() {
-    // The owner compiler emits the settings section without a Wright fallback.
-    let root = workspace_root().join("compatibility/fixtures/real-world/overpy-inputhud");
-    let source = std::fs::read_to_string(root.join("inputhud.opy")).unwrap();
-    let block_start = source.find("settings {").expect("settings block");
-    let block_end = source[block_start..]
-        .find("\n}\n")
-        .map(|index| block_start + index + 3)
-        .expect("settings block close");
-    let settings_only = format!(
-        "{}\nrule \"r\":\n    pass\n",
-        &source[block_start..block_end]
-    );
-    let dir = temp_dir();
-    let main = dir.join("inputhud-settings.opy");
-    std::fs::write(&main, &settings_only).unwrap();
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(main),
-        root: Some(root.clone()),
-        profile: wright_transform::Profile::Compat,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let envelope = session.compile();
-    assert!(envelope.ok);
-    let output = envelope.result.output.expect("owner emits settings");
-    assert!(output.text.contains("Mode Name:"));
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn opy_pixelart_compiles_and_matches_the_oracle_settings_section() {
-    // End-to-end owner capability path: custom-game settings are emitted by
-    // the canonical Workshop backend.
-    let root = workspace_root().join("compatibility/fixtures/real-world/overpy-pixelart");
-    let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(root.join("pixelart.opy")),
-        root: Some(root.clone()),
-        profile: wright_transform::Profile::Compat,
-        ..SessionConfig::default()
-    })
-    .unwrap();
-    let envelope = session.compile();
-    assert!(envelope.ok);
-    let output = envelope.result.output.expect("owner emits settings");
-    assert!(output.text.contains("Workshop Island"));
-}
-
-#[test]
-fn ostw_requests_fail_as_provider_unavailable() {
-    for extension in ["ostw", "del"] {
-        let dir = temp_dir();
-        let path = dir.join(format!("main.{extension}"));
-        std::fs::write(&path, "rule: \"r\" {}\n").unwrap();
-        macro_rules! assert_unavailable {
-            ($method:ident) => {
-                let mut session = CompilerSession::new(SessionConfig::from_path(&path)).unwrap();
-                let envelope = session.$method();
-                assert_eq!(envelope.diagnostics.len(), 1);
-                assert_eq!(envelope.diagnostics[0].code, "source-provider-unavailable");
-                assert_eq!(
-                    envelope.diagnostics[0].stage,
-                    wright_driver::Stage::Internal
-                );
-                assert_eq!(envelope.exit, exit::INTERNAL);
-            };
-        }
-        assert_unavailable!(check);
-        assert_unavailable!(compile);
-        assert_unavailable!(analyze);
-        assert_unavailable!(inspect);
-        assert_unavailable!(lint);
-        let _ = std::fs::remove_dir_all(dir);
-    }
+    .expect("session creates");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.diagnostics[0].code, "source-provider-unavailable");
 }

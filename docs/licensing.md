@@ -7,8 +7,8 @@ qualified lawyer.
 ## Purpose
 
 Wright is independently implemented Rust software: a tooling-first semantic
-platform for the Overwatch Workshop ecosystem, with the shipped source
-adapter limited to `wright-opy`;
+platform for the Overwatch Workshop ecosystem, with source-language integration
+through LPP providers;
 canonical Workshop semantics are consumed from `workshop-rs` (wright#143). Per
 [ADR-0009](adr/0009-language-ownership-licensing-boundaries.md), durable
 ownership of source-language frontends moves to provider repositories
@@ -42,8 +42,8 @@ facts, and invocation records are centralized in
 
 | Component | May invoke or inspect the reference? | Boundary and distribution rule |
 | --- | --- | --- |
-| Wright Rust core, including HIR, Workshop IR, lowering, diagnostics, and backends | No | Independently implemented code. It must not link to a reference, copy its source, import its internal AST/types, or compile against its generated artifacts. |
-| Frontend adapter/bridge (`adapter/`) | Only through an explicitly documented input or process boundary | It may translate a reviewed interchange result or observed frontend behavior into Wright-owned types. It must not make reference internals a Wright API. Ownership, license, and invocation are recorded in its [`README`](../adapter/README.md). |
+| Wright Rust tooling and canonical Workshop consumer | No | Independently implemented code. It must not link to a reference, copy its source, import its internal AST/types, or compile against its generated artifacts. |
+| LPP provider boundary | Only through an explicitly documented process boundary | It consumes provider-owned source semantics and artifacts without importing provider implementation internals into Wright. |
 | Compatibility harness/oracle tool | Yes, for isolated evaluation | It may invoke a separately installed/pinned reference (OverPy or OSTW) and compare documented or generated results. It must remain separable from the core build and runtime distribution. |
 | Compatibility fixtures and generated reference artifacts | Only after provenance review | Store identifiers, hashes, generators, or reviewable artifacts only when their license and redistribution status are recorded. Do not add copied reference source or unclear third-party content. |
 | CI and development scripts | Yes, when isolated | They may install or invoke a pinned external oracle for a compatibility check, but must not silently turn it into a core dependency or bundled release component. |
