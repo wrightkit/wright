@@ -23,6 +23,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
     parser.add_argument("output", type=Path)
+    parser.add_argument("--commit")
     args = parser.parse_args()
 
     built = (
@@ -34,7 +35,7 @@ def main() -> int:
     stamp = {
         "version": args.version,
         "contract": "wright-result/v1",
-        "commit": git_head(),
+        "commit": args.commit or git_head(),
         "built": built,
         "requires": {"node": False, "overpy": False},
     }
