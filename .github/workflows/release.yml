@@ -104,7 +104,7 @@ jobs:
               | sort_by(.created_at) | last // empty' <<<"${runs}")"
             if [[ -n "${ci_run}" ]]; then
               status="$(jq -r .status <<<"${ci_run}")"
-              conclusion="$(jq -r .conclusion // empty <<<"${ci_run}")"
+              conclusion="$(jq -r '.conclusion // empty' <<<"${ci_run}")"
               run_id="$(jq -r .id <<<"${ci_run}")"
               echo "CI run ${run_id}: ${status}/${conclusion}"
               if [[ "${status}" == "completed" ]]; then
