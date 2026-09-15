@@ -89,7 +89,7 @@ jobs:
 
           # Distribution validation additionally triggers on dist/ manifests and
           # the first-party Windows installer.
-          dist_match="$(matches "(^dist/|^install\\.ps1$|${broad})")"
+          dist_match="$(matches "(^dist/|^install\\.(sh|ps1)$|${broad})")"
           echo "dist=${dist_match}" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------------
@@ -97,20 +97,61 @@ jobs:
   # All other Rust-based jobs depend on this.
   # -------------------------------------------------------------------------
   rust-quality:
-    name: Rust (${{ matrix.toolchain }})
+    name: Rust (stable)
     needs: paths
     if: needs.paths.outputs.rust_core == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain:
-          - stable
-          - 1.85.0
     uses: wrightkit/.github/.github/workflows/rust-quality.yml@a83d0f1b4cbcb5b81fb0426e3a5aea1db0899fb5
     with:
-      toolchain: ${{ matrix.toolchain }}
-      cache-shared-key: linux-quality-${{ matrix.toolchain }}-dev-test
+      toolchain: stable
+      cache-shared-key: linux-quality-stable-dev-test
       all-features: true
+
+  # The reusable quality workflow installs its requested toolchain, but the
+  # repository rust-toolchain.toml remains authoritative for bare Cargo
+  # commands. Keep the MSRV gate local so every command explicitly selects
+  # 1.85.0 and cannot silently fall back to stable.
+  rust-msrv:
+    name: Rust (1.85.0)
+    needs: paths
+    if: needs.paths.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-quality-1.85.0-dev-test
+          cache-targets: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
+      - name: Check formatting with MSRV toolchain
+        run: cargo +1.85.0 fmt --all -- --check
+
+      # opy-rs 0.1.38 declares 1.85.0 but currently uses unstable let-chain
+      # syntax. Keep the owner-independent Wright crates on the declared MSRV;
+      # the stable quality gate above remains the full workspace gate.
+      - name: Run MSRV clippy for owner-independent crates
+        run: >-
+          cargo +1.85.0 clippy --locked --all-targets --all-features
+          -p wright-core -p wright-ir -p wright-analyzer -p wright-transform
+          -p wright-lpp -- -D warnings
+
+      - name: Run MSRV tests for owner-independent crates
+        run: >-
+          cargo +1.85.0 test --locked --all-targets --all-features
+          -p wright-core -p wright-ir -p wright-analyzer -p wright-transform
+          -p wright-lpp
 
   # -------------------------------------------------------------------------
   # [1a] WRIGHT CLI ARTIFACT  (stable/debug executable for compatible jobs)
@@ -120,7 +161,7 @@ jobs:
   # -------------------------------------------------------------------------
   wright-cli-build:
     name: Build Wright CLI (stable/debug)
-    needs: [paths, rust-quality]
+    needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.opy == 'true' || needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -173,7 +214,7 @@ jobs:
   # -------------------------------------------------------------------------
   workshop-integration:
     name: Workshop real-project integration
-    needs: [paths, rust-quality]
+    needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -222,7 +263,7 @@ jobs:
   # -------------------------------------------------------------------------
   opy-integration:
     name: OPY integration (semantic + owner)
-    needs: [paths, rust-quality, wright-cli-build]
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -321,7 +362,7 @@ jobs:
   # -------------------------------------------------------------------------
   lpp-integration:
     name: LPP client integration (#142, #139)
-    needs: [paths, rust-quality]
+    needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.lpp == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -375,7 +416,7 @@ jobs:
   # -------------------------------------------------------------------------
   cli-behavior:
     name: Wright CLI behavior (GitHub Actions smoke)
-    needs: [paths, rust-quality, wright-cli-build]
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -427,7 +468,7 @@ jobs:
   # -------------------------------------------------------------------------
   scenario-validation:
     name: Scenario validation (end-to-end)
-    needs: [paths, rust-quality, wright-cli-build]
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -515,7 +556,7 @@ jobs:
   # -------------------------------------------------------------------------
   benchmark:
     name: Performance benchmarks
-    needs: [paths, rust-quality]
+    needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -626,19 +667,91 @@ jobs:
   # When source changes are in scope, this remains gated on the relevant Rust
   # and integration jobs. Distribution-only changes run this job directly.
   # -------------------------------------------------------------------------
-  dist-validation:
-    name: Distribution validation (${{ matrix.channel }}, ${{ matrix.os }})
+  dist-cli-build:
+    name: Build distribution CLI/LSP (${{ matrix.os }})
     needs:
       - paths
       - rust-quality
+      - rust-msrv
       - opy-integration
       - lpp-integration
     if: |
       always() &&
       needs.paths.outputs.dist == 'true' &&
       (needs.rust-quality.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
+      (needs.rust-msrv.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
       (needs.opy-integration.result == 'success' || needs.paths.outputs.opy != 'true') &&
       (needs.lpp-integration.result == 'success' || needs.paths.outputs.lpp != 'true')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-15
+          - windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dist-validation-${{ runner.os }}-stable-dev
+          cache-targets: false
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
+      - name: Build wright CLI and LSP
+        shell: bash
+        run: cargo build --locked -p wright-cli -p wright-lsp
+
+      - name: Record distribution build identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          host_target="$(rustc -vV | sed -n 's/^host: //p')"
+          cat > target/debug/wright-dist.build.json <<EOF
+          {"revision":"${GITHUB_SHA}","runner_os":"${RUNNER_OS}","target":"${host_target}","toolchain":"stable","profile":"dev","packages":["wright-cli","wright-lsp"],"features":[]}
+          EOF
+
+      - name: Upload current-run distribution binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: wright-dist-cli-${{ matrix.os }}
+          path: |
+            target/debug/wright
+            target/debug/wright.exe
+            target/debug/wright-lsp
+            target/debug/wright-lsp.exe
+            target/debug/wright-dist.build.json
+          if-no-files-found: error
+
+  dist-validation:
+    name: Distribution validation (${{ matrix.channel }}, ${{ matrix.os }})
+    needs:
+      - paths
+      - rust-quality
+      - rust-msrv
+      - opy-integration
+      - lpp-integration
+      - dist-cli-build
+    if: |
+      always() &&
+      needs.paths.outputs.dist == 'true' &&
+      (needs.rust-quality.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
+      (needs.rust-msrv.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
+      (needs.opy-integration.result == 'success' || needs.paths.outputs.opy != 'true') &&
+      (needs.lpp-integration.result == 'success' || needs.paths.outputs.lpp != 'true') &&
+      needs.dist-cli-build.result == 'success'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -682,23 +795,28 @@ jobs:
         shell: pwsh
         run: winget settings --enable LocalManifestFiles
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+      - name: Download current-run distribution binaries
+        uses: actions/download-artifact@v8
         with:
-          toolchain: stable
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: dist-validation-${{ runner.os }}
-          cache-targets: false
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
+          name: wright-dist-cli-${{ matrix.os }}
+          path: target/debug
 
-      - name: Build wright CLI and LSP
-        run: cargo build --locked -p wright-cli -p wright-lsp
+      - name: Verify current-run distribution build identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e \
+            --arg revision "${GITHUB_SHA}" \
+            --arg runner_os "${RUNNER_OS}" \
+            '(.revision == $revision) and
+             (.runner_os == $runner_os) and
+             (.toolchain == "stable") and
+             (.profile == "dev") and
+             (.packages == ["wright-cli", "wright-lsp"])' \
+            target/debug/wright-dist.build.json >/dev/null
+          if [[ "${RUNNER_OS}" != "Windows" ]]; then
+            chmod +x target/debug/wright target/debug/wright-lsp
+          fi
 
       - name: Validate package-manager metadata and install script
         run: python scripts/verify-dist.py

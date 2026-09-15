@@ -551,7 +551,7 @@ fn public_event_id(event: &workshop_rs::Event) -> &str {
     }
 }
 
-fn matching_scopes<'a>(facts: &RuleFacts<'a>, scope: Scope) -> Vec<ScopeMatch> {
+fn matching_scopes(facts: &RuleFacts<'_>, scope: Scope) -> Vec<ScopeMatch> {
     if matches!(scope, Scope::Rule) {
         return vec![(
             None,

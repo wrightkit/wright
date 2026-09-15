@@ -171,6 +171,17 @@ jobs:
       - name: Add cross-compile target
         run: rustup target add "$TARGET"
 
+      - name: Restore release dependency cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}-stable-release
+          cache-targets: false
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
       - name: Build release binaries
         run: cargo build --locked --release -p wright-cli -p wright-lsp --target "$TARGET"
 
