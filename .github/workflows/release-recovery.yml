@@ -1,0 +1,30 @@
+name: Recover release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to recover
+        required: true
+        type: string
+      commit:
+        description: Commit the release tag must resolve to
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release-artifacts:
+    name: Build and publish release artifacts
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ inputs.commit }}
+      tag: ${{ inputs.tag }}
+      commit: ${{ inputs.commit }}
+    secrets: inherit
+    permissions:
+      actions: read
+      contents: write
