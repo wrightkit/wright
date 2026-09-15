@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.24](https://github.com/wrightkit/wright/compare/v0.2.23...v0.2.24) (2026-09-15)
+
+
+### Bug Fixes
+
+* **release:** make owner dependency updates releasable ([#331](https://github.com/wrightkit/wright/issues/331)) ([04ff93c](https://github.com/wrightkit/wright/commit/04ff93c491e2abd9f08bced74b53675b13d70186))
+
+
+### Performance Improvements
+
+* **ci:** remove redundant CI and release work ([#333](https://github.com/wrightkit/wright/issues/333)) ([dbafd1d](https://github.com/wrightkit/wright/commit/dbafd1d3ee47fa4b3fc8456fd05c47b567f129e3))
+
 ## [0.2.23](https://github.com/wrightkit/wright/compare/v0.2.22...v0.2.23) (2026-09-14)
 
 
