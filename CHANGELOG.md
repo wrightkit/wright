@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.27](https://github.com/wrightkit/wright/compare/v0.2.26...v0.2.27) (2026-09-15)
+
+
+### Bug Fixes
+
+* **release:** restore Windows release packaging ([#341](https://github.com/wrightkit/wright/issues/341)) ([2d09589](https://github.com/wrightkit/wright/commit/2d09589757c7b7676c6e686bca8de54ce1a7335e))
+
 ## [0.2.26](https://github.com/wrightkit/wright/compare/v0.2.25...v0.2.26) (2026-09-15)
 
 
