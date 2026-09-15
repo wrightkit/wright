@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.28](https://github.com/wrightkit/wright/compare/v0.2.27...v0.2.28) (2026-09-15)
+
+
+### Dependencies
+
+* update workshop-rs to 0.3.11 ([#346](https://github.com/wrightkit/wright/issues/346)) ([7f3876e](https://github.com/wrightkit/wright/commit/7f3876e5e9ba85c5b29216d252511771862e76aa))
+
 ## [0.2.27](https://github.com/wrightkit/wright/compare/v0.2.26...v0.2.27) (2026-09-15)
 
 
