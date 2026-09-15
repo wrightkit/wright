@@ -13,13 +13,24 @@
 
 use std::path::{Path, PathBuf};
 
+use wright_driver::CompilerSession;
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::service::ToolService;
-use wright_driver::{CompilerSession, Profile};
 use wright_lpp::{ClientInfo, Document, DocumentSet, ProviderError};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+}
+
+fn workshop_path() -> PathBuf {
+    let oracle = workspace_root().join("compatibility/fixtures/synthetic/control-flow/oracle.json");
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(oracle).unwrap()).unwrap();
+    let text = value["compile"]["workshop"].as_str().unwrap();
+    let path = workspace_root().join("target/issue-155-lpp/control-flow.ws");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, text).unwrap();
+    path
 }
 
 fn mock_provider_path() -> Option<PathBuf> {
@@ -65,6 +76,8 @@ fn session_spawns_initializes_and_queries_a_provider() {
         ))
         .expect("registered");
     let config = SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
         providers: registry,
         ..SessionConfig::default()
     };
@@ -141,16 +154,12 @@ fn tool_service_exposes_the_provider_seam() {
         ))
         .expect("registered");
     let config = SessionConfig {
-        input: InputSpec::Path(
-            workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-        ),
-        kind: SourceKind::Opy,
-        profile: Profile::Compat,
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
         providers: registry,
         ..SessionConfig::default()
     };
-    let mut session = CompilerSession::new(config).expect("session");
-    let _ = session.load().expect("loads");
+    let session = CompilerSession::new(config).expect("session");
     let session = Box::leak(Box::new(session));
     let service = ToolService::new(session).expect("service");
 
