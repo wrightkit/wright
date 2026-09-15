@@ -41,7 +41,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_COMMIT }}
+          ref: ${{ inputs.commit }}
           fetch-depth: 0
 
       - name: Install Rust toolchain
