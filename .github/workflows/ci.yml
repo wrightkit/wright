@@ -190,12 +190,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.85.0
+          toolchain: stable
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-quality-1.85.0-dev-test
+          shared-key: linux-quality-stable-dev-test
           cache-targets: true
           cache-all-crates: false
           cache-workspace-crates: false
