@@ -4,15 +4,13 @@
 set -euo pipefail
 
 PR_JSON="${PR:-}"
-if [[ -z "$PR_JSON" ]]; then
+pr_number="${PR_NUMBER:-}"
+if [[ -n "$PR_JSON" ]]; then
+  pr_number="$(jq -r '.number // empty' <<<"$PR_JSON")"
+fi
+if [[ -z "$pr_number" ]]; then
   echo 'No release-please PR requires metadata synchronization.'
   exit 0
-fi
-
-pr_number="$(jq -r '.number // empty' <<<"$PR_JSON")"
-if [[ -z "$pr_number" ]]; then
-  echo 'release-please returned a PR without a number.' >&2
-  exit 1
 fi
 
 gh pr checkout "$pr_number"
