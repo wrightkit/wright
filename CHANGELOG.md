@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.29](https://github.com/wrightkit/wright/compare/v0.2.28...v0.2.29) (2026-09-15)
+
+
+### Bug Fixes
+
+* **release:** add failed-release roll-forward entry point ([2cfd9c7](https://github.com/wrightkit/wright/commit/2cfd9c7ef5d3fa45fba1c528c718f76e2f73baba)), closes [#352](https://github.com/wrightkit/wright/issues/352)
+* **release:** synchronize recovery release metadata ([87b56d1](https://github.com/wrightkit/wright/commit/87b56d18b2200acad66e060df7f407f2ba91a554)), closes [#352](https://github.com/wrightkit/wright/issues/352)
+
 ## [0.2.28](https://github.com/wrightkit/wright/compare/v0.2.27...v0.2.28) (2026-09-15)
 
 
