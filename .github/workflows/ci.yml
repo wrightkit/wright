@@ -25,65 +25,56 @@ permissions:
   contents: read
 
 # ---------------------------------------------------------------------------
-# Path filter: determines which capability jobs run on PRs.
-# On push-to-main the previous commit is compared with the pushed revision.
+# Path filter: determines which capability jobs run on PRs and pushes.
 # ---------------------------------------------------------------------------
 jobs:
   paths:
     name: Detect changed paths
     runs-on: ubuntu-latest
     outputs:
-      rust_core: ${{ steps.f.outputs.rust_core }}
-      opy: ${{ steps.f.outputs.opy }}
-      lpp: ${{ steps.f.outputs.lpp }}
-      cli: ${{ steps.f.outputs.cli }}
-      dist: ${{ steps.f.outputs.dist }}
+      rust_core: ${{ steps.filter.outputs.rust_core }}
+      opy: ${{ steps.filter.outputs.rust_core }}
+      lpp: ${{ steps.filter.outputs.rust_core }}
+      cli: ${{ steps.filter.outputs.rust_core }}
+      dist: ${{ steps.filter.outputs.dist }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Compute path filters
-        id: f
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.event.before }}" =~ ^0+$ ]]; then
-            echo "rust_core=true"   >> "$GITHUB_OUTPUT"
-            echo "opy=true"         >> "$GITHUB_OUTPUT"
-            echo "lpp=true"         >> "$GITHUB_OUTPUT"
-            echo "cli=true"         >> "$GITHUB_OUTPUT"
-            echo "dist=true"        >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
-            changed="$(git diff --name-only "${base}" "${head}")"
-          else
-            base="${{ github.event.pull_request.base.sha }}"
-            head="${{ github.event.pull_request.head.sha }}"
-            changed="$(git diff --name-only "${base}...${head}")"
-          fi
-
-          # Helper: returns "true" if any path matches the given grep pattern.
-          matches() { echo "$changed" | grep -qE "$1" && echo "true" || echo "false"; }
-
-          # Core Rust workspace changes expand all Rust-based checks.
-          broad="(^Cargo\.(toml|lock)$|^rust-toolchain(\.toml)?$|^\.cargo/|^(src|crates|compatibility|scenarios)/|^scripts/|^\.github/workflows/)"
-          broad_match="$(matches "$broad")"
-
-          echo "rust_core=${broad_match}"   >> "$GITHUB_OUTPUT"
-          echo "opy=${broad_match}"         >> "$GITHUB_OUTPUT"
-          echo "lpp=${broad_match}"         >> "$GITHUB_OUTPUT"
-          echo "cli=${broad_match}"         >> "$GITHUB_OUTPUT"
-
-          # Distribution validation additionally triggers on dist/ manifests and
-          # the first-party Windows installer.
-          dist_match="$(matches "(^dist/|^install\\.(sh|ps1)$|${broad})")"
-          echo "dist=${dist_match}" >> "$GITHUB_OUTPUT"
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            rust_core:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'src/**'
+              - 'crates/**'
+              - 'compatibility/**'
+              - 'scenarios/**'
+              - 'scripts/**'
+              - '.github/workflows/**'
+            dist:
+              - 'dist/**'
+              - 'install.sh'
+              - 'install.ps1'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'src/**'
+              - 'crates/**'
+              - 'compatibility/**'
+              - 'scenarios/**'
+              - 'scripts/**'
+              - '.github/workflows/**'
 
   # -------------------------------------------------------------------------
   # [1] RUST QUALITY & TESTS  (fundamental gate)
@@ -187,16 +178,7 @@ jobs:
           if-no-files-found: error
 
       - name: Record CLI artifact provenance
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "## Wright CLI artifact"
-            echo ""
-            echo "- Revision: \`${GITHUB_SHA}\`"
-            echo "- Build identity: stable / debug / ubuntu-latest"
-            echo "- SHA-256: \`$(sha256sum target/debug/wright | cut -d' ' -f1)\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/report-cli-artifact.py
 
   # -------------------------------------------------------------------------
   # [1b] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
@@ -303,41 +285,7 @@ jobs:
 
       - name: Write step summary
         if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "## OPY Integration"
-            echo ""
-            # Semantic gate summary derived from the JSON report
-            if [[ -f target/v1-gates-report.json ]]; then
-              python3 - <<'PYEOF'
-          import json
-
-          r = json.load(open("target/v1-gates-report.json"))
-          s = r.get("summary", {})
-          passed = s.get("passed", 0)
-          total = s.get("total", 0)
-          state = "PASS" if passed == total else "FAIL"
-          icon = "✅" if passed == total else "❌"
-
-          print(f"### Semantic OPY gate: {icon} {state} ({passed}/{total} fixtures)")
-          print("")
-
-          failures = [(fid, f) for fid, f in r.get("fixtures", {}).items()
-                      if f.get("status") != "pass"]
-          if failures:
-              print("**Failures:**")
-              for fid, f in failures:
-                  print(f"- `{fid}`: {f.get('status', 'unknown')}")
-          else:
-              print("All fixtures passed.")
-          PYEOF
-            else
-              echo "### Semantic OPY gate: ⚠️ report not generated"
-            fi
-            echo ""
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/render-ci-summary.py --title "OPY Integration" --kind semantic --report target/v1-gates-report.json
 
   # -------------------------------------------------------------------------
   # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)
@@ -385,10 +333,7 @@ jobs:
       - name: Run LPP client integration tests (required)
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
-        run: |
-          cargo test --locked -p wright-lpp --test mock_provider
-          cargo test --locked -p wright-driver --test lpp
-          cargo test --locked -p wright-driver --test provider_edit
+        run: scripts/test-lpp-integration.sh
 
   # -------------------------------------------------------------------------
   # [4] CLI BEHAVIOR  (Wright CLI GitHub Actions renderer smoke test)
@@ -420,28 +365,7 @@ jobs:
         run: chmod +x target/debug/wright
 
       - name: Exercise auto GitHub Actions renderer
-        shell: bash
-        run: |
-          set -euo pipefail
-          fixture="$RUNNER_TEMP/wright-gha-smoke.ws"
-          stdout="$RUNNER_TEMP/wright-gha-smoke.stdout"
-          stderr="$RUNNER_TEMP/wright-gha-smoke.stderr"
-          cat > "$fixture" <<'EOF'
-          rule ("gha smoke") {
-              event {
-                  Ongoing - Global;
-              }
-              actions {
-                  Disable Inspector Recording;
-              }
-          }
-          EOF
-          target/debug/wright check "$fixture" > "$stdout" 2> "$stderr"
-          test ! -s "$stdout"
-          grep -Fq '::group::wright check' "$stderr"
-          grep -Fq '::endgroup::' "$stderr"
-          ! grep -Fq 'title=Wright summary' "$stderr"
-          grep -Fq 'Wright `check`: **PASS** (exit 0)' "$GITHUB_STEP_SUMMARY"
+        run: scripts/test-cli-github-actions.sh target/debug/wright
 
   # -------------------------------------------------------------------------
   # [5] SCENARIO VALIDATION  (end-to-end compile-time scenario regression)
@@ -494,42 +418,7 @@ jobs:
 
       - name: Write step summary
         if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "## Scenario Validation"
-            echo ""
-            if [[ -f target/scenarios-report.json ]]; then
-              python3 - <<'PYEOF'
-          import json
-
-          r = json.load(open("target/scenarios-report.json"))
-          s = r.get("summary", {})
-          passed = s.get("passed", 0)
-          total = s.get("total", 0)
-          icon = "✅" if passed == total else "❌"
-          state = "PASS" if passed == total else "FAIL"
-
-          print(f"### Scenarios: {icon} {state} ({passed}/{total})")
-          print("")
-
-          failures = [(sid, sc) for sid, sc in r.get("scenarios", {}).items()
-                      if not sc.get("passed")]
-          if failures:
-              print("**Failed scenarios:**")
-              for sid, sc in failures:
-                  failed_checks = [c["check"] for c in sc.get("checks", []) if not c["passed"]]
-                  print(f"- `{sid}`: {', '.join(failed_checks) or 'compile failed'}")
-          else:
-              print("All scenarios passed.")
-          PYEOF
-            else
-              echo "### Scenarios: ⚠️ report not generated"
-            fi
-            echo ""
-            echo "_Full machine-readable report available as workflow artifact._"
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/render-ci-summary.py --title "Scenario Validation" --kind scenarios --report target/scenarios-report.json
 
   # -------------------------------------------------------------------------
   # [6] BENCHMARK  (performance evidence)
@@ -576,40 +465,7 @@ jobs:
 
       - name: Write step summary
         if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "## Performance Benchmarks"
-            echo ""
-            if [[ "${{ steps.bench.outcome }}" == "success" ]]; then
-              echo "### Benchmarks: ✅ completed"
-            else
-              echo "### Benchmarks: ❌ FAIL"
-            fi
-            if [[ -f target/wright-bench-report.json ]]; then
-              python3 - <<'PYEOF'
-          import json
-
-          r = json.load(open("target/wright-bench-report.json"))
-          # Emit a compact table if the report has benchmark entries.
-          benches = r.get("benchmarks") or r.get("results") or []
-          if benches:
-              print("")
-              print("| Benchmark | Duration |")
-              print("| --- | --- |")
-              for b in benches[:20]:  # cap at 20 rows
-                  name = b.get("name") or b.get("id", "?")
-                  dur = (b.get("duration_ms") or b.get("elapsed_ms") or b.get("ns"))
-                  unit = "ms" if ("duration_ms" in b or "elapsed_ms" in b) else ("ns" if "ns" in b else "")
-                  print(f"| {name} | {dur}{unit} |")
-              if len(benches) > 20:
-                  print(f"_... and {len(benches) - 20} more (see artifact)_")
-          PYEOF
-              echo ""
-              echo "_Full machine-readable report available as workflow artifact._"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/render-ci-summary.py --title "Performance Benchmarks" --kind benchmarks --report target/wright-bench-report.json --outcome "${{ steps.bench.outcome }}"
 
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
@@ -664,13 +520,13 @@ jobs:
         run: cargo build --locked -p wright-cli -p wright-lsp
 
       - name: Record distribution build identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          host_target="$(rustc -vV | sed -n 's/^host: //p')"
-          cat > target/debug/wright-dist.build.json <<EOF
-          {"revision":"${GITHUB_SHA}","runner_os":"${RUNNER_OS}","target":"${host_target}","toolchain":"stable","profile":"dev","packages":["wright-cli","wright-lsp"],"features":[]}
-          EOF
+        run: >-
+          python3 scripts/write-build-identity.py
+          --output target/debug/wright-dist.build.json
+          --revision "${{ github.sha }}"
+          --runner-os "${{ runner.os }}"
+          --toolchain stable
+          --profile dev
 
       - name: Upload current-run distribution binaries
         uses: actions/upload-artifact@v7
@@ -730,14 +586,7 @@ jobs:
       - name: Install Scoop for Scoop validation
         if: matrix.channel == 'Scoop'
         shell: pwsh
-        run: |
-          Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-          Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $scoopShims = Join-Path $env:USERPROFILE "scoop\shims"
-          Add-Content -Path $env:GITHUB_PATH -Value $scoopShims
-          $env:PATH = "$scoopShims;$env:PATH"
-          scoop --version
+        run: ./scripts/setup-scoop.ps1
 
       - name: Enable WinGet local manifests for WinGet validation
         if: matrix.channel == 'WinGet'
@@ -751,21 +600,13 @@ jobs:
           path: target/debug
 
       - name: Verify current-run distribution build identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq -e \
-            --arg revision "${GITHUB_SHA}" \
-            --arg runner_os "${RUNNER_OS}" \
-            '(.revision == $revision) and
-             (.runner_os == $runner_os) and
-             (.toolchain == "stable") and
-             (.profile == "dev") and
-             (.packages == ["wright-cli", "wright-lsp"])' \
-            target/debug/wright-dist.build.json >/dev/null
-          if [[ "${RUNNER_OS}" != "Windows" ]]; then
-            chmod +x target/debug/wright target/debug/wright-lsp
-          fi
+        run: >-
+          python scripts/verify-build-identity.py
+          --identity target/debug/wright-dist.build.json
+          --revision "${{ github.sha }}"
+          --runner-os "${{ runner.os }}"
+          --wright target/debug/wright
+          --wright-lsp target/debug/wright-lsp
 
       - name: Validate package-manager metadata and install script
         run: python scripts/verify-dist.py
