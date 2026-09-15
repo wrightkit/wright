@@ -8,6 +8,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -44,10 +45,12 @@ def main() -> int:
 
     subprocess.run(
         [
-            "bash",
-            str(ROOT / "scripts/make-version-stamp.sh"),
+            sys.executable,
+            str(ROOT / "scripts/make-version-stamp.py"),
             version,
             str(payload / "version.json"),
+            "--commit",
+            args.commit,
         ],
         cwd=ROOT,
         check=True,
