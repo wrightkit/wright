@@ -171,19 +171,19 @@ impl SemanticIndex {
             }
         }
         for symbol in index.symbols.clone() {
-            if let Some(span) = symbol.occurrence
-                && !index.references.iter().any(|reference| {
+            if let Some(span) = symbol.occurrence {
+                if !index.references.iter().any(|reference| {
                     reference.symbol == symbol.id && reference.kind == ReferenceKind::Declaration
-                })
-            {
-                index.push(
-                    symbol.id,
-                    ReferenceKind::Declaration,
-                    symbol.rule,
-                    None,
-                    None,
-                    Some(span),
-                );
+                }) {
+                    index.push(
+                        symbol.id,
+                        ReferenceKind::Declaration,
+                        symbol.rule,
+                        None,
+                        None,
+                        Some(span),
+                    );
+                }
             }
         }
         let symbols = index.symbols.clone();

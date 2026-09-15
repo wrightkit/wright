@@ -30,20 +30,22 @@ on:
         required: true
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
-  release-gates:
-    name: Release gates
+  release-identity:
+    name: Verify release identity and packages
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_REF: ${{ inputs.ref }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_COMMIT }}
           fetch-depth: 0
 
       - name: Verify release revision and tag identity
@@ -54,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${RELEASE_COMMIT}"
+          test "${RELEASE_REF}" = "${RELEASE_COMMIT}"
           tag_commit="$(gh api \
             "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" \
             --jq .sha)"
@@ -63,7 +66,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          components: clippy, rustfmt
 
       - name: Verify tag version matches the workspace implementation version
         run: |
@@ -77,25 +79,53 @@ jobs:
           fi
           echo "workspace version $PACKAGE_VERSION matches tag $RELEASE_TAG"
 
-      - name: Run release gates (fmt, clippy, tests, v1 gates, scenarios, benchmarks, standalone proof)
-        run: scripts/release.sh "${RELEASE_TAG#v}"
-
       - name: Verify checked-in distribution metadata
         run: python3 scripts/verify-dist.py
 
-      - name: Upload gate reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-gate-reports
-          path: |
-            target/v1-gates-report.json
-            target/scenarios-report.json
-            target/wright-bench-report.json
+  ci-evidence:
+    name: Reuse exact-SHA CI evidence
+    needs: release-identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_COMMIT: ${{ inputs.commit }}
+    steps:
+      - name: Wait for a successful CI run for the release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            echo "Polling exact-SHA CI evidence (attempt ${attempt}/60)"
+            runs="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${RELEASE_COMMIT}&event=push&per_page=100")"
+            ci_run="$(jq -c --arg sha "${RELEASE_COMMIT}" '
+              [.workflow_runs[] | select(.name == "CI" and .event == "push" and .head_sha == $sha)]
+              | sort_by(.created_at) | last // empty' <<<"${runs}")"
+            if [[ -n "${ci_run}" ]]; then
+              status="$(jq -r .status <<<"${ci_run}")"
+              conclusion="$(jq -r .conclusion // empty <<<"${ci_run}")"
+              run_id="$(jq -r .id <<<"${ci_run}")"
+              echo "CI run ${run_id}: ${status}/${conclusion}"
+              if [[ "${status}" == "completed" ]]; then
+                test "${conclusion}" = "success" || {
+                  echo "CI run ${run_id} did not provide successful release evidence" >&2
+                  exit 1
+                }
+                echo "Reusing successful CI run ${run_id} for ${RELEASE_COMMIT}"
+                exit 0
+              fi
+            else
+              echo "No push CI run found yet for ${RELEASE_COMMIT}"
+            fi
+            sleep 30
+          done
+          echo "Timed out waiting for CI evidence for ${RELEASE_COMMIT}" >&2
+          exit 1
 
   build:
     name: Build ${{ matrix.target }}
-    needs: release-gates
+    needs: release-identity
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -118,13 +148,14 @@ jobs:
         shell: bash
     env:
       RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.commit }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -139,6 +170,17 @@ jobs:
 
       - name: Add cross-compile target
         run: rustup target add "$TARGET"
+
+      - name: Restore release dependency cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}-stable-release
+          cache-targets: false
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
 
       - name: Build release binaries
         run: cargo build --locked --release -p wright-cli -p wright-lsp --target "$TARGET"
@@ -164,6 +206,9 @@ jobs:
           else
             (cd dist && shasum -a 256 "$PAYLOAD.$EXT" > "$PAYLOAD.$EXT.sha256")
           fi
+          cat > "dist/$PAYLOAD.build.json" <<EOF
+          {"revision":"${RELEASE_COMMIT}","tag":"${RELEASE_TAG}","target":"${TARGET}","toolchain":"stable","profile":"release","packages":["wright-cli","wright-lsp"],"features":[]}
+          EOF
           ls -l dist/
 
       - name: Smoke test the packaged archive
@@ -199,10 +244,13 @@ jobs:
             dist/wright-*.tar.gz.sha256
             dist/wright-*.zip
             dist/wright-*.zip.sha256
+            dist/wright-*.build.json
 
   upload-artifacts:
     name: Upload native release artifacts
-    needs: build
+    needs:
+      - build
+      - ci-evidence
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ inputs.tag }}
@@ -224,6 +272,16 @@ jobs:
             archive="wright-$VERSION-$triple.$ext"
             test -f "artifacts/wright-$triple/$archive" || { echo "missing $archive"; exit 1; }
             test -f "artifacts/wright-$triple/$archive.sha256" || { echo "missing $archive.sha256"; exit 1; }
+            identity="artifacts/wright-$triple/$archive.build.json"
+            test -f "${identity}" || { echo "missing ${identity}"; exit 1; }
+            jq -e \
+              --arg revision "${{ inputs.commit }}" \
+              --arg tag "${RELEASE_TAG}" \
+              --arg target "${triple}" \
+              '(.revision == $revision) and (.tag == $tag) and (.target == $target) and
+               (.toolchain == "stable") and (.profile == "release") and
+               (.packages == ["wright-cli", "wright-lsp"]) and (.features == [])' \
+              "${identity}" >/dev/null
             cp "artifacts/wright-$triple/$archive" "release/"
             cp "artifacts/wright-$triple/$archive.sha256" "release/"
           done
@@ -259,7 +317,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.commit }}
           fetch-depth: 0
 
       - name: Download release artifacts

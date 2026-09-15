@@ -853,12 +853,11 @@ fn synthetic_hud_text_source_value(program: &wir::Program, args: &[ValueId]) -> 
     } else {
         args.get(1)
     }?;
-    if let Some(Value::Call { name, args }) = program.values.get(*value).map(|node| &node.value)
-        && name == "customString"
-    {
-        args.get(1).copied().or(Some(*value))
-    } else {
-        Some(*value)
+    match program.values.get(*value).map(|node| &node.value) {
+        Some(Value::Call { name, args }) if name == "customString" => {
+            args.get(1).copied().or(Some(*value))
+        }
+        _ => Some(*value),
     }
 }
 
