@@ -11,14 +11,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workshop_path() -> PathBuf {
-    let oracle = workspace_root().join("compatibility/fixtures/synthetic/control-flow/oracle.json");
-    let value: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(oracle).unwrap()).unwrap();
-    let text = value["compile"]["workshop"].as_str().unwrap();
-    let path = workspace_root().join("target/issue-155-service/control-flow.ws");
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, text).unwrap();
-    path
+    workspace_root().join("compatibility/fixtures/synthetic/control-flow/workshop.ws")
 }
 
 #[test]

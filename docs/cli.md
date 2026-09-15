@@ -204,11 +204,10 @@ Wright implementation.
   [`docs/opy/support-matrix.md`](opy/support-matrix.md) and
   [`docs/ostw/support-matrix.md`](ostw/support-matrix.md).
 
-The cross-format round-trip acceptance suite lives in
-`crates/wright-driver/tests/convert.rs` and writes the machine-readable
-report `target/wright-convert-report.json` (one entry per committed fixture:
-`Workshop → convert → owner source implementation → WIR → Workshop` for both
-targets, plus the deterministic rejection entries).
+The conversion boundary is covered by the CLI and driver contract tests. They
+assert the available Workshop → OPY provider handoff and the explicit
+Workshop → OSTW refusal; owner reconstruction semantics are tested in the
+owning language repository.
 
 ## `wright lint` and the lint configuration
 
@@ -519,4 +518,4 @@ External Rust consumers depend on `wright-driver` (never the CLI) and drive
 or `convert(ConvertTarget)`, each returning a typed `Envelope<T>`. Loading is
 idempotent (`Session::load`), and the driver exposes the resolved locale,
 input identity, and origin metadata. See `crates/wright-driver/tests/driver.rs`
-and `crates/wright-driver/tests/convert.rs` for the reusable test surface.
+and the provider/integration tests for the reusable test surface.

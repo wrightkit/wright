@@ -50,7 +50,11 @@ def main() -> None:
         type=Path,
         default=Path("compatibility/fixtures/synthetic/basic-rule/source.opy"),
     )
-    parser.add_argument("--check", type=Path, default=Path("scenarios/loops.opy"))
+    parser.add_argument(
+        "--check",
+        type=Path,
+        default=Path("compatibility/fixtures/synthetic/control-flow/workshop.ws"),
+    )
     parser.add_argument(
         "--provider-bootstrap",
         action="store_true",

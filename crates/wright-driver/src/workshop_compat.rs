@@ -169,14 +169,10 @@ mod tests {
 
     fn cake_workshop() -> String {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let value: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(
-                root.join("compatibility/fixtures/real-world/overpy-cake/oracle.json"),
-            )
-            .unwrap(),
+        std::fs::read_to_string(
+            root.join("compatibility/fixtures/real-world/overpy-cake/workshop.ws"),
         )
-        .unwrap();
-        value["compile"]["workshop"].as_str().unwrap().to_string()
+        .unwrap()
     }
 
     #[test]

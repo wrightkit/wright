@@ -16,14 +16,12 @@ evidence. The static OSTW path was removed; current `.ostw`/`.del` requests
 return `source-provider-unavailable`. Authoritative explicit-root comparison
 evidence is maintained by `deltin-rs`; current provider limits live in
 [`support-matrix.md`](support-matrix.md).
-The reverse direction (Workshop → OSTW reconstruction) is implemented by
-#125 (`wright_ostw::reconstruct`) and integrated end-to-end by #126 behind
-the same shared driver/session conversion contract as the #124 Workshop → OPY
-reconstruction (see [`../cli.md`](../cli.md)): the Workshop → OSTW
-reconstruction phase is complete, and the tooling/language-service phase was
-completed by #120. Direct OPY ↔ OSTW conversion remains
-explicitly deferred pending the PM's roadmap reassessment (recorded in the
-"OSTW reverse-interoperability completion" section below).
+The reverse direction (Workshop → OSTW reconstruction) was historically
+implemented by #125 and integrated by #126. That static adapter and its
+Wright-side conversion suite are no longer shipped; the current product
+boundary is the explicit `source-provider-unavailable` result documented in
+[`../cli.md`](../cli.md). Direct OPY ↔ OSTW conversion remains explicitly
+deferred pending the PM's roadmap reassessment.
 Scope: historical, forward-looking tiered inventory of the OSTW language
 surface against the pinned reference, plus the evidence and boundary findings
 that led to the owner migration.
@@ -96,7 +94,7 @@ planned or evidence-prioritized as marked per row.
 | 9 | **Generics / lambdas / pattern matching**: generic classes/functions, `Func`/function types, expanded enum pattern matching | `evidence-prioritized` | - | - | - | - | ✅ upstream tests |
 | 10 | **Project settings (`ds.toml`)**: `entry_point`, `out_file`, `optimize_output`, `c_style_workshop_output`, variable/subroutine prefixes, `reset_nonpersistent`/`__loadPersist`, validation toggles | `baseline-planned` (the settings subset the corpus uses) | ✅ | ✅ | - | ✅ | ✅ probes |
 | 11 | **OSTW → Workshop emission**: en-US, both output syntaxes, default-argument filling, element counts | `baseline-planned` | - | - | ✅ | - | ✅ normalized |
-| 12 | **Workshop → OSTW reconstruction**: rules/actions/conditions/values via Wright's Workshop parser → WIR → a Wright-owned OSTW emitter; `import "settings.json"` handling | `baseline-supported` (declared surface #125, shared driver/session conversion path #126) | - | - | ✅ | - | ✅ reference decompiler |
+| 12 | **Workshop → OSTW reconstruction**: historical Wright-side emitter and `import "settings.json"` handling | `retired` (the static adapter and its fixtures were removed) | - | - | - | - | ✅ reference decompiler |
 | 13 | **Tooling/language services**: OSTW documents in `check`/`lint`/`analyze`/`inspect`, editor-neutral language services, LSP mapping, source provenance and structured diagnostics through `wright-result/v1` | `baseline-planned` | - | - | - | ✅ | - |
 | 14 | **Emission extras**: multi-locale output (12 non-en-US), optimizer-equivalent transforms, `use_tabs_in_workshop_output`, `compile_miscellaneous_comments` | `legacy-quirk/demand-driven` (en-US is the corpus default) | - | - | - | - | partial |
 | 15 | **Specialized subsystems**: pathfinding (`.pathmap`/`.csv`), asset/model import, JSON import, debugger protocol, lobby-settings authoring schema, save/load (`reset_nonpersistent`) | `evidence-prioritized` (lobby settings if corpus needs it) / `reference-limited` (debugger requires a live game) | - | - | - | - | partial |
@@ -310,31 +308,19 @@ is A+B+C scoped to the MOBAwatch/protect-ban corpus.
 | A | Reference & corpus baseline | Pin OSTW `v3.4.0` (content-verified); owner-side `deltin-rs` oracle runner (LSP stdio client + `--ping` smoke); acquire MOBAwatch + protect-ban with manifests; S-level accept/reject record for corpus files | Owner corpus + oracle runner exist; every fixture records reference identity |
 | B | OSTW frontend core | Lexer/parser/CST → HIR for categories 1 to 7 (rules, variables/scopes, control flow, values/workshop calls via catalog, core types/structs/enums, functions/macros/subroutines); structured source-located diagnostics | D-level diagnostics + S-level parity on corpus; HIR boundary tests |
 | C | OSTW → Workshop emission | Lower HIR → WIR → Workshop (en-US); round-trip validation; comparison against pinned owner evidence | **Implemented by #119** for the declared surface through the shared adapter and emitter; authoritative p4/p5/p6 differential evidence is maintained in `deltin-rs`. See `docs/ostw/support-matrix.md`. |
-| D | Workshop → OSTW reconstruction | Wright-owned OSTW emitter for the declared Workshop surface; reconstruction quality criteria (semantics + useful structure, no formatting/comments/macro recovery); round-trip tests | **Implemented by #125** (`wright_ostw::reconstruct`) and #126 (shared `CompilerSession::convert` + `wright convert --target ostw`, cross-format acceptance in `crates/wright-driver/tests/convert.rs`); reconstruction recompiles to equivalent WIR under the declared boundary and the #119 normalization |
+| D | Workshop → OSTW reconstruction | Historical Wright-owned OSTW emitter and round-trip tests | **Retired** with the static adapter; current OSTW reconstruction evidence remains in `deltin-rs` |
 | E | Tooling & language services | OSTW in `check`/`lint`/`analyze`/`inspect`; editor-neutral language services; LSP mapping; session/CI integration | Cross-input workflows without language-specific semantic forks. **Implemented by #120**: the shared session lowers the #118 semantic HIR through the shared validate→lower→validate path, the four CLI workflows and the tool service run the shared analyzer over it with multi-file provenance, language-service diagnostics/symbol classification work for OSTW documents, and cross-language regressions cover OPY/Workshop/OSTW. |
 | Later | Evidence-prioritized | Classes/generics/lambdas/pattern matching (categories 8 to 9) if the corpus demands them; lobby-settings authoring; multi-locale | Corpus or PM evidence |
 | Explicitly deferred | - | Direct OPY ↔ OSTW (deferral recorded below, pending PM reassessment); debugger protocol; optimizer parity; perfect reconstruction; E-level timing scenarios | - |
 
-## OSTW reverse-interoperability completion and the direct-OPY↔OSTW deferral (#126)
+## Historical OSTW reverse-interoperability work and the direct-OPY↔OSTW deferral (#126)
 
-The reverse-interoperability integration of the OSTW work is complete: the #124
-Workshop → OPY and #125 Workshop → OSTW reconstructors are both exposed
-through **one shared driver/session conversion contract**
-(`CompilerSession::convert` with explicit `opy`/`ostw` target selection; the
-CLI is `wright convert --target opy|ostw`). The shared operation reuses the
-driver's own `load()` path for validated Workshop input, calls the
-language-owned reconstructors directly (no generic transpiler matrix, no
-duplicated reconstruction logic), preserves the reconstructors' structured
-diagnostics (stable codes, stage `reconstruction`, unsupported exit code 3)
-with no partial output, and requires no upstream runtime (no OverPy/Node, no
-OSTW .NET). The cross-format acceptance suite
-(`crates/wright-driver/tests/convert.rs`) proves both reverse loops through
-the real native frontends and writes `target/wright-convert-report.json`;
-the declared conversion directions and limits are documented in
-[`../cli.md`](../cli.md), [`support-matrix.md`](support-matrix.md), and
-[`../opy/support-matrix.md`](../opy/support-matrix.md). The four supported
-directions are OPY → Workshop, OSTW → Workshop, Workshop → OPY, and
-Workshop → OSTW; reconstruction is semantic, never original-source recovery.
+The historical reverse-interoperability integration exposed Workshop → OPY and
+Workshop → OSTW through one shared driver/session conversion contract. The
+OSTW adapter and its cross-format acceptance suite were subsequently removed
+when the static OSTW implementation left Wright. Current Wright retains the
+Workshop → OPY provider handoff and reports the OSTW provider boundary
+explicitly; authoritative OSTW reconstruction evidence remains in `deltin-rs`.
 
 **Direct OPY ↔ OSTW source conversion remains explicitly deferred.** The
 roadmap reassessment that would admit it is the PM's reassessment decision; this
@@ -346,8 +332,9 @@ is an external human action outside this milestone's gates.
 ## Open questions
 
 * ~~Whether the first milestone should include Workshop → OSTW reconstruction
-  (D) or only the OSTW → Workshop pipeline (A to C)~~: resolved; phase D was
-  included and is complete (#125/#126).
+  (D) or only the OSTW → Workshop pipeline (A to C)~~: historically resolved;
+  phase D was implemented by #125/#126 and later retired with the static
+  adapter.
 * Whether `MOBAwatch`'s full include closure (asset/lobby files beyond `.ostw`)
   is needed for compile parity or only for emission parity.
 * Whether any corpus construct demonstrates divergence between tag `v3.4.0`

@@ -126,75 +126,20 @@ arithmetic (the fold pass restores it on the Wright side).
   rules remains deferred; the accepted targets use `Event Player` only in
   Ongoing Player rules.
 
-## Workshop → OSTW reconstruction surface (#125)
+## Current Workshop → OSTW boundary
 
-The reverse direction is owned by `crates/wright-ostw/src/reconstruct.rs`:
-`wright_ostw::reconstruct::reconstruct` converts a validated `wir::Program`
-whose constructs lie on the declared reconstruction surface into
-deterministic canonical OSTW source, and **rejects** everything else with
-structured, machine-readable diagnostics and no partial output. The declared
-surface and the committed fixtures match exactly
-(`crates/wright-driver/tests/fixtures/convert/ostw/`):
-
-- **Supported**: variables (`globalvar Any`/`playervar Any`, the permissive
-  universal type, since the WIR carries no type info and the pinned reference
-  requires a type), rules with Global/Each Player events and comparison
-  conditions, subroutines (`void name() "…" { … }`), set/modify assignments
-  (`=`, `+=`, `-=`, `*=`, `/=`, `%=`, `.append(value)`), `if`/`else if`/
-  `else`, `while`, `for (v = start; stop; step)`, `Call Subroutine`, `return`
-  (rule-level `Abort`), scalar/array/vector/enum values, global/player
-  variable access, `Event Player`, arithmetic (`+ - * /` infix, the real OSTW
-  operator forms, whereas the reference rejects callable `Add(...)`), comparison/
-  logical/ternary/format-string values, and the catalog actions/values named
-  in the manifest (source names reverse the `signature.rs` binding table; the
-  catalog is the identity source).
-- **Rejected** (never misleading output): `For Player Variable`, Wright's
-  `debug`/`print` actions, custom-game `Program.settings`, calls/values/enums
-  with no OSTW source binding, `Raise To Power`/`Remove From Array` modify
-  operations, non-comparison rule conditions, partial-arity bound calls,
-  name collisions, bodiless subroutines, and non-literal format strings.
-- **Not recovered** (non-goals): variable types/indexes, original
-  formatting/comments, classes, macros, functions, and project structure.
-  Variable-table identity is outside the declared #119 semantic comparison.
-- **Reference divergence**: the reconstructed `.append(value)` form (from
-  the Workshop Modify-Append-To-Array action) is accepted by Wright's native
-  frontend. Reference-side compatibility details remain in `deltin-rs`.
-
-The full loop `Workshop → WIR → OSTW → owner source implementation → WIR →
-Workshop` is exercised by the Wright-side conversion suite with zero frontend
-diagnostics, the declared normalization applied to both sides, structural
-equality, and the round-trip fixed point. A `ds.toml` project root
-(`entry_point`) is generated in-test; authoritative reference comparison
-remains in `deltin-rs`.
-
-### Shared conversion path (#126)
-
-The reconstructor is exposed end-to-end through one shared driver/session
-conversion operation: `wright convert --target ostw <workshop-input>` (CLI)
-and `CompilerSession::convert(ConvertTarget::Ostw)` (library) load validated
-Workshop input through the driver's own `load()` path and call
-`wright_ostw::reconstruct::reconstruct` unchanged. The reconstructed source is
-the `result.text` of the `wright-result/v1` envelope; a construct outside the
-declared surface fails with the reconstructor's stable diagnostics (stage
-`reconstruction`, exit code 3) and no partial source. The operation is
-Workshop → OSTW only: non-Workshop inputs are rejected explicitly, and there
-is no direct OPY ↔ OSTW path. The cross-format suite
-(`crates/wright-driver/tests/convert.rs`) proves the full loop
-`Workshop → convert(ostw) → native frontend → HIR → WIR → Workshop` for the
-`surface-*` fixtures (equivalence under the declared #119 normalization plus
-the round-trip fixed point) and the deterministic `reject/` entries, and
-writes `target/wright-convert-report.json`.
+Wright does not ship a static OSTW reconstructor or a DEL/OSTW provider.
+`wright convert --target ostw` remains a recognized product boundary and
+returns the structured `source-provider-unavailable` result without partial
+source. OSTW reconstruction semantics and compatibility evidence belong to
+`deltin-rs`; the former Wright-side conversion fixtures and suite were removed
+with the static adapter so they cannot become a second owner contract.
 
 ## Evidence
 
 - [`deltin-rs` compatibility evidence](https://github.com/wrightkit/deltin-rs/tree/main/compatibility/ostw):
   pinned reference identity, probes, recorded observations, and the
   owner-side differential workflow.
-- `crates/wright-driver/tests/fixtures/convert/ostw/`: Wright-owned
-  reconstruction fixtures (`surface-*` positive Workshop sources and the
-  `reject/` case) consumed by the shared conversion integration suite.
-- `crates/wright-driver/tests/convert.rs`: the Wright-side reconstruction
-  and conversion contract gate.
 - `workshop-rs` catalog data (`crates/workshop-rs/src/catalog/data/catalog.json`):
   canonical catalog with `paramDefaults` (probe-evidenced) and the `abort`
   action, consumed from `workshop-rs`.

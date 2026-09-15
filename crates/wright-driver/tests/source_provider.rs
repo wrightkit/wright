@@ -14,16 +14,10 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workshop_fixture(fixture: &str) -> String {
-    let oracle = std::fs::read_to_string(
-        workspace_root().join(format!("compatibility/fixtures/{fixture}/oracle.json")),
+    std::fs::read_to_string(
+        workspace_root().join(format!("compatibility/fixtures/{fixture}/workshop.ws")),
     )
-    .expect("fixture oracle");
-    serde_json::from_str::<serde_json::Value>(&oracle)
-        .expect("oracle JSON")
-        .pointer("/compile/workshop")
-        .and_then(serde_json::Value::as_str)
-        .expect("Workshop artifact")
-        .to_string()
+    .expect("Workshop fixture")
 }
 
 fn temp_entry() -> (PathBuf, PathBuf) {
@@ -155,7 +149,7 @@ fn provider_backend_delegates_directory_discovery_to_the_source_owner() {
         operations: Arc::new(Mutex::new(Vec::new())),
         check_compilation: None,
         compilation: Some(SourceCompilation::success(workshop_fixture(
-            "real-world/overpy-cronch",
+            "synthetic/basic-rule",
         ))),
         failure: None,
     };

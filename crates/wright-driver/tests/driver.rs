@@ -17,29 +17,17 @@ fn legacy_protocol() -> &'static str {
 }
 
 fn workshop_fixture(id: &str) -> PathBuf {
-    let oracle = workspace_root()
+    workspace_root()
         .join("compatibility/fixtures")
         .join(id)
-        .join("oracle.json");
-    let value: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(oracle).expect("oracle reads"))
-            .expect("oracle parses");
-    let text = value["compile"]["workshop"]
-        .as_str()
-        .expect("oracle carries Workshop output");
-    let path = workspace_root()
-        .join("target/issue-155-driver")
-        .join(format!("{id}.ws"));
-    std::fs::create_dir_all(path.parent().unwrap()).expect("fixture directory creates");
-    std::fs::write(&path, text).expect("Workshop fixture writes");
-    path
+        .join("workshop.ws")
 }
 
 #[test]
 fn workshop_runs_all_product_workflows() {
     let path = workshop_fixture("synthetic/control-flow");
     let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(path),
+        input: InputSpec::Path(path.clone()),
         kind: SourceKind::Workshop,
         ..SessionConfig::default()
     })
@@ -56,7 +44,7 @@ fn workshop_runs_all_product_workflows() {
 fn workshop_compile_is_deterministic_and_idempotent() {
     let path = workshop_fixture("synthetic/basic-rule");
     let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(path),
+        input: InputSpec::Path(path.clone()),
         kind: SourceKind::Workshop,
         ..SessionConfig::default()
     })
@@ -77,12 +65,13 @@ fn workshop_compile_is_deterministic_and_idempotent() {
 #[test]
 fn legacy_protocol_input_is_refused_without_hir_lowering() {
     let path = workspace_root()
-        .join("target/issue-155-driver")
+        .join("target")
+        .join(format!("wright-driver-{}", std::process::id()))
         .join("legacy.json");
     std::fs::create_dir_all(path.parent().unwrap()).expect("fixture directory creates");
     std::fs::write(&path, legacy_protocol()).expect("legacy fixture writes");
     let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(path),
+        input: InputSpec::Path(path.clone()),
         kind: SourceKind::Auto,
         ..SessionConfig::default()
     })
@@ -90,6 +79,7 @@ fn legacy_protocol_input_is_refused_without_hir_lowering() {
     let result = session.check();
     assert!(!result.ok);
     assert_eq!(result.diagnostics[0].code, "input-kind-unsupported");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]

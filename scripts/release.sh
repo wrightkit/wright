@@ -38,9 +38,6 @@ test -x "$BENCH_BIN" || { echo "release benchmark binary missing"; exit 1; }
 echo "==> semantic OPY gate (compat profile)"
 python3 scripts/v1-gates.py --wright "$BIN"
 
-echo "==> E-level scenarios"
-python3 scripts/run-scenarios.py --wright "$BIN"
-
 echo "==> benchmarks"
 "$BENCH_BIN" > /dev/null
 
@@ -56,7 +53,8 @@ cp "$LSP_BIN" "$SANDBOX/wright-lsp"
     --profile compat >/dev/null
   "$SANDBOX/wright" compile "$ROOT/compatibility/fixtures/real-world/overpy-cake/source.opy" \
     --profile compat >/dev/null
-  "$SANDBOX/wright" check "$ROOT/scenarios/loops.opy" --profile compat >/dev/null
+  "$SANDBOX/wright" check "$ROOT/compatibility/fixtures/synthetic/control-flow/workshop.ws" \
+    --profile compat >/dev/null
   LSP_VERSION="$("$SANDBOX/wright-lsp" --version)"
   [[ "$LSP_VERSION" == *"$VERSION"* ]] || { echo "lsp version mismatch: $LSP_VERSION"; exit 1; }
   echo "standalone compile/check/version OK without node"

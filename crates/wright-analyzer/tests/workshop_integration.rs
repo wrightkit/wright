@@ -10,19 +10,15 @@ use workshop_rs::catalog::{Catalog, Locale};
 use workshop_rs::parser;
 use wright_analyzer::service::SemanticService;
 
-fn oracle_path(fixture_id: &str) -> PathBuf {
+fn workshop_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../compatibility/fixtures")
         .join(fixture_id)
-        .join("oracle.json")
+        .join("workshop.ws")
 }
 
 fn corpus_text(fixture_id: &str) -> String {
-    let oracle = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(oracle_path(fixture_id)).unwrap(),
-    )
-    .unwrap();
-    oracle["compile"]["workshop"].as_str().unwrap().to_string()
+    std::fs::read_to_string(workshop_path(fixture_id)).unwrap()
 }
 
 fn workshop_service(fixture_id: &str) -> SemanticService<'static> {
