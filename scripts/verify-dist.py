@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Validate Wright distribution metadata and the install script (#108).
+"""Validate Wright distribution metadata and release packaging (#108, #338).
 
 Runs in CI and locally. It detects version drift and hand-edited metadata by
 regenerating every checked-in dist/ manifest with the workspace version and
 placeholder hashes and comparing it byte-for-byte to what is committed. It
 also validates manifest structure (hash format, artifact URLs), checks that
-install.sh covers the declared release target matrix, and verifies the shell
-syntax of install.sh.
+install.sh covers the declared release target matrix, verifies the shell
+syntax of install.sh where Bash is native, and exercises release packaging on
+the current host with synthetic binaries.
 
 Usage: python3 scripts/verify-dist.py
 """
@@ -16,6 +17,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -128,6 +130,12 @@ def main() -> None:
         # `bash` on PATH is the WSL launcher, which fails without a distro.
         print("skip: install.sh shell syntax check (Unix-only, no real bash on Windows)")
 
+    subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "test-package-release.py")],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    print("ok: release packaging smoke passed on this host")
     print("dist validation passed")
 
 
