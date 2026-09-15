@@ -6,6 +6,12 @@ on:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+  workflow_dispatch:
+    inputs:
+      release_as:
+        description: Exact semver for a failed-release roll-forward (for example 0.2.29)
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,6 +43,7 @@ jobs:
 
       - name: Run release-please
         id: release
+        if: github.event_name == 'push'
         uses: googleapis/release-please-action@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -44,6 +51,36 @@ jobs:
           token: ${{ secrets.GH_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Open recovery release PR
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          RELEASE_AS: ${{ inputs.release_as }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "release recovery must run from main" >&2
+            exit 1
+          fi
+          npx --yes release-please@17.6.0 release-pr \
+            --repo-url="$GITHUB_REPOSITORY" \
+            --target-branch=main \
+            --token="$GITHUB_TOKEN" \
+            --config-file=release-please-config.json \
+            --manifest-file=.release-please-manifest.json \
+            --release-as="$RELEASE_AS"
+          pr_number="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head release-please--branches--main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [[ -z "$pr_number" ]]; then
+            echo "release-please did not leave an open release PR" >&2
+            exit 1
+          fi
+          echo "PR_NUMBER=$pr_number" >> "$GITHUB_ENV"
 
       - name: Synchronize checked-in release metadata
         env:
