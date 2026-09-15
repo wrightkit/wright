@@ -17,12 +17,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def git_head() -> str:
-    return subprocess.check_output(
-        ["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True
-    ).strip()
-
-
 def main() -> int:
     runner_os = (
         "Windows"
@@ -33,7 +27,7 @@ def main() -> int:
     suffix = ".exe" if runner_os == "Windows" else ""
     target = f"packaging-smoke-{runner_os.lower()}"
     version = "0.0.0-packaging-smoke"
-    commit = git_head()
+    commit = "packaging-smoke-commit"
     build_dir = ROOT / "target" / target / "release"
     build_dir.mkdir(parents=True, exist_ok=True)
     for binary in ("wright", "wright-lsp"):
