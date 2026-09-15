@@ -132,20 +132,18 @@ jobs:
       - name: Check formatting with MSRV toolchain
         run: cargo +1.85.0 fmt --all -- --check
 
-      # opy-rs 0.1.38 declares 1.85.0 but currently uses unstable let-chain
-      # syntax. Keep the owner-independent Wright crates on the declared MSRV;
-      # the stable quality gate above remains the full workspace gate.
+      # Keep the surviving owner-independent Wright crates on the declared
+      # MSRV. The provider-backed consumer crates are covered by the stable
+      # full-workspace gate and the dedicated integration jobs below.
       - name: Run MSRV clippy for owner-independent crates
         run: >-
           cargo +1.85.0 clippy --locked --all-targets --all-features
-          -p wright-core -p wright-ir -p wright-analyzer -p wright-transform
-          -p wright-lpp -- -D warnings
+          -p wright-analyzer -p wright-transform -p wright-lpp -- -D warnings
 
       - name: Run MSRV tests for owner-independent crates
         run: >-
           cargo +1.85.0 test --locked --all-targets --all-features
-          -p wright-core -p wright-ir -p wright-analyzer -p wright-transform
-          -p wright-lpp
+          -p wright-analyzer -p wright-transform -p wright-lpp
 
   # -------------------------------------------------------------------------
   # [1a] WRIGHT CLI ARTIFACT  (stable/debug executable for compatible jobs)
