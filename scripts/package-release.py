@@ -49,6 +49,8 @@ def main() -> int:
             str(ROOT / "scripts/make-version-stamp.py"),
             version,
             str(payload / "version.json"),
+            "--commit",
+            args.commit,
         ],
         cwd=ROOT,
         check=True,
