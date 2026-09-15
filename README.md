@@ -17,7 +17,7 @@ engines instead of reimplementing them:
 - [`workshop-rs`](https://github.com/wrightkit/workshop-rs): canonical Workshop
   semantics, WIR, and catalog;
 - [`opy-rs`](https://github.com/wrightkit/opy-rs): standalone OverPy frontend and
-  compiler;
+  compiler, consumed by Wright through an LPP provider;
 - [`del-rs`](https://github.com/wrightkit/del-rs): standalone DEL and OSTW
   frontend, consumed by Wright through a provider boundary.
 
@@ -66,7 +66,7 @@ underlying language surface is complete.
 | Source form | Owning implementation | Current WrightKit status |
 | --- | --- | --- |
 | Raw Workshop | `workshop-rs` | ✅ Canonical parsing/WIR/validation/emission baseline is available |
-| OverPy (`.opy`) | `opy-rs` | 🟡 Standalone source analysis exists; builtin/member/catalog breadth and end-to-end compilation are still being closed |
+| OverPy (`.opy`) | `opy-rs` through LPP | 🟡 Provider-backed workflows are integrated; language support remains bounded by the provider's published capabilities |
 | DEL / OSTW (`.del`, `.ostw`) | `del-rs` via future provider | ⚪ Recognized by Wright, but provider support is not currently shipped; no static DEL dependency |
 
 Workshop → OPY and Workshop → DEL reconstruction are not treated as supported
@@ -156,7 +156,7 @@ maintaining a second authoritative language implementation:
 ```text
 source input
    ↓
-workshop-rs / opy-rs / del-rs
+workshop-rs in-process / LPP provider
    ↓
 source-language semantic results and canonical Workshop contracts
    ↓

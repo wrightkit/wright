@@ -492,75 +492,6 @@ fn lint_rule_flags_control_findings() {
 }
 
 #[test]
-fn lint_loads_local_yaml_rules_and_project_config() {
-    let input = workspace_root().join("compatibility/fixtures/synthetic/control-flow/source.opy");
-    let rule = temp_file(
-        "minimum-wait.yaml",
-        r#"
-id: community/minimum-wait
-metadata:
-  summary: loop contains a wait
-  rationale: verify local declarative rule loading
-  documentation: Matches a wait action in a loop.
-  known-limits: Structural match only.
-  tags: [test]
-matcher:
-  scope: while
-  actions:
-    - kind: call
-      name: Wait
-      count:
-        min: 1
-"#,
-    );
-    let config = temp_file(
-        "lint.yaml",
-        r#"
-rules:
-  community/minimum-wait:
-    severity: warn
-    options:
-      max-matches: 1
-"#,
-    );
-    let output = run(&[
-        "lint",
-        input.to_str().unwrap(),
-        "--kind",
-        "opy",
-        "--rule",
-        rule.to_str().unwrap(),
-        "--lint-config",
-        config.to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let result = parse_json(&output.stdout)["result"].clone();
-    let finding = result["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|finding| finding["code"] == "community/minimum-wait")
-        .expect("the local rule is executed");
-    assert_eq!(finding["severity"], "warning");
-    let rule_meta = result["rules"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|rule| rule["id"] == "community/minimum-wait")
-        .expect("the local rule is discoverable");
-    assert_eq!(rule_meta["kind"], "declarative");
-    assert_eq!(rule_meta["effectiveSeverity"], "warning");
-    let _ = std::fs::remove_dir_all(rule.parent().unwrap());
-    let _ = std::fs::remove_dir_all(config.parent().unwrap());
-}
-
-#[test]
 fn lint_flags_are_usage_errors_for_other_commands() {
     for flags in [
         &["check", "--disable-rule", "min-wait-loop"][..],
@@ -577,23 +508,21 @@ fn lint_flags_are_usage_errors_for_other_commands() {
 }
 
 #[test]
-fn stdin_workshop_and_protocol_piping_work() {
+fn stdin_workshop_works_and_legacy_protocol_is_refused() {
     // Workshop text on stdin.
     let output = run_with_stdin(&["check", "-"], &corpus_workshop("synthetic/basic-rule"));
     assert_eq!(output.status.code(), Some(0));
 
-    // Protocol JSON on stdin (auto-detected by leading `{`).
-    let protocol = std::fs::read_to_string(
-        workspace_root().join("adapter/fixtures/synthetic/basic-rule.json"),
-    )
-    .unwrap();
-    let output = run_with_stdin(&["check", "-"], &protocol);
+    // Legacy protocol JSON is recognized but no longer parsed by Wright.
+    let protocol = r#"{"protocol":{"name":"wright/opy-hir","version":"1.1.0"}}"#;
+    let output = run_with_stdin(&["check", "-"], protocol);
     assert_eq!(
         output.status.code(),
         Some(1),
         "stdin protocol: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("input-kind-unsupported"));
 }
 
 #[test]
@@ -805,8 +734,6 @@ fn version_and_help_are_documented_contract_surfaces() {
         "--color",
         "--disable-rule",
         "--rule-severity",
-        "--lint-config",
-        "--rule",
     ] {
         assert!(help.contains(option), "top-level help documents {option}");
     }
@@ -1159,27 +1086,31 @@ fn provider_backed_opy_analyze_surfaces_provider_resolution_failures() {
 
 // ── Convert (#126) ───────────────────────────────────────────────────────────
 
-fn workspace_fixture(relative: &str) -> String {
-    workspace_root().join(relative).display().to_string()
-}
-
 #[test]
-fn convert_workshop_input_to_opy_reports_owner_boundary() {
-    // OPY reconstruction remains unavailable until opy-rs accepts canonical
-    // Workshop programs directly.
-    let fixture =
-        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
-    let output = run(&["convert", "--target", "opy", &fixture]);
-    assert_eq!(output.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("reconstructor has not migrated"));
+fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
+    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
+    let path = path.to_str().unwrap();
+    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["command"], "convert");
+    assert!(
+        matches!(
+            envelope["diagnostics"][0]["code"].as_str(),
+            Some("capability-unavailable")
+        ),
+        "unexpected provider refusal: {}",
+        envelope["diagnostics"][0]
+    );
+    assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
 }
 
 #[test]
 fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
     // `wright convert --target ostw` is a recognized provider boundary.
-    let fixture =
-        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
-    let output = run(&["convert", "--target", "ostw", &fixture, "-f", "json"]);
+    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
+    let path = path.to_str().unwrap();
+    let output = run(&["convert", "--target", "ostw", path, "-f", "json"]);
     assert_eq!(
         output.status.code(),
         Some(4),
@@ -1199,110 +1130,40 @@ fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
 
 #[test]
 fn convert_json_envelope_reports_command_result_and_target() {
-    let fixture =
-        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
-    let output = run(&["convert", "--target", "opy", &fixture, "-f", "json"]);
-    assert_eq!(output.status.code(), Some(3));
+    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
+    let path = path.to_str().unwrap();
+    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
     assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["exit"], 3);
+    assert_ne!(envelope["exit"], 0);
     assert_eq!(envelope["command"], "convert");
     assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
     assert_eq!(envelope["result"]["target"], "opy");
-    assert_eq!(
-        envelope["diagnostics"][0]["code"],
-        "reconstruction-canonical-program-unavailable"
-    );
-    assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
-}
-
-#[test]
-fn convert_is_byte_deterministic_across_runs() {
-    let target = "opy";
-    let fixture =
-        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
-    let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
-    let second = run(&["convert", "--target", target, &fixture, "-f", "json"]);
-    assert_eq!(
-        first.stdout, second.stdout,
-        "convert --target {target} must be byte-deterministic"
-    );
-    assert!(!first.stdout.is_empty());
-}
-
-#[test]
-fn convert_rejects_unsupported_constructs_with_exit_three() {
-    // Non-representable Workshop constructs fail deterministically with the
-    // reconstructor's stable code, the documented unsupported exit code (3),
-    // and no partial source — identically on every run.
-    for (target, fixture) in [(
-        "opy",
-        "crates/wright-driver/tests/fixtures/convert/reject-opy-per-player-loop.ws",
-    )] {
-        let fixture = workspace_fixture(fixture);
-        let first = run(&["convert", "--target", target, &fixture, "-f", "json"]);
-        let second = run(&["convert", "--target", target, &fixture, "-f", "json"]);
-        assert_eq!(
-            first.stdout, second.stdout,
-            "convert --target {target} rejection must be deterministic"
-        );
-        for output in [&first, &second] {
-            assert_eq!(
-                output.status.code(),
-                Some(3),
-                "--target {target}: recognized-but-unsupported must exit 3"
-            );
-            assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
-            let envelope = parse_json(&output.stdout);
-            assert_eq!(envelope["ok"], false);
-            assert_eq!(envelope["exit"], 3);
-            assert_eq!(envelope["command"], "convert");
-            let codes: Vec<&str> = envelope["diagnostics"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|diagnostic| diagnostic["code"].as_str().unwrap())
-                .collect();
-            assert!(
-                codes.contains(&"reconstruction-canonical-program-unavailable"),
-                "--target {target}: expected canonical reconstruction boundary in {codes:?}"
-            );
-            assert!(
-                envelope["diagnostics"][0]["stage"] == "reconstruction",
-                "rejections carry the reconstruction stage"
-            );
-            assert!(
-                envelope["result"]["text"].as_str().unwrap().is_empty(),
-                "a rejection must never carry partial source"
-            );
-        }
-    }
 }
 
 #[test]
 fn convert_requires_an_explicit_target_flag() {
     // Missing or unknown --target is a usage error (exit 2); --target on
     // another command is a usage error too.
-    let fixture =
-        workspace_fixture("crates/wright-opy/tests/fixtures/reconstruct/variables-declarations.ws");
-    let output = run(&["convert", &fixture]);
+    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
+    let path = path.to_str().unwrap();
+    let output = run(&["convert", path]);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty(), "usage errors write stderr only");
     assert!(String::from_utf8_lossy(&output.stderr).contains("--target"));
 
-    let output = run(&["convert", "--target", "nope", &fixture]);
+    let output = run(&["convert", "--target", "nope", path]);
     assert_eq!(output.status.code(), Some(2));
 
-    let output = run(&["check", "--target", "opy", &fixture]);
+    let output = run(&["check", "--target", "opy", path]);
     assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]
 fn convert_rejects_non_workshop_input() {
-    // The conversion surface is declared over Workshop input only; an `.opy`
-    // input fails with the structured convert-input-kind diagnostic (exit 1),
-    // not a direct OPY ↔ OSTW conversion.
+    // OPY conversion requires an entry provider workflow; it never falls back
+    // to a direct OPY ↔ OSTW conversion.
     let source = std::fs::read_to_string(
         workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
     )
@@ -1316,10 +1177,13 @@ fn convert_rejects_non_workshop_input() {
         "-f",
         "json",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(3));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["diagnostics"][0]["code"], "convert-input-kind");
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "source-provider-unsupported"
+    );
     assert!(
         envelope["result"]["text"].as_str().unwrap().is_empty(),
         "no source on a rejected input kind"

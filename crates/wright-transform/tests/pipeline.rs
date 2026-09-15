@@ -109,7 +109,7 @@ fn compat_profile_folds_constants_with_metrics() {
     // The folded expression is now the literal 6 in the action.
     let rule = program
         .rules
-        .get(wright_ir::ids::Id::from_index(0))
+        .get(workshop_rs::ids::Id::from_index(0))
         .expect("rule");
     let Action::SetGlobalVariable { value, .. } = program.actions.get(rule.actions[0]).unwrap()
     else {

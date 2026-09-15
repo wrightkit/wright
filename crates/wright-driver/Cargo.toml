@@ -19,10 +19,7 @@ tar.workspace = true
 reqwest.workspace = true
 url = "2"
 wright-analyzer.workspace = true
-wright-core.workspace = true
-wright-ir.workspace = true
 wright-lpp = { path = "../wright-lpp" }
-wright-opy.workspace = true
 wright-transform.workspace = true
 # Single released reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true

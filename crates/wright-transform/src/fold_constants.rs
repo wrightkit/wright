@@ -7,6 +7,8 @@
 //! value nodes in place so callers keep their ids, and runs to a fixpoint so
 //! nested constants fold transitively.
 
+use workshop_rs::format::format_number;
+use workshop_rs::ids::Id;
 use workshop_rs::wir::{self, Value};
 
 use crate::pipeline::{Pass, PassStats};
@@ -26,7 +28,7 @@ impl Pass for FoldConstants {
         loop {
             let mut iteration_changed = 0usize;
             for index in 0..program.values.len() {
-                let id = wright_ir::ids::Id::from_index(index);
+                let id = Id::from_index(index);
                 let current = {
                     let Some(node) = program.values.get_mut(id) else {
                         continue;
@@ -169,12 +171,12 @@ fn fold_one(program: &wir::Program, value: &Value) -> Option<Value> {
 fn folded_number(value: f64) -> Value {
     Value::Number {
         value,
-        text: wright_ir::format::format_number(value),
+        text: format_number(value),
     }
 }
 
 /// The numeric value of a node, if it is a number literal.
-fn number(program: &wir::Program, id: wright_ir::ids::Id<wir::ValueNode>) -> Option<f64> {
+fn number(program: &wir::Program, id: Id<wir::ValueNode>) -> Option<f64> {
     match program.values.get(id)?.value {
         Value::Number { value, .. } => Some(value),
         _ => None,
@@ -182,7 +184,7 @@ fn number(program: &wir::Program, id: wright_ir::ids::Id<wir::ValueNode>) -> Opt
 }
 
 /// The boolean value of a node, if it is a boolean literal.
-fn bool_value(program: &wir::Program, id: wright_ir::ids::Id<wir::ValueNode>) -> Option<bool> {
+fn bool_value(program: &wir::Program, id: Id<wir::ValueNode>) -> Option<bool> {
     match program.values.get(id)?.value {
         Value::Bool(value) => Some(value),
         _ => None,

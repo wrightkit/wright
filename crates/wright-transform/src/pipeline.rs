@@ -43,7 +43,7 @@ pub struct PassResult {
 pub fn run(
     program: &mut wir::Program,
     profile: Profile,
-) -> Result<Vec<PassResult>, wright_ir::error::IrError> {
+) -> Result<Vec<PassResult>, workshop_rs::wir::error::IrError> {
     program.validate()?;
     let passes: Vec<Box<dyn Pass>> = match profile {
         Profile::Off => Vec::new(),

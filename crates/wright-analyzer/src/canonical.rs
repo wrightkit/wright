@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::{Value as JsonValue, json};
+use workshop_rs::ids::Id;
 use workshop_rs::source::Span;
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
-use wright_ir::ids::Id;
 
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::LintConfig;

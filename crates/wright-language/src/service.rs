@@ -1,7 +1,7 @@
 //! The editor-neutral language service (#63, #65, #66).
 //!
-//! Composes the native `.opy` frontend, the semantic index/analyzer, the
-//! safe-edit transaction contract, and the workshop catalog. Every result is tagged with
+//! Composes provider-backed source capabilities with Wright's editor-neutral
+//! response and safe-edit contracts. Every result is tagged with
 //! the document version it was computed for, so stale results are
 //! deterministic and replaceable (#64). No LSP types appear here.
 
@@ -10,9 +10,8 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use workshop_rs::Program;
-use wright_analyzer::analysis;
-use wright_analyzer::canonical::Finding;
-use wright_analyzer::canonical::{self, SemanticIndex, Symbol};
+use wright_analyzer::analysis::{self, Finding};
+use wright_analyzer::canonical::{SemanticIndex, Symbol};
 
 use crate::document::{Document, DocumentStore, Position, Range};
 
@@ -155,51 +154,12 @@ impl LanguageService {
         }
     }
 
-    /// Analyze one document: preprocess → parse → lower → semantic index.
-    /// Open-document overlays (unsaved editor buffers) participate in include
-    /// resolution before the filesystem.
+    /// Analyze one document. OPY language-service capabilities are provider
+    /// owned; the first-party provider currently exposes no editor capability,
+    /// so Wright returns a structured refusal instead of parsing statically.
     pub fn analyze(&self, document: &Document) -> Analysis {
-        if is_ostw_document(&document.uri) {
-            return unavailable_ostw_analysis();
-        }
-        let overlay = self.store.overlay(&self.root);
-        let wright_opy::CompileOutcome {
-            program,
-            error,
-            files,
-        } = wright_opy::compile_with_overlay_outcome(
-            &document.text,
-            &document.uri,
-            &self.root,
-            &overlay,
-        );
-        let files = files.into_iter().map(opy_file).collect();
-        let Some(program) = program else {
-            return Analysis {
-                program: Program::default(),
-                index: None,
-                findings: Vec::new(),
-                parse_errors: error.into_iter().map(opy_error).collect(),
-                files,
-            };
-        };
-        let findings =
-            canonical::analyze(&program, &wright_analyzer::registry::LintConfig::default());
-        let source_texts = files
-            .iter()
-            .map(|file| {
-                let source = self.source_identity(&files, document, file.id.index());
-                (file.id, self.source_text(&source, document))
-            })
-            .collect::<Vec<_>>();
-        let index = Some(SemanticIndex::build_with_sources(&program, &source_texts));
-        Analysis {
-            program,
-            index,
-            findings,
-            parse_errors: Vec::new(),
-            files,
-        }
+        let _ = document;
+        unavailable_source_analysis()
     }
 
     /// Diagnostics for a document: parse errors and semantic findings,
@@ -441,77 +401,11 @@ impl LanguageService {
         (source, crate::document::span_to_range(&span, &source_text))
     }
 
-    /// Completion items: declared symbols, builtin names, and keywords.
+    /// Completion is provider-owned and unavailable until the provider
+    /// negotiates a completion capability.
     pub fn completion(&self, uri: &str, position: Position) -> Vec<CompletionItem> {
-        let Some(document) = self.store.document(uri) else {
-            return Vec::new();
-        };
-        let analysis = self.analyze(document);
-
-        let prefix = word_prefix(&document.text, position);
-        let member = member_receiver(&document.text, position);
-
-        if let Some(receiver) = member {
-            // Member context: enum members when the receiver is a declared
-            // enum domain, otherwise the manifest-declared receiver members
-            // (the manifest is the authoritative OPY semantic table, #109).
-            if let Some(domain) = wright_opy::manifest::Manifest::builtin()
-                .ok()
-                .and_then(|manifest| manifest.enum_domain(&receiver))
-            {
-                return domain
-                    .members
-                    .iter()
-                    .filter(|member| member.starts_with(&prefix))
-                    .map(|member| CompletionItem {
-                        label: member.clone(),
-                        kind: "enumMember".to_string(),
-                        detail: Some(domain.domain.clone()),
-                    })
-                    .collect();
-            }
-            return receiver_members()
-                .into_iter()
-                .filter(|member| member.starts_with(&prefix))
-                .map(|member| CompletionItem {
-                    label: member.to_string(),
-                    kind: "method".to_string(),
-                    detail: Some("receiver member".to_string()),
-                })
-                .collect();
-        }
-
-        let mut items = Vec::new();
-        if let Some(index) = &analysis.index {
-            for symbol in index.symbols() {
-                if symbol.name.starts_with(&prefix) {
-                    items.push(CompletionItem {
-                        label: symbol.name.clone(),
-                        kind: symbol_kind_name(symbol.kind).to_string(),
-                        detail: None,
-                    });
-                }
-            }
-        }
-        for builtin in builtin_names() {
-            if builtin.starts_with(&prefix) {
-                items.push(CompletionItem {
-                    label: builtin.to_string(),
-                    kind: "function".to_string(),
-                    detail: Some("builtin".to_string()),
-                });
-            }
-        }
-        for keyword in KEYWORDS {
-            if keyword.starts_with(&prefix) {
-                items.push(CompletionItem {
-                    label: keyword.to_string(),
-                    kind: "keyword".to_string(),
-                    detail: None,
-                });
-            }
-        }
-        items
+        let _ = (uri, position);
+        Vec::new()
     }
 
     /// Rename the symbol at a position across the whole project.
@@ -553,14 +447,14 @@ impl LanguageService {
                 )],
             };
         };
-        if is_ostw_document(uri) {
+        if is_source_document(uri) {
             return RenameResult {
                 document_version: requesting.version,
                 ok: false,
                 edits: Vec::new(),
                 previews: Vec::new(),
                 diagnostics: vec![
-                    "source-provider-unavailable: DEL/OSTW provider support is not currently shipped with Wright"
+                    "source-provider-unavailable: OPY language-service capabilities are not currently shipped with the configured provider"
                         .to_string(),
                 ],
             };
@@ -853,48 +747,11 @@ impl LanguageService {
             })
     }
 
-    /// Semantic tokens for a document, classified by the native lexer.
+    /// Semantic tokens are provider-owned and unavailable without a negotiated
+    /// provider capability.
     pub fn semantic_tokens(&self, uri: &str) -> Vec<SemanticToken> {
-        let Some(document) = self.store.document(uri) else {
-            return Vec::new();
-        };
-        if is_ostw_document(uri) {
-            return Vec::new();
-        }
-        let analysis = self.analyze(document);
-        // Token classification needs the raw lexer stream plus the semantic
-        // index for symbol identity (never name-string membership alone).
-        let tokens = match wright_opy::lexer::lex(wright_opy::lexer::LexInput {
-            file_id: 0,
-            text: &document.text,
-        }) {
-            Ok(tokens) => tokens,
-            Err(_) => return Vec::new(),
-        };
-        let mut result = Vec::new();
-        for token in &tokens {
-            if token.kind == wright_opy::lexer::TokenKind::Eof {
-                continue;
-            }
-            let token_type = classify_token(token, analysis.index.as_ref());
-            if token_type.is_empty() {
-                continue;
-            }
-            result.push(SemanticToken {
-                line: token.span.start.line.saturating_sub(1),
-                character: crate::document::char_offset_to_utf16(
-                    document
-                        .text
-                        .lines()
-                        .nth(token.span.start.line.saturating_sub(1) as usize)
-                        .unwrap_or_default(),
-                    token.span.start.col.saturating_sub(1) as usize,
-                ) as u32,
-                length: crate::document::utf16_len(&token.text).max(1) as u32,
-                token_type,
-            });
-        }
-        result
+        let _ = uri;
+        Vec::new()
     }
 
     /// The symbol whose declaration or reference span contains a position.
@@ -933,49 +790,25 @@ impl LanguageService {
     }
 }
 
-fn opy_file(file: wright_opy::preprocess::FileRecord) -> SourceFile {
-    SourceFile {
-        id: workshop_rs::source::FileId::from_index(file.id as usize),
-        path: file.path,
-    }
-}
-
-fn opy_error(error: wright_opy::OpyError) -> SourceError {
-    SourceError {
-        code: error.code,
-        message: error.message,
-        span: error.span.map(opy_span),
-    }
-}
-
-fn opy_span(span: wright_opy::diag::Span) -> workshop_rs::source::Span {
-    workshop_rs::source::Span::new(
-        wright_ir::ids::Id::from_index(span.file as usize),
-        workshop_rs::source::Position::new(span.start.line, span.start.col),
-        workshop_rs::source::Position::new(span.end.line, span.end.col),
-    )
-}
-
-/// Whether a document URI names an OSTW source (`.ostw`/`.del`), mirroring
-/// the driver's extension detection.
-fn is_ostw_document(uri: &str) -> bool {
+/// Whether a document is a source-language document whose semantics belong to
+/// an external provider rather than Wright.
+fn is_source_document(uri: &str) -> bool {
     crate::document::uri_to_path(uri)
         .and_then(|path| {
             path.extension()
                 .map(|ext| ext.to_string_lossy().to_lowercase())
         })
-        .map(|extension| extension == "ostw" || extension == "del")
-        .unwrap_or(false)
+        .is_some_and(|extension| matches!(extension.as_str(), "opy" | "ostw" | "del"))
 }
 
-fn unavailable_ostw_analysis() -> Analysis {
+fn unavailable_source_analysis() -> Analysis {
     Analysis {
         program: Program::default(),
         index: None,
         findings: Vec::new(),
         parse_errors: vec![SourceError {
             code: "source-provider-unavailable".to_string(),
-            message: "DEL/OSTW provider support is not currently shipped with Wright".to_string(),
+            message: "source-language analysis is provider-owned and no editor capability is currently negotiated".to_string(),
             span: None,
         }],
         files: Vec::new(),
@@ -1004,14 +837,6 @@ fn empty_range() -> Range {
     }
 }
 
-fn severity_name(severity: analysis::Severity) -> &'static str {
-    match severity {
-        analysis::Severity::Error => "error",
-        analysis::Severity::Warning => "warning",
-        analysis::Severity::Info => "info",
-    }
-}
-
 fn symbol_kind_name(kind: wright_analyzer::canonical::SymbolKind) -> &'static str {
     match kind {
         wright_analyzer::canonical::SymbolKind::GlobalVariable => "globalVariable",
@@ -1021,163 +846,10 @@ fn symbol_kind_name(kind: wright_analyzer::canonical::SymbolKind) -> &'static st
     }
 }
 
-/// Every manifest-declared generic builtin id (the authoritative builtin
-/// surface, #109); the source for builtin completion and token
-/// classification.
-fn builtin_names() -> Vec<&'static str> {
-    wright_opy::manifest::Manifest::builtin()
-        .map(|manifest| {
-            manifest
-                .functions
-                .iter()
-                .filter(|function| !function.kind.is_member())
-                .map(|function| function.id.as_str())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Every manifest-declared receiver member id (#109); the source for
-/// member-access completion.
-fn receiver_members() -> Vec<&'static str> {
-    wright_opy::manifest::Manifest::builtin()
-        .map(|manifest| {
-            manifest
-                .functions
-                .iter()
-                .filter(|function| function.kind.is_member())
-                .map(|function| function.id.as_str())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Source keywords offered by completion.
-const KEYWORDS: &[&str] = &[
-    "rule",
-    "globalvar",
-    "playervar",
-    "subroutine",
-    "def",
-    "enum",
-    "macro",
-    "if",
-    "elif",
-    "else",
-    "for",
-    "while",
-    "in",
-    "and",
-    "or",
-    "not",
-    "pass",
-    "true",
-    "false",
-    "None",
-];
-
-/// The identifier being typed immediately before a position.
-///
-/// The UTF-16 editor offset is converted to a character offset first, and the
-/// line is then sliced by characters (never by byte offsets), so non-ASCII
-/// text before the cursor cannot shift the slice.
-fn word_prefix(text: &str, position: Position) -> String {
-    let line = text.lines().nth(position.line as usize).unwrap_or_default();
-    let char_end = crate::document::utf16_offset_to_char(line, position.character as usize);
-    let before: String = line.chars().take(char_end).collect();
-    before
-        .chars()
-        .rev()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect()
-}
-
-/// The receiver immediately before a member-access dot, when the position
-/// follows `<receiver>.` (possibly with a partial member typed after the dot).
-fn member_receiver(text: &str, position: Position) -> Option<String> {
-    let line = text.lines().nth(position.line as usize)?;
-    let char_end = crate::document::utf16_offset_to_char(line, position.character as usize);
-    let before: String = line.chars().take(char_end).collect();
-    let trimmed = before.trim_end().strip_suffix('.')?;
-    let name = trimmed
-        .chars()
-        .rev()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect::<Vec<_>>();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.into_iter().rev().collect())
+fn severity_name(severity: analysis::Severity) -> &'static str {
+    match severity {
+        analysis::Severity::Error => "error",
+        analysis::Severity::Warning => "warning",
+        analysis::Severity::Info => "info",
     }
-}
-
-/// Classify one token by parser/semantic identity: keywords by parser
-/// identity, symbol references by semantic index spans and symbol kinds,
-/// builtin functions by the corpus catalog, and everything else as an
-/// identifier.
-fn classify_token(token: &wright_opy::lexer::Token, index: Option<&SemanticIndex>) -> String {
-    use wright_opy::lexer::TokenKind;
-    match token.kind {
-        TokenKind::Ident => {
-            if KEYWORDS.contains(&token.text.as_str()) {
-                return "keyword".to_string();
-            }
-            if let Some(index) = index {
-                if let Some(kind) =
-                    symbol_kind_at(index, token.span.start.line, token.span.start.col)
-                {
-                    return match kind {
-                        wright_analyzer::canonical::SymbolKind::GlobalVariable
-                        | wright_analyzer::canonical::SymbolKind::PlayerVariable => {
-                            "variable".to_string()
-                        }
-                        wright_analyzer::canonical::SymbolKind::Subroutine => {
-                            "function".to_string()
-                        }
-                        wright_analyzer::canonical::SymbolKind::Rule => "class".to_string(),
-                    };
-                }
-            }
-            if builtin_names().contains(&token.text.as_str()) {
-                "function".to_string()
-            } else {
-                "identifier".to_string()
-            }
-        }
-        TokenKind::Number => "number".to_string(),
-        TokenKind::String => "string".to_string(),
-        TokenKind::Directive => "macro".to_string(),
-        TokenKind::At => "attribute".to_string(),
-        TokenKind::Newline | TokenKind::Indent(_) => String::new(),
-        _ => "operator".to_string(),
-    }
-}
-
-/// The semantic kind of the symbol whose declaration or reference span
-/// contains a 1-based line/column, when one exists.
-fn symbol_kind_at(
-    index: &SemanticIndex,
-    line: u32,
-    col: u32,
-) -> Option<wright_analyzer::canonical::SymbolKind> {
-    for symbol in index.symbols() {
-        if symbol
-            .span
-            .is_some_and(|span| span_contains(span, line, col))
-        {
-            return Some(symbol.kind);
-        }
-        for reference in index.references(symbol.id) {
-            if reference
-                .span
-                .is_some_and(|span| span_contains(span, line, col))
-            {
-                return Some(symbol.kind);
-            }
-        }
-    }
-    None
 }
