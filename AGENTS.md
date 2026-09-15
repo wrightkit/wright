@@ -141,6 +141,9 @@ support claims require real-project validation in addition to focused tests.
 
 - Never push directly to `main`; use independent branches/worktrees and PRs.
 - Keep commits focused and do not mix unrelated repository changes.
+- PRs that advance shipped owner dependency pins must use the `deps:`
+  Conventional Commit type so the changed product graph enters the normal Wright
+  patch-release flow; do not classify those updates as ordinary `chore:` work.
 - Review-time verification results, including hashes, residual counts, and
   pass/fail status, must come from the test/CI run under review. Never hand-write
   or manually refresh a committed evidence/result file; put results in the PR
