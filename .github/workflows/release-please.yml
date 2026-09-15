@@ -11,6 +11,7 @@ env:
   CARGO_TERM_COLOR: always
 
 permissions:
+  actions: read
   contents: write
   issues: write
   pull-requests: write
@@ -88,4 +89,5 @@ jobs:
       commit: ${{ needs.release.outputs.release_commit }}
     secrets: inherit
     permissions:
+      actions: read
       contents: write

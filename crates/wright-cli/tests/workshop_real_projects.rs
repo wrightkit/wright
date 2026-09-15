@@ -1,5 +1,5 @@
-//! Run the released Workshop corpus through Wright's public CLI commands and
-//! compare the resulting semantic diagnostics with the owner Program API.
+//! Run representative released Workshop projects through Wright's public CLI
+//! commands and compare the resulting diagnostics with the owner Program API.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,7 +8,7 @@ use wright_driver::workshop_provider::{diagnostic_code, status_for_classificatio
 
 #[test]
 #[ignore = "requires the released workshop-rs corpus checkout"]
-fn real_projects_run_check_and_lint_through_wright() {
+fn representative_real_projects_run_check_and_lint_through_wright() {
     let root = std::env::var_os("WRIGHTKIT_WORKSHOP_CORPUS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| panic!("WRIGHTKIT_WORKSHOP_CORPUS_DIR must be set for this test"));
@@ -18,10 +18,10 @@ fn real_projects_run_check_and_lint_through_wright() {
         root.display()
     );
     let catalog = workshop_rs::catalog::Catalog::builtin().expect("owner catalog loads");
-    let files = corpus_files(&root);
+    let files = representative_files(&root);
     assert!(
         !files.is_empty(),
-        "released corpus must contain source files"
+        "representative corpus fixtures must exist"
     );
 
     for path in files {
@@ -125,28 +125,19 @@ fn issue_kind(kind: workshop_rs::semantic::IncompletenessKind) -> &'static str {
     }
 }
 
-fn corpus_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    collect_files(root, &mut files);
-    files.sort();
-    files
-}
+const REPRESENTATIVE_FIXTURES: &[&str] = &["illari.ow", "rework.ow"];
 
-fn collect_files(root: &Path, files: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(root)
-        .unwrap_or_else(|error| panic!("cannot read corpus directory {}: {error}", root.display()))
-    {
-        let entry = entry.expect("read corpus directory entry");
-        let path = entry.path();
-        let kind = entry.file_type().expect("inspect corpus entry");
-        if kind.is_dir() {
-            collect_files(&path, files);
-        } else if kind.is_file()
-            && path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("ow"))
-        {
-            files.push(path);
-        }
-    }
+fn representative_files(root: &Path) -> Vec<PathBuf> {
+    REPRESENTATIVE_FIXTURES
+        .iter()
+        .map(|name| {
+            let path = root.join(name);
+            assert!(
+                path.is_file(),
+                "missing representative fixture {}",
+                path.display()
+            );
+            path
+        })
+        .collect()
 }

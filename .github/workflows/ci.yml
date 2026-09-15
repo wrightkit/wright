@@ -3,7 +3,8 @@ name: CI
 # ---------------------------------------------------------------------------
 # Trigger rules
 # ---------------------------------------------------------------------------
-# Push to main: full convergence run (all capability checks).
+# Push to main: capability checks are selected by changed paths, just like PRs.
+# Broad changes still run the full convergence set.
 # PR: capability checks are selected by changed paths.  Broad/core changes
 # (Cargo workspace, scripts, compatibility fixtures, CI itself) expand to the
 # full check set; narrow path changes run only the relevant capability.
@@ -25,7 +26,7 @@ permissions:
 
 # ---------------------------------------------------------------------------
 # Path filter: determines which capability jobs run on PRs.
-# On push-to-main every filter is forced to true so all jobs run.
+# On push-to-main the previous commit is compared with the pushed revision.
 # ---------------------------------------------------------------------------
 jobs:
   paths:
@@ -49,8 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # On push-to-main run everything unconditionally.
-          if [[ "${{ github.event_name }}" == "push" ]]; then
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.event.before }}" =~ ^0+$ ]]; then
             echo "rust_core=true"   >> "$GITHUB_OUTPUT"
             echo "opy=true"         >> "$GITHUB_OUTPUT"
             echo "lpp=true"         >> "$GITHUB_OUTPUT"
@@ -60,16 +60,21 @@ jobs:
             exit 0
           fi
 
-          # Compute files changed in this PR against the merge-base.
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          changed="$(git diff --name-only "${base}...${head}")"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            changed="$(git diff --name-only "${base}" "${head}")"
+          else
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            changed="$(git diff --name-only "${base}...${head}")"
+          fi
 
           # Helper: returns "true" if any path matches the given grep pattern.
           matches() { echo "$changed" | grep -qE "$1" && echo "true" || echo "false"; }
 
           # Core Rust workspace changes expand all Rust-based checks.
-          broad="(^Cargo\.(toml|lock)$|^(src|crates|compatibility|scenarios)/|^scripts/|^\.github/workflows/)"
+          broad="(^Cargo\.(toml|lock)$|^rust-toolchain(\.toml)?$|^\.cargo/|^(src|crates|compatibility|scenarios)/|^scripts/|^\.github/workflows/)"
           broad_match="$(matches "$broad")"
 
           echo "rust_core=${broad_match}"   >> "$GITHUB_OUTPUT"
@@ -104,7 +109,7 @@ jobs:
     uses: wrightkit/.github/.github/workflows/rust-quality.yml@a83d0f1b4cbcb5b81fb0426e3a5aea1db0899fb5
     with:
       toolchain: ${{ matrix.toolchain }}
-      cache-shared-key: linux-quality
+      cache-shared-key: linux-quality-${{ matrix.toolchain }}-dev-test
       all-features: true
 
   # -------------------------------------------------------------------------
@@ -130,7 +135,7 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-quality
+          shared-key: linux-quality-stable-dev-test
           cache-targets: true
           cache-all-crates: false
           cache-workspace-crates: false
@@ -190,7 +195,7 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-quality
+          shared-key: linux-quality-1.85.0-dev-test
           cache-targets: true
           cache-all-crates: false
           cache-workspace-crates: false
@@ -231,7 +236,7 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-quality
+          shared-key: linux-quality-stable-dev-test
           cache-targets: true
           cache-all-crates: false
           cache-workspace-crates: false
@@ -330,7 +335,7 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-quality
+          shared-key: linux-quality-stable-dev-test
           cache-targets: true
           cache-all-crates: false
           cache-workspace-crates: false
@@ -436,7 +441,7 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-quality
+          shared-key: linux-quality-stable-dev-test
           cache-targets: true
           cache-all-crates: false
           cache-workspace-crates: false
@@ -524,7 +529,7 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: linux-quality
+          shared-key: linux-quality-stable-dev-test
           cache-targets: true
           cache-all-crates: false
           cache-workspace-crates: false
@@ -618,11 +623,8 @@ jobs:
 
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
-  # Gated on rust-quality + opy-integration + lpp-integration so a
-  # fundamental or integration failure prevents wasting cross-platform runner
-  # time on packages whose source has already failed.
-  # When dist-validation is skipped due to upstream failures, a summary step
-  # explains which gate caused the skip.
+  # When source changes are in scope, this remains gated on the relevant Rust
+  # and integration jobs. Distribution-only changes run this job directly.
   # -------------------------------------------------------------------------
   dist-validation:
     name: Distribution validation (${{ matrix.channel }}, ${{ matrix.os }})
@@ -632,10 +634,11 @@ jobs:
       - opy-integration
       - lpp-integration
     if: |
+      always() &&
       needs.paths.outputs.dist == 'true' &&
-      needs.rust-quality.result == 'success' &&
-      needs.opy-integration.result == 'success' &&
-      needs.lpp-integration.result == 'success'
+      (needs.rust-quality.result == 'success' || needs.paths.outputs.rust_core != 'true') &&
+      (needs.opy-integration.result == 'success' || needs.paths.outputs.opy != 'true') &&
+      (needs.lpp-integration.result == 'success' || needs.paths.outputs.lpp != 'true')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -691,7 +694,7 @@ jobs:
           cache-all-crates: false
           cache-workspace-crates: false
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
           cache-on-failure: false
 
       - name: Build wright CLI and LSP
