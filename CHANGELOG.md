@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.25](https://github.com/wrightkit/wright/compare/v0.2.24...v0.2.25) (2026-09-15)
+
+
+### Bug Fixes
+
+* **release:** fix exact-SHA CI evidence parsing ([#336](https://github.com/wrightkit/wright/issues/336)) ([ad1ed70](https://github.com/wrightkit/wright/commit/ad1ed70e1d3aba1c21a88b6341efb5493a8c4ccf))
+
 ## [0.2.24](https://github.com/wrightkit/wright/compare/v0.2.23...v0.2.24) (2026-09-15)
 
 
