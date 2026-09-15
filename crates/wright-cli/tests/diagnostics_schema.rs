@@ -8,18 +8,16 @@ fn workspace_root() -> PathBuf {
 #[test]
 fn check_json_matches_schema_and_snapshot() {
     let root = workspace_root();
-    let oracle = std::fs::read_to_string(
-        root.join("compatibility/fixtures/real-world/overpy-client-to-server/oracle.json"),
+    let source = std::fs::read_to_string(
+        root.join("compatibility/fixtures/real-world/overpy-client-to-server/workshop.ws"),
     )
-    .expect("real fixture oracle");
-    let oracle_value = serde_json::from_str::<serde_json::Value>(&oracle).expect("oracle JSON");
-    let source = oracle_value["compile"]["workshop"]
-        .as_str()
-        .expect("real fixture Workshop output");
-    let directory = root.join("target/diagnostics-schema-test");
+    .expect("real Workshop fixture");
+    let directory = root
+        .join("target")
+        .join(format!("diagnostics-schema-test-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("test directory");
     let input = directory.join("client-to-server.txt");
-    std::fs::write(&input, source).expect("real fixture source");
+    std::fs::write(&input, &source).expect("real fixture source");
 
     let output = Command::new(env!("CARGO_BIN_EXE_wright"))
         .args([
@@ -66,6 +64,7 @@ fn check_json_matches_schema_and_snapshot() {
         status_value["diagnostics"][0]["status"],
         serde_json::Value::String("unsupported".to_string())
     );
+    let _ = std::fs::remove_dir_all(directory);
 }
 
 fn validate_output(schema: &serde_json::Value, output: &[u8]) -> serde_json::Value {

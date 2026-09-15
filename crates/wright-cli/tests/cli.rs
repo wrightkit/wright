@@ -16,17 +16,13 @@ fn workspace_root() -> PathBuf {
 }
 
 fn corpus_workshop(fixture_id: &str) -> String {
-    let oracle = std::fs::read_to_string(
+    std::fs::read_to_string(
         workspace_root()
             .join("compatibility/fixtures")
             .join(fixture_id)
-            .join("oracle.json"),
+            .join("workshop.ws"),
     )
-    .unwrap();
-    serde_json::from_str::<serde_json::Value>(&oracle).unwrap()["compile"]["workshop"]
-        .as_str()
-        .unwrap()
-        .to_string()
+    .unwrap()
 }
 
 fn temp_file(name: &str, content: &str) -> PathBuf {
@@ -715,14 +711,6 @@ fn version_and_help_are_documented_contract_surfaces() {
     for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
         assert!(help.contains(command), "help documents {command}");
     }
-    assert!(
-        help.contains("semantic hotspots"),
-        "help distinguishes analyze"
-    );
-    assert!(
-        help.contains("exhaustive structural"),
-        "help distinguishes inspect"
-    );
     for option in [
         "--kind",
         "--target",

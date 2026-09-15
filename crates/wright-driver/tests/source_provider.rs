@@ -14,16 +14,10 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workshop_fixture(fixture: &str) -> String {
-    let oracle = std::fs::read_to_string(
-        workspace_root().join(format!("compatibility/fixtures/{fixture}/oracle.json")),
+    std::fs::read_to_string(
+        workspace_root().join(format!("compatibility/fixtures/{fixture}/workshop.ws")),
     )
-    .expect("fixture oracle");
-    serde_json::from_str::<serde_json::Value>(&oracle)
-        .expect("oracle JSON")
-        .pointer("/compile/workshop")
-        .and_then(serde_json::Value::as_str)
-        .expect("Workshop artifact")
-        .to_string()
+    .expect("Workshop fixture")
 }
 
 fn temp_entry() -> (PathBuf, PathBuf) {
@@ -41,18 +35,7 @@ fn temp_entry() -> (PathBuf, PathBuf) {
 }
 
 fn cleanup(dir: PathBuf) {
-    #[cfg(target_os = "macos")]
-    {
-        let status = std::process::Command::new("trash")
-            .arg(&dir)
-            .status()
-            .expect("trash command");
-        assert!(status.success(), "trash failed for {}", dir.display());
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        std::fs::remove_dir_all(dir).expect("remove test directory");
-    }
+    std::fs::remove_dir_all(dir).expect("remove test directory");
 }
 
 struct RecordingProvider {
@@ -155,7 +138,7 @@ fn provider_backend_delegates_directory_discovery_to_the_source_owner() {
         operations: Arc::new(Mutex::new(Vec::new())),
         check_compilation: None,
         compilation: Some(SourceCompilation::success(workshop_fixture(
-            "real-world/overpy-cronch",
+            "synthetic/basic-rule",
         ))),
         failure: None,
     };

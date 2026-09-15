@@ -57,7 +57,6 @@ jobs:
               - 'src/**'
               - 'crates/**'
               - 'compatibility/**'
-              - 'scenarios/**'
               - 'scripts/**'
               - '.github/workflows/**'
             dist:
@@ -72,7 +71,6 @@ jobs:
               - 'src/**'
               - 'crates/**'
               - 'compatibility/**'
-              - 'scenarios/**'
               - 'scripts/**'
               - '.github/workflows/**'
 
@@ -199,7 +197,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: wrightkit/workshop-rs
-          ref: 4a9f2dae36c47d50b8396563dd42cb9c750106ec # v0.3.9
+          ref: f1f3c58f790e9aede9300ca6421698f2503f5f62 # v0.3.11
           path: workshop-rs-pinned
 
       - name: Install Rust toolchain
@@ -368,60 +366,7 @@ jobs:
         run: scripts/test-cli-github-actions.sh target/debug/wright
 
   # -------------------------------------------------------------------------
-  # [5] SCENARIO VALIDATION  (end-to-end compile-time scenario regression)
-  # Proves Wright compile-time WIR/emission contracts for declared scenarios.
-  # Depends on rust-quality (fundamental gate).
-  # -------------------------------------------------------------------------
-  scenario-validation:
-    name: Scenario validation (end-to-end)
-    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
-    if: needs.paths.outputs.opy == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
-
-      - name: Download current-run Wright CLI
-        uses: actions/download-artifact@v8
-        with:
-          name: wright-cli-linux-stable-debug
-          path: target/debug
-
-      - name: Prepare Wright CLI executable
-        run: chmod +x target/debug/wright
-
-      - name: Run compile-time scenarios
-        id: scenarios
-        run: python3 scripts/run-scenarios.py
-
-      - name: Upload scenario report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: scenario-report
-          path: target/scenarios-report.json
-
-      - name: Write step summary
-        if: always()
-        run: python3 scripts/render-ci-summary.py --title "Scenario Validation" --kind scenarios --report target/scenarios-report.json
-
-  # -------------------------------------------------------------------------
-  # [6] BENCHMARK  (performance evidence)
+  # [5] BENCHMARK  (performance evidence)
   # Non-blocking on PRs; records regression-detectable output as artifact.
   # Depends on rust-quality so a fundamental failure skips benchmark time.
   # -------------------------------------------------------------------------

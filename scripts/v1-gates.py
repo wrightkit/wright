@@ -16,7 +16,6 @@ Usage: python3 scripts/v1-gates.py [--wright path/to/wright]
 import argparse
 import hashlib
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +29,7 @@ FIXTURES = [
     "synthetic/preprocessing",
     "real-world/overpy-cake",
 ]
+OPY_PROVIDER_VERSION = "0.1.38"
 
 
 def fixture_hash(fixture_id: str) -> str:
@@ -77,8 +77,8 @@ def main() -> int:
         "provider": {
             "language": "opy",
             "source": "wright-first-party-release",
-            "resolution": "refresh latest first-party release, then compile with active provider",
-            "versionPin": None,
+            "resolution": "install the explicitly selected first-party release",
+            "versionPin": OPY_PROVIDER_VERSION,
         },
         "wright": {"commit": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
@@ -95,7 +95,7 @@ def main() -> int:
     expected_dir.mkdir(parents=True, exist_ok=True)
 
     provider_update = subprocess.run(
-        [args.wright, "provider", "update", "opy"],
+        [args.wright, "provider", "update", "opy", "--version", OPY_PROVIDER_VERSION],
         capture_output=True,
         text=True,
     )
@@ -110,12 +110,8 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         print("\nFAILURES:\n" + "\n".join(failures), file=sys.stderr)
         return 1
-    provider_update_match = re.search(
-        r"provider\s+(\d+\.\d+\.\d+)", provider_update.stdout
-    )
-    report["provider"]["refresh"] = "success"
-    if provider_update_match:
-        report["provider"]["version"] = provider_update_match.group(1)
+    report["provider"]["install"] = "success"
+    report["provider"]["version"] = OPY_PROVIDER_VERSION
 
     for fixture_id in FIXTURES:
         fixture_dir = ROOT / "compatibility/fixtures" / fixture_id

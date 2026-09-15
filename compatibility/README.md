@@ -30,7 +30,8 @@ Each fixture has the form:
 compatibility/fixtures/<category>/<name>/
   fixture.json   # fixture identity, expected status, and provenance
   source.opy     # input, or the source path named by fixture.json
-  oracle.json    # immutable recorded reference result consumed by Wright tests
+  oracle.json    # immutable recorded OPY reference result for integration gates
+  workshop.ws    # focused canonical Workshop input for Wright-owned tests
 ```
 
 Wright validates these records without installing an upstream compiler:
@@ -44,8 +45,10 @@ expected status, snapshot structure, output hashes, and imported-source
 provenance. It deliberately has no Node, .NET, OverPy, or OSTW runtime
 dependency.
 
-Current Wright consumer and release-gate tests may consume selected recorded
-snapshots while OPY execution remains owned by the LPP provider.
+Wright's OPY integration gate consumes selected recorded snapshots while OPY
+execution remains owned by the LPP provider. Wright-native tests use the
+focused `workshop.ws` inputs instead of treating OPY output as a generic
+Workshop fixture.
 DEL/OSTW compatibility evidence stays in `deltin-rs`; Wright has no static
 DEL/OSTW integration and reports an unavailable provider boundary. These tests
 protect Wright's current integration behavior; they are not the authoritative

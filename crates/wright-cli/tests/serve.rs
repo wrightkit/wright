@@ -15,23 +15,10 @@ fn workspace_root() -> PathBuf {
 }
 
 fn corpus_workshop(id: &str) -> PathBuf {
-    let oracle = workspace_root()
+    workspace_root()
         .join("compatibility/fixtures")
         .join(id)
-        .join("oracle.json");
-    let workshop = serde_json::from_str::<serde_json::Value>(
-        &std::fs::read_to_string(oracle).expect("corpus oracle reads"),
-    )
-    .expect("corpus oracle parses")["compile"]["workshop"]
-        .as_str()
-        .expect("corpus oracle carries Workshop text")
-        .to_string();
-    let path = workspace_root()
-        .join("target/issue-155-serve")
-        .join(format!("{id}.ws"));
-    std::fs::create_dir_all(path.parent().unwrap()).expect("serve fixture directory creates");
-    std::fs::write(&path, workshop).expect("serve Workshop fixture writes");
-    path
+        .join("workshop.ws")
 }
 
 fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::Value> {

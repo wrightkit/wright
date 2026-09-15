@@ -33,32 +33,6 @@ def summary(report: dict, kind: str, outcome: str | None) -> str:
             lines.append("All fixtures passed.")
         return "\n".join(lines)
 
-    if kind == "scenarios":
-        stats = report.get("summary", {})
-        passed = stats.get("passed", 0)
-        total = stats.get("total", 0)
-        state = "PASS" if passed == total else "FAIL"
-        icon = "✅" if passed == total else "❌"
-        lines = [f"### Scenarios: {icon} {state} ({passed}/{total})", ""]
-        failures = [
-            (scenario_id, scenario)
-            for scenario_id, scenario in report.get("scenarios", {}).items()
-            if not scenario.get("passed")
-        ]
-        if failures:
-            lines.append("**Failed scenarios:**")
-            for scenario_id, scenario in failures:
-                checks = [
-                    check["check"]
-                    for check in scenario.get("checks", [])
-                    if not check["passed"]
-                ]
-                lines.append(f"- `{scenario_id}`: {', '.join(checks) or 'compile failed'}")
-        else:
-            lines.append("All scenarios passed.")
-        lines.extend(["", "_Full machine-readable report available as workflow artifact._"])
-        return "\n".join(lines)
-
     if kind == "benchmarks":
         lines = [f"### Benchmarks: {'✅ completed' if outcome == 'success' else '❌ FAIL'}"]
         benchmarks = report.get("benchmarks") or report.get("results") or []
@@ -91,7 +65,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--title", required=True)
     parser.add_argument("--report", type=Path)
-    parser.add_argument("--kind", choices=("semantic", "scenarios", "benchmarks"), required=True)
+    parser.add_argument("--kind", choices=("semantic", "benchmarks"), required=True)
     parser.add_argument("--out", type=Path, help="summary file; defaults to GITHUB_STEP_SUMMARY")
     parser.add_argument("--outcome", help="workflow step outcome for benchmark summaries")
     args = parser.parse_args()

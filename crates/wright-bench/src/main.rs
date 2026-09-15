@@ -63,7 +63,7 @@ fn corpus_cases() -> Vec<(&'static str, PathBuf)> {
             workspace_root()
                 .join("compatibility/fixtures")
                 .join(id)
-                .join("oracle.json"),
+                .join("workshop.ws"),
         )
     })
     .collect()
@@ -102,14 +102,8 @@ fn run() -> Result<bool, String> {
     let mut regressions = Vec::new();
 
     for (id, path) in corpus_cases() {
-        let oracle = std::fs::read_to_string(&path)
+        let source = std::fs::read_to_string(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        let source = serde_json::from_str::<serde_json::Value>(&oracle)
-            .map_err(|error| format!("cannot parse {}: {error}", path.display()))?["compile"]
-            ["workshop"]
-            .as_str()
-            .ok_or_else(|| format!("{} has no compile.workshop oracle", path.display()))?
-            .to_string();
         let root = path
             .parent()
             .unwrap_or_else(|| Path::new("."))
