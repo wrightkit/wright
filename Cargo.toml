@@ -11,8 +11,8 @@ repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
 # Canonical Workshop core and OPY owner releases for the Program API migration.
-workshop-rs = "=0.3.9"
-opy-rs = "=0.1.36"
+workshop-rs = "=0.3.10"
+opy-rs = "=0.1.38"
 libc = "0.2"
 serde = "1"
 serde_json = "1"
