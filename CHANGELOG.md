@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.26](https://github.com/wrightkit/wright/compare/v0.2.25...v0.2.26) (2026-09-15)
+
+
+### Bug Fixes
+
+* **ci:** verify the requested release commit ([1e4c0ea](https://github.com/wrightkit/wright/commit/1e4c0ea3ea6b19a8b33dfea214f6c7d85dda0cd0))
+
 ## [0.2.25](https://github.com/wrightkit/wright/compare/v0.2.24...v0.2.25) (2026-09-15)
 
 
