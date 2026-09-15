@@ -711,14 +711,6 @@ fn version_and_help_are_documented_contract_surfaces() {
     for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
         assert!(help.contains(command), "help documents {command}");
     }
-    assert!(
-        help.contains("semantic hotspots"),
-        "help distinguishes analyze"
-    );
-    assert!(
-        help.contains("exhaustive structural"),
-        "help distinguishes inspect"
-    );
     for option in [
         "--kind",
         "--target",

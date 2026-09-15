@@ -271,7 +271,7 @@ jobs:
 
       - name: Run semantic OPY gate (Wright compile vs recorded snapshots)
         id: semantic_gate
-        run: python3 scripts/v1-gates.py --provider-version 0.1.38
+        run: python3 scripts/v1-gates.py
 
       - name: Upload OPY integration reports
         if: always()

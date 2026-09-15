@@ -67,11 +67,6 @@ def main() -> int:
         help="wright binary providing the internal semantic-compare command",
     )
     parser.add_argument("--profile", default="compat")
-    parser.add_argument(
-        "--provider-version",
-        default=OPY_PROVIDER_VERSION,
-        help=f"exact first-party OPY provider release (default: {OPY_PROVIDER_VERSION})",
-    )
     args = parser.parse_args()
     semantic_comparator = args.semantic_compare or str(Path(args.wright))
 
@@ -83,7 +78,7 @@ def main() -> int:
             "language": "opy",
             "source": "wright-first-party-release",
             "resolution": "install the explicitly selected first-party release",
-            "versionPin": args.provider_version,
+            "versionPin": OPY_PROVIDER_VERSION,
         },
         "wright": {"commit": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
@@ -100,7 +95,7 @@ def main() -> int:
     expected_dir.mkdir(parents=True, exist_ok=True)
 
     provider_update = subprocess.run(
-        [args.wright, "provider", "update", "opy", "--version", args.provider_version],
+        [args.wright, "provider", "update", "opy", "--version", OPY_PROVIDER_VERSION],
         capture_output=True,
         text=True,
     )
@@ -116,7 +111,7 @@ def main() -> int:
         print("\nFAILURES:\n" + "\n".join(failures), file=sys.stderr)
         return 1
     report["provider"]["install"] = "success"
-    report["provider"]["version"] = args.provider_version
+    report["provider"]["version"] = OPY_PROVIDER_VERSION
 
     for fixture_id in FIXTURES:
         fixture_dir = ROOT / "compatibility/fixtures" / fixture_id

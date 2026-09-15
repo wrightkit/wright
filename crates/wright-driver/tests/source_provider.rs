@@ -35,18 +35,7 @@ fn temp_entry() -> (PathBuf, PathBuf) {
 }
 
 fn cleanup(dir: PathBuf) {
-    #[cfg(target_os = "macos")]
-    {
-        let status = std::process::Command::new("trash")
-            .arg(&dir)
-            .status()
-            .expect("trash command");
-        assert!(status.success(), "trash failed for {}", dir.display());
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        std::fs::remove_dir_all(dir).expect("remove test directory");
-    }
+    std::fs::remove_dir_all(dir).expect("remove test directory");
 }
 
 struct RecordingProvider {

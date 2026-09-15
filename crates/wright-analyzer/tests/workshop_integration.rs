@@ -35,24 +35,47 @@ fn workshop_service(fixture_id: &str) -> SemanticService<'static> {
     SemanticService::from_workshop(program, "en-US").unwrap()
 }
 
+fn query(service: &SemanticService<'_>, request: Value) -> Value {
+    let response: Value =
+        serde_json::from_str(&service.handle_json(&serde_json::to_string(&request).unwrap()))
+            .unwrap();
+    assert!(
+        response.get("error").is_none(),
+        "query must succeed: {response}"
+    );
+    response["result"].clone()
+}
+
+fn id_for(service: &SemanticService<'_>, request: Value, name: &str) -> u32 {
+    query(service, request)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == name)
+        .and_then(|item| item["id"].as_u64())
+        .unwrap_or_else(|| panic!("query result has no item named {name}")) as u32
+}
+
 #[test]
 fn workshop_input_runs_all_semantic_queries() {
     let service = workshop_service("synthetic/control-flow");
+    let rule = id_for(
+        &service,
+        serde_json::json!({"op": "listRules"}),
+        "bounded while",
+    );
+    let symbol = id_for(&service, serde_json::json!({"op": "listSymbols"}), "index");
     let requests = [
-        r#"{"op":"program"}"#,
-        r#"{"op":"listRules"}"#,
-        r#"{"op":"getRule","rule":0}"#,
-        r#"{"op":"findReferences","symbol":0}"#,
-        r#"{"op":"getUsage","symbol":0}"#,
-        r#"{"op":"getCfg","rule":1}"#,
-        r#"{"op":"getFindings"}"#,
+        serde_json::json!({"op": "program"}),
+        serde_json::json!({"op": "listRules"}),
+        serde_json::json!({"op": "getRule", "rule": rule}),
+        serde_json::json!({"op": "findReferences", "symbol": symbol}),
+        serde_json::json!({"op": "getUsage", "symbol": symbol}),
+        serde_json::json!({"op": "getCfg", "rule": rule}),
+        serde_json::json!({"op": "getFindings"}),
     ];
     for request in requests {
-        let response: Value = serde_json::from_str(&service.handle_json(request)).unwrap();
-        assert!(
-            response.get("error").is_none(),
-            "{request} must succeed: {response}"
-        );
+        query(&service, request);
     }
 
     // Origin metadata identifies the Workshop source and locale.
@@ -85,11 +108,16 @@ fn workshop_input_analysis_findings_are_available() {
 #[test]
 fn workshop_input_references_preserve_source_spans() {
     let service = workshop_service("synthetic/declarations-rules");
-    // hasStarted is symbol 1 (after score).
-    let response: Value =
-        serde_json::from_str(&service.handle_json(r#"{"op":"findReferences","symbol":1}"#))
-            .unwrap();
-    let references = response["result"].as_array().unwrap();
+    let symbol = id_for(
+        &service,
+        serde_json::json!({"op": "listSymbols"}),
+        "hasStarted",
+    );
+    let references = query(
+        &service,
+        serde_json::json!({"op": "findReferences", "symbol": symbol}),
+    );
+    let references = references.as_array().unwrap();
     assert!(
         references
             .iter()
