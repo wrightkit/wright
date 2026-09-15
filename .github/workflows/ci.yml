@@ -29,7 +29,7 @@ permissions:
 # ---------------------------------------------------------------------------
 jobs:
   paths:
-    name: Detect changed paths
+    name: Detect paths
     runs-on: ubuntu-latest
     outputs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
@@ -38,12 +38,12 @@ jobs:
       cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Filter changed paths
+      - name: Filter paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
@@ -98,16 +98,16 @@ jobs:
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
+      - name: Install Rust (1.85.0)
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.85.0
           components: rustfmt, clippy
 
-      - name: Restore Rust cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-quality-1.85.0-dev-test
@@ -118,18 +118,18 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: false
 
-      - name: Check formatting with MSRV toolchain
+      - name: Check formatting
         run: cargo +1.85.0 fmt --all -- --check
 
       # Keep the surviving owner-independent Wright crates on the declared
       # MSRV. The provider-backed consumer crates are covered by the stable
       # full-workspace gate and the dedicated integration jobs below.
-      - name: Run MSRV clippy for owner-independent crates
+      - name: Clippy (independent crates)
         run: >-
           cargo +1.85.0 clippy --locked --all-targets --all-features
           -p wright-analyzer -p wright-transform -p wright-lpp -- -D warnings
 
-      - name: Run MSRV tests for owner-independent crates
+      - name: Test (independent crates)
         run: >-
           cargo +1.85.0 test --locked --all-targets --all-features
           -p wright-analyzer -p wright-transform -p wright-lpp
@@ -141,20 +141,20 @@ jobs:
   # independent.
   # -------------------------------------------------------------------------
   wright-cli-build:
-    name: Build Wright CLI (stable/debug)
+    name: Build CLI
     needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.opy == 'true' || needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
-      - name: Restore Rust cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-quality-stable-dev-test
@@ -165,17 +165,17 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Build wright CLI (debug)
+      - name: Build CLI
         run: cargo build --locked -p wright-cli
 
-      - name: Upload current-run Wright CLI
+      - name: Upload CLI artifact
         uses: actions/upload-artifact@v7
         with:
           name: wright-cli-linux-stable-debug
           path: target/debug/wright
           if-no-files-found: error
 
-      - name: Record CLI artifact provenance
+      - name: Record CLI provenance
         run: python3 scripts/report-cli-artifact.py
 
   # -------------------------------------------------------------------------
@@ -185,27 +185,27 @@ jobs:
   # owned by the released workshop-rs corpus.
   # -------------------------------------------------------------------------
   workshop-integration:
-    name: Workshop real-project integration
+    name: Workshop integration
     needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out Wright
+      - name: Checkout Wright
         uses: actions/checkout@v7
 
-      - name: Check out released workshop-rs corpus
+      - name: Checkout workshop-rs
         uses: actions/checkout@v7
         with:
           repository: wrightkit/workshop-rs
           ref: f1f3c58f790e9aede9300ca6421698f2503f5f62 # v0.3.11
           path: workshop-rs-pinned
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
-      - name: Restore Rust cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-quality-stable-dev-test
@@ -216,12 +216,12 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Run owner-contract cross-validation
+      - name: Cross-validate owner contract
         env:
           WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
         run: cargo test --locked -p wright-driver --test workshop_contract -- --ignored
 
-      - name: Run Wright check and lint on real projects
+      - name: Check & lint real projects
         env:
           WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
         run: cargo test --locked -p wright-cli --test workshop_real_projects -- --ignored --nocapture
@@ -234,19 +234,19 @@ jobs:
   #   - Provider-backed OPY consumer contract coverage
   # -------------------------------------------------------------------------
   opy-integration:
-    name: OPY integration (semantic + owner)
+    name: OPY integration
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - name: Restore Rust cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-quality-stable-dev-test
@@ -257,23 +257,23 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Download current-run Wright CLI
+      - name: Download CLI artifact
         uses: actions/download-artifact@v8
         with:
           name: wright-cli-linux-stable-debug
           path: target/debug
 
-      - name: Prepare Wright CLI executable
+      - name: Prepare CLI executable
         run: chmod +x target/debug/wright
 
-      - name: Validate committed compatibility evidence
+      - name: Validate compatibility evidence
         run: python3 -m unittest discover -s compatibility/tests
 
-      - name: Run semantic OPY gate (Wright compile vs recorded snapshots)
+      - name: Run semantic OPY gate
         id: semantic_gate
         run: python3 scripts/v1-gates.py
 
-      - name: Upload OPY integration reports
+      - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -281,7 +281,7 @@ jobs:
           path: |
             target/v1-gates-report.json
 
-      - name: Write step summary
+      - name: Render summary
         if: always()
         run: python3 scripts/render-ci-summary.py --title "OPY Integration" --kind semantic --report target/v1-gates-report.json
 
@@ -289,19 +289,19 @@ jobs:
   # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)
   # -------------------------------------------------------------------------
   lpp-integration:
-    name: LPP client integration (#142, #139)
+    name: LPP integration
     needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.lpp == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - name: Restore Rust cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-quality-stable-dev-test
@@ -315,20 +315,20 @@ jobs:
       # The mock provider is built from the pinned language-provider-protocol
       # commit the integration tests were validated against (merged LPP v1,
       # PR wrightkit/language-provider-protocol#2 plus docs-only follow-ups).
-      - name: Check out language-provider-protocol (pinned)
+      - name: Checkout LPP
         uses: actions/checkout@v7
         with:
           repository: wrightkit/language-provider-protocol
           ref: 416b293e26e6fb2d29061608a493a7aecd2ce14f
           path: language-provider-protocol
 
-      - name: Build the pinned LPP mock provider
+      - name: Build mock provider
         run: cargo build --locked -p lpp-mock-provider
         working-directory: language-provider-protocol
 
       # REQUIRED: these suites self-skip when LPP_MOCK_PROVIDER is absent,
       # so the variable must be set here for them to run at all.
-      - name: Run LPP client integration tests (required)
+      - name: Run integration tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
         run: scripts/test-lpp-integration.sh
@@ -340,29 +340,29 @@ jobs:
   # repository CI integration, not the renderer semantics layer.
   # -------------------------------------------------------------------------
   cli-behavior:
-    name: Wright CLI behavior (GitHub Actions smoke)
+    name: CLI behavior
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
-      - name: Download current-run Wright CLI
+      - name: Download CLI artifact
         uses: actions/download-artifact@v8
         with:
           name: wright-cli-linux-stable-debug
           path: target/debug
 
-      - name: Prepare Wright CLI executable
+      - name: Prepare CLI executable
         run: chmod +x target/debug/wright
 
-      - name: Exercise auto GitHub Actions renderer
+      - name: Test GitHub Actions renderer
         run: scripts/test-cli-github-actions.sh target/debug/wright
 
   # -------------------------------------------------------------------------
@@ -371,19 +371,19 @@ jobs:
   # Depends on rust-quality so a fundamental failure skips benchmark time.
   # -------------------------------------------------------------------------
   benchmark:
-    name: Performance benchmarks
+    name: Benchmarks
     needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - name: Restore Rust cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-quality-stable-dev-test
@@ -394,21 +394,21 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Build benchmark (stable/debug)
+      - name: Build benchmark
         run: cargo build --locked -p wright-bench
 
       - name: Run benchmarks
         id: bench
         run: target/debug/wright-bench
 
-      - name: Upload benchmark report
+      - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-report
           path: target/wright-bench-report.json
 
-      - name: Write step summary
+      - name: Render summary
         if: always()
         run: python3 scripts/render-ci-summary.py --title "Performance Benchmarks" --kind benchmarks --report target/wright-bench-report.json --outcome "${{ steps.bench.outcome }}"
 
@@ -418,7 +418,7 @@ jobs:
   # and integration jobs. Distribution-only changes run this job directly.
   # -------------------------------------------------------------------------
   dist-cli-build:
-    name: Build distribution CLI/LSP (${{ matrix.os }})
+    name: Build dist (${{ matrix.os }})
     needs:
       - paths
       - rust-quality
@@ -441,15 +441,15 @@ jobs:
           - macos-15
           - windows-latest
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
-      - name: Restore Rust dependency cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: dist-validation-${{ runner.os }}-stable-dev
@@ -460,11 +460,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: false
 
-      - name: Build wright CLI and LSP
+      - name: Build CLI and LSP
         shell: bash
         run: cargo build --locked -p wright-cli -p wright-lsp
 
-      - name: Record distribution build identity
+      - name: Record build identity
         run: >-
           python3 scripts/write-build-identity.py
           --output target/debug/wright-dist.build.json
@@ -473,7 +473,7 @@ jobs:
           --toolchain stable
           --profile dev
 
-      - name: Upload current-run distribution binaries
+      - name: Upload distribution binaries
         uses: actions/upload-artifact@v7
         with:
           name: wright-dist-cli-${{ matrix.os }}
@@ -486,7 +486,7 @@ jobs:
           if-no-files-found: error
 
   dist-validation:
-    name: Distribution validation (${{ matrix.channel }}, ${{ matrix.os }})
+    name: Dist validation (${{ matrix.channel }}, ${{ matrix.os }})
     needs:
       - paths
       - rust-quality
@@ -520,7 +520,7 @@ jobs:
           - os: windows-latest
             channel: WinGet
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
 
       - name: Set up Python
@@ -528,23 +528,23 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Scoop for Scoop validation
+      - name: Install Scoop
         if: matrix.channel == 'Scoop'
         shell: pwsh
         run: ./scripts/setup-scoop.ps1
 
-      - name: Enable WinGet local manifests for WinGet validation
+      - name: Enable WinGet local manifests
         if: matrix.channel == 'WinGet'
         shell: pwsh
         run: winget settings --enable LocalManifestFiles
 
-      - name: Download current-run distribution binaries
+      - name: Download distribution binaries
         uses: actions/download-artifact@v8
         with:
           name: wright-dist-cli-${{ matrix.os }}
           path: target/debug
 
-      - name: Verify current-run distribution build identity
+      - name: Verify build identity
         run: >-
           python scripts/verify-build-identity.py
           --identity target/debug/wright-dist.build.json
@@ -553,29 +553,29 @@ jobs:
           --wright target/debug/wright
           --wright-lsp target/debug/wright-lsp
 
-      - name: Validate package-manager metadata and install script
+      - name: Validate package metadata & install script
         run: python scripts/verify-dist.py
 
-      - name: Run install.sh functional tests
+      - name: Test install.sh (functional)
         if: matrix.channel == 'install.sh'
         run: scripts/test-install.sh
-      - name: Run install.sh native channel smoke
+      - name: Test install.sh (native smoke)
         if: matrix.channel == 'install.sh'
         run: python scripts/test-distribution-install-sh.py
-      - name: Run install.ps1 channel validation
+      - name: Test install.ps1 (channel)
         if: matrix.channel == 'install.ps1'
         shell: pwsh
         run: ./scripts/test-install.ps1
-      - name: Run install.ps1 production R2 smoke
+      - name: Test install.ps1 (R2 smoke)
         if: matrix.channel == 'install.ps1'
         shell: pwsh
         run: ./scripts/test-install-r2.ps1
-      - name: Run Homebrew channel validation
+      - name: Test Homebrew channel
         if: matrix.channel == 'Homebrew'
         run: python scripts/test-distribution-homebrew.py
-      - name: Run Scoop channel validation
+      - name: Test Scoop channel
         if: matrix.channel == 'Scoop'
         run: python scripts/test-distribution-scoop.py
-      - name: Run WinGet channel validation
+      - name: Test WinGet channel
         if: matrix.channel == 'WinGet'
         run: python scripts/test-distribution-winget.py
