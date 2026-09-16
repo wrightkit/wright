@@ -125,65 +125,111 @@ fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
         if line.trim().is_empty() {
             continue;
         }
-        let value: Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => {
-                let _ = writeln!(
-                    out,
-                    "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32700,\"message\":\"parse error\"}}}}"
-                );
-                continue;
-            }
+        let response = match serde_json::from_str(&line) {
+            Ok(value) => jsonrpc_dispatch(service, value),
+            Err(_) => Some(jsonrpc_error(Value::Null, -32700, "Parse error")),
         };
-        let id = value.get("id").cloned();
-        let method = value
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let params = value.get("params").cloned();
-        let result = match method {
-            "request" => {
-                // The full params object is forwarded verbatim (op plus any
-                // operation arguments, e.g. mutation sources/targets, #130)
-                // so the JSON-RPC adapter maps the same request shape
-                // as the stdio adapter; a params object without `op` is a
-                // malformed request rather than a silently empty one.
-                let request_line = match params {
-                    Some(params) if params.get("op").is_some() => {
-                        serde_json::to_string(&params).expect("params serialize")
-                    }
-                    _ => "{}".to_string(),
-                };
-                dispatch(service, &request_line)
+        if let Some(response) = response {
+            if writeln!(out, "{response}").is_err() {
+                break;
             }
-            "compile" | "check" | "analyze" | "inspect" => {
-                let envelope = match method {
-                    "compile" => serde_json::to_value(service.compile()),
-                    "check" => serde_json::to_value(service.check()),
-                    "analyze" => serde_json::to_value(service.analyze()),
-                    _ => serde_json::to_value(service.inspect()),
-                };
-                serde_json::to_string(&serde_json::json!({
-                    "result": envelope.expect("envelope serializes"),
-                }))
-                .expect("response serializes")
-            }
-            other => serde_json::to_string(&serde_json::json!({
-                "error": { "code": -32601, "message": format!("method not found: {other}") },
-            }))
-            .expect("error serializes"),
-        };
-        let result_value: Value = serde_json::from_str(&result).unwrap_or(Value::Null);
-        let response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": result_value,
-        });
-        if writeln!(out, "{response}").is_err() {
-            break;
         }
     }
     ExitCode::SUCCESS
+}
+
+fn jsonrpc_dispatch(service: &mut ToolService<'_>, value: Value) -> Option<Value> {
+    let object = match value.as_object() {
+        Some(object) => object,
+        None => return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request")),
+    };
+    if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+        return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
+    }
+
+    let method = match object.get("method").and_then(Value::as_str) {
+        Some(method) => method,
+        None => return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request")),
+    };
+    let has_id = object.contains_key("id");
+    let id = object.get("id").cloned().unwrap_or(Value::Null);
+    if has_id && !matches!(id, Value::Null | Value::String(_) | Value::Number(_)) {
+        return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
+    }
+
+    let response = match method {
+        "request" => {
+            let params = match object.get("params") {
+                Some(Value::Object(params)) if params.get("op").is_some() => {
+                    Value::Object(params.clone())
+                }
+                _ => return jsonrpc_optional_error(has_id, id, -32602, "Invalid params"),
+            };
+            let request = match serde_json::from_value::<ToolRequest>(params) {
+                Ok(request) => request,
+                Err(_) => return jsonrpc_optional_error(has_id, id, -32602, "Invalid params"),
+            };
+            tool_response_result(service.handle(&request))
+        }
+        "compile" | "check" | "analyze" | "inspect" => {
+            if object.contains_key("params") {
+                return jsonrpc_optional_error(has_id, id, -32602, "Invalid params");
+            }
+            match method {
+                "compile" => serde_json::to_value(service.compile()).expect("result serializes"),
+                "check" => serde_json::to_value(service.check()).expect("result serializes"),
+                "analyze" => serde_json::to_value(service.analyze()).expect("result serializes"),
+                _ => serde_json::to_value(service.inspect()).expect("result serializes"),
+            }
+        }
+        other => {
+            return jsonrpc_optional_error(
+                has_id,
+                id,
+                -32601,
+                format!("Method not found: {other}"),
+            );
+        }
+    };
+
+    has_id.then(|| jsonrpc_result(id, response))
+}
+
+fn tool_response_result(response: wright_driver::service::ToolResponse) -> Value {
+    match response {
+        wright_driver::service::ToolResponse::Ok { result } => result,
+        wright_driver::service::ToolResponse::Error { error } => serde_json::json!({
+            "error": error,
+        }),
+    }
+}
+
+fn jsonrpc_result(id: Value, result: Value) -> Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result,
+    })
+}
+
+fn jsonrpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message.into(),
+        },
+    })
+}
+
+fn jsonrpc_optional_error(
+    has_id: bool,
+    id: Value,
+    code: i64,
+    message: impl Into<String>,
+) -> Option<Value> {
+    has_id.then(|| jsonrpc_error(id, code, message))
 }
 
 /// Dispatch one request JSON line through the tool service.

@@ -80,18 +80,29 @@ fn jsonrpc_transport_serves_requests_and_workflows() {
         &[
             r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"rules"}}"#,
             r#"{"jsonrpc":"2.0","id":2,"method":"request","params":{"op":"costEstimate"}}"#,
-            r#"{"jsonrpc":"2.0","id":3,"method":"check"}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"compile"}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"check"}"#,
+            r#"{"jsonrpc":"2.0","id":5,"method":"analyze"}"#,
+            r#"{"jsonrpc":"2.0","id":6,"method":"inspect"}"#,
         ],
     );
-    assert_eq!(responses.len(), 3);
+    assert_eq!(responses.len(), 6);
     assert_eq!(responses[0]["id"], 1);
-    assert_eq!(
-        responses[0]["result"]["result"].as_array().unwrap().len(),
-        2
-    );
+    assert_eq!(responses[0]["result"].as_array().unwrap().len(), 2);
     assert_eq!(responses[1]["id"], 2);
     assert_eq!(responses[2]["id"], 3);
-    assert_eq!(responses[2]["result"]["result"]["command"], "check");
+    assert_eq!(responses[2]["result"]["command"], "compile");
+    assert_eq!(responses[3]["id"], 4);
+    assert_eq!(responses[3]["result"]["command"], "check");
+    assert_eq!(responses[4]["id"], 5);
+    assert_eq!(responses[4]["result"]["command"], "analyze");
+    assert_eq!(responses[5]["id"], 6);
+    assert_eq!(responses[5]["result"]["command"], "inspect");
+    for response in responses {
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response.get("result").is_some());
+        assert!(response.get("error").is_none());
+    }
 }
 
 #[test]
@@ -107,7 +118,80 @@ fn transports_match_in_process_semantics() {
         &corpus_workshop("synthetic/control-flow"),
         &[r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"findings"}}"#],
     );
-    assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]["result"]);
+    assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]);
+}
+
+#[test]
+fn jsonrpc_transport_preserves_application_errors_and_protocol_errors() {
+    let responses = run_lines(
+        "jsonrpc",
+        &corpus_workshop("synthetic/control-flow"),
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"references","symbol":999999}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"missing"}"#,
+            "not json",
+            r#"{"jsonrpc":"2.0","id":4,"method":"request"}"#,
+            r#"{"jsonrpc":"2.0","id":5,"method":"request","params":{"op":"unknown"}}"#,
+        ],
+    );
+    assert_eq!(responses.len(), 5);
+
+    assert_eq!(responses[0]["id"], 1);
+    assert_eq!(responses[0]["result"]["error"]["code"], "invalid-id");
+    assert!(responses[0].get("error").is_none());
+
+    assert_eq!(responses[1]["id"], 2);
+    assert_eq!(responses[1]["error"]["code"], -32601);
+    assert!(responses[1].get("result").is_none());
+
+    assert_eq!(responses[2]["id"], serde_json::Value::Null);
+    assert_eq!(responses[2]["error"]["code"], -32700);
+
+    assert_eq!(responses[3]["id"], 4);
+    assert_eq!(responses[3]["error"]["code"], -32602);
+
+    assert_eq!(responses[4]["id"], 5);
+    assert_eq!(responses[4]["error"]["code"], -32602);
+    for response in responses {
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response.get("result").is_some() ^ response.get("error").is_some());
+    }
+}
+
+#[test]
+fn jsonrpc_transport_rejects_invalid_requests_with_null_id() {
+    let responses = run_lines(
+        "jsonrpc",
+        &corpus_workshop("synthetic/basic-rule"),
+        &[
+            r#"{"jsonrpc":"1.0","id":1,"method":"check"}"#,
+            r#"{"jsonrpc":"2.0","id":2}"#,
+            r#"[1,2,3]"#,
+        ],
+    );
+    assert_eq!(responses.len(), 3);
+    for response in responses {
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["id"], serde_json::Value::Null);
+        assert_eq!(response["error"]["code"], -32600);
+        assert!(response.get("result").is_none());
+    }
+}
+
+#[test]
+fn jsonrpc_transport_does_not_respond_to_notifications() {
+    let responses = run_lines(
+        "jsonrpc",
+        &corpus_workshop("synthetic/basic-rule"),
+        &[
+            r#"{"jsonrpc":"2.0","method":"request","params":{"op":"capabilities"}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"check"}"#,
+        ],
+    );
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0]["jsonrpc"], "2.0");
+    assert_eq!(responses[0]["id"], 2);
+    assert!(responses[0].get("result").is_some());
 }
 
 #[test]
@@ -215,5 +299,5 @@ fn transports_are_equivalent_for_mutation_operations() {
         &input,
         &[&serde_json::to_string(&jsonrpc_request).unwrap()],
     );
-    assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]["result"]);
+    assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]);
 }
