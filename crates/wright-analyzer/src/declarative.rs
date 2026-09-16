@@ -205,7 +205,7 @@ enum CanonicalValuePattern {
 
 impl RuleDefinition {
     pub fn from_yaml_str(input: &str) -> Result<Self, RuleError> {
-        serde_yaml::from_str(input).map_err(RuleError::Yaml)
+        yaml_serde::from_str(input).map_err(RuleError::Yaml)
     }
 }
 
@@ -959,7 +959,7 @@ fn default_true() -> bool {
 
 #[derive(Debug)]
 pub enum RuleError {
-    Yaml(serde_yaml::Error),
+    Yaml(yaml_serde::Error),
     InvalidIdentity(String),
     UnsupportedLocale(String),
     UnknownSpelling {
