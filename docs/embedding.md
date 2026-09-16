@@ -131,7 +131,9 @@ explicit caller responsibility.
 
 `wright-serve` exposes the same operations over stdio JSON-lines and
 JSON-RPC 2.0; both are thin mappings with identical semantics to in-process
-consumers (equivalence tested).
+consumers (equivalence tested). JSON-RPC protocol failures use the standard
+top-level `error` member, while a `ToolResponse::Error` remains an application
+result under the top-level `result` member.
 
 ## Versioning
 
