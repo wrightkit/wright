@@ -161,14 +161,14 @@ pub struct LintConfig {
 
 impl LintConfig {
     /// Parse a project lint configuration from the stable YAML surface.
-    pub fn from_yaml_str(input: &str) -> Result<Self, serde_yaml::Error> {
-        serde_yaml::from_str(input)
+    pub fn from_yaml_str(input: &str) -> Result<Self, yaml_serde::Error> {
+        yaml_serde::from_str(input)
     }
 
     /// Read and parse a project lint configuration from YAML.
     pub fn from_yaml_path(path: &Path) -> Result<Self, std::io::Error> {
         let input = std::fs::read_to_string(path)?;
-        serde_yaml::from_str(&input).map_err(std::io::Error::other)
+        yaml_serde::from_str(&input).map_err(std::io::Error::other)
     }
 
     /// Disable a rule by its stable ID.
