@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.30](https://github.com/wrightkit/wright/compare/v0.2.29...v0.2.30) (2026-09-16)
+
+
+### Bug Fixes
+
+* conform wright-serve to JSON-RPC 2.0 ([8216f8d](https://github.com/wrightkit/wright/commit/8216f8dec6f077345698b0dfabf05dd7aa14b3de)), closes [#357](https://github.com/wrightkit/wright/issues/357)
+* support JSON-RPC batch requests ([e6b7416](https://github.com/wrightkit/wright/commit/e6b7416a70b4d7360ae1272ed6e4c3419d28716f)), closes [#357](https://github.com/wrightkit/wright/issues/357)
+
 ## [0.2.29](https://github.com/wrightkit/wright/compare/v0.2.28...v0.2.29) (2026-09-15)
 
 
