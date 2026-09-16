@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Validate Wright's single released workshop-rs dependency contract."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def metadata() -> dict:
+    result = subprocess.run(
+        ["cargo", "metadata", "--locked", "--format-version", "1"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "workshop dependency validation failed: cargo metadata failed\n"
+            + result.stderr
+        )
+    return json.loads(result.stdout)
+
+
+def main() -> int:
+    data = metadata()
+    packages_by_id = {package["id"]: package for package in data["packages"]}
+    workspace_packages = [
+        packages_by_id[package_id] for package_id in data["workspace_members"]
+    ]
+    workshop_packages = [
+        package for package in data["packages"] if package["name"] == "workshop-rs"
+    ]
+
+    if len(workshop_packages) != 1:
+        versions = ", ".join(
+            f"{package['version']} ({package['source'] or 'unpublished'})"
+            for package in workshop_packages
+        )
+        raise SystemExit(
+            "workshop dependency validation failed: expected exactly one resolved "
+            f"workshop-rs package, found {len(workshop_packages)}: {versions or 'none'}"
+        )
+
+    workshop = workshop_packages[0]
+    source = workshop.get("source")
+    if not source or not source.startswith("registry+"):
+        raise SystemExit(
+            "workshop dependency validation failed: workshop-rs must come from a "
+            f"released registry, got {source or 'unpublished'}"
+        )
+
+    direct = []
+    for package in workspace_packages:
+        for dependency in package["dependencies"]:
+            if dependency["name"] == "workshop-rs":
+                direct.append((package["name"], dependency))
+
+    if not direct:
+        raise SystemExit(
+            "workshop dependency validation failed: no workspace package directly "
+            "consumes workshop-rs"
+        )
+
+    aliases = [
+        f"{package}: {dependency['rename']}"
+        for package, dependency in direct
+        if dependency.get("rename")
+    ]
+    if aliases:
+        raise SystemExit(
+            "workshop dependency validation failed: renamed workshop-rs "
+            f"dependencies are not allowed ({', '.join(aliases)})"
+        )
+
+    expected_requirement = f"={workshop['version']}"
+    requirements = {dependency["req"] for _, dependency in direct}
+    if requirements != {expected_requirement}:
+        consumers = ", ".join(
+            f"{package} ({dependency['req']})" for package, dependency in direct
+        )
+        raise SystemExit(
+            "workshop dependency validation failed: direct consumers must use "
+            f"{expected_requirement}, found {consumers}"
+        )
+
+    consumers = ", ".join(sorted(package for package, _ in direct))
+    print(
+        f"workshop-rs contract: {workshop['version']} from {source} "
+        f"({len(direct)} direct consumers: {consumers})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

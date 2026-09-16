@@ -121,6 +121,11 @@ jobs:
       - name: Check formatting
         run: cargo +1.85.0 fmt --all -- --check
 
+      - name: Check Workshop dependency contract
+        env:
+          RUSTUP_TOOLCHAIN: 1.85.0
+        run: python3 scripts/check-workshop-dependency.py
+
       # Keep the surviving owner-independent Wright crates on the declared
       # MSRV. The provider-backed consumer crates are covered by the stable
       # full-workspace gate and the dedicated integration jobs below.
