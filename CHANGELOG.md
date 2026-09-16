@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.31](https://github.com/wrightkit/wright/compare/v0.2.30...v0.2.31) (2026-09-16)
+
+
+### Bug Fixes
+
+* **analyzer:** replace serde_yaml with yaml_serde ([#361](https://github.com/wrightkit/wright/issues/361)) ([58c868d](https://github.com/wrightkit/wright/commit/58c868dc19e7e4f021117b97701feabd9b47983e))
+* **deps:** enforce single workshop-rs contract ([#362](https://github.com/wrightkit/wright/issues/362)) ([ca2ac58](https://github.com/wrightkit/wright/commit/ca2ac583698ac955607572d9d09ac69e5f497f31))
+
+
+### Dependencies
+
+* update workshop-rs to 0.3.14 ([#363](https://github.com/wrightkit/wright/issues/363)) ([967f63a](https://github.com/wrightkit/wright/commit/967f63ae882e6e5b773a9f4ad96f1fadd46e1ae6))
+
 ## [0.2.30](https://github.com/wrightkit/wright/compare/v0.2.29...v0.2.30) (2026-09-16)
 
 
