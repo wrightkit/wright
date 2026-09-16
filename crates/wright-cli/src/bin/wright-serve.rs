@@ -139,6 +139,20 @@ fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
 }
 
 fn jsonrpc_dispatch(service: &mut ToolService<'_>, value: Value) -> Option<Value> {
+    if let Value::Array(batch) = value {
+        if batch.is_empty() {
+            return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request"));
+        }
+        let responses: Vec<Value> = batch
+            .into_iter()
+            .filter_map(|value| jsonrpc_dispatch_request(service, value))
+            .collect();
+        return (!responses.is_empty()).then_some(Value::Array(responses));
+    }
+    jsonrpc_dispatch_request(service, value)
+}
+
+fn jsonrpc_dispatch_request(service: &mut ToolService<'_>, value: Value) -> Option<Value> {
     let object = match value.as_object() {
         Some(object) => object,
         None => return Some(jsonrpc_error(Value::Null, -32600, "Invalid Request")),
