@@ -166,7 +166,7 @@ fn jsonrpc_transport_rejects_invalid_requests_with_null_id() {
         &[
             r#"{"jsonrpc":"1.0","id":1,"method":"check"}"#,
             r#"{"jsonrpc":"2.0","id":2}"#,
-            r#"[1,2,3]"#,
+            "[]",
         ],
     );
     assert_eq!(responses.len(), 3);
@@ -175,6 +175,33 @@ fn jsonrpc_transport_rejects_invalid_requests_with_null_id() {
         assert_eq!(response["id"], serde_json::Value::Null);
         assert_eq!(response["error"]["code"], -32600);
         assert!(response.get("result").is_none());
+    }
+}
+
+#[test]
+fn jsonrpc_transport_serves_batch_requests() {
+    let responses = run_lines(
+        "jsonrpc",
+        &corpus_workshop("synthetic/basic-rule"),
+        &[
+            r#"[{"jsonrpc":"2.0","id":1,"method":"check"},{"jsonrpc":"2.0","method":"check"},{"jsonrpc":"2.0","id":2,"method":"missing"},1]"#,
+        ],
+    );
+    assert_eq!(responses.len(), 1);
+    let batch = responses[0].as_array().unwrap();
+    assert_eq!(batch.len(), 3);
+
+    assert_eq!(batch[0]["id"], 1);
+    assert_eq!(batch[0]["result"]["command"], "check");
+
+    assert_eq!(batch[1]["id"], 2);
+    assert_eq!(batch[1]["error"]["code"], -32601);
+
+    assert_eq!(batch[2]["id"], serde_json::Value::Null);
+    assert_eq!(batch[2]["error"]["code"], -32600);
+    for response in batch {
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert!(response.get("result").is_some() ^ response.get("error").is_some());
     }
 }
 

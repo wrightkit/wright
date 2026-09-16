@@ -133,7 +133,8 @@ explicit caller responsibility.
 JSON-RPC 2.0; both are thin mappings with identical semantics to in-process
 consumers (equivalence tested). JSON-RPC protocol failures use the standard
 top-level `error` member, while a `ToolResponse::Error` remains an application
-result under the top-level `result` member.
+result under the top-level `result` member. Non-empty JSON-RPC arrays are
+handled as batches, with notification responses omitted.
 
 ## Versioning
 
