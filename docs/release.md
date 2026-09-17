@@ -62,19 +62,21 @@ workflow is the single product release path:
 2. The Release PR updates the shared workspace version, `Cargo.lock`, and the
    checked-in `dist/` metadata. All workspace crate changes are included in the
    product changelog decision.
-3. Merging that Release PR runs release-please, which creates exactly one
-   `vX.Y.Z` tag and a draft GitHub Release. The job passes the release-please
-   tag and release commit to the reusable `release.yml` workflow.
-4. The reusable workflow verifies the tag/revision and version identity, runs
-   `scripts/release.sh` and `scripts/verify-dist.py`, builds and smoke-tests the
-   native matrix, attaches archives/checksums/manifests to the draft, and marks
-   the GitHub Release public. It then publishes the exact verified archives and
-   checksums to R2 and independently updates the Homebrew tap.
+3. Merging that Release PR leaves the exact release commit on `main` without
+   creating a tag or GitHub Release. The `CI` workflow validates that commit.
+4. After that exact `CI` run succeeds, `release-publication.yml` starts the
+   reusable `release.yml` workflow. It verifies the version, builds and
+   smoke-tests the native matrix, verifies the complete archive/checksum set,
+   and generates package-manager manifests.
+5. The final `publish-release` job creates the `vX.Y.Z` tag and public GitHub
+   Release against that exact commit with the verified archives, checksums,
+   and manifests. Only then do R2 and Homebrew publication run.
 
-A failure before the GitHub Release is published leaves the same draft
-Release/tag available for a retry; it does not create a new product version.
-If R2 publication fails afterward, the public GitHub Release remains the
-canonical record but `latest/version` is not advanced. A retry reuses only
+A failure before GitHub Release creation leaves no public release or tag for
+that candidate; rerun the failed release-publication workflow run to retry the
+same CI-qualified commit. If R2 publication fails afterward, the public
+GitHub Release remains the canonical record but `latest/version` is not
+advanced. A retry reuses only
 byte-identical immutable R2 objects and refuses any conflicting object.
 
 ### Creating a release
@@ -82,13 +84,14 @@ byte-identical immutable R2 objects and refuses any conflicting object.
 The Release PR is the release decision point. Maintainers do not enter a
 version, edit version files, create a tag, or dispatch a second workflow for
 the normal case. Review and merge the automatically maintained Release PR;
-release-please derives the next version from Conventional Commits and creates
-the one product tag/release.
+release-please derives the next version from Conventional Commits and records
+the version/changelog that the publication workflow later releases.
 
-The `release.yml` workflow is reusable and is intentionally not triggered by a
-tag or Release event. The default Actions token cannot start a new workflow
-from a tag push; passing release-please outputs through a job dependency keeps
-the release in one run.
+The `release-publication.yml` workflow is triggered by the completed `CI`
+workflow, so successful exact-commit CI is a native prerequisite. The reusable
+`release.yml` workflow is intentionally not triggered by a tag or Release
+event. Release creation is the final publication-stage job, so the default
+Actions token does not need to start a second workflow from a tag push.
 
 ### Target matrix and artifact naming
 
@@ -190,8 +193,8 @@ it extracts the archive and runs the shared `scripts/smoke-native.py` contract
 against the extracted binaries. The contract checks both version banners,
 representative OPY compile/check paths, and first-party OPY provider bootstrap
 from an empty provider store. The upload job re-verifies that every declared
-target's archive and checksum are present before attaching them to the draft
-Release.
+target's archive and checksum are present before attaching them to the final
+GitHub Release.
 
 The normal CI distribution validation uses independent channel legs. It stages
 a canonical-shaped local release archive and generated local metadata for
@@ -214,7 +217,8 @@ Configure these optional/required environment secrets:
 
 * `GH_TOKEN` is a fine-grained token with write access to
   `wrightkit/homebrew-tap`; it is required for automatic Homebrew tap updates.
-* The workflow's built-in `GITHUB_TOKEN` updates the draft GitHub Release.
+* The workflow's built-in `GITHUB_TOKEN` creates the final GitHub Release and
+  uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and
   `R2_SECRET_ACCESS_KEY` grant the release workflow S3 API access to the
   `wrightkit-release` bucket. The bucket must expose `releases.wrightkit.dev`

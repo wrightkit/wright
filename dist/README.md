@@ -38,19 +38,19 @@ install script stops covering the declared target matrix.
 
 ## Publication process
 
-The release-please workflow creates one draft GitHub Release and calls the
-reusable release workflow (`release.yml`) with its tag and merge commit. The
-workflow keeps the Release draft until native and package-manager distribution
-stages complete:
+The release-please workflow only maintains the Release PR and checked-in
+version/changelog. After the exact release commit's `CI` workflow succeeds,
+`release-publication.yml` calls the reusable release workflow (`release.yml`):
 
 1. `package-manifests` regenerates the Homebrew, WinGet, and Scoop manifests from
-   the native release checksums and attaches them to the draft Release as:
+   the native release checksums and stages them for the final GitHub Release as:
    - `wright-<version>.homebrew.rb`
    - `wright-<version>.winget.zip` (unzip into a winget-pkgs checkout)
    - `wright-<version>.scoop.json`
 
-2. `publish-release` marks the draft Release public after the native and
-   package-manager stages succeed.
+2. `publish-release` creates the tag and public GitHub Release with the
+   complete verified asset set after the native and package-manager stages
+   succeed.
 
 ### Homebrew
 

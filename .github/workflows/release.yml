@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       tag:
-        description: GitHub Release tag created by release-please
+        description: Release tag to create after all release gates pass
         required: true
         type: string
       commit:
@@ -49,9 +49,7 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Verify release revision and tag identity
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify release revision and version identity
         run: >-
           python3 scripts/verify-release-identity.py
           --tag "${{ inputs.tag }}"
@@ -60,21 +58,6 @@ jobs:
 
       - name: Verify checked-in distribution metadata
         run: python3 scripts/verify-dist.py
-
-  ci-evidence:
-    name: Reuse exact-SHA CI evidence
-    needs: release-identity
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.commit }}
-      - name: Wait for a successful CI run for the release commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/wait-for-ci-evidence.py --commit "${{ inputs.commit }}"
 
   build:
     name: Build ${{ matrix.target }}
@@ -168,7 +151,6 @@ jobs:
     name: Upload native release artifacts
     needs:
       - build
-      - ci-evidence
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ inputs.tag }}
@@ -193,17 +175,12 @@ jobs:
           --artifacts-dir artifacts
           --output-dir release
 
-      - name: Verify the release-please draft Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/verify-release-draft.py --tag "${{ inputs.tag }}"
-
-      - name: Attach native archives and checksums
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release upload "${RELEASE_TAG}" release/* --clobber
-          --repo "${GITHUB_REPOSITORY}"
+      - name: Upload verified native release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: verified-release-assets
+          path: release/*
+          if-no-files-found: error
 
   package-manifests:
     name: Generate package-manager manifests
@@ -218,12 +195,11 @@ jobs:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
 
-      - name: Download release artifacts
+      - name: Download verified release artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: wright-*
+          name: verified-release-assets
           path: artifacts
-          merge-multiple: true
 
       - name: Generate manifests from the published checksums
         run: >-
@@ -233,19 +209,12 @@ jobs:
           --output-dir manifests
           --attach-dir attach
 
-      - name: Upload Homebrew formula for tap publication
+      - name: Upload verified package-manager manifests
         uses: actions/upload-artifact@v7
         with:
-          name: homebrew-formula
-          path: ${{ github.workspace }}/manifests/dist/homebrew/wright.rb
+          name: release-manifests
+          path: attach/*
           if-no-files-found: error
-
-      - name: Attach package-manager manifests to the draft Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release upload "${RELEASE_TAG}" attach/* --clobber
-          --repo "${GITHUB_REPOSITORY}"
 
   publish-tap:
     name: Publish formula to homebrew-tap
@@ -263,7 +232,7 @@ jobs:
       - name: Download generated Homebrew formula
         uses: actions/download-artifact@v8
         with:
-          name: homebrew-formula
+          name: release-manifests
           path: formula
 
       - name: Check out wrightkit/homebrew-tap
@@ -283,17 +252,101 @@ jobs:
   publish-release:
     name: Publish completed GitHub Release
     needs:
+      - upload-artifacts
       - package-manifests
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - name: Publish the completed draft Release
+      - name: Check out the exact release revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit }}
+
+      - name: Download verified native release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: verified-release-assets
+          path: release
+
+      - name: Download verified package-manager manifests
+        uses: actions/download-artifact@v8
+        with:
+          name: release-manifests
+          path: attach
+
+      - name: Prepare Release Please release notes
+        run: >-
+          python3 scripts/extract-release-notes.py
+          --tag "${{ inputs.tag }}"
+          --output release-notes.md
+
+      - name: Create, resume, or verify the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-        run: >-
-          gh release edit "${RELEASE_TAG}" --draft=false --latest
-          --repo "${GITHUB_REPOSITORY}"
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          verify_release_assets() {
+            expected_assets="$(for path in release/* attach/*; do basename "$path"; done | sort -u)"
+            published_assets="$(gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name' | sort -u)"
+            if ! diff -u \
+              <(printf '%s\n' "$expected_assets") \
+              <(printf '%s\n' "$published_assets"); then
+              echo "release $RELEASE_TAG does not have exactly the verified asset set" >&2
+              exit 1
+            fi
+          }
+
+          existing_tag_commit="$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
+            --jq '.sha' 2>/dev/null || true)"
+          if [[ -n "$existing_tag_commit" && \
+            "$existing_tag_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "tag $RELEASE_TAG already points to $existing_tag_commit" >&2
+            exit 1
+          fi
+
+          if draft="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft' 2>/dev/null)"; then
+            echo "found existing $([[ "$draft" == true ]] && echo draft || echo public) release $RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$RELEASE_COMMIT" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --draft
+            draft=true
+          fi
+
+          python3 scripts/verify-release-identity.py \
+            --tag "$RELEASE_TAG" \
+            --commit "$RELEASE_COMMIT" \
+            --ref "$RELEASE_COMMIT" \
+            --verify-tag
+
+          if [[ "$draft" == true ]]; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md
+            gh release upload "$RELEASE_TAG" release/* attach/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            verify_release_assets
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft=false \
+              --latest
+          else
+            verify_release_assets
+            echo "verified existing public release $RELEASE_TAG"
+          fi
 
   publish-r2:
     name: Publish verified archives to R2
@@ -320,9 +373,8 @@ jobs:
       - name: Download verified release artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: wright-*
+          name: verified-release-assets
           path: artifacts
-          merge-multiple: true
 
       - name: Publish immutable versioned objects, then advance latest
         env:

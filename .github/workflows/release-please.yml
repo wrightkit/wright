@@ -29,10 +29,6 @@ jobs:
     concurrency:
       group: release-please-${{ github.ref }}
       cancel-in-progress: false
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      release_tag: ${{ steps.release.outputs.tag_name }}
-      release_commit: ${{ steps.release.outputs.sha }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -51,6 +47,7 @@ jobs:
           token: ${{ secrets.GH_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-release: true
 
       - name: Open recovery release PR
         if: github.event_name == 'workflow_dispatch'
@@ -87,17 +84,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
           PR: ${{ steps.release.outputs.pr }}
         run: ./scripts/sync-release-metadata.sh
-
-  release-artifacts:
-    name: Build and publish release artifacts
-    needs: release
-    if: needs.release.outputs.release_created == 'true'
-    uses: ./.github/workflows/release.yml
-    with:
-      ref: ${{ needs.release.outputs.release_commit }}
-      tag: ${{ needs.release.outputs.release_tag }}
-      commit: ${{ needs.release.outputs.release_commit }}
-    secrets: inherit
-    permissions:
-      actions: read
-      contents: write
