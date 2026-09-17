@@ -3,9 +3,10 @@ name: Release
 # ---------------------------------------------------------------------------
 # Trigger rules
 # ---------------------------------------------------------------------------
-# Runs only when the CI workflow completes successfully for a push to main.
-# The first job (detect-release) checks whether the triggering commit is a
-# release commit; all subsequent jobs are skipped when it is not.
+# Runs only when the CI workflow completes for a push to main.
+# detect-release gates on CI success and verifies the triggering run came
+# from a trusted push event on this repository before checking out or
+# executing any content from the triggering SHA.
 #
 # This replaces the previous approach where release-please dispatched this
 # workflow directly and a polling job waited for CI to finish. CI success is
@@ -24,18 +25,22 @@ permissions:
 jobs:
   # -------------------------------------------------------------------------
   # [0] DETECT RELEASE
-  # Checks whether the commit that triggered CI is a release commit by
-  # comparing version.txt at that SHA against the most recently published
-  # GitHub Release tag. Skips all downstream jobs when it is not.
+  # Trust boundary: verifies the triggering CI run was a push event from this
+  # repository (not a fork PR whose head branch is named main) before checking
+  # out the SHA or advancing to any privileged job. Also gates on CI success
+  # so a failed CI run can never advance to publication.
   #
-  # Also gates on the triggering CI run having concluded successfully so that
-  # a failed CI run can never advance to publication.
+  # Checks whether the triggering commit is a release commit by comparing
+  # version.txt at that SHA against existing published tags. Skips all
+  # downstream jobs when the commit is not a new release.
   # -------------------------------------------------------------------------
   detect-release:
     name: Detect release commit
     runs-on: ubuntu-latest
-    # Only proceed when the upstream CI run succeeded.
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     outputs:
       is_release: ${{ steps.check.outputs.is_release }}
       release_tag: ${{ steps.check.outputs.release_tag }}
@@ -223,10 +228,12 @@ jobs:
 
   # -------------------------------------------------------------------------
   # [3] UPLOAD ARTIFACTS
-  # Verifies the complete artifact set and checksums, then creates the
-  # release tag and GitHub Release, and attaches native archives.
-  # The GitHub Release is created here (not as a draft beforehand) so that
-  # a failed build or verification does not leave a published release.
+  # Verifies the complete artifact set and checksums, creates the release tag
+  # and a draft GitHub Release, then attaches native archives.
+  # The Release is kept as a draft here so that a failure in the subsequent
+  # package-manifests job cannot leave a public incomplete Release.
+  # Final publication to non-draft happens in publish-release after all
+  # release-specific artifact and manifest gates have succeeded.
   # -------------------------------------------------------------------------
   upload-artifacts:
     name: Upload native release artifacts
@@ -261,7 +268,7 @@ jobs:
           --artifacts-dir artifacts
           --output-dir release
 
-      - name: Create release tag and GitHub Release
+      - name: Create release tag and draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -270,7 +277,7 @@ jobs:
           --target "${RELEASE_COMMIT}"
           --title "${RELEASE_TAG}"
           --generate-notes
-          --latest
+          --draft
 
       - name: Attach native archives and checksums
         env:
@@ -282,7 +289,8 @@ jobs:
   # -------------------------------------------------------------------------
   # [4] PACKAGE MANIFESTS
   # Generates package-manager manifests from verified checksums and attaches
-  # them to the published release.
+  # them to the draft Release. Runs before publication so that the published
+  # Release contains the complete artifact and manifest set.
   # -------------------------------------------------------------------------
   package-manifests:
     name: Generate package-manager manifests
@@ -321,7 +329,7 @@ jobs:
           path: ${{ github.workspace }}/manifests/dist/homebrew/wright.rb
           if-no-files-found: error
 
-      - name: Attach package-manager manifests to the Release
+      - name: Attach package-manager manifests to the draft Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -329,15 +337,37 @@ jobs:
           --repo "${GITHUB_REPOSITORY}"
 
   # -------------------------------------------------------------------------
-  # [5] PUBLISH TAP
+  # [5] PUBLISH RELEASE
+  # Promotes the draft GitHub Release to public --latest only after all
+  # artifact and package-manifest gates have succeeded. R2 and Homebrew
+  # publication are downstream of this boundary.
+  # -------------------------------------------------------------------------
+  publish-release:
+    name: Publish completed GitHub Release
+    needs:
+      - detect-release
+      - package-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the completed draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
+        run: >-
+          gh release edit "${RELEASE_TAG}" --draft=false --latest
+          --repo "${GITHUB_REPOSITORY}"
+
+  # -------------------------------------------------------------------------
+  # [6] PUBLISH TAP
   # Publishes the Homebrew formula to wrightkit/homebrew-tap after the
-  # GitHub Release is published and manifests are generated.
+  # GitHub Release is publicly published.
   # -------------------------------------------------------------------------
   publish-tap:
     name: Publish formula to homebrew-tap
     needs:
       - detect-release
       - package-manifests
+      - publish-release
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
@@ -368,16 +398,16 @@ jobs:
         run: ./scripts/publish-homebrew-tap.sh
 
   # -------------------------------------------------------------------------
-  # [6] PUBLISH R2
+  # [7] PUBLISH R2
   # Publishes verified archives to Cloudflare R2 after the GitHub Release
-  # is published. Downstream of upload-artifacts to ensure only verified
-  # artifacts are distributed.
+  # is publicly published.
   # -------------------------------------------------------------------------
   publish-r2:
     name: Publish verified archives to R2
     needs:
       - detect-release
       - upload-artifacts
+      - publish-release
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
