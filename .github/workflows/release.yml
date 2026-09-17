@@ -274,12 +274,32 @@ jobs:
           name: release-manifests
           path: attach
 
-      - name: Create or verify the completed GitHub Release
+      - name: Prepare Release Please release notes
+        run: >-
+          python3 scripts/extract-release-notes.py
+          --tag "${{ inputs.tag }}"
+          --output release-notes.md
+
+      - name: Create, resume, or verify the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_COMMIT: ${{ inputs.commit }}
         run: |
+          verify_release_assets() {
+            expected_assets="$(for path in release/* attach/*; do basename "$path"; done | sort -u)"
+            published_assets="$(gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name' | sort -u)"
+            if ! diff -u \
+              <(printf '%s\n' "$expected_assets") \
+              <(printf '%s\n' "$published_assets"); then
+              echo "release $RELEASE_TAG does not have exactly the verified asset set" >&2
+              exit 1
+            fi
+          }
+
           existing_tag_commit="$(gh api \
             "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
             --jq '.sha' 2>/dev/null || true)"
@@ -289,20 +309,19 @@ jobs:
             exit 1
           fi
 
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
-            if [[ "$draft" != "false" ]]; then
-              echo "existing release $RELEASE_TAG is still a draft" >&2
-              exit 1
-            fi
-            echo "verified existing public release $RELEASE_TAG"
+          if draft="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft' 2>/dev/null)"; then
+            echo "found existing $([[ "$draft" == true ]] && echo draft || echo public) release $RELEASE_TAG"
           else
-            gh release create "$RELEASE_TAG" release/* attach/* \
+            gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$RELEASE_COMMIT" \
-              --title "Wright $RELEASE_TAG" \
-              --generate-notes \
-              --latest
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --draft
+            draft=true
           fi
 
           python3 scripts/verify-release-identity.py \
@@ -311,17 +330,23 @@ jobs:
             --ref "$RELEASE_COMMIT" \
             --verify-tag
 
-          published_assets="$(gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets[].name')"
-          for path in release/* attach/*; do
-            asset="$(basename "$path")"
-            grep -Fx -- "$asset" <<<"$published_assets" >/dev/null || {
-              echo "release $RELEASE_TAG is missing asset $asset" >&2
-              exit 1
-            }
-          done
+          if [[ "$draft" == true ]]; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md
+            gh release upload "$RELEASE_TAG" release/* attach/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            verify_release_assets
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft=false \
+              --latest
+          else
+            verify_release_assets
+            echo "verified existing public release $RELEASE_TAG"
+          fi
 
   publish-r2:
     name: Publish verified archives to R2
