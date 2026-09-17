@@ -7,7 +7,7 @@ set -euo pipefail
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 version="${RELEASE_TAG#v}"
-formula="$GITHUB_WORKSPACE/formula/wright.rb"
+formula="$GITHUB_WORKSPACE/formula/wright-${version}.homebrew.rb"
 test -f "$formula"
 cp "$formula" "$GITHUB_WORKSPACE/tap/wright.rb"
 cd "$GITHUB_WORKSPACE/tap"

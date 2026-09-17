@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify release tag, revision, and workspace version identity."""
+"""Verify release revision and workspace version identity."""
 
 from __future__ import annotations
 
@@ -14,19 +14,25 @@ def main() -> int:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--ref", required=True)
+    parser.add_argument(
+        "--verify-tag",
+        action="store_true",
+        help="also verify that the remote tag points to the requested commit",
+    )
     args = parser.parse_args()
 
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     if head != args.commit or args.ref != args.commit:
         raise SystemExit("release checkout does not match the requested commit")
 
-    repository = os.environ["GITHUB_REPOSITORY"]
-    tag_commit = subprocess.check_output(
-        ["gh", "api", f"repos/{repository}/commits/{args.tag}", "--jq", ".sha"],
-        text=True,
-    ).strip()
-    if tag_commit != args.commit:
-        raise SystemExit(f"tag {args.tag} points to {tag_commit}, expected {args.commit}")
+    if args.verify_tag:
+        repository = os.environ["GITHUB_REPOSITORY"]
+        tag_commit = subprocess.check_output(
+            ["gh", "api", f"repos/{repository}/commits/{args.tag}", "--jq", ".sha"],
+            text=True,
+        ).strip()
+        if tag_commit != args.commit:
+            raise SystemExit(f"tag {args.tag} points to {tag_commit}, expected {args.commit}")
 
     version = args.tag.removeprefix("v")
     metadata = json.loads(

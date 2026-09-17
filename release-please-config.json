@@ -21,9 +21,7 @@
         { "type": "build", "section": "Build System", "hidden": true },
         { "type": "ci", "section": "Continuous Integration", "hidden": true }
       ],
-      "include-component-in-tag": false,
-      "draft": true,
-      "force-tag-creation": true
+      "include-component-in-tag": false
     }
   }
 }
