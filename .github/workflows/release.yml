@@ -195,12 +195,11 @@ jobs:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
 
-      - name: Download release artifacts
+      - name: Download verified release artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: wright-*
+          name: verified-release-assets
           path: artifacts
-          merge-multiple: true
 
       - name: Generate manifests from the published checksums
         run: >-
