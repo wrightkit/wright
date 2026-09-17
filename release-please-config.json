@@ -22,8 +22,7 @@
         { "type": "ci", "section": "Continuous Integration", "hidden": true }
       ],
       "include-component-in-tag": false,
-      "draft": true,
-      "force-tag-creation": true
+      "skip-github-release": true
     }
   }
 }

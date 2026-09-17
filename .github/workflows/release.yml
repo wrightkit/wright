@@ -1,47 +1,103 @@
 name: Release
 
+# ---------------------------------------------------------------------------
+# Trigger rules
+# ---------------------------------------------------------------------------
+# Runs only when the CI workflow completes successfully for a push to main.
+# The first job (detect-release) checks whether the triggering commit is a
+# release commit; all subsequent jobs are skipped when it is not.
+#
+# This replaces the previous approach where release-please dispatched this
+# workflow directly and a polling job waited for CI to finish. CI success is
+# now a native prerequisite expressed through the Actions graph.
+
 on:
-  workflow_call:
-    inputs:
-      ref:
-        description: Git revision containing the release packages
-        required: true
-        type: string
-      tag:
-        description: GitHub Release tag created by release-please
-        required: true
-        type: string
-      commit:
-        description: Release commit used for version identity
-        required: true
-        type: string
-    secrets:
-      GH_TOKEN:
-        description: Dedicated cross-repository token with write access to wrightkit/homebrew-tap
-        required: true
-      R2_ACCESS_KEY_ID:
-        description: Cloudflare R2 S3 API access key with write access to the release bucket
-        required: true
-      R2_SECRET_ACCESS_KEY:
-        description: Cloudflare R2 S3 API secret key with write access to the release bucket
-        required: true
-      CLOUDFLARE_ACCOUNT_ID:
-        description: Cloudflare account ID for the R2 S3 API endpoint
-        required: true
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   actions: read
   contents: write
 
 jobs:
+  # -------------------------------------------------------------------------
+  # [0] DETECT RELEASE
+  # Checks whether the commit that triggered CI is a release commit by
+  # comparing version.txt at that SHA against the most recently published
+  # GitHub Release tag. Skips all downstream jobs when it is not.
+  #
+  # Also gates on the triggering CI run having concluded successfully so that
+  # a failed CI run can never advance to publication.
+  # -------------------------------------------------------------------------
+  detect-release:
+    name: Detect release commit
+    runs-on: ubuntu-latest
+    # Only proceed when the upstream CI run succeeded.
+    if: github.event.workflow_run.conclusion == 'success'
+    outputs:
+      is_release: ${{ steps.check.outputs.is_release }}
+      release_tag: ${{ steps.check.outputs.release_tag }}
+      release_commit: ${{ steps.check.outputs.release_commit }}
+    steps:
+      - name: Check out repository at CI commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Determine whether this is a release commit
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < version.txt)"
+          tag="v${version}"
+          echo "Candidate release: ${tag} at ${CI_COMMIT}"
+
+          # Check whether the tag already exists (published or not) to avoid
+          # creating a duplicate on a re-run or non-release push.
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" \
+               --json tagName --jq '.tagName' 2>/dev/null | grep -q "${tag}"; then
+            echo "Release ${tag} already exists; not a new release commit."
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Confirm the commit message matches a release-please merge pattern.
+          commit_subject="$(git log -1 --format='%s' "${CI_COMMIT}")"
+          if [[ "$commit_subject" != "chore(main): release "* ]]; then
+            echo "Commit subject '${commit_subject}' is not a release commit."
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Confirmed release commit: ${tag} at ${CI_COMMIT}"
+          echo "is_release=true"   >> "$GITHUB_OUTPUT"
+          echo "release_tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "release_commit=${CI_COMMIT}" >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------------------
+  # [1] RELEASE IDENTITY
+  # Verifies the release commit's workspace version matches the derived tag.
+  # Runs only when detect-release confirms a new release commit.
+  # -------------------------------------------------------------------------
   release-identity:
     name: Verify release identity and packages
+    needs: detect-release
+    if: needs.detect-release.outputs.is_release == 'true'
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
+      RELEASE_COMMIT: ${{ needs.detect-release.outputs.release_commit }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.detect-release.outputs.release_commit }}
           fetch-depth: 0
 
       - name: Install Rust toolchain
@@ -49,36 +105,37 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Verify release revision and tag identity
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          python3 scripts/verify-release-identity.py
-          --tag "${{ inputs.tag }}"
-          --commit "${{ inputs.commit }}"
-          --ref "${{ inputs.ref }}"
+      - name: Verify workspace version matches tag
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < version.txt)"
+          tag="v${version}"
+          if [[ "$tag" != "$RELEASE_TAG" ]]; then
+            echo "version.txt (${version}) does not match expected tag ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 \
+            | python3 -c "import sys,json; pkgs=json.load(sys.stdin)['packages']; \
+              print(next(p['version'] for p in pkgs if p['name']=='wright-cli'))")"
+          if [[ "$cargo_version" != "$version" ]]; then
+            echo "Cargo workspace version (${cargo_version}) does not match version.txt (${version})" >&2
+            exit 1
+          fi
+          echo "Release identity verified: ${RELEASE_TAG} at ${RELEASE_COMMIT}"
 
       - name: Verify checked-in distribution metadata
         run: python3 scripts/verify-dist.py
 
-  ci-evidence:
-    name: Reuse exact-SHA CI evidence
-    needs: release-identity
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.commit }}
-      - name: Wait for a successful CI run for the release commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/wait-for-ci-evidence.py --commit "${{ inputs.commit }}"
-
+  # -------------------------------------------------------------------------
+  # [2] BUILD
+  # Native release builds per target. Depends on release-identity so a
+  # version mismatch aborts before building.
+  # -------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.target }}
-    needs: release-identity
+    needs:
+      - detect-release
+      - release-identity
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -100,15 +157,15 @@ jobs:
       run:
         shell: bash
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
+      RELEASE_COMMIT: ${{ needs.detect-release.outputs.release_commit }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.detect-release.outputs.release_commit }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -139,10 +196,10 @@ jobs:
       - name: Package archive with version stamp
         run: >-
           python scripts/package-release.py
-          --version "${{ inputs.tag }}"
+          --version "${{ needs.detect-release.outputs.release_tag }}"
           --target "$TARGET"
           --extension "$EXT"
-          --commit "${{ inputs.commit }}"
+          --commit "${{ needs.detect-release.outputs.release_commit }}"
           --runner-os "${{ runner.os }}"
 
       - name: Smoke test the packaged archive
@@ -164,19 +221,30 @@ jobs:
             dist/wright-*.zip.sha256
             dist/wright-*.build.json
 
+  # -------------------------------------------------------------------------
+  # [3] UPLOAD ARTIFACTS
+  # Verifies the complete artifact set and checksums, then creates the
+  # release tag and GitHub Release, and attaches native archives.
+  # The GitHub Release is created here (not as a draft beforehand) so that
+  # a failed build or verification does not leave a published release.
+  # -------------------------------------------------------------------------
   upload-artifacts:
     name: Upload native release artifacts
     needs:
+      - detect-release
+      - release-identity
       - build
-      - ci-evidence
     runs-on: ubuntu-latest
+    environment: release
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
+      RELEASE_COMMIT: ${{ needs.detect-release.outputs.release_commit }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.detect-release.outputs.release_commit }}
+
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -187,16 +255,22 @@ jobs:
       - name: Verify the complete artifact set
         run: >-
           python3 scripts/verify-release-artifacts.py
-          --version "${{ inputs.tag }}"
-          --commit "${{ inputs.commit }}"
-          --tag "${{ inputs.tag }}"
+          --version "${{ needs.detect-release.outputs.release_tag }}"
+          --commit "${{ needs.detect-release.outputs.release_commit }}"
+          --tag "${{ needs.detect-release.outputs.release_tag }}"
           --artifacts-dir artifacts
           --output-dir release
 
-      - name: Verify the release-please draft Release
+      - name: Create release tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/verify-release-draft.py --tag "${{ inputs.tag }}"
+        run: >-
+          gh release create "${RELEASE_TAG}"
+          --repo "${GITHUB_REPOSITORY}"
+          --target "${RELEASE_COMMIT}"
+          --title "${RELEASE_TAG}"
+          --generate-notes
+          --latest
 
       - name: Attach native archives and checksums
         env:
@@ -205,17 +279,24 @@ jobs:
           gh release upload "${RELEASE_TAG}" release/* --clobber
           --repo "${GITHUB_REPOSITORY}"
 
+  # -------------------------------------------------------------------------
+  # [4] PACKAGE MANIFESTS
+  # Generates package-manager manifests from verified checksums and attaches
+  # them to the published release.
+  # -------------------------------------------------------------------------
   package-manifests:
     name: Generate package-manager manifests
-    needs: upload-artifacts
+    needs:
+      - detect-release
+      - upload-artifacts
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.detect-release.outputs.release_commit }}
           fetch-depth: 0
 
       - name: Download release artifacts
@@ -228,7 +309,7 @@ jobs:
       - name: Generate manifests from the published checksums
         run: >-
           python3 scripts/generate-release-manifests.py
-          --version "${{ inputs.tag }}"
+          --version "${{ needs.detect-release.outputs.release_tag }}"
           --artifacts-dir artifacts
           --output-dir manifests
           --attach-dir attach
@@ -240,26 +321,32 @@ jobs:
           path: ${{ github.workspace }}/manifests/dist/homebrew/wright.rb
           if-no-files-found: error
 
-      - name: Attach package-manager manifests to the draft Release
+      - name: Attach package-manager manifests to the Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release upload "${RELEASE_TAG}" attach/* --clobber
           --repo "${GITHUB_REPOSITORY}"
 
+  # -------------------------------------------------------------------------
+  # [5] PUBLISH TAP
+  # Publishes the Homebrew formula to wrightkit/homebrew-tap after the
+  # GitHub Release is published and manifests are generated.
+  # -------------------------------------------------------------------------
   publish-tap:
     name: Publish formula to homebrew-tap
     needs:
+      - detect-release
       - package-manifests
-      - publish-release
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.detect-release.outputs.release_commit }}
+
       - name: Download generated Homebrew formula
         uses: actions/download-artifact@v8
         with:
@@ -280,29 +367,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: ./scripts/publish-homebrew-tap.sh
 
-  publish-release:
-    name: Publish completed GitHub Release
-    needs:
-      - package-manifests
-    runs-on: ubuntu-latest
-    environment: release
-    steps:
-      - name: Publish the completed draft Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: >-
-          gh release edit "${RELEASE_TAG}" --draft=false --latest
-          --repo "${GITHUB_REPOSITORY}"
-
+  # -------------------------------------------------------------------------
+  # [6] PUBLISH R2
+  # Publishes verified archives to Cloudflare R2 after the GitHub Release
+  # is published. Downstream of upload-artifacts to ensure only verified
+  # artifacts are distributed.
+  # -------------------------------------------------------------------------
   publish-r2:
     name: Publish verified archives to R2
     needs:
+      - detect-release
       - upload-artifacts
-      - publish-release
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
       R2_BUCKET: wrightkit-release
       R2_PUBLIC_BASE_URL: https://releases.wrightkit.dev
       R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
@@ -313,7 +391,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.detect-release.outputs.release_commit }}
+
       - name: Check R2 publication configuration
         run: aws --version
 
