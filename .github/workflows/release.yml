@@ -30,9 +30,12 @@ jobs:
   # out the SHA or advancing to any privileged job. Also gates on CI success
   # so a failed CI run can never advance to publication.
   #
-  # Checks whether the triggering commit is a release commit by comparing
-  # version.txt at that SHA against existing published tags. Skips all
-  # downstream jobs when the commit is not a new release.
+  # State machine:
+  #   - Published Release for this tag       → is_release=false (clean skip)
+  #   - Draft for this tag, same SHA         → is_release=true  (resume)
+  #   - Draft for this tag, different SHA    → exit 1 (identity conflict)
+  #   - No Release, release-please subject   → is_release=true  (fresh run)
+  #   - No Release, non-release subject      → is_release=false (clean skip)
   # -------------------------------------------------------------------------
   detect-release:
     name: Detect release commit
@@ -64,50 +67,48 @@ jobs:
           echo "Candidate release: ${tag} at ${CI_COMMIT}"
 
           # Check whether a Release for this tag already exists.
-          # A published (non-draft) Release means this version is complete; skip.
-          # A draft Release may mean a previous upload-artifacts run started but
-          # failed partway. Only resume if the draft targets the current CI commit;
-          # a stale draft from a different commit must not be silently adopted.
-          existing="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" \
-            --json tagName,isDraft,targetCommitish 2>/dev/null || true)"
-          if [[ -n "${existing}" ]]; then
-            is_draft="$(echo "${existing}" | python3 -c \
-              "import sys,json; r=json.load(sys.stdin); print(str(r.get('isDraft',False)).lower())")"
-            if [[ "${is_draft}" == "false" ]]; then
+          existing_draft="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" \
+            --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+
+          if [[ -n "${existing_draft}" ]]; then
+            if [[ "${existing_draft}" == "false" ]]; then
+              # Already published: clean skip.
               echo "Published Release ${tag} already exists; skipping."
               echo "is_release=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            # Resolve targetCommitish to a SHA (it may be a branch name).
-            target_ref="$(echo "${existing}" | python3 -c \
-              "import sys,json; print(json.load(sys.stdin).get('targetCommitish',''))")"
+
+            # Draft exists. Verify it targets this exact commit.
+            # targetCommitish may be a branch name; resolve to a full SHA.
+            target_ref="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" \
+              --json targetCommitish --jq '.targetCommitish')"
             draft_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target_ref}" \
-              --jq '.sha' 2>/dev/null || true)"
+              --jq '.sha')"
             if [[ "${draft_sha}" != "${CI_COMMIT}" ]]; then
-              echo "Draft Release ${tag} targets ${draft_sha} (via '${target_ref}'), not ${CI_COMMIT}; skipping."
+              echo "ERROR: draft Release ${tag} targets ${draft_sha} (via '${target_ref}'), expected ${CI_COMMIT}." >&2
+              echo "Stale or mismatched draft exists for this tag. Resolve it manually before retrying." >&2
+              exit 1
+            fi
+            echo "Draft Release ${tag} targets ${CI_COMMIT}; resuming incomplete release pipeline."
+          else
+            # No Release exists. Confirm this is a release-please merge commit.
+            commit_subject="$(git log -1 --format='%s' "${CI_COMMIT}")"
+            if [[ "$commit_subject" != "chore(main): release "* ]]; then
+              echo "Commit subject '${commit_subject}' is not a release commit; skipping."
               echo "is_release=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "Draft Release ${tag} targets ${CI_COMMIT}; resuming incomplete release pipeline."
-          fi
-
-          # Confirm the commit message matches a release-please merge pattern.
-          commit_subject="$(git log -1 --format='%s' "${CI_COMMIT}")"
-          if [[ "$commit_subject" != "chore(main): release "* ]]; then
-            echo "Commit subject '${commit_subject}' is not a release commit."
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
 
           echo "Confirmed release commit: ${tag} at ${CI_COMMIT}"
-          echo "is_release=true"   >> "$GITHUB_OUTPUT"
+          echo "is_release=true"    >> "$GITHUB_OUTPUT"
           echo "release_tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "release_commit=${CI_COMMIT}" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------------
   # [1] RELEASE IDENTITY
   # Verifies the release commit's workspace version matches the derived tag.
-  # Runs only when detect-release confirms a new release commit.
+  # Runs only when detect-release confirms a new or resumable release commit.
   # -------------------------------------------------------------------------
   release-identity:
     name: Verify release identity and packages
@@ -248,11 +249,16 @@ jobs:
   # -------------------------------------------------------------------------
   # [3] UPLOAD ARTIFACTS
   # Verifies the complete artifact set and checksums, creates the release tag
-  # and a draft GitHub Release, then attaches native archives.
+  # and a draft GitHub Release (with Release Please CHANGELOG notes), then
+  # attaches native archives.
+  #
+  # Draft creation is idempotent: if a matching draft already exists for the
+  # exact release commit, it is reused. A published Release or a draft
+  # targeting a different commit both result in an explicit failure.
+  #
   # The Release is kept as a draft here so that a failure in the subsequent
-  # package-manifests job cannot leave a public incomplete Release.
-  # Final publication to non-draft happens in publish-release after all
-  # release-specific artifact and manifest gates have succeeded.
+  # package-manifests job cannot leave a public incomplete Release. Final
+  # publication happens in publish-release after all gates succeed.
   # -------------------------------------------------------------------------
   upload-artifacts:
     name: Upload native release artifacts
@@ -261,7 +267,6 @@ jobs:
       - release-identity
       - build
     runs-on: ubuntu-latest
-    environment: release
     env:
       RELEASE_TAG: ${{ needs.detect-release.outputs.release_tag }}
       RELEASE_COMMIT: ${{ needs.detect-release.outputs.release_commit }}
@@ -287,29 +292,39 @@ jobs:
           --artifacts-dir artifacts
           --output-dir release
 
+      - name: Extract Release Please changelog notes
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          # Extract the section for this version from CHANGELOG.md.
+          # Prints everything between the version heading and the next ## heading.
+          awk "/^## \[${version}\]/{found=1; next} found && /^## /{exit} found{print}" \
+            CHANGELOG.md > release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            echo "WARNING: no CHANGELOG section found for ${version}; using empty notes." >&2
+          fi
+
       - name: Create or reuse draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          existing="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
-            --json tagName,isDraft,targetCommitish 2>/dev/null || true)"
-          if [[ -n "${existing}" ]]; then
-            is_draft="$(echo "${existing}" | python3 -c \
-              "import sys,json; r=json.load(sys.stdin); print(str(r.get('isDraft',False)).lower())")"
-            if [[ "${is_draft}" != "true" ]]; then
-              echo "A published Release ${RELEASE_TAG} already exists; cannot overwrite." >&2
+          existing_draft="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+
+          if [[ -n "${existing_draft}" ]]; then
+            if [[ "${existing_draft}" != "true" ]]; then
+              echo "ERROR: a published Release ${RELEASE_TAG} already exists; cannot overwrite." >&2
               exit 1
             fi
-            # targetCommitish may be a branch name; resolve it to a SHA before
-            # comparing to RELEASE_COMMIT to enforce the exact-SHA identity contract.
-            target_ref="$(echo "${existing}" | python3 -c \
-              "import sys,json; print(json.load(sys.stdin).get('targetCommitish',''))")"
+            # Draft exists. Enforce exact-SHA identity before reusing.
+            target_ref="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+              --json targetCommitish --jq '.targetCommitish')"
             draft_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target_ref}" \
-              --jq '.sha' 2>/dev/null || true)"
+              --jq '.sha')"
             if [[ "${draft_sha}" != "${RELEASE_COMMIT}" ]]; then
-              echo "Draft Release ${RELEASE_TAG} targets ${draft_sha} (via '${target_ref}'), expected ${RELEASE_COMMIT}." >&2
-              echo "Stale or mismatched draft; delete it manually before rerunning." >&2
+              echo "ERROR: draft Release ${RELEASE_TAG} targets ${draft_sha} (via '${target_ref}'), expected ${RELEASE_COMMIT}." >&2
+              echo "Stale or mismatched draft. Delete it manually before rerunning." >&2
               exit 1
             fi
             echo "Reusing draft Release ${RELEASE_TAG} targeting ${RELEASE_COMMIT}."
@@ -318,7 +333,7 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --target "${RELEASE_COMMIT}" \
               --title "${RELEASE_TAG}" \
-              --generate-notes \
+              --notes-file release-notes.md \
               --draft
             echo "Created draft Release ${RELEASE_TAG}."
           fi
@@ -383,8 +398,10 @@ jobs:
   # -------------------------------------------------------------------------
   # [5] PUBLISH RELEASE
   # Promotes the draft GitHub Release to public --latest only after all
-  # artifact and package-manifest gates have succeeded. R2 and Homebrew
-  # publication are downstream of this boundary.
+  # artifact and package-manifest gates have succeeded. The release
+  # environment protection boundary remains here so that the final
+  # publication gate is guarded by the existing environment rules.
+  # R2 and Homebrew publication are downstream of this boundary.
   # -------------------------------------------------------------------------
   publish-release:
     name: Publish completed GitHub Release
@@ -392,6 +409,7 @@ jobs:
       - detect-release
       - package-manifests
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Publish the completed draft Release
         env:
