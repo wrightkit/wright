@@ -63,13 +63,23 @@ jobs:
           tag="v${version}"
           echo "Candidate release: ${tag} at ${CI_COMMIT}"
 
-          # Check whether the tag already exists (published or not) to avoid
-          # creating a duplicate on a re-run or non-release push.
-          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" \
-               --json tagName --jq '.tagName' 2>/dev/null | grep -q "${tag}"; then
-            echo "Release ${tag} already exists; not a new release commit."
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          # Check whether a Release for this tag already exists.
+          # A published (non-draft) Release means this version is complete; skip.
+          # A draft Release means a previous upload-artifacts run started but
+          # failed partway; allow the pipeline to continue so the re-run can
+          # resume from where it failed (upload-artifacts handles the draft
+          # creation idempotently).
+          existing="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" \
+            --json tagName,isDraft 2>/dev/null || true)"
+          if [[ -n "${existing}" ]]; then
+            is_draft="$(echo "${existing}" | python3 -c \
+              "import sys,json; r=json.load(sys.stdin); print(str(r.get('isDraft',False)).lower())")"
+            if [[ "${is_draft}" == "false" ]]; then
+              echo "Published Release ${tag} already exists; skipping."
+              echo "is_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Draft Release ${tag} found; resuming incomplete release pipeline."
           fi
 
           # Confirm the commit message matches a release-please merge pattern.
@@ -268,16 +278,30 @@ jobs:
           --artifacts-dir artifacts
           --output-dir release
 
-      - name: Create release tag and draft GitHub Release
+      - name: Create or reuse draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "${RELEASE_TAG}"
-          --repo "${GITHUB_REPOSITORY}"
-          --target "${RELEASE_COMMIT}"
-          --title "${RELEASE_TAG}"
-          --generate-notes
-          --draft
+        run: |
+          set -euo pipefail
+          existing="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --json tagName,isDraft,targetCommitish 2>/dev/null || true)"
+          if [[ -n "${existing}" ]]; then
+            is_draft="$(echo "${existing}" | python3 -c \
+              "import sys,json; r=json.load(sys.stdin); print(str(r.get('isDraft',False)).lower())")"
+            if [[ "${is_draft}" != "true" ]]; then
+              echo "A published Release ${RELEASE_TAG} already exists; cannot overwrite." >&2
+              exit 1
+            fi
+            echo "Reusing existing draft Release ${RELEASE_TAG}."
+          else
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${RELEASE_COMMIT}" \
+              --title "${RELEASE_TAG}" \
+              --generate-notes \
+              --draft
+            echo "Created draft Release ${RELEASE_TAG}."
+          fi
 
       - name: Attach native archives and checksums
         env:
