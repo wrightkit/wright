@@ -22,8 +22,8 @@ Describe the direct benefits, costs, constraints, and follow-up work.
 ## Compatibility impact
 
 State which syntax, diagnostic, normalized-output, or semantic compatibility
-claims are affected, and which tests, owner comparisons, or provenance records
-are required.
+claims are affected, and which tests, owner/reference comparisons, source
+provenance, or licensing provenance are required.
 
 ## Scope boundaries
 
