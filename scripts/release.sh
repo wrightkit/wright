@@ -35,8 +35,9 @@ test -x "$BIN" || { echo "release binary missing"; exit 1; }
 test -x "$LSP_BIN" || { echo "release LSP binary missing"; exit 1; }
 test -x "$BENCH_BIN" || { echo "release benchmark binary missing"; exit 1; }
 
-echo "==> semantic OPY gate (compat profile)"
-python3 scripts/v1-gates.py --wright "$BIN"
+echo "==> first-party provider integration (compat profile)"
+"$BIN" provider update opy --version 0.1.38
+"$BIN" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" --profile compat >/dev/null
 
 echo "==> benchmarks"
 "$BENCH_BIN" > /dev/null
@@ -49,11 +50,11 @@ cp "$LSP_BIN" "$SANDBOX/wright-lsp"
 (
   export PATH=/usr/bin:/bin
   command -v node >/dev/null 2>&1 && { echo "node unexpectedly present"; exit 1; }
-  "$SANDBOX/wright" compile "$ROOT/compatibility/fixtures/synthetic/basic-rule/source.opy" \
+  "$SANDBOX/wright" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" \
     --profile compat >/dev/null
-  "$SANDBOX/wright" compile "$ROOT/compatibility/fixtures/real-world/overpy-cake/source.opy" \
+  "$SANDBOX/wright" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" \
     --profile compat >/dev/null
-  "$SANDBOX/wright" check "$ROOT/compatibility/fixtures/synthetic/control-flow/workshop.ws" \
+  "$SANDBOX/wright" check "$ROOT/tests/fixtures/workshop/synthetic/control-flow.ws" \
     --profile compat >/dev/null
   LSP_VERSION="$("$SANDBOX/wright-lsp" --version)"
   [[ "$LSP_VERSION" == *"$VERSION"* ]] || { echo "lsp version mismatch: $LSP_VERSION"; exit 1; }

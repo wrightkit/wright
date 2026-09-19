@@ -109,7 +109,7 @@ owning implementations merely because a command or legacy in-repo path exists.
 
 Current implementation reality and project intent must remain distinct. Public
 documentation should describe partial compiler or reconstruction paths as
-partial until the owning repository has end-to-end evidence.
+partial until the owning repository has end-to-end tests.
 
 ### 7. Development ordering
 
@@ -124,7 +124,7 @@ When Wright fails on a real project, first identify the owning layer:
 
 Architecture cleanup should not displace user-visible functionality unless it
 protects a public/versioned contract, repository ownership, dependency
-direction, provenance/source-edit correctness, licensing boundary, or an
+direction, source mapping/source-edit correctness, licensing boundary, or an
 observed high-cost maintenance risk.
 
 ## Consequences
@@ -146,5 +146,5 @@ observed high-cost maintenance risk.
 - Forcing a single Rust API boundary when LPP/process isolation is preferable.
 - Making `workshop-rs` depend on OPY/DEL implementation details.
 - Expanding the direct OPY↔DEL conversion matrix for symmetry.
-- Claiming compiler or reconstruction completeness that current evidence does
+- Claiming compiler or reconstruction completeness that current tests do
   not support.

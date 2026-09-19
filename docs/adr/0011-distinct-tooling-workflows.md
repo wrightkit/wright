@@ -39,8 +39,8 @@ inputs:
    Ordinary configurable lint findings are not part of this gate by default.
 2. **`lint`** applies configurable Wright or local rules to semantic facts and
    reports rule findings. Findings retain stable rule identity, effective
-   severity, evidence classification, boundedness where applicable, and
-   source/provenance information available from the owner boundary.
+   severity, support classification, boundedness where applicable, and
+   source mapping/owner attribution available from the owner boundary.
 3. **`analyze`** reports semantic facts and measurements such as program
    structure, symbol usage, and CFG-derived indicators. It is not another
    presentation of the lint registry or its finding list.
@@ -61,7 +61,7 @@ framework is not required before a useful, deterministic report exists.
   because it prevents facts from being reused independently of rule policy.
 - **Build a general analysis framework first:** deferred because the product
   boundary can be established with a narrow semantic report and expanded from
-  real workflow evidence.
+  real workflow tests.
 
 ## Consequences
 
@@ -85,6 +85,6 @@ unchanged.
 ## Scope boundaries
 
 - Additional semantic measurements may enter the bounded `analyze` report only
-  with evidence from real rules and workflows.
-- Runtime behavior and server cost are outside static-analysis evidence and are
+  when real rules and workflows establish a consumer need.
+- Runtime behavior and server cost are outside static-analysis guarantees and are
   governed by the tooling contract.

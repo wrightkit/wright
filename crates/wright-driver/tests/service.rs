@@ -11,7 +11,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workshop_path() -> PathBuf {
-    workspace_root().join("compatibility/fixtures/synthetic/control-flow/workshop.ws")
+    workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn tool_service_queries_canonical_workshop() {
 
 #[test]
 fn tool_service_keeps_provider_refusals_structured() {
-    let path = workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy");
+    let path = workspace_root().join("tests/fixtures/opy/basic-rule.opy");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(path),
         kind: SourceKind::Opy,

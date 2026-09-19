@@ -23,7 +23,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workshop_path() -> PathBuf {
-    workspace_root().join("compatibility/fixtures/synthetic/control-flow/workshop.ws")
+    workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
 fn mock_provider_path() -> Option<PathBuf> {

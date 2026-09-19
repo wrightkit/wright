@@ -1,5 +1,5 @@
 //! Measures compile latency, peak RSS, and generated-resource usage (emitted
-//! Workshop bytes and canonical Program counts for the versioned Workshop corpus
+//! Workshop bytes and canonical Program counts for representative Workshop inputs
 //! through the real driver path (`CompilerSession::compile`), and enforces declared
 //! regression thresholds. Output is versioned machine-readable JSON:
 //! `target/wright-bench-report.json`. Exits non-zero when a threshold is
@@ -47,7 +47,7 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-fn corpus_cases() -> Vec<(&'static str, PathBuf)> {
+fn benchmark_cases() -> Vec<(&'static str, PathBuf)> {
     [
         "synthetic/basic-rule",
         "synthetic/control-flow",
@@ -61,9 +61,9 @@ fn corpus_cases() -> Vec<(&'static str, PathBuf)> {
         (
             id,
             workspace_root()
-                .join("compatibility/fixtures")
+                .join("tests/fixtures/workshop")
                 .join(id)
-                .join("workshop.ws"),
+                .with_extension("ws"),
         )
     })
     .collect()
@@ -101,7 +101,7 @@ fn run() -> Result<bool, String> {
     let mut reports = Vec::new();
     let mut regressions = Vec::new();
 
-    for (id, path) in corpus_cases() {
+    for (id, path) in benchmark_cases() {
         let source = std::fs::read_to_string(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         let root = path

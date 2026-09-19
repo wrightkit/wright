@@ -71,7 +71,7 @@ underlying language surface is complete.
 
 Workshop → OPY and Workshop → DEL reconstruction are not treated as supported
 WrightKit capabilities until the owning language implementations provide and
-evidence those reconstruction paths.
+test those reconstruction paths.
 
 Compatibility targets observable semantics, not compiler-output identity,
 formatting, temporary variables, optimizer shape, or internal architecture.
@@ -206,5 +206,5 @@ through focused branches and PRs.
 ## License
 
 Wright is currently distributed under the GNU Affero General Public License v3.0
-or later. Third-party compatibility references and fixtures remain governed by
+or later. Third-party reference inputs remain governed by
 their recorded licenses and provenance; see [`docs/licensing.md`](docs/licensing.md).

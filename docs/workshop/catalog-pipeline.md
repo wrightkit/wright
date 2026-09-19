@@ -22,8 +22,7 @@ route to `workshop-rs` and are picked up here by updating that pin.
 ## Sources and licensing
 
 * The catalog covers the supported Workshop surface in `en-US`; spellings are
-  transcribed from the compatibility corpus workshop snapshots and recorded
-  in the `workshop-rs` support matrix and provenance record.
+  recorded in the `workshop-rs` support matrix and provenance record.
 * OverPy's translation tables are GPL-3.0 reference data and are not
   automatically reusable as implementation data
   ([`docs/licensing.md`](../licensing.md),

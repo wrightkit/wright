@@ -16,7 +16,7 @@ contract and would make target-specific concerns difficult to test.
 Wright uses two owned intermediate boundaries:
 
 1. **HIR** is frontend-independent and semantic. The bridge validates frontend
-   data, preserves source provenance where available, and produces HIR-owned
+   data, preserves source mapping and identity where available, and produces HIR-owned
    types.
 2. **Workshop IR** is target-oriented and deterministic. An explicit lowering
    step maps validated HIR into the operations and values required by a
@@ -36,8 +36,8 @@ the contract that introduces an executable implementation path.
 
 ## Compatibility impact
 
-HIR and Workshop IR comparisons may support normalized-output evidence, but IR
-equality alone does not establish semantic compatibility. Provenance and
+HIR and Workshop IR comparisons may support normalized-output tests, but IR
+equality alone does not establish semantic compatibility. Source mapping and
 determinism are part of the transformation contract and should be covered by
 tests as the representations become executable.
 

@@ -17,9 +17,9 @@ types from ADR-0005 (`wright/opy-hir` v1, in `wright-core::hir`) are the
 serialized bridge contract between the frontend adapter and the core; they
 use raw strings for identity (symbol names, function names, operator
 spellings) and own no storage strategy. The compiler-side model requires
-strongly typed identity, arena storage, source provenance, and an explicit
+strongly typed identity, arena storage, source mapping, and an explicit
 HIR-to-Workshop-IR boundary, without reimplementing OverPy internals or adding
-speculative nodes beyond the v0.1 corpus.
+speculative nodes beyond the v0.1 protocol surface.
 
 ## Decision
 
@@ -73,15 +73,16 @@ ADR-0005.
 
 ## Compatibility impact
 
-IR equality is not semantic evidence (ADR-0003). This ADR defines the model
-behind S/D-level evidence only; no N/E-level claim is made. The v0.1 corpus
-must convert and lower without lossy catch-all nodes.
+IR equality is not semantic compatibility (ADR-0003). This ADR defines the
+model protected by IR and integration tests; no source-language parity claim is
+made. Representative protocol inputs must convert and lower without lossy
+catch-all nodes.
 
 ## Scope boundaries
 
 * Whether `debug`/`print` should become HUD actions in the Workshop IR and where
   the function-name mapping table should live are outside this IR decision.
-* Call-name interning is outside this decision; it requires evidence that
+* Call-name interning is outside this decision; it requires a demonstrated
   analysis needs identity comparisons at scale.
 * User-defined enum representation is outside this decision and requires a
   frontend contract that preserves those declarations.

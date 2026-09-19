@@ -87,7 +87,7 @@ Architecture and cleanup matter when they protect a public/versioned contract,
 repository ownership, dependency direction, provenance/source-edit correctness,
 licensing boundaries, or an observed maintenance risk. Internal layout, helper
 abstractions, temporary adapters, and code organization are revisable and must
-not displace user-visible functionality without evidence.
+not displace user-visible functionality without an observed need.
 
 ## Real-project execution rule
 
@@ -97,7 +97,7 @@ projects that motivated the work. For product regressions:
 1. reproduce the failure with the released/current Wright path and the owning
    standalone implementation where possible;
 2. classify the owner before changing code;
-3. keep the full-project regression or pinned project evidence;
+3. keep the full-project regression or pinned project input and owner reference;
 4. add a minimized regression where practical;
 5. rerun the full user workflow (`check`, `lint`, `analyze`, `inspect`, compile
    when relevant) before claiming the blocker resolved.
@@ -109,7 +109,7 @@ clear.
 
 ## Architecture boundaries
 
-- Preserve source provenance and structured diagnostics across integration
+- Preserve source locations, owner attribution, and structured diagnostics across integration
   boundaries.
 - Never silently fall back to upstream OverPy/OSTW runtimes for a declared
   first-party workflow.
@@ -120,7 +120,7 @@ clear.
 - Source-oriented validated edits are preferred over full-file regeneration.
 
 Current support claims must be grounded in the owning repositories and executable
-evidence, not in historical Wright monolith behavior.
+executable owner/integration tests, not in historical Wright monolith behavior.
 
 ## Validation
 
@@ -146,8 +146,8 @@ support claims require real-project validation in addition to focused tests.
   patch-release flow; do not classify those updates as ordinary `chore:` work.
 - Review-time verification results, including hashes, residual counts, and
   pass/fail status, must come from the test/CI run under review. Never hand-write
-  or manually refresh a committed evidence/result file; put results in the PR
-  description and CI logs/artifacts. Committed fixtures and provenance/input
+  or manually refresh a committed test-result file; put results in the PR
+  description and CI logs/artifacts. Committed fixtures and source/licensing input
   manifests are allowed only as reproducible, machine-validated inputs.
 - Do not use repository changes or commits for GitHub metadata-only operations.
 - Do not publish, rewrite history, delete data, or modify unrelated remote state

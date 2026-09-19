@@ -18,9 +18,9 @@ fn workspace_root() -> PathBuf {
 fn corpus_workshop(fixture_id: &str) -> String {
     std::fs::read_to_string(
         workspace_root()
-            .join("compatibility/fixtures")
+            .join("tests/fixtures/workshop")
             .join(fixture_id)
-            .join("workshop.ws"),
+            .with_extension("ws"),
     )
     .unwrap()
 }
@@ -523,10 +523,9 @@ fn stdin_workshop_works_and_legacy_protocol_is_refused() {
 
 #[test]
 fn stdin_opy_requires_an_entry_for_provider_workflows() {
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-    )
-    .unwrap();
+    let source =
+        std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
+            .unwrap();
     let output = run_with_stdin(&["compile", "-", "--kind", "opy", "-f", "json"], &source);
     assert_eq!(output.status.code(), Some(3));
     let envelope = parse_json(&output.stdout);
@@ -592,7 +591,7 @@ fn stdout_stderr_separation_holds_in_both_modes() {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn tty_progress_stops_and_clears_before_final_render() {
-    let path = workspace_root().join("compatibility/fixtures/synthetic/control-flow/source.opy");
+    let path = workspace_root().join("tests/fixtures/opy/basic-rule.opy");
     let output = run_in_tty(&[
         "analyze",
         path.to_str().unwrap(),
@@ -641,10 +640,9 @@ fn tty_progress_stops_and_clears_before_final_render() {
 
 #[test]
 fn non_interactive_renderers_have_no_progress_artifacts() {
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/control-flow/source.opy"),
-    )
-    .unwrap();
+    let source =
+        std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
+            .unwrap();
     let path = temp_file("basic.opy", &source);
     for renderer in ["plain", "github-actions"] {
         let output = run_with_env(
@@ -1031,10 +1029,9 @@ fn github_summary_uses_step_summary_file_when_available() {
 
 #[test]
 fn opy_file_does_not_fall_back_to_native_frontend() {
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-    )
-    .unwrap();
+    let source =
+        std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
+            .unwrap();
     let path = temp_file("basic-rule.opy", &source);
     let missing_provider = path.parent().unwrap().join("missing-opy-provider");
     let output = run(&[
@@ -1152,10 +1149,9 @@ fn convert_requires_an_explicit_target_flag() {
 fn convert_rejects_non_workshop_input() {
     // OPY conversion requires an entry provider workflow; it never falls back
     // to a direct OPY ↔ OSTW conversion.
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-    )
-    .unwrap();
+    let source =
+        std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
+            .unwrap();
     let path = temp_file("basic-rule.opy", &source);
     let output = run(&[
         "convert",

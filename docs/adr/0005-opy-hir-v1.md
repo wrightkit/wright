@@ -13,15 +13,15 @@
 Wright's v0.1 flow uses existing OverPy as the `.opy` frontend. The parsed
 frontend AST is an OverPy-internal representation that the Rust core must not
 depend on, and `JSON.stringify()` of that AST is not a protocol design. The
-compiler slice covered by this decision consumes the compatibility corpus
+compiler slice covered by this decision consumes representative protocol inputs
 through a reproducible, Wright-owned interchange format.
 
 Issue #3 requires a stable, versioned protocol between the temporary OverPy
-frontend and the Rust core. The evidence gathered from the pinned OverPy
+frontend and the Rust core. Tests against the pinned OverPy
 frontend (9.7.10) shows that its public compile API does not expose parsed rule
 ASTs, that its exported compiler class can be driven to produce parsed ASTs
-with source provenance, and that the corpus needs declarations, rules, events,
-conditions, statements, and expressions with spans.
+with source file/line/column mapping. The protocol needs declarations, rules,
+events, conditions, statements, and expressions with spans.
 
 ## Decision
 
@@ -32,7 +32,7 @@ The protocol:
 
 * models program declarations, rules, events, conditions, statements, and
   expressions with Wright-owned node kinds and operator spellings;
-* preserves file/line/column provenance through `files` and `span` fields;
+* preserves file/line/column source mapping through `files` and `span` fields;
 * keeps source-level macro calls explicit (`macroCall`) and records macro,
   constant, and preprocessor-define declarations so the payload is
   self-contained;
@@ -40,7 +40,7 @@ The protocol:
   reject an unknown name or major version before parsing, reject unknown node
   kinds as structured unsupported-node errors, and never silently ignore
   semantic content;
-* defines validation order (envelope, shape, provenance, identifiers,
+* defines validation order (envelope, shape, source mapping, identifiers,
   references, unsupported nodes) and stable debug output for tests and issue
   reports.
 
@@ -51,7 +51,7 @@ onto the protocol; the Rust core consumes the protocol through serde types and
 validation in `crates/wright-core/src/hir/`. Macro calls remain explicit in
 HIR; expansion semantics are outside this protocol boundary.
 
-Constructs outside the v0.1 corpus boundary (labels, relative gotos,
+Constructs outside the v0.1 protocol surface (labels, relative gotos,
 custom game settings) are rejected explicitly by the adapter and reported as
 unsupported by the consumer. This keeps the first protocol slice small while
 making unsupported behavior observable, per the architecture's explicit
@@ -59,18 +59,18 @@ unsupported-behavior contract.
 
 ## Compatibility impact
 
-This ADR defines the interchange contract for S/D-level compatibility work:
-the corpus converts reproducibly (S), and failures carry structured
-diagnostics with spans (D). It does not claim N/E-level parity with OverPy
-output. Protocol equality alone is not semantic evidence, per
-[ADR-0003](0003-ir-boundary.md) and [`docs/compatibility.md`](../compatibility.md).
+This ADR defines the interchange contract. Protocol tests protect reproducible
+conversion and structured failure diagnostics with spans. It does not claim
+semantic parity with OverPy output. Protocol equality alone is not semantic
+compatibility, per [ADR-0003](0003-ir-boundary.md) and
+[`docs/compatibility.md`](../compatibility.md).
 
 ## Scope boundaries
 
 * Macro expansion is outside HIR; adding a Wright-owned expansion stage
   requires a separate decision.
 * `settings` blocks and labels/gotos are outside the v0.1 protocol scope; adding
-  them requires corpus evidence and protocol review.
+  them requires a named provider/reference case and protocol review.
 * The adapter's exact OverPy driver setup is an implementation detail of the
   adapter boundary. Changes to the pinned frontend version must be reviewed
   with the adapter and this protocol together.

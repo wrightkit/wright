@@ -83,14 +83,14 @@ The rest of ADR-0008 remains normative:
 - no source-language forking (decision 5);
 - Workshop-centered conversion matrix (decision 6);
 - source-oriented semantic edits as the default mutation model (decision 7);
-- corpus-defined support claims (decision 8).
+- concrete-consumer tests and reference comparisons for support claims (decision 8).
 
-### 5. Provider-specific provenance and licensing
+### 5. Provider-specific source attribution and licensing
 
-Provenance and licensing are recorded per provider; there is no single
-repository-wide frontend licensing assumption:
+Source attribution and license metadata are recorded per provider; there is no
+single repository-wide frontend licensing assumption:
 
-- **`opy-rs`** treats pinned OverPy as a GPL-3.0-only compatibility oracle
+- **`opy-rs`** treats pinned OverPy as a GPL-3.0-only behavior reference
   (engineering assumption, not a legal conclusion) and follows the ADR-0004
   clean-room boundary: no linking, copying, or internal-type import.
 - **`del-rs`** treats pinned OSTW as an unlicensed reference: its source may
@@ -98,8 +98,8 @@ repository-wide frontend licensing assumption:
   only the MIT-licensed VS Code extension subdirectory is MIT.
 - **`workshop-rs`** must not import Blizzard-IP-adjacent game-derived data
   (such as OSTW `Elements.json`) into its canonical catalog; catalog
-  provenance and version boundaries are its own contracts.
-- **Wright** remains AGPL-3.0-or-later until a provenance and contributor
+  source attribution and version boundaries are its own contracts.
+- **Wright** remains AGPL-3.0-or-later until a license-metadata and contributor
   audit enables a different license; final Wright relicensing is not decided
   here.
 
@@ -111,8 +111,8 @@ be combined or distributed.
 
 Unlicensed upstream implementation internals (such as the OSTW compiler)
 are not an implementation source for independently compatible providers.
-Behavior observed through documented, lawful compatibility tests and pinned
-oracles is a permitted input; copying or mechanically translating unlicensed
+Behavior observed through documented, lawful reference tests and pinned
+upstream comparisons is a permitted input; copying or mechanically translating unlicensed
 implementation internals is not.
 
 ## Consequences
@@ -121,7 +121,7 @@ implementation internals is not.
   semantic-compatibility decisions remain normative.
 - [`docs/architecture.md`](../architecture.md) and
   [`docs/licensing.md`](../licensing.md) distinguish repository ownership from
-  implementation location and provider provenance.
+  implementation location and provider source attribution.
 - Repository extraction and provider cutover are execution concerns; they do
   not alter the ownership or dependency direction in this ADR.
 - LPP request/response schema design belongs to `language-provider-protocol`
@@ -129,16 +129,16 @@ implementation internals is not.
 
 ## Compatibility impact
 
-No compatibility level is removed or weakened. The S/D/N/E measurement
-contracts from ADR-0002 and ADR-0008 remain normative, and the declared OPY
-and OSTW semantic compatibility surfaces remain binding when ownership moves
-to `opy-rs` and `del-rs`. Tooling-first priority, semantic compatibility over
-output identity, Workshop-centered interoperability, and source-oriented
-mutation are unchanged.
+No owner-side compatibility contract is removed. Wright's current OPY and OSTW
+integration claims are established by named provider/reference comparisons and
+real-workflow tests; Wright does not maintain a second S/D/N/E result store.
+Tooling-first priority, semantic compatibility over output identity,
+Workshop-centered interoperability, and source-oriented mutation are unchanged.
 
 ## Scope boundaries
 
 - License selection and relicensing are outside this ADR; each repository or
-  product owner must decide them from its provenance and contributor evidence.
+  product owner must decide them from its license/source-attribution and
+  contributor records.
 - LPP v1 schema and conformance requirements belong to
   `language-provider-protocol` and are outside this ownership decision.

@@ -18,9 +18,9 @@ fn legacy_protocol() -> &'static str {
 
 fn workshop_fixture(id: &str) -> PathBuf {
     workspace_root()
-        .join("compatibility/fixtures")
+        .join("tests/fixtures/workshop")
         .join(id)
-        .join("workshop.ws")
+        .with_extension("ws")
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn legacy_protocol_input_is_refused_without_hir_lowering() {
 
 #[test]
 fn opy_source_never_falls_back_to_a_static_frontend() {
-    let path = workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy");
+    let path = workspace_root().join("tests/fixtures/opy/basic-rule.opy");
     let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Path(path),
         kind: SourceKind::Opy,

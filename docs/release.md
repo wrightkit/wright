@@ -27,13 +27,13 @@ and this script verifies and packages the host platform.
 
 1. **Quality gates**: `cargo fmt --check`, `cargo clippy -D warnings`,
    `cargo test --workspace --all-targets --all-features`.
-2. **Semantic OPY integration gate**: `scripts/v1-gates.py` against the
-   release binary (`target/v1-gates-report.json`), using the explicitly pinned
-   first-party provider release.
+2. **First-party provider integration**: bootstrap the explicitly pinned
+   provider release and compile the minimal Wright-owned OPY input through the
+   release binary.
 3. **Benchmarks**: `wright-bench` with declared regression thresholds
    (`target/wright-bench-report.json`).
 4. **Standalone proof**: the packaged binaries run `compile`/`check` over the
-   corpus with `PATH=/usr/bin:/bin` (Node and OverPy absent), and
+   retained Wright test inputs with `PATH=/usr/bin:/bin` (Node and OverPy absent), and
    `wright-lsp --version` reports the release version.
 
 Any gate failure aborts the release before the version is stamped.

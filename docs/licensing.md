@@ -45,7 +45,7 @@ facts, and invocation records are centralized in
 | Wright Rust tooling and canonical Workshop consumer | No | Independently implemented code. It must not link to a reference, copy its source, import its internal AST/types, or compile against its generated artifacts. |
 | LPP provider boundary | Only through an explicitly documented process boundary | It consumes provider-owned source semantics and artifacts without importing provider implementation internals into Wright. |
 | Compatibility harness/oracle tool | Yes, for isolated evaluation | It may invoke a separately installed/pinned reference (OverPy or OSTW) and compare documented or generated results. It must remain separable from the core build and runtime distribution. |
-| Compatibility fixtures and generated reference artifacts | Only after provenance review | Store identifiers, hashes, generators, or reviewable artifacts only when their license and redistribution status are recorded. Do not add copied reference source or unclear third-party content. |
+| Named integration inputs and generated reference artifacts | Only after provenance review | Keep only the smallest input required by a Wright-owned test, with its license and source provenance recorded. Do not add copied reference source or unclear third-party content. |
 | CI and development scripts | Yes, when isolated | They may install or invoke a pinned external oracle for a compatibility check, but must not silently turn it into a core dependency or bundled release component. |
 
 No allow-listed path may import reference implementation details into the core

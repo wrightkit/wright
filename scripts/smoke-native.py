@@ -48,12 +48,12 @@ def main() -> None:
     parser.add_argument(
         "--compile",
         type=Path,
-        default=Path("compatibility/fixtures/synthetic/basic-rule/source.opy"),
+        default=Path("tests/fixtures/opy/basic-rule.opy"),
     )
     parser.add_argument(
         "--check",
         type=Path,
-        default=Path("compatibility/fixtures/synthetic/control-flow/workshop.ws"),
+        default=Path("tests/fixtures/workshop/synthetic/control-flow.ws"),
     )
     parser.add_argument(
         "--provider-bootstrap",

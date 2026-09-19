@@ -6,10 +6,9 @@ use wright_driver::provider::{LanguageProvider, Status};
 #[test]
 fn provider_checks_a_real_workshop_fixture_without_swallowing_failure() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let source = std::fs::read_to_string(
-        root.join("compatibility/fixtures/synthetic/basic-rule/workshop.ws"),
-    )
-    .expect("Workshop fixture");
+    let source =
+        std::fs::read_to_string(root.join("tests/fixtures/workshop/synthetic/basic-rule.ws"))
+            .expect("Workshop fixture");
     let provider = WorkshopProvider::new().expect("provider initializes");
     let diagnostics = provider
         .check(&source, Path::new("basic-rule.txt"))

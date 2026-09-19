@@ -6,8 +6,9 @@
 
 ## Context
 
-What problem or contract boundary requires a decision? Include the evidence
-that makes the decision relevant now.
+What problem or contract boundary requires a decision? Identify the current
+consumer, failure, owner contract, or real workflow that makes the decision
+relevant now.
 
 ## Decision
 
@@ -21,7 +22,9 @@ Describe the direct benefits, costs, constraints, and follow-up work.
 ## Compatibility impact
 
 State which syntax, diagnostic, normalized-output, or semantic compatibility
-claims are affected, and what evidence is required.
+claims are affected, and which tests, owner/reference comparisons, source
+mapping/location, owner attribution, license metadata, pinned version/revision,
+checksum, or reproducibility requirements are required.
 
 ## Scope boundaries
 

@@ -9,13 +9,13 @@ fn workspace_root() -> PathBuf {
 
 fn workshop_fixture(id: &str) -> PathBuf {
     workspace_root()
-        .join("compatibility/fixtures")
+        .join("tests/fixtures/workshop")
         .join(id)
-        .join("workshop.ws")
+        .with_extension("ws")
 }
 
 #[test]
-fn consumer_runs_all_public_api_workflows_on_the_corpus() {
+fn consumer_runs_all_public_api_workflows_on_representative_inputs() {
     for id in [
         "synthetic/basic-rule",
         "synthetic/control-flow",

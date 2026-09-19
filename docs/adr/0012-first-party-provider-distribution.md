@@ -83,7 +83,8 @@ not silently fall back to a static source-language implementation.
 
 This decision changes packaging and process ownership, not OPY or Workshop
 semantics. The provider must satisfy the owner-published LPP contract, and
-Wright must preserve structured diagnostics and provenance across the handoff.
+Wright must preserve structured diagnostics, source locations, and owner
+attribution across the handoff.
 Provider target matrices and release versions are implementation details outside
 this ADR.
 
@@ -92,4 +93,4 @@ this ADR.
 - This ADR does not decide whether to support broader provider families; any
   generalization requires an owner-backed, real-project workflow.
 - Stronger source-span mapping is a provider/protocol contract question, not a
-  reason to weaken the explicit unmapped-evidence behavior.
+  reason to weaken the explicit unmapped provider-artifact behavior.

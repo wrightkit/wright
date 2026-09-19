@@ -14,10 +14,8 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workshop_fixture(fixture: &str) -> String {
-    std::fs::read_to_string(
-        workspace_root().join(format!("compatibility/fixtures/{fixture}/workshop.ws")),
-    )
-    .expect("Workshop fixture")
+    std::fs::read_to_string(workspace_root().join(format!("tests/fixtures/workshop/{fixture}.ws")))
+        .expect("Workshop fixture")
 }
 
 fn temp_entry() -> (PathBuf, PathBuf) {

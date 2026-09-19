@@ -6,7 +6,7 @@ name: CI
 # Push to main: capability checks are selected by changed paths, just like PRs.
 # Broad changes still run the full convergence set.
 # PR: capability checks are selected by changed paths.  Broad/core changes
-# (Cargo workspace, scripts, compatibility fixtures, CI itself) expand to the
+# (Cargo workspace, scripts, test inputs, CI itself) expand to the
 # full check set; narrow path changes run only the relevant capability.
 # Docs-only changes skip CI entirely.
 
@@ -56,7 +56,7 @@ jobs:
               - '.cargo/**'
               - 'src/**'
               - 'crates/**'
-              - 'compatibility/**'
+              - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
             dist:
@@ -70,7 +70,7 @@ jobs:
               - '.cargo/**'
               - 'src/**'
               - 'crates/**'
-              - 'compatibility/**'
+              - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
 
@@ -232,14 +232,13 @@ jobs:
         run: cargo test --locked -p wright-cli --test workshop_real_projects -- --ignored --nocapture
 
   # -------------------------------------------------------------------------
-  # [2] OPY INTEGRATION  (Wright's consumer contract with OverPy/OPY)
-  # Covers:
-  #   - Committed compatibility evidence integrity (no live oracle needed)
-  #   - Semantic gate: Wright compile vs recorded reference snapshots through WIR
-  #   - Provider-backed OPY consumer contract coverage
+  # [2] PRODUCT INTEGRATION  (Wright-owned provider and product contracts)
+  # The source-language owners test language semantics. Wright tests its
+  # provider seam, provider distribution success path, failure routing, and
+  # user-facing product behavior directly.
   # -------------------------------------------------------------------------
   opy-integration:
-    name: OPY integration
+    name: Product integration
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
@@ -251,6 +250,13 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -262,33 +268,25 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Download CLI artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: wright-cli-linux-stable-debug
-          path: target/debug
+      - name: Run provider and product integration tests
+        run: >-
+          cargo test --locked
+          -p wright-driver --test driver --test source_provider --test service
+          --test workshop_provider
 
-      - name: Prepare CLI executable
-        run: chmod +x target/debug/wright
+      - name: Run CLI and embedding integration tests
+        run: >-
+          cargo test --locked
+          -p wright-cli --test cli --test diagnostics_schema --test serve
+          && cargo test --locked -p wright-consumer --test consumer
 
-      - name: Validate compatibility evidence
-        run: python3 -m unittest discover -s compatibility/tests
+      - name: Install pinned OPY provider
+        run: target/debug/wright provider update opy --version 0.1.38
 
-      - name: Run semantic OPY gate
-        id: semantic_gate
-        run: python3 scripts/v1-gates.py
-
-      - name: Upload reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: opy-integration-reports
-          path: |
-            target/v1-gates-report.json
-
-      - name: Render summary
-        if: always()
-        run: python3 scripts/render-ci-summary.py --title "OPY Integration" --kind semantic --report target/v1-gates-report.json
+      - name: Compile minimal OPY through provider boundary
+        run: >-
+          target/debug/wright compile tests/fixtures/opy/basic-rule.opy
+          --profile compat
 
   # -------------------------------------------------------------------------
   # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)

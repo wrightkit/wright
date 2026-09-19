@@ -48,7 +48,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workshop_path() -> PathBuf {
-    workspace_root().join("compatibility/fixtures/synthetic/control-flow/workshop.ws")
+    workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws")
 }
 
 fn mock_provider_path() -> Option<PathBuf> {
@@ -451,9 +451,7 @@ fn unconfigured_language_id_refuses_explicitly() {
     // The source session itself refuses before any static frontend can be
     // selected; provider edit requests therefore cannot inherit a fallback.
     let mut session = CompilerSession::new(SessionConfig {
-        input: InputSpec::Path(
-            workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-        ),
+        input: InputSpec::Path(workspace_root().join("tests/fixtures/opy/basic-rule.opy")),
         kind: SourceKind::Opy,
         ..SessionConfig::default()
     })

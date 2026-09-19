@@ -12,7 +12,7 @@ architecture/README.md       current Wright architecture routing
   ├─ integration.md          language/provider integration + failure routing
   └─ tooling.md              Wright-owned tooling/edit/agent/CI/LSP model
 cli.md / embedding.md / ...  focused public/product contracts
-compatibility.md             compatibility methodology
+compatibility.md             Wright integration verification contract
 adr/                         point-in-time decisions and rationale
 source/tests/CI/integrations current implementation reality
 Issues / PRs / releases      mutable execution state
@@ -39,8 +39,8 @@ Issue contract.
 - [Embedding/tool API](embedding.md): programmatic session/query/edit services.
 - [Language services & LSP](language-services.md): editor-neutral language
   services and LSP framing.
-- [Compatibility methodology](compatibility.md): compatibility/evidence levels
-  and evaluation rules.
+- [Integration verification](compatibility.md): owner boundaries and
+  Wright-owned tests.
 - [Licensing/provenance boundary](licensing.md): third-party reference and
   licensing constraints.
 - [Extensible lint rules](specs/SPEC-309-extensible-lint-rules.md): canonical
@@ -61,7 +61,7 @@ Current language support claims must come from the owning repositories:
 
 Historical Wright-side OPY/OSTW/Workshop support matrices, compatibility
 baselines, manifests, HIR migration documents, and catalog-pipeline notes may
-remain useful migration/reference evidence while consumers still exist, but
+remain useful migration/reference material while consumers still exist, but
 they do not override the current owner contracts or upgrade current support.
 Do not create new source-language semantic truth in Wright to keep those
 historical assets current.
