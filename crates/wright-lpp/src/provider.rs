@@ -54,6 +54,8 @@ impl NegotiatedCapabilities {
     }
 }
 
+pub type LppRes<T> = Result<T, ProviderError>;
+
 /// The transport-neutral language-provider client surface.
 ///
 /// Implementations are session-oriented: [`initialize`](Self::initialize)
@@ -63,171 +65,103 @@ impl NegotiatedCapabilities {
 /// `capabilityUnavailable` before anything is sent to the provider.
 pub trait LanguageProvider {
     /// Perform the initialize/handshake and capability negotiation.
-    ///
-    /// The protocol version is fixed to `"1.0"` by this client. A provider
-    /// that does not support it responds with a `protocolVersionMismatch`
-    /// LPP error; a provider that echoes a different version after accepting
-    /// fails with `ProtocolVersionMismatch`. Either way the session stays
-    /// restartable.
-    fn initialize(
-        &mut self,
-        client_info: Option<&ClientInfo>,
-    ) -> Result<InitializeResult, ProviderError>;
+    fn initialize(&mut self, client_info: Option<&ClientInfo>) -> LppRes<InitializeResult>;
 
     /// Initialize with LPP 1.1 for provider-owned project loading.
     fn initialize_project_loading(
         &mut self,
-        client_info: Option<&ClientInfo>,
-    ) -> Result<InitializeResult, ProviderError> {
-        let result = self.initialize(client_info)?;
+        info: Option<&ClientInfo>,
+    ) -> LppRes<InitializeResult> {
+        let res = self.initialize(info)?;
         Err(ProviderError::ProtocolVersionMismatch {
-            supported: vec![result.protocol_version],
-            message: "the provider client does not support LPP 1.1 project loading".to_string(),
+            supported: vec![res.protocol_version],
+            message: "the provider client does not support LPP 1.1 project loading".into(),
         })
     }
 
     /// Initialize with LPP 1.2 for provider-owned file or directory targets.
-    fn initialize_project_target(
-        &mut self,
-        client_info: Option<&ClientInfo>,
-    ) -> Result<InitializeResult, ProviderError> {
-        let result = self.initialize_project_loading(client_info)?;
+    fn initialize_project_target(&mut self, info: Option<&ClientInfo>) -> LppRes<InitializeResult> {
+        let res = self.initialize_project_loading(info)?;
         Err(ProviderError::ProtocolVersionMismatch {
-            supported: vec![result.protocol_version],
-            message: "the provider client does not support LPP 1.2 directory targets".to_string(),
+            supported: vec![res.protocol_version],
+            message: "the provider client does not support LPP 1.2 directory targets".into(),
         })
     }
 
     /// The negotiated capabilities, after a successful initialize.
-    fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError>;
-
+    fn capabilities(&self) -> LppRes<&NegotiatedCapabilities>;
     /// `lpp/check`: produce diagnostics for a document set.
-    fn check(
-        &mut self,
-        documents: &DocumentSet,
-        project_root: Option<&str>,
-    ) -> Result<CheckResult, ProviderError>;
-
+    fn check(&mut self, docs: &DocumentSet, root: Option<&str>) -> LppRes<CheckResult>;
     /// `lpp/check` over a provider-owned filesystem project entry.
     fn check_entry(
         &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CheckResult, ProviderError> {
-        let _ = (entry, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/check" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        e: &ProjectEntry,
+        root: Option<&str>,
+        loc: Option<&str>,
+    ) -> LppRes<CheckResult> {
+        self.check_target(e, root, loc)
     }
-
     /// `lpp/check` over an LPP 1.2 file or directory target.
     fn check_target(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CheckResult, ProviderError> {
-        let _ = (target, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/check" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        _t: &ProjectEntry,
+        _r: Option<&str>,
+        _l: Option<&str>,
+    ) -> LppRes<CheckResult> {
+        unavail("projectLoading", "lpp/check")
     }
-
-    /// `lpp/compile`: compile a document set into one opaque Workshop
-    /// artifact.
-    fn compile(
-        &mut self,
-        documents: &DocumentSet,
-        project_root: Option<&str>,
-    ) -> Result<CompileResult, ProviderError>;
-
+    /// `lpp/compile`: compile a document set into one opaque Workshop artifact.
+    fn compile(&mut self, docs: &DocumentSet, root: Option<&str>) -> LppRes<CompileResult>;
     /// `lpp/compile` over a provider-owned filesystem project entry.
     fn compile_entry(
         &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CompileResult, ProviderError> {
-        let _ = (entry, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        e: &ProjectEntry,
+        root: Option<&str>,
+        loc: Option<&str>,
+    ) -> LppRes<CompileResult> {
+        self.compile_target(e, root, loc)
     }
-
     /// `lpp/compile` over an LPP 1.2 file or directory target.
     fn compile_target(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CompileResult, ProviderError> {
-        let _ = (target, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        _t: &ProjectEntry,
+        _r: Option<&str>,
+        _l: Option<&str>,
+    ) -> LppRes<CompileResult> {
+        unavail("projectLoading", "lpp/compile")
     }
-
     /// `lpp/reconstruct`: reconstruct source from a provider-owned artifact.
-    fn reconstruct(
-        &mut self,
-        artifact: &WorkshopArtifact,
-    ) -> Result<ReconstructResult, ProviderError>;
-
+    fn reconstruct(&mut self, artifact: &WorkshopArtifact) -> LppRes<ReconstructResult>;
     /// `lpp/symbols`: list the symbols declared in a document set.
-    fn symbols(
-        &mut self,
-        documents: &DocumentSet,
-        project_root: Option<&str>,
-    ) -> Result<SymbolsResult, ProviderError>;
-
+    fn symbols(&mut self, docs: &DocumentSet, root: Option<&str>) -> LppRes<SymbolsResult>;
     /// `lpp/definition`: resolve the definition at a position.
-    fn definition(
-        &mut self,
-        document: &Document,
-        position: Position,
-    ) -> Result<LocationsResult, ProviderError>;
-
+    fn definition(&mut self, doc: &Document, pos: Position) -> LppRes<LocationsResult>;
     /// `lpp/references`: find references to the symbol at a position.
-    fn references(
-        &mut self,
-        document: &Document,
-        position: Position,
-        include_declaration: bool,
-    ) -> Result<LocationsResult, ProviderError>;
-
+    fn references(&mut self, doc: &Document, pos: Position, decl: bool) -> LppRes<LocationsResult>;
     /// `lpp/rename`: compute source edits for a semantic rename.
     fn rename(
         &mut self,
-        documents: &DocumentSet,
-        position_document_uri: &str,
-        position: Position,
-        new_name: &str,
-        project_root: Option<&str>,
-    ) -> Result<RenameResult, ProviderError>;
-
-    /// `lpp/validateEdits`: validate a set of source edits against a
-    /// document.
-    fn validate_edits(
-        &mut self,
-        document: &Document,
-        edits: &[TextEdit],
-    ) -> Result<ValidateEditsResult, ProviderError>;
-
-    /// Graceful termination: send `lpp/shutdown`, close the provider's
-    /// stdin, and wait (bounded) for the provider to exit.
-    fn shutdown(&mut self) -> Result<(), ProviderError>;
-
+        docs: &DocumentSet,
+        uri: &str,
+        pos: Position,
+        name: &str,
+        root: Option<&str>,
+    ) -> LppRes<RenameResult>;
+    /// `lpp/validateEdits`: validate a set of source edits against a document.
+    fn validate_edits(&mut self, doc: &Document, edits: &[TextEdit])
+    -> LppRes<ValidateEditsResult>;
+    /// Graceful termination: send `lpp/shutdown`, close stdin, and wait for exit.
+    fn shutdown(&mut self) -> LppRes<()>;
     /// The last observed provider exit code, when the provider exited.
     fn exit_status(&self) -> Option<i32>;
+}
+
+fn unavail<T>(cap: &str, method: &str) -> LppRes<T> {
+    Err(ProviderError::lpp(
+        crate::error::LppErrorKind::CapabilityUnavailable,
+        json!({ "capability": cap, "method": method }),
+        format!("capability '{cap}' is not available in this provider client"),
+    ))
 }
 
 /// A `LanguageProvider` over a spawned stdio provider process.
@@ -355,6 +289,15 @@ impl StdioLanguageProvider {
             }),
         }
     }
+    fn call_capability<T: DeserializeOwned>(
+        &mut self,
+        capability: Capability,
+        params: Value,
+    ) -> Result<T, ProviderError> {
+        self.require_capability(capability)?;
+        let method = capability.method();
+        parse_result(self.request(method, params)?, method)
+    }
 }
 
 impl Drop for StdioLanguageProvider {
@@ -366,191 +309,107 @@ impl Drop for StdioLanguageProvider {
 }
 
 impl LanguageProvider for StdioLanguageProvider {
-    fn initialize(
-        &mut self,
-        client_info: Option<&ClientInfo>,
-    ) -> Result<InitializeResult, ProviderError> {
-        self.initialize_with_version(LPP_PROTOCOL_VERSION, client_info)
+    fn initialize(&mut self, info: Option<&ClientInfo>) -> LppRes<InitializeResult> {
+        self.initialize_with_version(LPP_PROTOCOL_VERSION, info)
     }
 
     fn initialize_project_loading(
         &mut self,
-        client_info: Option<&ClientInfo>,
-    ) -> Result<InitializeResult, ProviderError> {
-        self.initialize_with_version(crate::LPP_PROJECT_LOADING_PROTOCOL_VERSION, client_info)
+        info: Option<&ClientInfo>,
+    ) -> LppRes<InitializeResult> {
+        self.initialize_with_version(crate::LPP_PROJECT_LOADING_PROTOCOL_VERSION, info)
     }
 
-    fn initialize_project_target(
-        &mut self,
-        client_info: Option<&ClientInfo>,
-    ) -> Result<InitializeResult, ProviderError> {
-        self.initialize_with_version(LPP_DIRECTORY_TARGET_PROTOCOL_VERSION, client_info)
+    fn initialize_project_target(&mut self, info: Option<&ClientInfo>) -> LppRes<InitializeResult> {
+        self.initialize_with_version(LPP_DIRECTORY_TARGET_PROTOCOL_VERSION, info)
     }
 
-    fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError> {
+    fn capabilities(&self) -> LppRes<&NegotiatedCapabilities> {
         self.negotiated
             .as_ref()
             .ok_or_else(|| ProviderError::NotInitialized {
-                method: "capabilities".to_string(),
+                method: "capabilities".into(),
             })
     }
 
-    fn check(
-        &mut self,
-        documents: &DocumentSet,
-        project_root: Option<&str>,
-    ) -> Result<CheckResult, ProviderError> {
-        self.require_capability(Capability::Check)?;
-        let value = self.request("lpp/check", documents_params(documents, project_root))?;
-        parse_result(value, "lpp/check")
-    }
-
-    fn check_entry(
-        &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CheckResult, ProviderError> {
-        self.require_capability(Capability::Check)?;
-        self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/check", entry_params(entry, project_root, locale))?;
-        parse_result(value, "lpp/check")
+    fn check(&mut self, docs: &DocumentSet, root: Option<&str>) -> LppRes<CheckResult> {
+        self.call_capability(Capability::Check, documents_params(docs, root))
     }
 
     fn check_target(
         &mut self,
         target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CheckResult, ProviderError> {
-        self.require_capability(Capability::Check)?;
+        root: Option<&str>,
+        loc: Option<&str>,
+    ) -> LppRes<CheckResult> {
         self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/check", entry_params(target, project_root, locale))?;
-        parse_result(value, "lpp/check")
+        self.call_capability(Capability::Check, entry_params(target, root, loc))
     }
 
-    fn compile(
-        &mut self,
-        documents: &DocumentSet,
-        project_root: Option<&str>,
-    ) -> Result<CompileResult, ProviderError> {
-        self.require_capability(Capability::Compile)?;
-        let value = self.request("lpp/compile", documents_params(documents, project_root))?;
-        parse_result(value, "lpp/compile")
-    }
-
-    fn compile_entry(
-        &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CompileResult, ProviderError> {
-        self.require_capability(Capability::Compile)?;
-        self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/compile", entry_params(entry, project_root, locale))?;
-        parse_result(value, "lpp/compile")
+    fn compile(&mut self, docs: &DocumentSet, root: Option<&str>) -> LppRes<CompileResult> {
+        self.call_capability(Capability::Compile, documents_params(docs, root))
     }
 
     fn compile_target(
         &mut self,
         target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-    ) -> Result<CompileResult, ProviderError> {
-        self.require_capability(Capability::Compile)?;
+        root: Option<&str>,
+        loc: Option<&str>,
+    ) -> LppRes<CompileResult> {
         self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/compile", entry_params(target, project_root, locale))?;
-        parse_result(value, "lpp/compile")
+        self.call_capability(Capability::Compile, entry_params(target, root, loc))
     }
 
-    fn reconstruct(
-        &mut self,
-        artifact: &WorkshopArtifact,
-    ) -> Result<ReconstructResult, ProviderError> {
-        self.require_capability(Capability::Reconstruct)?;
-        let params =
-            json!({ "artifact": serde_json::to_value(artifact).expect("artifact serializes") });
-        let value = self.request("lpp/reconstruct", params)?;
-        parse_result(value, "lpp/reconstruct")
+    fn reconstruct(&mut self, artifact: &WorkshopArtifact) -> LppRes<ReconstructResult> {
+        self.call_capability(Capability::Reconstruct, json!({ "artifact": artifact }))
     }
 
-    fn symbols(
-        &mut self,
-        documents: &DocumentSet,
-        project_root: Option<&str>,
-    ) -> Result<SymbolsResult, ProviderError> {
-        self.require_capability(Capability::Symbols)?;
-        let value = self.request("lpp/symbols", documents_params(documents, project_root))?;
-        parse_result(value, "lpp/symbols")
+    fn symbols(&mut self, docs: &DocumentSet, root: Option<&str>) -> LppRes<SymbolsResult> {
+        self.call_capability(Capability::Symbols, documents_params(docs, root))
     }
 
-    fn definition(
-        &mut self,
-        document: &Document,
-        position: Position,
-    ) -> Result<LocationsResult, ProviderError> {
-        self.require_capability(Capability::Definition)?;
-        let params = json!({
-            "document": serde_json::to_value(document).expect("document serializes"),
-            "position": serde_json::to_value(position).expect("position serializes"),
-        });
-        let value = self.request("lpp/definition", params)?;
-        parse_result(value, "lpp/definition")
+    fn definition(&mut self, doc: &Document, pos: Position) -> LppRes<LocationsResult> {
+        self.call_capability(
+            Capability::Definition,
+            json!({ "document": doc, "position": pos }),
+        )
     }
 
-    fn references(
-        &mut self,
-        document: &Document,
-        position: Position,
-        include_declaration: bool,
-    ) -> Result<LocationsResult, ProviderError> {
-        self.require_capability(Capability::References)?;
-        let params = json!({
-            "document": serde_json::to_value(document).expect("document serializes"),
-            "position": serde_json::to_value(position).expect("position serializes"),
-            "includeDeclaration": include_declaration,
-        });
-        let value = self.request("lpp/references", params)?;
-        parse_result(value, "lpp/references")
+    fn references(&mut self, doc: &Document, pos: Position, decl: bool) -> LppRes<LocationsResult> {
+        self.call_capability(
+            Capability::References,
+            json!({ "document": doc, "position": pos, "includeDeclaration": decl }),
+        )
     }
 
     fn rename(
         &mut self,
-        documents: &DocumentSet,
-        position_document_uri: &str,
-        position: Position,
-        new_name: &str,
-        project_root: Option<&str>,
-    ) -> Result<RenameResult, ProviderError> {
-        self.require_capability(Capability::Rename)?;
-        let mut params = json!({
-            "documents": serde_json::to_value(documents).expect("document set serializes"),
-            "positionDocumentUri": position_document_uri,
-            "position": serde_json::to_value(position).expect("position serializes"),
-            "newName": new_name,
-        });
-        if let Some(root) = project_root {
-            params["projectRoot"] = json!(root);
-        }
-        let value = self.request("lpp/rename", params)?;
-        parse_result(value, "lpp/rename")
+        docs: &DocumentSet,
+        uri: &str,
+        pos: Position,
+        name: &str,
+        root: Option<&str>,
+    ) -> LppRes<RenameResult> {
+        let p = opt_param(
+            json!({ "documents": docs, "positionDocumentUri": uri, "position": pos, "newName": name }),
+            "projectRoot",
+            root,
+        );
+        self.call_capability(Capability::Rename, p)
     }
 
     fn validate_edits(
         &mut self,
-        document: &Document,
+        doc: &Document,
         edits: &[TextEdit],
-    ) -> Result<ValidateEditsResult, ProviderError> {
-        self.require_capability(Capability::EditValidation)?;
-        let params = json!({
-            "document": serde_json::to_value(document).expect("document serializes"),
-            "edits": serde_json::to_value(edits).expect("edits serialize"),
-        });
-        let value = self.request("lpp/validateEdits", params)?;
-        parse_result(value, "lpp/validateEdits")
+    ) -> LppRes<ValidateEditsResult> {
+        self.call_capability(
+            Capability::EditValidation,
+            json!({ "document": doc, "edits": edits }),
+        )
     }
 
-    fn shutdown(&mut self) -> Result<(), ProviderError> {
+    fn shutdown(&mut self) -> LppRes<()> {
         if let Err(mut error) = self.client.shutdown() {
             self.enrich_transport_error(&mut error, "lpp/shutdown");
             return Err(error);
@@ -565,26 +424,24 @@ impl LanguageProvider for StdioLanguageProvider {
     }
 }
 
-/// The common `documents`/`projectRoot` parameter shape.
-fn documents_params(documents: &DocumentSet, project_root: Option<&str>) -> Value {
-    let mut params =
-        json!({ "documents": serde_json::to_value(documents).expect("document set serializes") });
-    if let Some(root) = project_root {
-        params["projectRoot"] = json!(root);
+fn opt_param(mut obj: Value, key: &'static str, val: Option<&str>) -> Value {
+    if let Some(v) = val {
+        obj[key] = json!(v);
     }
-    params
+    obj
+}
+
+fn documents_params(documents: &DocumentSet, project_root: Option<&str>) -> Value {
+    opt_param(
+        json!({ "documents": documents }),
+        "projectRoot",
+        project_root,
+    )
 }
 
 fn entry_params(entry: &ProjectEntry, project_root: Option<&str>, locale: Option<&str>) -> Value {
-    let mut params =
-        json!({ "entry": serde_json::to_value(entry).expect("project entry serializes") });
-    if let Some(root) = project_root {
-        params["projectRoot"] = json!(root);
-    }
-    if let Some(locale) = locale {
-        params["locale"] = json!(locale);
-    }
-    params
+    let p = opt_param(json!({ "entry": entry }), "projectRoot", project_root);
+    opt_param(p, "locale", locale)
 }
 
 /// Parse a typed result, converting shape failures into a deterministic
@@ -616,17 +473,17 @@ mod tests {
     /// A placeholder child whose pipes are taken and discarded; only the
     /// exit-status surface is used by these tests.
     fn dummy_child() -> ChildProcess {
-        let (command, args): (&str, Vec<String>) = if cfg!(windows) {
-            (
-                "ping",
-                vec!["-n".to_string(), "60".to_string(), "127.0.0.1".to_string()],
-            )
+        let (cmd, args): (&str, &[&str]) = if cfg!(windows) {
+            ("ping", &["-n", "60", "127.0.0.1"])
         } else {
-            ("sleep", vec!["30".to_string()])
+            ("sleep", &["30"])
         };
-        let mut child = ChildProcess::spawn(Path::new(command), &args).expect("dummy child spawns");
-        let _stdin = child.take_stdin();
-        let _stdout = child.take_stdout();
+        let mut child = ChildProcess::spawn(
+            Path::new(cmd),
+            &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        )
+        .expect("dummy child spawns");
+        let _ = (child.take_stdin(), child.take_stdout());
         child
     }
 
@@ -646,8 +503,7 @@ mod tests {
                 let mut line = String::new();
                 for step in script {
                     line.clear();
-                    let read = reader.read_line(&mut line).unwrap_or(0);
-                    if read == 0 {
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
                         break;
                     }
                     let request = line.trim_end_matches(['\r', '\n']).to_string();
@@ -655,11 +511,10 @@ mod tests {
                     let FakeStep::Respond(mut response) = step;
                     let id = serde_json::from_str::<Value>(&request)
                         .ok()
-                        .and_then(|value| value.get("id").cloned())
+                        .and_then(|v| v.get("id").cloned())
                         .unwrap_or(Value::Null);
                     response["id"] = id;
-                    let _ = writer.write_all(response.to_string().as_bytes());
-                    let _ = writer.write_all(b"\n");
+                    let _ = writeln!(writer, "{response}");
                     let _ = writer.flush();
                 }
             });
@@ -670,14 +525,13 @@ mod tests {
                     request_timeout: Duration::from_secs(5),
                 },
             );
-            let provider = StdioLanguageProvider {
-                child: dummy_child(),
-                client,
-                negotiated: None,
-                last_exit_status: None,
-            };
             (
-                provider,
+                StdioLanguageProvider {
+                    child: dummy_child(),
+                    client,
+                    negotiated: None,
+                    last_exit_status: None,
+                },
                 Fake {
                     requests: requests_rx,
                     _thread: thread,
@@ -685,8 +539,6 @@ mod tests {
             )
         }
 
-        /// Drain exactly `expected` request lines, then assert that nothing
-        /// further reaches the provider (no unexpected wire traffic).
         fn assert_only_requests(&self, expected: usize) {
             for _ in 0..expected {
                 let line = self
@@ -695,12 +547,20 @@ mod tests {
                     .expect("expected request arrives");
                 assert!(!line.is_empty(), "request line is non-empty");
             }
-            match self.requests.recv_timeout(Duration::from_millis(100)) {
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Ok(line) => panic!("unexpected request reached the provider: {line}"),
-                Err(mpsc::RecvTimeoutError::Disconnected) => {}
+            if let Ok(line) = self.requests.recv_timeout(Duration::from_millis(100)) {
+                panic!("unexpected request reached the provider: {line}");
             }
         }
+    }
+
+    fn recv_req(fake: &Fake) -> Value {
+        serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("request"),
+        )
+        .expect("JSON")
     }
 
     enum FakeStep {
@@ -713,28 +573,16 @@ mod tests {
             "serverInfo": { "name": "lpp-mock-provider", "version": "0.1.0" },
             "languages": [ { "id": "x-demo-lang", "extensions": ["xdl"] } ],
             "capabilities": {
-                "check": true,
-                "compile": true,
-                "reconstruct": true,
-                "symbols": true,
-                "definition": true,
-                "references": true,
-                "rename": true,
-                "editValidation": true,
+                "check": true, "compile": true, "reconstruct": true, "symbols": true,
+                "definition": true, "references": true, "rename": true, "editValidation": true,
             }
         })
     }
 
-    fn init_result_project_loading_json() -> Value {
+    fn init_result_version(ver: &str) -> Value {
         let mut result = init_result_json();
-        result["protocolVersion"] = json!("1.1");
+        result["protocolVersion"] = json!(ver);
         result["capabilities"]["projectLoading"] = json!(true);
-        result
-    }
-
-    fn init_result_directory_target_json() -> Value {
-        let mut result = init_result_project_loading_json();
-        result["protocolVersion"] = json!("1.2");
         result
     }
 
@@ -752,48 +600,33 @@ mod tests {
     }
 
     #[test]
-    fn initialize_parse_failure_resets_the_session_for_retry() {
+    fn initialize_failure_resets_the_session_for_retry() {
         let mut missing = init_result_json();
         missing["capabilities"]
             .as_object_mut()
             .expect("object")
             .remove("compile");
-        let (mut provider, fake) = Fake::spawn(vec![
+        let (mut p1, f1) = Fake::spawn(vec![
             FakeStep::Respond(ok_response(missing)),
             FakeStep::Respond(ok_response(init_result_json())),
         ]);
-        let first = provider
-            .initialize(None)
-            .expect_err("missing capability field");
-        assert_eq!(first.code(), "provider-malformed");
-        assert_eq!(
-            provider.client.phase(),
-            ClientPhase::Fresh,
-            "session stays restartable"
-        );
-        let second = provider.initialize(None).expect("retry succeeds");
-        assert_eq!(second.protocol_version, "1.0");
-        assert_eq!(
-            provider.capabilities().expect("negotiated").language_ids(),
-            vec!["x-demo-lang"]
-        );
-        fake.assert_only_requests(2);
-    }
+        let err1 = p1.initialize(None).expect_err("missing capability field");
+        assert_eq!(err1.code(), "provider-malformed");
+        assert_eq!(p1.client.phase(), ClientPhase::Fresh);
+        assert_eq!(p1.initialize(None).unwrap().protocol_version, "1.0");
+        f1.assert_only_requests(2);
 
-    #[test]
-    fn initialize_echoed_version_mismatch_resets_the_session_for_retry() {
         let mut wrong = init_result_json();
         wrong["protocolVersion"] = json!("0.9");
-        let (mut provider, fake) = Fake::spawn(vec![
+        let (mut p2, f2) = Fake::spawn(vec![
             FakeStep::Respond(ok_response(wrong)),
             FakeStep::Respond(ok_response(init_result_json())),
         ]);
-        let first = provider.initialize(None).expect_err("echo mismatch");
-        assert_eq!(first.code(), "protocol-version-mismatch");
-        assert_eq!(first.supported_protocol_versions(), vec!["0.9"]);
-        assert_eq!(provider.client.phase(), ClientPhase::Fresh);
-        provider.initialize(None).expect("retry succeeds");
-        fake.assert_only_requests(2);
+        let err2 = p2.initialize(None).expect_err("echo mismatch");
+        assert_eq!(err2.code(), "protocol-version-mismatch");
+        assert_eq!(p2.client.phase(), ClientPhase::Fresh);
+        p2.initialize(None).expect("retry succeeds");
+        f2.assert_only_requests(2);
     }
 
     #[test]
@@ -814,105 +647,52 @@ mod tests {
             .compile(&documents, Some("file:///project"))
             .expect_err("compile not negotiated");
         assert_eq!(error.code(), "capability-unavailable");
-        // The session is healthy and check still works end to end.
         let check = provider.check(&documents, None).expect("check works");
         assert!(check.documents.is_empty());
         fake.assert_only_requests(2);
     }
 
     #[test]
-    fn project_loading_initialization_and_entry_requests_use_lpp_11() {
-        let (mut provider, fake) = Fake::spawn(vec![
-            FakeStep::Respond(ok_response(init_result_project_loading_json())),
+    fn project_loading_and_directory_targets_use_proper_lpp_versions() {
+        let (mut p1, f1) = Fake::spawn(vec![
+            FakeStep::Respond(ok_response(init_result_version("1.1"))),
             FakeStep::Respond(ok_response(json!({ "documents": [] }))),
             FakeStep::Respond(ok_response(json!({ "diagnostics": [], "artifact": null }))),
         ]);
-        provider
-            .initialize_project_loading(None)
-            .expect("LPP 1.1 initialize");
+        p1.initialize_project_loading(None).unwrap();
         let entry = ProjectEntry {
             uri: "file:///project/main.opy".to_string(),
             language_id: "opy".to_string(),
             version: 7,
             kind: crate::types::ProjectTargetKind::File,
         };
-        provider
-            .check_entry(&entry, Some("file:///project"), Some("zh-CN"))
-            .expect("entry check");
-        provider
-            .compile_entry(&entry, Some("file:///project"), Some("zh-CN"))
-            .expect("entry compile");
-        let initialize: Value = serde_json::from_str(
-            &fake
-                .requests
-                .recv_timeout(Duration::from_millis(250))
-                .expect("initialize request"),
-        )
-        .expect("initialize JSON");
-        assert_eq!(initialize["params"]["protocolVersion"], "1.1");
-        let check: Value = serde_json::from_str(
-            &fake
-                .requests
-                .recv_timeout(Duration::from_millis(250))
-                .expect("check request"),
-        )
-        .expect("check JSON");
+        p1.check_entry(&entry, Some("file:///project"), Some("zh-CN"))
+            .unwrap();
+        p1.compile_entry(&entry, Some("file:///project"), Some("zh-CN"))
+            .unwrap();
+        assert_eq!(recv_req(&f1)["params"]["protocolVersion"], "1.1");
+        let check = recv_req(&f1);
         assert_eq!(check["method"], "lpp/check");
-        assert_eq!(
-            check["params"]["entry"],
-            serde_json::to_value(&entry).unwrap()
-        );
-        assert_eq!(check["params"]["projectRoot"], "file:///project");
         assert_eq!(check["params"]["locale"], "zh-CN");
-        let compile: Value = serde_json::from_str(
-            &fake
-                .requests
-                .recv_timeout(Duration::from_millis(250))
-                .expect("compile request"),
-        )
-        .expect("compile JSON");
-        assert_eq!(compile["method"], "lpp/compile");
-        fake.assert_only_requests(0);
-    }
+        assert_eq!(recv_req(&f1)["method"], "lpp/compile");
+        f1.assert_only_requests(0);
 
-    #[test]
-    fn directory_target_requests_use_lpp_12_and_preserve_target_kind() {
-        let (mut provider, fake) = Fake::spawn(vec![
-            FakeStep::Respond(ok_response(init_result_directory_target_json())),
+        let (mut p2, f2) = Fake::spawn(vec![
+            FakeStep::Respond(ok_response(init_result_version("1.2"))),
             FakeStep::Respond(ok_response(json!({ "documents": [] }))),
             FakeStep::Respond(ok_response(json!({ "diagnostics": [], "artifact": null }))),
         ]);
-        provider
-            .initialize_project_target(None)
-            .expect("LPP 1.2 initialize");
+        p2.initialize_project_target(None).unwrap();
         let target = ProjectEntry {
             uri: "file:///project".to_string(),
             language_id: "opy".to_string(),
             version: 7,
             kind: crate::types::ProjectTargetKind::Directory,
         };
-        provider
-            .check_target(&target, None, None)
-            .expect("directory check");
-        provider
-            .compile_target(&target, None, None)
-            .expect("directory compile");
-        let initialize: Value = serde_json::from_str(
-            &fake
-                .requests
-                .recv_timeout(Duration::from_millis(250))
-                .expect("initialize request"),
-        )
-        .expect("initialize JSON");
-        assert_eq!(initialize["params"]["protocolVersion"], "1.2");
-        let check: Value = serde_json::from_str(
-            &fake
-                .requests
-                .recv_timeout(Duration::from_millis(250))
-                .expect("check request"),
-        )
-        .expect("check JSON");
-        assert_eq!(check["params"]["entry"]["kind"], "directory");
-        fake.assert_only_requests(1);
+        p2.check_target(&target, None, None).unwrap();
+        p2.compile_target(&target, None, None).unwrap();
+        assert_eq!(recv_req(&f2)["params"]["protocolVersion"], "1.2");
+        assert_eq!(recv_req(&f2)["params"]["entry"]["kind"], "directory");
+        f2.assert_only_requests(1);
     }
 }

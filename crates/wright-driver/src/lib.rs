@@ -9,7 +9,10 @@ pub mod edit;
 pub mod input;
 pub mod opy_provider;
 pub mod progress;
-pub mod provider;
+pub mod provider {
+    pub use crate::diag::{Diagnostic, Severity, SourceSpan, Status};
+    pub use crate::workshop_provider::ProviderError;
+}
 pub mod provider_edit;
 pub mod result;
 pub mod service;

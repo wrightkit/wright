@@ -28,17 +28,15 @@ use crate::source_provider::{
 };
 
 fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProviderErrorKind {
+    use opy_provider::OpyProviderError as O;
+    use wright_lpp::LocalProviderErrorKind as K;
     match error {
-        opy_provider::OpyProviderError::Missing(_) => wright_lpp::LocalProviderErrorKind::Missing,
-        opy_provider::OpyProviderError::UnsupportedPlatform(_) => {
-            wright_lpp::LocalProviderErrorKind::UnsupportedPlatform
-        }
-        opy_provider::OpyProviderError::Offline(_) => wright_lpp::LocalProviderErrorKind::Offline,
-        opy_provider::OpyProviderError::Download(_) => wright_lpp::LocalProviderErrorKind::Download,
-        opy_provider::OpyProviderError::Integrity(_) => {
-            wright_lpp::LocalProviderErrorKind::Integrity
-        }
-        opy_provider::OpyProviderError::Install(_) => wright_lpp::LocalProviderErrorKind::Install,
+        O::Missing(_) => K::Missing,
+        O::UnsupportedPlatform(_) => K::UnsupportedPlatform,
+        O::Offline(_) => K::Offline,
+        O::Download(_) => K::Download,
+        O::Integrity(_) => K::Integrity,
+        O::Install(_) => K::Install,
     }
 }
 
@@ -194,12 +192,7 @@ impl CompilerSession {
         }
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
         let mut resolved = input::resolve(&self.config)?;
-        let provider_backend = match self.config.source_backend {
-            SourceBackend::Native => false,
-            SourceBackend::Provider => true,
-            SourceBackend::Auto => resolved.kind == SourceKind::Opy,
-        };
-        if provider_backend && resolved.kind == SourceKind::Ostw {
+        if resolved.kind == SourceKind::Ostw {
             return Err(source_provider_unavailable());
         }
         if self.config.source_backend == SourceBackend::Provider && resolved.kind != SourceKind::Opy
@@ -213,9 +206,11 @@ impl CompilerSession {
                 ),
             ));
         }
-        if resolved.kind == SourceKind::Ostw {
-            return Err(source_provider_unavailable());
-        }
+        let provider_backend = match self.config.source_backend {
+            SourceBackend::Native => false,
+            SourceBackend::Provider => true,
+            SourceBackend::Auto => resolved.kind == SourceKind::Opy,
+        };
         if provider_backend {
             return self.load_from_source_provider(&mut resolved, provider_operation);
         }
@@ -309,19 +304,13 @@ impl CompilerSession {
                     }
                     .diagnostic()
                 })?;
+            let info = wright_lpp::ClientInfo {
+                name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+                version: crate::result::DRIVER_VERSION.to_string(),
+            };
             let initialize = match resolved.target {
-                InputTarget::File => {
-                    provider.initialize_project_loading(Some(&wright_lpp::ClientInfo {
-                        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-                        version: crate::result::DRIVER_VERSION.to_string(),
-                    }))
-                }
-                InputTarget::Directory => {
-                    provider.initialize_project_target(Some(&wright_lpp::ClientInfo {
-                        name: wright_lpp::LPP_CLIENT_NAME.to_string(),
-                        version: crate::result::DRIVER_VERSION.to_string(),
-                    }))
-                }
+                InputTarget::File => provider.initialize_project_loading(Some(&info)),
+                InputTarget::Directory => provider.initialize_project_target(Some(&info)),
             };
             initialize.map_err(|error| {
                 SourceProviderError::Failed {
@@ -534,7 +523,7 @@ impl CompilerSession {
                 return self.finish(command, result);
             }
         };
-        match &self.config.output {
+        let written_to = match &self.config.output {
             Some(path) => {
                 if let Err(error) = std::fs::write(path, &output.text) {
                     self.diagnostics.push(Diagnostic::error(
@@ -544,18 +533,14 @@ impl CompilerSession {
                     ));
                     return self.finish(command, result);
                 }
-                result.output = Some(CompiledOutput {
-                    written_to: crate::input::display_path(path),
-                    ..output
-                });
+                crate::input::display_path(path)
             }
-            None => {
-                result.output = Some(CompiledOutput {
-                    written_to: "stdout".to_string(),
-                    ..output
-                });
-            }
-        }
+            None => "stdout".to_string(),
+        };
+        result.output = Some(CompiledOutput {
+            written_to,
+            ..output
+        });
         self.finish(command, result)
     }
 
@@ -597,141 +582,120 @@ impl CompilerSession {
         self.finish(command, CheckResult {})
     }
 
-    /// `analyze`: load and produce the semantic summary and structural facts.
-    /// This report deliberately does not execute or expose the lint registry.
-    pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
-        let command = "analyze";
-        let loaded = match self.load_with_operation(ProviderOperation::Compile) {
+    fn with_service<T: Default + serde::Serialize>(
+        &mut self,
+        command: &str,
+        load_compile: bool,
+        lint_config: LintConfig,
+        f: impl FnOnce(&mut Self, &Loaded, &SemanticService<'_>) -> T,
+    ) -> Envelope<T> {
+        let loaded = match if load_compile {
+            self.load_with_operation(ProviderOperation::Compile)
+        } else {
+            self.load()
+        } {
             Ok(loaded) => loaded,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
-                return self.finish(command, AnalyzeResult::default());
+                return self.finish(command, T::default());
             }
         };
-        let service = match self.service(&loaded) {
+        let service = match self.service_with(&loaded, lint_config) {
             Ok(service) => service,
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);
-                return self.finish(command, AnalyzeResult::default());
+                return self.finish(command, T::default());
             }
         };
         self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-        let mut program = service_response(&service, &Request::Program);
-        if let serde_json::Value::Object(object) = &mut program {
-            // The service also supports the legacy findings query for agents,
-            // but an analyze report must not be a view of that lint registry.
-            object.remove("findings");
-        }
-        let facts = semantic_facts(&service);
-        self.finish(command, AnalyzeResult { program, facts })
+        let result = f(self, &loaded, &service);
+        self.finish(command, result)
+    }
+
+    /// `analyze`: load and produce the semantic summary and structural facts.
+    pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
+        self.with_service(
+            "analyze",
+            true,
+            LintConfig::default(),
+            |_sess, _loaded, service| {
+                let mut program = service_response(service, &Request::Program);
+                if let serde_json::Value::Object(object) = &mut program {
+                    object.remove("findings");
+                }
+                AnalyzeResult {
+                    program,
+                    facts: semantic_facts(service),
+                }
+            },
+        )
     }
 
     /// `inspect`: load and produce the structural/semantic program model.
     pub fn inspect(&mut self) -> Envelope<InspectResult> {
-        let command = "inspect";
-        let loaded = match self.load() {
-            Ok(loaded) => loaded,
-            Err(diagnostic) => {
-                self.diagnostics.push(diagnostic);
-                return self.finish(command, InspectResult::default());
-            }
-        };
-        let service = match self.service(&loaded) {
-            Ok(service) => service,
-            Err(diagnostic) => {
-                self.diagnostics.push(diagnostic);
-                return self.finish(command, InspectResult::default());
-            }
-        };
-        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-        let program = service_response(&service, &Request::Program);
-        let rules = service_response(&service, &Request::ListRules);
-        let symbols = service_response(&service, &Request::ListSymbols { kind: None });
-        let references: serde_json::Value = {
-            let symbol_ids: Vec<u32> = symbols
-                .as_array()
-                .map(|list| {
-                    list.iter()
-                        .filter_map(|symbol| symbol.get("id").and_then(serde_json::Value::as_u64))
-                        .map(|id| id as u32)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let list: Vec<serde_json::Value> = symbol_ids
-                .iter()
-                .map(|id| service_response(&service, &Request::FindReferences { symbol: *id }))
-                .collect();
-            serde_json::Value::Array(list)
-        };
-        self.finish(
-            command,
-            InspectResult {
-                program,
-                rules,
-                symbols,
-                references,
+        self.with_service(
+            "inspect",
+            false,
+            LintConfig::default(),
+            |_sess, _loaded, service| {
+                let program = service_response(service, &Request::Program);
+                let rules = service_response(service, &Request::ListRules);
+                let symbols = service_response(service, &Request::ListSymbols { kind: None });
+                let references = serde_json::Value::Array(
+                    symbols
+                        .as_array()
+                        .map_or(&[][..], Vec::as_slice)
+                        .iter()
+                        .filter_map(|s| s.get("id").and_then(serde_json::Value::as_u64))
+                        .map(|id| {
+                            service_response(
+                                service,
+                                &Request::FindReferences { symbol: id as u32 },
+                            )
+                        })
+                        .collect(),
+                );
+                InspectResult {
+                    program,
+                    rules,
+                    symbols,
+                    references,
+                }
             },
         )
     }
 
     /// `lint`: load and produce the source identity, program summary, rule
     /// metadata, effective configuration, and findings (#98).
-    ///
-    /// Lint rule findings are reported in `result.findings`; frontend and
-    /// Workshop semantic-completeness diagnostics remain in the envelope.
-    /// Rule enable/disable and severity come from `self.config.lint`, the same
-    /// configuration the CLI flags and programmatic consumers set.
     pub fn lint(&mut self) -> Envelope<LintResult> {
-        let command = "lint";
-        let loaded = match self.load_with_operation(ProviderOperation::Compile) {
-            Ok(loaded) => loaded,
-            Err(diagnostic) => {
-                self.diagnostics.push(diagnostic);
-                return self.finish(command, LintResult::default());
-            }
-        };
-        self.attach_workshop_completeness(&loaded);
-        let service = match self.service_with(&loaded, self.config.lint.clone()) {
-            Ok(service) => service,
-            Err(diagnostic) => {
-                self.diagnostics.push(diagnostic);
-                return self.finish(command, LintResult::default());
-            }
-        };
-        self.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-        let program = service_response(&service, &Request::Program);
-        let lint_rules = service_response(&service, &Request::LintRules);
-        let lint_rule_count = lint_rules
-            .pointer("/rules")
-            .and_then(serde_json::Value::as_array)
-            .map_or(0, Vec::len);
-        self.progress(ProgressEvent::with_count(
-            ProgressPhase::Linting,
-            lint_rule_count,
-            ProgressUnit::Rules,
-        ));
-        let mut findings = service_response(&service, &Request::GetFindings);
-        resolve_finding_span_paths(&mut findings, &loaded);
-        let (rules, config, skipped) = match lint_rules {
-            serde_json::Value::Object(mut object) => (
-                object
-                    .remove("rules")
-                    .unwrap_or_else(|| serde_json::json!([])),
-                object
-                    .remove("config")
-                    .unwrap_or_else(|| serde_json::json!({})),
-                object
-                    .remove("skipped")
-                    .unwrap_or_else(|| serde_json::json!([])),
-            ),
-            _ => (
-                serde_json::json!([]),
-                serde_json::json!({}),
-                serde_json::json!([]),
-            ),
-        };
-        self.finish(
-            command,
+        let config = self.config.lint.clone();
+        self.with_service("lint", true, config, |sess, loaded, service| {
+            sess.attach_workshop_completeness(loaded);
+            let program = service_response(service, &Request::Program);
+            let lint_rules = service_response(service, &Request::LintRules);
+            let count = lint_rules
+                .pointer("/rules")
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, Vec::len);
+            sess.progress(ProgressEvent::with_count(
+                ProgressPhase::Linting,
+                count,
+                ProgressUnit::Rules,
+            ));
+            let mut findings = service_response(service, &Request::GetFindings);
+            resolve_finding_span_paths(&mut findings, loaded);
+            let (rules, config, skipped) = match lint_rules {
+                serde_json::Value::Object(mut o) => (
+                    o.remove("rules").unwrap_or_else(|| serde_json::json!([])),
+                    o.remove("config").unwrap_or_else(|| serde_json::json!({})),
+                    o.remove("skipped").unwrap_or_else(|| serde_json::json!([])),
+                ),
+                _ => (
+                    serde_json::json!([]),
+                    serde_json::json!({}),
+                    serde_json::json!([]),
+                ),
+            };
             LintResult {
                 input_identity: loaded.input.identity.clone(),
                 program,
@@ -739,8 +703,8 @@ impl CompilerSession {
                 config,
                 findings,
                 skipped,
-            },
-        )
+            }
+        })
     }
 
     /// `convert`: load validated Workshop input and reconstruct canonical OPY
@@ -818,14 +782,13 @@ impl CompilerSession {
             .map_err(|error| {
                 self.diagnostics.push(provider_error_diagnostic(error));
             })?;
-        provider
-            .initialize(Some(&wright_lpp::ClientInfo {
-                name: crate::result::DRIVER_VERSION.to_string(),
-                version: crate::result::DRIVER_VERSION.to_string(),
-            }))
-            .map_err(|error| {
-                self.diagnostics.push(provider_error_diagnostic(error));
-            })?;
+        let client_info = wright_lpp::ClientInfo {
+            name: crate::result::DRIVER_VERSION.to_string(),
+            version: crate::result::DRIVER_VERSION.to_string(),
+        };
+        provider.initialize(Some(&client_info)).map_err(|error| {
+            self.diagnostics.push(provider_error_diagnostic(error));
+        })?;
         let result = provider
             .reconstruct(&wright_lpp::WorkshopArtifact {
                 format: "workshop-rs/text-v1".to_string(),
@@ -836,11 +799,6 @@ impl CompilerSession {
             })?;
         let _ = provider.shutdown();
         Ok(result.source)
-    }
-
-    /// Build the semantic service over a loaded program.
-    fn service<'a>(&self, loaded: &'a Loaded) -> Result<SemanticService<'a>, Diagnostic> {
-        self.service_with(loaded, LintConfig::default())
     }
 
     /// Build the semantic service over a loaded program with an explicit lint
@@ -890,33 +848,12 @@ impl CompilerSession {
             .path
             .as_deref()
             .unwrap_or_else(|| Path::new("<stdin>"));
-        match crate::provider::LanguageProvider::check(&provider, &loaded.input.text, path) {
+        match provider.check(&loaded.input.text, path) {
             Ok(diagnostics) => {
-                self.diagnostics
-                    .extend(diagnostics.into_iter().map(|diagnostic| Diagnostic {
-                        code: diagnostic.code,
-                        stage: Stage::Analysis,
-                        severity: match diagnostic.severity {
-                            crate::provider::Severity::Error => Severity::Error,
-                            crate::provider::Severity::Warning => Severity::Warning,
-                            crate::provider::Severity::Info => Severity::Info,
-                        },
-                        message: diagnostic.message,
-                        span: Some(SourceSpan {
-                            file: 0,
-                            path: diagnostic.span.file.display().to_string(),
-                            start: Position {
-                                line: diagnostic.span.start_line,
-                                col: diagnostic.span.start_col,
-                            },
-                            end: Position {
-                                line: diagnostic.span.end_line,
-                                col: diagnostic.span.end_col,
-                            },
-                        }),
-                        status: Some(diagnostic.status),
-                        source: Some(loaded.origin.clone()),
-                    }));
+                for mut diagnostic in diagnostics {
+                    diagnostic.source = Some(loaded.origin.clone());
+                    self.diagnostics.push(diagnostic);
+                }
             }
             Err(error) => self.diagnostics.push(Diagnostic::error(
                 "workshop-provider-check",
@@ -930,7 +867,7 @@ impl CompilerSession {
         let diagnostics = std::mem::take(&mut self.diagnostics);
         let has_error = diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.severity == crate::diag::Severity::Error);
+            .any(|d| d.severity == crate::diag::Severity::Error);
         let exit = if has_error {
             exit_code_from(&diagnostics)
         } else {
@@ -955,122 +892,47 @@ fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_j
     }
 }
 
-/// Build the initial `analyze` report from existing semantic query surfaces.
-///
-/// Keeping this composition here makes the product boundary explicit: the
-/// report contains symbol usage and CFG measurements, while lint rules remain
-/// owned by `LintRegistry` and are only exposed by `lint`/`findings` queries.
 fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
-    let symbols = service_response(service, &Request::ListSymbols { kind: None });
-    let symbols = symbols
-        .as_array()
-        .map(|symbols| {
-            symbols
-                .iter()
-                .map(|symbol| {
-                    let id = symbol
-                        .get("id")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or_default() as u32;
-                    let usage = service_response(service, &Request::GetUsage { symbol: id });
-                    serde_json::json!({
-                        "id": symbol.get("id").cloned().unwrap_or_default(),
-                        "kind": symbol.get("kind").cloned().unwrap_or_default(),
-                        "name": symbol.get("name").cloned().unwrap_or_default(),
-                        "span": symbol.get("span").cloned().unwrap_or(serde_json::Value::Null),
-                        "usage": usage,
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let rules = service_response(service, &Request::ListRules);
-    let rules = rules
-        .as_array()
-        .map(|rules| {
-            rules
-                .iter()
-                .map(|rule| {
-                    let id = rule
-                        .get("id")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or_default() as u32;
-                    let cfg = service_response(service, &Request::GetCfg { rule: id });
-                    let blocks = cfg
-                        .get("blocks")
-                        .and_then(serde_json::Value::as_array)
-                        .cloned()
-                        .unwrap_or_default();
-                    let edge_count = blocks
-                        .iter()
-                        .map(|block| {
-                            block
-                                .get("successors")
-                                .and_then(serde_json::Value::as_array)
-                                .map_or(0, Vec::len)
-                        })
-                        .sum::<usize>();
-                    let wait_blocks = blocks
-                        .iter()
-                        .filter(|block| {
-                            block
-                                .get("waits")
-                                .and_then(serde_json::Value::as_bool)
-                                .unwrap_or(false)
-                        })
-                        .count();
-                    let loop_blocks = blocks
-                        .iter()
-                        .filter(|block| {
-                            matches!(
-                                block.get("kind").and_then(serde_json::Value::as_str),
-                                Some("while" | "for")
-                            )
-                        })
-                        .count();
-                    serde_json::json!({
-                        "id": rule.get("id").cloned().unwrap_or_default(),
-                        "name": rule.get("name").cloned().unwrap_or_default(),
-                        "span": rule.get("span").cloned().unwrap_or(serde_json::Value::Null),
-                        "controlFlow": {
-                            "blocks": blocks.len(),
-                            "edges": edge_count,
-                            "loopBlocks": loop_blocks,
-                            "waitBlocks": wait_blocks,
-                        },
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    serde_json::json!({
-        "symbols": symbols,
-        "rules": rules,
-    })
+    let mut symbols = service_response(service, &Request::ListSymbols { kind: None });
+    if let Some(list) = symbols.as_array_mut() {
+        for s in list {
+            let id = s.get("id").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
+            s["usage"] = service_response(service, &Request::GetUsage { symbol: id });
+        }
+    }
+    let mut rules = service_response(service, &Request::ListRules);
+    if let Some(list) = rules.as_array_mut() {
+        for r in list {
+            let id = r.get("id").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
+            let cfg = service_response(service, &Request::GetCfg { rule: id });
+            let blocks = cfg["blocks"].as_array().map_or(&[][..], Vec::as_slice);
+            let (mut edges, mut wait_blocks, mut loop_blocks) = (0, 0, 0);
+            for b in blocks {
+                edges += b["successors"].as_array().map_or(0, Vec::len);
+                wait_blocks += b["waits"].as_bool().unwrap_or(false) as usize;
+                loop_blocks += matches!(b["kind"].as_str(), Some("while" | "for")) as usize;
+            }
+            r["controlFlow"] = serde_json::json!({
+                "blocks": blocks.len(),
+                "edges": edges,
+                "loopBlocks": loop_blocks,
+                "waitBlocks": wait_blocks,
+            });
+        }
+    }
+    serde_json::json!({ "symbols": symbols, "rules": rules })
 }
 
-/// Add the resolved `path` to every finding span.
-///
-/// File 0 is the main input and resolves root-relative to the include root
-/// (`--root`, defaulting to the input's directory); other files resolve from
-/// the retained frontend file registry. `<file N>` is the fallback when no
-/// registry entry resolves (matching the [`span_from_json`] convention), and
-/// stdin inputs fall back to their display identity (`<stdin>`).
 pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loaded: &Loaded) {
     let Some(list) = findings.as_array_mut() else {
         return;
     };
     for finding in list {
-        let Some(span) = finding.get_mut("span") else {
+        let Some(span) = finding.get_mut("span").filter(|s| s.is_object()) else {
             continue;
         };
-        if !span.is_object() {
-            continue;
-        }
         let path = if loaded.provenance == Provenance::Unmapped {
-            "<provider-artifact>".to_string()
+            "<provider-artifact>".into()
         } else {
             span.get("file")
                 .and_then(serde_json::Value::as_u64)
@@ -1090,11 +952,8 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
                             } else {
                                 None
                             };
-                            path.map(|path| {
-                                root_relative(Some(path), &loaded.input.root)
-                                    .unwrap_or_else(|| source.clone())
-                            })
-                            .unwrap_or_else(|| source.clone())
+                            path.and_then(|p| root_relative(Some(p), &loaded.input.root))
+                                .unwrap_or_else(|| source.clone())
                         })
                         .unwrap_or_else(|| format!("<file {file}>"))
                 })
@@ -1104,109 +963,64 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
     }
 }
 
-/// The root-relative form of `path` when it sits under `root`.
-///
-/// `canonicalize` makes both paths absolute and resolves symlinks, so
-/// absolute, relative, and cwd-relative spellings of the same file all
-/// produce the same root-relative result. Returns `None` when there is no
-/// path (stdin) or the path is not under the root.
 fn root_relative(path: Option<&Path>, root: &Path) -> Option<String> {
     let path = path?;
     let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    // A single-component relative input (`loop.opy`) has an empty parent, so
-    // the resolved root is the empty path; canonicalizing it fails, so treat
-    // it as the cwd (its directory by definition).
-    let abs_root = match root.canonicalize() {
-        Ok(root) => root,
-        Err(_) if root.as_os_str().is_empty() => std::env::current_dir().ok()?,
-        Err(_) => root.to_path_buf(),
-    };
-    match abs_path.strip_prefix(&abs_root) {
-        Ok(relative) if !relative.as_os_str().is_empty() => Some(relative.display().to_string()),
-        _ => None,
-    }
+    let abs_root = root
+        .canonicalize()
+        .or_else(|_| {
+            if root.as_os_str().is_empty() {
+                std::env::current_dir()
+            } else {
+                Ok(root.to_path_buf())
+            }
+        })
+        .ok()?;
+    abs_path
+        .strip_prefix(&abs_root)
+        .ok()
+        .filter(|r| !r.as_os_str().is_empty())
+        .map(|r| r.display().to_string())
 }
 
-/// Map a Workshop-language error to a driver diagnostic.
 pub(crate) fn workshop_diag(
     error: workshop_rs::WorkshopError,
     resolved: &ResolvedInput,
 ) -> Diagnostic {
+    use workshop_rs::WorkshopError as WE;
     let (code, stage, span) = match &error {
-        workshop_rs::WorkshopError::Catalog(catalog) => {
+        WE::Catalog(c) => {
             return Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
-                format!("{}: {}", catalog.code, catalog.message),
+                format!("{}: {}", c.code, c.message),
             );
         }
-        workshop_rs::WorkshopError::Unknown { kind, span, .. } => (
-            format!("unknown-{kind}"),
-            Stage::Frontend,
-            span.map(|span| SourceSpan {
-                file: span.file.index(),
-                path: resolved.display.clone(),
-                start: Position {
-                    line: span.start.line,
-                    col: span.start.col,
-                },
-                end: Position {
-                    line: span.end.line,
-                    col: span.end.col,
-                },
-            }),
-        ),
-        workshop_rs::WorkshopError::Malformed { span, .. } => (
-            "parse-error".to_string(),
-            Stage::Frontend,
-            span.map(|span| SourceSpan {
-                file: span.file.index(),
-                path: resolved.display.clone(),
-                start: Position {
-                    line: span.start.line,
-                    col: span.start.col,
-                },
-                end: Position {
-                    line: span.end.line,
-                    col: span.end.col,
-                },
-            }),
-        ),
-        workshop_rs::WorkshopError::Unsupported { span, .. } => (
-            "unsupported-construct".to_string(),
-            Stage::Frontend,
-            span.map(|span| SourceSpan {
-                file: span.file.index(),
-                path: resolved.display.clone(),
-                start: Position {
-                    line: span.start.line,
-                    col: span.start.col,
-                },
-                end: Position {
-                    line: span.end.line,
-                    col: span.end.col,
-                },
-            }),
-        ),
-        // The workshop-rs emitter reports missing target-locale spellings as
-        // a first-class error (ADR-0001 Decision 7; wright#143): conversion
-        // or emission into a locale without a mapping is a diagnostic, never
-        // a guess or a silent passthrough.
-        workshop_rs::WorkshopError::MissingMapping { kind, id, locale } => (
-            "missing-mapping".to_string(),
-            Stage::Frontend,
-            Diagnostic::error(
+        WE::MissingMapping { kind, id, locale } => {
+            return Diagnostic::error(
                 "missing-mapping",
                 Stage::Frontend,
                 format!(
-                    "missing {kind} mapping for locale '{locale}': '{id}' \
-                     (fallback emission is opt-in; see workshop-rs EmitOptions)"
+                    "missing {kind} mapping for locale '{locale}': '{id}' (fallback emission is opt-in; see workshop-rs EmitOptions)"
                 ),
-            )
-            .span
-            .map(|_| unreachable!("constructed above without a span")),
-        ),
+            );
+        }
+        WE::Unknown { kind, span, .. } => (format!("unknown-{kind}"), Stage::Frontend, span),
+        WE::Malformed { span, .. } => ("parse-error".into(), Stage::Frontend, span),
+        WE::Unsupported { span, .. } => ("unsupported-construct".into(), Stage::Frontend, span),
     };
+    let span = span.map(|s| SourceSpan {
+        file: s.file.index(),
+        path: resolved.display.clone(),
+        start: Position {
+            line: s.start.line,
+            col: s.start.col,
+        },
+        end: Position {
+            line: s.end.line,
+            col: s.end.col,
+        },
+    });
     Diagnostic {
         code,
         stage,
@@ -1220,7 +1034,7 @@ pub(crate) fn workshop_diag(
 
 fn provider_artifact_origin(resolved: &ResolvedInput) -> Origin {
     Origin {
-        kind: "provider-artifact".to_string(),
+        kind: "provider-artifact".into(),
         locale: resolved.origin.locale.clone(),
     }
 }
@@ -1229,23 +1043,16 @@ fn workshop_diag_for_unmapped_provider_artifact(
     error: workshop_rs::WorkshopError,
     resolved: &ResolvedInput,
 ) -> Diagnostic {
-    let mut diagnostic = workshop_diag(error, resolved);
-    if let Some(span) = &mut diagnostic.span {
-        span.path = "<provider-artifact>".to_string();
+    let mut diag = workshop_diag(error, resolved);
+    if let Some(span) = &mut diag.span {
+        span.path = "<provider-artifact>".into();
     }
-    diagnostic.source = Some(provider_artifact_origin(resolved));
-    diagnostic
+    diag.source = Some(provider_artifact_origin(resolved));
+    diag
 }
 
 fn provider_error_diagnostic(error: wright_lpp::ProviderError) -> Diagnostic {
-    let unsupported = matches!(
-        &error,
-        wright_lpp::ProviderError::Lpp(lpp)
-            if matches!(
-                lpp.kind,
-                wright_lpp::LppErrorKind::CapabilityUnavailable | wright_lpp::LppErrorKind::Refusal
-            )
-    );
+    let unsupported = matches!(&error, wright_lpp::ProviderError::Lpp(lpp) if matches!(lpp.kind, wright_lpp::LppErrorKind::CapabilityUnavailable | wright_lpp::LppErrorKind::Refusal));
     Diagnostic::error(
         error.code(),
         if unsupported {

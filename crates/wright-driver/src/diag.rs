@@ -83,6 +83,18 @@ pub struct Origin {
     pub locale: Option<String>,
 }
 
+/// Semantic support status for a diagnosed construct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    /// The construct is understood by the provider.
+    Supported,
+    /// The construct is understood only partially.
+    Partial,
+    /// The construct is not understood and must not be treated as supported.
+    Unsupported,
+}
+
 /// One structured diagnostic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Diagnostic {
@@ -95,7 +107,7 @@ pub struct Diagnostic {
     /// Provider semantic support status, when this diagnostic came from an
     /// in-process language provider.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<crate::provider::Status>,
+    pub status: Option<Status>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]

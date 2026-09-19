@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 
 use wright_driver::WorkshopProvider;
-use wright_driver::provider::LanguageProvider;
 use wright_driver::workshop_provider::{diagnostic_code, status_for_classification};
 
 #[test]
@@ -52,7 +51,7 @@ fn provider_matches_released_workshop_contract() {
             .check(&source, &path)
             .unwrap_or_else(|error| panic!("{} provider: {error}", path.display()))
             .into_iter()
-            .map(|diagnostic| (diagnostic.code, diagnostic.status))
+            .map(|diagnostic| (diagnostic.code, diagnostic.status.unwrap()))
             .collect::<Vec<_>>();
         expected.sort_by(|left, right| left.0.cmp(&right.0));
         actual.sort_by(|left, right| left.0.cmp(&right.0));

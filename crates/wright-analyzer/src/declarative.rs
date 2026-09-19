@@ -3,12 +3,9 @@ use std::fmt;
 use serde::Deserialize;
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
-use workshop_rs::wir::{self, Action, ActionId, Event, RuleId, Value, ValueId};
-use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
+use workshop_rs::{Action, Event, PlayerEventKind, Program, Rule, Value};
 
-use crate::analysis::{EvidenceClass, Finding as LegacyFinding, Severity};
-use crate::canonical::Finding as CanonicalFinding;
-use crate::facts::{RuleFacts, SemanticFacts};
+use crate::analysis::{EvidenceClass, Finding, Severity};
 
 const DEFAULT_LOCALE: &str = "en-US";
 
@@ -181,8 +178,6 @@ struct CanonicalActionPattern {
     present: bool,
 }
 
-type ScopeMatch = (Option<ActionId>, Vec<ActionId>, Vec<ValueId>, Option<Span>);
-
 #[derive(Debug, Clone)]
 enum CanonicalValuePattern {
     Any,
@@ -253,138 +248,58 @@ impl DeclarativeRule {
         &self.definition.metadata
     }
 
-    /// Declarative matchers only report exact structural facts from canonical
-    /// WIR; they do not claim runtime behavior.
     pub fn evidence(&self) -> EvidenceClass {
         EvidenceClass::Exact
     }
 
-    /// The built-in policy default. Project configuration owns overrides.
     pub fn default_severity(&self) -> Severity {
         Severity::Warning
     }
 
     pub fn run(
         &self,
-        facts: &SemanticFacts<'_>,
-        rule: RuleId,
-        min_matches: Option<usize>,
-        max_matches: Option<usize>,
-    ) -> Vec<LegacyFinding> {
-        let Some(rule_facts) = facts.rule(rule) else {
-            return Vec::new();
-        };
-        let scopes = matching_scopes(&rule_facts, self.definition.matcher.scope);
-        let mut findings = Vec::new();
-        for (scope_id, actions, conditions, anchor) in scopes {
-            if self
-                .event
-                .as_deref()
-                .is_some_and(|event| event != event_id(rule_facts.event()))
-            {
-                continue;
-            }
-            if let Some(pattern) = &self.conditions {
-                let count = matching_values(&rule_facts, conditions, &pattern.value);
-                if !pattern.count.accepts(count) {
-                    continue;
-                }
-            }
-            let mut counts = Vec::new();
-            if self.actions.iter().any(|pattern| {
-                let count = matching_actions(&rule_facts, &actions, pattern);
-                let accepted = if pattern.present {
-                    pattern.count.accepts(count)
-                } else {
-                    count == 0 && pattern.count.accepts(0)
-                };
-                counts.push(count);
-                !accepted
-            }) {
-                continue;
-            }
-            let matched = counts.iter().copied().max().unwrap_or(1);
-            if min_matches.is_some_and(|min| matched < min)
-                || max_matches.is_some_and(|max| matched > max)
-            {
-                continue;
-            }
-            findings.push(LegacyFinding {
-                code: self.id().to_string(),
-                severity: self.default_severity(),
-                message: format!(
-                    "{} (matched {matched} node{})",
-                    self.metadata().summary,
-                    if matched == 1 { "" } else { "s" }
-                ),
-                span: anchor,
-                rule,
-                action: scope_id,
-                value: None,
-                evidence: self.evidence(),
-                boundedness: None,
-                persistent_object: None,
-            });
-        }
-        findings
-    }
-
-    /// Run a declarative matcher over the canonical public Workshop program.
-    /// This keeps custom lint rules on the same public semantic boundary as
-    /// first-party analysis; the WIR matcher above remains for legacy tests
-    /// and internal consumers.
-    pub fn run_canonical(
-        &self,
-        program: &PublicProgram,
+        program: &Program,
         rule: usize,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<CanonicalFinding> {
+    ) -> Vec<Finding> {
         let Some(rule_data) = program.rules.get(rule) else {
             return Vec::new();
         };
         if self
             .event
             .as_deref()
-            .is_some_and(|event| event != public_event_id(&rule_data.event))
+            .is_some_and(|e| e != event_id(&rule_data.event))
         {
             return Vec::new();
         }
-        let scopes = public_scopes(rule_data);
         let mut findings = Vec::new();
-        for (scope_id, actions, values, anchor) in scopes {
-            if let Some(pattern) = &self.conditions {
-                let count = values
-                    .iter()
-                    .filter(|value| public_value_matches(value, &pattern.value))
-                    .count();
-                if !pattern.count.accepts(count) {
+        for (scope_id, actions, values, anchor) in rule_scopes(rule_data) {
+            if let Some(p) = &self.conditions {
+                let count = values.iter().filter(|v| value_matches(v, &p.value)).count();
+                if !p.count.accepts(count) {
                     continue;
                 }
             }
             let mut counts = Vec::new();
-            if self.actions.iter().any(|pattern| {
-                let count = actions
-                    .iter()
-                    .filter(|action| public_action_matches(action, pattern))
-                    .count();
-                let accepted = if pattern.present {
-                    pattern.count.accepts(count)
+            if self.actions.iter().any(|p| {
+                let count = actions.iter().filter(|a| action_matches(a, p)).count();
+                let accepted = if p.present {
+                    p.count.accepts(count)
                 } else {
-                    count == 0 && pattern.count.accepts(0)
+                    count == 0 && p.count.accepts(0)
                 };
                 counts.push(count);
                 !accepted
             }) {
                 continue;
             }
-            let matched = counts.iter().copied().max().unwrap_or(1);
-            if min_matches.is_some_and(|min| matched < min)
-                || max_matches.is_some_and(|max| matched > max)
+            let matched = counts.into_iter().max().unwrap_or(1);
+            if min_matches.is_some_and(|m| matched < m) || max_matches.is_some_and(|m| matched > m)
             {
                 continue;
             }
-            findings.push(CanonicalFinding {
+            findings.push(Finding {
                 code: self.id().to_string(),
                 severity: self.default_severity(),
                 message: format!(
@@ -402,22 +317,28 @@ impl DeclarativeRule {
         }
         findings
     }
+
+    pub fn run_canonical(
+        &self,
+        program: &Program,
+        rule: usize,
+        min_matches: Option<usize>,
+        max_matches: Option<usize>,
+    ) -> Vec<Finding> {
+        self.run(program, rule, min_matches, max_matches)
+    }
 }
 
-type PublicScope<'a> = (
-    Option<usize>,
-    Vec<&'a PublicAction>,
-    Vec<&'a PublicValue>,
-    Option<Span>,
-);
+type ScopeData<'a> = (Option<usize>, Vec<&'a Action>, Vec<&'a Value>, Option<Span>);
 
-fn public_scopes(rule: &workshop_rs::Rule) -> Vec<PublicScope<'_>> {
-    match rule.actions.iter().enumerate().find(|(_, action)| {
+fn rule_scopes(rule: &Rule) -> Vec<ScopeData<'_>> {
+    let conds: Vec<&Value> = rule.conditions.iter().map(|c| &c.value).collect();
+    match rule.actions.iter().enumerate().find(|(_, a)| {
         matches!(
-            action,
-            PublicAction::While { .. }
-                | PublicAction::ForGlobalVariable { .. }
-                | PublicAction::ForPlayerVariable { .. }
+            a,
+            Action::While { .. }
+                | Action::ForGlobalVariable { .. }
+                | Action::ForPlayerVariable { .. }
         )
     }) {
         Some((index, _)) => {
@@ -425,58 +346,46 @@ fn public_scopes(rule: &workshop_rs::Rule) -> Vec<PublicScope<'_>> {
             let end = rule.actions[index + 1..]
                 .iter()
                 .enumerate()
-                .find_map(|(offset, action)| {
-                    match action {
-                        PublicAction::If { .. }
-                        | PublicAction::While { .. }
-                        | PublicAction::ForGlobalVariable { .. }
-                        | PublicAction::ForPlayerVariable { .. } => depth += 1,
-                        PublicAction::End if depth == 0 => return Some(index + 1 + offset),
-                        PublicAction::End => depth -= 1,
-                        _ => {}
+                .find_map(|(offset, action)| match action {
+                    Action::If { .. }
+                    | Action::While { .. }
+                    | Action::ForGlobalVariable { .. }
+                    | Action::ForPlayerVariable { .. } => {
+                        depth += 1;
+                        None
                     }
-                    None
+                    Action::End if depth == 0 => Some(index + 1 + offset),
+                    Action::End => {
+                        depth -= 1;
+                        None
+                    }
+                    _ => None,
                 })
                 .unwrap_or(rule.actions.len());
             vec![(
                 Some(index),
                 rule.actions[index + 1..end].iter().collect(),
-                rule.conditions
-                    .iter()
-                    .map(|condition| &condition.value)
-                    .collect(),
+                conds,
                 None,
             )]
         }
-        None => vec![(
-            None,
-            rule.actions.iter().collect(),
-            rule.conditions
-                .iter()
-                .map(|condition| &condition.value)
-                .collect(),
-            None,
-        )],
+        None => vec![(None, rule.actions.iter().collect(), conds, None)],
     }
 }
 
-fn public_action_matches(action: &PublicAction, pattern: &CanonicalActionPattern) -> bool {
+fn action_matches(action: &Action, pattern: &CanonicalActionPattern) -> bool {
     let kind_matches = match pattern.kind {
         None | Some(ActionKind::Any) => true,
-        Some(ActionKind::Call) => matches!(action, PublicAction::Call { .. }),
-        Some(ActionKind::While) => matches!(action, PublicAction::While { .. }),
-        Some(ActionKind::ForGlobalVariable) => {
-            matches!(action, PublicAction::ForGlobalVariable { .. })
-        }
-        Some(ActionKind::ForPlayerVariable) => {
-            matches!(action, PublicAction::ForPlayerVariable { .. })
-        }
-        Some(ActionKind::If) => matches!(action, PublicAction::If { .. }),
+        Some(ActionKind::Call) => matches!(action, Action::Call { .. }),
+        Some(ActionKind::While) => matches!(action, Action::While { .. }),
+        Some(ActionKind::ForGlobalVariable) => matches!(action, Action::ForGlobalVariable { .. }),
+        Some(ActionKind::ForPlayerVariable) => matches!(action, Action::ForPlayerVariable { .. }),
+        Some(ActionKind::If) => matches!(action, Action::If { .. }),
     };
     if !kind_matches {
         return false;
     }
-    let PublicAction::Call { name, args } = action else {
+    let Action::Call { name, args } = action else {
         return pattern.name.is_none() && pattern.args.is_empty();
     };
     if pattern
@@ -486,205 +395,21 @@ fn public_action_matches(action: &PublicAction, pattern: &CanonicalActionPattern
     {
         return false;
     }
-    pattern.args.iter().enumerate().all(|(index, expected)| {
-        args.get(index)
-            .is_some_and(|actual| public_value_matches(actual, expected))
-    }) && pattern.parameters.iter().all(|(index, expected)| {
-        args.get(*index)
-            .is_some_and(|actual| public_value_matches(actual, expected))
-    })
+    pattern
+        .args
+        .iter()
+        .enumerate()
+        .all(|(i, exp)| args.get(i).is_some_and(|act| value_matches(act, exp)))
+        && pattern
+            .parameters
+            .iter()
+            .all(|(i, exp)| args.get(*i).is_some_and(|act| value_matches(act, exp)))
 }
 
-fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) -> bool {
+fn value_matches(value: &Value, pattern: &CanonicalValuePattern) -> bool {
     match (pattern, value) {
         (CanonicalValuePattern::Any, _) => true,
-        (CanonicalValuePattern::Number(expected), PublicValue::Number(actual)) => {
-            expected == actual
-        }
-        (CanonicalValuePattern::String(expected), PublicValue::String(actual))
-        | (CanonicalValuePattern::String(expected), PublicValue::LocalizedString(actual)) => {
-            expected == actual
-        }
-        (CanonicalValuePattern::Boolean(expected), PublicValue::Bool(actual)) => expected == actual,
-        (
-            CanonicalValuePattern::Enum { domain, member },
-            PublicValue::Enum { value_type, value },
-        ) => domain == value_type && member == value,
-        (
-            CanonicalValuePattern::Call { name, args },
-            PublicValue::Call {
-                name: actual,
-                args: actual_args,
-            },
-        ) => {
-            name == actual
-                && args.len() <= actual_args.len()
-                && args
-                    .iter()
-                    .enumerate()
-                    .all(|(index, expected)| public_value_matches(&actual_args[index], expected))
-        }
-        _ => false,
-    }
-}
-
-fn public_event_id(event: &workshop_rs::Event) -> &str {
-    match event {
-        workshop_rs::Event::Global => "global",
-        workshop_rs::Event::EachPlayer | workshop_rs::Event::EachPlayerWithFilters { .. } => {
-            "eachPlayer"
-        }
-        workshop_rs::Event::Player { kind, .. } => match kind {
-            workshop_rs::PlayerEventKind::DealtDamage => "playerDealtDamage",
-            workshop_rs::PlayerEventKind::DealtFinalBlow => "playerDealtFinalBlow",
-            workshop_rs::PlayerEventKind::DealtHealing => "playerDealtHealing",
-            workshop_rs::PlayerEventKind::DealtKnockback => "playerDealtKnockback",
-            workshop_rs::PlayerEventKind::Died => "playerDied",
-            workshop_rs::PlayerEventKind::EarnedElimination => "playerEarnedElimination",
-            workshop_rs::PlayerEventKind::Joined => "playerJoined",
-            workshop_rs::PlayerEventKind::Left => "playerLeft",
-            workshop_rs::PlayerEventKind::ReceivedHealing => "playerReceivedHealing",
-            workshop_rs::PlayerEventKind::ReceivedKnockback => "playerReceivedKnockback",
-            workshop_rs::PlayerEventKind::TookDamage => "playerTookDamage",
-        },
-        workshop_rs::Event::Subroutine(_) => "subroutine",
-    }
-}
-
-fn matching_scopes(facts: &RuleFacts<'_>, scope: Scope) -> Vec<ScopeMatch> {
-    if matches!(scope, Scope::Rule) {
-        return vec![(
-            None,
-            facts.actions().to_vec(),
-            facts.conditions().to_vec(),
-            facts
-                .program()
-                .rules
-                .get(facts.id())
-                .and_then(|rule| rule.span),
-        )];
-    }
-    let mut result = Vec::new();
-    visit_actions(facts.program(), facts.actions(), &mut |id, action| {
-        let matches = matches!(
-            (scope, action),
-            (Scope::While, Action::While { .. })
-                | (Scope::ForGlobalVariable, Action::ForGlobalVariable { .. })
-                | (Scope::ForPlayerVariable, Action::ForPlayerVariable { .. })
-                | (Scope::If, Action::If { .. })
-        );
-        if !matches {
-            return;
-        }
-        let (body, conditions) = match action {
-            Action::While {
-                condition, body, ..
-            } => (body.clone(), vec![*condition]),
-            Action::ForGlobalVariable { body, .. } | Action::ForPlayerVariable { body, .. } => {
-                (body.clone(), Vec::new())
-            }
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                let mut body = branches
-                    .iter()
-                    .flat_map(|branch| branch.body.clone())
-                    .collect::<Vec<_>>();
-                if let Some(else_body) = else_body {
-                    body.extend(else_body);
-                }
-                let conditions = branches.iter().map(|branch| branch.condition).collect();
-                (body, conditions)
-            }
-            _ => (Vec::new(), Vec::new()),
-        };
-        result.push((Some(id), body, conditions, action.span()));
-    });
-    result
-}
-
-fn matching_actions(
-    facts: &RuleFacts<'_>,
-    actions: &[ActionId],
-    pattern: &CanonicalActionPattern,
-) -> usize {
-    let mut count = 0;
-    visit_actions(facts.program(), actions, &mut |id, action| {
-        if action_matches(facts, id, action, pattern) {
-            count += 1;
-        }
-    });
-    count
-}
-
-fn action_matches(
-    facts: &RuleFacts<'_>,
-    _id: ActionId,
-    action: &Action,
-    pattern: &CanonicalActionPattern,
-) -> bool {
-    if let Some(kind) = pattern.kind {
-        let matches = matches!(
-            (kind, action),
-            (ActionKind::Any, _)
-                | (ActionKind::Call, Action::Call { .. })
-                | (ActionKind::While, Action::While { .. })
-                | (
-                    ActionKind::ForGlobalVariable,
-                    Action::ForGlobalVariable { .. }
-                )
-                | (
-                    ActionKind::ForPlayerVariable,
-                    Action::ForPlayerVariable { .. }
-                )
-                | (ActionKind::If, Action::If { .. })
-        );
-        if !matches {
-            return false;
-        }
-    }
-    let Some((name, args)) = (match action {
-        Action::Call { name, args, .. } => Some((name, args)),
-        _ => None,
-    }) else {
-        return pattern.name.is_none() && pattern.args.is_empty();
-    };
-    if pattern
-        .name
-        .as_deref()
-        .is_some_and(|expected| expected != name)
-    {
-        return false;
-    }
-    pattern.args.iter().enumerate().all(|(index, expected)| {
-        args.get(index)
-            .is_some_and(|actual| value_matches(facts, *actual, expected))
-    }) && pattern.parameters.iter().all(|(index, expected)| {
-        args.get(*index)
-            .is_some_and(|actual| value_matches(facts, *actual, expected))
-    })
-}
-
-fn matching_values(
-    facts: &RuleFacts<'_>,
-    values: Vec<ValueId>,
-    pattern: &CanonicalValuePattern,
-) -> usize {
-    values
-        .into_iter()
-        .filter(|value| value_matches(facts, *value, pattern))
-        .count()
-}
-
-fn value_matches(facts: &RuleFacts<'_>, id: ValueId, pattern: &CanonicalValuePattern) -> bool {
-    let Some(value) = facts.value(id) else {
-        return false;
-    };
-    match (pattern, value) {
-        (CanonicalValuePattern::Any, _) => true,
-        (CanonicalValuePattern::Number(expected), Value::Number { value, .. }) => expected == value,
+        (CanonicalValuePattern::Number(expected), Value::Number(actual)) => expected == actual,
         (CanonicalValuePattern::String(expected), Value::String(actual))
         | (CanonicalValuePattern::String(expected), Value::LocalizedString(actual)) => {
             expected == actual
@@ -705,54 +430,41 @@ fn value_matches(facts: &RuleFacts<'_>, id: ValueId, pattern: &CanonicalValuePat
                 && args
                     .iter()
                     .enumerate()
-                    .all(|(index, expected)| value_matches(facts, actual_args[index], expected))
+                    .all(|(i, exp)| value_matches(&actual_args[i], exp))
         }
-        (
-            CanonicalValuePattern::Comparison { operator, value },
-            Value::Number { value: actual, .. },
-        ) => {
-            let CanonicalValuePattern::Number(expected) = value.as_ref() else {
-                return false;
-            };
-            match operator {
-                ComparisonOperator::Less => actual < expected,
-                ComparisonOperator::LessOrEqual => actual <= expected,
-                ComparisonOperator::Greater => actual > expected,
-                ComparisonOperator::GreaterOrEqual => actual >= expected,
+        (CanonicalValuePattern::Comparison { operator, value }, Value::Number(actual)) => {
+            match value.as_ref() {
+                CanonicalValuePattern::Number(expected) => match operator {
+                    ComparisonOperator::Less => actual < expected,
+                    ComparisonOperator::LessOrEqual => actual <= expected,
+                    ComparisonOperator::Greater => actual > expected,
+                    ComparisonOperator::GreaterOrEqual => actual >= expected,
+                },
+                _ => false,
             }
         }
         _ => false,
     }
 }
 
-fn visit_actions(
-    program: &wir::Program,
-    actions: &[ActionId],
-    f: &mut impl FnMut(ActionId, &Action),
-) {
-    for id in actions {
-        let Some(action) = program.actions.get(*id) else {
-            continue;
-        };
-        f(*id, action);
-        match action {
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    visit_actions(program, &branch.body, f);
-                }
-                if let Some(body) = else_body {
-                    visit_actions(program, body, f);
-                }
-            }
-            Action::While { body, .. }
-            | Action::ForGlobalVariable { body, .. }
-            | Action::ForPlayerVariable { body, .. } => visit_actions(program, body, f),
-            _ => {}
-        }
+fn event_id(event: &Event) -> &str {
+    match event {
+        Event::Global => "global",
+        Event::EachPlayer | Event::EachPlayerWithFilters { .. } => "eachPlayer",
+        Event::Subroutine(_) => "subroutine",
+        Event::Player { kind, .. } => match kind {
+            PlayerEventKind::DealtDamage => "playerDealtDamage",
+            PlayerEventKind::DealtFinalBlow => "playerDealtFinalBlow",
+            PlayerEventKind::DealtHealing => "playerDealtHealing",
+            PlayerEventKind::DealtKnockback => "playerDealtKnockback",
+            PlayerEventKind::Died => "playerDied",
+            PlayerEventKind::EarnedElimination => "playerEarnedElimination",
+            PlayerEventKind::Joined => "playerJoined",
+            PlayerEventKind::Left => "playerLeft",
+            PlayerEventKind::ReceivedHealing => "playerReceivedHealing",
+            PlayerEventKind::ReceivedKnockback => "playerReceivedKnockback",
+            PlayerEventKind::TookDamage => "playerTookDamage",
+        },
     }
 }
 
@@ -785,13 +497,13 @@ fn canonical_action(
                 .as_deref()
                 .and_then(|name| catalog.entry(Kind::Action, name))
                 .ok_or_else(|| RuleError::ParameterNeedsActionName(parameter.name.clone()))?;
-            let index = resolve_parameter(action, locale, &parameter.name).ok_or_else(|| {
-                RuleError::UnknownParameter {
+            let index = action
+                .resolve_param(locale, &parameter.name)
+                .ok_or_else(|| RuleError::UnknownParameter {
                     action: action.id.clone(),
                     spelling: parameter.name.clone(),
                     locale: locale.to_string(),
-                }
-            })?;
+                })?;
             Ok((index, canonical_value(&parameter.value, catalog, locale)?))
         })
         .collect::<Result<Vec<_>, RuleError>>()?;
@@ -809,48 +521,37 @@ fn canonical_action(
     })
 }
 
-fn resolve_parameter(
-    action: &workshop_rs::catalog::CatalogEntry,
-    locale: &Locale,
-    spelling: &str,
-) -> Option<usize> {
-    action.resolve_param(locale, spelling)
-}
-
 fn canonical_value(
     pattern: &ValuePattern,
     catalog: &Catalog,
     locale: &Locale,
 ) -> Result<CanonicalValuePattern, RuleError> {
-    let selected = usize::from(pattern.number.is_some())
-        + usize::from(pattern.string.is_some())
-        + usize::from(pattern.boolean.is_some())
-        + usize::from(pattern.call.is_some())
-        + usize::from(pattern.enum_value.is_some())
-        + usize::from(pattern.comparison.is_some());
+    let selected = pattern.number.is_some() as usize
+        + pattern.string.is_some() as usize
+        + pattern.boolean.is_some() as usize
+        + pattern.call.is_some() as usize
+        + pattern.enum_value.is_some() as usize
+        + pattern.comparison.is_some() as usize;
     if selected > 1 {
         return Err(RuleError::AmbiguousValuePattern);
     }
     if let Some(number) = pattern.number {
-        return Ok(CanonicalValuePattern::Number(number));
-    }
-    if let Some(string) = &pattern.string {
-        return Ok(CanonicalValuePattern::String(string.clone()));
-    }
-    if let Some(boolean) = pattern.boolean {
-        return Ok(CanonicalValuePattern::Boolean(boolean));
-    }
-    if let Some(call) = &pattern.call {
-        return Ok(CanonicalValuePattern::Call {
+        Ok(CanonicalValuePattern::Number(number))
+    } else if let Some(string) = &pattern.string {
+        Ok(CanonicalValuePattern::String(string.clone()))
+    } else if let Some(boolean) = pattern.boolean {
+        Ok(CanonicalValuePattern::Boolean(boolean))
+    } else if let Some(call) = &pattern.call {
+        let args = call
+            .args
+            .iter()
+            .map(|value| canonical_value(value, catalog, locale))
+            .collect::<Result<_, _>>()?;
+        Ok(CanonicalValuePattern::Call {
             name: resolve_value_or_operator(catalog, locale, &call.name)?,
-            args: call
-                .args
-                .iter()
-                .map(|value| canonical_value(value, catalog, locale))
-                .collect::<Result<_, _>>()?,
-        });
-    }
-    if let Some(en) = &pattern.enum_value {
+            args,
+        })
+    } else if let Some(en) = &pattern.enum_value {
         let domain = resolve_enum_domain(catalog, locale, &en.domain)?;
         let member = catalog
             .resolve_enum_member(&domain, locale, &en.member)
@@ -860,19 +561,19 @@ fn canonical_value(
                 locale: locale.to_string(),
             })?
             .1;
-        return Ok(CanonicalValuePattern::Enum { domain, member });
-    }
-    if let Some(comparison) = &pattern.comparison {
+        Ok(CanonicalValuePattern::Enum { domain, member })
+    } else if let Some(comparison) = &pattern.comparison {
         let value = canonical_value(&comparison.value, catalog, locale)?;
         if !matches!(value, CanonicalValuePattern::Number(_)) {
             return Err(RuleError::ComparisonNeedsNumber);
         }
-        return Ok(CanonicalValuePattern::Comparison {
+        Ok(CanonicalValuePattern::Comparison {
             operator: comparison.operator,
             value: Box::new(value),
-        });
+        })
+    } else {
+        Ok(CanonicalValuePattern::Any)
     }
-    Ok(CanonicalValuePattern::Any)
 }
 
 fn resolve_value_or_operator(
@@ -893,12 +594,8 @@ fn resolve(
 ) -> Result<String, RuleError> {
     catalog
         .entry(kind, spelling)
+        .or_else(|| catalog.resolve(kind, locale, spelling))
         .map(|entry| entry.id.clone())
-        .or_else(|| {
-            catalog
-                .resolve(kind, locale, spelling)
-                .map(|entry| entry.id.clone())
-        })
         .ok_or_else(|| RuleError::UnknownSpelling {
             kind: kind.as_str(),
             spelling: spelling.to_string(),
@@ -926,27 +623,15 @@ fn resolve_enum_domain(
         })
 }
 
-fn event_id(event: &Event) -> &str {
-    match event {
-        Event::Global => "global",
-        Event::EachPlayer | Event::EachPlayerWithFilters { .. } => "eachPlayer",
-        Event::Player { kind, .. } => kind.catalog_id(),
-        Event::Subroutine(_) => "subroutine",
-    }
-}
-
 fn validate_identity(id: &str) -> Result<(), RuleError> {
-    let Some((namespace, rule_id)) = id.split_once('/') else {
-        return Err(RuleError::InvalidIdentity(id.to_string()));
-    };
-    if namespace.is_empty()
-        || rule_id.is_empty()
-        || id.matches('/').count() != 1
-        || namespace == "wright"
-    {
-        return Err(RuleError::InvalidIdentity(id.to_string()));
+    match id.split_once('/') {
+        Some((ns, rid))
+            if !ns.is_empty() && !rid.is_empty() && ns != "wright" && !rid.contains('/') =>
+        {
+            Ok(())
+        }
+        _ => Err(RuleError::InvalidIdentity(id.to_string())),
     }
-    Ok(())
 }
 
 fn default_locale() -> String {
@@ -980,23 +665,27 @@ pub enum RuleError {
 impl fmt::Display for RuleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Yaml(error) => write!(f, "invalid rule YAML: {error}"),
+            Self::Yaml(err) => write!(f, "invalid rule YAML: {err}"),
             Self::InvalidIdentity(id) => write!(
                 f,
                 "external rule ID '{id}' must be <namespace>/<rule-id>; namespace 'wright' is reserved"
             ),
-            Self::UnsupportedLocale(locale) => write!(
-                f,
-                "rule locale '{locale}' is not supported by the Workshop catalog"
-            ),
+            Self::UnsupportedLocale(loc) => {
+                write!(
+                    f,
+                    "rule locale '{loc}' is not supported by the Workshop catalog"
+                )
+            }
             Self::UnknownSpelling {
                 kind,
                 spelling,
                 locale,
-            } => write!(
-                f,
-                "unknown {kind} spelling '{spelling}' in locale '{locale}'"
-            ),
+            } => {
+                write!(
+                    f,
+                    "unknown {kind} spelling '{spelling}' in locale '{locale}'"
+                )
+            }
             Self::UnknownParameter {
                 action,
                 spelling,
@@ -1005,8 +694,8 @@ impl fmt::Display for RuleError {
                 f,
                 "unknown parameter '{spelling}' for action '{action}' in locale '{locale}'"
             ),
-            Self::ParameterNeedsActionName(parameter) => {
-                write!(f, "parameter '{parameter}' requires an action name")
+            Self::ParameterNeedsActionName(p) => {
+                write!(f, "parameter '{p}' requires an action name")
             }
             Self::AmbiguousValuePattern => {
                 f.write_str("a value pattern must select at most one literal or call shape")

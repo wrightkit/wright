@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -315,21 +315,9 @@ impl OpyProviderResolver {
                 .unwrap_or_default()
         ));
         let result = (|| -> Result<(), OpyProviderError> {
-            let mut file = std::fs::File::create(&temporary).map_err(|error| {
+            std::fs::write(&temporary, version.as_bytes()).map_err(|error| {
                 OpyProviderError::install(format!(
                     "cannot write temporary OPY provider pointer '{}': {error}",
-                    temporary.display()
-                ))
-            })?;
-            file.write_all(version.as_bytes()).map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot write temporary OPY provider pointer '{}': {error}",
-                    temporary.display()
-                ))
-            })?;
-            file.sync_all().map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot persist temporary OPY provider pointer '{}': {error}",
                     temporary.display()
                 ))
             })?;
@@ -362,23 +350,23 @@ pub enum OpyProviderError {
 }
 
 impl OpyProviderError {
-    fn missing(message: impl Into<String>) -> Self {
-        Self::Missing(message.into())
+    fn missing(m: impl Into<String>) -> Self {
+        Self::Missing(m.into())
     }
-    fn unsupported(message: impl Into<String>) -> Self {
-        Self::UnsupportedPlatform(message.into())
+    fn unsupported(m: impl Into<String>) -> Self {
+        Self::UnsupportedPlatform(m.into())
     }
-    fn offline(message: impl Into<String>) -> Self {
-        Self::Offline(message.into())
+    fn offline(m: impl Into<String>) -> Self {
+        Self::Offline(m.into())
     }
-    fn download(message: impl Into<String>) -> Self {
-        Self::Download(message.into())
+    fn download(m: impl Into<String>) -> Self {
+        Self::Download(m.into())
     }
-    fn integrity(message: impl Into<String>) -> Self {
-        Self::Integrity(message.into())
+    fn integrity(m: impl Into<String>) -> Self {
+        Self::Integrity(m.into())
     }
-    fn install(message: impl Into<String>) -> Self {
-        Self::Install(message.into())
+    fn install(m: impl Into<String>) -> Self {
+        Self::Install(m.into())
     }
 
     /// Stable machine-readable error code.
@@ -403,15 +391,14 @@ impl OpyProviderError {
 }
 
 impl fmt::Display for OpyProviderError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Missing(message)
-            | Self::UnsupportedPlatform(message)
-            | Self::Offline(message)
-            | Self::Download(message)
-            | Self::Integrity(message)
-            | Self::Install(message) => formatter.write_str(message),
-        }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (Self::Missing(m)
+        | Self::UnsupportedPlatform(m)
+        | Self::Offline(m)
+        | Self::Download(m)
+        | Self::Integrity(m)
+        | Self::Install(m)) = self;
+        f.write_str(m)
     }
 }
 
@@ -505,24 +492,22 @@ fn provider_client() -> Result<reqwest::blocking::Client, OpyProviderError> {
         .user_agent(concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(60))
         .build()
-        .map_err(|error| {
+        .map_err(|e| {
             OpyProviderError::offline(format!(
-                "cannot initialize HTTPS client for OPY provider release source: {error}"
+                "cannot initialize HTTPS client for OPY provider release source: {e}"
             ))
         })
 }
 
 fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, OpyProviderError> {
-    let bytes = fetch(client, url)?;
-    String::from_utf8(bytes).map_err(|error| {
-        OpyProviderError::download(format!("cannot decode response from {url}: {error}"))
-    })
+    String::from_utf8(fetch(client, url)?)
+        .map_err(|e| OpyProviderError::download(format!("cannot decode response from {url}: {e}")))
 }
 
 fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, OpyProviderError> {
-    let response = client.get(url).send().map_err(|error| {
+    let response = client.get(url).send().map_err(|e| {
         OpyProviderError::offline(format!(
-            "cannot reach OPY provider release source {url}: {error}"
+            "cannot reach OPY provider release source {url}: {e}"
         ))
     })?;
     if !response.status().is_success() {
@@ -535,9 +520,7 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, OpyPr
     response
         .take(MAX_DOWNLOAD_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| {
-            OpyProviderError::download(format!("cannot read response from {url}: {error}"))
-        })?;
+        .map_err(|e| OpyProviderError::download(format!("cannot read response from {url}: {e}")))?;
     if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
         return Err(OpyProviderError::download(format!(
             "response from {url} exceeds the 128 MiB provider artifact limit"
@@ -559,14 +542,7 @@ fn verify_checksum(
             "invalid SHA-256 checksum for {archive_name}"
         )));
     }
-    let actual = Sha256::digest(archive);
-    let actual = actual
-        .iter()
-        .fold(String::with_capacity(64), |mut output, byte| {
-            use std::fmt::Write as _;
-            let _ = write!(output, "{byte:02x}");
-            output
-        });
+    let actual = format!("{:x}", Sha256::digest(archive));
     if !actual.eq_ignore_ascii_case(published) {
         return Err(OpyProviderError::integrity(format!(
             "SHA-256 verification failed for {archive_name} (published {published}, got {actual}); the active provider was not changed"
@@ -581,20 +557,19 @@ fn extract_provider(
     target: &str,
 ) -> Result<(), OpyProviderError> {
     let binary = provider_binary(target);
-    let decoder = GzDecoder::new(archive);
-    let mut archive = tar::Archive::new(decoder);
+    let mut archive = tar::Archive::new(GzDecoder::new(archive));
     let mut found = false;
-    let entries = archive.entries().map_err(|error| {
-        OpyProviderError::install(format!("cannot read OPY provider archive: {error}"))
-    })?;
+    let entries = archive
+        .entries()
+        .map_err(|e| OpyProviderError::install(format!("cannot read OPY provider archive: {e}")))?;
     for entry in entries {
-        let mut entry = entry.map_err(|error| {
-            OpyProviderError::install(format!("cannot read OPY provider archive entry: {error}"))
+        let mut entry = entry.map_err(|e| {
+            OpyProviderError::install(format!("cannot read OPY provider archive entry: {e}"))
         })?;
-        let path = entry.path().map_err(|error| {
-            OpyProviderError::install(format!("cannot inspect OPY provider archive path: {error}"))
-        })?;
-        if path != Path::new(binary) {
+        if entry.path().map_err(|e| {
+            OpyProviderError::install(format!("cannot inspect OPY provider archive path: {e}"))
+        })? != Path::new(binary)
+        {
             return Err(OpyProviderError::install(
                 "OPY provider archive contains an unexpected path",
             ));
@@ -605,36 +580,21 @@ fn extract_provider(
             ));
         }
         let output = destination.join(binary);
-        let mut file = std::fs::File::create(&output).map_err(|error| {
-            OpyProviderError::install(format!(
-                "cannot create staged OPY provider '{}': {error}",
-                output.display()
-            ))
-        })?;
-        std::io::copy(&mut entry, &mut file).map_err(|error| {
-            OpyProviderError::install(format!(
-                "cannot unpack staged OPY provider '{}': {error}",
-                output.display()
-            ))
-        })?;
-        file.sync_all().map_err(|error| {
-            OpyProviderError::install(format!(
-                "cannot persist staged OPY provider '{}': {error}",
-                output.display()
-            ))
-        })?;
+        let err = |msg: &str, e: std::io::Error| {
+            OpyProviderError::install(format!("{msg} '{}': {e}", output.display()))
+        };
+        let mut file = std::fs::File::create(&output)
+            .map_err(|e| err("cannot create staged OPY provider", e))?;
+        std::io::copy(&mut entry, &mut file)
+            .map_err(|e| err("cannot unpack staged OPY provider", e))?;
+        file.sync_all()
+            .map_err(|e| err("cannot persist staged OPY provider", e))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = entry.header().mode().unwrap_or(0o755) | 0o111;
-            std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode)).map_err(
-                |error| {
-                    OpyProviderError::install(format!(
-                        "cannot make staged OPY provider executable '{}': {error}",
-                        output.display()
-                    ))
-                },
-            )?;
+            std::fs::set_permissions(&output, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| err("cannot make staged OPY provider executable", e))?;
         }
         found = true;
     }
@@ -647,43 +607,56 @@ fn extract_provider(
 }
 
 fn provider_binary(target: &str) -> &'static str {
-    if target == "x86_64-pc-windows-msvc" {
-        "opy-provider.exe"
-    } else {
-        "opy-provider"
+    match target {
+        "x86_64-pc-windows-msvc" => "opy-provider.exe",
+        _ => "opy-provider",
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{TcpListener, TcpStream};
+    use std::io::Write;
+    use std::net::TcpListener;
     use std::sync::{
         Arc, Barrier,
         atomic::{AtomicUsize, Ordering},
     };
     use std::thread;
 
-    fn test_root(name: &str) -> PathBuf {
+    struct TestRoot(PathBuf);
+    impl std::ops::Deref for TestRoot {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_root(name: &str) -> TestRoot {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target")
             .join(format!("wright-opy-provider-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        root
+        TestRoot(root)
     }
 
     fn archive(_version: &str, target: &str, body: &[u8]) -> Vec<u8> {
-        let binary = provider_binary(target);
-        let mut builder = tar::Builder::new(Vec::new());
-        let mut header = tar::Header::new_gnu();
-        header.set_size(body.len() as u64);
-        header.set_mode(0o755);
-        header.set_cksum();
-        builder.append_data(&mut header, binary, body).unwrap();
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(&builder.into_inner().unwrap()).unwrap();
-        encoder.finish().unwrap()
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_size(body.len() as u64);
+        h.set_mode(0o755);
+        h.set_cksum();
+        b.append_data(&mut h, provider_binary(target), body)
+            .unwrap();
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&b.into_inner().unwrap()).unwrap();
+        enc.finish().unwrap()
     }
 
     #[test]
@@ -696,22 +669,30 @@ mod tests {
         let resolved = resolver.resolve(Some(&executable)).unwrap();
         assert_eq!(resolved.executable, executable);
         assert_eq!(resolved.version, None);
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn clean_install_and_failed_integrity_update_preserve_active_provider() {
+    fn clean_install_offline_reuse_and_failed_integrity() {
         let root = test_root("install");
         let target = "x86_64-unknown-linux-gnu";
-        let resolver = OpyProviderResolver::new(&root).with_target(target);
+        let resolver = OpyProviderResolver::new(&*root).with_target(target);
         let first = archive("1.2.3", target, b"first");
-        let first_sum = format!("{}  archive\n", hex(&first));
+        let first_sum = format!("{:x}  archive\n", Sha256::digest(&first));
         verify_checksum(&first, &first_sum, "archive").unwrap();
         resolver.install_archive("1.2.3", target, &first).unwrap();
         assert_eq!(
             std::fs::read_to_string(root.join("active")).unwrap(),
             "1.2.3"
         );
+
+        let offline = resolver.with_release_urls(
+            "http://127.0.0.1:1/opy-rs/latest/version",
+            "http://127.0.0.1:1/opy-rs/releases",
+        );
+        let resolved = offline.resolve(None).unwrap();
+        assert_eq!(resolved.version.as_deref(), Some("1.2.3"));
+        assert_eq!(std::fs::read(resolved.executable).unwrap(), b"first");
+
         let bad = archive("1.2.4", target, b"second");
         let error = verify_checksum(&bad, &first_sum, "archive").unwrap_err();
         assert_eq!(error.code(), "provider-integrity");
@@ -719,24 +700,32 @@ mod tests {
             std::fs::read_to_string(root.join("active")).unwrap(),
             "1.2.3"
         );
-        let _ = std::fs::remove_dir_all(root);
     }
 
-    #[test]
-    fn installed_provider_is_reused_without_network_access() {
-        let root = test_root("offline");
-        let target = "x86_64-unknown-linux-gnu";
-        let resolver = OpyProviderResolver::new(&root).with_target(target);
-        let bytes = archive("2.0.0", target, b"cached");
-        resolver.install_archive("2.0.0", target, &bytes).unwrap();
-        let offline = resolver.with_release_urls(
-            "http://127.0.0.1:1/opy-rs/latest/version",
-            "http://127.0.0.1:1/opy-rs/releases",
+    fn mock_release(
+        root: &Path,
+        target: &str,
+        version: &str,
+        body: &[u8],
+    ) -> (
+        OpyProviderResolver,
+        Arc<AtomicUsize>,
+        thread::JoinHandle<()>,
+    ) {
+        let bytes = archive(version, target, body);
+        let checksum = format!(
+            "{:x}  opy-provider-{version}-{target}.tar.gz\n",
+            Sha256::digest(&bytes)
         );
-        let resolved = offline.resolve(None).unwrap();
-        assert_eq!(resolved.version.as_deref(), Some("2.0.0"));
-        assert_eq!(std::fs::read(resolved.executable).unwrap(), b"cached");
-        let _ = std::fs::remove_dir_all(root);
+        let (base_url, requests, server) =
+            test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
+        let resolver = OpyProviderResolver::new(root)
+            .with_target(target)
+            .with_release_urls(
+                format!("{base_url}/opy-rs/latest/version"),
+                format!("{base_url}/opy-rs/releases"),
+            );
+        (resolver, requests, server)
     }
 
     #[test]
@@ -744,16 +733,7 @@ mod tests {
         let root = test_root("bootstrap");
         let target = "x86_64-unknown-linux-gnu";
         let version = "3.1.4";
-        let bytes = archive(version, target, b"bootstrapped");
-        let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
-        let (base_url, requests, server) =
-            test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
-        let resolver = OpyProviderResolver::new(&root)
-            .with_target(target)
-            .with_release_urls(
-                format!("{base_url}/opy-rs/latest/version"),
-                format!("{base_url}/opy-rs/releases"),
-            );
+        let (resolver, requests, server) = mock_release(&root, target, version, b"bootstrapped");
         let resolved = resolver.resolve(None).unwrap();
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 3);
@@ -763,7 +743,6 @@ mod tests {
             std::fs::read_to_string(root.join("active")).unwrap(),
             version
         );
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -772,27 +751,24 @@ mod tests {
         let target = "x86_64-unknown-linux-gnu";
         let version = "3.1.4";
         let archive = archive(version, target, b"bootstrapped");
-        let resolver = OpyProviderResolver::new(&root).with_target(target);
-        let first_staging = resolver.staging_dir(version).unwrap();
-        let second_staging = resolver.staging_dir(version).unwrap();
-        extract_provider(&archive, &first_staging, target).unwrap();
-        extract_provider(&archive, &second_staging, target).unwrap();
+        let resolver = OpyProviderResolver::new(&*root).with_target(target);
+        let s1 = resolver.staging_dir(version).unwrap();
+        let s2 = resolver.staging_dir(version).unwrap();
+        extract_provider(&archive, &s1, target).unwrap();
+        extract_provider(&archive, &s2, target).unwrap();
         let barrier = Arc::new(Barrier::new(2));
-        let first_resolver = resolver.clone();
-        let first_barrier = Arc::clone(&barrier);
-        let first = thread::spawn(move || {
-            first_barrier.wait();
-            first_resolver.promote_staging(&first_staging, version, target)
+        let (r1, b1) = (resolver.clone(), Arc::clone(&barrier));
+        let (r2, b2) = (resolver.clone(), Arc::clone(&barrier));
+        let t1 = thread::spawn(move || {
+            b1.wait();
+            r1.promote_staging(&s1, version, target)
         });
-        let second_resolver = resolver.clone();
-        let second_barrier = Arc::clone(&barrier);
-        let second = thread::spawn(move || {
-            second_barrier.wait();
-            second_resolver.promote_staging(&second_staging, version, target)
+        let t2 = thread::spawn(move || {
+            b2.wait();
+            r2.promote_staging(&s2, version, target)
         });
-
-        first.join().unwrap().unwrap();
-        second.join().unwrap().unwrap();
+        t1.join().unwrap().unwrap();
+        t2.join().unwrap().unwrap();
         assert_eq!(
             std::fs::read_to_string(root.join("active")).unwrap(),
             version
@@ -801,24 +777,15 @@ mod tests {
             std::fs::read(resolver.provider_path(version, target)).unwrap(),
             b"bootstrapped"
         );
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn unsupported_target_is_structured() {
-        let error = OpyProviderResolver::new(test_root("target"))
+    fn targets_and_windows_packaging() {
+        let error = OpyProviderResolver::new(&*test_root("target"))
             .with_target("mips-unknown-linux-gnu")
             .update(Some("1.0.0"))
             .unwrap_err();
         assert_eq!(error.code(), "provider-unsupported-platform");
-        assert_eq!(
-            target_for("windows", "x86_64").unwrap(),
-            "x86_64-pc-windows-msvc"
-        );
-    }
-
-    #[test]
-    fn windows_target_uses_exe_and_tar_gz_archive() {
         let target = target_for("windows", "x86_64").unwrap();
         assert_eq!(target, "x86_64-pc-windows-msvc");
         assert_eq!(provider_binary(&target), "opy-provider.exe");
@@ -826,16 +793,8 @@ mod tests {
 
         let root = test_root("windows");
         let version = "1.0.0";
-        let bytes = archive(version, &target, b"windows-provider");
-        let checksum = format!("{}  opy-provider-{version}-{target}.tar.gz\n", hex(&bytes));
-        let (base_url, requests, server) =
-            test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
-        let resolver = OpyProviderResolver::new(&root)
-            .with_target(&target)
-            .with_release_urls(
-                format!("{base_url}/opy-rs/latest/version"),
-                format!("{base_url}/opy-rs/releases"),
-            );
+        let (resolver, requests, server) =
+            mock_release(&root, &target, version, b"windows-provider");
         let updated = resolver.update(None).unwrap();
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 3);
@@ -852,66 +811,43 @@ mod tests {
             .resolve(None)
             .unwrap();
         assert_eq!(resolved, updated);
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        Sha256::digest(bytes)
-            .iter()
-            .fold(String::new(), |mut value, byte| {
-                use std::fmt::Write as _;
-                let _ = write!(value, "{byte:02x}");
-                value
-            })
     }
 
     fn test_server(
-        latest_version: Vec<u8>,
+        latest: Vec<u8>,
         archive: Vec<u8>,
         checksum: Vec<u8>,
     ) -> (String, Arc<AtomicUsize>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let address = listener.local_addr().unwrap();
+        let addr = listener.local_addr().unwrap();
         let requests = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&requests);
         let server = thread::spawn(move || {
             for _ in 0..3 {
                 let (mut stream, _) = listener.accept().unwrap();
-                respond(&mut stream, &latest_version, &archive, &checksum);
+                let mut buf = [0; 1024];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let path = String::from_utf8_lossy(&buf[..n]);
+                let path = path.split_whitespace().nth(1).unwrap_or_default();
+                let body: &[u8] = if path == "/opy-rs/latest/version" {
+                    &latest
+                } else if path.ends_with(".sha256") {
+                    &checksum
+                } else if path.ends_with(".tar.gz") {
+                    &archive
+                } else {
+                    b"not found"
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(body);
                 seen.fetch_add(1, Ordering::Relaxed);
             }
         });
-        (format!("http://{address}"), requests, server)
-    }
-
-    fn respond(stream: &mut TcpStream, latest_version: &[u8], archive: &[u8], checksum: &[u8]) {
-        let mut request = Vec::new();
-        let mut buffer = [0; 1024];
-        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-            let count = stream.read(&mut buffer).unwrap();
-            if count == 0 {
-                break;
-            }
-            request.extend_from_slice(&buffer[..count]);
-        }
-        let request = String::from_utf8_lossy(&request);
-        let path = request.split_whitespace().nth(1).unwrap_or_default();
-        let (status, body): (&str, &[u8]) = if path == "/opy-rs/latest/version" {
-            ("200 OK", latest_version)
-        } else if path.starts_with("/opy-rs/releases/") && path.ends_with(".sha256") {
-            ("200 OK", checksum)
-        } else if path.starts_with("/opy-rs/releases/") && path.ends_with(".tar.gz") {
-            ("200 OK", archive)
-        } else {
-            ("404 Not Found", b"not found")
-        };
-        write!(
-            stream,
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )
-        .unwrap();
-        stream.write_all(body).unwrap();
+        (format!("http://{addr}"), requests, server)
     }
 
     #[cfg(unix)]

@@ -282,52 +282,33 @@ impl Capability {
         Capability::EditValidation,
     ];
 
+    fn meta(self) -> (&'static str, &'static str) {
+        match self {
+            Capability::Check => ("check", "lpp/check"),
+            Capability::Compile => ("compile", "lpp/compile"),
+            Capability::ProjectLoading => ("projectLoading", "lpp/check"),
+            Capability::Reconstruct => ("reconstruct", "lpp/reconstruct"),
+            Capability::Symbols => ("symbols", "lpp/symbols"),
+            Capability::Definition => ("definition", "lpp/definition"),
+            Capability::References => ("references", "lpp/references"),
+            Capability::Rename => ("rename", "lpp/rename"),
+            Capability::EditValidation => ("editValidation", "lpp/validateEdits"),
+        }
+    }
+
     /// The wire capability id.
     pub fn as_str(self) -> &'static str {
-        match self {
-            Capability::Check => "check",
-            Capability::Compile => "compile",
-            Capability::ProjectLoading => "projectLoading",
-            Capability::Reconstruct => "reconstruct",
-            Capability::Symbols => "symbols",
-            Capability::Definition => "definition",
-            Capability::References => "references",
-            Capability::Rename => "rename",
-            Capability::EditValidation => "editValidation",
-        }
+        self.meta().0
     }
 
     /// The LPP v1 method governed by this capability.
     pub fn method(self) -> &'static str {
-        match self {
-            Capability::Check => "lpp/check",
-            Capability::Compile => "lpp/compile",
-            Capability::ProjectLoading => "lpp/check",
-            Capability::Reconstruct => "lpp/reconstruct",
-            Capability::Symbols => "lpp/symbols",
-            Capability::Definition => "lpp/definition",
-            Capability::References => "lpp/references",
-            Capability::Rename => "lpp/rename",
-            Capability::EditValidation => "lpp/validateEdits",
-        }
+        self.meta().1
     }
 
-    /// Parse a wire capability id (`None` for unknown ids; unknown capability
-    /// ids can only appear through a new protocol version or an additive
-    /// revision).
+    /// Parse a wire capability id (`None` for unknown ids).
     pub fn parse(name: &str) -> Option<Capability> {
-        Some(match name {
-            "check" => Capability::Check,
-            "compile" => Capability::Compile,
-            "projectLoading" => Capability::ProjectLoading,
-            "reconstruct" => Capability::Reconstruct,
-            "symbols" => Capability::Symbols,
-            "definition" => Capability::Definition,
-            "references" => Capability::References,
-            "rename" => Capability::Rename,
-            "editValidation" => Capability::EditValidation,
-            _ => return None,
-        })
+        Self::ALL.into_iter().find(|c| c.as_str() == name)
     }
 }
 

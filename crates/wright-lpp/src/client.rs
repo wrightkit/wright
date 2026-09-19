@@ -70,6 +70,12 @@ struct Shared {
     exited: Option<ProviderError>,
 }
 
+impl Shared {
+    fn check_dead(&self) -> Option<ProviderError> {
+        self.violation.clone().or_else(|| self.exited.clone())
+    }
+}
+
 /// A JSON-RPC 2.0 client with LPP v1 session semantics over a byte
 /// transport (typically the stdio pipes of a spawned provider process).
 pub struct JsonRpcClient {
@@ -121,61 +127,36 @@ impl JsonRpcClient {
         self.timeout
     }
 
-    /// Send `lpp/initialize` (the first message of a session).
-    ///
-    /// Only allowed in the fresh phase. On success the session becomes
-    /// ready. On failure the session stays fresh so the caller can retry
-    /// with a supported protocol version or terminate.
-    pub fn initialize(&mut self, params: Value) -> Result<Value, ProviderError> {
-        match self.phase {
-            ClientPhase::Fresh => {}
-            ClientPhase::Ready => return Err(ProviderError::AlreadyInitialized),
-            ClientPhase::ShutDown => {
-                return Err(ProviderError::ShutDown {
-                    method: "lpp/initialize".to_string(),
-                });
-            }
+    fn check_phase(&self, method: &str) -> Result<(), ProviderError> {
+        match (self.phase, method) {
+            (ClientPhase::Ready, "lpp/initialize") => Err(ProviderError::AlreadyInitialized),
+            (ClientPhase::Fresh, "lpp/initialize") | (ClientPhase::Ready, _) => Ok(()),
+            (ClientPhase::Fresh, _) => Err(ProviderError::NotInitialized {
+                method: method.to_string(),
+            }),
+            (ClientPhase::ShutDown, _) => Err(ProviderError::ShutDown {
+                method: method.to_string(),
+            }),
         }
+    }
+
+    /// Send `lpp/initialize` (the first message of a session).
+    pub fn initialize(&mut self, params: Value) -> Result<Value, ProviderError> {
+        self.check_phase("lpp/initialize")?;
         let value = self.send("lpp/initialize", params)?;
         self.phase = ClientPhase::Ready;
         Ok(value)
     }
 
-    /// Send a document-scoped request. Only allowed once the session is
-    /// ready.
+    /// Send a document-scoped request. Only allowed once the session is ready.
     pub fn request(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
-        match self.phase {
-            ClientPhase::Fresh => {
-                return Err(ProviderError::NotInitialized {
-                    method: method.to_string(),
-                });
-            }
-            ClientPhase::ShutDown => {
-                return Err(ProviderError::ShutDown {
-                    method: method.to_string(),
-                });
-            }
-            ClientPhase::Ready => {}
-        }
+        self.check_phase(method)?;
         self.send(method, params)
     }
 
-    /// Send `lpp/shutdown` and await the null result. Only allowed once the
-    /// session is ready; afterwards the session is shut down.
+    /// Send `lpp/shutdown` and await the null result.
     pub fn shutdown(&mut self) -> Result<(), ProviderError> {
-        match self.phase {
-            ClientPhase::Fresh => {
-                return Err(ProviderError::NotInitialized {
-                    method: "lpp/shutdown".to_string(),
-                });
-            }
-            ClientPhase::ShutDown => {
-                return Err(ProviderError::ShutDown {
-                    method: "lpp/shutdown".to_string(),
-                });
-            }
-            ClientPhase::Ready => {}
-        }
+        self.check_phase("lpp/shutdown")?;
         let value = self.send("lpp/shutdown", json!({}))?;
         if !value.is_null() {
             return Err(ProviderError::Malformed {
@@ -193,11 +174,6 @@ impl JsonRpcClient {
     }
 
     /// Return the session to the fresh phase after a failed initialize.
-    ///
-    /// The wire-level initialize only marks the session ready after a
-    /// successful response; callers that then fail to validate the response
-    /// (malformed result, protocol version echo mismatch) use this to keep
-    /// the session restartable instead of wedged.
     pub fn reset_initialize(&mut self) {
         if matches!(self.phase, ClientPhase::Ready) {
             self.phase = ClientPhase::Fresh;
@@ -209,11 +185,8 @@ impl JsonRpcClient {
     fn send(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
         {
             let shared = self.shared.lock().expect("LPP reader state lock poisoned");
-            if let Some(error) = &shared.violation {
-                return Err(error.clone());
-            }
-            if let Some(error) = &shared.exited {
-                return Err(error.clone());
+            if let Some(error) = shared.check_dead() {
+                return Err(error);
             }
         }
 
@@ -222,13 +195,8 @@ impl JsonRpcClient {
         let (tx, rx) = mpsc::channel();
         {
             let mut shared = self.shared.lock().expect("LPP reader state lock poisoned");
-            // Re-check under the lock: a violation may have been recorded
-            // while waiting for it.
-            if let Some(error) = &shared.violation {
-                return Err(error.clone());
-            }
-            if let Some(error) = &shared.exited {
-                return Err(error.clone());
+            if let Some(error) = shared.check_dead() {
+                return Err(error);
             }
             shared.pending.insert(id, tx);
         }
@@ -244,15 +212,10 @@ impl JsonRpcClient {
             message: format!("cannot send '{method}': the provider stdin is closed"),
         })?;
         if let Err(error) = write_line(writer, &line) {
-            // Best effort: if the reader already recorded an exit, report
-            // that; otherwise the write failure is an I/O failure.
             let shared = self.shared.lock().expect("LPP reader state lock poisoned");
-            if let Some(exited) = &shared.exited {
-                return Err(exited.clone());
-            }
-            return Err(ProviderError::Io {
+            return Err(shared.exited.clone().unwrap_or_else(|| ProviderError::Io {
                 message: format!("cannot write request '{method}': {error}"),
-            });
+            }));
         }
 
         match rx.recv_timeout(self.timeout) {
@@ -263,14 +226,9 @@ impl JsonRpcClient {
                 duration: self.timeout,
             }),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                // The reader thread ended without routing this request. The
-                // session is dead; report the recorded state if any.
                 let shared = self.shared.lock().expect("LPP reader state lock poisoned");
-                if let Some(error) = &shared.violation {
-                    return Err(error.clone());
-                }
-                if let Some(error) = &shared.exited {
-                    return Err(error.clone());
+                if let Some(error) = shared.check_dead() {
+                    return Err(error);
                 }
                 Err(ProviderError::Exited {
                     status: None,
@@ -440,23 +398,23 @@ fn error_from_response(error: Value) -> ProviderError {
     }
 }
 
-/// Record the first session-poisoning violation and fail every pending
-/// request with it.
 fn poison(shared: &Arc<Mutex<Shared>>, error: ProviderError) {
-    let mut shared = shared.lock().expect("LPP reader state lock poisoned");
-    if shared.violation.is_none() {
-        shared.violation = Some(error.clone());
-        for (_, sender) in shared.pending.drain() {
-            let _ = sender.send(Err(error.clone()));
-        }
-    }
+    fail_pending(shared, error, true);
 }
 
-/// Record that the provider connection ended and fail every pending request.
 fn fail_all(shared: &Arc<Mutex<Shared>>, error: ProviderError) {
+    fail_pending(shared, error, false);
+}
+
+fn fail_pending(shared: &Arc<Mutex<Shared>>, error: ProviderError, is_violation: bool) {
     let mut shared = shared.lock().expect("LPP reader state lock poisoned");
-    if shared.exited.is_none() {
-        shared.exited = Some(error.clone());
+    let slot = if is_violation {
+        &mut shared.violation
+    } else {
+        &mut shared.exited
+    };
+    if slot.is_none() {
+        *slot = Some(error.clone());
         for (_, sender) in shared.pending.drain() {
             let _ = sender.send(Err(error.clone()));
         }

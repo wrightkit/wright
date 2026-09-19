@@ -1,95 +1,46 @@
-//! WIR transformation pipeline tests (#51/#52): `off` is a no-op, the compat
+//! Canonical transformation pipeline tests: `off` is a no-op, the compat
 //! pass is evidence-backed with before/after metrics, and every pass leaves
-//! the WIR validated. Source-semantic initializer synthesis is owned by the
-//! profile-independent HIR → WIR lowering, not by this pipeline (#112).
+//! the Program validated.
 
-use workshop_rs::wir::{self, Action, Value, ValueNode};
+use workshop_rs::{Action, Event, Program, Rule, Value, Variable};
 use wright_transform::profile::Profile;
 use wright_transform::run;
 
-/// Build a program with `x = len(a) + 2 * 3`.
-fn arithmetic_program() -> wir::Program {
-    let mut program = wir::Program::default();
-    program
-        .files
-        .push(workshop_rs::source::SourceFile::new("test.opy"));
-
-    let points = program.global_variables.push(wir::WorkshopVariable {
-        name: "points".to_string(),
-        index: 1,
-        span: None,
-        name_span: None,
-    });
-    let variable = program.global_variables.push(wir::WorkshopVariable {
-        name: "result".to_string(),
-        index: 0,
-        span: None,
-        name_span: None,
-    });
-
-    let two = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 2.0,
-            text: "2".to_string(),
-        },
-        None,
-    ));
-    let three = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 3.0,
-            text: "3".to_string(),
-        },
-        None,
-    ));
-    let multiply = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "*".to_string(),
-            args: vec![two, three],
-        },
-        None,
-    ));
-    let points_ref = program
-        .values
-        .push(ValueNode::new(Value::GlobalVariable(points), None));
-    let len = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "len".to_string(),
-            args: vec![points_ref],
-        },
-        None,
-    ));
-    let add = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "+".to_string(),
-            args: vec![len, multiply],
-        },
-        None,
-    ));
-    let action = program.actions.push(Action::SetGlobalVariable {
-        variable,
-        value: add,
-        span: None,
-        target_span: None,
-    });
-    program.rules.push(wir::Rule {
-        name: "compute".to_string(),
-        span: None,
-        name_span: None,
+fn single_action_program(value: Value) -> Program {
+    let mut program = Program::new();
+    program.global_variables.push(Variable::new("result"));
+    program.rule(Rule {
+        name: "test".to_string(),
         disabled: false,
-        event: wir::Event::Global,
+        event: Event::Global,
         conditions: vec![],
-        actions: vec![action],
+        actions: vec![Action::SetGlobalVariable {
+            variable: "result".to_string(),
+            value,
+        }],
     });
+    program
+}
+
+fn arithmetic_program() -> Program {
+    let mut program = single_action_program(Value::call(
+        "+",
+        [
+            Value::call("len", [Value::global_variable("points")]),
+            Value::call("*", [Value::Number(2.0), Value::Number(3.0)]),
+        ],
+    ));
+    program.global_variables.push(Variable::new("points"));
     program
 }
 
 #[test]
 fn off_profile_performs_no_transformation() {
     let mut program = arithmetic_program();
-    let before = program.dump();
+    let before = format!("{program:?}");
     let results = run(&mut program, Profile::Off).unwrap();
     assert!(results.is_empty(), "off runs no passes");
-    assert_eq!(program.dump(), before, "off leaves the WIR untouched");
+    assert_eq!(format!("{program:?}"), before);
     assert!(program.validate().is_ok());
 }
 
@@ -99,80 +50,43 @@ fn compat_profile_folds_constants_with_metrics() {
     let results = run(&mut program, Profile::Compat).unwrap();
     assert_eq!(results.len(), 1, "one compat pass");
 
-    // fold-constants: `2 * 3` collapsed to `6`.
     let fold = results
         .iter()
-        .find(|result| result.stats.pass == "fold-constants")
+        .find(|r| r.stats.pass == "fold-constants")
         .expect("fold-constants ran");
-    assert!(fold.stats.changed >= 1, "changed: {}", fold.stats.changed);
+    assert!(fold.stats.changed >= 1);
 
-    // The folded expression is now the literal 6 in the action.
-    let rule = program
-        .rules
-        .get(workshop_rs::ids::Id::from_index(0))
-        .expect("rule");
-    let Action::SetGlobalVariable { value, .. } = program.actions.get(rule.actions[0]).unwrap()
-    else {
+    let Action::SetGlobalVariable { value, .. } = &program.rules[0].actions[0] else {
         panic!("expected Set Global Variable");
     };
-    let node = program.values.get(*value).unwrap();
-    match &node.value {
-        Value::Call { name, args } => {
-            assert_eq!(
-                name, "+",
-                "folding keeps source-level names (emission maps them)"
-            );
-            let right = program.values.get(args[1]).unwrap();
-            match right.value {
-                Value::Number { value: n, .. } => assert_eq!(n, 6.0, "2 * 3 folds to 6"),
-                ref other => panic!("right side should be the literal 6, got {other:?}"),
-            }
-        }
-        other => panic!("expected an add call, got {other:?}"),
-    }
+    let Value::Call { name, args } = value else {
+        panic!("expected an add call");
+    };
+    assert_eq!(name, "+");
+    assert!(matches!(&args[1], Value::Number(n) if *n == 6.0));
     assert!(program.validate().is_ok());
 }
 
 #[test]
 fn compat_profile_folds_canonical_square_root() {
-    let mut program = arithmetic_program();
-    let two = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 2.0,
-            text: "2".to_string(),
-        },
-        None,
-    ));
-    let square_root = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "squareRoot".to_string(),
-            args: vec![two],
-        },
-        None,
-    ));
-
+    let mut program = single_action_program(Value::call("squareRoot", [Value::Number(2.0)]));
     run(&mut program, Profile::Compat).unwrap();
-
-    match &program.values.get(square_root).unwrap().value {
-        Value::Number { value, .. } => assert_eq!(*value, 2.0_f64.sqrt()),
-        other => panic!("canonical squareRoot should fold to a number, got {other:?}"),
-    }
+    let Action::SetGlobalVariable { value, .. } = &program.rules[0].actions[0] else {
+        panic!("expected SetGlobalVariable");
+    };
+    assert!(matches!(value, Value::Number(n) if *n == 2.0_f64.sqrt()));
 }
 
 #[test]
-fn folding_is_deterministic() {
-    let mut first = arithmetic_program();
-    let mut second = arithmetic_program();
-    let first_results = run(&mut first, Profile::Compat).unwrap();
-    let second_results = run(&mut second, Profile::Compat).unwrap();
-    assert_eq!(first.dump(), second.dump());
-    assert_eq!(first_results, second_results);
-}
+fn folding_determinism_and_aggressive_profile() {
+    let (mut first, mut second) = (arithmetic_program(), arithmetic_program());
+    let r1 = run(&mut first, Profile::Compat).unwrap();
+    let r2 = run(&mut second, Profile::Compat).unwrap();
+    assert_eq!(format!("{first:?}"), format!("{second:?}"));
+    assert_eq!(r1, r2);
 
-#[test]
-fn aggressive_profile_uses_evidence_backed_passes_only() {
-    let mut program = arithmetic_program();
-    let results = run(&mut program, Profile::Aggressive).unwrap();
+    let mut agg = arithmetic_program();
+    let results = run(&mut agg, Profile::Aggressive).unwrap();
     assert_eq!(results.len(), 1, "aggressive = compat passes in v1");
-    assert!(program.validate().is_ok());
+    assert!(agg.validate().is_ok());
 }

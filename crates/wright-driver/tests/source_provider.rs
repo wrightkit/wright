@@ -20,22 +20,56 @@ fn workshop_fixture(fixture: &str) -> String {
     .expect("Workshop fixture")
 }
 
-fn temp_entry() -> (PathBuf, PathBuf) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "wright-source-provider-test-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&dir).expect("temp directory");
-    let entry = dir.join("main.opy");
-    std::fs::write(&entry, "this is intentionally not native OPY").expect("entry source");
-    (dir, entry)
+struct Fixture {
+    dir: PathBuf,
+    entry: PathBuf,
 }
 
-fn cleanup(dir: PathBuf) {
-    std::fs::remove_dir_all(dir).expect("remove test directory");
+impl Fixture {
+    fn new() -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "wright-sp-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).expect("temp directory");
+        let entry = dir.join("main.opy");
+        std::fs::write(&entry, "this is intentionally not native OPY").expect("entry source");
+        Self { dir, entry }
+    }
+
+    fn config(&self, path: PathBuf, kind: SourceKind) -> SessionConfig {
+        SessionConfig {
+            input: InputSpec::Path(path),
+            kind,
+            source_backend: SourceBackend::Provider,
+            ..SessionConfig::default()
+        }
+    }
+
+    fn session_with(&self, provider: RecordingProvider) -> CompilerSession {
+        CompilerSession::with_source_provider(
+            self.config(self.entry.clone(), SourceKind::Opy),
+            Box::new(provider),
+        )
+        .expect("provider session")
+    }
+
+    fn dir_session_with(&self, provider: RecordingProvider) -> CompilerSession {
+        CompilerSession::with_source_provider(
+            self.config(self.dir.clone(), SourceKind::Auto),
+            Box::new(provider),
+        )
+        .expect("provider session")
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
 }
 
 struct RecordingProvider {
@@ -44,6 +78,36 @@ struct RecordingProvider {
     check_compilation: Option<SourceCompilation>,
     compilation: Option<SourceCompilation>,
     failure: Option<SourceProviderError>,
+}
+
+type RecordingReturn = (
+    RecordingProvider,
+    Arc<Mutex<Option<SourceTarget>>>,
+    Arc<Mutex<Vec<&'static str>>>,
+);
+
+impl RecordingProvider {
+    fn new() -> RecordingReturn {
+        let target = Arc::new(Mutex::new(None));
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        (
+            Self {
+                target: Arc::clone(&target),
+                operations: Arc::clone(&operations),
+                check_compilation: None,
+                compilation: None,
+                failure: None,
+            },
+            target,
+            operations,
+        )
+    }
+
+    fn with_compilation(compilation: SourceCompilation) -> RecordingReturn {
+        let (mut p, target, ops) = Self::new();
+        p.compilation = Some(compilation);
+        (p, target, ops)
+    }
 }
 
 impl SourceProvider for RecordingProvider {
@@ -55,393 +119,206 @@ impl SourceProvider for RecordingProvider {
         if self.check_compilation.is_none() {
             return self.compile(target);
         }
-        self.operations
-            .lock()
-            .expect("operation lock")
-            .push("check");
-        *self.target.lock().expect("target lock") = Some(target.clone());
-        if let Some(error) = self.failure.take() {
-            return Err(error);
-        }
-        Ok(self.check_compilation.take().expect("check result"))
+        self.operations.lock().unwrap().push("check");
+        *self.target.lock().unwrap() = Some(target.clone());
+        self.failure
+            .take()
+            .map(Err)
+            .unwrap_or_else(|| Ok(self.check_compilation.clone().unwrap()))
     }
 
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
-        self.operations
-            .lock()
-            .expect("operation lock")
-            .push("compile");
-        *self.target.lock().expect("target lock") = Some(target.clone());
-        if let Some(error) = self.failure.take() {
-            return Err(error);
-        }
-        Ok(self.compilation.take().expect("provider result"))
+        self.operations.lock().unwrap().push("compile");
+        *self.target.lock().unwrap() = Some(target.clone());
+        self.failure
+            .take()
+            .map(Err)
+            .unwrap_or_else(|| Ok(self.compilation.clone().unwrap()))
     }
 }
 
 #[test]
 fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_handoff() {
-    let (dir, entry) = temp_entry();
-    let observed = Arc::new(Mutex::new(None));
-    let operations = Arc::new(Mutex::new(Vec::new()));
-    let provider = RecordingProvider {
-        target: Arc::clone(&observed),
-        operations: Arc::clone(&operations),
-        check_compilation: None,
-        compilation: Some(SourceCompilation::success(workshop_fixture(
-            "synthetic/control-flow",
-        ))),
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry.clone()),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
+    let fix = Fixture::new();
+    let (provider, observed, operations) = RecordingProvider::with_compilation(
+        SourceCompilation::success(workshop_fixture("synthetic/control-flow")),
+    );
+    let mut session = fix.session_with(provider);
     let result = session.compile();
     assert!(result.ok, "provider compile: {:?}", result.diagnostics);
     assert!(result.result.output.is_some());
     let lint = session.lint();
     let findings = lint.result.findings.as_array().expect("finding array");
     assert!(!findings.is_empty(), "fixture supplies a lint finding");
-    assert!(findings.iter().all(|finding| {
-        finding.pointer("/span/path")
-            == Some(&serde_json::Value::String(
-                "<provider-artifact>".to_string(),
-            ))
-    }));
-    let target = observed
-        .lock()
-        .expect("target lock")
-        .clone()
-        .expect("provider target");
+    assert!(findings.iter().all(|f| f.pointer("/span/path")
+        == Some(&serde_json::Value::String(
+            "<provider-artifact>".to_string()
+        ))));
+    let target = observed.lock().unwrap().clone().expect("provider target");
     assert_eq!(target.language, SourceLanguage::Opy);
-    assert_eq!(target.entry, entry);
-    assert_eq!(target.cwd, std::env::current_dir().expect("cwd"));
-    assert_eq!(target.project_root, Some(dir.clone()));
+    assert_eq!(target.entry, fix.entry);
+    assert_eq!(target.cwd, std::env::current_dir().unwrap());
+    assert_eq!(target.project_root, Some(fix.dir.clone()));
     assert_eq!(
-        session.load().expect("cached provider result").provenance,
+        session.load().unwrap().provenance,
         wright_driver::Provenance::Unmapped
     );
-    assert_eq!(*operations.lock().expect("operation lock"), vec!["compile"]);
-    cleanup(dir);
+    assert_eq!(*operations.lock().unwrap(), vec!["compile"]);
 }
 
 #[test]
-fn provider_backend_delegates_directory_discovery_to_the_source_owner() {
-    let (dir, _) = temp_entry();
-    let target = Arc::new(Mutex::new(None));
-    let provider = RecordingProvider {
-        target: target.clone(),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: Some(SourceCompilation::success(workshop_fixture(
-            "synthetic/basic-rule",
-        ))),
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(dir.clone()),
-        kind: SourceKind::Auto,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
+fn directory_provider_operations() {
+    let fix = Fixture::new();
+    let (provider, target, _) = RecordingProvider::with_compilation(SourceCompilation {
+        workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
+        locale: None,
+        provenance: wright_driver::SourceProvenance::Unmapped,
+        diagnostics: Vec::new(),
+        source_identity: Some(wright_driver::input_identity("owner-selected source")),
+    });
+    let mut session = fix.dir_session_with(provider);
     let result = session.check();
     assert!(result.ok, "provider check: {:?}", result.diagnostics);
-    let selected = target.lock().expect("target lock").clone().expect("target");
+    let selected = target.lock().unwrap().clone().expect("target");
     assert_eq!(selected.kind, SourceTargetKind::Directory);
-    assert_eq!(selected.entry, dir);
-    cleanup(selected.entry);
-}
+    assert_eq!(selected.entry, fix.dir);
 
-#[test]
-fn directory_provider_compile_uses_the_owner_source_identity() {
-    let (dir, _) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: Some(SourceCompilation {
-            workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
-            locale: None,
-            provenance: wright_driver::SourceProvenance::Unmapped,
-            diagnostics: Vec::new(),
-            source_identity: Some(wright_driver::input_identity("owner-selected source")),
-        }),
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(dir.clone()),
-        kind: SourceKind::Auto,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.compile();
-    assert!(result.ok, "provider compile: {:?}", result.diagnostics);
+    let compile_result = session.compile();
+    assert!(
+        compile_result.ok,
+        "provider compile: {:?}",
+        compile_result.diagnostics
+    );
     assert_eq!(
-        result
+        compile_result
             .result
             .output
             .expect("compiled output")
             .input_identity,
         wright_driver::input_identity("owner-selected source")
     );
-    cleanup(dir);
 }
 
 #[test]
-fn provider_backend_check_uses_the_provider_check_operation() {
-    let (dir, entry) = temp_entry();
-    let operations = Arc::new(Mutex::new(Vec::new()));
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::clone(&operations),
-        check_compilation: Some(SourceCompilation {
-            workshop_text: None,
-            locale: Some("zh-CN".to_string()),
-            provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
-            diagnostics: Vec::new(),
-            source_identity: None,
-        }),
-        compilation: Some(SourceCompilation::success("unused")),
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.check();
-    assert!(result.ok, "provider check: {:?}", result.diagnostics);
-    assert_eq!(*operations.lock().expect("operation lock"), vec!["check"]);
-    cleanup(dir);
-}
-
-#[test]
-fn provider_backend_does_not_reuse_a_check_load_for_compile() {
-    let (dir, entry) = temp_entry();
-    let operations = Arc::new(Mutex::new(Vec::new()));
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::clone(&operations),
-        check_compilation: Some(SourceCompilation {
-            workshop_text: None,
-            locale: None,
-            provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
-            diagnostics: Vec::new(),
-            source_identity: None,
-        }),
-        compilation: Some(SourceCompilation::success(workshop_fixture(
-            "synthetic/basic-rule",
-        ))),
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
+fn provider_backend_check_and_compile_operations() {
+    let fix = Fixture::new();
+    let (mut provider, _, operations) = RecordingProvider::new();
+    provider.check_compilation = Some(SourceCompilation {
+        workshop_text: None,
+        locale: Some("zh-CN".to_string()),
+        provenance: wright_driver::source_provider::SourceProvenance::Unmapped,
+        diagnostics: Vec::new(),
+        source_identity: None,
+    });
+    provider.compilation = Some(SourceCompilation::success(workshop_fixture(
+        "synthetic/basic-rule",
+    )));
+    let mut session = fix.session_with(provider);
     assert!(session.check().ok);
+    assert_eq!(*operations.lock().unwrap(), vec!["check"]);
     assert!(session.compile().ok);
-    assert_eq!(
-        *operations.lock().expect("operation lock"),
-        vec!["check", "compile"]
-    );
-    cleanup(dir);
+    assert_eq!(*operations.lock().unwrap(), vec!["check", "compile"]);
 }
 
 #[test]
-fn provider_backend_lint_and_analyze_use_the_canonical_artifact_without_opy_spans() {
-    let (dir, entry) = temp_entry();
-    let operations = Arc::new(Mutex::new(Vec::new()));
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::clone(&operations),
-        check_compilation: None,
-        compilation: Some(SourceCompilation {
-            workshop_text: Some(workshop_fixture("synthetic/control-flow")),
-            locale: None,
-            provenance: wright_driver::SourceProvenance::Unmapped,
-            diagnostics: vec![Diagnostic {
-                code: "owner-warning".to_string(),
-                stage: Stage::Frontend,
-                severity: wright_driver::Severity::Warning,
-                message: "owner-side warning".to_string(),
-                status: None,
-                span: None,
-                source: Some(Origin {
-                    kind: "opy".to_string(),
-                    locale: None,
-                }),
-            }],
-            source_identity: None,
-        }),
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
+fn provider_backend_lint_analyze_and_unmapped_errors() {
+    let fix = Fixture::new();
+    let (provider, _, operations) = RecordingProvider::with_compilation(SourceCompilation {
+        workshop_text: Some(workshop_fixture("synthetic/control-flow")),
+        locale: None,
+        provenance: wright_driver::SourceProvenance::Unmapped,
+        diagnostics: vec![Diagnostic {
+            code: "owner-warning".to_string(),
+            stage: Stage::Frontend,
+            severity: wright_driver::Severity::Warning,
+            message: "owner-side warning".to_string(),
+            status: None,
+            span: None,
+            source: Some(Origin {
+                kind: "opy".to_string(),
+                locale: None,
+            }),
+        }],
+        source_identity: None,
+    });
+    let mut session = fix.session_with(provider);
 
     let lint = session.lint();
     assert!(lint.ok, "provider lint: {:?}", lint.diagnostics);
     assert_eq!(lint.result.program["origin"]["kind"], "provider-artifact");
     let findings = lint.result.findings.as_array().expect("finding array");
     assert!(!findings.is_empty(), "fixture supplies a lint finding");
-    assert!(findings.iter().all(|finding| finding.pointer("/span/path")
+    assert!(findings.iter().all(|f| f.pointer("/span/path")
         == Some(&serde_json::Value::String(
             "<provider-artifact>".to_string()
         ))));
     assert_eq!(lint.diagnostics[0].code, "owner-warning");
-    assert_eq!(
-        lint.diagnostics[0]
-            .source
-            .as_ref()
-            .expect("owner source")
-            .kind,
-        "opy"
-    );
+    assert_eq!(lint.diagnostics[0].source.as_ref().unwrap().kind, "opy");
 
     let analyze = session.analyze();
-    assert!(analyze.ok, "provider analyze: {:?}", analyze.diagnostics);
+    assert!(analyze.ok && !analyze.result.facts.is_null());
+    assert_eq!(*operations.lock().unwrap(), vec!["compile"]);
+
+    let (broken_p, _, _) = RecordingProvider::with_compilation(SourceCompilation::success(
+        "rule (\"broken\") {\n    actions {\n        UnknownAction;\n    }\n}\n",
+    ));
+    let mut broken_session = fix.session_with(broken_p);
+    let result = broken_session.compile();
+    assert!(!result.ok);
+    assert_eq!(result.diagnostics[0].code, "unknown-action");
     assert_eq!(
-        analyze.result.program["origin"]["kind"],
+        result.diagnostics[0].span.as_ref().unwrap().path,
+        "<provider-artifact>"
+    );
+    assert_eq!(
+        result.diagnostics[0].source.as_ref().unwrap().kind,
         "provider-artifact"
     );
-    assert!(!analyze.result.facts.is_null());
-    assert_eq!(*operations.lock().expect("operation lock"), vec!["compile"]);
-    cleanup(dir);
 }
 
 #[test]
-fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
-    let config = SessionConfig {
+fn provider_backend_refusals_and_failures() {
+    let fix = Fixture::new();
+
+    let mut session = CompilerSession::new(SessionConfig {
         input: InputSpec::Stdin,
         kind: SourceKind::Opy,
         source_backend: SourceBackend::Provider,
         ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::new(config).expect("session");
+    })
+    .unwrap();
     let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 3);
-    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
-}
-
-#[test]
-fn unmapped_provider_artifact_errors_do_not_claim_the_opy_entry() {
-    let (dir, entry) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: Some(SourceCompilation::success(
-            "rule (\"broken\") {\n    actions {\n        UnknownAction;\n    }\n}\n",
-        )),
-        failure: None,
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.compile();
-    assert!(!result.ok);
-    assert_eq!(result.diagnostics[0].code, "unknown-action");
-    assert_eq!(
-        result.diagnostics[0]
-            .span
-            .as_ref()
-            .expect("artifact span")
-            .path,
-        "<provider-artifact>"
+    assert!(
+        !result.ok
+            && result.exit == 3
+            && result.diagnostics[0].code == "source-provider-unsupported"
     );
-    assert_eq!(
-        result.diagnostics[0]
-            .source
-            .as_ref()
-            .expect("artifact origin")
-            .kind,
-        "provider-artifact"
-    );
-    cleanup(dir);
-}
 
-#[test]
-fn provider_backend_does_not_fall_back_when_the_provider_fails() {
-    let (dir, entry) = temp_entry();
-    let provider = RecordingProvider {
-        target: Arc::new(Mutex::new(None)),
-        operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: None,
-        failure: Some(SourceProviderError::Failed {
-            code: "provider-exited".to_string(),
-            message: "provider exited before compiling the entry".to_string(),
-        }),
-    };
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
-        .expect("provider session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 4);
-    assert_eq!(result.diagnostics[0].code, "provider-exited");
-    cleanup(dir);
-}
-
-#[test]
-fn provider_backend_provider_resolution_failure_is_explicit() {
-    let (dir, entry) = temp_entry();
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        source_backend: SourceBackend::Provider,
-        opy_provider: wright_driver::OpyProviderConfig::with_executable(
-            dir.join("missing-provider"),
-        ),
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::new(config).expect("session");
-    let result = session.check();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 4);
-    assert_eq!(result.diagnostics[0].code, "provider-missing");
-    cleanup(dir);
-}
-
-#[test]
-fn provider_backend_inspect_remains_explicitly_unsupported() {
-    let (dir, entry) = temp_entry();
-    let config = SessionConfig {
-        input: InputSpec::Path(entry),
-        kind: SourceKind::Opy,
-        source_backend: SourceBackend::Provider,
-        ..SessionConfig::default()
-    };
-    let mut session = CompilerSession::new(config).expect("session");
-
+    let mut session = CompilerSession::new(fix.config(fix.entry.clone(), SourceKind::Opy)).unwrap();
     let result = session.inspect();
-    assert!(!result.ok);
-    assert_eq!(result.exit, 3);
-    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
-    assert!(result.result.program.is_null());
-    cleanup(dir);
+    assert!(
+        !result.ok
+            && result.exit == 3
+            && result.diagnostics[0].code == "source-provider-unsupported"
+            && result.result.program.is_null()
+    );
+
+    let mut session = CompilerSession::new(SessionConfig {
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(
+            fix.dir.join("missing-provider"),
+        ),
+        ..fix.config(fix.entry.clone(), SourceKind::Opy)
+    })
+    .unwrap();
+    let result = session.check();
+    assert!(!result.ok && result.exit == 4 && result.diagnostics[0].code == "provider-missing");
+
+    let (mut provider, _, _) = RecordingProvider::new();
+    provider.failure = Some(SourceProviderError::Failed {
+        code: "provider-exited".to_string(),
+        message: "provider exited before compiling the entry".to_string(),
+    });
+    let mut session = fix.session_with(provider);
+    let result = session.check();
+    assert!(!result.ok && result.exit == 4 && result.diagnostics[0].code == "provider-exited");
 }

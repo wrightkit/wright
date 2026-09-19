@@ -46,44 +46,36 @@ pub(crate) struct Activity {
 }
 
 impl Activity {
-    fn disabled() -> Self {
-        Self {
-            done: Arc::new(AtomicBool::new(true)),
-            visible: Arc::new(AtomicBool::new(false)),
-            status: Arc::new(Mutex::new(None)),
-            output: Arc::new(Mutex::new(())),
-            #[cfg(test)]
-            frame: Arc::new(AtomicUsize::new(0)),
-            handle: None,
-        }
-    }
-
-    fn start() -> Self {
-        let done = Arc::new(AtomicBool::new(false));
-        let visible = Arc::new(AtomicBool::new(false));
-        let status = Arc::new(Mutex::new(None));
-        let output = Arc::new(Mutex::new(()));
+    fn new(active: bool) -> Self {
+        let (done, visible, status, output) = (
+            Arc::new(AtomicBool::new(!active)),
+            Arc::new(AtomicBool::new(active)),
+            Arc::new(Mutex::new(None)),
+            Arc::new(Mutex::new(())),
+        );
         #[cfg(test)]
         let frame = Arc::new(AtomicUsize::new(0));
-        write_activity_line(&output, None, None);
-        visible.store(true, Ordering::Release);
-        let thread_done = Arc::clone(&done);
-        let thread_status = Arc::clone(&status);
-        let thread_output = Arc::clone(&output);
-        #[cfg(test)]
-        let thread_frame = Arc::clone(&frame);
-        let handle = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(60));
-            let mut frame = 0;
-            while !thread_done.load(Ordering::Acquire) {
-                let event = *thread_status.lock().expect("activity status lock");
-                write_activity_line(&thread_output, event, Some(SPINNER[frame]));
-                frame = (frame + 1) % SPINNER.len();
-                #[cfg(test)]
-                thread_frame.store(frame, Ordering::Release);
-                thread::sleep(Duration::from_millis(80));
-            }
-        });
+        let handle = if active {
+            write_activity_line(&output, None, None);
+            let (done, status, output) =
+                (Arc::clone(&done), Arc::clone(&status), Arc::clone(&output));
+            #[cfg(test)]
+            let thread_frame = Arc::clone(&frame);
+            Some(thread::spawn(move || {
+                thread::sleep(Duration::from_millis(60));
+                let mut frame = 0;
+                while !done.load(Ordering::Acquire) {
+                    let event = *status.lock().expect("activity status lock");
+                    write_activity_line(&output, event, Some(SPINNER[frame]));
+                    frame = (frame + 1) % SPINNER.len();
+                    #[cfg(test)]
+                    thread_frame.store(frame, Ordering::Release);
+                    thread::sleep(Duration::from_millis(80));
+                }
+            }))
+        } else {
+            None
+        };
         Self {
             done,
             visible,
@@ -91,7 +83,7 @@ impl Activity {
             output,
             #[cfg(test)]
             frame,
-            handle: Some(handle),
+            handle,
         }
     }
 }
@@ -113,29 +105,27 @@ fn write_activity_line(output: &Mutex<()>, event: Option<ProgressEvent>, spinner
     let label = event
         .map(progress_label)
         .unwrap_or("Starting workflow".to_string());
-    match spinner {
-        Some(spinner) => eprint!("\r\x1b[2K\r  {spinner} {label}…"),
-        None => eprint!("\r\x1b[2K\r  {label}…"),
-    }
+    let prefix = spinner.map_or(String::new(), |s| format!("{s} "));
+    eprint!("\r\x1b[2K\r  {prefix}{label}…");
     let _ = std::io::stderr().flush();
 }
 
 fn progress_label(event: ProgressEvent) -> String {
     let label = match event.phase {
-        ProgressPhase::InputResolution => "Resolving input".to_string(),
-        ProgressPhase::ProjectLoading => "Loading project".to_string(),
-        ProgressPhase::Parsing => "Parsing".to_string(),
-        ProgressPhase::Validation => "Validating".to_string(),
-        ProgressPhase::Lowering => "Lowering".to_string(),
-        ProgressPhase::SemanticAnalysis => "Resolving semantics".to_string(),
-        ProgressPhase::Linting => "Running lint rules".to_string(),
-        ProgressPhase::Emission => "Emitting Workshop".to_string(),
-        ProgressPhase::Conversion => "Reconstructing source".to_string(),
+        ProgressPhase::InputResolution => "Resolving input",
+        ProgressPhase::ProjectLoading => "Loading project",
+        ProgressPhase::Parsing => "Parsing",
+        ProgressPhase::Validation => "Validating",
+        ProgressPhase::Lowering => "Lowering",
+        ProgressPhase::SemanticAnalysis => "Resolving semantics",
+        ProgressPhase::Linting => "Running lint rules",
+        ProgressPhase::Emission => "Emitting Workshop",
+        ProgressPhase::Conversion => "Reconstructing source",
     };
     match (event.count, event.unit) {
-        (Some(count), Some(ProgressUnit::Files)) => format!("{label} {count} files"),
-        (Some(count), Some(ProgressUnit::Rules)) => format!("{label} {count} rules"),
-        _ => label,
+        (Some(c), Some(ProgressUnit::Files)) => format!("{label} {c} files"),
+        (Some(c), Some(ProgressUnit::Rules)) => format!("{label} {c} rules"),
+        _ => label.to_string(),
     }
 }
 
@@ -152,8 +142,7 @@ impl Drop for Activity {
 }
 
 fn clear_activity_line(writer: &mut impl Write) {
-    let _ = write!(writer, "\r\x1b[2K\r");
-    let _ = writeln!(writer);
+    let _ = write!(writer, "\r\x1b[2K\r\n");
     let _ = writer.flush();
 }
 
@@ -164,7 +153,7 @@ enum Renderer {
     GithubActions,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct RuntimeEnvironment {
     github_actions: bool,
     ci: bool,
@@ -182,7 +171,7 @@ impl RuntimeEnvironment {
             stdout_terminal: std::io::stdout().is_terminal(),
             no_color: std::env::var_os("NO_COLOR").is_some(),
             force_color: env_truthy("FORCE_COLOR"),
-            term_dumb: std::env::var("TERM").is_ok_and(|term| term == "dumb"),
+            term_dumb: std::env::var("TERM").is_ok_and(|t| t == "dumb"),
         }
     }
 }
@@ -205,16 +194,16 @@ impl Presentation {
         format: OutputFormat,
         renderer: RendererArg,
         color: ColorArg,
-        environment: RuntimeEnvironment,
+        env: RuntimeEnvironment,
     ) -> Self {
         let renderer = match renderer {
             RendererArg::Terminal => Renderer::Terminal,
             RendererArg::Plain => Renderer::Plain,
             RendererArg::GithubActions => Renderer::GithubActions,
             RendererArg::Auto => {
-                if environment.github_actions {
+                if env.github_actions {
                     Renderer::GithubActions
-                } else if environment.ci || !environment.stdout_terminal {
+                } else if env.ci || !env.stdout_terminal {
                     Renderer::Plain
                 } else {
                     Renderer::Terminal
@@ -225,39 +214,31 @@ impl Presentation {
             ColorArg::Always => renderer != Renderer::GithubActions,
             ColorArg::Never => false,
             ColorArg::Auto => {
-                renderer == Renderer::Terminal && !environment.no_color && !environment.term_dumb
-                    || environment.force_color
-                        && renderer == Renderer::Terminal
-                        && !environment.no_color
+                renderer == Renderer::Terminal
+                    && !env.no_color
+                    && (!env.term_dumb || env.force_color)
             }
         };
         Self {
             format,
             renderer,
             color,
-            interactive: renderer == Renderer::Terminal
-                && environment.stdout_terminal
-                && !environment.term_dumb,
+            interactive: renderer == Renderer::Terminal && env.stdout_terminal && !env.term_dumb,
         }
     }
 
     pub(crate) fn activity(&self) -> Activity {
-        if self.format == OutputFormat::Text && self.interactive {
-            Activity::start()
-        } else {
-            Activity::disabled()
-        }
+        Activity::new(self.format == OutputFormat::Text && self.interactive)
     }
 }
 
 fn env_truthy(name: &str) -> bool {
-    match std::env::var(name) {
-        Ok(value) => !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
+    std::env::var(name).is_ok_and(|v| {
+        !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
             "" | "0" | "false" | "no"
-        ),
-        Err(_) => false,
-    }
+        )
+    })
 }
 
 /// Render one result envelope. JSON is deliberately handled before renderer
@@ -343,11 +324,27 @@ fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T
     if matches!(envelope.command.as_str(), "compile" | "convert") {
         envelope.result.render_body();
     } else {
-        let status = summary_status(envelope);
-        eprintln!("{status} {}", envelope.command);
+        eprintln!("{} {}", summary_status(envelope), envelope.command);
     }
     eprintln!("::endgroup::");
     emit_summary(envelope);
+}
+
+fn emit_workflow_annotation(
+    kind: &str,
+    title: &str,
+    message: &str,
+    span: Option<(&str, u64, u64, u64, u64)>,
+) {
+    let t = escape_workflow_property(title);
+    let props = match span {
+        Some((p, l, c, el, ec)) => format!(
+            "file={},title={t},line={l},col={c},endLine={el},endColumn={ec}",
+            escape_workflow_property(p)
+        ),
+        None => format!("title={t}"),
+    };
+    eprintln!("::{kind} {props}::{}", escape_workflow_data(message));
 }
 
 fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
@@ -356,63 +353,45 @@ fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
         Severity::Warning => "warning",
         Severity::Info => "notice",
     };
-    let mut properties = vec![format!(
-        "title={}",
-        escape_workflow_property(&diagnostic.code)
-    )];
-    if let Some(span) = diagnostic
+    let span = diagnostic
         .span
         .as_ref()
-        .filter(|span| is_real_source_path(&span.path))
-    {
-        properties.insert(0, format!("file={}", escape_workflow_property(&span.path)));
-        properties.push(format!("line={}", span.start.line));
-        properties.push(format!("col={}", span.start.col));
-        properties.push(format!("endLine={}", span.end.line));
-        properties.push(format!("endColumn={}", span.end.col));
-    }
-    eprintln!(
-        "::{kind} {}::{}",
-        properties.join(","),
-        escape_workflow_data(&diagnostic.message)
-    );
+        .filter(|s| is_real_source_path(&s.path))
+        .map(|s| {
+            (
+                s.path.as_str(),
+                s.start.line as u64,
+                s.start.col as u64,
+                s.end.line as u64,
+                s.end.col as u64,
+            )
+        });
+    emit_workflow_annotation(kind, &diagnostic.code, &diagnostic.message, span);
 }
 
 fn emit_finding_annotation(finding: &serde_json::Value) {
-    let severity = match finding.get("severity").and_then(serde_json::Value::as_str) {
-        Some("error") => Severity::Error,
-        Some("warning") => Severity::Warning,
-        _ => Severity::Info,
+    let kind = match str_field(finding, "severity", "info") {
+        "error" => "error",
+        "warning" => "warning",
+        _ => "notice",
     };
-    let span = finding.get("span").filter(|span| span.is_object());
-    let Some(span) = span else { return };
-    let path = span
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .filter(|path| is_real_source_path(path));
-    let Some(path) = path else { return };
-    let line = span_position(span, "start", "line").unwrap_or(1);
-    let col = span_position(span, "start", "col").unwrap_or(1);
-    let end_line = span_position(span, "end", "line").unwrap_or(line);
-    let end_col = span_position(span, "end", "col").unwrap_or(col);
-    let code = finding
-        .get("code")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("finding");
-    let message = finding
-        .get("message")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let kind = match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "notice",
-    };
-    eprintln!(
-        "::{kind} file={},line={line},col={col},endLine={end_line},endColumn={end_col},title={}::{}",
-        escape_workflow_property(path),
-        escape_workflow_property(code),
-        escape_workflow_data(message)
+    let span = finding.get("span").filter(|s| s.is_object()).and_then(|s| {
+        let p = s.get("path")?.as_str().filter(|p| is_real_source_path(p))?;
+        let l = span_position(s, "start", "line").unwrap_or(1);
+        let c = span_position(s, "start", "col").unwrap_or(1);
+        Some((
+            p,
+            l,
+            c,
+            span_position(s, "end", "line").unwrap_or(l),
+            span_position(s, "end", "col").unwrap_or(c),
+        ))
+    });
+    emit_workflow_annotation(
+        kind,
+        str_field(finding, "code", "finding"),
+        str_field(finding, "message", ""),
+        span,
     );
 }
 
@@ -454,13 +433,17 @@ pub(crate) trait ResultPresentation {
 
 impl ResultPresentation for CompileResult {
     fn render_body(&self) {
-        render_compile(self);
+        match &self.output {
+            Some(out) if out.written_to == "stdout" => print!("{}", out.text),
+            None => eprintln!("compile: failed (no output produced)"),
+            _ => {}
+        }
     }
 }
 
 impl ResultPresentation for ConvertResult {
     fn render_body(&self) {
-        render_convert(self);
+        print!("{}", self.text);
     }
 }
 
@@ -527,7 +510,30 @@ impl ResultPresentation for InspectResult {
     }
 
     fn render_body(&self) {
-        render_inspect(self);
+        let (rules, symbols) = (
+            self.rules.as_array().map_or(&[][..], Vec::as_slice),
+            self.symbols.as_array().map_or(&[][..], Vec::as_slice),
+        );
+        println!(
+            "\nProgram structure\n  {} rule(s), {} symbol(s)",
+            count(&self.program, "rules"),
+            symbols.len()
+        );
+        for rule in rules {
+            println!(
+                "  rule {}: \"{}\"",
+                u64_field(rule, "id"),
+                str_field(rule, "name", "<unnamed>")
+            );
+        }
+        for symbol in symbols {
+            println!(
+                "  {} {}: {}",
+                str_field(symbol, "kind", "symbol"),
+                u64_field(symbol, "id"),
+                str_field(symbol, "name", "<unnamed>")
+            );
+        }
     }
 }
 
@@ -595,35 +601,34 @@ fn is_real_source_path(path: &str) -> bool {
     !path.is_empty() && !path.starts_with('<')
 }
 
-fn span_position(span: &serde_json::Value, edge: &str, coordinate: &str) -> Option<u64> {
-    span.get(edge)
-        .and_then(serde_json::Value::as_object)
-        .and_then(|position| position.get(coordinate))
+fn str_field<'a>(value: &'a serde_json::Value, key: &str, default: &'a str) -> &'a str {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(default)
+}
+
+fn u64_field(value: &serde_json::Value, key: &str) -> u64 {
+    value
+        .get(key)
         .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
 }
 
-fn render_compile(result: &CompileResult) {
-    let Some(output) = result.output.as_ref() else {
-        eprintln!("compile: failed (no output produced)");
-        return;
-    };
-    if output.written_to != "stdout" {
-        return;
-    }
-    print!("{}", output.text);
-}
-
-fn render_convert(result: &ConvertResult) {
-    print!("{}", result.text);
+fn count(value: &serde_json::Value, key: &str) -> usize {
+    u64_field(value, key) as usize
 }
 
 fn array_len(value: &serde_json::Value) -> usize {
     value.as_array().map_or(0, Vec::len)
 }
 
+fn span_position(span: &serde_json::Value, edge: &str, coordinate: &str) -> Option<u64> {
+    span.get(edge)?.get(coordinate)?.as_u64()
+}
+
 fn render_analyze(result: &AnalyzeResult) {
-    let program = &result.program;
-    let facts = &result.facts;
+    let (program, facts) = (&result.program, &result.facts);
     let symbols = facts
         .get("symbols")
         .and_then(serde_json::Value::as_array)
@@ -632,49 +637,44 @@ fn render_analyze(result: &AnalyzeResult) {
         .get("rules")
         .and_then(serde_json::Value::as_array)
         .map_or(&[][..], Vec::as_slice);
-    println!("\nProgram overview");
     println!(
-        "  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s)",
+        "\nProgram overview\n  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s)\n  evidence: [static] parsed program inventory",
         count(program, "files"),
         count(program, "rules"),
         count(program, "globalVariables"),
         count(program, "playerVariables"),
         count(program, "subroutines"),
     );
-    println!("  evidence: [static] parsed program inventory");
 
-    let mut total_blocks = 0;
-    let mut total_edges = 0;
-    let mut total_loops = 0;
-    let mut total_waits = 0;
-    let mut rule_hotspots = Vec::new();
-    for rule in rules {
-        let flow = rule.get("controlFlow").cloned().unwrap_or_default();
-        let blocks = count(&flow, "blocks");
-        let edges = count(&flow, "edges");
-        let loops = count(&flow, "loopBlocks");
-        let waits = count(&flow, "waitBlocks");
-        total_blocks += blocks;
-        total_edges += edges;
-        total_loops += loops;
-        total_waits += waits;
-        rule_hotspots.push((
-            blocks + edges,
-            rule.get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<unnamed>"),
-            blocks,
-            edges,
-            loops,
-            waits,
-        ));
-    }
-    rule_hotspots.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
-    println!("\nControl-flow summary");
+    let (mut total_blocks, mut total_edges, mut total_loops, mut total_waits) = (0, 0, 0, 0);
+    let mut rule_hotspots: Vec<_> = rules
+        .iter()
+        .map(|rule| {
+            let flow = rule.get("controlFlow").cloned().unwrap_or_default();
+            let (blocks, edges, loops, waits) = (
+                count(&flow, "blocks"),
+                count(&flow, "edges"),
+                count(&flow, "loopBlocks"),
+                count(&flow, "waitBlocks"),
+            );
+            total_blocks += blocks;
+            total_edges += edges;
+            total_loops += loops;
+            total_waits += waits;
+            (
+                blocks + edges,
+                str_field(rule, "name", "<unnamed>"),
+                blocks,
+                edges,
+                loops,
+                waits,
+            )
+        })
+        .collect();
+    rule_hotspots.sort_by(|l, r| r.0.cmp(&l.0).then_with(|| l.1.cmp(r.1)));
     println!(
-        "  {total_blocks} blocks, {total_edges} edges, {total_loops} loop block(s), {total_waits} wait block(s)"
+        "\nControl-flow summary\n  {total_blocks} blocks, {total_edges} edges, {total_loops} loop block(s), {total_waits} wait block(s)\n  Top rules (heuristic ranking: blocks + edges; facts are [static])"
     );
-    println!("  Top rules (heuristic ranking: blocks + edges; facts are [static])");
     if rule_hotspots.is_empty() {
         println!("    none");
     } else {
@@ -685,44 +685,39 @@ fn render_analyze(result: &AnalyzeResult) {
         }
     }
 
-    let mut coupled_symbols = symbols
+    let mut coupled_symbols: Vec<_> = symbols
         .iter()
-        .filter(|symbol| {
+        .filter(|s| {
             matches!(
-                symbol.get("kind").and_then(serde_json::Value::as_str),
+                s.get("kind").and_then(serde_json::Value::as_str),
                 Some("globalVariable" | "playerVariable")
             )
         })
-        .map(|symbol| {
-            let usage = symbol.get("usage").cloned().unwrap_or_default();
-            let rules = count(&usage, "rules");
-            let reads = count(&usage, "reads");
-            let writes = count(&usage, "writes");
+        .map(|s| {
+            let usage = s.get("usage").cloned().unwrap_or_default();
+            let (rules, reads, writes) = (
+                count(&usage, "rules"),
+                count(&usage, "reads"),
+                count(&usage, "writes"),
+            );
             (
                 rules,
                 reads + writes,
-                symbol
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("variable"),
-                symbol
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("<unnamed>"),
+                str_field(s, "kind", "variable"),
+                str_field(s, "name", "<unnamed>"),
                 reads,
                 writes,
             )
         })
-        .collect::<Vec<_>>();
-    coupled_symbols.sort_by(|left, right| {
-        right
-            .0
-            .cmp(&left.0)
-            .then_with(|| right.1.cmp(&left.1))
-            .then_with(|| left.3.cmp(right.3))
+        .collect();
+    coupled_symbols.sort_by(|l, r| {
+        r.0.cmp(&l.0)
+            .then_with(|| r.1.cmp(&l.1))
+            .then_with(|| l.3.cmp(r.3))
     });
-    println!("\nState and coupling");
-    println!("  Top variables (heuristic ranking: rules touched, then reads + writes)");
+    println!(
+        "\nState and coupling\n  Top variables (heuristic ranking: rules touched, then reads + writes)"
+    );
     if coupled_symbols.is_empty() {
         println!("    none");
     } else {
@@ -734,40 +729,23 @@ fn render_analyze(result: &AnalyzeResult) {
     }
 }
 
-fn count(value: &serde_json::Value, key: &str) -> usize {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize
-}
-
 fn render_lint(result: &LintResult) {
-    let findings = result.findings.as_array().cloned().unwrap_or_default();
+    let findings = result.findings.as_array().map_or(&[][..], Vec::as_slice);
     println!("\nLint findings");
     if findings.is_empty() {
         println!("  none");
     }
-    for finding in &findings {
-        let code = finding
-            .get("code")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("finding");
-        let severity = finding
-            .get("severity")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("info");
-        let evidence = finding
-            .get("evidence")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("exact");
-        let boundedness = finding
+    for finding in findings {
+        let (code, severity, evidence, message) = (
+            str_field(finding, "code", "finding"),
+            str_field(finding, "severity", "info"),
+            str_field(finding, "evidence", "exact"),
+            str_field(finding, "message", ""),
+        );
+        match finding
             .get("boundedness")
-            .and_then(serde_json::Value::as_str);
-        let message = finding
-            .get("message")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        match boundedness {
+        {
             Some(value) => println!(
                 "  {severity}[{code}] (evidence: {evidence}) (boundedness: {value}): {message}"
             ),
@@ -776,44 +754,6 @@ fn render_lint(result: &LintResult) {
         if let Some(span) = finding.get("span") {
             print_span(span, "      ");
         }
-    }
-}
-
-fn render_inspect(result: &InspectResult) {
-    let program = &result.program;
-    let rules = result.rules.as_array().cloned().unwrap_or_default();
-    let symbols = result.symbols.as_array().cloned().unwrap_or_default();
-    let count = program
-        .get("rules")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    println!("\nProgram structure");
-    println!("  {count} rule(s), {} symbol(s)", symbols.len());
-    for rule in &rules {
-        let id = rule
-            .get("id")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let name = rule
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("<unnamed>");
-        println!("  rule {id}: \"{name}\"");
-    }
-    for symbol in &symbols {
-        let id = symbol
-            .get("id")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let kind = symbol
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("symbol");
-        let name = symbol
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("<unnamed>");
-        println!("  {kind} {id}: {name}");
     }
 }
 
@@ -860,9 +800,6 @@ fn print_span(span: &serde_json::Value, indent: &str) {
     render_source_context(path, line as u32, col as u32, indent);
 }
 
-/// Add one source line only when the provenance path resolves in the current
-/// process. Structured output never calls this renderer, and an unresolved
-/// path remains a normal location-only presentation.
 fn render_source_context(path: &str, line: u32, col: u32, indent: &str) {
     let Ok(source) = std::fs::read_to_string(path) else {
         return;
@@ -887,165 +824,134 @@ mod tests {
 
     fn environment() -> RuntimeEnvironment {
         RuntimeEnvironment {
-            github_actions: false,
-            ci: false,
             stdout_terminal: true,
-            no_color: false,
-            force_color: false,
-            term_dumb: false,
+            ..Default::default()
         }
     }
 
     #[test]
     fn auto_renderer_prefers_github_actions_then_ci_then_terminal() {
-        let mut env = environment();
-        assert_eq!(
+        let res = |gh, ci| {
+            let env = RuntimeEnvironment {
+                github_actions: gh,
+                ci,
+                stdout_terminal: true,
+                ..Default::default()
+            };
             Presentation::resolve(OutputFormat::Text, RendererArg::Auto, ColorArg::Auto, env)
-                .renderer,
-            Renderer::Terminal
-        );
-        env.ci = true;
-        assert_eq!(
-            Presentation::resolve(OutputFormat::Text, RendererArg::Auto, ColorArg::Auto, env)
-                .renderer,
-            Renderer::Plain
-        );
-        env.github_actions = true;
-        assert_eq!(
-            Presentation::resolve(OutputFormat::Text, RendererArg::Auto, ColorArg::Auto, env)
-                .renderer,
-            Renderer::GithubActions
-        );
+                .renderer
+        };
+        assert_eq!(res(false, false), Renderer::Terminal);
+        assert_eq!(res(false, true), Renderer::Plain);
+        assert_eq!(res(true, false), Renderer::GithubActions);
     }
 
     #[test]
     fn explicit_renderer_and_color_override_detection() {
-        let mut env = environment();
-        env.github_actions = true;
-        env.no_color = true;
-        let terminal = Presentation::resolve(
-            OutputFormat::Text,
-            RendererArg::Terminal,
-            ColorArg::Always,
-            env,
+        let env = RuntimeEnvironment {
+            stdout_terminal: true,
+            github_actions: true,
+            no_color: true,
+            ..Default::default()
+        };
+        let p = |ren, col| Presentation::resolve(OutputFormat::Text, ren, col, env);
+        let terminal = p(RendererArg::Terminal, ColorArg::Always);
+        assert_eq!(
+            (terminal.renderer, terminal.color),
+            (Renderer::Terminal, true)
         );
-        assert_eq!(terminal.renderer, Renderer::Terminal);
-        assert!(terminal.color);
-        let plain = Presentation::resolve(
-            OutputFormat::Text,
-            RendererArg::Plain,
-            ColorArg::Always,
-            env,
-        );
-        assert_eq!(plain.renderer, Renderer::Plain);
-        assert!(
-            plain.color,
-            "explicit color wins over auto renderer detection"
-        );
-        let never = Presentation::resolve(
-            OutputFormat::Text,
-            RendererArg::Terminal,
-            ColorArg::Never,
-            env,
-        );
-        assert!(!never.color);
+        let plain = p(RendererArg::Plain, ColorArg::Always);
+        assert_eq!((plain.renderer, plain.color), (Renderer::Plain, true));
+        assert!(!p(RendererArg::Terminal, ColorArg::Never).color);
     }
 
     #[test]
     fn activity_is_only_enabled_for_interactive_text() {
-        let terminal = Presentation::resolve(
+        let check = |fmt, ren, col, dumb| {
+            let env = RuntimeEnvironment {
+                stdout_terminal: true,
+                term_dumb: dumb,
+                ..Default::default()
+            };
+            Presentation::resolve(fmt, ren, col, env)
+                .activity()
+                .handle
+                .is_some()
+        };
+        assert!(check(
             OutputFormat::Text,
             RendererArg::Terminal,
             ColorArg::Never,
-            environment(),
-        );
-        let plain = Presentation::resolve(
+            false
+        ));
+        assert!(!check(
             OutputFormat::Text,
             RendererArg::Plain,
             ColorArg::Never,
-            environment(),
-        );
-        let json = Presentation::resolve(
+            false
+        ));
+        assert!(!check(
             OutputFormat::Json,
             RendererArg::Terminal,
             ColorArg::Always,
-            environment(),
-        );
-        let mut dumb_environment = environment();
-        dumb_environment.term_dumb = true;
-        let dumb = Presentation::resolve(
+            false
+        ));
+        assert!(!check(
             OutputFormat::Text,
             RendererArg::Terminal,
             ColorArg::Never,
-            dumb_environment,
-        );
-        assert!(terminal.activity().handle.is_some());
-        assert!(plain.activity().handle.is_none());
-        assert!(json.activity().handle.is_none());
-        assert!(dumb.activity().handle.is_none());
+            true
+        ));
     }
 
     #[test]
-    fn activity_is_visible_immediately_and_accepts_phase_updates() {
-        let terminal = Presentation::resolve(
+    fn activity_lifecycle_and_rendering() {
+        let activity = Presentation::resolve(
             OutputFormat::Text,
             RendererArg::Terminal,
             ColorArg::Never,
             environment(),
-        );
-        let activity = terminal.activity();
+        )
+        .activity();
         assert!(activity.visible.load(Ordering::Acquire));
         assert_eq!(*activity.status.lock().unwrap(), None);
-        activity.on_progress(ProgressEvent::with_count(
-            ProgressPhase::Linting,
-            12,
-            ProgressUnit::Rules,
-        ));
-        assert_eq!(
-            *activity.status.lock().unwrap(),
-            Some(ProgressEvent::with_count(
-                ProgressPhase::Linting,
-                12,
-                ProgressUnit::Rules,
-            ))
-        );
+        let event = ProgressEvent::with_count(ProgressPhase::Linting, 12, ProgressUnit::Rules);
+        activity.on_progress(event);
+        assert_eq!(*activity.status.lock().unwrap(), Some(event));
         thread::sleep(Duration::from_millis(150));
         assert!(activity.frame.load(Ordering::Acquire) > 0);
-    }
 
-    #[test]
-    fn activity_cleanup_clears_the_line_and_terminates_it() {
         let mut output = Vec::new();
         clear_activity_line(&mut output);
         assert_eq!(output, b"\r\x1b[2K\r\n");
     }
 
     #[test]
-    fn metadata_is_dimmed_only_for_terminal_color_output() {
+    fn escaping_and_styling() {
         assert_eq!(dim("2 symbols", false), "2 symbols");
         assert_eq!(dim("2 symbols", true), "\x1b[2m2 symbols\x1b[0m");
-    }
-
-    #[test]
-    fn workflow_command_escaping_is_split_by_context() {
         assert_eq!(escape_workflow_property("a,b:c%\n"), "a%2Cb%3Ac%25%0A");
         assert_eq!(escape_workflow_data("a,b:c%\n"), "a,b:c%25%0A");
     }
 
-    fn summary_envelope(
-        ok: bool,
-        diagnostics: Vec<wright_driver::Diagnostic>,
-        findings: serde_json::Value,
-    ) -> Envelope<LintResult> {
+    fn summary_envelope(sev: Severity, findings: serde_json::Value) -> Envelope<LintResult> {
         Envelope {
             wright: wright_driver::result::VersionInfo {
-                version: "test".to_string(),
-                contract: "wright-result/v1".to_string(),
+                version: "test".into(),
+                contract: "wright-result/v1".into(),
             },
-            command: "lint".to_string(),
-            ok,
-            exit: if ok { 0 } else { 1 },
-            diagnostics,
+            command: "lint".into(),
+            ok: true,
+            exit: 0,
+            diagnostics: vec![wright_driver::Diagnostic {
+                code: "test".into(),
+                stage: wright_driver::Stage::Analysis,
+                severity: sev,
+                message: "test".into(),
+                status: None,
+                span: None,
+                source: None,
+            }],
             result: LintResult {
                 findings,
                 ..LintResult::default()
@@ -1053,52 +959,26 @@ mod tests {
         }
     }
 
-    fn diagnostic(severity: Severity) -> wright_driver::Diagnostic {
-        wright_driver::Diagnostic {
-            code: "test".to_string(),
-            stage: wright_driver::Stage::Analysis,
-            severity,
-            message: "test".to_string(),
-            status: None,
-            span: None,
-            source: None,
+    #[test]
+    fn summary_status_progression() {
+        for (sev, findings, expected) in [
+            (
+                Severity::Info,
+                serde_json::json!([{"severity": "info"}, {"severity": "notice"}]),
+                "PASS",
+            ),
+            (
+                Severity::Warning,
+                serde_json::json!([{"severity": "info"}]),
+                "WARN",
+            ),
+            (
+                Severity::Error,
+                serde_json::json!([{"severity": "warning"}, {"severity": "error"}]),
+                "ERROR",
+            ),
+        ] {
+            assert_eq!(summary_status(&summary_envelope(sev, findings)), expected);
         }
-    }
-
-    #[test]
-    fn summary_info_only_is_pass() {
-        let envelope = summary_envelope(
-            true,
-            vec![diagnostic(Severity::Info)],
-            serde_json::json!([
-                {"severity": "info"},
-                {"severity": "notice"}
-            ]),
-        );
-        assert_eq!(summary_status(&envelope), "PASS");
-    }
-
-    #[test]
-    fn summary_warning_over_info_is_warn() {
-        let envelope = summary_envelope(
-            true,
-            vec![diagnostic(Severity::Warning)],
-            serde_json::json!([{"severity": "info"}]),
-        );
-        assert_eq!(summary_status(&envelope), "WARN");
-    }
-
-    #[test]
-    fn summary_error_over_warning_is_error() {
-        let envelope = summary_envelope(
-            true,
-            vec![diagnostic(Severity::Error)],
-            serde_json::json!([
-                {"severity": "warning"},
-                {"severity": "error"},
-                {"severity": "info"}
-            ]),
-        );
-        assert_eq!(summary_status(&envelope), "ERROR");
     }
 }

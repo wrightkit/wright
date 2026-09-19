@@ -1,31 +1,27 @@
 use std::path::Path;
 
 use wright_driver::WorkshopProvider;
-use wright_driver::provider::{LanguageProvider, Status};
+use wright_driver::provider::Status;
 
 #[test]
-fn provider_checks_a_real_workshop_fixture_without_swallowing_failure() {
+fn workshop_provider_check_and_parse_failure() {
+    let provider = WorkshopProvider::new().expect("provider initializes");
+    let error = provider
+        .check("not Workshop source", Path::new("broken.txt"))
+        .expect_err("malformed Workshop must not disappear");
+    assert_eq!(error.code, "workshop.locale");
+
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let source = std::fs::read_to_string(
         root.join("compatibility/fixtures/synthetic/basic-rule/workshop.ws"),
     )
     .expect("Workshop fixture");
-    let provider = WorkshopProvider::new().expect("provider initializes");
     let diagnostics = provider
         .check(&source, Path::new("basic-rule.txt"))
         .expect("valid Workshop input reaches semantic inspection");
     assert!(
         diagnostics
             .iter()
-            .all(|diagnostic| diagnostic.status != Status::Supported)
+            .all(|diagnostic| diagnostic.status != Some(Status::Supported))
     );
-}
-
-#[test]
-fn provider_parse_failure_is_an_explicit_result_error() {
-    let provider = WorkshopProvider::new().expect("provider initializes");
-    let error = provider
-        .check("not Workshop source", Path::new("broken.txt"))
-        .expect_err("malformed Workshop must not disappear");
-    assert_eq!(error.code, "workshop.locale");
 }
