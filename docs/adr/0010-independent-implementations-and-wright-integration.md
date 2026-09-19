@@ -124,7 +124,7 @@ When Wright fails on a real project, first identify the owning layer:
 
 Architecture cleanup should not displace user-visible functionality unless it
 protects a public/versioned contract, repository ownership, dependency
-direction, provenance/source-edit correctness, licensing boundary, or an
+direction, source mapping/source-edit correctness, licensing boundary, or an
 observed high-cost maintenance risk.
 
 ## Consequences

@@ -17,7 +17,7 @@ types from ADR-0005 (`wright/opy-hir` v1, in `wright-core::hir`) are the
 serialized bridge contract between the frontend adapter and the core; they
 use raw strings for identity (symbol names, function names, operator
 spellings) and own no storage strategy. The compiler-side model requires
-strongly typed identity, arena storage, source provenance, and an explicit
+strongly typed identity, arena storage, source mapping, and an explicit
 HIR-to-Workshop-IR boundary, without reimplementing OverPy internals or adding
 speculative nodes beyond the v0.1 protocol surface.
 

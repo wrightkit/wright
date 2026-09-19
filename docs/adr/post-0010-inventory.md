@@ -14,7 +14,7 @@ records; they did not exist when the original work landed.
 | --- | --- | --- |
 | #209: distinct `check` / `lint` / `analyze` semantics | Backfill required | [ADR-0011](0011-distinct-tooling-workflows.md) |
 | #240/#244: first-party provider distribution, lazy bootstrap, local activation, and explicit updates | Backfill required | [ADR-0012](0012-first-party-provider-distribution.md) |
-| #243/#246: entry-based source-provider seam and canonical/provenance handoff | Backfill required | [ADR-0013](0013-entry-based-source-provider-seam.md) |
+| #243/#246: entry-based source-provider seam and canonical/source-attribution handoff | Backfill required | [ADR-0013](0013-entry-based-source-provider-seam.md) |
 | #261/#283: R2 distribution, finalized as repository-namespaced immutable artifacts with `latest/version` pointer | Backfill required; #283 supersedes the initial #261 object shape | [ADR-0014](0014-namespaced-immutable-r2-artifacts.md) |
 | #309: semantic facts, declarative rules, project lint policy, and findings | Backfill required | [ADR-0015](0015-canonical-facts-and-declarative-lint-policy.md) |
 | #234/#235: consume owner APIs and keep Wright's internal crates out of crates.io | Existing ADR-covered / implementation contract | Owner boundaries and dependency direction follow ADR-0009/0010; publication intent is maintained in the release contract, not a new architecture decision. |

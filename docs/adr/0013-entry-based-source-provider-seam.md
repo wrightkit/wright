@@ -26,7 +26,7 @@ workspace scanner or client-supplied full document set would make Wright a
 second source-language owner.
 
 Wright also needs to keep owner diagnostics, provider failures, canonical
-Workshop output, source identity, and truthful provenance distinct. The LPP
+Workshop output, source identity, and truthful source attribution distinct. The LPP
 process contract is a transport boundary, not the Wright product model.
 
 ## Decision
@@ -67,7 +67,7 @@ represent it, rather than being assigned a synthetic path.
 - **Expose provider AST/HIR/WIR to Wright tooling:** rejected because it leaks
   owner internals and encourages duplicated source semantics.
 - **Attribute generated canonical output to the selected source path:**
-  rejected because it creates false provenance and misleading diagnostics.
+  rejected because it creates false source attribution and misleading diagnostics.
 
 ## Consequences
 

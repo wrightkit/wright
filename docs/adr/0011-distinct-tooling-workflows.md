@@ -40,7 +40,7 @@ inputs:
 2. **`lint`** applies configurable Wright or local rules to semantic facts and
    reports rule findings. Findings retain stable rule identity, effective
    severity, support classification, boundedness where applicable, and
-   source/provenance information available from the owner boundary.
+   source mapping/owner attribution available from the owner boundary.
 3. **`analyze`** reports semantic facts and measurements such as program
    structure, symbol usage, and CFG-derived indicators. It is not another
    presentation of the lint registry or its finding list.
