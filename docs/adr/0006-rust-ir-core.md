@@ -19,7 +19,7 @@ use raw strings for identity (symbol names, function names, operator
 spellings) and own no storage strategy. The compiler-side model requires
 strongly typed identity, arena storage, source provenance, and an explicit
 HIR-to-Workshop-IR boundary, without reimplementing OverPy internals or adding
-speculative nodes beyond the v0.1 corpus.
+speculative nodes beyond the v0.1 protocol surface.
 
 ## Decision
 
@@ -74,8 +74,9 @@ ADR-0005.
 ## Compatibility impact
 
 IR equality is not semantic compatibility (ADR-0003). This ADR defines the
-model used by S/D-level tests only; no N/E-level claim is made. The v0.1 corpus
-must convert and lower without lossy catch-all nodes.
+model protected by IR and integration tests; no source-language parity claim is
+made. Representative protocol inputs must convert and lower without lossy
+catch-all nodes.
 
 ## Scope boundaries
 

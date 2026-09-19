@@ -64,9 +64,9 @@ The implementation areas considered by this decision were:
 - **OSTW**: a first-class compatible semantic frontend only after a separate,
   separately approved decision backed by a named consumer need and tests.
 
-Upstream compilers and language services (OverPy, OSTW) remain compatibility
-oracles, behavior references, and test inputs. They are not production runtime
-dependencies for supported standalone workflows.
+Upstream compilers and language services (OverPy, OSTW) remain owner/reference
+implementations and test inputs for explicit comparison tests. They are not
+production runtime dependencies for supported standalone workflows.
 
 ### 3. Compatibility targets observable semantics
 
@@ -89,8 +89,8 @@ create implementation work.
 
 ### 4. Legacy and reference quirks
 
-Default compatibility preserves corpus-evidenced observable upstream behavior
-where real projects may depend on it. A future strict or fixed mode may
+Default integration preserves observable upstream behavior where real projects
+may depend on it, as demonstrated by named reference comparisons. A future strict or fixed mode may
 diagnose or correct known quirks, but this ADR does not require implementing
 such a mode.
 
@@ -129,11 +129,12 @@ Agent and refactoring tooling should primarily use semantic, validated **source
 edits against the original source**. Full AST or IR regeneration with
 formatting and comment preservation is not the default mutation model.
 
-### 8. Support claims are corpus-defined
+### 8. Support claims follow concrete validation
 
-"Supported" means the declared corpus or surface is parseable, semantically
-understood, compilable where compilation is claimed, and analyzable through the
-declared tooling contracts.
+"Supported" means the declared surface has named tests, provider/reference
+comparisons, and real-workflow validation for the capabilities being claimed.
+Each retained input must have a concrete Wright consumer; a generic source
+fixture set or snapshot store is not a support contract.
 
 It does not guarantee successful execution in every live Overwatch runtime.
 Runtime-sensitive claims require separate runtime tests and owner/runtime
@@ -149,11 +150,11 @@ internal parity are preserved in this ADR and in `ARCHITECTURE.md`.
 
 ### On ADR-0002 / COMPATIBILITY.md
 
-ADR-0002's four-level S/D/N/E framework is preserved and remains normative.
-This ADR adds a priority rule: **E-level observable semantics outrank N-level
-output-text identity**. N-level differences that are purely presentational are
-not automatically product bugs; they must be evaluated against the observable
-and documented compatibility surface before creating implementation work.
+ADR-0002's S/D/N/E vocabulary remains available to owner repositories and
+explicit reference comparisons. For those comparisons, **observable semantics
+outrank output-text identity**. Output differences that are purely presentational
+are not automatically product bugs; they must be evaluated against the named
+consumer contract before creating implementation work.
 
 ### On ARCHITECTURE.md
 
@@ -170,16 +171,17 @@ frontend or tooling surface requires its own scope and consumer validation.
 
 ## Compatibility impact
 
-No compatibility level is removed or weakened. The S/D/N/E levels from ADR-0002
-remain normative. The priority clarification (semantic over text-identity)
-affects how output differences are evaluated, not the measurement contracts
-themselves.
+No owner-side compatibility contract is removed. Wright's current integration
+claims are made through named tests, provider/reference comparisons, and real
+workflow validation rather than a second measurement or snapshot database. The
+priority clarification (semantic over text-identity) still applies when an
+owner comparison uses that vocabulary.
 
 ## Scope boundaries
 
-- This ADR does not choose Workshop output targets or runtime versions for E-level
-  scenarios beyond the declared corpus.
-- Corpus licensing and local-generation processes for OSTW fixtures are outside
-  this ADR's scope.
+- This ADR does not choose Workshop output targets or runtime versions for
+  explicitly named reference scenarios.
+- Reference-input licensing and local-generation processes for OSTW fixtures
+  are outside this ADR's scope.
 - Third-party lint-rule extension mechanisms require a separate,
   separately approved decision backed by a concrete extension contract.

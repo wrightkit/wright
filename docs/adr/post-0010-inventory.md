@@ -27,7 +27,7 @@ records; they did not exist when the original work landed.
 
 ADR-0008 already establishes tooling-first priority, observable semantic
 compatibility, Workshop-centered conversion, source-oriented edits, and
-corpus-defined support claims. ADR-0010 establishes independent language
+concrete-consumer support validation. ADR-0010 establishes independent language
 implementations, the meaning of frontend/provider, the dependency direction,
 and Wright's product boundary. The later cleanup and migration work listed
 above is therefore a consequence of those decisions unless it changes a
