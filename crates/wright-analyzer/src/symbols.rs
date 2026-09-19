@@ -1,23 +1,13 @@
-//! [`SemanticIndex`] is the read-only semantic query surface for tooling and
-//! agents: it enumerates every symbol (global/player variables, subroutines,
-//! rules), records every reference site (declarations, reads, writes, calls,
-//! definitions) with its source span and rule/action/value context, and
-//! answers usage and find-references queries without scraping source text.
-
 use std::collections::HashSet;
 
-use workshop_rs::arena::Arena;
-use workshop_rs::ids::Id;
+pub use workshop_rs::ids::Id;
 use workshop_rs::source::Span;
-use workshop_rs::wir::error::IrError;
-use workshop_rs::wir::{
-    self, Action, ActionId, GlobalVarId, PlayerVarId, RuleId, SubroutineId, Value, ValueId,
-};
+use workshop_rs::{Action, Event, Program, Value};
 
-/// A typed ID referencing a [`Symbol`].
-pub type SymbolId = Id<Symbol>;
+pub type RuleId = usize;
+pub type ActionId = usize;
+pub type ValueId = usize;
 
-/// The kind of a symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
     GlobalVariable,
@@ -26,647 +16,531 @@ pub enum SymbolKind {
     Rule,
 }
 
-/// A declared symbol.
+impl SymbolKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GlobalVariable => "globalVariable",
+            Self::PlayerVariable => "playerVariable",
+            Self::Subroutine => "subroutine",
+            Self::Rule => "rule",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceKind {
+    Declaration,
+    Definition,
+    Read,
+    Write,
+    Call,
+}
+
+impl ReferenceKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Declaration => "declaration",
+            Self::Definition => "definition",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Call => "call",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub id: SymbolId,
     pub kind: SymbolKind,
     pub name: String,
-    /// The declaration site, when the IR carries one.
     pub span: Option<Span>,
-    /// The exact span of the declared identifier occurrence (the rename
-    /// target); `None` when provenance could not be preserved.
     pub occurrence: Option<Span>,
-    /// The rule that owns this symbol, for rule symbols.
     pub rule: Option<RuleId>,
 }
 
-/// The kind of a reference to a symbol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReferenceKind {
-    /// The symbol's own declaration site.
-    Declaration,
-    /// A subroutine definition event (`def` body rule).
-    Definition,
-    /// A read of a variable value.
-    Read,
-    /// A write or bind to a variable (set, modify, for-loop binding).
-    Write,
-    /// A subroutine call.
-    Call,
-}
+pub type SymbolId = Id<Symbol>;
 
-/// One reference to a symbol, with its source location and IR context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     pub symbol: SymbolId,
     pub kind: ReferenceKind,
     pub span: Option<Span>,
-    /// The exact span of the identifier occurrence (the rename target);
-    /// `None` when provenance could not be preserved.
     pub occurrence: Option<Span>,
-    /// The containing rule, for references inside rules.
     pub rule: Option<RuleId>,
-    /// The containing action, for references inside actions.
     pub action: Option<ActionId>,
-    /// The value node the reference occurs in, for value reads.
     pub value: Option<ValueId>,
 }
 
-/// Aggregate usage counts for one symbol.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct UsageSummary {
     pub reads: u32,
     pub writes: u32,
     pub calls: u32,
-    /// Number of distinct rules referencing the symbol.
     pub rules: u32,
 }
 
-/// The semantic index over one Workshop IR program.
 #[derive(Debug, Clone)]
 pub struct SemanticIndex {
-    symbols: Arena<Symbol>,
+    symbols: Vec<Symbol>,
     references: Vec<Reference>,
-    references_by_symbol: Vec<Vec<usize>>,
 }
 
 impl SemanticIndex {
-    /// Build the index by walking the program's declarations, rules, actions,
-    /// and values in deterministic order.
-    pub fn build(program: &wir::Program) -> Result<SemanticIndex, IrError> {
-        Builder::new(program).build()
+    pub fn build(program: &Program) -> Self {
+        let mut symbols = Vec::new();
+        let mut register =
+            |name: &str, kind, prefix: Option<&str>, rule: Option<usize>, span: Option<Span>| {
+                let id = SymbolId::from_index(symbols.len());
+                let occ = prefix
+                    .and_then(|p| declaration_span(program, &[p], name))
+                    .or(span);
+                symbols.push(Symbol {
+                    id,
+                    kind,
+                    name: name.to_string(),
+                    span: occ,
+                    occurrence: occ,
+                    rule,
+                });
+            };
+        for (vars, kind, prefix) in [
+            (
+                &program.global_variables,
+                SymbolKind::GlobalVariable,
+                "globalvar ",
+            ),
+            (
+                &program.player_variables,
+                SymbolKind::PlayerVariable,
+                "playervar ",
+            ),
+        ] {
+            for v in vars {
+                register(&v.name, kind, Some(prefix), None, None);
+            }
+        }
+        for s in &program.subroutines {
+            register(
+                &s.name,
+                SymbolKind::Subroutine,
+                Some("subroutine "),
+                None,
+                None,
+            );
+        }
+        for (r, d) in program.rules.iter().enumerate() {
+            register(
+                &d.name,
+                SymbolKind::Rule,
+                None,
+                Some(r),
+                program.rule_span(r),
+            );
+        }
+        let mut index = Self {
+            symbols,
+            references: Vec::new(),
+        };
+        for symbol in index.symbols.clone() {
+            if let Some(span) = symbol.occurrence {
+                index.push(
+                    symbol.id,
+                    ReferenceKind::Declaration,
+                    symbol.rule,
+                    None,
+                    None,
+                    Some(span),
+                );
+            }
+        }
+        for (rule, data) in program.rules.iter().enumerate() {
+            index.walk_event(&data.event, rule, program);
+            for (condition, value) in data.conditions.iter().enumerate() {
+                index.walk_value(
+                    &value.value,
+                    rule,
+                    None,
+                    Some(condition),
+                    program.condition_span(rule, condition),
+                    program,
+                );
+            }
+            for (action, value) in data.actions.iter().enumerate() {
+                index.walk_action(value, rule, action, program);
+            }
+        }
+        index
     }
 
-    /// All symbols in declaration order.
     pub fn symbols(&self) -> impl Iterator<Item = &Symbol> {
         self.symbols.iter()
     }
 
-    /// The symbol with the given ID, if any.
     pub fn symbol(&self, id: SymbolId) -> Option<&Symbol> {
-        self.symbols.get(id)
+        self.symbols.get(id.index())
     }
 
-    /// Every symbol of the given kind, in declaration order.
-    pub fn symbols_of(&self, kind: SymbolKind) -> Vec<&Symbol> {
-        self.symbols
-            .iter()
-            .filter(|symbol| symbol.kind == kind)
-            .collect()
-    }
-
-    /// Symbol IDs whose name matches exactly.
-    pub fn find_by_name(&self, name: &str) -> Vec<SymbolId> {
-        self.symbols
-            .iter()
-            .filter(|symbol| symbol.name == name)
-            .map(|symbol| symbol.id)
-            .collect()
-    }
-
-    /// Every reference to the given symbol, in program order.
     pub fn references(&self, symbol: SymbolId) -> Vec<&Reference> {
-        let Some(slots) = self.references_by_symbol.get(symbol.index()) else {
-            return Vec::new();
-        };
-        slots
+        self.references
             .iter()
-            .filter_map(|index| self.references.get(*index))
+            .filter(|reference| reference.symbol == symbol)
             .collect()
     }
 
-    /// Aggregate usage counts for the given symbol.
     pub fn usage(&self, symbol: SymbolId) -> UsageSummary {
-        let mut summary = UsageSummary::default();
+        let mut usage = UsageSummary::default();
         let mut rules = HashSet::new();
         for reference in self.references(symbol) {
             match reference.kind {
-                ReferenceKind::Read => summary.reads += 1,
-                ReferenceKind::Write => summary.writes += 1,
-                ReferenceKind::Call => summary.calls += 1,
-                ReferenceKind::Declaration | ReferenceKind::Definition => {}
+                ReferenceKind::Read => usage.reads += 1,
+                ReferenceKind::Write => usage.writes += 1,
+                ReferenceKind::Call => usage.calls += 1,
+                _ => {}
             }
             if let Some(rule) = reference.rule {
                 rules.insert(rule);
             }
         }
-        summary.rules = rules.len() as u32;
-        summary
-    }
-}
-
-struct Builder<'a> {
-    program: &'a wir::Program,
-    symbols: Arena<Symbol>,
-    references: Vec<Reference>,
-    references_by_symbol: Vec<Vec<usize>>,
-}
-
-impl<'a> Builder<'a> {
-    fn new(program: &'a wir::Program) -> Self {
-        Builder {
-            program,
-            symbols: Arena::new(),
-            references: Vec::new(),
-            references_by_symbol: Vec::new(),
-        }
+        usage.rules = rules.len() as u32;
+        usage
     }
 
-    fn build(mut self) -> Result<SemanticIndex, IrError> {
-        // Symbol tables, in the fixed order the id arithmetic relies on:
-        // globals, players, subroutines, rules.
-        for id in 0..self.program.global_variables.len() {
-            let variable = self
-                .program
-                .global_variables
-                .get(GlobalVarId::from_index(id))
-                .ok_or_else(|| dangling("global variable", id))?;
-            let symbol = self.symbols.push(Symbol {
-                id: SymbolId::from_index(id),
-                kind: SymbolKind::GlobalVariable,
-                name: variable.name.clone(),
-                span: variable.span,
-                occurrence: variable.name_span,
-                rule: None,
-            });
-            self.declare(symbol, variable.span, variable.name_span, None)?;
-        }
-        let global_count = self.symbols.len();
-        for id in 0..self.program.player_variables.len() {
-            let variable = self
-                .program
-                .player_variables
-                .get(PlayerVarId::from_index(id))
-                .ok_or_else(|| dangling("player variable", id))?;
-            let symbol = self.symbols.push(Symbol {
-                id: SymbolId::from_index(global_count + id),
-                kind: SymbolKind::PlayerVariable,
-                name: variable.name.clone(),
-                span: variable.span,
-                occurrence: variable.name_span,
-                rule: None,
-            });
-            self.declare(symbol, variable.span, variable.name_span, None)?;
-        }
-        let player_start = self.symbols.len();
-        for id in 0..self.program.subroutines.len() {
-            let subroutine = self
-                .program
-                .subroutines
-                .get(SubroutineId::from_index(id))
-                .ok_or_else(|| dangling("subroutine", id))?;
-            let symbol = self.symbols.push(Symbol {
-                id: SymbolId::from_index(player_start + id),
-                kind: SymbolKind::Subroutine,
-                name: subroutine.name.clone(),
-                span: subroutine.span,
-                occurrence: subroutine.name_span,
-                rule: None,
-            });
-            self.declare(symbol, subroutine.span, subroutine.name_span, None)?;
-        }
-        let subroutine_start = self.symbols.len();
-        for id in 0..self.program.rules.len() {
-            let rule = self
-                .program
-                .rules
-                .get(RuleId::from_index(id))
-                .ok_or_else(|| dangling("rule", id))?;
-            let symbol = self.symbols.push(Symbol {
-                id: SymbolId::from_index(subroutine_start + id),
-                kind: SymbolKind::Rule,
-                name: rule.name.clone(),
-                span: rule.span,
-                occurrence: rule.name_span,
-                rule: Some(RuleId::from_index(id)),
-            });
-            self.declare(
-                symbol,
-                rule.span,
-                rule.name_span,
-                Some(RuleId::from_index(id)),
-            )?;
-        }
-
-        for id in 0..self.program.rules.len() {
-            self.walk_rule(RuleId::from_index(id))?;
-        }
-        Ok(SemanticIndex {
-            symbols: self.symbols,
-            references: self.references,
-            references_by_symbol: self.references_by_symbol,
-        })
-    }
-
-    fn declare(
+    fn push(
         &mut self,
         symbol: SymbolId,
-        span: Option<Span>,
-        occurrence: Option<Span>,
+        kind: ReferenceKind,
         rule: Option<RuleId>,
-    ) -> Result<(), IrError> {
-        self.push(Reference {
+        action: Option<ActionId>,
+        value: Option<ValueId>,
+        span: Option<Span>,
+    ) {
+        self.references.push(Reference {
             symbol,
-            kind: ReferenceKind::Declaration,
+            kind,
             span,
-            occurrence,
+            occurrence: span,
             rule,
-            action: None,
-            value: None,
-        })
+            action,
+            value,
+        });
     }
 
-    fn walk_rule(&mut self, rule: RuleId) -> Result<(), IrError> {
-        let rule_data = self
-            .program
-            .rules
-            .get(rule)
-            .ok_or_else(|| dangling("rule", rule.index()))?
-            .clone();
-        for condition in &rule_data.conditions {
-            self.walk_value(*condition, Some(rule), None)?;
-        }
-        for action in &rule_data.actions {
-            self.walk_action(*action, Some(rule))?;
-        }
-        if let wir::Event::Subroutine(subroutine) = &rule_data.event {
-            let symbol = self.subroutine_symbol(*subroutine)?;
-            self.push(Reference {
-                symbol,
-                kind: ReferenceKind::Definition,
-                span: rule_data.span,
-                occurrence: rule_data.name_span,
-                rule: Some(rule),
-                action: None,
-                value: None,
-            })?;
-        }
-        Ok(())
+    fn symbol_by(&self, kind: SymbolKind, name: &str) -> Option<SymbolId> {
+        self.symbols
+            .iter()
+            .find(|s| s.kind == kind && s.name == name)
+            .map(|s| s.id)
     }
 
-    fn walk_action(&mut self, action_id: ActionId, rule: Option<RuleId>) -> Result<(), IrError> {
-        let action = self
-            .program
-            .actions
-            .get(action_id)
-            .ok_or_else(|| dangling("action", action_id.index()))?
-            .clone();
-        let span = action.span();
-        match &action {
-            Action::SetGlobalVariable {
-                variable,
-                value,
-                target_span,
-                ..
-            } => {
-                self.write(
-                    self.global_symbol(*variable)?,
-                    span,
-                    *target_span,
-                    rule,
-                    Some(action_id),
-                )?;
-                self.walk_value(*value, rule, Some(action_id))
+    fn walk_event(&mut self, event: &Event, rule: RuleId, program: &Program) {
+        if let Event::Subroutine(name) = event {
+            if let Some(symbol) = self.symbol_by(SymbolKind::Subroutine, name) {
+                let rule_span = program.rule_span(rule);
+                self.push(
+                    symbol,
+                    ReferenceKind::Definition,
+                    Some(rule),
+                    None,
+                    None,
+                    text_occurrence(program, rule_span, name, false).or(rule_span),
+                );
             }
-            Action::ModifyGlobalVariable {
-                variable,
-                value,
-                target_span,
-                ..
+        }
+    }
+
+    fn write_var(
+        &mut self,
+        kind: SymbolKind,
+        var: &str,
+        (rule, act, span): (RuleId, ActionId, Option<Span>),
+        prog: &Program,
+        is_modify: bool,
+        before_eq: bool,
+    ) {
+        if let Some(sym) = self.symbol_by(kind, var) {
+            let occ = text_occurrence(prog, span, var, before_eq).or(span);
+            self.push(sym, ReferenceKind::Write, Some(rule), Some(act), None, occ);
+            if is_modify {
+                self.push(sym, ReferenceKind::Read, Some(rule), Some(act), None, span);
+            }
+        }
+    }
+
+    fn walk_args(&mut self, args: &[(usize, &Value)], rule: RuleId, act: ActionId, prog: &Program) {
+        for (i, v) in args {
+            self.walk_value(
+                v,
+                rule,
+                Some(act),
+                None,
+                prog.action_argument_span(rule, act, *i),
+                prog,
+            );
+        }
+    }
+
+    fn read_var(
+        &mut self,
+        kind: SymbolKind,
+        name: &str,
+        (rule, act, val): (RuleId, Option<ActionId>, Option<ValueId>),
+        span: Option<Span>,
+        prog: &Program,
+    ) {
+        if let Some(sym) = self.symbol_by(kind, name) {
+            let occ = text_occurrence(prog, span, name, false).or(span);
+            self.push(sym, ReferenceKind::Read, Some(rule), act, val, occ);
+        }
+    }
+
+    fn walk_action(
+        &mut self,
+        action: &Action,
+        rule: RuleId,
+        action_id: ActionId,
+        program: &Program,
+    ) {
+        let span = program.action_span(rule, action_id);
+        match action {
+            Action::SetGlobalVariable { variable, value }
+            | Action::ModifyGlobalVariable {
+                variable, value, ..
             } => {
-                // A modify reads and writes; it is indexed as a write.
-                self.write(
-                    self.global_symbol(*variable)?,
-                    span,
-                    *target_span,
-                    rule,
-                    Some(action_id),
-                )?;
-                self.walk_value(*value, rule, Some(action_id))
+                let is_mod = matches!(action, Action::ModifyGlobalVariable { .. });
+                self.write_var(
+                    SymbolKind::GlobalVariable,
+                    variable,
+                    (rule, action_id, span),
+                    program,
+                    is_mod,
+                    true,
+                );
+                self.walk_args(&[(1, value)], rule, action_id, program);
             }
             Action::SetPlayerVariable {
                 player,
                 variable,
                 value,
-                target_span,
-                ..
-            } => {
-                self.write(
-                    self.player_symbol(*variable)?,
-                    span,
-                    *target_span,
-                    rule,
-                    Some(action_id),
-                )?;
-                self.walk_value(*player, rule, Some(action_id))?;
-                self.walk_value(*value, rule, Some(action_id))
             }
-            Action::ModifyPlayerVariable {
+            | Action::ModifyPlayerVariable {
                 player,
                 variable,
                 value,
-                target_span,
                 ..
             } => {
-                self.write(
-                    self.player_symbol(*variable)?,
-                    span,
-                    *target_span,
-                    rule,
-                    Some(action_id),
-                )?;
-                self.walk_value(*player, rule, Some(action_id))?;
-                self.walk_value(*value, rule, Some(action_id))
+                let is_mod = matches!(action, Action::ModifyPlayerVariable { .. });
+                self.write_var(
+                    SymbolKind::PlayerVariable,
+                    variable,
+                    (rule, action_id, span),
+                    program,
+                    is_mod,
+                    true,
+                );
+                self.walk_args(&[(0, player), (2, value)], rule, action_id, program);
             }
             Action::AssignMember { target, value, .. } => {
-                self.walk_value(*target, rule, Some(action_id))?;
-                self.walk_value(*value, rule, Some(action_id))
+                self.walk_args(&[(0, target), (1, value)], rule, action_id, program);
             }
-            Action::CallSubroutine {
-                subroutine,
-                callee_span,
-                ..
-            } => self.call(
-                self.subroutine_symbol(*subroutine)?,
-                span,
-                *callee_span,
-                rule,
-                Some(action_id),
-            ),
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    self.walk_value(branch.condition, rule, Some(action_id))?;
-                    for action in &branch.body {
-                        self.walk_action(*action, rule)?;
-                    }
+            Action::CallSubroutine { subroutine } => {
+                if let Some(symbol) = self.symbol_by(SymbolKind::Subroutine, subroutine) {
+                    self.push(
+                        symbol,
+                        ReferenceKind::Call,
+                        Some(rule),
+                        Some(action_id),
+                        None,
+                        span,
+                    );
                 }
-                if let Some(else_body) = else_body {
-                    for action in else_body {
-                        self.walk_action(*action, rule)?;
-                    }
-                }
-                Ok(())
-            }
-            Action::While {
-                condition, body, ..
-            } => {
-                self.walk_value(*condition, rule, Some(action_id))?;
-                for action in body {
-                    self.walk_action(*action, rule)?;
-                }
-                Ok(())
             }
             Action::ForGlobalVariable {
                 variable,
                 start,
                 stop,
                 step,
-                body,
-                target_span,
-                ..
             } => {
-                self.write(
-                    self.global_symbol(*variable)?,
-                    span,
-                    *target_span,
+                self.write_var(
+                    SymbolKind::GlobalVariable,
+                    variable,
+                    (rule, action_id, span),
+                    program,
+                    false,
+                    false,
+                );
+                self.walk_args(
+                    &[(1, start), (2, stop), (3, step)],
                     rule,
-                    Some(action_id),
-                )?;
-                self.walk_value(*start, rule, Some(action_id))?;
-                self.walk_value(*stop, rule, Some(action_id))?;
-                self.walk_value(*step, rule, Some(action_id))?;
-                for action in body {
-                    self.walk_action(*action, rule)?;
-                }
-                Ok(())
+                    action_id,
+                    program,
+                );
             }
             Action::ForPlayerVariable {
+                player,
                 variable,
                 start,
                 stop,
                 step,
-                body,
-                ..
             } => {
-                self.write(
-                    self.player_symbol(*variable)?,
-                    span,
-                    None,
+                self.write_var(
+                    SymbolKind::PlayerVariable,
+                    variable,
+                    (rule, action_id, span),
+                    program,
+                    false,
+                    false,
+                );
+                self.walk_args(
+                    &[(0, player), (1, start), (2, stop), (3, step)],
                     rule,
-                    Some(action_id),
-                )?;
-                self.walk_value(*start, rule, Some(action_id))?;
-                self.walk_value(*stop, rule, Some(action_id))?;
-                self.walk_value(*step, rule, Some(action_id))?;
-                for action in body {
-                    self.walk_action(*action, rule)?;
-                }
-                Ok(())
+                    action_id,
+                    program,
+                );
+            }
+            Action::If { condition }
+            | Action::ElseIf { condition }
+            | Action::While { condition } => {
+                self.walk_args(&[(0, condition)], rule, action_id, program);
             }
             Action::Call { args, .. } => {
-                for arg in args {
-                    self.walk_value(*arg, rule, Some(action_id))?;
+                for (arg, value) in args.iter().enumerate() {
+                    self.walk_value(
+                        value,
+                        rule,
+                        Some(action_id),
+                        None,
+                        program.action_argument_span(rule, action_id, arg),
+                        program,
+                    );
                 }
-                Ok(())
             }
+            Action::Disabled { action } => self.walk_action(action, rule, action_id, program),
+            Action::Else | Action::End => {}
         }
     }
 
     fn walk_value(
         &mut self,
-        value_id: ValueId,
-        rule: Option<RuleId>,
+        value: &Value,
+        rule: RuleId,
         action: Option<ActionId>,
-    ) -> Result<(), IrError> {
-        let node = self
-            .program
-            .values
-            .get(value_id)
-            .ok_or_else(|| dangling("value", value_id.index()))?;
-        match &node.value {
-            Value::GlobalVariable(variable) => self.read(
-                self.global_symbol(*variable)?,
-                node.span,
-                // A global-variable value node spans exactly its name token.
-                node.span,
-                rule,
-                action,
-                Some(value_id),
-            ),
-            Value::PlayerVariable { player, variable } => {
-                // A player-variable value node spans the whole
-                // `receiver.member` expression; the member name is its final
-                // token, derived here where the identity is known.
-                let occurrence = self.player_occurrence(*variable, node.span);
-                self.read(
-                    self.player_symbol(*variable)?,
-                    node.span,
-                    occurrence,
-                    rule,
-                    action,
-                    Some(value_id),
-                )?;
-                self.walk_value(*player, rule, action)
+        value_id: Option<ValueId>,
+        span: Option<Span>,
+        program: &Program,
+    ) {
+        match value {
+            Value::GlobalVariable(name) => {
+                self.read_var(
+                    SymbolKind::GlobalVariable,
+                    name,
+                    (rule, action, value_id),
+                    span,
+                    program,
+                );
             }
-            Value::Array(elements) => {
-                for element in elements {
-                    self.walk_value(*element, rule, action)?;
+            Value::PlayerVariable { player, variable } => {
+                self.read_var(
+                    SymbolKind::PlayerVariable,
+                    variable,
+                    (rule, action, value_id),
+                    span,
+                    program,
+                );
+                self.walk_value(player, rule, action, value_id, span, program);
+            }
+            Value::Array(values) | Value::Call { args: values, .. } => {
+                for value in values {
+                    self.walk_value(value, rule, action, value_id, span, program);
                 }
-                Ok(())
             }
             Value::Vector { x, y, z } => {
-                self.walk_value(*x, rule, action)?;
-                self.walk_value(*y, rule, action)?;
-                self.walk_value(*z, rule, action)
-            }
-            Value::Call { args, .. } => {
-                for arg in args {
-                    self.walk_value(*arg, rule, action)?;
+                for comp in [x, y, z] {
+                    self.walk_value(comp, rule, action, value_id, span, program);
                 }
-                Ok(())
             }
-            Value::Number { .. }
-            | Value::String(_)
-            | Value::LocalizedString(_)
-            | Value::Bool(_)
-            | Value::Null
-            | Value::Enum { .. }
-            | Value::Subroutine(_)
-            | Value::EventPlayer => Ok(()),
-        }
-    }
-
-    fn read(
-        &mut self,
-        symbol: SymbolId,
-        span: Option<Span>,
-        occurrence: Option<Span>,
-        rule: Option<RuleId>,
-        action: Option<ActionId>,
-        value: Option<ValueId>,
-    ) -> Result<(), IrError> {
-        self.push(Reference {
-            symbol,
-            kind: ReferenceKind::Read,
-            span,
-            occurrence,
-            rule,
-            action,
-            value,
-        })
-    }
-
-    fn write(
-        &mut self,
-        symbol: SymbolId,
-        span: Option<Span>,
-        occurrence: Option<Span>,
-        rule: Option<RuleId>,
-        action: Option<ActionId>,
-    ) -> Result<(), IrError> {
-        self.push(Reference {
-            symbol,
-            kind: ReferenceKind::Write,
-            span,
-            occurrence,
-            rule,
-            action,
-            value: None,
-        })
-    }
-
-    fn call(
-        &mut self,
-        symbol: SymbolId,
-        span: Option<Span>,
-        occurrence: Option<Span>,
-        rule: Option<RuleId>,
-        action: Option<ActionId>,
-    ) -> Result<(), IrError> {
-        self.push(Reference {
-            symbol,
-            kind: ReferenceKind::Call,
-            span,
-            occurrence,
-            rule,
-            action,
-            value: None,
-        })
-    }
-
-    /// The exact member-name occurrence of a player variable inside a
-    /// `receiver.member` span: the member token is the final token of the
-    /// member expression, so the occurrence ends at the span end and starts
-    /// `name` characters earlier (columns are char-based).
-    fn player_occurrence(&self, variable: PlayerVarId, span: Option<Span>) -> Option<Span> {
-        let span = span?;
-        let name_len = self
-            .program
-            .player_variables
-            .get(variable)
-            .map(|player| player.name.chars().count() as u32)
-            .unwrap_or(0);
-        Some(Span::new(
-            span.file,
-            workshop_rs::source::Position::new(
-                span.end.line,
-                span.end.col.saturating_sub(name_len).max(span.start.col),
-            ),
-            span.end,
-        ))
-    }
-
-    fn push(&mut self, reference: Reference) -> Result<(), IrError> {
-        let index = self.references.len();
-        self.references.push(reference);
-        let symbol_index = self.references[index].symbol.index();
-        if self.references_by_symbol.len() <= symbol_index {
-            self.references_by_symbol
-                .resize(symbol_index + 1, Vec::new());
-        }
-        self.references_by_symbol[symbol_index].push(index);
-        Ok(())
-    }
-
-    fn global_symbol(&self, id: GlobalVarId) -> Result<SymbolId, IrError> {
-        if self.program.global_variables.contains(id) {
-            Ok(SymbolId::from_index(id.index()))
-        } else {
-            Err(dangling("global variable", id.index()))
-        }
-    }
-
-    fn player_symbol(&self, id: PlayerVarId) -> Result<SymbolId, IrError> {
-        if self.program.player_variables.contains(id) {
-            Ok(SymbolId::from_index(
-                self.program.global_variables.len() + id.index(),
-            ))
-        } else {
-            Err(dangling("player variable", id.index()))
-        }
-    }
-
-    fn subroutine_symbol(&self, id: SubroutineId) -> Result<SymbolId, IrError> {
-        if self.program.subroutines.contains(id) {
-            Ok(SymbolId::from_index(
-                self.program.global_variables.len()
-                    + self.program.player_variables.len()
-                    + id.index(),
-            ))
-        } else {
-            Err(dangling("subroutine", id.index()))
+            _ => {}
         }
     }
 }
 
-fn dangling(what: &'static str, id: usize) -> IrError {
-    IrError::DanglingReference {
-        what,
-        id: id as u32,
+fn declaration_span(program: &Program, prefixes: &[&str], name: &str) -> Option<Span> {
+    for file_index in 0..64 {
+        let file = workshop_rs::source::FileId::from_index(file_index);
+        let Some(source) = program.source(file) else {
+            continue;
+        };
+        for (line_index, line) in source.text().lines().enumerate() {
+            for prefix in prefixes {
+                if let Some(rest) = line.strip_prefix(prefix) {
+                    if rest
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|f| f.trim_matches('"') == name)
+                    {
+                        let start = prefix.chars().count() as u32 + 1;
+                        let line_num = line_index as u32 + 1;
+                        return Some(Span::new(
+                            file,
+                            workshop_rs::source::Position::new(line_num, start),
+                            workshop_rs::source::Position::new(
+                                line_num,
+                                start + name.chars().count() as u32,
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
     }
+    None
+}
+
+fn text_occurrence(
+    program: &Program,
+    span: Option<Span>,
+    name: &str,
+    before_eq: bool,
+) -> Option<Span> {
+    let span = span?;
+    let source = program.source(span.file)?.text();
+    let name_chars: Vec<char> = name.chars().collect();
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+    for lno in span.start.line..=span.end.line {
+        let line = source.lines().nth(lno.saturating_sub(1) as usize)?;
+        let chars: Vec<char> = line.chars().collect();
+        let lower = if lno == span.start.line {
+            span.start.col.saturating_sub(1) as usize
+        } else {
+            0
+        };
+        let mut upper = if lno == span.end.line {
+            span.end.col.saturating_sub(1) as usize
+        } else {
+            chars.len()
+        };
+        if before_eq {
+            if let Some(op) = line.find('=') {
+                upper = upper.min(op);
+            }
+        }
+        for start in lower.min(chars.len())..=upper.min(chars.len()) {
+            let end = start + name_chars.len();
+            if end <= upper && chars.get(start..end) == Some(name_chars.as_slice()) {
+                let before = start
+                    .checked_sub(1)
+                    .and_then(|i| chars.get(i))
+                    .copied()
+                    .is_some_and(is_ident);
+                let after = chars.get(end).copied().is_some_and(is_ident);
+                if !before && !after {
+                    return Some(Span::new(
+                        span.file,
+                        workshop_rs::source::Position::new(lno, start as u32 + 1),
+                        workshop_rs::source::Position::new(lno, end as u32 + 1),
+                    ));
+                }
+            }
+        }
+    }
+    None
 }

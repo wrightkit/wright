@@ -164,13 +164,19 @@ pub struct Capabilities {
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
     loaded: Loaded,
+    index: SemanticIndex,
 }
 
 impl<'a> ToolService<'a> {
     /// Build the service over a session, loading the program eagerly.
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         let loaded = session.load()?;
-        Ok(ToolService { session, loaded })
+        let index = SemanticIndex::build(&loaded.program);
+        Ok(ToolService {
+            session,
+            loaded,
+            index,
+        })
     }
 
     /// The loaded program snapshot (origin, input identity, canonical program).
@@ -178,39 +184,19 @@ impl<'a> ToolService<'a> {
         &self.loaded
     }
 
+    /// The precomputed semantic index over the loaded program.
+    pub fn index(&self) -> &SemanticIndex {
+        &self.index
+    }
+
     /// The capability/version contract.
     pub fn capabilities(&self) -> Capabilities {
+        let ops = "capabilities project rules symbols references usage cfg findings persistentObjects lint lintRules callGraph costEstimate targetMetadata compile check analyze inspect validateEditTransaction semanticRename providerSemanticRename providerValidateEdit";
         Capabilities {
             name: SERVICE_NAME.to_string(),
             version: SERVICE_VERSION.to_string(),
             contract: RESULT_CONTRACT.to_string(),
-            operations: vec![
-                "capabilities",
-                "project",
-                "rules",
-                "symbols",
-                "references",
-                "usage",
-                "cfg",
-                "findings",
-                "persistentObjects",
-                "lint",
-                "lintRules",
-                "callGraph",
-                "costEstimate",
-                "targetMetadata",
-                "compile",
-                "check",
-                "analyze",
-                "inspect",
-                "validateEditTransaction",
-                "semanticRename",
-                "providerSemanticRename",
-                "providerValidateEdit",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+            operations: ops.split_whitespace().map(str::to_string).collect(),
             languages: vec!["opy".to_string(), "workshop".to_string()],
             profiles: vec![
                 crate::Profile::Off.as_str().to_string(),
@@ -223,9 +209,7 @@ impl<'a> ToolService<'a> {
     /// Handle one tool request, returning a structured owned response.
     pub fn handle(&self, request: &ToolRequest) -> ToolResponse {
         match request {
-            ToolRequest::Capabilities => ToolResponse::Ok {
-                result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
-            },
+            ToolRequest::Capabilities => self.ok_val(self.capabilities()),
             ToolRequest::Project => self.ok(self.project()),
             ToolRequest::Rules => self.semantic_query(Request::ListRules),
             ToolRequest::Symbols { kind } => {
@@ -249,16 +233,14 @@ impl<'a> ToolService<'a> {
             ToolRequest::ValidateEdit {
                 sources,
                 transaction,
-            } => self.ok(serde_json::to_value(crate::edit::validate_transaction(
+            } => self.ok_val(crate::edit::validate_transaction(
                 &self.session.config,
                 sources,
                 transaction,
-            ))
-            .expect("edit validation serializes")),
-            ToolRequest::SemanticRename { sources, target } => self.ok(serde_json::to_value(
+            )),
+            ToolRequest::SemanticRename { sources, target } => self.ok_val(
                 crate::edit::semantic_rename(&self.session.config, sources, target),
-            )
-            .expect("semantic rename serializes")),
+            ),
             ToolRequest::ProviderSemanticRename {
                 language_id,
                 documents,
@@ -268,7 +250,7 @@ impl<'a> ToolService<'a> {
                 project_root,
                 sources,
             } => {
-                let request = crate::provider_edit::ProviderRenameRequest {
+                let req = crate::provider_edit::ProviderRenameRequest {
                     documents: documents.clone(),
                     position_document_uri: position_document_uri.clone(),
                     position: *position,
@@ -276,12 +258,9 @@ impl<'a> ToolService<'a> {
                     project_root: project_root.clone(),
                     sources: sources.clone(),
                 };
-                self.ok(
-                    serde_json::to_value(self.run_provider_flow(language_id, |provider| {
-                        crate::provider_edit::semantic_rename(provider, &request)
-                    }))
-                    .expect("provider semantic rename serializes"),
-                )
+                self.ok_val(self.run_provider_flow(language_id, |p| {
+                    crate::provider_edit::semantic_rename(p, &req)
+                }))
             }
             ToolRequest::ProviderValidateEdit {
                 language_id,
@@ -290,18 +269,15 @@ impl<'a> ToolService<'a> {
                 sources,
                 project_root,
             } => {
-                let request = crate::provider_edit::ProviderValidateRequest {
+                let req = crate::provider_edit::ProviderValidateRequest {
                     documents: documents.clone(),
                     transaction: transaction.clone(),
                     sources: sources.clone(),
                     project_root: project_root.clone(),
                 };
-                self.ok(
-                    serde_json::to_value(self.run_provider_flow(language_id, |provider| {
-                        crate::provider_edit::validate_transaction(provider, &request)
-                    }))
-                    .expect("provider edit validation serializes"),
-                )
+                self.ok_val(self.run_provider_flow(language_id, |p| {
+                    crate::provider_edit::validate_transaction(p, &req)
+                }))
             }
         }
     }
@@ -376,14 +352,14 @@ impl<'a> ToolService<'a> {
         ToolResponse::Ok { result }
     }
 
-    /// `findings`: every static-analysis finding with resolved span paths.
-    ///
-    /// The tool/agent surface resolves `span.path` exactly like the CLI
-    /// `analyze`/`lint` workflows, so one file identity holds per finding
-    /// across every surface (#102).
-    fn findings(&self) -> ToolResponse {
-        let response = self.semantic_query(Request::GetFindings);
-        match response {
+    fn ok_val<T: Serialize>(&self, val: T) -> ToolResponse {
+        ToolResponse::Ok {
+            result: serde_json::to_value(val).expect("serializes"),
+        }
+    }
+
+    fn query_with_resolved_paths(&self, req: Request) -> ToolResponse {
+        match self.semantic_query(req) {
             ToolResponse::Ok { mut result } => {
                 crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
                 ToolResponse::Ok { result }
@@ -392,21 +368,34 @@ impl<'a> ToolService<'a> {
         }
     }
 
+    /// `findings`: every static-analysis finding with resolved span paths.
+    fn findings(&self) -> ToolResponse {
+        self.query_with_resolved_paths(Request::GetFindings)
+    }
+
     /// `persistentObjects`: persistent-object facts with resolved source paths.
     fn persistent_objects(&self) -> ToolResponse {
-        let response = self.semantic_query(Request::GetPersistentObjects);
-        match response {
-            ToolResponse::Ok { mut result } => {
-                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
-                ToolResponse::Ok { result }
-            }
-            other => other,
-        }
+        self.query_with_resolved_paths(Request::GetPersistentObjects)
     }
 
     /// Run one semantic query over the loaded program.
     fn semantic_query(&self, request: Request) -> ToolResponse {
         self.semantic_query_with_config(request, wright_analyzer::registry::LintConfig::default())
+    }
+
+    fn semantic_service(
+        &self,
+        config: wright_analyzer::registry::LintConfig,
+    ) -> SemanticService<'_> {
+        SemanticService::with_origin_and_config_and_registry(
+            &self.loaded.program,
+            Origin {
+                kind: self.loaded.origin.kind.clone(),
+                locale: self.loaded.origin.locale.clone(),
+            },
+            config,
+            std::sync::Arc::clone(self.session.lint_registry()),
+        )
     }
 
     /// Run one semantic query over the loaded program with an explicit lint
@@ -416,17 +405,7 @@ impl<'a> ToolService<'a> {
         request: Request,
         config: wright_analyzer::registry::LintConfig,
     ) -> ToolResponse {
-        let origin = Origin {
-            kind: self.loaded.origin.kind.clone(),
-            locale: self.loaded.origin.locale.clone(),
-        };
-        let service = SemanticService::with_origin_and_config_and_registry(
-            &self.loaded.program,
-            origin,
-            config,
-            std::sync::Arc::clone(self.session.lint_registry()),
-        );
-        match service.handle(&request) {
+        match self.semantic_service(config).handle(&request) {
             Response::Ok { result } => ToolResponse::Ok { result },
             Response::Error { error } => ToolResponse::Error {
                 error: ToolErrorInfo {
@@ -441,35 +420,23 @@ impl<'a> ToolService<'a> {
     /// loaded program through the same semantic-service path as the CLI
     /// `lint` workflow (no duplicated rule execution, #98).
     fn lint(&self) -> ToolResponse {
-        let config = self.session.config.lint.clone();
-        let origin = Origin {
-            kind: self.loaded.origin.kind.clone(),
-            locale: self.loaded.origin.locale.clone(),
+        let service = self.semantic_service(self.session.config.lint.clone());
+        let lint_rules = match service.handle(&Request::LintRules) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!({}),
         };
-        {
-            let service = SemanticService::with_origin_and_config_and_registry(
-                &self.loaded.program,
-                origin,
-                config,
-                std::sync::Arc::clone(self.session.lint_registry()),
-            );
-            let lint_rules = match service.handle(&Request::LintRules) {
-                Response::Ok { result } => result,
-                Response::Error { .. } => serde_json::json!({}),
-            };
-            let mut findings = match service.handle(&Request::GetFindings) {
-                Response::Ok { result } => result,
-                Response::Error { .. } => serde_json::json!([]),
-            };
-            crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
-            self.ok(json!({
-                "inputIdentity": self.loaded.input.identity,
-                "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
-                "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
-                "findings": findings,
-                "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
-            }))
-        }
+        let mut findings = match service.handle(&Request::GetFindings) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!([]),
+        };
+        crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
+        self.ok(json!({
+            "inputIdentity": self.loaded.input.identity,
+            "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
+            "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
+            "findings": findings,
+            "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
+        }))
     }
 
     /// Program summary with origin and source identity.
@@ -497,17 +464,21 @@ impl<'a> ToolService<'a> {
 
     /// The subroutine call graph: every caller rule → callee subroutines.
     fn call_graph(&self) -> serde_json::Value {
-        let mut edges: Vec<serde_json::Value> = Vec::new();
-        for rule in self.loaded.program.rules.iter() {
-            for action in &rule.actions {
-                if let workshop_rs::Action::CallSubroutine { subroutine } = action {
-                    edges.push(json!({
+        let edges: Vec<_> = self
+            .loaded
+            .program
+            .rules
+            .iter()
+            .flat_map(|rule| {
+                rule.actions.iter().filter_map(move |action| match action {
+                    workshop_rs::Action::CallSubroutine { subroutine } => Some(json!({
                         "caller": rule.name,
                         "callee": subroutine,
-                    }));
-                }
-            }
-        }
+                    })),
+                    _ => None,
+                })
+            })
+            .collect();
         serde_json::Value::Array(edges)
     }
 
@@ -519,24 +490,20 @@ impl<'a> ToolService<'a> {
     /// in-process.
     fn cost_estimate(&self) -> serde_json::Value {
         let catalog = workshop_rs::catalog::Catalog::builtin().expect("built-in catalog loads");
-        let locale = self
-            .loaded
-            .origin
-            .locale
-            .clone()
-            .map(|locale| workshop_rs::catalog::Locale::new(&locale))
-            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
-        let text =
-            workshop_rs::emitter::emit(&self.loaded.program, &catalog, &locale).unwrap_or_default();
+        let loc = self.loaded.origin.locale.as_deref().unwrap_or("en-US");
+        let text = workshop_rs::emitter::emit(
+            &self.loaded.program,
+            &catalog,
+            &workshop_rs::catalog::Locale::new(loc),
+        )
+        .unwrap_or_default();
         let waits = self
             .loaded
             .program
             .rules
             .iter()
-            .flat_map(|rule| rule.actions.iter())
-            .filter(
-                |action| matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait"),
-            )
+            .flat_map(|r| &r.actions)
+            .filter(|a| matches!(a, workshop_rs::Action::Call { name, .. } if name == "wait"))
             .count();
         let findings = wright_analyzer::canonical::analyze(
             &self.loaded.program,
@@ -545,14 +512,14 @@ impl<'a> ToolService<'a> {
         json!({
             "exact": {
                 "emittedBytes": text.len(),
-                "programActions": self.loaded.program.rules.iter().map(|rule| rule.actions.len()).sum::<usize>(),
+                "programActions": self.loaded.program.rules.iter().map(|r| r.actions.len()).sum::<usize>(),
                 "programRules": self.loaded.program.rules.len(),
                 "waitActions": waits,
             },
-            "findings": findings.iter().map(|finding| json!({
-                "code": finding.code,
-                "severity": severity_name(finding.severity),
-                "message": finding.message,
+            "findings": findings.iter().map(|f| json!({
+                "code": f.code,
+                "severity": f.severity.as_str(),
+                "message": f.message,
             })).collect::<Vec<_>>(),
             "kind": {
                 "exact": "exact target-resource counts",
@@ -582,14 +549,5 @@ impl<'a> ToolService<'a> {
                 "members": domain.members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
-    }
-}
-
-/// The canonical severity name of a finding.
-fn severity_name(severity: wright_analyzer::analysis::Severity) -> &'static str {
-    match severity {
-        wright_analyzer::analysis::Severity::Error => "error",
-        wright_analyzer::analysis::Severity::Warning => "warning",
-        wright_analyzer::analysis::Severity::Info => "info",
     }
 }

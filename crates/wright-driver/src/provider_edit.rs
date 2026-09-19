@@ -112,53 +112,30 @@ pub struct ProviderValidateRequest {
     pub project_root: Option<String>,
 }
 
-/// The provider's machine code and human-readable message, preserved on a
-/// refusal that came from the provider.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProviderInfo {
-    code: String,
-    message: String,
-}
-
-/// A structured refusal with optional provider failure metadata.
-struct Refusal {
+fn refusal(
     diagnostics: Vec<Diagnostic>,
-    provider: Option<ProviderInfo>,
-}
-
-impl Refusal {
-    /// The atomic [`ProviderMutation`] form of this refusal: no transaction,
-    /// no preview.
-    fn into_mutation(self) -> ProviderMutation {
-        let (provider_code, provider_message) = match self.provider {
-            Some(info) => (Some(info.code), Some(info.message)),
-            None => (None, None),
-        };
-        ProviderMutation {
-            ok: false,
-            transaction: None,
-            diagnostics: self.diagnostics,
-            preview: None,
-            provider_code,
-            provider_message,
-        }
+    code: Option<String>,
+    msg: Option<String>,
+) -> ProviderMutation {
+    ProviderMutation {
+        ok: false,
+        transaction: None,
+        diagnostics,
+        preview: None,
+        provider_code: code,
+        provider_message: msg,
     }
 }
 
+fn refusal_err(diag: Diagnostic) -> ProviderMutation {
+    refusal(vec![diag], None, None)
+}
+
+fn disc_err(code: &'static str, msg: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(code, Stage::Discovery, msg)
+}
+
 /// A provider-driven semantic rename (#139).
-///
-/// Routes target resolution and edit generation through the LPP `rename`
-/// capability, wraps the provider's source-oriented edit set in Wright's own
-/// [`EditTransaction`] (deterministic ordering, overlap/conflict checks, and
-/// identity/version preconditions), previews it atomically, and validates it
-/// against the provider's project semantics (`lpp/validateEdits` per edited
-/// document, then `lpp/check` over the edited project) before success.
-///
-/// `provider` must be an initialized `LanguageProvider` session. Every
-/// failure — a provider refusal, an unsupported capability, a stale
-/// source/version, a failed semantic validation, or a provider process
-/// failure — is a structured [`ProviderMutation`] refusal with no
-/// transaction and no preview.
 pub fn semantic_rename(
     provider: &mut dyn wright_lpp::LanguageProvider,
     request: &ProviderRenameRequest,
@@ -174,44 +151,31 @@ pub fn semantic_rename(
         Err(error) => return provider_failure(&error),
     };
 
-    // Adapter: the provider's per-document edit set becomes Wright source
-    // edits carrying the identity of the text they were computed against.
-    // A provider that edits a document outside the request set, or echoes a
-    // version different from the one the caller sent, is a stale/contract
-    // violation and refuses.
     let mut edits: Vec<SourceEdit> = Vec::new();
     for document_edits in &result.edits {
         let Some(document) = request.documents.get(&document_edits.document_uri) else {
-            return refusal(
-                vec![Diagnostic::error(
-                    "provider-edit-outside-set",
-                    Stage::Discovery,
-                    format!(
-                        "the provider returned edits for '{}', which is not in the request document set",
-                        document_edits.document_uri
-                    ),
-                )],
-                None,
-            );
+            return refusal_err(disc_err(
+                "provider-edit-outside-set",
+                format!(
+                    "the provider returned edits for '{}', which is not in the request document set",
+                    document_edits.document_uri
+                ),
+            ));
         };
         if document_edits.version != document.version {
-            return refusal(
-                vec![Diagnostic::error(
-                    "edit-stale-source",
-                    Stage::Discovery,
-                    format!(
-                        "the provider computed edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
-                        document_edits.document_uri, document_edits.version, document.version
-                    ),
-                )],
-                None,
-            );
+            return refusal_err(disc_err(
+                "edit-stale-source",
+                format!(
+                    "the provider computed edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
+                    document_edits.document_uri, document_edits.version, document.version
+                ),
+            ));
         }
         let identity = crate::input_identity(&document.text);
         for text_edit in &document_edits.text_edits {
             let range = match to_edit_range(&document.text, text_edit.range) {
                 Ok(range) => range,
-                Err(diagnostic) => return refusal(vec![diagnostic], None),
+                Err(diagnostic) => return refusal_err(diagnostic),
             };
             edits.push(SourceEdit {
                 edit_kind: "rename".to_string(),
@@ -234,14 +198,6 @@ pub fn semantic_rename(
 
 /// Validate a caller-proposed source-edit transaction against the provider's
 /// project semantics (#139).
-///
-/// Re-asserts the Wright-owned transaction guarantees (deterministic
-/// ordering, overlap/conflict checks, identity/version preconditions),
-/// previews the transaction atomically, and runs the provider's semantic
-/// gates (`lpp/validateEdits` per edited document, then `lpp/check` over the
-/// edited project) before reporting success. A transaction that is stale,
-/// malformed, or fails provider validation is refused with no partial edit
-/// set.
 pub fn validate_transaction(
     provider: &mut dyn wright_lpp::LanguageProvider,
     request: &ProviderValidateRequest,
@@ -255,32 +211,28 @@ pub fn validate_transaction(
     )
 }
 
-/// A structured refusal for a provider failure: the provider's machine code
-/// and message are preserved on the mutation for callers that surface
-/// machine-readable refusals.
+/// A structured refusal for a provider failure.
 pub fn provider_failure(error: &wright_lpp::ProviderError) -> ProviderMutation {
-    let provider = ProviderInfo {
-        code: match error.refusal_code() {
-            Some(code) => code.to_string(),
-            None => error.code().to_string(),
-        },
-        message: error.to_string(),
-    };
-    refusal(vec![provider_diagnostic(error)], Some(provider))
+    let code = error
+        .refusal_code()
+        .unwrap_or_else(|| error.code())
+        .to_string();
+    refusal(
+        vec![provider_diagnostic(error)],
+        Some(code),
+        Some(error.to_string()),
+    )
 }
 
-/// The structured diagnostic for a provider failure: refusals and other
-/// failures are distinct codes, with the provider's message preserved.
+/// The structured diagnostic for a provider failure.
 fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
     match error.refusal_code() {
-        Some(code) => Diagnostic::error(
+        Some(code) => disc_err(
             "provider-refusal",
-            Stage::Discovery,
             format!("the provider refused the request ({code}): {error}"),
         ),
-        None => Diagnostic::error(
+        None => disc_err(
             "provider-error",
-            Stage::Discovery,
             format!(
                 "the provider failed the request ({}): {error}",
                 error.code()
@@ -289,9 +241,6 @@ fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
     }
 }
 
-/// The shared Wright-owned pipeline for both flows: transaction construction
-/// and checks, identity/version preconditions, atomic preview, then the
-/// provider-owned semantic validation gates.
 fn finish(
     provider: &mut dyn wright_lpp::LanguageProvider,
     documents: &wright_lpp::DocumentSet,
@@ -299,29 +248,20 @@ fn finish(
     sources: &BTreeMap<String, String>,
     project_root: Option<&str>,
 ) -> ProviderMutation {
-    // Wright-owned transaction guarantees: deterministic ordering, overlap
-    // and order-dependent zero-width conflict detection, non-empty.
     let transaction = match EditTransaction::new(edits) {
         Ok(transaction) => transaction,
-        Err(diagnostic) => return refusal(vec![diagnostic], None),
+        Err(diagnostic) => return refusal_err(diagnostic),
     };
 
-    // Wright-owned preconditions: every edited source must be known and
-    // current, so a stale or fabricated version can never apply.
     if let Some(diagnostic) = precondition_problems(&transaction, sources) {
-        return refusal(vec![diagnostic], None);
+        return refusal_err(diagnostic);
     }
 
-    // Wright-owned mechanical application: the atomic preview every source
-    // the transaction touches, against the caller's current texts.
     let preview = match transaction.apply(sources) {
         Ok(preview) => preview,
-        Err(diagnostic) => return refusal(vec![diagnostic], None),
+        Err(diagnostic) => return refusal_err(diagnostic),
     };
 
-    // Provider-owned semantic validation: per-document edit validation and
-    // project-aware check of the edited project. A failed gate refuses with
-    // no transaction and no preview.
     match provider_validation(provider, documents, &transaction, &preview, project_root) {
         Ok(()) => ProviderMutation {
             ok: true,
@@ -331,23 +271,18 @@ fn finish(
             provider_code: None,
             provider_message: None,
         },
-        Err(refusal) => refusal.into_mutation(),
+        Err(mutation) => mutation,
     }
 }
 
-/// The identity/version precondition check, mirroring the codes of the
-/// shared `crate::edit::validate_transaction`: every edited source must have
-/// current text supplied and its identity must match the identity the edits
-/// were computed against.
 fn precondition_problems(
     transaction: &EditTransaction,
     sources: &BTreeMap<String, String>,
 ) -> Option<Diagnostic> {
     for edit in &transaction.edits {
         let Some(current) = sources.get(&edit.source) else {
-            return Some(Diagnostic::error(
+            return Some(disc_err(
                 "edit-unknown-source",
-                Stage::Discovery,
                 format!(
                     "the edit targets '{}' but no current text was provided for it; \
                      supply the current source so the version precondition can be verified",
@@ -356,9 +291,8 @@ fn precondition_problems(
             ));
         };
         if crate::input_identity(current) != edit.source_identity {
-            return Some(Diagnostic::error(
+            return Some(disc_err(
                 "edit-stale-source",
-                Stage::Discovery,
                 format!(
                     "the edit for '{}' targets a different source version (identity mismatch); \
                      re-fetch the source and retry",
@@ -370,73 +304,41 @@ fn precondition_problems(
     None
 }
 
-/// The provider-owned semantic validation gates (#139).
-///
-/// Gate 1: `lpp/validateEdits` per edited document — the provider applies
-/// the edit set under the LPP v1 normative rules (bounds, ordering, overlap,
-/// application, re-parse) and reports whether the result is well-formed.
-///
-/// Gate 2: `lpp/check` over the edited project — the provider's project
-/// semantics over the full document set with the edited texts applied
-/// (edited versions bump by one, per the LPP client bookkeeping rule). Any
-/// error-severity diagnostic refuses.
-///
-/// Both gates are mandatory: a provider that did not negotiate the
-/// `editValidation` or `check` capability cannot semantically validate the
-/// mutation, and the flow refuses explicitly — there is no silent fallback.
 fn provider_validation(
     provider: &mut dyn wright_lpp::LanguageProvider,
     documents: &wright_lpp::DocumentSet,
     transaction: &EditTransaction,
     previews: &[SourcePreview],
     project_root: Option<&str>,
-) -> Result<(), Refusal> {
+) -> Result<(), ProviderMutation> {
     let mut grouped: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
     for edit in &transaction.edits {
         grouped.entry(edit.source.as_str()).or_default().push(edit);
     }
     for (source, edits) in grouped {
         let Some(document) = documents.get(source) else {
-            return Err(Refusal {
-                diagnostics: vec![Diagnostic::error(
-                    "edit-unknown-source",
-                    Stage::Discovery,
-                    format!(
-                        "the transaction targets '{}' but the request document set has no current text for it",
-                        source
-                    ),
-                )],
-                provider: None,
-            });
+            return Err(refusal_err(disc_err(
+                "edit-unknown-source",
+                format!(
+                    "the transaction targets '{source}' but the request document set has no current text for it"
+                ),
+            )));
         };
         let mut text_edits = Vec::new();
         for edit in edits {
-            match to_text_edit(&document.text, edit) {
-                Ok(text_edit) => text_edits.push(text_edit),
-                Err(diagnostic) => {
-                    return Err(Refusal {
-                        diagnostics: vec![diagnostic],
-                        provider: None,
-                    });
-                }
-            }
+            text_edits.push(to_text_edit(&document.text, edit).map_err(refusal_err)?);
         }
-        let result = match provider.validate_edits(document, &text_edits) {
-            Ok(result) => result,
-            Err(error) => return Err(provider_failure_refusal(&error)),
-        };
+        let result = provider
+            .validate_edits(document, &text_edits)
+            .map_err(|e| provider_failure(&e))?;
         if result.version != document.version {
-            return Err(Refusal {
-                diagnostics: vec![Diagnostic::error(
-                    "edit-stale-source",
-                    Stage::Discovery,
-                    format!(
-                        "the provider validated edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
-                        source, result.version, document.version
-                    ),
-                )],
-                provider: None,
-            });
+            return Err(refusal_err(disc_err(
+                "edit-stale-source",
+                format!(
+                    "the provider validated edits for '{source}' against version {}, but the current version is {}; re-fetch the source and retry",
+                    result.version, document.version
+                ),
+            )));
         }
         if !result.valid {
             let reason = result.reason.as_deref().unwrap_or("invalid");
@@ -446,90 +348,48 @@ fn provider_validation(
             if let Some(index) = result.failing_edit_index {
                 message.push_str(&format!(" (failing edit {index})"));
             }
-            return Err(Refusal {
-                diagnostics: vec![Diagnostic::error(
-                    "provider-validation-failed",
-                    Stage::Discovery,
-                    message,
-                )],
-                provider: None,
-            });
+            return Err(refusal_err(disc_err("provider-validation-failed", message)));
         }
     }
 
-    let mut edited = wright_lpp::DocumentSet::new();
-    for (uri, document) in documents {
-        let edited_text = previews
-            .iter()
-            .find(|preview| preview.source == *uri)
-            .map(|preview| preview.new_text.clone());
-        let text = edited_text.clone().unwrap_or_else(|| document.text.clone());
-        edited.insert(
-            uri.clone(),
-            wright_lpp::Document {
-                uri: uri.clone(),
-                language_id: document.language_id.clone(),
-                version: if edited_text.is_some() {
-                    document.version + 1
-                } else {
-                    document.version
+    let edited: wright_lpp::DocumentSet = documents
+        .iter()
+        .map(|(uri, doc)| {
+            let p = previews.iter().find(|p| p.source == *uri);
+            let version = if p.is_some() {
+                doc.version + 1
+            } else {
+                doc.version
+            };
+            let text = p.map_or_else(|| doc.text.clone(), |p| p.new_text.clone());
+            (
+                uri.clone(),
+                wright_lpp::Document {
+                    uri: uri.clone(),
+                    language_id: doc.language_id.clone(),
+                    version,
+                    text,
                 },
-                text,
-            },
-        );
-    }
-    let checked = match provider.check(&edited, project_root) {
-        Ok(checked) => checked,
-        Err(error) => return Err(provider_failure_refusal(&error)),
-    };
+            )
+        })
+        .collect();
+    let checked = provider
+        .check(&edited, project_root)
+        .map_err(|e| provider_failure(&e))?;
     for document in &checked.documents {
         for diagnostic in &document.diagnostics {
             if diagnostic.severity == wright_lpp::DiagnosticSeverity::Error {
-                return Err(Refusal {
-                    diagnostics: vec![Diagnostic::error(
-                        "provider-semantic-error",
-                        Stage::Discovery,
-                        format!(
-                            "the edited project is semantically invalid in '{}': {}",
-                            document.uri, diagnostic.message
-                        ),
-                    )],
-                    provider: None,
-                });
+                return Err(refusal_err(disc_err(
+                    "provider-semantic-error",
+                    format!(
+                        "the edited project is semantically invalid in '{}': {}",
+                        document.uri, diagnostic.message
+                    ),
+                )));
             }
         }
     }
     Ok(())
-}
-
-/// The refusal parts for a provider failure during a validation gate.
-fn provider_failure_refusal(error: &wright_lpp::ProviderError) -> Refusal {
-    Refusal {
-        diagnostics: vec![provider_diagnostic(error)],
-        provider: Some(ProviderInfo {
-            code: match error.refusal_code() {
-                Some(code) => code.to_string(),
-                None => error.code().to_string(),
-            },
-            message: error.to_string(),
-        }),
-    }
-}
-
-/// An atomic refusal: structured diagnostics and no transaction/preview.
-fn refusal(diagnostics: Vec<Diagnostic>, provider: Option<ProviderInfo>) -> ProviderMutation {
-    let (provider_code, provider_message) = match provider {
-        Some(info) => (Some(info.code), Some(info.message)),
-        None => (None, None),
-    };
-    ProviderMutation {
-        ok: false,
-        transaction: None,
-        diagnostics,
-        preview: None,
-        provider_code,
-        provider_message,
-    }
 }
 
 /// Convert an LPP range (0-based line, 0-based UTF-16 code units) into a
@@ -567,115 +427,83 @@ fn to_text_edit(text: &str, edit: &SourceEdit) -> Result<wright_lpp::TextEdit, D
     })
 }
 
-/// An LPP position (0-based line, 0-based UTF-16 units) as a 1-based
-/// (line, character column) pair.
 fn position_to_column(
     lines: &[&str],
-    position: wright_lpp::Position,
+    pos: wright_lpp::Position,
     what: &str,
 ) -> Result<(u32, u32), Diagnostic> {
-    let line = position.line as usize;
-    let Some(line_text) = lines.get(line) else {
-        return Err(Diagnostic::error(
+    let line_text = lines.get(pos.line as usize).ok_or_else(|| {
+        disc_err(
             "edit-invalid-range",
-            Stage::Discovery,
             format!(
                 "the {what} names line {}, but the document has {} lines",
-                position.line,
+                pos.line,
                 lines.len()
-            ),
-        ));
-    };
-    let column = utf16_to_char_column(line_text, position.character).ok_or_else(|| {
-        Diagnostic::error(
-            "edit-invalid-range",
-            Stage::Discovery,
-            format!(
-                "the {what} names UTF-16 offset {} in line {}, which is not a character boundary of that line",
-                position.character, position.line
             ),
         )
     })?;
-    Ok(((line as u32) + 1, column))
+    let col = utf16_to_char_column(line_text, pos.character).ok_or_else(|| {
+        disc_err("edit-invalid-range", format!("the {what} names UTF-16 offset {} in line {}, which is not a character boundary of that line", pos.character, pos.line))
+    })?;
+    Ok((pos.line + 1, col))
 }
 
-/// A Wright 1-based (line, column) pair as an LPP position (0-based line,
-/// 0-based UTF-16 units).
 fn column_to_position(
     lines: &[&str],
     line: u32,
     column: u32,
 ) -> Result<wright_lpp::Position, Diagnostic> {
-    let line_index = line.saturating_sub(1) as usize;
-    let Some(line_text) = lines.get(line_index) else {
-        return Err(Diagnostic::error(
+    let line_idx = line.saturating_sub(1) as usize;
+    let line_text = lines.get(line_idx).ok_or_else(|| {
+        disc_err(
             "edit-invalid-range",
-            Stage::Discovery,
             format!(
                 "the edit names line {line}, but the document has {} lines",
                 lines.len()
             ),
-        ));
-    };
-    let character = char_column_to_utf16(line_text, column).ok_or_else(|| {
-        Diagnostic::error(
-            "edit-invalid-range",
-            Stage::Discovery,
-            format!(
-                "the edit names column {column} in line {line}, which is outside that line \
-                 (line {line} has {} characters)",
-                line_text.chars().count()
-            ),
         )
     })?;
+    let character = char_column_to_utf16(line_text, column).ok_or_else(|| {
+        disc_err("edit-invalid-range", format!("the edit names column {column} in line {line}, which is outside that line (line {line} has {} characters)", line_text.chars().count()))
+    })?;
     Ok(wright_lpp::Position {
-        line: line_index as u32,
+        line: line_idx as u32,
         character,
     })
 }
 
-/// A 0-based UTF-16 code-unit offset within a line as a 1-based character
-/// column (a position at the end of a line is valid). `None` when the offset
-/// is inside a supplementary-plane character or beyond the line end.
 fn utf16_to_char_column(line: &str, units: u32) -> Option<u32> {
-    let mut accumulated = 0u32;
-    let mut column = 1u32;
-    for ch in line.chars() {
-        if accumulated == units {
-            return Some(column);
+    let mut acc = 0;
+    for (i, ch) in line.chars().enumerate() {
+        if acc == units {
+            return Some(i as u32 + 1);
         }
         let len = ch.len_utf16() as u32;
-        if accumulated + len > units {
-            // Inside a supplementary-plane character: not a valid boundary.
+        if acc + len > units {
             return None;
         }
-        accumulated += len;
-        column += 1;
+        acc += len;
     }
-    (accumulated == units).then_some(column)
+    (acc == units).then_some(line.chars().count() as u32 + 1)
 }
 
-/// A 1-based character column as a 0-based UTF-16 code-unit offset within a
-/// line. `None` when the column is 0 or beyond the line end (the end of the
-/// line is a valid column: `chars + 1`).
 fn char_column_to_utf16(line: &str, column: u32) -> Option<u32> {
-    let mut accumulated = 0u32;
-    for (index, ch) in line.chars().enumerate() {
-        let this_column = (index as u32) + 1;
-        if this_column == column {
-            return Some(accumulated);
-        }
-        accumulated += ch.len_utf16() as u32;
+    if column == 0 {
+        return None;
     }
-    (column as usize == line.chars().count() + 1).then_some(accumulated)
+    let mut acc = 0;
+    for (i, ch) in line.chars().enumerate() {
+        if (i as u32) + 1 == column {
+            return Some(acc);
+        }
+        acc += ch.len_utf16() as u32;
+    }
+    (column as usize == line.chars().count() + 1).then_some(acc)
 }
 
-/// The generic invalid-range refusal for an LPP range that could not be
-/// converted.
 fn edit_invalid_range(range: wright_lpp::Range) -> Diagnostic {
-    Diagnostic::error(
+    disc_err(
         "edit-invalid-range",
-        Stage::Discovery,
         format!(
             "the provider edit range {}-{}:{}-{} is not a valid range of the document",
             range.start.line, range.start.character, range.end.line, range.end.character
@@ -687,182 +515,172 @@ fn edit_invalid_range(range: wright_lpp::Range) -> Diagnostic {
 mod tests {
     use super::*;
     use wright_lpp::{
-        CheckResult, ClientInfo, Document, DocumentSet, InitializeResult, LocationsResult,
-        NegotiatedCapabilities, ProviderError, ReconstructResult, RenameResult, SymbolsResult,
-        ValidateEditsResult, WorkshopArtifact,
+        CheckResult, ClientInfo, Document, DocumentDiagnostics, DocumentEdits, DocumentSet,
+        InitializeResult, LocationsResult, NegotiatedCapabilities, Position, ProviderError, Range,
+        ReconstructResult, RenameResult, SymbolsResult, TextEdit, ValidateEditsResult,
+        WorkshopArtifact,
     };
 
     const URI: &str = "file:///project/puzzle.xdl";
     const CLEAN: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n    plus1: x => x + 1\n  }\n  solution = [ double, double ]\n}";
 
-    fn document(text: &str) -> Document {
-        Document {
-            uri: URI.to_string(),
-            language_id: "x-demo-lang".to_string(),
-            version: 3,
-            text: text.to_string(),
-        }
-    }
-
     fn document_set() -> DocumentSet {
-        let mut documents = DocumentSet::new();
-        documents.insert(URI.to_string(), document(CLEAN));
-        documents
+        let doc = Document {
+            uri: URI.into(),
+            language_id: "x-demo-lang".into(),
+            version: 3,
+            text: CLEAN.into(),
+        };
+        [(URI.into(), doc)].into_iter().collect()
     }
 
     fn sources(text: &str) -> BTreeMap<String, String> {
-        let mut sources = BTreeMap::new();
-        sources.insert(URI.to_string(), text.to_string());
-        sources
+        [(URI.into(), text.into())].into_iter().collect()
     }
 
     fn rename_request() -> ProviderRenameRequest {
         ProviderRenameRequest {
             documents: document_set(),
-            position_document_uri: URI.to_string(),
-            position: wright_lpp::Position {
+            position_document_uri: URI.into(),
+            position: Position {
                 line: 4,
                 character: 6,
             },
-            new_name: "twice".to_string(),
-            project_root: Some("file:///project".to_string()),
+            new_name: "twice".into(),
+            project_root: Some("file:///project".into()),
             sources: sources(CLEAN),
         }
     }
 
-    /// The mock provider's rename edit set for `CLEAN` (declaration plus
-    /// both references), as the wire shape describes it.
     fn clean_rename_result() -> RenameResult {
-        let text_edit = |line, start, end| wright_lpp::TextEdit {
-            range: wright_lpp::Range {
-                start: wright_lpp::Position {
-                    line,
-                    character: start,
-                },
-                end: wright_lpp::Position {
-                    line,
-                    character: end,
-                },
+        let edit = |line, s, e| TextEdit {
+            range: Range {
+                start: Position { line, character: s },
+                end: Position { line, character: e },
             },
-            new_text: "twice".to_string(),
+            new_text: "twice".into(),
         };
         RenameResult {
-            edits: vec![wright_lpp::DocumentEdits {
-                document_uri: URI.to_string(),
+            edits: vec![DocumentEdits {
+                document_uri: URI.into(),
                 version: 3,
-                text_edits: vec![
-                    text_edit(4, 4, 10),
-                    text_edit(7, 15, 21),
-                    text_edit(7, 23, 29),
-                ],
+                text_edits: vec![edit(4, 4, 10), edit(7, 15, 21), edit(7, 23, 29)],
             }],
         }
     }
 
-    /// A scripted `LanguageProvider` for flow unit tests: the requested
-    /// methods return canned results, everything else is unreachable.
+    #[derive(Default)]
     struct ScriptedProvider {
-        rename: Result<RenameResult, ProviderError>,
-        validate_edits: Result<ValidateEditsResult, ProviderError>,
-        check: Result<CheckResult, ProviderError>,
+        rename: Option<Result<RenameResult, ProviderError>>,
+        validate_edits: Option<Result<ValidateEditsResult, ProviderError>>,
+        check: Option<Result<CheckResult, ProviderError>>,
     }
 
+    type LppRes<T> = Result<T, ProviderError>;
+
     impl wright_lpp::LanguageProvider for ScriptedProvider {
-        fn initialize(
-            &mut self,
-            _client_info: Option<&ClientInfo>,
-        ) -> Result<InitializeResult, ProviderError> {
-            unreachable!("not used by flow unit tests")
+        fn initialize(&mut self, _: Option<&ClientInfo>) -> LppRes<InitializeResult> {
+            unreachable!()
         }
-        fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError> {
-            unreachable!("not used by flow unit tests")
+        fn capabilities(&self) -> LppRes<&NegotiatedCapabilities> {
+            unreachable!()
         }
-        fn check(
-            &mut self,
-            _documents: &DocumentSet,
-            _project_root: Option<&str>,
-        ) -> Result<CheckResult, ProviderError> {
-            self.check.clone()
+        fn check(&mut self, _: &DocumentSet, _: Option<&str>) -> LppRes<CheckResult> {
+            self.check
+                .clone()
+                .unwrap_or(Ok(CheckResult { documents: vec![] }))
         }
         fn compile(
             &mut self,
-            _documents: &DocumentSet,
-            _project_root: Option<&str>,
-        ) -> Result<wright_lpp::CompileResult, ProviderError> {
-            unreachable!("not used by flow unit tests")
+            _: &DocumentSet,
+            _: Option<&str>,
+        ) -> LppRes<wright_lpp::CompileResult> {
+            unreachable!()
         }
-        fn reconstruct(
-            &mut self,
-            _artifact: &WorkshopArtifact,
-        ) -> Result<ReconstructResult, ProviderError> {
-            unreachable!("not used by flow unit tests")
+        fn reconstruct(&mut self, _: &WorkshopArtifact) -> LppRes<ReconstructResult> {
+            unreachable!()
         }
-        fn symbols(
-            &mut self,
-            _documents: &DocumentSet,
-            _project_root: Option<&str>,
-        ) -> Result<SymbolsResult, ProviderError> {
-            unreachable!("not used by flow unit tests")
+        fn symbols(&mut self, _: &DocumentSet, _: Option<&str>) -> LppRes<SymbolsResult> {
+            unreachable!()
         }
-        fn definition(
-            &mut self,
-            _document: &Document,
-            _position: wright_lpp::Position,
-        ) -> Result<LocationsResult, ProviderError> {
-            unreachable!("not used by flow unit tests")
+        fn definition(&mut self, _: &Document, _: Position) -> LppRes<LocationsResult> {
+            unreachable!()
         }
-        fn references(
-            &mut self,
-            _document: &Document,
-            _position: wright_lpp::Position,
-            _include_declaration: bool,
-        ) -> Result<LocationsResult, ProviderError> {
-            unreachable!("not used by flow unit tests")
+        fn references(&mut self, _: &Document, _: Position, _: bool) -> LppRes<LocationsResult> {
+            unreachable!()
         }
         fn rename(
             &mut self,
-            _documents: &DocumentSet,
-            _position_document_uri: &str,
-            _position: wright_lpp::Position,
-            _new_name: &str,
-            _project_root: Option<&str>,
-        ) -> Result<RenameResult, ProviderError> {
-            self.rename.clone()
+            _: &DocumentSet,
+            _: &str,
+            _: Position,
+            _: &str,
+            _: Option<&str>,
+        ) -> LppRes<RenameResult> {
+            self.rename
+                .clone()
+                .unwrap_or_else(|| Ok(clean_rename_result()))
         }
-        fn validate_edits(
-            &mut self,
-            _document: &Document,
-            _edits: &[wright_lpp::TextEdit],
-        ) -> Result<ValidateEditsResult, ProviderError> {
-            self.validate_edits.clone()
+        fn validate_edits(&mut self, _: &Document, _: &[TextEdit]) -> LppRes<ValidateEditsResult> {
+            self.validate_edits
+                .clone()
+                .unwrap_or(Ok(ValidateEditsResult {
+                    valid: true,
+                    version: 3,
+                    reason: None,
+                    failing_edit_index: None,
+                }))
         }
-        fn shutdown(&mut self) -> Result<(), ProviderError> {
-            unreachable!("not used by flow unit tests")
+        fn shutdown(&mut self) -> LppRes<()> {
+            unreachable!()
         }
         fn exit_status(&self) -> Option<i32> {
             None
         }
     }
 
-    fn ok_check() -> CheckResult {
-        CheckResult { documents: vec![] }
+    fn assert_refusal(mutation: ProviderMutation, diag: &str, code: Option<&str>) {
+        assert!(!mutation.ok);
+        assert_eq!(mutation.diagnostics[0].code, diag);
+        if let Some(c) = code {
+            assert_eq!(mutation.provider_code.as_deref(), Some(c));
+        }
+        assert!(mutation.transaction.is_none() && mutation.preview.is_none());
     }
 
-    // -----------------------------------------------------------------------
-    // Position conversion
-    // -----------------------------------------------------------------------
+    fn test_edit(line: u32, s: u32, e: u32, text: &str, ident: &str) -> SourceEdit {
+        SourceEdit {
+            edit_kind: "rename".into(),
+            source: URI.into(),
+            source_identity: ident.into(),
+            range: EditRange {
+                start_line: line,
+                start_col: s,
+                end_line: line,
+                end_col: e,
+            },
+            new_text: text.into(),
+        }
+    }
+
+    fn val_req(transaction: EditTransaction) -> ProviderValidateRequest {
+        ProviderValidateRequest {
+            documents: document_set(),
+            transaction,
+            sources: sources(CLEAN),
+            project_root: None,
+        }
+    }
 
     #[test]
-    fn utf16_ranges_convert_to_wright_columns_and_back() {
-        // "puzzle αβ {": α and β are 2-byte/1-UTF-16-unit characters. The
-        // mock provider's own unit tests pin UTF-16 offsets 7 (α) and 8 (β).
+    fn utf16_and_edit_range_conversions() {
         let text = "puzzle αβ {\n  target = 40\n}";
-        let lpp = wright_lpp::Range {
-            start: wright_lpp::Position {
+        let lpp = Range {
+            start: Position {
                 line: 0,
                 character: 7,
             },
-            end: wright_lpp::Position {
+            end: Position {
                 line: 0,
                 character: 9,
             },
@@ -874,85 +692,48 @@ mod tests {
                 start_line: 1,
                 start_col: 8,
                 end_line: 1,
-                end_col: 10,
+                end_col: 10
             }
         );
-        // Round trip: the Wright range converts back to the same UTF-16
-        // offsets.
         let back = to_text_edit(
             text,
-            &SourceEdit {
-                edit_kind: "rename".to_string(),
-                source: URI.to_string(),
-                source_identity: crate::input_identity(text),
-                range: wright,
-                new_text: "x".to_string(),
-            },
+            &test_edit(1, 8, 10, "x", &crate::input_identity(text)),
         )
         .expect("converts back");
         assert_eq!(back.range, lpp);
-    }
 
-    #[test]
-    fn utf16_offset_inside_a_supplementary_character_refuses() {
-        // "𝕏" is one character but two UTF-16 code units; offset 1 is
-        // inside it.
-        let text = "puzzle 𝕏 {";
-        let error = to_edit_range(
-            text,
-            wright_lpp::Range {
-                start: wright_lpp::Position {
-                    line: 0,
-                    character: 7,
-                },
-                end: wright_lpp::Position {
-                    line: 0,
-                    character: 8,
-                },
+        let supp = Range {
+            start: Position {
+                line: 0,
+                character: 7,
             },
-        )
-        .expect_err("inside a supplementary character");
-        assert_eq!(error.code, "edit-invalid-range");
-    }
-
-    #[test]
-    fn position_at_end_of_line_is_valid() {
-        let text = "ab\ncd";
-        let wright = to_edit_range(
-            text,
-            wright_lpp::Range {
-                start: wright_lpp::Position {
-                    line: 0,
-                    character: 2,
-                },
-                end: wright_lpp::Position {
-                    line: 0,
-                    character: 2,
-                },
+            end: Position {
+                line: 0,
+                character: 8,
             },
-        )
-        .expect("end of line is a valid insertion point");
-        assert_eq!(wright.start_line, 1);
-        assert_eq!(wright.start_col, 3);
-    }
+        };
+        assert_eq!(
+            to_edit_range("puzzle 𝕏 {", supp).expect_err("inside").code,
+            "edit-invalid-range"
+        );
 
-    // -----------------------------------------------------------------------
-    // Flow behavior with a scripted provider
-    // -----------------------------------------------------------------------
+        let eol = Range {
+            start: Position {
+                line: 0,
+                character: 2,
+            },
+            end: Position {
+                line: 0,
+                character: 2,
+            },
+        };
+        let w = to_edit_range("ab\ncd", eol).expect("end of line is valid");
+        assert_eq!((w.start_line, w.start_col), (1, 3));
+    }
 
     #[test]
     fn rename_wraps_provider_edits_in_a_wright_transaction() {
-        let mut provider = ScriptedProvider {
-            rename: Ok(clean_rename_result()),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
-        };
-        let mutation = semantic_rename(&mut provider, &rename_request());
+        let mutation = semantic_rename(&mut ScriptedProvider::default(), &rename_request());
         assert!(mutation.ok, "rename succeeds: {:?}", mutation.diagnostics);
         let transaction = mutation.transaction.expect("transaction");
         assert_eq!(transaction.edits.len(), 3);
@@ -960,311 +741,166 @@ mod tests {
             transaction
                 .edits
                 .iter()
-                .all(|edit| edit.edit_kind == "rename"),
-            "provider edits arrive as Wright rename edits"
+                .all(|e| e.edit_kind == "rename"
+                    && e.source_identity == crate::input_identity(CLEAN))
         );
-        assert!(
-            transaction
-                .edits
-                .iter()
-                .all(|edit| edit.source_identity == crate::input_identity(CLEAN)),
-            "every edit carries the identity precondition of the text it was computed against"
+        assert_eq!(
+            (
+                transaction.edits[0].range.start_line,
+                transaction.edits[1].range.start_line,
+                transaction.edits[2].range.start_line
+            ),
+            (5, 8, 8)
         );
-        // Deterministic ordering: declaration first, then the two
-        // references, all in one document.
-        assert_eq!(transaction.edits[0].range.start_line, 5);
-        assert_eq!(transaction.edits[1].range.start_line, 8);
-        assert_eq!(transaction.edits[2].range.start_line, 8);
         let preview = mutation.preview.expect("preview");
-        assert_eq!(preview.len(), 1);
-        assert!(preview[0].new_text.contains("twice: x => x * 2"));
-        assert!(preview[0].new_text.contains("solution = [ twice, twice ]"));
+        assert!(
+            preview[0].new_text.contains("twice: x => x * 2")
+                && preview[0].new_text.contains("solution = [ twice, twice ]")
+        );
     }
 
     #[test]
-    fn rename_edits_are_never_outside_the_request_document_set() {
-        let mut result = clean_rename_result();
-        result.edits[0].document_uri = "file:///project/other.xdl".to_string();
-        let mut provider = ScriptedProvider {
-            rename: Ok(result),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
-        };
-        let mutation = semantic_rename(&mut provider, &rename_request());
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "provider-edit-outside-set");
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
+    fn rename_refusal_modes() {
+        let mut p = ScriptedProvider::default();
+        let mut r1 = clean_rename_result();
+        r1.edits[0].document_uri = "file:///project/other.xdl".into();
+        p.rename = Some(Ok(r1));
+        assert_refusal(
+            semantic_rename(&mut p, &rename_request()),
+            "provider-edit-outside-set",
+            None,
+        );
 
-    #[test]
-    fn rename_version_echo_mismatch_is_a_stale_refusal() {
-        let mut result = clean_rename_result();
-        result.edits[0].version = 2;
-        let mut provider = ScriptedProvider {
-            rename: Ok(result),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
-        };
-        let mutation = semantic_rename(&mut provider, &rename_request());
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "edit-stale-source");
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
+        let mut r2 = clean_rename_result();
+        r2.edits[0].version = 2;
+        p.rename = Some(Ok(r2));
+        assert_refusal(
+            semantic_rename(&mut p, &rename_request()),
+            "edit-stale-source",
+            None,
+        );
 
-    #[test]
-    fn stale_current_sources_refuse_without_a_partial_edit_set() {
-        // The caller's current text no longer matches the snapshot the
-        // provider computed against: the identity precondition refuses.
-        let mut request = rename_request();
-        request.sources = sources(&format!("{CLEAN}\n"));
-        let mut provider = ScriptedProvider {
-            rename: Ok(clean_rename_result()),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
-        };
-        let mutation = semantic_rename(&mut provider, &request);
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "edit-stale-source");
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
+        let mut req = rename_request();
+        req.sources = sources(&format!("{CLEAN}\n"));
+        assert_refusal(
+            semantic_rename(&mut ScriptedProvider::default(), &req),
+            "edit-stale-source",
+            None,
+        );
 
-    #[test]
-    fn provider_failure_mid_rename_refuses_without_partial_application() {
-        // The provider computes the rename but dies before the flow
-        // completes: the refusal is structured and nothing is applied.
-        let mut provider = ScriptedProvider {
-            rename: Ok(clean_rename_result()),
-            validate_edits: Err(ProviderError::Exited {
+        p = ScriptedProvider {
+            validate_edits: Some(Err(ProviderError::Exited {
                 status: Some(3),
-                message: "the LPP provider process exited".to_string(),
-            }),
-            check: Ok(ok_check()),
+                message: "the LPP provider process exited".into(),
+            })),
+            ..Default::default()
         };
-        let mutation = semantic_rename(&mut provider, &rename_request());
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "provider-error");
-        assert_eq!(mutation.provider_code.as_deref(), Some("provider-exited"));
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
+        assert_refusal(
+            semantic_rename(&mut p, &rename_request()),
+            "provider-error",
+            Some("provider-exited"),
+        );
 
-    #[test]
-    fn rename_refusal_passes_through_the_provider_code() {
-        let mut provider = ScriptedProvider {
-            rename: Err(ProviderError::lpp(
+        p = ScriptedProvider {
+            rename: Some(Err(ProviderError::lpp(
                 wright_lpp::LppErrorKind::Refusal,
                 serde_json::json!({ "refusalCode": "rename.nameCollision" }),
                 "new name collides with an existing symbol",
-            )),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
+            ))),
+            ..Default::default()
         };
-        let mutation = semantic_rename(&mut provider, &rename_request());
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "provider-refusal");
-        assert_eq!(
-            mutation.provider_code.as_deref(),
-            Some("rename.nameCollision")
+        assert_refusal(
+            semantic_rename(&mut p, &rename_request()),
+            "provider-refusal",
+            Some("rename.nameCollision"),
         );
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
 
-    #[test]
-    fn unsupported_capability_is_an_explicit_refusal_not_a_fallback() {
-        let mut provider = ScriptedProvider {
-            rename: Err(ProviderError::lpp(
+        p = ScriptedProvider {
+            rename: Some(Err(ProviderError::lpp(
                 wright_lpp::LppErrorKind::CapabilityUnavailable,
-                serde_json::json!({
-                    "capability": "rename",
-                    "method": "lpp/rename",
-                }),
+                serde_json::json!({ "capability": "rename", "method": "lpp/rename" }),
                 "capability 'rename' is not available in this session",
-            )),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
+            ))),
+            ..Default::default()
         };
-        let mutation = semantic_rename(&mut provider, &rename_request());
-        assert!(!mutation.ok);
-        assert_eq!(
-            mutation.provider_code.as_deref(),
-            Some("capability-unavailable")
+        assert_refusal(
+            semantic_rename(&mut p, &rename_request()),
+            "provider-error",
+            Some("capability-unavailable"),
         );
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
 
-    #[test]
-    fn semantic_validation_failure_refuses_without_partial_application() {
-        // The provider accepts the rename but its own semantic validation of
-        // the edited document fails (valid = false): no transaction, no
-        // preview.
-        let mut provider = ScriptedProvider {
-            rename: Ok(clean_rename_result()),
-            validate_edits: Ok(ValidateEditsResult {
+        p = ScriptedProvider {
+            validate_edits: Some(Ok(ValidateEditsResult {
                 valid: false,
                 version: 3,
-                reason: Some("syntaxError".to_string()),
+                reason: Some("syntaxError".into()),
                 failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
+            })),
+            ..Default::default()
         };
-        let mutation = semantic_rename(&mut provider, &rename_request());
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "provider-validation-failed");
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
+        assert_refusal(
+            semantic_rename(&mut p, &rename_request()),
+            "provider-validation-failed",
+            None,
+        );
 
-    #[test]
-    fn edited_project_check_refuses_on_error_severity_diagnostics() {
-        // Gate 2: the provider's project-aware check reports an error in the
-        // edited project, so the mutation refuses atomically.
-        let mut provider = ScriptedProvider {
-            rename: Ok(clean_rename_result()),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(CheckResult {
-                documents: vec![wright_lpp::DocumentDiagnostics {
-                    uri: URI.to_string(),
+        let mut err_provider = ScriptedProvider {
+            check: Some(Ok(CheckResult {
+                documents: vec![DocumentDiagnostics {
+                    uri: URI.into(),
                     version: 4,
                     diagnostics: vec![wright_lpp::Diagnostic {
-                        range: wright_lpp::Range {
-                            start: wright_lpp::Position {
+                        range: Range {
+                            start: Position {
                                 line: 7,
                                 character: 15,
                             },
-                            end: wright_lpp::Position {
+                            end: Position {
                                 line: 7,
                                 character: 21,
                             },
                         },
                         severity: wright_lpp::DiagnosticSeverity::Error,
-                        code: Some("x-demo/unresolved-op".to_string()),
-                        message: "unresolved op reference 'twice'".to_string(),
-                        source: Some("x-demo-lang".to_string()),
+                        code: Some("x-demo/unresolved-op".into()),
+                        message: "unresolved op reference 'twice'".into(),
+                        source: Some("x-demo-lang".into()),
                     }],
                 }],
-            }),
+            })),
+            ..Default::default()
         };
-        let mutation = semantic_rename(&mut provider, &rename_request());
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "provider-semantic-error");
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
-    }
-
-    #[test]
-    fn validate_transaction_runs_the_provider_gates_on_a_caller_transaction() {
-        // The caller proposes a Wright transaction; the flow re-asserts the
-        // transaction guarantees and runs the provider's semantic gates.
-        let transaction = EditTransaction::new(vec![SourceEdit {
-            edit_kind: "rename".to_string(),
-            source: URI.to_string(),
-            source_identity: crate::input_identity(CLEAN),
-            range: EditRange {
-                start_line: 5,
-                start_col: 5,
-                end_line: 5,
-                end_col: 11,
-            },
-            new_text: "twice".to_string(),
-        }])
-        .expect("transaction");
-        let request = ProviderValidateRequest {
-            documents: document_set(),
-            transaction,
-            sources: sources(CLEAN),
-            project_root: None,
-        };
-        let mut provider = ScriptedProvider {
-            rename: Ok(RenameResult { edits: vec![] }),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
-        };
-        let mutation = validate_transaction(&mut provider, &request);
-        assert!(
-            mutation.ok,
-            "validation succeeds: {:?}",
-            mutation.diagnostics
+        assert_refusal(
+            semantic_rename(&mut err_provider, &rename_request()),
+            "provider-semantic-error",
+            None,
         );
-        assert!(mutation.preview.is_some());
     }
 
     #[test]
-    fn validate_transaction_refuses_a_stale_caller_transaction() {
-        // The transaction carries the identity of an older text than the
-        // caller's current sources: stale refusal, no preview.
-        let transaction = EditTransaction::new(vec![SourceEdit {
-            edit_kind: "rename".to_string(),
-            source: URI.to_string(),
-            source_identity: crate::input_identity("puzzle stale {\n}"),
-            range: EditRange {
-                start_line: 1,
-                start_col: 8,
-                end_line: 1,
-                end_col: 12,
-            },
-            new_text: "twice".to_string(),
-        }])
-        .expect("transaction");
-        let request = ProviderValidateRequest {
-            documents: document_set(),
-            transaction,
-            sources: sources(CLEAN),
-            project_root: None,
-        };
-        let mut provider = ScriptedProvider {
-            rename: Ok(RenameResult { edits: vec![] }),
-            validate_edits: Ok(ValidateEditsResult {
-                valid: true,
-                version: 3,
-                reason: None,
-                failing_edit_index: None,
-            }),
-            check: Ok(ok_check()),
-        };
-        let mutation = validate_transaction(&mut provider, &request);
-        assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "edit-stale-source");
-        assert!(mutation.transaction.is_none());
-        assert!(mutation.preview.is_none());
+    fn validate_transaction_runs_or_refuses() {
+        let tx = EditTransaction::new(vec![test_edit(
+            5,
+            5,
+            11,
+            "twice",
+            &crate::input_identity(CLEAN),
+        )])
+        .unwrap();
+        let mutation = validate_transaction(&mut ScriptedProvider::default(), &val_req(tx));
+        assert!(mutation.ok && mutation.preview.is_some());
+
+        let stale = EditTransaction::new(vec![test_edit(
+            1,
+            8,
+            12,
+            "twice",
+            &crate::input_identity("puzzle stale {\n}"),
+        )])
+        .unwrap();
+        assert_refusal(
+            validate_transaction(&mut ScriptedProvider::default(), &val_req(stale)),
+            "edit-stale-source",
+            None,
+        );
     }
 }

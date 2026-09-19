@@ -1,9 +1,31 @@
-use std::path::{Path, PathBuf};
+use std::fmt;
+use std::path::Path;
 
-use crate::provider::{
-    Diagnostic as ProviderDiagnostic, LanguageProvider, ProviderError, Result as ProviderResult,
-    Severity as ProviderSeverity, SourceSpan as ProviderSourceSpan, Status,
-};
+use crate::diag::{Diagnostic, Position, Severity, SourceSpan, Stage, Status};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderError {
+    pub code: String,
+    pub message: String,
+}
+
+impl ProviderError {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for ProviderError {}
+
 /// Wright's in-process provider for localized raw Workshop source.
 pub struct WorkshopProvider {
     catalog: workshop_rs::catalog::Catalog,
@@ -11,15 +33,13 @@ pub struct WorkshopProvider {
 
 impl WorkshopProvider {
     /// Construct a provider from the canonical Workshop catalog.
-    pub fn new() -> ProviderResult<Self> {
+    pub fn new() -> Result<Self, ProviderError> {
         let catalog = workshop_rs::catalog::Catalog::builtin()
             .map_err(|error| ProviderError::new("workshop.catalog", error.to_string()))?;
         Ok(Self { catalog })
     }
-}
 
-impl LanguageProvider for WorkshopProvider {
-    fn check(&self, source: &str, path: &Path) -> ProviderResult<Vec<ProviderDiagnostic>> {
+    pub fn check(&self, source: &str, path: &Path) -> Result<Vec<Diagnostic>, ProviderError> {
         let locale = workshop_rs::detect::resolve_locale(source, &self.catalog, None)
             .map_err(|error| ProviderError::new("workshop.locale", error.to_string()))?;
         let program =
@@ -37,19 +57,17 @@ impl LanguageProvider for WorkshopProvider {
     }
 }
 
-fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> ProviderDiagnostic {
+fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> Diagnostic {
     let (kind_code, severity) = match issue.kind {
-        workshop_rs::semantic::IncompletenessKind::RawSetting => {
-            ("raw-setting", ProviderSeverity::Warning)
-        }
+        workshop_rs::semantic::IncompletenessKind::RawSetting => ("raw-setting", Severity::Warning),
         workshop_rs::semantic::IncompletenessKind::UnknownAction => {
-            ("unknown-action", ProviderSeverity::Error)
+            ("unknown-action", Severity::Error)
         }
         workshop_rs::semantic::IncompletenessKind::UnknownValue => {
-            ("unknown-value", ProviderSeverity::Error)
+            ("unknown-value", Severity::Error)
         }
         workshop_rs::semantic::IncompletenessKind::OpaqueAction => {
-            ("opaque-action", ProviderSeverity::Error)
+            ("opaque-action", Severity::Error)
         }
     };
     let code = diagnostic_code(kind_code, &issue.name);
@@ -60,12 +78,14 @@ fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> Provid
         status_name(status),
         issue.classification.as_str()
     );
-    ProviderDiagnostic {
+    Diagnostic {
         code,
+        stage: Stage::Analysis,
         severity,
-        status,
-        span: provider_span(issue.span, path),
         message,
+        status: Some(status),
+        span: Some(provider_span(issue.span, path)),
+        source: None,
     }
 }
 
@@ -107,16 +127,21 @@ fn status_name(status: Status) -> &'static str {
     }
 }
 
-fn provider_span(span: Option<workshop_rs::source::Span>, path: &Path) -> ProviderSourceSpan {
+fn provider_span(span: Option<workshop_rs::source::Span>, path: &Path) -> SourceSpan {
     let (start_line, start_col, end_line, end_col) = span
         .map(|span| (span.start.line, span.start.col, span.end.line, span.end.col))
         .unwrap_or((1, 1, 1, 1));
-    ProviderSourceSpan {
-        file: PathBuf::from(path),
-        start_line,
-        start_col,
-        end_line,
-        end_col,
+    SourceSpan {
+        file: 0,
+        path: path.display().to_string(),
+        start: Position {
+            line: start_line,
+            col: start_col,
+        },
+        end: Position {
+            line: end_line,
+            col: end_col,
+        },
     }
 }
 

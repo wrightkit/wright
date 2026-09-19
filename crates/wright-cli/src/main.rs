@@ -240,14 +240,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 ConvertTargetArg::Opy => wright_driver::ConvertTarget::Opy,
                 ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
             };
-            let activity = Arc::new(presentation.activity());
-            session.set_progress_observer(activity.clone());
-            let envelope = session.convert(target);
-            session.clear_progress_observer();
-            drop(activity);
-            let code = envelope.exit;
-            present::render(&envelope, presentation);
-            code
+            run_command(&mut session, |s| s.convert(target), presentation)
         }
         _ => unreachable!("all workflow commands are mapped"),
     };
@@ -255,28 +248,20 @@ fn run_workflow(command: Command) -> ExitCode {
 }
 
 fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {
-    let expected = match std::fs::read_to_string(&args.expected) {
-        Ok(text) => text,
-        Err(error) => {
-            eprintln!("wright: cannot read expected Workshop text: {error}");
-            return ExitCode::from(4);
+    let read = |p: &std::path::PathBuf| -> Result<String, ()> {
+        if p.as_os_str() == "-" {
+            let mut text = String::new();
+            std::io::stdin()
+                .read_to_string(&mut text)
+                .map(|_| text)
+                .map_err(|e| eprintln!("wright: cannot read actual Workshop text from stdin: {e}"))
+        } else {
+            std::fs::read_to_string(p)
+                .map_err(|e| eprintln!("wright: cannot read expected Workshop text: {e}"))
         }
     };
-    let actual = if args.actual.as_os_str() == "-" {
-        let mut text = String::new();
-        if let Err(error) = std::io::stdin().read_to_string(&mut text) {
-            eprintln!("wright: cannot read actual Workshop text from stdin: {error}");
-            return ExitCode::from(4);
-        }
-        text
-    } else {
-        match std::fs::read_to_string(&args.actual) {
-            Ok(text) => text,
-            Err(error) => {
-                eprintln!("wright: cannot read actual Workshop text: {error}");
-                return ExitCode::from(4);
-            }
-        }
+    let (Ok(expected), Ok(actual)) = (read(&args.expected), read(&args.actual)) else {
+        return ExitCode::from(4);
     };
     let comparison = wright_driver::compare_workshop_texts(&expected, &actual);
     println!(
@@ -340,9 +325,8 @@ fn is_opy_input(common: &CommonArgs) -> bool {
         cli::SourceKindArg::Auto => common
             .input
             .as_deref()
-            .and_then(|path| path.extension())
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("opy")),
+            .and_then(|p| p.extension()?.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("opy")),
         _ => false,
     }
 }
@@ -350,16 +334,16 @@ fn is_opy_input(common: &CommonArgs) -> bool {
 fn is_directory_input(common: &CommonArgs) -> bool {
     match common.input.as_deref() {
         None => true,
-        Some(path) if path.as_os_str() == "." => true,
-        Some(path) if path.as_os_str() == "-" => false,
-        Some(path) => std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()),
+        Some(p) if p.as_os_str() == "." => true,
+        Some(p) if p.as_os_str() == "-" => false,
+        Some(p) => std::fs::metadata(p).is_ok_and(|m| m.is_dir()),
     }
 }
 
 /// Run one driver workflow and render its envelope in the CLI presentation.
 fn run_command<T: serde::Serialize + present::ResultPresentation>(
     session: &mut wright_driver::CompilerSession,
-    run: fn(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
+    run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
 ) -> u8 {
     let activity = Arc::new(presentation.activity());

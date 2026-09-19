@@ -19,37 +19,37 @@ mod exit {
 
 /// A failure of completion operations.
 #[derive(Debug)]
-pub(crate) enum CompletionError {
-    Usage(String),
-    UndetectedShell(String),
-    Failed(String),
+pub(crate) struct CompletionError {
+    code: u8,
+    message: String,
 }
 
 impl CompletionError {
-    pub(crate) fn usage(message: impl Into<String>) -> Self {
-        CompletionError::Usage(message.into())
+    pub(crate) fn usage(m: impl Into<String>) -> Self {
+        Self {
+            code: exit::USAGE,
+            message: m.into(),
+        }
     }
-    pub(crate) fn undetected(message: impl Into<String>) -> Self {
-        CompletionError::UndetectedShell(message.into())
+    pub(crate) fn undetected(m: impl Into<String>) -> Self {
+        Self {
+            code: exit::USER_ERROR,
+            message: m.into(),
+        }
     }
-    pub(crate) fn failed(message: impl Into<String>) -> Self {
-        CompletionError::Failed(message.into())
+    pub(crate) fn failed(m: impl Into<String>) -> Self {
+        Self {
+            code: exit::INTERNAL,
+            message: m.into(),
+        }
     }
 
     pub(crate) fn exit_code(&self) -> u8 {
-        match self {
-            CompletionError::Usage(_) => exit::USAGE,
-            CompletionError::UndetectedShell(_) => exit::USER_ERROR,
-            CompletionError::Failed(_) => exit::INTERNAL,
-        }
+        self.code
     }
 
     pub(crate) fn message(&self) -> &str {
-        match self {
-            CompletionError::Usage(msg)
-            | CompletionError::UndetectedShell(msg)
-            | CompletionError::Failed(msg) => msg,
-        }
+        &self.message
     }
 }
 
@@ -63,13 +63,23 @@ pub(crate) enum InstallStatus {
 }
 
 impl InstallStatus {
-    #[allow(dead_code)]
     pub(crate) fn path(&self) -> &Path {
         match self {
             InstallStatus::Created(p)
             | InstallStatus::Updated(p)
             | InstallStatus::UpToDate(p)
             | InstallStatus::DryRun(p) => p,
+        }
+    }
+
+    fn report(&self, shell: ShellArg) {
+        let s = shell.as_str();
+        let p = self.path().display();
+        match self {
+            Self::Created(_) => println!("==> installed {s} completion to {p}"),
+            Self::Updated(_) => println!("==> updated {s} completion in {p}"),
+            Self::UpToDate(_) => println!("{s} completion in {p} is already up to date"),
+            Self::DryRun(_) => println!("would install {s} completion to {p}"),
         }
     }
 }
@@ -106,7 +116,6 @@ pub(crate) fn detect_shell() -> Result<ShellArg, CompletionError> {
         });
     }
 
-    // Check $SHELL (POSIX path to shell executable)
     if let Some(shell_path) = env_var_non_empty("SHELL") {
         let shell_name = Path::new(&shell_path)
             .file_name()
@@ -117,24 +126,21 @@ pub(crate) fn detect_shell() -> Result<ShellArg, CompletionError> {
         }
     }
 
-    // Check shell-specific environment variables
-    if env_var_non_empty("ZSH_VERSION").is_some() || env_var_non_empty("ZDOTDIR").is_some() {
-        return Ok(ShellArg::Zsh);
-    }
-    if env_var_non_empty("BASH_VERSION").is_some() {
-        return Ok(ShellArg::Bash);
-    }
-    if env_var_non_empty("FISH_VERSION").is_some() {
-        return Ok(ShellArg::Fish);
-    }
-    if env_var_non_empty("PSModulePath").is_some()
-        || env_var_non_empty("POWERSHELL_DISTRIBUTION_CHANNEL").is_some()
-        || env_var_non_empty("PSExecutionPolicyPreference").is_some()
-    {
-        return Ok(ShellArg::PowerShell);
+    const SHELL_VARS: &[(&str, ShellArg)] = &[
+        ("ZSH_VERSION", ShellArg::Zsh),
+        ("ZDOTDIR", ShellArg::Zsh),
+        ("BASH_VERSION", ShellArg::Bash),
+        ("FISH_VERSION", ShellArg::Fish),
+        ("PSModulePath", ShellArg::PowerShell),
+        ("POWERSHELL_DISTRIBUTION_CHANNEL", ShellArg::PowerShell),
+        ("PSExecutionPolicyPreference", ShellArg::PowerShell),
+    ];
+    for &(var, shell) in SHELL_VARS {
+        if env_var_non_empty(var).is_some() {
+            return Ok(shell);
+        }
     }
 
-    // Windows fallback if no other shell detected
     if cfg!(windows) {
         return Ok(ShellArg::PowerShell);
     }
@@ -147,17 +153,13 @@ pub(crate) fn detect_shell() -> Result<ShellArg, CompletionError> {
 fn parse_shell_name(name: &str) -> Option<ShellArg> {
     let lower = name.to_ascii_lowercase();
     let name = lower.trim();
-    if name == "zsh" || name.starts_with("zsh") {
+    if name.starts_with("zsh") {
         Some(ShellArg::Zsh)
-    } else if name == "bash" || name.starts_with("bash") {
+    } else if name.starts_with("bash") {
         Some(ShellArg::Bash)
-    } else if name == "fish" || name.starts_with("fish") {
+    } else if name.starts_with("fish") {
         Some(ShellArg::Fish)
-    } else if name == "pwsh"
-        || name == "powershell"
-        || name.starts_with("pwsh")
-        || name.starts_with("powershell")
-    {
+    } else if name.starts_with("pwsh") || name.starts_with("powershell") {
         Some(ShellArg::PowerShell)
     } else {
         None
@@ -165,47 +167,37 @@ fn parse_shell_name(name: &str) -> Option<ShellArg> {
 }
 
 fn user_home_dir() -> Result<PathBuf, CompletionError> {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return Ok(PathBuf::from(home));
-        }
-    }
-    if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        if !userprofile.is_empty() {
-            return Ok(PathBuf::from(userprofile));
-        }
-    }
-    Err(CompletionError::failed(
-        "could not determine user home directory (HOME or USERPROFILE environment variable not set)",
-    ))
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .filter(|val| !val.trim().is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            CompletionError::failed(
+                "could not determine user home directory (HOME or USERPROFILE environment variable not set)",
+            )
+        })
+}
+
+fn xdg_dir(var: &str, fallback: impl FnOnce(&Path) -> PathBuf) -> Result<PathBuf, CompletionError> {
+    env_var_non_empty(var)
+        .map(PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(|| user_home_dir().map(|h| fallback(&h)))
 }
 
 fn xdg_data_home() -> Result<PathBuf, CompletionError> {
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        if !xdg.is_empty() {
-            return Ok(PathBuf::from(xdg));
-        }
-    }
-    let home = user_home_dir()?;
-    Ok(home.join(".local").join("share"))
+    xdg_dir("XDG_DATA_HOME", |h| h.join(".local").join("share"))
 }
 
 fn xdg_config_home() -> Result<PathBuf, CompletionError> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return Ok(PathBuf::from(xdg));
-        }
-    }
-    let home = user_home_dir()?;
-    Ok(home.join(".config"))
+    xdg_dir("XDG_CONFIG_HOME", |h| h.join(".config"))
 }
 
 /// Determine the default conventional installation directory for a given shell.
 pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionError> {
-    if let Ok(override_dir) = std::env::var("WRIGHT_COMPLETION_DIR") {
-        if !override_dir.is_empty() {
-            return Ok(PathBuf::from(override_dir));
-        }
+    if let Some(override_dir) = env_var_non_empty("WRIGHT_COMPLETION_DIR") {
+        return Ok(PathBuf::from(override_dir));
     }
 
     let home = user_home_dir()?;
@@ -214,63 +206,59 @@ pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionErro
 
     match shell {
         ShellArg::Fish => {
-            let config_fish = config_home.join("fish").join("completions");
-            let vendor_fish = data_home.join("fish").join("vendor_completions.d");
-            if vendor_fish.is_dir() && !config_fish.is_dir() {
-                Ok(vendor_fish)
+            let (cfg, vdr) = (
+                config_home.join("fish").join("completions"),
+                data_home.join("fish").join("vendor_completions.d"),
+            );
+            Ok(if vdr.is_dir() && !cfg.is_dir() {
+                vdr
             } else {
-                Ok(config_fish)
-            }
+                cfg
+            })
         }
         ShellArg::Bash => {
-            let xdg_bash = data_home.join("bash-completion").join("completions");
-            let legacy_bash = home.join(".bash_completion.d");
-            if legacy_bash.is_dir() && !xdg_bash.is_dir() {
-                Ok(legacy_bash)
+            let (xdg, leg) = (
+                data_home.join("bash-completion").join("completions"),
+                home.join(".bash_completion.d"),
+            );
+            Ok(if leg.is_dir() && !xdg.is_dir() {
+                leg
             } else {
-                Ok(xdg_bash)
-            }
+                xdg
+            })
         }
         ShellArg::Zsh => {
-            if let Ok(custom) = std::env::var("ZSH_CUSTOM") {
-                if !custom.is_empty() {
-                    let custom_path = PathBuf::from(custom);
-                    let completions = custom_path.join("completions");
-                    if completions.is_dir() || custom_path.is_dir() {
-                        return Ok(completions);
-                    }
+            if let Some(custom) = env_var_non_empty("ZSH_CUSTOM") {
+                let p = PathBuf::from(custom);
+                let c = p.join("completions");
+                if c.is_dir() || p.is_dir() {
+                    return Ok(c);
                 }
             }
-            let oh_my_zsh_custom = home.join(".oh-my-zsh").join("custom").join("completions");
-            if oh_my_zsh_custom.is_dir() {
-                return Ok(oh_my_zsh_custom);
+            let omz = home.join(".oh-my-zsh").join("custom").join("completions");
+            if omz.is_dir() || home.join(".oh-my-zsh").is_dir() {
+                return Ok(omz);
             }
-            let oh_my_zsh = home.join(".oh-my-zsh");
-            if oh_my_zsh.is_dir() {
-                return Ok(oh_my_zsh_custom);
-            }
-            let zfunc = home.join(".zfunc");
-            if zfunc.is_dir() {
-                return Ok(zfunc);
-            }
-            let dot_zsh = home.join(".zsh").join("completions");
-            if dot_zsh.is_dir() {
-                return Ok(dot_zsh);
+            for c in [home.join(".zfunc"), home.join(".zsh").join("completions")] {
+                if c.is_dir() {
+                    return Ok(c);
+                }
             }
             Ok(data_home.join("zsh").join("site-functions"))
         }
         ShellArg::PowerShell => {
             if cfg!(windows) {
-                let ps_docs = home.join("Documents").join("PowerShell").join("Scripts");
-                let win_ps_docs = home
-                    .join("Documents")
-                    .join("WindowsPowerShell")
-                    .join("Scripts");
-                if win_ps_docs.is_dir() && !ps_docs.is_dir() {
-                    Ok(win_ps_docs)
+                let (ps, win) = (
+                    home.join("Documents").join("PowerShell").join("Scripts"),
+                    home.join("Documents")
+                        .join("WindowsPowerShell")
+                        .join("Scripts"),
+                );
+                Ok(if win.is_dir() && !ps.is_dir() {
+                    win
                 } else {
-                    Ok(ps_docs)
-                }
+                    ps
+                })
             } else {
                 Ok(config_home.join("powershell").join("completions"))
             }
@@ -280,56 +268,46 @@ pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionErro
 
 /// Return all candidate conventional directories for a given shell.
 pub(crate) fn candidate_dirs_for(shell: ShellArg) -> Vec<PathBuf> {
-    if let Ok(override_dir) = std::env::var("WRIGHT_COMPLETION_DIR") {
-        if !override_dir.is_empty() {
-            return vec![PathBuf::from(override_dir)];
-        }
+    if let Some(override_dir) = env_var_non_empty("WRIGHT_COMPLETION_DIR") {
+        return vec![PathBuf::from(override_dir)];
     }
-
-    let mut dirs = Vec::new();
-    let Ok(home) = user_home_dir() else {
-        return dirs;
-    };
-    let Ok(data_home) = xdg_data_home() else {
-        return dirs;
-    };
-    let Ok(config_home) = xdg_config_home() else {
-        return dirs;
+    let (Ok(home), Ok(data_home), Ok(config_home)) =
+        (user_home_dir(), xdg_data_home(), xdg_config_home())
+    else {
+        return Vec::new();
     };
 
     match shell {
-        ShellArg::Fish => {
-            dirs.push(config_home.join("fish").join("completions"));
-            dirs.push(data_home.join("fish").join("vendor_completions.d"));
-        }
-        ShellArg::Bash => {
-            dirs.push(data_home.join("bash-completion").join("completions"));
-            dirs.push(home.join(".bash_completion.d"));
-        }
+        ShellArg::Fish => vec![
+            config_home.join("fish").join("completions"),
+            data_home.join("fish").join("vendor_completions.d"),
+        ],
+        ShellArg::Bash => vec![
+            data_home.join("bash-completion").join("completions"),
+            home.join(".bash_completion.d"),
+        ],
         ShellArg::Zsh => {
-            if let Ok(custom) = std::env::var("ZSH_CUSTOM") {
-                if !custom.is_empty() {
-                    dirs.push(PathBuf::from(custom).join("completions"));
-                }
-            }
-            dirs.push(home.join(".oh-my-zsh").join("custom").join("completions"));
-            dirs.push(home.join(".zfunc"));
-            dirs.push(home.join(".zsh").join("completions"));
-            dirs.push(data_home.join("zsh").join("site-functions"));
+            let mut dirs = env_var_non_empty("ZSH_CUSTOM")
+                .map(|c| PathBuf::from(c).join("completions"))
+                .into_iter()
+                .collect::<Vec<_>>();
+            dirs.extend([
+                home.join(".oh-my-zsh").join("custom").join("completions"),
+                home.join(".zfunc"),
+                home.join(".zsh").join("completions"),
+                data_home.join("zsh").join("site-functions"),
+            ]);
+            dirs
         }
-        ShellArg::PowerShell => {
-            dirs.push(home.join("Documents").join("PowerShell").join("Scripts"));
-            dirs.push(
-                home.join("Documents")
-                    .join("WindowsPowerShell")
-                    .join("Scripts"),
-            );
-            dirs.push(config_home.join("powershell").join("completions"));
-            dirs.push(data_home.join("powershell").join("Completions"));
-        }
+        ShellArg::PowerShell => vec![
+            home.join("Documents").join("PowerShell").join("Scripts"),
+            home.join("Documents")
+                .join("WindowsPowerShell")
+                .join("Scripts"),
+            config_home.join("powershell").join("completions"),
+            data_home.join("powershell").join("Completions"),
+        ],
     }
-
-    dirs
 }
 
 /// Install the generated completion script for a shell into `explicit_dir` or the default location.
@@ -350,160 +328,79 @@ pub(crate) fn install_for_shell(
         return Ok(InstallStatus::DryRun(target_file));
     }
 
-    if target_file.is_file() {
-        let existing = std::fs::read(&target_file).map_err(|err| {
-            CompletionError::failed(format!(
-                "could not read existing completion file {}: {err}",
-                target_file.display()
-            ))
-        })?;
-        if existing == content && !force {
+    let exists = target_file.is_file();
+    if exists {
+        if !force
+            && std::fs::read(&target_file)
+                .map(|e| e == content)
+                .unwrap_or(false)
+        {
             return Ok(InstallStatus::UpToDate(target_file));
         }
-        std::fs::write(&target_file, &content).map_err(|err| {
+    } else {
+        std::fs::create_dir_all(&target_dir).map_err(|err| {
             CompletionError::failed(format!(
-                "could not update completion file {}: {err}",
-                target_file.display()
+                "could not create completion directory {}: {err}",
+                target_dir.display()
             ))
         })?;
-        return Ok(InstallStatus::Updated(target_file));
-    }
-
-    if let Err(err) = std::fs::create_dir_all(&target_dir) {
-        return Err(CompletionError::failed(format!(
-            "could not create completion directory {}: {err}",
-            target_dir.display()
-        )));
     }
 
     std::fs::write(&target_file, &content).map_err(|err| {
+        let op = if exists { "update" } else { "write" };
         CompletionError::failed(format!(
-            "could not write completion file {}: {err}",
+            "could not {op} completion file {}: {err}",
             target_file.display()
         ))
     })?;
-
-    Ok(InstallStatus::Created(target_file))
+    Ok(if exists {
+        InstallStatus::Updated(target_file)
+    } else {
+        InstallStatus::Created(target_file)
+    })
 }
 
 fn print_guidance(shell: ShellArg, target_file: &Path) {
-    let target_dir = target_file.parent().unwrap_or(target_file);
+    let dir = target_file.parent().unwrap_or(target_file).display();
     match shell {
-        ShellArg::Zsh => {
-            let path_str = target_dir.to_string_lossy();
-            if path_str.contains(".oh-my-zsh") {
-                println!("note: completion installed into Oh My Zsh custom completions directory");
-            } else {
-                println!(
-                    "note: ensure {} is in your zsh $fpath (e.g. fpath=({} $fpath) in ~/.zshrc)",
-                    target_dir.display(),
-                    target_dir.display()
-                );
-            }
+        ShellArg::Zsh if dir.to_string().contains(".oh-my-zsh") => {
+            println!("note: completion installed into Oh My Zsh custom completions directory");
         }
-        ShellArg::Bash => {
-            println!(
-                "note: bash completions in {} are loaded automatically when bash-completion is active",
-                target_dir.display()
-            );
-        }
-        ShellArg::Fish => {
-            println!(
-                "note: fish autoloads completions from {}",
-                target_dir.display()
-            );
-        }
-        ShellArg::PowerShell => {
-            println!(
-                "note: add '. \"{}\"' to your PowerShell $PROFILE if not already autoloaded",
-                target_file.display()
-            );
-        }
+        ShellArg::Zsh => println!(
+            "note: ensure {dir} is in your zsh $fpath (e.g. fpath=({dir} $fpath) in ~/.zshrc)"
+        ),
+        ShellArg::Bash => println!(
+            "note: bash completions in {dir} are loaded automatically when bash-completion is active"
+        ),
+        ShellArg::Fish => println!("note: fish autoloads completions from {dir}"),
+        ShellArg::PowerShell => println!(
+            "note: add '. \"{}\"' to your PowerShell $PROFILE if not already autoloaded",
+            target_file.display()
+        ),
     }
 }
 
 /// Run the `completion install` workflow.
 pub(crate) fn run_install(args: &CompletionInstallArgs) -> Result<u8, CompletionError> {
-    if args.all {
-        let shells = [
+    let shells: Vec<ShellArg> = if args.all {
+        vec![
             ShellArg::Bash,
             ShellArg::Zsh,
             ShellArg::Fish,
             ShellArg::PowerShell,
-        ];
-        for shell in shells {
-            let status = install_for_shell(shell, args.dir.as_deref(), args.dry_run, args.force)?;
-            match &status {
-                InstallStatus::Created(path) => {
-                    println!(
-                        "==> installed {} completion to {}",
-                        shell.as_str(),
-                        path.display()
-                    );
-                }
-                InstallStatus::Updated(path) => {
-                    println!(
-                        "==> updated {} completion in {}",
-                        shell.as_str(),
-                        path.display()
-                    );
-                }
-                InstallStatus::UpToDate(path) => {
-                    println!(
-                        "{} completion in {} is already up to date",
-                        shell.as_str(),
-                        path.display()
-                    );
-                }
-                InstallStatus::DryRun(path) => {
-                    println!(
-                        "would install {} completion to {}",
-                        shell.as_str(),
-                        path.display()
-                    );
-                }
-            }
-        }
-        return Ok(exit::SUCCESS);
-    }
-
-    let shell = match args.effective_shell() {
-        Some(s) => s,
-        None => detect_shell()?,
+        ]
+    } else {
+        vec![match args.effective_shell() {
+            Some(s) => s,
+            None => detect_shell()?,
+        }]
     };
 
-    let status = install_for_shell(shell, args.dir.as_deref(), args.dry_run, args.force)?;
-    match &status {
-        InstallStatus::Created(path) => {
-            println!(
-                "==> installed {} completion to {}",
-                shell.as_str(),
-                path.display()
-            );
-            print_guidance(shell, path);
-        }
-        InstallStatus::Updated(path) => {
-            println!(
-                "==> updated {} completion in {}",
-                shell.as_str(),
-                path.display()
-            );
-            print_guidance(shell, path);
-        }
-        InstallStatus::UpToDate(path) => {
-            println!(
-                "{} completion in {} is already up to date",
-                shell.as_str(),
-                path.display()
-            );
-        }
-        InstallStatus::DryRun(path) => {
-            println!(
-                "would install {} completion to {}",
-                shell.as_str(),
-                path.display()
-            );
-            print_guidance(shell, path);
+    for &shell in &shells {
+        let status = install_for_shell(shell, args.dir.as_deref(), args.dry_run, args.force)?;
+        status.report(shell);
+        if !args.all && !matches!(status, InstallStatus::UpToDate(_)) {
+            print_guidance(shell, status.path());
         }
     }
 
@@ -527,7 +424,7 @@ pub(crate) fn refresh_installed_completions() -> Result<usize, String> {
             let target_file = dir.join(filename);
             if target_file.is_file() {
                 match install_for_shell(shell, Some(&dir), false, false) {
-                    Ok(InstallStatus::Updated(p)) => {
+                    Ok(InstallStatus::Updated(p) | InstallStatus::Created(p)) => {
                         println!(
                             "==> refreshed {} completion in {}",
                             shell.as_str(),
@@ -535,16 +432,7 @@ pub(crate) fn refresh_installed_completions() -> Result<usize, String> {
                         );
                         refreshed += 1;
                     }
-                    Ok(InstallStatus::Created(p)) => {
-                        println!(
-                            "==> refreshed {} completion in {}",
-                            shell.as_str(),
-                            p.display()
-                        );
-                        refreshed += 1;
-                    }
-                    Ok(InstallStatus::UpToDate(_)) => {}
-                    Ok(InstallStatus::DryRun(_)) => {}
+                    Ok(InstallStatus::UpToDate(_) | InstallStatus::DryRun(_)) => {}
                     Err(err) => {
                         eprintln!(
                             "warning: could not refresh {} completion in {}: {}",
@@ -566,21 +454,29 @@ mod tests {
 
     #[test]
     fn parse_shell_name_handles_standard_names_and_aliases() {
-        assert_eq!(parse_shell_name("bash"), Some(ShellArg::Bash));
-        assert_eq!(parse_shell_name("zsh"), Some(ShellArg::Zsh));
-        assert_eq!(parse_shell_name("fish"), Some(ShellArg::Fish));
-        assert_eq!(parse_shell_name("powershell"), Some(ShellArg::PowerShell));
-        assert_eq!(parse_shell_name("pwsh"), Some(ShellArg::PowerShell));
-        assert_eq!(parse_shell_name("/bin/bash"), None); // filename extraction done beforehand
-        assert_eq!(parse_shell_name("unknown"), None);
+        for (input, expected) in [
+            ("bash", Some(ShellArg::Bash)),
+            ("zsh", Some(ShellArg::Zsh)),
+            ("fish", Some(ShellArg::Fish)),
+            ("powershell", Some(ShellArg::PowerShell)),
+            ("pwsh", Some(ShellArg::PowerShell)),
+            ("/bin/bash", None),
+            ("unknown", None),
+        ] {
+            assert_eq!(parse_shell_name(input), expected);
+        }
     }
 
     #[test]
     fn filenames_match_shell_conventions() {
-        assert_eq!(filename_for(ShellArg::Bash), "wright");
-        assert_eq!(filename_for(ShellArg::Zsh), "_wright");
-        assert_eq!(filename_for(ShellArg::Fish), "wright.fish");
-        assert_eq!(filename_for(ShellArg::PowerShell), "_wright.ps1");
+        for (shell, expected) in [
+            (ShellArg::Bash, "wright"),
+            (ShellArg::Zsh, "_wright"),
+            (ShellArg::Fish, "wright.fish"),
+            (ShellArg::PowerShell, "_wright.ps1"),
+        ] {
+            assert_eq!(filename_for(shell), expected);
+        }
     }
 
     #[test]
@@ -593,9 +489,8 @@ mod tests {
         ] {
             let script = generate_script(shell);
             assert!(!script.is_empty(), "{:?} script must not be empty", shell);
-            let text = String::from_utf8_lossy(&script);
             assert!(
-                text.contains("wright"),
+                String::from_utf8_lossy(&script).contains("wright"),
                 "{:?} script contains wright",
                 shell
             );

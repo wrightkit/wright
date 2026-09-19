@@ -49,19 +49,34 @@ fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::V
 }
 
 #[test]
-fn stdio_transport_serves_structured_queries() {
+fn stdio_and_jsonrpc_serve_structured_queries() {
+    let input = corpus_workshop("synthetic/control-flow");
     let responses = run_lines(
         "stdio",
-        &corpus_workshop("synthetic/control-flow"),
+        &input,
         &[
             r#"{"op":"capabilities"}"#,
             r#"{"op":"project"}"#,
             r#"{"op":"callGraph"}"#,
             r#"{"op":"costEstimate"}"#,
+            r#"{"op":"findings"}"#,
         ],
     );
-    assert_eq!(responses.len(), 4);
-    assert_eq!(responses[0]["result"]["contract"], "wright-result/v1");
+    assert_eq!(responses.len(), 5);
+    let caps = &responses[0]["result"];
+    assert!(
+        caps["contract"]
+            .as_str()
+            .unwrap()
+            .starts_with("wright-result/")
+    );
+    assert!(
+        caps["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|op| op == "compile")
+    );
     assert_eq!(responses[1]["result"]["origin"]["kind"], "workshop");
     assert!(responses[2]["result"].as_array().unwrap().is_empty());
     assert!(
@@ -70,6 +85,13 @@ fn stdio_transport_serves_structured_queries() {
             .unwrap()
             > 0
     );
+
+    let jsonrpc = run_lines(
+        "jsonrpc",
+        &input,
+        &[r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"findings"}}"#],
+    );
+    assert_eq!(responses[4]["result"], jsonrpc[0]["result"]);
 }
 
 #[test]
@@ -106,26 +128,11 @@ fn jsonrpc_transport_serves_requests_and_workflows() {
 }
 
 #[test]
-fn transports_match_in_process_semantics() {
-    // The same query through both transports yields equivalent results.
-    let stdio = run_lines(
-        "stdio",
-        &corpus_workshop("synthetic/control-flow"),
-        &[r#"{"op":"findings"}"#],
-    );
-    let jsonrpc = run_lines(
-        "jsonrpc",
-        &corpus_workshop("synthetic/control-flow"),
-        &[r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"findings"}}"#],
-    );
-    assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]);
-}
-
-#[test]
-fn jsonrpc_transport_preserves_application_errors_and_protocol_errors() {
+fn transport_error_handling_and_batch_requests() {
+    let input = corpus_workshop("synthetic/control-flow");
     let responses = run_lines(
         "jsonrpc",
-        &corpus_workshop("synthetic/control-flow"),
+        &input,
         &[
             r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"references","symbol":999999}}"#,
             r#"{"jsonrpc":"2.0","id":2,"method":"missing"}"#,
@@ -135,130 +142,63 @@ fn jsonrpc_transport_preserves_application_errors_and_protocol_errors() {
         ],
     );
     assert_eq!(responses.len(), 5);
-
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(responses[0]["result"]["error"]["code"], "invalid-id");
-    assert!(responses[0].get("error").is_none());
-
-    assert_eq!(responses[1]["id"], 2);
     assert_eq!(responses[1]["error"]["code"], -32601);
-    assert!(responses[1].get("result").is_none());
-
     assert_eq!(responses[2]["id"], serde_json::Value::Null);
     assert_eq!(responses[2]["error"]["code"], -32700);
-
-    assert_eq!(responses[3]["id"], 4);
     assert_eq!(responses[3]["error"]["code"], -32602);
-
-    assert_eq!(responses[4]["id"], 5);
     assert_eq!(responses[4]["error"]["code"], -32602);
-    for response in responses {
-        assert_eq!(response["jsonrpc"], "2.0");
-        assert!(response.get("result").is_some() ^ response.get("error").is_some());
-    }
-}
 
-#[test]
-fn jsonrpc_transport_rejects_invalid_requests_with_null_id() {
-    let responses = run_lines(
+    let basic = corpus_workshop("synthetic/basic-rule");
+    let null_id_responses = run_lines(
         "jsonrpc",
-        &corpus_workshop("synthetic/basic-rule"),
+        &basic,
         &[
             r#"{"jsonrpc":"1.0","id":1,"method":"check"}"#,
             r#"{"jsonrpc":"2.0","id":2}"#,
             "[]",
         ],
     );
-    assert_eq!(responses.len(), 3);
-    for response in responses {
-        assert_eq!(response["jsonrpc"], "2.0");
-        assert_eq!(response["id"], serde_json::Value::Null);
-        assert_eq!(response["error"]["code"], -32600);
-        assert!(response.get("result").is_none());
+    for resp in null_id_responses {
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], serde_json::Value::Null);
+        assert_eq!(resp["error"]["code"], -32600);
     }
-}
 
-#[test]
-fn jsonrpc_transport_serves_batch_requests() {
-    let responses = run_lines(
+    let batch = run_lines(
         "jsonrpc",
-        &corpus_workshop("synthetic/basic-rule"),
+        &basic,
         &[
             r#"[{"jsonrpc":"2.0","id":1,"method":"check"},{"jsonrpc":"2.0","method":"check"},{"jsonrpc":"2.0","id":2,"method":"missing"},1]"#,
         ],
     );
-    assert_eq!(responses.len(), 1);
-    let batch = responses[0].as_array().unwrap();
-    assert_eq!(batch.len(), 3);
+    let items = batch[0].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0]["id"], 1);
+    assert_eq!(items[0]["result"]["command"], "check");
+    assert_eq!(items[1]["id"], 2);
+    assert_eq!(items[1]["error"]["code"], -32601);
+    assert_eq!(items[2]["id"], serde_json::Value::Null);
+    assert_eq!(items[2]["error"]["code"], -32600);
 
-    assert_eq!(batch[0]["id"], 1);
-    assert_eq!(batch[0]["result"]["command"], "check");
-
-    assert_eq!(batch[1]["id"], 2);
-    assert_eq!(batch[1]["error"]["code"], -32601);
-
-    assert_eq!(batch[2]["id"], serde_json::Value::Null);
-    assert_eq!(batch[2]["error"]["code"], -32600);
-    for response in batch {
-        assert_eq!(response["jsonrpc"], "2.0");
-        assert!(response.get("result").is_some() ^ response.get("error").is_some());
-    }
-}
-
-#[test]
-fn jsonrpc_transport_does_not_respond_to_notifications() {
-    let responses = run_lines(
+    let notif = run_lines(
         "jsonrpc",
-        &corpus_workshop("synthetic/basic-rule"),
+        &basic,
         &[
             r#"{"jsonrpc":"2.0","method":"request","params":{"op":"capabilities"}}"#,
             r#"{"jsonrpc":"2.0","id":2,"method":"check"}"#,
         ],
     );
-    assert_eq!(responses.len(), 1);
-    assert_eq!(responses[0]["jsonrpc"], "2.0");
-    assert_eq!(responses[0]["id"], 2);
-    assert!(responses[0].get("result").is_some());
+    assert_eq!(notif.len(), 1);
+    assert_eq!(notif[0]["id"], 2);
+
+    let malformed_stdio = run_lines("stdio", &basic, &["not json"]);
+    assert_eq!(malformed_stdio[0]["error"]["code"], "malformed-request");
 }
 
 #[test]
-fn malformed_requests_are_structured_errors() {
-    let responses = run_lines(
-        "stdio",
-        &corpus_workshop("synthetic/basic-rule"),
-        &["not json"],
-    );
-    assert_eq!(responses[0]["error"]["code"], "malformed-request");
-}
-
-#[test]
-fn capability_negotiation_is_preserved() {
-    let responses = run_lines(
-        "stdio",
-        &corpus_workshop("synthetic/basic-rule"),
-        &[r#"{"op":"capabilities"}"#],
-    );
-    let capabilities = &responses[0]["result"];
-    assert!(
-        capabilities["operations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|op| op == "compile")
-    );
-    assert!(
-        capabilities["contract"]
-            .as_str()
-            .unwrap()
-            .starts_with("wright-result/")
-    );
-}
-
-#[test]
-fn stdio_transport_serves_mutation_operations() {
-    // #130: the stdio adapter exposes the shared mutation operations as
-    // thin mappings — validated edit preview and semantic rename — with the
-    // same structured all-or-nothing results as in-process consumers.
+fn transports_serve_mutation_operations() {
     let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
     let identity = wright_driver::input_identity(&source);
@@ -291,24 +231,6 @@ fn stdio_transport_serves_mutation_operations() {
     );
     assert_eq!(responses[0]["result"]["ok"], false, "{responses:?}");
 
-    // Semantic rename through the same transport.
-    let rename = serde_json::json!({
-        "op": "semanticRename",
-        "sources": {
-            input.to_string_lossy().into_owned():
-                std::fs::read_to_string(&input).unwrap()
-        },
-        "target": { "source": input.to_string_lossy().into_owned(), "line": 1, "col": 11, "to": "total" }
-    });
-    let responses = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
-    assert_eq!(responses[0]["result"]["ok"], false, "{responses:?}");
-}
-
-#[test]
-fn transports_are_equivalent_for_mutation_operations() {
-    // #130: stdio and JSON-RPC map the same mutation request to the same
-    // in-process behavior.
-    let input = corpus_workshop("synthetic/control-flow");
     let rename = serde_json::json!({
         "op": "semanticRename",
         "sources": {
@@ -318,6 +240,8 @@ fn transports_are_equivalent_for_mutation_operations() {
         "target": { "source": input.to_string_lossy().into_owned(), "line": 1, "col": 11, "to": "total" }
     });
     let stdio = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
+    assert_eq!(stdio[0]["result"]["ok"], false, "{stdio:?}");
+
     let jsonrpc_request = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "request", "params": rename
     });

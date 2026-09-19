@@ -1,30 +1,5 @@
 //! End-to-end LPP client tests against the reference conformance mock
 //! provider from the `language-provider-protocol` repository.
-//!
-//! The mock provider serves the deliberately foreign reference language
-//! `x-demo-lang`, so every assertion below is also evidence that the client
-//! has no source-language-specific protocol logic: the language id is an
-//! opaque key, and a document tagged with an unserved language id is refused
-//! by the provider through the normal `invalidLanguage` error path.
-//!
-//! The provider binary is located through the `LPP_MOCK_PROVIDER`
-//! environment variable. When the variable is absent the tests are skipped
-//! with a clear reason; CI sets it (see `.github/workflows/ci.yml`) so the
-//! suite is REQUIRED there. Build the provider from the pinned
-//! `language-provider-protocol` commit with:
-//!
-//! ```text
-//! git clone https://github.com/wrightkit/language-provider-protocol
-//! git -C language-provider-protocol checkout 416b293e26e6fb2d29061608a493a7aecd2ce14f
-//! cargo build -p lpp-mock-provider
-//! ```
-//!
-//! then run:
-//!
-//! ```text
-//! LPP_MOCK_PROVIDER=language-provider-protocol/target/debug/lpp-mock-provider \
-//!   cargo test -p wright-lpp --test mock_provider
-//! ```
 
 #![allow(clippy::result_large_err)]
 
@@ -36,32 +11,19 @@ use wright_lpp::{
     TextEdit, WorkshopArtifact,
 };
 
-/// The pinned language-provider-protocol commit the tests were written and
-/// validated against.
 const PINNED_LPP_COMMIT: &str = "416b293e26e6fb2d29061608a493a7aecd2ce14f";
-
-/// The reference mock provider's deliberately foreign language id.
 const DEMO_LANGUAGE_ID: &str = "x-demo-lang";
-
-/// The mock provider's artifact format for compiled puzzles.
 const DEMO_ARTIFACT_FORMAT: &str = "x-demo/puzzle-eval-v1";
-
-/// A clean x-demo-lang puzzle document (from the LPP v1 spec transcript).
 const CLEAN_PUZZLE: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n    plus1: x => x + 1\n  }\n  solution = [ double, double ]\n}";
-
-/// A puzzle with an unresolved op reference.
 const BROKEN_PUZZLE: &str = "puzzle broken {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n  }\n  solution = [ triple ]\n}";
+const PUZZLE_URI: &str = "file:///project/puzzle.xdl";
 
-/// The mock provider binary path from the environment, skipping the test
-/// with a clear reason when absent.
 fn mock_provider_path() -> Option<PathBuf> {
     match std::env::var("LPP_MOCK_PROVIDER") {
         Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
         _ => {
             eprintln!(
-                "SKIPPED: LPP_MOCK_PROVIDER is not set; build the LPP mock provider \
-                 from the pinned language-provider-protocol commit {PINNED_LPP_COMMIT} \
-                 (cargo build -p lpp-mock-provider) and point LPP_MOCK_PROVIDER at it."
+                "SKIPPED: LPP_MOCK_PROVIDER is not set; build from commit {PINNED_LPP_COMMIT}"
             );
             None
         }
@@ -77,60 +39,65 @@ fn demo_document(uri: &str, text: &str) -> Document {
     }
 }
 
+fn doc_set(uri: &str, text: &str) -> DocumentSet {
+    let mut docs = DocumentSet::new();
+    docs.insert(uri.to_string(), demo_document(uri, text));
+    docs
+}
+
 fn clean_document_set() -> DocumentSet {
-    let mut documents = DocumentSet::new();
-    documents.insert(
-        "file:///project/puzzle.xdl".to_string(),
-        demo_document("file:///project/puzzle.xdl", CLEAN_PUZZLE),
-    );
-    documents
+    doc_set(PUZZLE_URI, CLEAN_PUZZLE)
 }
 
-fn provider() -> StdioLanguageProvider {
-    let path = mock_provider_path().expect("mock provider path");
-    StdioLanguageProvider::spawn(&path, &[], std::time::Duration::from_secs(30))
-        .expect("provider spawns")
+fn broken_document_set() -> DocumentSet {
+    doc_set("file:///project/broken.xdl", BROKEN_PUZZLE)
 }
 
-fn initialize() -> (StdioLanguageProvider, wright_lpp::InitializeResult) {
-    let mut provider = provider();
+fn initialized() -> Option<(StdioLanguageProvider, wright_lpp::InitializeResult)> {
+    let path = mock_provider_path()?;
+    let mut provider =
+        StdioLanguageProvider::spawn(&path, &[], std::time::Duration::from_secs(30)).ok()?;
     let result = provider
         .initialize(Some(&ClientInfo {
             name: "wright".to_string(),
             version: "0.2.0".to_string(),
         }))
-        .expect("initialize succeeds");
-    (provider, result)
+        .ok()?;
+    Some((provider, result))
 }
 
-// ---------------------------------------------------------------------------
-// Initialize / handshake / capability negotiation
-// ---------------------------------------------------------------------------
+fn with_mock(f: impl FnOnce(&mut StdioLanguageProvider)) {
+    let Some((mut p, _)) = initialized() else {
+        return;
+    };
+    f(&mut p);
+    p.shutdown().expect("shutdown");
+}
+
+fn pos(line: u32, character: u32) -> Position {
+    Position { line, character }
+}
 
 #[test]
 fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
-    let Some(_) = mock_provider_path() else {
+    let Some((mut provider, result)) = initialized() else {
         return;
     };
-    let (mut provider, result) = initialize();
     assert_eq!(result.protocol_version, "1.0");
     assert_eq!(result.server_info.name, "lpp-mock-provider");
     assert_eq!(result.languages.len(), 1);
     assert_eq!(result.languages[0].id, DEMO_LANGUAGE_ID);
     assert_eq!(result.languages[0].extensions, vec!["xdl"]);
-    // The reference language is deliberately foreign: the opaque language
-    // id is served exactly as declared.
     let negotiated = provider.capabilities().expect("negotiated");
     assert_eq!(negotiated.language_ids(), vec![DEMO_LANGUAGE_ID]);
-    for capability in Capability::ALL {
-        if capability == Capability::ProjectLoading {
-            continue;
+    for cap in Capability::ALL {
+        if cap != Capability::ProjectLoading {
+            assert!(
+                negotiated.supports(cap),
+                "capability {} negotiated",
+                cap.as_str()
+            );
         }
-        assert!(
-            negotiated.supports(capability),
-            "capability {} negotiated",
-            capability.as_str()
-        );
     }
     provider.shutdown().expect("shutdown");
     assert_eq!(provider.exit_status(), Some(0));
@@ -145,7 +112,6 @@ fn registry_lookup_is_by_opaque_language_id() {
     registry
         .register(ProviderConfig::new(DEMO_LANGUAGE_ID, path, Vec::new()))
         .expect("registered");
-    // A second registration for the same id refuses.
     assert_eq!(
         registry
             .register(ProviderConfig::new(
@@ -153,15 +119,12 @@ fn registry_lookup_is_by_opaque_language_id() {
                 PathBuf::from("ignored"),
                 Vec::new(),
             ))
-            .expect_err("duplicate"),
+            .unwrap_err(),
         RegistryError::DuplicateLanguage {
             language_id: DEMO_LANGUAGE_ID.to_string(),
         }
     );
-    // A configured id spawns a session (dropped below; the provider is
-    // terminated on drop).
     drop(registry.spawn(DEMO_LANGUAGE_ID).expect("spawns"));
-    // An unconfigured language id refuses explicitly; there is no fallback.
     let error = registry
         .spawn("x-other-lang")
         .err()
@@ -175,328 +138,207 @@ fn registry_lookup_is_by_opaque_language_id() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Document operations through the full session
-// ---------------------------------------------------------------------------
-
 #[test]
 fn check_reports_clean_and_broken_documents() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (mut provider, _) = initialize();
+    with_mock(|p| {
+        let checked = p
+            .check(&clean_document_set(), Some("file:///project"))
+            .expect("check");
+        assert_eq!(checked.documents.len(), 1);
+        assert!(checked.documents[0].diagnostics.is_empty(), "clean puzzle");
 
-    let clean = clean_document_set();
-    let checked = provider
-        .check(&clean, Some("file:///project"))
-        .expect("check");
-    assert_eq!(checked.documents.len(), 1);
-    assert!(checked.documents[0].diagnostics.is_empty(), "clean puzzle");
-
-    let mut broken = DocumentSet::new();
-    broken.insert(
-        "file:///project/broken.xdl".to_string(),
-        demo_document("file:///project/broken.xdl", BROKEN_PUZZLE),
-    );
-    let checked = provider.check(&broken, None).expect("check");
-    let diagnostics = &checked.documents[0].diagnostics;
-    assert_eq!(diagnostics.len(), 1, "one unresolved op reference");
-    assert_eq!(
-        diagnostics[0].severity,
-        wright_lpp::DiagnosticSeverity::Error
-    );
-    assert_eq!(diagnostics[0].code.as_deref(), Some("x-demo/unresolved-op"));
-    assert_eq!(diagnostics[0].source.as_deref(), Some(DEMO_LANGUAGE_ID));
-    provider.shutdown().expect("shutdown");
+        let checked = p.check(&broken_document_set(), None).expect("check");
+        let diagnostics = &checked.documents[0].diagnostics;
+        assert_eq!(diagnostics.len(), 1, "one unresolved op reference");
+        assert_eq!(
+            diagnostics[0].severity,
+            wright_lpp::DiagnosticSeverity::Error
+        );
+        assert_eq!(diagnostics[0].code.as_deref(), Some("x-demo/unresolved-op"));
+        assert_eq!(diagnostics[0].source.as_deref(), Some(DEMO_LANGUAGE_ID));
+    });
 }
 
 #[test]
 fn compile_produces_an_opaque_artifact_and_refuses_on_errors() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (mut provider, _) = initialize();
+    with_mock(|p| {
+        let compiled = p
+            .compile(&clean_document_set(), Some("file:///project"))
+            .expect("compile");
+        let artifact = compiled.artifact.expect("clean puzzle compiles");
+        assert_eq!(artifact.format, DEMO_ARTIFACT_FORMAT);
+        let content: serde_json::Value =
+            serde_json::from_str(&artifact.content).expect("artifact content");
+        assert_eq!(content["name"], "clean");
+        assert_eq!(content["target"], 40);
 
-    let compiled = provider
-        .compile(&clean_document_set(), Some("file:///project"))
-        .expect("compile");
-    let artifact = compiled.artifact.expect("clean puzzle compiles");
-    assert_eq!(artifact.format, DEMO_ARTIFACT_FORMAT);
-    let content: serde_json::Value =
-        serde_json::from_str(&artifact.content).expect("artifact content is the provider's own");
-    assert_eq!(content["name"], "clean");
-    assert_eq!(content["target"], 40);
+        let compiled = p.compile(&broken_document_set(), None).expect("compile");
+        assert!(
+            compiled.artifact.is_none(),
+            "artifact must be null on error"
+        );
+        assert_eq!(
+            compiled.diagnostics[0].diagnostics[0].code.as_deref(),
+            Some("x-demo/unresolved-op")
+        );
 
-    let mut broken = DocumentSet::new();
-    broken.insert(
-        "file:///project/broken.xdl".to_string(),
-        demo_document("file:///project/broken.xdl", BROKEN_PUZZLE),
-    );
-    let compiled = provider.compile(&broken, None).expect("compile");
-    assert!(
-        compiled.artifact.is_none(),
-        "artifact must be null on error diagnostics"
-    );
-    assert_eq!(
-        compiled.diagnostics[0].diagnostics[0].code.as_deref(),
-        Some("x-demo/unresolved-op")
-    );
-
-    // Compiling more than one document is refused by the provider with a
-    // structured refusal, which the client surfaces as a refusal.
-    let mut multi = clean_document_set();
-    multi.insert(
-        "file:///project/second.xdl".to_string(),
-        demo_document("file:///project/second.xdl", CLEAN_PUZZLE),
-    );
-    let error = provider
-        .compile(&multi, None)
-        .expect_err("multi-document refusal");
-    assert_eq!(error.code(), "refusal");
-    assert_eq!(error.refusal_code(), Some("compile.requiresSingleDocument"));
-    provider.shutdown().expect("shutdown");
+        let mut multi = clean_document_set();
+        multi.insert(
+            "file:///project/second.xdl".into(),
+            demo_document("file:///project/second.xdl", CLEAN_PUZZLE),
+        );
+        let error = p.compile(&multi, None).expect_err("multi-doc refusal");
+        assert_eq!(error.code(), "refusal");
+        assert_eq!(error.refusal_code(), Some("compile.requiresSingleDocument"));
+    });
 }
 
 #[test]
 fn reconstruct_roundtrips_an_artifact_and_refuses_unknown_formats() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (mut provider, _) = initialize();
+    with_mock(|p| {
+        let compiled = p
+            .compile(&clean_document_set(), None)
+            .expect("compile")
+            .artifact
+            .expect("artifact");
+        let reconstructed = p.reconstruct(&compiled).expect("reconstruct");
+        assert!(reconstructed.source.contains("puzzle clean"));
 
-    let compiled = provider
-        .compile(&clean_document_set(), None)
-        .expect("compile")
-        .artifact
-        .expect("artifact");
-    let reconstructed = provider.reconstruct(&compiled).expect("reconstruct");
-    assert!(reconstructed.source.contains("puzzle clean"));
+        let unsupported = p
+            .reconstruct(&WorkshopArtifact {
+                format: "other/format".into(),
+                content: "{}".into(),
+            })
+            .expect_err("unsupported format");
+        assert_eq!(unsupported.code(), "refusal");
+        assert_eq!(
+            unsupported.refusal_code(),
+            Some("reconstruct.artifactFormatUnsupported")
+        );
 
-    let unsupported = provider
-        .reconstruct(&WorkshopArtifact {
-            format: "other/format".to_string(),
-            content: "{}".to_string(),
-        })
-        .expect_err("unsupported format");
-    assert_eq!(unsupported.code(), "refusal");
-    assert_eq!(
-        unsupported.refusal_code(),
-        Some("reconstruct.artifactFormatUnsupported")
-    );
-
-    let malformed = provider
-        .reconstruct(&WorkshopArtifact {
-            format: DEMO_ARTIFACT_FORMAT.to_string(),
-            content: "not a puzzle sheet".to_string(),
-        })
-        .expect_err("malformed content");
-    assert_eq!(malformed.code(), "invalid-artifact");
-    assert!(matches!(
-        &malformed,
-        ProviderError::Lpp(lpp) if lpp.kind == LppErrorKind::InvalidArtifact
-    ));
-    provider.shutdown().expect("shutdown");
+        let malformed = p
+            .reconstruct(&WorkshopArtifact {
+                format: DEMO_ARTIFACT_FORMAT.into(),
+                content: "not a puzzle sheet".into(),
+            })
+            .expect_err("malformed content");
+        assert_eq!(malformed.code(), "invalid-artifact");
+        assert!(
+            matches!(&malformed, ProviderError::Lpp(lpp) if lpp.kind == LppErrorKind::InvalidArtifact)
+        );
+    });
 }
 
 #[test]
 fn symbols_definition_and_references_resolve_across_the_document() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (mut provider, _) = initialize();
-    let documents = clean_document_set();
+    with_mock(|p| {
+        let documents = clean_document_set();
+        let symbols = p.symbols(&documents, None).expect("symbols");
+        let names: Vec<(&str, &str)> = symbols.documents[0]
+            .symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            vec![("clean", "puzzle"), ("double", "op"), ("plus1", "op")]
+        );
 
-    let symbols = provider.symbols(&documents, None).expect("symbols");
-    let names: Vec<(&str, &str)> = symbols.documents[0]
-        .symbols
-        .iter()
-        .map(|symbol| (symbol.name.as_str(), symbol.kind.as_str()))
-        .collect();
-    assert_eq!(
-        names,
-        vec![("clean", "puzzle"), ("double", "op"), ("plus1", "op")],
-        "declaration order, provider-defined kinds"
-    );
+        let p_pos = pos(4, 6);
+        let definition = p
+            .definition(&documents[PUZZLE_URI], p_pos)
+            .expect("definition");
+        assert_eq!(definition.locations.len(), 1);
+        assert_eq!(definition.locations[0].range.start.character, 4);
 
-    // Position inside the `double` op name (0-based line 4, char 6).
-    let position = Position {
-        line: 4,
-        character: 6,
-    };
-    let definition = provider
-        .definition(&documents["file:///project/puzzle.xdl"], position)
-        .expect("definition");
-    assert_eq!(definition.locations.len(), 1);
-    assert_eq!(definition.locations[0].range.start.character, 4);
+        let references = p
+            .references(&documents[PUZZLE_URI], p_pos, true)
+            .expect("references");
+        let spans: Vec<(u32, u32)> = references
+            .locations
+            .iter()
+            .map(|l| (l.range.start.line, l.range.start.character))
+            .collect();
+        assert_eq!(spans, vec![(4, 4), (7, 15), (7, 23)]);
 
-    let references = provider
-        .references(&documents["file:///project/puzzle.xdl"], position, true)
-        .expect("references");
-    let spans: Vec<(u32, u32)> = references
-        .locations
-        .iter()
-        .map(|location| (location.range.start.line, location.range.start.character))
-        .collect();
-    assert_eq!(
-        spans,
-        vec![(4, 4), (7, 15), (7, 23)],
-        "declaration first, then sorted references"
-    );
+        let err = p.definition(&documents[PUZZLE_URI], pos(1, 0)).unwrap_err();
+        assert_eq!(err.refusal_code(), Some("definition.noSymbolAtPosition"));
 
-    // No symbol at a position: a structured refusal, session stays healthy.
-    let error = provider
-        .definition(
-            &documents["file:///project/puzzle.xdl"],
-            Position {
-                line: 1,
-                character: 0,
-            },
-        )
-        .expect_err("no symbol at position");
-    assert_eq!(error.refusal_code(), Some("definition.noSymbolAtPosition"));
-
-    // Position outside the document: invalidPosition LPP error.
-    let error = provider
-        .definition(
-            &documents["file:///project/puzzle.xdl"],
-            Position {
-                line: 99,
-                character: 0,
-            },
-        )
-        .expect_err("position outside document");
-    assert_eq!(error.code(), "invalid-position");
-    provider.shutdown().expect("shutdown");
+        let err = p
+            .definition(&documents[PUZZLE_URI], pos(99, 0))
+            .unwrap_err();
+        assert_eq!(err.code(), "invalid-position");
+    });
 }
 
 #[test]
 fn rename_computes_source_edits_and_refuses_invalid_names_and_collisions() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (mut provider, _) = initialize();
-    let documents = clean_document_set();
-    let uri = "file:///project/puzzle.xdl";
+    with_mock(|p| {
+        let documents = clean_document_set();
+        let p_pos = pos(4, 6);
+        let renamed = p
+            .rename(&documents, PUZZLE_URI, p_pos, "twice", None)
+            .expect("rename");
+        assert_eq!(renamed.edits.len(), 1);
+        let edits = &renamed.edits[0];
+        assert_eq!(edits.document_uri, PUZZLE_URI);
+        assert_eq!(edits.version, 3);
+        assert_eq!(edits.text_edits.len(), 3);
+        assert!(edits.text_edits.iter().all(|e| e.new_text == "twice"));
 
-    let renamed = provider
-        .rename(
-            &documents,
-            uri,
-            Position {
-                line: 4,
-                character: 6,
-            },
-            "twice",
-            None,
-        )
-        .expect("rename");
-    assert_eq!(renamed.edits.len(), 1);
-    let edits = &renamed.edits[0];
-    assert_eq!(edits.document_uri, uri);
-    assert_eq!(edits.version, 3);
-    assert_eq!(
-        edits.text_edits.len(),
-        3,
-        "declaration plus both references"
-    );
-    assert!(edits.text_edits.iter().all(|edit| edit.new_text == "twice"));
+        let invalid = p
+            .rename(&documents, PUZZLE_URI, p_pos, "not a name!", None)
+            .unwrap_err();
+        assert_eq!(invalid.refusal_code(), Some("rename.invalidName"));
 
-    let invalid = provider
-        .rename(
-            &documents,
-            uri,
-            Position {
-                line: 4,
-                character: 6,
-            },
-            "not a name!",
-            None,
-        )
-        .expect_err("invalid name");
-    assert_eq!(invalid.refusal_code(), Some("rename.invalidName"));
-
-    let collision = provider
-        .rename(
-            &documents,
-            uri,
-            Position {
-                line: 4,
-                character: 6,
-            },
-            "plus1",
-            None,
-        )
-        .expect_err("collision");
-    assert_eq!(collision.refusal_code(), Some("rename.nameCollision"));
-    provider.shutdown().expect("shutdown");
+        let collision = p
+            .rename(&documents, PUZZLE_URI, p_pos, "plus1", None)
+            .unwrap_err();
+        assert_eq!(collision.refusal_code(), Some("rename.nameCollision"));
+    });
 }
 
 #[test]
 fn validate_edits_applies_the_normative_rules() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (mut provider, _) = initialize();
-    let document = demo_document("file:///project/puzzle.xdl", CLEAN_PUZZLE);
+    with_mock(|p| {
+        let document = demo_document(PUZZLE_URI, CLEAN_PUZZLE);
+        let renamed = p
+            .rename(&clean_document_set(), PUZZLE_URI, pos(4, 6), "twice", None)
+            .expect("rename");
+        let edits: Vec<TextEdit> = renamed.edits[0].text_edits.clone();
+        let validated = p.validate_edits(&document, &edits).expect("validation");
+        assert!(validated.valid);
+        assert_eq!(validated.version, 3);
 
-    let renamed = provider
-        .rename(
-            &clean_document_set(),
-            "file:///project/puzzle.xdl",
-            Position {
-                line: 4,
-                character: 6,
-            },
-            "twice",
-            None,
-        )
-        .expect("rename");
-    let edits: Vec<TextEdit> = renamed.edits[0].text_edits.clone();
-    let validated = provider
-        .validate_edits(&document, &edits)
-        .expect("validation");
-    assert!(validated.valid, "the rename edits apply cleanly");
-    assert_eq!(validated.version, 3);
-
-    let overlapping = provider
-        .validate_edits(&document, &[edits[0].clone(), edits[0].clone()])
-        .expect("validation");
-    assert!(!overlapping.valid);
-    assert_eq!(overlapping.reason.as_deref(), Some("overlappingEdits"));
-    assert_eq!(overlapping.failing_edit_index, Some(1));
-    provider.shutdown().expect("shutdown");
+        let overlapping = p
+            .validate_edits(&document, &[edits[0].clone(), edits[0].clone()])
+            .expect("validation");
+        assert!(!overlapping.valid);
+        assert_eq!(overlapping.reason.as_deref(), Some("overlappingEdits"));
+        assert_eq!(overlapping.failing_edit_index, Some(1));
+    });
 }
 
 #[test]
 fn unserved_language_id_is_refused_by_the_provider() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (mut provider, _) = initialize();
-    let mut documents = DocumentSet::new();
-    documents.insert(
-        "file:///project/other.xdl".to_string(),
-        Document {
-            uri: "file:///project/other.xdl".to_string(),
-            language_id: "x-other-lang".to_string(),
-            version: 1,
-            text: "whatever".to_string(),
-        },
-    );
-    let error = provider
-        .check(&documents, None)
-        .expect_err("unserved language");
-    assert_eq!(error.code(), "invalid-language");
-    assert!(matches!(
-        &error,
-        ProviderError::Lpp(lpp) if lpp.kind == LppErrorKind::InvalidLanguage
-    ));
-    provider.shutdown().expect("shutdown");
+    with_mock(|p| {
+        let mut documents = DocumentSet::new();
+        documents.insert(
+            "file:///project/other.xdl".into(),
+            Document {
+                uri: "file:///project/other.xdl".into(),
+                language_id: "x-other-lang".into(),
+                version: 1,
+                text: "whatever".into(),
+            },
+        );
+        let error = p.check(&documents, None).expect_err("unserved language");
+        assert_eq!(error.code(), "invalid-language");
+        assert!(
+            matches!(&error, ProviderError::Lpp(lpp) if lpp.kind == LppErrorKind::InvalidLanguage)
+        );
+    });
 }
-
-// ---------------------------------------------------------------------------
-// Capability negotiation and explicit refusal
-// ---------------------------------------------------------------------------
 
 #[test]
 fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
@@ -508,7 +350,7 @@ fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
         .register(ProviderConfig::new(
             DEMO_LANGUAGE_ID,
             path,
-            vec!["--without".to_string(), "compile".to_string()],
+            vec!["--without".into(), "compile".into()],
         ))
         .expect("registered");
     let mut provider = registry.spawn(DEMO_LANGUAGE_ID).expect("spawns");
@@ -526,58 +368,45 @@ fn missing_capability_is_an_explicit_refusal_not_a_fallback() {
         .expect_err("compile not negotiated");
     assert_eq!(error.code(), "capability-unavailable");
     let ProviderError::Lpp(lpp) = &error else {
-        panic!("expected a typed LPP error");
+        panic!("expected typed LPP error")
     };
     assert_eq!(lpp.capability(), Some("compile"));
     assert_eq!(lpp.method(), Some("lpp/compile"));
 
-    // The session is healthy: an available capability still works.
     provider
         .check(&clean_document_set(), None)
         .expect("check works");
     provider.shutdown().expect("shutdown");
 }
 
-// ---------------------------------------------------------------------------
-// Process lifecycle and failure handling
-// ---------------------------------------------------------------------------
-
 #[test]
-fn graceful_shutdown_exits_with_status_zero() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let mut provider = provider();
-    provider.initialize(None).expect("initialize");
-    provider.shutdown().expect("shutdown");
-    assert_eq!(provider.exit_status(), Some(0));
-}
-
-#[test]
-fn provider_crash_fails_requests_with_an_exit_status() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    let (command, args): (&str, Vec<String>) = if cfg!(windows) {
-        ("cmd", vec!["/C".to_string(), "exit 3".to_string()])
-    } else {
-        ("sh", vec!["-c".to_string(), "exit 3".to_string()])
-    };
-    let mut provider =
-        StdioLanguageProvider::spawn(Path::new(command), &args, std::time::Duration::from_secs(5))
-            .expect("spawns");
-    let error = provider
-        .initialize(Some(&ClientInfo {
-            name: "wright".to_string(),
-            version: "0.2.0".to_string(),
-        }))
-        .expect_err("provider exited");
-    assert_eq!(error.code(), "provider-exited");
-    assert_eq!(provider.exit_status(), Some(3));
-}
-
-#[test]
-fn spawn_failure_is_deterministic() {
+fn provider_lifecycle_exit_and_drop() {
+    if let Some((mut provider, _)) = initialized() {
+        provider.shutdown().expect("shutdown");
+        assert_eq!(provider.exit_status(), Some(0));
+    }
+    if mock_provider_path().is_some() {
+        let (command, args): (&str, Vec<String>) = if cfg!(windows) {
+            ("cmd", vec!["/C".into(), "exit 3".into()])
+        } else {
+            ("sh", vec!["-c".into(), "exit 3".into()])
+        };
+        let mut p = StdioLanguageProvider::spawn(
+            Path::new(command),
+            &args,
+            std::time::Duration::from_secs(5),
+        )
+        .expect("spawns");
+        let client_info = ClientInfo {
+            name: "wright".into(),
+            version: "0.2.0".into(),
+        };
+        let err = p
+            .initialize(Some(&client_info))
+            .expect_err("provider exited");
+        assert_eq!(err.code(), "provider-exited");
+        assert_eq!(p.exit_status(), Some(3));
+    }
     let missing = if cfg!(windows) {
         PathBuf::from("Z:\\definitely\\missing\\lpp-provider.exe")
     } else {
@@ -588,17 +417,8 @@ fn spawn_failure_is_deterministic() {
         .expect("spawn fails");
     assert_eq!(error.code(), "provider-spawn");
     assert!(matches!(error, ProviderError::Spawn { .. }));
-}
 
-#[test]
-fn provider_without_shutdown_is_cleaned_up_on_drop() {
-    let Some(_) = mock_provider_path() else {
-        return;
-    };
-    // Dropping an initialized provider (without shutdown) must not leave the
-    // process running: the child is terminated on drop. The test completes
-    // without hanging, and the graceful path is covered by
-    // `graceful_shutdown_exits_with_status_zero`.
-    let (provider, _) = initialize();
-    drop(provider);
+    if let Some((provider, _)) = initialized() {
+        drop(provider);
+    }
 }

@@ -6,49 +6,77 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// The path of the `wright` binary under test.
 fn wright() -> &'static str {
     env!("CARGO_BIN_EXE_wright")
 }
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn corpus_workshop(fixture_id: &str) -> String {
+fn corpus_str(id: &str, file: &str) -> String {
     std::fs::read_to_string(
         workspace_root()
             .join("compatibility/fixtures")
-            .join(fixture_id)
-            .join("workshop.ws"),
+            .join(id)
+            .join(file),
     )
     .unwrap()
 }
 
-fn temp_file(name: &str, content: &str) -> PathBuf {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "wright-cli-test-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(name);
-    std::fs::write(&path, content).unwrap();
-    path
+fn corpus_workshop(id: &str) -> String {
+    corpus_str(id, "workshop.ws")
 }
 
-fn temp_dir() -> PathBuf {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "wright-cli-dir-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "wcli-dir-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+    fn path(&self) -> &Path {
+        &self.0
+    }
+    fn str(&self) -> &str {
+        self.0.to_str().unwrap()
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+struct Fixture(#[allow(dead_code)] TempDir, PathBuf);
+
+impl Fixture {
+    fn new(name: &str, content: &str) -> Self {
+        let dir = TempDir::new();
+        let path = dir.path().join(name);
+        std::fs::write(&path, content).unwrap();
+        Self(dir, path)
+    }
+    fn corpus(id: &str) -> Self {
+        Self::new("workshop.ws", &corpus_workshop(id))
+    }
+    fn corpus_opy(id: &str) -> Self {
+        Self::new("source.opy", &corpus_str(id, "source.opy"))
+    }
+    fn path(&self) -> &Path {
+        &self.1
+    }
+    fn str(&self) -> &str {
+        self.1.to_str().unwrap()
+    }
 }
 
 fn run(args: &[&str]) -> std::process::Output {
@@ -120,473 +148,343 @@ fn parse_json(output: &[u8]) -> serde_json::Value {
     serde_json::from_slice(output).expect("stdout is one JSON envelope")
 }
 
-fn command_result(output: &std::process::Output) -> String {
-    format!(
-        "status: {}\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )
+trait OutputExt {
+    fn stdout_str(&self) -> String;
+    fn stderr_str(&self) -> String;
+    fn json(&self) -> serde_json::Value;
+    fn code(&self) -> i32;
+    fn ok(&self) -> bool {
+        self.code() == 0
+    }
+    fn diag_code(&self) -> String {
+        self.json()["diagnostics"][0]["code"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+}
+
+impl OutputExt for std::process::Output {
+    fn stdout_str(&self) -> String {
+        String::from_utf8_lossy(&self.stdout).to_string()
+    }
+    fn stderr_str(&self) -> String {
+        String::from_utf8_lossy(&self.stderr).to_string()
+    }
+    fn json(&self) -> serde_json::Value {
+        parse_json(&self.stdout)
+    }
+    fn code(&self) -> i32 {
+        self.status.code().unwrap_or(-1)
+    }
+}
+
+fn assert_exit_diag(args: &[&str], code: i32, diag: &str) -> serde_json::Value {
+    let out = run(args);
+    assert_eq!(out.code(), code);
+    assert_eq!(out.diag_code(), diag);
+    out.json()
 }
 
 #[test]
-fn compile_over_workshop_file_emits_correct_text() {
-    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    let output = run(&["compile", path.to_str().unwrap()]);
-    assert!(output.status.success());
-    assert!(output.stderr.is_empty(), "stderr clean on success");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Disable Inspector Recording"), "{stdout}");
-    assert!(stdout.contains("Ongoing - Global"));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
+fn compile_and_check_clean_inputs() {
+    let file = Fixture::corpus("synthetic/basic-rule");
+    let check_out = run(&["check", file.str()]);
+    assert_eq!(check_out.code(), 0);
+    assert!(check_out.stdout_str().contains("PASS check"));
 
-#[test]
-fn compile_writes_output_file_and_reports_envelope() {
-    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    let out_path = temp_file("emitted.txt", "");
-    let text_output = run(&[
-        "compile",
-        path.to_str().unwrap(),
-        "-o",
-        out_path.to_str().unwrap(),
-    ]);
-    assert!(text_output.status.success());
+    let out = run(&["compile", file.str()]);
+    assert!(out.ok() && out.stderr.is_empty());
+    let stdout = out.stdout_str();
+    assert!(stdout.contains("Disable Inspector Recording") && stdout.contains("Ongoing - Global"));
+
+    let emit = Fixture::new("emitted.txt", "");
+    let text = run(&["compile", file.str(), "-o", emit.str()]);
+    assert!(text.ok() && text.stdout.is_empty() && text.stderr.is_empty());
+
+    let output = run(&["compile", file.str(), "-o", emit.str(), "-f", "json"]);
+    assert!(output.ok() && output.stderr.is_empty());
+    let env = output.json();
+    assert!(env["ok"] == true && env["exit"] == 0 && env["command"] == "compile");
+    assert_eq!(env["wright"]["contract"], "wright-result/v1");
+    assert_eq!(env["result"]["output"]["written_to"], emit.str());
     assert!(
-        text_output.stdout.is_empty(),
-        "-o keeps artifacts off stdout"
+        std::fs::read_to_string(emit.path())
+            .unwrap()
+            .contains("Disable Inspector Recording")
     );
-    assert!(text_output.stderr.is_empty());
-
-    let output = run(&[
-        "compile",
-        path.to_str().unwrap(),
-        "-o",
-        out_path.to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], true);
-    assert_eq!(envelope["exit"], 0);
-    assert_eq!(envelope["command"], "compile");
-    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
-    assert_eq!(
-        envelope["result"]["output"]["written_to"].as_str().unwrap(),
-        out_path.to_str().unwrap()
-    );
-    let stored = std::fs::read_to_string(&out_path).unwrap();
-    assert!(stored.contains("Disable Inspector Recording"));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn check_over_clean_input_exits_zero() {
-    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    let output = run(&["check", path.to_str().unwrap()]);
-    assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("PASS check"));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
 fn terminal_renderer_uses_command_specific_hierarchy() {
-    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    for (command, heading, detail) in [
+    let file = Fixture::corpus("synthetic/control-flow");
+    for (cmd, head, det) in [
         ("check", "PASS check", "diagnostic(s)"),
         ("lint", "WARN lint", "Lint findings"),
         ("analyze", "PASS analyze", "Program overview"),
         ("inspect", "PASS inspect", "Program structure"),
     ] {
-        let output = run(&[
-            command,
-            path.to_str().unwrap(),
+        let out = run(&[
+            cmd,
+            file.str(),
             "--renderer",
             "terminal",
             "--color",
             "never",
         ]);
-        assert!(output.status.code().is_some(), "{command} exited by signal");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains(heading), "{command}: {stdout}");
-        assert!(stdout.contains(detail), "{command}: {stdout}");
+        assert!(out.status.code().is_some());
+        let s = out.stdout_str();
+        assert!(s.contains(head) && s.contains(det));
     }
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
 fn analyze_real_project_report_is_bounded_and_ranked() {
-    let path = temp_file(
+    let file = Fixture::new(
         "pixelart.txt",
         &corpus_workshop("real-world/overpy-pixelart"),
     );
-    let output = run(&[
+    let out = run(&[
         "analyze",
-        path.to_str().unwrap(),
+        file.str(),
         "--renderer",
         "terminal",
         "--color",
         "never",
     ]);
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Program overview"));
-    assert!(stdout.contains("Control-flow summary"));
-    assert!(stdout.contains("Top rules (heuristic ranking"));
-    assert!(stdout.contains("State and coupling"));
-    assert!(stdout.contains("[static]"));
+    assert!(out.ok());
+    let s = out.stdout_str();
+    assert!(s.contains("Program overview") && s.contains("Control-flow summary"));
     assert!(
-        stdout.lines().count() <= 40,
-        "report is not bounded:\n{stdout}"
+        s.contains("Top rules (heuristic ranking")
+            && s.contains("State and coupling")
+            && s.contains("[static]")
     );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    assert!(s.lines().count() <= 40);
 }
 
 #[test]
-fn check_over_malformed_input_exits_one_with_structured_diagnostics() {
-    // Enough locale evidence to pass detection, then a syntax error.
-    let path = temp_file(
+fn check_malformed_and_query_commands() {
+    let file = Fixture::new(
         "broken.txt",
         "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
     );
-    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stderr.is_empty(), "JSON mode: no stderr");
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["exit"], 1);
-    let diagnostic = &envelope["diagnostics"][0];
-    assert!(diagnostic["code"].is_string());
-    assert_eq!(diagnostic["severity"], "error");
-    assert!(diagnostic["span"].is_object(), "diagnostics carry spans");
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
+    let out = run(&["check", file.str(), "-f", "json"]);
+    assert_eq!(out.code(), 1);
+    assert!(out.stderr.is_empty());
+    let env = out.json();
+    assert_eq!(env["ok"], false);
+    assert_eq!(env["exit"], 1);
+    let diag = &env["diagnostics"][0];
+    assert!(diag["code"].is_string() && diag["severity"] == "error" && diag["span"].is_object());
 
-#[test]
-fn check_excludes_configurable_lint_findings() {
-    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
-    assert_eq!(output.status.code(), Some(0), "warnings do not fail check");
-    let envelope = parse_json(&output.stdout);
-    assert!(
-        envelope["diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|diagnostic| diagnostic["code"] != "min-wait-loop")
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
+    let ctrl = Fixture::corpus("synthetic/control-flow");
+    let chk = run(&["check", ctrl.str(), "-f", "json"]);
+    assert_eq!(chk.code(), 0);
+    let diags = chk.json()["diagnostics"].as_array().unwrap().clone();
+    assert!(diags.iter().all(|d| d["code"] != "min-wait-loop"));
 
-#[test]
-fn analyze_over_workshop_input_reports_semantic_facts() {
-    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    let output = run(&["analyze", path.to_str().unwrap(), "-f", "json"]);
-    assert!(output.status.success());
-    let envelope = parse_json(&output.stdout);
-    assert!(envelope["result"]["program"]["findings"].is_null());
+    let ana = run(&["analyze", ctrl.str(), "-f", "json"]);
+    assert!(ana.ok());
+    let env_a = ana.json();
+    assert!(env_a["result"]["program"]["findings"].is_null());
     assert!(
-        !envelope["result"]["facts"]["symbols"]
+        !env_a["result"]["facts"]["symbols"]
             .as_array()
             .unwrap()
             .is_empty()
     );
     assert!(
-        !envelope["result"]["facts"]["rules"]
+        !env_a["result"]["facts"]["rules"]
             .as_array()
             .unwrap()
             .is_empty()
     );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
 
-#[test]
-fn inspect_over_workshop_input_lists_rules_and_symbols() {
-    let path = temp_file("decl.txt", &corpus_workshop("synthetic/declarations-rules"));
-    let output = run(&["inspect", path.to_str().unwrap(), "-f", "json"]);
-    assert!(output.status.success());
-    let envelope = parse_json(&output.stdout);
-    assert!(!envelope["result"]["rules"].as_array().unwrap().is_empty());
-    assert!(!envelope["result"]["symbols"].as_array().unwrap().is_empty());
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let decl = Fixture::corpus("synthetic/declarations-rules");
+    let insp = run(&["inspect", decl.str(), "-f", "json"]);
+    assert!(insp.ok());
+    assert!(
+        !insp.json()["result"]["rules"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !insp.json()["result"]["symbols"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
-
-// ── Lint (#98) ───────────────────────────────────────────────────────────────
 
 #[test]
 fn lint_over_workshop_input_reports_findings_in_text_and_json() {
-    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    // Text mode: summary line, findings with evidence and source spans.
-    let output = run(&["lint", path.to_str().unwrap()]);
+    let file = Fixture::corpus("synthetic/control-flow");
+    let text = run(&["lint", file.str()]);
+    assert!(text.ok());
+    let stdout = text.stdout_str();
     assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        stdout.contains("WARN lint")
+            && stdout.contains("min-wait-loop")
+            && stdout.contains("evidence:")
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("WARN lint"), "summary line: {stdout}");
-    assert!(stdout.contains("min-wait-loop"), "findings: {stdout}");
+
+    let json = run(&["lint", file.str(), "-f", "json"]);
+    assert!(json.ok());
+    let env = json.json();
+    assert_eq!(env["command"], "lint");
+    assert_eq!(env["ok"], true);
+    assert_eq!(env["result"]["input_identity"].as_str().unwrap().len(), 64);
+    let findings = env["result"]["findings"].as_array().unwrap();
+    assert!(!findings.is_empty());
     assert!(
-        stdout.contains("evidence:"),
-        "text mode exposes the evidence class: {stdout}"
+        findings
+            .iter()
+            .all(|f| f["evidence"].is_string() && f["span"]["path"].is_string())
     );
-    // JSON mode: the lint envelope with findings, rules, and config.
-    let output = run(&["lint", path.to_str().unwrap(), "-f", "json"]);
-    assert!(output.status.success());
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["command"], "lint");
-    assert_eq!(envelope["ok"], true);
-    assert!(
-        envelope["result"]["input_identity"].as_str().unwrap().len() == 64,
-        "lint carries the SHA-256 input identity"
-    );
-    let findings = envelope["result"]["findings"].as_array().unwrap();
-    assert!(!findings.is_empty(), "control-flow produces findings");
-    for finding in findings {
-        assert!(finding["evidence"].is_string(), "findings carry evidence");
-        assert!(
-            finding["span"]["path"].is_string(),
-            "finding spans carry the resolved path"
-        );
-    }
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    assert!(!rules.is_empty(), "first-party rules are reported");
+    let rules = env["result"]["rules"].as_array().unwrap();
+    assert!(!rules.is_empty());
     assert_eq!(
-        envelope["result"]["config"]["rules"]
-            .as_object()
-            .unwrap()
-            .len(),
+        env["result"]["config"]["rules"].as_object().unwrap().len(),
         rules.len()
     );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
 fn span_path_is_consistent_across_input_spellings() {
-    // Lint resolves the same root-relative `span.path` for the absolute,
-    // bare-name (cwd), and dir-relative spellings of the same Workshop file.
-    // Each subprocess gets its own cwd, so the bare-name spelling is
-    // exercised end-to-end exactly as in the issue.
-    let dir = temp_dir();
-    std::fs::create_dir_all(dir.join("sub")).unwrap();
-    std::fs::write(
-        dir.join("sub").join("loop.txt"),
-        corpus_workshop("synthetic/control-flow"),
-    )
-    .unwrap();
+    let dir = TempDir::new();
+    let sub = dir.path().join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let file_path = sub.join("loop.txt");
+    std::fs::write(&file_path, corpus_workshop("synthetic/control-flow")).unwrap();
 
-    let absolute = run(&[
-        "lint",
-        dir.join("sub").join("loop.txt").to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
-    assert!(absolute.status.success(), "{}", command_result(&absolute));
-    let absolute_path = parse_json(&absolute.stdout)["result"]["findings"][0]["span"]["path"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let bare = Command::new(wright())
-        .args(["lint", "loop.txt", "-f", "json"])
-        .current_dir(dir.join("sub"))
-        .stdin(Stdio::null())
-        .output()
-        .expect("wright runs");
-    assert!(bare.status.success(), "{}", command_result(&bare));
-    let bare_path = parse_json(&bare.stdout)["result"]["findings"][0]["span"]["path"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let relative = Command::new(wright())
-        .args(["lint", "sub/loop.txt", "-f", "json"])
-        .current_dir(&dir)
-        .stdin(Stdio::null())
-        .output()
-        .expect("wright runs");
-    assert!(relative.status.success(), "{}", command_result(&relative));
-    let relative_path = parse_json(&relative.stdout)["result"]["findings"][0]["span"]["path"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    assert_eq!(absolute_path, "loop.txt");
-    assert_eq!(
-        bare_path, absolute_path,
-        "the bare-name (cwd) spelling must agree with the absolute spelling"
-    );
-    assert_eq!(
-        relative_path, absolute_path,
-        "the dir-relative spelling must agree with the absolute spelling"
-    );
-    let _ = std::fs::remove_dir_all(&dir);
+    let path_of = |out: std::process::Output| {
+        assert!(out.ok());
+        out.json()["result"]["findings"][0]["span"]["path"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let run_in = |d: &Path, p: &str| {
+        Command::new(wright())
+            .args(["lint", p, "-f", "json"])
+            .current_dir(d)
+            .output()
+            .unwrap()
+    };
+    let abs = path_of(run(&["lint", file_path.to_str().unwrap(), "-f", "json"]));
+    assert_eq!(abs, "loop.txt");
+    assert_eq!(path_of(run_in(&sub, "loop.txt")), abs);
+    assert_eq!(path_of(run_in(dir.path(), "sub/loop.txt")), abs);
 }
 
 #[test]
 fn lint_rule_flags_control_findings() {
-    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    // --disable-rule removes the rule's findings and reports enabled:false.
-    let output = run(&[
+    let file = Fixture::corpus("synthetic/control-flow");
+    let out = run(&[
         "lint",
-        path.to_str().unwrap(),
+        file.str(),
         "--disable-rule",
         "min-wait-loop",
         "-f",
         "json",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    assert!(out.ok());
+    let env = out.json();
+    let findings = env["result"]["findings"].as_array().unwrap();
+    assert!(findings.iter().all(|f| f["code"] != "min-wait-loop"));
+    let rules = env["result"]["rules"].as_array().unwrap();
+    assert_eq!(
+        rules.iter().find(|r| r["id"] == "min-wait-loop").unwrap()["enabled"],
+        false
     );
-    let envelope = parse_json(&output.stdout);
-    let findings = envelope["result"]["findings"].as_array().unwrap();
-    assert!(
-        findings
-            .iter()
-            .all(|finding| finding["code"] != "min-wait-loop"),
-        "the disabled rule must produce no findings"
-    );
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    let min_wait = rules
-        .iter()
-        .find(|rule| rule["id"] == "min-wait-loop")
-        .unwrap();
-    assert_eq!(min_wait["enabled"], false);
 
-    // --rule-severity overrides the effective severity of a rule. The
-    // control-flow fixture produces no expensive-loop-check findings, so
-    // the assertion is on the rules metadata.
-    let output = run(&[
+    let out = run(&[
         "lint",
-        path.to_str().unwrap(),
+        file.str(),
         "--rule-severity",
         "expensive-loop-check:warn",
         "-f",
         "json",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let envelope = parse_json(&output.stdout);
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    let exp_loop = rules
+    assert!(out.ok());
+    let exp_loop = out.json()["result"]["rules"]
+        .as_array()
+        .unwrap()
         .iter()
-        .find(|rule| rule["id"] == "expensive-loop-check")
-        .unwrap();
+        .find(|r| r["id"] == "expensive-loop-check")
+        .unwrap()
+        .clone();
     assert_eq!(exp_loop["effectiveSeverity"], "warning");
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
 fn lint_flags_are_usage_errors_for_other_commands() {
-    for flags in [
+    for args in [
         &["check", "--disable-rule", "min-wait-loop"][..],
-        &["analyze", "--rule-severity", "min-wait-loop:info"][..],
+        &["analyze", "--rule-severity", "min-wait-loop:info"],
     ] {
-        let output = run(flags);
-        assert_eq!(
-            output.status.code(),
-            Some(2),
-            "{flags:?} must be a usage error"
-        );
-        assert!(output.stdout.is_empty(), "usage errors write stderr only");
+        let out = run(args);
+        assert!(out.code() == 2 && out.stdout.is_empty());
     }
 }
 
 #[test]
-fn stdin_workshop_works_and_legacy_protocol_is_refused() {
-    // Workshop text on stdin.
-    let output = run_with_stdin(&["check", "-"], &corpus_workshop("synthetic/basic-rule"));
-    assert_eq!(output.status.code(), Some(0));
+fn stdin_and_unknown_flags_and_extensions() {
+    let out = run_with_stdin(&["check", "-"], &corpus_workshop("synthetic/basic-rule"));
+    assert_eq!(out.code(), 0);
 
-    // Legacy protocol JSON is recognized but no longer parsed by Wright.
     let protocol = r#"{"protocol":{"name":"wright/opy-hir","version":"1.1.0"}}"#;
-    let output = run_with_stdin(&["check", "-"], protocol);
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "stdin protocol: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("input-kind-unsupported"));
-}
+    let out_proto = run_with_stdin(&["check", "-"], protocol);
+    assert_eq!(out_proto.code(), 1);
+    assert!(out_proto.stderr_str().contains("input-kind-unsupported"));
 
-#[test]
-fn stdin_opy_requires_an_entry_for_provider_workflows() {
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-    )
-    .unwrap();
-    let output = run_with_stdin(&["compile", "-", "--kind", "opy", "-f", "json"], &source);
-    assert_eq!(output.status.code(), Some(3));
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_eq!(
-        envelope["diagnostics"][0]["code"],
-        "source-provider-unsupported"
+    let out_opy = run_with_stdin(
+        &["compile", "-", "--kind", "opy", "-f", "json"],
+        &corpus_str("synthetic/basic-rule", "source.opy"),
     );
-}
+    assert_eq!(out_opy.code(), 3);
+    assert_eq!(out_opy.diag_code(), "source-provider-unsupported");
 
-#[test]
-fn unknown_extension_is_ambiguous_and_fails_explicitly() {
-    let path = temp_file("mystery.data", "whatever");
-    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
-    assert_eq!(output.status.code(), Some(1));
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["diagnostics"][0]["code"], "input-kind-unknown");
+    let file = Fixture::new("mystery.data", "whatever");
+    let env = assert_exit_diag(
+        &["check", file.str(), "-f", "json"],
+        1,
+        "input-kind-unknown",
+    );
     assert!(
-        envelope["diagnostics"][0]["message"]
+        env["diagnostics"][0]["message"]
             .as_str()
             .unwrap()
-            .contains("--kind"),
-        "ambiguous input guidance is actionable"
+            .contains("--kind")
     );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
 
-#[test]
-fn unknown_flag_is_a_usage_error_exit_two() {
-    let output = run(&["check", "--frobnicate"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty(), "usage errors write stderr only");
-    assert!(!output.stderr.is_empty());
+    let unk = run(&["check", "--frobnicate"]);
+    assert_eq!(unk.code(), 2);
+    assert!(unk.stdout.is_empty() && !unk.stderr.is_empty());
 }
 
 #[test]
 fn json_output_is_deterministic_across_runs() {
-    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
-    let first = run(&["analyze", path.to_str().unwrap(), "-f", "json"]);
-    let second = run(&["analyze", path.to_str().unwrap(), "-f", "json"]);
-    assert_eq!(
-        first.stdout, second.stdout,
-        "JSON output must be byte-deterministic"
+    let file = Fixture::corpus("synthetic/control-flow");
+    let (first, second) = (
+        run(&["analyze", file.str(), "-f", "json"]),
+        run(&["analyze", file.str(), "-f", "json"]),
     );
+    assert_eq!(first.stdout, second.stdout);
     assert!(!first.stdout.is_empty());
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
 fn stdout_stderr_separation_holds_in_both_modes() {
-    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    // Text mode: result on stdout, no stderr on success.
-    let output = run(&["check", path.to_str().unwrap()]);
-    assert!(output.stderr.is_empty());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("PASS check"));
-    // JSON mode: envelope on stdout only.
-    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
-    assert!(output.stderr.is_empty());
-    parse_json(&output.stdout);
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let file = Fixture::corpus("synthetic/basic-rule");
+    let text = run(&["check", file.str()]);
+    assert!(text.stderr.is_empty() && text.stdout_str().contains("PASS check"));
+
+    let json = run(&["check", file.str(), "-f", "json"]);
+    assert!(json.stderr.is_empty());
+    json.json();
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -603,23 +501,22 @@ fn tty_progress_stops_and_clears_before_final_render() {
         "--color",
         "never",
     ]);
-    assert!(output.status.success());
+    assert!(output.ok());
     let mut transcript = output.stdout;
     transcript.extend_from_slice(&output.stderr);
     let transcript = String::from_utf8_lossy(&transcript);
     let final_render = transcript
         .find("PASS analyze")
-        .expect("final analyze render is present");
-    let before_final = &transcript[..final_render];
-    assert!(before_final.contains("Starting workflow"));
-    assert!(before_final.contains("Resolving input"));
-    assert!(before_final.contains("Parsing"));
-    assert!(before_final.contains("Resolving semantics"));
-    let cleared = before_final
-        .rfind("\x1b[2K")
-        .expect("activity line is cleared before final render");
-    assert!(cleared < final_render);
-    assert!(!transcript.contains("working…PASS"));
+        .expect("final analyze render present");
+    let before = &transcript[..final_render];
+    assert!(
+        before.contains("Starting workflow")
+            && before.contains("Resolving input")
+            && before.contains("Parsing")
+            && before.contains("Resolving semantics")
+    );
+    let cleared = before.rfind("\x1b[2K").expect("activity line cleared");
+    assert!(cleared < final_render && !transcript.contains("working…PASS"));
 
     let lint = run_in_tty(&[
         "lint",
@@ -631,307 +528,154 @@ fn tty_progress_stops_and_clears_before_final_render() {
         "--color",
         "never",
     ]);
-    assert!(lint.status.success());
+    assert!(lint.ok());
     let mut lint_transcript = lint.stdout;
     lint_transcript.extend_from_slice(&lint.stderr);
-    let lint_transcript = String::from_utf8_lossy(&lint_transcript);
-    assert!(lint_transcript.contains("Running lint rules"));
-    assert!(lint_transcript.contains(" rules…"));
+    let s = String::from_utf8_lossy(&lint_transcript);
+    assert!(s.contains("Running lint rules") && s.contains(" rules…"));
 }
 
 #[test]
 fn non_interactive_renderers_have_no_progress_artifacts() {
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/control-flow/source.opy"),
-    )
-    .unwrap();
-    let path = temp_file("basic.opy", &source);
-    for renderer in ["plain", "github-actions"] {
-        let output = run_with_env(
-            &[
-                "analyze",
-                path.to_str().unwrap(),
-                "--renderer",
-                renderer,
-                "--color",
-                "always",
-            ],
+    let file = Fixture::corpus_opy("synthetic/control-flow");
+    for r in ["plain", "github-actions"] {
+        let out = run_with_env(
+            &["analyze", file.str(), "--renderer", r, "--color", "always"],
             &[("GITHUB_ACTIONS", "true")],
         );
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let combined = format!("{}{}", out.stdout_str(), out.stderr_str());
         assert!(
-            !combined.contains("Resolving input"),
-            "{renderer}: {combined}"
+            !combined.contains("Resolving input")
+                && !combined.contains("Running lint rules")
+                && !combined.contains('⠋')
         );
-        assert!(
-            !combined.contains("Running lint rules"),
-            "{renderer}: {combined}"
-        );
-        assert!(!combined.contains("⠋"), "{renderer}: {combined}");
     }
-    let json = run(&["analyze", path.to_str().unwrap(), "--format", "json"]);
-    assert!(json.status.success());
-    assert!(json.stderr.is_empty());
-    assert!(!String::from_utf8_lossy(&json.stdout).contains("Resolving input"));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let json = run(&["analyze", file.str(), "--format", "json"]);
+    assert!(json.ok() && json.stderr.is_empty() && !json.stdout_str().contains("Resolving input"));
 }
 
 #[test]
-fn explicit_locale_override_is_accepted() {
-    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
-    let output = run(&["check", path.to_str().unwrap(), "--locale", "en-US"]);
-    assert_eq!(output.status.code(), Some(0));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
+fn version_help_and_locale_contract_surfaces() {
+    let file = Fixture::corpus("synthetic/basic-rule");
+    assert_eq!(run(&["check", file.str(), "--locale", "en-US"]).code(), 0);
 
-#[test]
-fn version_and_help_are_documented_contract_surfaces() {
     let output = run(&["version"]);
-    assert!(output.status.success());
-    let banner = String::from_utf8_lossy(&output.stdout);
-    assert!(banner.starts_with("wright "), "{banner}");
+    assert!(output.ok());
+    let banner = output.stdout_str();
     assert!(
-        banner.contains(env!("CARGO_PKG_VERSION")),
-        "banner does not report the implementation version: {banner}"
+        banner.starts_with("wright ")
+            && banner.contains(env!("CARGO_PKG_VERSION"))
+            && banner.contains("wright-driver")
     );
-    assert!(banner.contains("wright-driver"), "{banner}");
+    assert_eq!(run(&["--version"]).stdout_str(), banner);
 
-    let output = run(&["--version"]);
-    assert!(output.status.success());
-    let flag_banner = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(flag_banner, banner, "--version matches `version`");
-
-    let output = run(&["--help"]);
-    assert!(output.status.success());
-    let help = String::from_utf8_lossy(&output.stdout);
-    for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
-        assert!(help.contains(command), "help documents {command}");
+    let help = run(&["--help"]).stdout_str();
+    for item in "compile convert check analyze lint inspect update --check --version --kind --target --locale --root --profile --format --renderer --color --disable-rule --rule-severity EXIT CODES".split_whitespace() {
+        assert!(help.contains(item));
     }
-    for option in [
-        "--kind",
-        "--target",
-        "--locale",
-        "--root",
-        "--profile",
-        "--format",
-        "--renderer",
-        "--color",
-        "--disable-rule",
-        "--rule-severity",
-    ] {
-        assert!(help.contains(option), "top-level help documents {option}");
-    }
-    assert!(help.contains("EXIT CODES"));
-}
 
-#[test]
-fn completion_is_generated_for_all_supported_shells() {
     for shell in ["bash", "zsh", "fish", "powershell", "pwsh"] {
         let output = run(&["completion", shell]);
-        assert!(output.status.success(), "{shell}: {:?}", output.status);
-        assert!(output.stderr.is_empty(), "{shell}: stderr is not clean");
-        let completion = String::from_utf8_lossy(&output.stdout);
-        assert!(completion.contains("compile"), "{shell}: {completion}");
-        assert!(completion.contains("renderer"), "{shell}: {completion}");
-        assert!(completion.contains("color"), "{shell}: {completion}");
+        assert!(output.ok() && output.stderr.is_empty());
+        let c = output.stdout_str();
+        assert!(c.contains("compile") && c.contains("renderer") && c.contains("color"));
     }
 }
 
 #[test]
-fn completion_without_arguments_is_usage_error() {
-    let output = run(&["completion"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("specify a shell") && stderr.contains("install"));
-}
-
-#[test]
-fn completion_install_explicit_shell_and_dir() {
-    let dir = temp_dir();
-    let output = run(&[
-        "completion",
-        "install",
-        "zsh",
-        "--dir",
-        dir.to_str().unwrap(),
-    ]);
+fn completion_command_workflows_and_refusals() {
+    let no_args = run(&["completion"]);
+    assert_eq!(no_args.code(), 2);
+    let err = no_args.stderr_str();
     assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        no_args.stdout.is_empty() && err.contains("specify a shell") && err.contains("install")
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("installed zsh completion"), "{stdout}");
-    let target = dir.join("_wright");
-    assert!(target.is_file());
-    let content = std::fs::read_to_string(&target).unwrap();
-    assert!(content.contains("#compdef wright") || content.contains("wright"));
 
-    // Idempotent rerun: reports already up to date
-    let output2 = run(&[
-        "completion",
-        "install",
-        "zsh",
-        "--dir",
-        dir.to_str().unwrap(),
-    ]);
-    assert!(output2.status.success());
-    let stdout2 = String::from_utf8_lossy(&output2.stdout);
-    assert!(stdout2.contains("is already up to date"), "{stdout2}");
+    if !cfg!(windows) {
+        let keys = "WRIGHT_SHELL SHELL ZSH_VERSION BASH_VERSION FISH_VERSION PSModulePath POWERSHELL_DISTRIBUTION_CHANNEL PSExecutionPolicyPreference ZDOTDIR";
+        let envs: Vec<(&str, &str)> = keys.split_whitespace().map(|k| (k, "")).collect();
+        let out = run_with_env(&["completion", "install"], &envs);
+        assert_eq!(out.code(), 1);
+        let err = out.stderr_str();
+        assert!(
+            err.contains("could not automatically detect your shell")
+                && err.contains("wright completion install <bash|zsh|fish|powershell>")
+        );
+    }
 
-    // Force rerun: reports updated
-    let output3 = run(&[
-        "completion",
-        "install",
-        "zsh",
-        "--dir",
-        dir.to_str().unwrap(),
-        "--force",
-    ]);
-    assert!(output3.status.success());
-    let stdout3 = String::from_utf8_lossy(&output3.stdout);
-    assert!(stdout3.contains("updated zsh completion"), "{stdout3}");
+    let dir = TempDir::new();
+    let run_inst = |args: &[&str]| {
+        run(&[
+            &["completion", "install", "zsh", "--dir", dir.str()][..],
+            args,
+        ]
+        .concat())
+    };
+    assert!(
+        run_inst(&[])
+            .stdout_str()
+            .contains("installed zsh completion")
+    );
+    assert!(dir.path().join("_wright").is_file());
+    assert!(run_inst(&[]).stdout_str().contains("is already up to date"));
+    assert!(
+        run_inst(&["--force"])
+            .stdout_str()
+            .contains("updated zsh completion")
+    );
 
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn completion_install_dry_run() {
-    let dir = temp_dir();
-    let output = run(&[
+    let dry = run(&[
         "completion",
         "install",
         "bash",
         "--dir",
-        dir.to_str().unwrap(),
+        dir.str(),
         "--dry-run",
     ]);
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("would install bash completion"), "{stdout}");
-    assert!(
-        !dir.join("wright").exists(),
-        "dry-run must not create files"
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
+    assert!(dry.ok() && dry.stdout_str().contains("would install bash completion"));
+    assert!(!dir.path().join("wright").exists());
 
-#[test]
-fn completion_install_detection_via_env() {
-    let dir = temp_dir();
-    let output = run_with_env(
-        &["completion", "install"],
-        &[
-            ("WRIGHT_SHELL", "fish"),
-            ("WRIGHT_COMPLETION_DIR", dir.to_str().unwrap()),
-        ],
-    );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("installed fish completion"), "{stdout}");
-    assert!(dir.join("wright.fish").is_file());
-    let _ = std::fs::remove_dir_all(&dir);
-}
+    let dir2 = TempDir::new();
+    let env = [
+        ("WRIGHT_SHELL", "fish"),
+        ("WRIGHT_COMPLETION_DIR", dir2.str()),
+    ];
+    let out_env = run_with_env(&["completion", "install"], &env);
+    assert!(out_env.ok() && out_env.stdout_str().contains("installed fish completion"));
+    assert!(dir2.path().join("wright.fish").is_file());
 
-#[test]
-fn completion_install_all_flag() {
-    let dir = temp_dir();
-    let output = run(&[
-        "completion",
-        "install",
-        "--all",
-        "--dir",
-        dir.to_str().unwrap(),
-    ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("installed bash completion"), "{stdout}");
-    assert!(stdout.contains("installed zsh completion"), "{stdout}");
-    assert!(stdout.contains("installed fish completion"), "{stdout}");
-    assert!(
-        stdout.contains("installed powershell completion"),
-        "{stdout}"
-    );
-    assert!(dir.join("wright").is_file());
-    assert!(dir.join("_wright").is_file());
-    assert!(dir.join("wright.fish").is_file());
-    assert!(dir.join("_wright.ps1").is_file());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn completion_install_undetected_shell_reports_user_error() {
-    let output = run_with_env(
-        &["completion", "install"],
-        &[
-            ("WRIGHT_SHELL", ""),
-            ("SHELL", ""),
-            ("ZSH_VERSION", ""),
-            ("BASH_VERSION", ""),
-            ("FISH_VERSION", ""),
-            ("PSModulePath", ""),
-            ("POWERSHELL_DISTRIBUTION_CHANNEL", ""),
-            ("PSExecutionPolicyPreference", ""),
-            ("ZDOTDIR", ""),
-        ],
-    );
-    // On Unix this is an undetected shell user error (exit 1). On Windows cfg!(windows) defaults to powershell.
-    if !cfg!(windows) {
-        assert_eq!(output.status.code(), Some(1));
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("could not automatically detect your shell"),
-            "{stderr}"
-        );
-        assert!(
-            stderr.contains("wright completion install <bash|zsh|fish|powershell>"),
-            "{stderr}"
-        );
+    let dir3 = TempDir::new();
+    let out_all = run(&["completion", "install", "--all", "--dir", dir3.str()]);
+    assert!(out_all.ok());
+    let s = out_all.stdout_str();
+    for sh in ["bash", "zsh", "fish", "powershell"] {
+        assert!(s.contains(&format!("installed {sh} completion")));
+    }
+    for f in ["wright", "_wright", "wright.fish", "_wright.ps1"] {
+        assert!(dir3.path().join(f).is_file());
     }
 }
 
 #[test]
-fn explicit_renderer_and_color_overrides_are_respected() {
-    let path = temp_file("broken.txt", "rule (\"x\") { event { Ongoing - Global; }");
+fn renderers_and_github_actions_formatting() {
+    let broken = Fixture::new("broken.txt", "rule (\"x\") { event { Ongoing - Global; }");
+    let env = &[("GITHUB_ACTIONS", "true")];
 
-    let github = run_with_env(
-        &[
-            "check",
-            path.to_str().unwrap(),
-            "--renderer",
-            "github-actions",
-        ],
-        &[("GITHUB_ACTIONS", "true")],
+    let gh = run_with_env(
+        &["check", broken.str(), "--renderer", "github-actions"],
+        env,
     );
-    assert_eq!(github.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&github.stderr).contains("::error"));
-    assert!(String::from_utf8_lossy(&github.stderr).contains("::group::"));
+    assert_eq!(gh.code(), 1);
+    assert!(gh.stderr_str().contains("::error") && gh.stderr_str().contains("::group::"));
 
-    let plain = run_with_env(
-        &["check", path.to_str().unwrap(), "--renderer", "plain"],
-        &[("GITHUB_ACTIONS", "true")],
-    );
-    assert_eq!(plain.status.code(), Some(1));
-    assert!(!String::from_utf8_lossy(&plain.stderr).contains("::error"));
-    assert!(!String::from_utf8_lossy(&plain.stderr).contains("\x1b["));
+    let plain = run_with_env(&["check", broken.str(), "--renderer", "plain"], env);
+    assert_eq!(plain.code(), 1);
+    assert!(!plain.stderr_str().contains("::error") && !plain.stderr_str().contains("\x1b["));
 
     let color = run_with_env(
         &[
             "check",
-            path.to_str().unwrap(),
+            broken.str(),
             "--renderer",
             "terminal",
             "--color",
@@ -939,18 +683,13 @@ fn explicit_renderer_and_color_overrides_are_respected() {
         ],
         &[("GITHUB_ACTIONS", "true"), ("NO_COLOR", "1")],
     );
-    assert_eq!(color.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&color.stderr).contains("\x1b["));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
+    assert_eq!(color.code(), 1);
+    assert!(color.stderr_str().contains("\x1b["));
 
-#[test]
-fn json_and_source_stdout_stay_pure_in_github_actions() {
-    let path = temp_file("broken.txt", "rule (\"x\") { event { Ongoing - Global; }");
     let json = run_with_env(
         &[
             "check",
-            path.to_str().unwrap(),
+            broken.str(),
             "-f",
             "json",
             "--renderer",
@@ -958,223 +697,108 @@ fn json_and_source_stdout_stay_pure_in_github_actions() {
             "--color",
             "always",
         ],
-        &[("GITHUB_ACTIONS", "true")],
+        env,
     );
-    assert_eq!(json.status.code(), Some(1));
-    assert!(json.stderr.is_empty());
-    let envelope = parse_json(&json.stdout);
-    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    assert_eq!(json.code(), 1);
+    assert!(json.stderr.is_empty() && json.json()["wright"]["contract"] == "wright-result/v1");
 
-    let source = corpus_workshop("synthetic/basic-rule");
-    let path = temp_file("basic.txt", &source);
+    let clean = Fixture::corpus("synthetic/basic-rule");
     let compile = run_with_env(
-        &[
-            "compile",
-            path.to_str().unwrap(),
-            "--renderer",
-            "github-actions",
-        ],
-        &[("GITHUB_ACTIONS", "true")],
+        &["compile", clean.str(), "--renderer", "github-actions"],
+        env,
     );
-    assert_eq!(compile.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&compile.stdout);
-    assert!(stdout.contains("Disable Inspector Recording"));
-    assert!(!stdout.contains("::"));
-    assert!(String::from_utf8_lossy(&compile.stderr).contains("::group::"));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
+    assert_eq!(compile.code(), 0);
+    assert!(
+        compile.stdout_str().contains("Disable Inspector Recording")
+            && !compile.stdout_str().contains("::")
+    );
+    assert!(compile.stderr_str().contains("::group::"));
 
-#[test]
-fn source_artifacts_are_byte_exact_in_plain_and_github_renderers() {
-    let source = corpus_workshop("synthetic/basic-rule");
-    let path = temp_file("basic.txt", &source);
-
-    let expected = parse_json(&run(&["compile", path.to_str().unwrap(), "-f", "json"])
-        .stdout)["result"]["output"]["text"]
+    let exp = run(&["compile", clean.str(), "-f", "json"]).json()["result"]["output"]["text"]
         .as_str()
         .unwrap()
         .as_bytes()
         .to_vec();
-    for renderer in ["plain", "github-actions"] {
-        let output = run_with_env(
-            &["compile", path.to_str().unwrap(), "--renderer", renderer],
-            &[("GITHUB_ACTIONS", "true")],
-        );
-        assert!(output.status.success(), "{renderer}");
-        assert_eq!(output.stdout, expected, "{renderer} must preserve bytes");
+    for r in ["plain", "github-actions"] {
+        let out = run_with_env(&["compile", clean.str(), "--renderer", r], env);
+        assert!(out.ok() && out.stdout == exp);
     }
 
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
-fn github_summary_uses_step_summary_file_when_available() {
-    let path = temp_file("broken.txt", "rule (\"x\") { event { Ongoing - Global; }");
-    let summary = temp_file("summary.md", "");
-    let output = run_with_env(
-        &[
-            "check",
-            path.to_str().unwrap(),
-            "--renderer",
-            "github-actions",
-        ],
+    let sum = Fixture::new("summary.md", "");
+    let out_sum = run_with_env(
+        &["check", broken.str(), "--renderer", "github-actions"],
         &[
             ("GITHUB_ACTIONS", "true"),
-            ("GITHUB_STEP_SUMMARY", summary.to_str().unwrap()),
+            ("GITHUB_STEP_SUMMARY", sum.str()),
         ],
     );
-    assert_eq!(output.status.code(), Some(1));
-    assert!(!std::fs::read_to_string(&summary).unwrap().is_empty());
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    assert_eq!(out_sum.code(), 1);
+    assert!(!std::fs::read_to_string(sum.path()).unwrap().is_empty());
 }
 
 #[test]
-fn opy_file_does_not_fall_back_to_native_frontend() {
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-    )
-    .unwrap();
-    let path = temp_file("basic-rule.opy", &source);
-    let missing_provider = path.parent().unwrap().join("missing-opy-provider");
-    let output = run(&[
-        "compile",
-        path.to_str().unwrap(),
-        "--opy-provider",
-        missing_provider.to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
-    assert_eq!(output.status.code(), Some(4));
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["diagnostics"][0]["code"], "provider-missing");
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+fn missing_provider_analyze_and_compile_fail_with_distinct_diagnostics() {
+    let fix = Fixture::corpus_opy("synthetic/basic-rule");
+    let miss = fix.path().parent().unwrap().join("missing-opy-provider");
+    let miss_str = miss.to_str().unwrap();
+    assert_exit_diag(
+        &[
+            "compile",
+            fix.str(),
+            "--opy-provider",
+            miss_str,
+            "-f",
+            "json",
+        ],
+        4,
+        "provider-missing",
+    );
+    let env = assert_exit_diag(
+        &[
+            "analyze",
+            fix.str(),
+            "--opy-provider",
+            miss_str,
+            "-f",
+            "json",
+        ],
+        4,
+        "provider-missing",
+    );
+    assert!(env["result"]["program"].is_null());
 }
 
 #[test]
-fn provider_backed_opy_analyze_surfaces_provider_resolution_failures() {
-    let path = temp_file("main.opy", "rule \"r\":\n    @Event global\n");
-    let missing_provider = path.parent().unwrap().join("missing-opy-provider");
-    let output = run(&[
-        "analyze",
-        path.to_str().unwrap(),
-        "--opy-provider",
-        missing_provider.to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
-    assert_eq!(output.status.code(), Some(4));
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["diagnostics"][0]["code"], "provider-missing");
-    assert!(envelope["result"]["program"].is_null());
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-// ── Convert (#126) ───────────────────────────────────────────────────────────
-
-#[test]
-fn convert_workshop_input_to_opy_requires_provider_reconstruct_capability() {
-    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["command"], "convert");
+fn convert_commands_verify_target_and_provider_contracts() {
+    let file = Fixture::corpus("synthetic/basic-rule");
+    let out = run(&["convert", "--target", "opy", file.str(), "-f", "json"]);
+    assert_eq!(out.diag_code(), "capability-unavailable");
+    let env = out.json();
     assert!(
-        matches!(
-            envelope["diagnostics"][0]["code"].as_str(),
-            Some("capability-unavailable")
-        ),
-        "unexpected provider refusal: {}",
-        envelope["diagnostics"][0]
+        !env["ok"].as_bool().unwrap()
+            && env["command"] == "convert"
+            && env["result"]["target"] == "opy"
     );
-    assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
-}
+    assert_eq!(env["wright"]["contract"], "wright-result/v1");
 
-#[test]
-fn convert_workshop_input_to_ostw_reports_provider_unavailable() {
-    // `wright convert --target ostw` is a recognized provider boundary.
-    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", "--target", "ostw", path, "-f", "json"]);
-    assert_eq!(
-        output.status.code(),
-        Some(4),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    let ostw = assert_exit_diag(
+        &["convert", "--target", "ostw", file.str(), "-f", "json"],
+        4,
+        "source-provider-unavailable",
     );
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_eq!(envelope["exit"], 4);
-    assert_eq!(
-        envelope["diagnostics"][0]["code"],
-        "source-provider-unavailable"
+    assert!(!ostw["ok"].as_bool().unwrap() && ostw["diagnostics"][0]["stage"] == "internal");
+
+    let no_flag = run(&["convert", file.str()]);
+    assert_eq!(no_flag.code(), 2);
+    assert!(no_flag.stdout.is_empty() && no_flag.stderr_str().contains("--target"));
+    assert_eq!(run(&["convert", "--target", "nope", file.str()]).code(), 2);
+    assert_eq!(run(&["check", "--target", "opy", file.str()]).code(), 2);
+
+    let opy_file = Fixture::corpus_opy("synthetic/basic-rule");
+    let bad_in = assert_exit_diag(
+        &["convert", "--target", "ostw", opy_file.str(), "-f", "json"],
+        3,
+        "source-provider-unsupported",
     );
-    assert_eq!(envelope["diagnostics"][0]["stage"], "internal");
-    assert!(envelope["result"]["text"].as_str().unwrap().is_empty());
-}
-
-#[test]
-fn convert_json_envelope_reports_command_result_and_target() {
-    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", "--target", "opy", path, "-f", "json"]);
-    assert!(output.stderr.is_empty(), "JSON mode keeps stderr clean");
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_ne!(envelope["exit"], 0);
-    assert_eq!(envelope["command"], "convert");
-    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
-    assert_eq!(envelope["result"]["target"], "opy");
-}
-
-#[test]
-fn convert_requires_an_explicit_target_flag() {
-    // Missing or unknown --target is a usage error (exit 2); --target on
-    // another command is a usage error too.
-    let path = temp_file("convert.txt", &corpus_workshop("synthetic/basic-rule"));
-    let path = path.to_str().unwrap();
-    let output = run(&["convert", path]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty(), "usage errors write stderr only");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--target"));
-
-    let output = run(&["convert", "--target", "nope", path]);
-    assert_eq!(output.status.code(), Some(2));
-
-    let output = run(&["check", "--target", "opy", path]);
-    assert_eq!(output.status.code(), Some(2));
-}
-
-#[test]
-fn convert_rejects_non_workshop_input() {
-    // OPY conversion requires an entry provider workflow; it never falls back
-    // to a direct OPY ↔ OSTW conversion.
-    let source = std::fs::read_to_string(
-        workspace_root().join("compatibility/fixtures/synthetic/basic-rule/source.opy"),
-    )
-    .unwrap();
-    let path = temp_file("basic-rule.opy", &source);
-    let output = run(&[
-        "convert",
-        "--target",
-        "ostw",
-        path.to_str().unwrap(),
-        "-f",
-        "json",
-    ]);
-    assert_eq!(output.status.code(), Some(3));
-    let envelope = parse_json(&output.stdout);
-    assert_eq!(envelope["ok"], false);
-    assert_eq!(
-        envelope["diagnostics"][0]["code"],
-        "source-provider-unsupported"
-    );
-    assert!(
-        envelope["result"]["text"].as_str().unwrap().is_empty(),
-        "no source on a rejected input kind"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    assert!(bad_in["result"]["text"].as_str().unwrap().is_empty());
 }
