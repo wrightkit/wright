@@ -62,7 +62,7 @@ The implementation areas considered by this decision were:
   target semantics;
 - **OPY**: an independently implemented compatible semantic frontend;
 - **OSTW**: a first-class compatible semantic frontend only after a separate,
-  evidence-backed decision.
+  separately approved decision backed by a named consumer need and tests.
 
 Upstream compilers and language services (OverPy, OSTW) remain compatibility
 oracles, behavior references, and test inputs. They are not production runtime
@@ -82,8 +82,8 @@ affects:
 - source or tooling contracts; or
 - an explicitly documented compatibility surface.
 
-N-level normalized-output evidence remains a useful regression-detection tool,
-but it is supporting evidence rather than the ultimate product objective.
+N-level normalized-output tests remain useful for regression detection, but
+they are supporting checks rather than the ultimate product objective.
 Reference-output differences that are presentation-only must not automatically
 create implementation work.
 
@@ -136,7 +136,8 @@ understood, compilable where compilation is claimed, and analyzable through the
 declared tooling contracts.
 
 It does not guarantee successful execution in every live Overwatch runtime.
-Runtime-sensitive claims require separate evidence.
+Runtime-sensitive claims require separate runtime tests and owner/runtime
+identity.
 
 ## Consequences
 
@@ -165,7 +166,7 @@ was resolved in favor of the implementation state at that time.
 
 This ADR does not set roadmap ordering, release sequencing, or Issue priority.
 Execution planning belongs to Issues and release planning; a new semantic
-frontend or tooling surface requires its own scope and evidence.
+frontend or tooling surface requires its own scope and consumer validation.
 
 ## Compatibility impact
 
@@ -181,4 +182,4 @@ themselves.
 - Corpus licensing and local-generation processes for OSTW fixtures are outside
   this ADR's scope.
 - Third-party lint-rule extension mechanisms require a separate,
-  evidence-backed decision.
+  separately approved decision backed by a concrete extension contract.

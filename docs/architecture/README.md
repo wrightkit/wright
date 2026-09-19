@@ -2,7 +2,7 @@
 
 This directory routes Wright's **current** architecture contracts.
 
-Keep these evidence classes separate:
+Keep these sources of authority separate:
 
 - documents here state current durable product/integration contracts;
 - source, Cargo metadata, tests, CI, provider integrations, and real-project workflows establish implementation reality;

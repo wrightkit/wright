@@ -12,12 +12,12 @@ use wright_analyzer::service::SemanticService;
 
 fn workshop_path(fixture_id: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../compatibility/fixtures")
+        .join("../../tests/fixtures/workshop")
         .join(fixture_id)
-        .join("workshop.ws")
+        .with_extension("ws")
 }
 
-fn corpus_text(fixture_id: &str) -> String {
+fn fixture_text(fixture_id: &str) -> String {
     std::fs::read_to_string(workshop_path(fixture_id)).unwrap()
 }
 
@@ -27,7 +27,7 @@ fn workshop_service(fixture_id: &str) -> SemanticService<'static> {
     // expected enum domains (e.g. Create HUD Text's Reevaluation argument is
     // HudReeval), resolving bare members that are ambiguous across the
     // catalog's enum domains (#118).
-    let text = corpus_text(fixture_id);
+    let text = fixture_text(fixture_id);
     let catalog = Catalog::builtin().unwrap();
     let program = parser::parse_wir_with_context(&text, &catalog, &Locale::new("en-US"), &catalog)
         .unwrap_or_else(|error| panic!("{fixture_id} must parse: {error}"));

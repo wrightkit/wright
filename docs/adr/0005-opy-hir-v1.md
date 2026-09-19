@@ -17,7 +17,7 @@ compiler slice covered by this decision consumes the compatibility corpus
 through a reproducible, Wright-owned interchange format.
 
 Issue #3 requires a stable, versioned protocol between the temporary OverPy
-frontend and the Rust core. The evidence gathered from the pinned OverPy
+frontend and the Rust core. Tests against the pinned OverPy
 frontend (9.7.10) shows that its public compile API does not expose parsed rule
 ASTs, that its exported compiler class can be driven to produce parsed ASTs
 with source provenance, and that the corpus needs declarations, rules, events,
@@ -62,7 +62,7 @@ unsupported-behavior contract.
 This ADR defines the interchange contract for S/D-level compatibility work:
 the corpus converts reproducibly (S), and failures carry structured
 diagnostics with spans (D). It does not claim N/E-level parity with OverPy
-output. Protocol equality alone is not semantic evidence, per
+output. Protocol equality alone is not semantic compatibility, per
 [ADR-0003](0003-ir-boundary.md) and [`docs/compatibility.md`](../compatibility.md).
 
 ## Scope boundaries
@@ -70,7 +70,7 @@ output. Protocol equality alone is not semantic evidence, per
 * Macro expansion is outside HIR; adding a Wright-owned expansion stage
   requires a separate decision.
 * `settings` blocks and labels/gotos are outside the v0.1 protocol scope; adding
-  them requires corpus evidence and protocol review.
+  them requires an owner corpus case and protocol review.
 * The adapter's exact OverPy driver setup is an implementation detail of the
   adapter boundary. Changes to the pinned frontend version must be reviewed
   with the adapter and this protocol together.

@@ -13,7 +13,7 @@
 
 This record was backfilled on 2026-09-12. The decision emerged through the
 design and review of Issue #309 and PR #310. Issues #262 and #308 supplied
-motivating analysis evidence but did not independently establish this
+motivating analysis notes but did not independently establish this
 extension architecture. This ADR did not exist when those changes landed.
 
 ## Context
@@ -33,7 +33,7 @@ duplicating language semantics or exposing WIR/CFG implementation details.
 
 Wright separates four responsibilities:
 
-1. **Canonical semantic facts** come from owner-backed Workshop evidence and
+1. **Canonical semantic facts** come from owner-backed Workshop contracts and
    expose structured identities, nodes, spans, and measurements.
 2. **Rule definitions** describe what to match and how to explain it. Local
    YAML is the human-facing authoring form for bounded Workshop-shaped rules;
@@ -42,7 +42,7 @@ Wright separates four responsibilities:
    `warn`, or `error`, and supplies bounded options. Rule authors do not set
    project severity.
 4. **Findings and skips** are Wright results that preserve stable rule IDs,
-   source/provenance, evidence classification, and explicit unavailable/skip
+   source/provenance, support classification, and explicit unavailable/skip
    reasons when an owner fact is missing.
 
 Rules canonicalize localized or canonical Workshop spellings through
@@ -53,8 +53,8 @@ declarative matcher would distort a richer analysis.
 
 External rules use a namespaced identity; Wright-owned built-ins retain their
 existing bare stable IDs and reserve the `wright` namespace. Declarative
-metadata may explain evidence and limitations, but cannot self-certify
-correctness or override Wright's evidence classification.
+metadata may explain support and limitations, but cannot self-certify
+correctness or override Wright's support classification.
 
 ## Alternatives considered
 
@@ -63,25 +63,26 @@ correctness or override Wright's evidence classification.
 - **Expose a general-purpose YAML query/programming language:** rejected
   because it would duplicate Wright internals and create an unbounded public
   language surface.
-- **Let rule definitions assign severity/evidence:** rejected because project
-  policy and Wright/owner-backed evidence must remain independent of author
+- **Let rule definitions assign severity/support:** rejected because project
+  policy and Wright/owner-backed contracts must remain independent of author
   declarations.
 - **Use a remote registry or plugin runtime initially:** deferred because the
   concrete workflow only requires local files/directories; distribution and
-  executable extension contracts need separate evidence.
+  executable extension contracts need separate tests.
 
 ## Consequences
 
 - `analyze` can grow semantic facts without turning each fact into a lint
   finding, consistent with ADR-0011.
 - The same canonical rule semantics can be reused across source languages when
-  their owners provide sufficient canonical evidence and provenance.
+  their owners provide sufficient canonical contracts and provenance.
 - Missing owner capability is explicit and does not become a guessed finding
   or a whole-run failure.
 - The rule and project configuration surfaces are stable enough for CLI,
   agent, embedding, query, and documentation consumers, while execution and
   source edits remain Wright-owned concerns.
-- Programmable extensions require a separate evidence-backed decision.
+- Programmable extensions require a separate decision backed by a concrete
+  extension contract.
 
 ## Compatibility impact
 
@@ -92,7 +93,7 @@ machine-readable output form, while YAML is the local authoring form.
 
 ## Scope boundaries
 
-- Additional facts and matcher capabilities require evidence from real rules
-  and owner-backed workflows.
+- Additional facts and matcher capabilities require tests from real rules and
+  owner-backed workflows.
 - Remote rule distribution and programmable runtimes are outside this ADR and
   require a separate decision.

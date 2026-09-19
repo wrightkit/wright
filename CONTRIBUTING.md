@@ -3,7 +3,7 @@
 Wright is being built incrementally. Read [`AGENTS.md`](AGENTS.md),
 [`docs/architecture.md`](docs/architecture.md), [`docs/compatibility.md`](docs/compatibility.md),
 and [`docs/licensing.md`](docs/licensing.md) before changing compiler
-boundaries or compatibility tooling.
+boundaries or integration verification.
 
 ## Toolchain policy
 

@@ -1,16 +1,14 @@
-# Wright Compatibility Matrix
+# Wright integration matrix
 
 Status: current provider-boundary baseline
 
-| Surface | Owner | Wright evidence |
+| Surface | Owner | Wright-owned test contract |
 | --- | --- | --- |
-| OPY source workflows | `opy-rs` through LPP | `wright-driver` provider integration and CLI contract tests |
+| OPY source workflows | `opy-rs` through LPP | `wright-driver` provider seam and CLI failure-routing tests |
 | DEL / OSTW source workflows | `deltin-rs` or a future provider | Explicit `source-provider-unavailable` diagnostics |
-| Canonical Workshop text and WIR | `workshop-rs` | `wright-analyzer`, `wright-transform`, and consumer tests |
+| Canonical Workshop text and WIR | `workshop-rs` | `wright-analyzer`, `wright-transform`, and embedding tests |
 | Driver and CLI result contracts | Wright | `wright-driver` and `wright-cli` tests |
 
-Wright has no native OPY parser, HIR, lowering, manifest, or reconstruction
-implementation. It does not claim OPY syntax or semantic compatibility from a
-successful Wright build; those claims require the owner repository's corpus
-and provider evidence. A missing provider capability is reported explicitly,
-with no silent fallback.
+Wright does not claim OPY or DEL/OSTW language completeness from a successful
+build. Provider capabilities and source-language semantics remain bounded by
+the owning repository's public contract, with no silent fallback.

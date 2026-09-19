@@ -169,10 +169,8 @@ mod tests {
 
     fn cake_workshop() -> String {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        std::fs::read_to_string(
-            root.join("compatibility/fixtures/real-world/overpy-cake/workshop.ws"),
-        )
-        .unwrap()
+        std::fs::read_to_string(root.join("tests/fixtures/workshop/real-world/overpy-cake.ws"))
+            .unwrap()
     }
 
     #[test]

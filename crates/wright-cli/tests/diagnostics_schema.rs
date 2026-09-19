@@ -9,7 +9,7 @@ fn workspace_root() -> PathBuf {
 fn check_json_matches_schema_and_snapshot() {
     let root = workspace_root();
     let source = std::fs::read_to_string(
-        root.join("compatibility/fixtures/real-world/overpy-client-to-server/workshop.ws"),
+        root.join("tests/fixtures/workshop/real-world/overpy-client-to-server.ws"),
     )
     .expect("real Workshop fixture");
     let directory = root

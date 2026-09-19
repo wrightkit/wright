@@ -47,10 +47,10 @@ Wright public contract.
 
 ## Compatibility impact
 
-The policy permits S/D/N/E compatibility evidence under
+The policy permits S/D/N/E compatibility tests under
 [`docs/compatibility.md`](../compatibility.md), but no compatibility level grants
 permission to copy or redistribute OverPy. Reference identity, fixture
-provenance, and the invocation or comparison method remain part of the evidence
+provenance, and the invocation or comparison method remain part of the test
 record.
 
 ## Scope boundaries

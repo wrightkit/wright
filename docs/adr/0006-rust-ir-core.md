@@ -73,15 +73,15 @@ ADR-0005.
 
 ## Compatibility impact
 
-IR equality is not semantic evidence (ADR-0003). This ADR defines the model
-behind S/D-level evidence only; no N/E-level claim is made. The v0.1 corpus
+IR equality is not semantic compatibility (ADR-0003). This ADR defines the
+model used by S/D-level tests only; no N/E-level claim is made. The v0.1 corpus
 must convert and lower without lossy catch-all nodes.
 
 ## Scope boundaries
 
 * Whether `debug`/`print` should become HUD actions in the Workshop IR and where
   the function-name mapping table should live are outside this IR decision.
-* Call-name interning is outside this decision; it requires evidence that
+* Call-name interning is outside this decision; it requires a demonstrated
   analysis needs identity comparisons at scale.
 * User-defined enum representation is outside this decision and requires a
   frontend contract that preserves those declarations.

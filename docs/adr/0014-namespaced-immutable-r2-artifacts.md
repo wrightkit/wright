@@ -92,4 +92,4 @@ artifact paths are not retained as a second supported route.
   R2 deployment; the pointer-versus-immutable-object distinction is part of
   this contract.
 - This ADR does not decide whether additional repositories adopt the same
-  shape; each adoption requires its own owner and release evidence.
+  shape; each adoption requires its own owner and release tests.

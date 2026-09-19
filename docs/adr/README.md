@@ -2,7 +2,7 @@
 
 ADRs record point-in-time decisions that affected Wright's observable product/compiler contract or component boundaries. They preserve rationale and consequences; they are not a database of current implementation reality.
 
-Current architecture contracts are routed from [`docs/architecture/README.md`](../architecture/README.md). Source, Cargo metadata, tests, CI, integrations, and real-project evidence establish implementation reality. An `Accepted` ADR means the decision was approved at that point in project history; it does not by itself prove that current code still conforms to the decision.
+Current architecture contracts are routed from [`docs/architecture/README.md`](../architecture/README.md). Source, Cargo metadata, tests, CI, integrations, and real-project runs establish implementation reality. An `Accepted` ADR means the decision was approved at that point in project history; it does not by itself prove that current code still conforms to the decision.
 
 ## Conventions
 
@@ -14,8 +14,8 @@ Current architecture contracts are routed from [`docs/architecture/README.md`](.
 * Do not use ADR status to encode current release versions, feature counts, migration progress, or Issue/PR state.
 
 The [post-ADR-0010 decision inventory](post-0010-inventory.md) records the
-candidate classification and evidence for the backfill set covered by its
-audit date.
+candidate classification and source decisions for the backfill set covered by
+its audit date.
 
 ## Index
 
@@ -37,4 +37,5 @@ audit date.
 * [ADR-0015: Canonical facts, declarative lint rules, and project policy](0015-canonical-facts-and-declarative-lint-policy.md)
 * [ADR-0016: Current-directory and directory project targets](0016-current-directory-and-directory-project-targets.md)
 * [ADR-0017: Domain-intelligence query contract](0017-domain-intelligence-query-contract.md)
+* [ADR-0018: Tests-first integration verification](0018-tests-first-integration-verification.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)

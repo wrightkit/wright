@@ -1,139 +1,26 @@
-# Workshop Support Matrix
+# Workshop integration coverage
 
-Status: accepted baseline: living Workshop support matrix
-Scope: the evidence-backed Workshop feature and localization surface Wright
-supports for native localized Workshop input/output
+Status: current Wright integration contract
 
-This document inventories the Workshop surface evidenced by the compatibility
-corpus, records the localization matrix, and specifies the supported feature
-set of the canonical `workshop-rs` core as consumed directly by Wright.
+`workshop-rs` owns the canonical Workshop support surface, catalog, parser,
+semantic completeness, localization, and real-project corpus. Wright does not
+derive a second Workshop feature matrix from source-language output.
 
-## Evidence sources
+Wright verifies its integration through these named tests:
 
-| Source | Provenance | Use |
-| --- | --- | --- |
-| `compatibility/fixtures/**/oracle.json` `compile.workshop` (en-US) | Pinned OverPy 9.7.10 reference output, GPL-3.0-only, recorded per fixture | The primary surface inventory below. |
-| Pinned OverPy 9.7.10 package surface (`actionKw`, `valueFuncKw`, `constantValues`, `eventKw`) | Observed for scoping only; not copied | Confirms spellings and value domains beyond the corpus. |
-| Oracle emission test `--language zh-CN` | Generated reference output (GPL) | Shows localized samples are generatable for review; not committed as catalog data. |
+| Wright surface | Test contract |
+| --- | --- |
+| Analyzer | `crates/wright-analyzer/tests/workshop_integration.rs` runs semantic queries, findings, references, and source-span checks on localized Workshop inputs. |
+| Driver | `crates/wright-driver/tests/workshop_contract.rs` compares provider diagnostics with the released owner `Program` API over the owner corpus. |
+| CLI | `crates/wright-cli/tests/workshop_real_projects.rs` runs public `check` and `lint` and compares their diagnostics with the owner API. |
+| Provider | `crates/wright-driver/tests/workshop_provider.rs` checks successful and malformed Workshop input through the provider boundary. |
+| Public consumers | `crates/wright-consumer/tests/consumer.rs` exercises the public embedding workflow on representative Workshop inputs. |
 
-Every count below is derived from the checked-in corpus snapshots, so the
-matrix is regenerable from the repository alone.
+The small local inputs used by these tests are listed in
+[`tests/fixtures/README.md`](../../tests/fixtures/README.md). They are
+consumer-specific regressions and smoke inputs, not a compatibility corpus or
+a source-language support claim.
 
-## Feature × corpus matrix
-
-Sections list the surface observed in the en-US corpus Workshop text.
-
-### Variables
-- `variables { global: <index>: <name> }`: control-flow, expressions-values.
-- `variables { player: <index>: <name> }`: declarations-rules.
-- Explicit indices and names are both evidenced.
-
-### Subroutines
-- `subroutines { <index>: <name> }`: declarations-rules.
-
-### Rules
-- `rule ("<name>") { event { ... } conditions { ... } actions { ... } }`: all
-  fixtures; conditions/actions blocks are optional.
-
-### Events
-- `Ongoing - Global;`: all fixtures with `@Event global`.
-- `Ongoing - Each Player;` plus team/slot lines (`All; All;`):
-  declarations-rules.
-- `Subroutine; <name>;`: declarations-rules (def bodies).
-
-### Conditions
-- `Has Spawned(Event Player) == True;`: declarations-rules.
-
-### Actions
-Disable Inspector Recording, Set Global Variable, Modify Global Variable,
-Set Player Variable, Call Subroutine, If, Else If, Else, End, For Global
-Variable, While, Wait, Create Beam Effect, Create HUD Text, Play Effect.
-Receiver-call actions (emitted for native `.opy` `eventPlayer.<method>(...)` /
-player-receiver forms, `synthetic/receiver-calls` fixture): Set Move Speed,
-Set Max Health, Set Player Health, Teleport, Set Aim Speed, Set Gravity,
-Set Damage Dealt, Set Damage Received, Set Ultimate Charge.
-
-### Values
-Add, Subtract, Multiply, Divide, Compare (with inline operators `==`, `>`,
-`<`, `<=`, `>=`, `!=`), And, Or, Not, Count Of, Absolute Value, Array,
-Vector, Custom String, Value In Array, Mapped Array, First Of, String
-Replace, String Slice, String Split, All Players, Random Real, Random Value
-In Array, Has Spawned.
-Receiver-call values (emitted for native `.opy` receiver-method forms in
-conditions and arguments, `synthetic/receiver-calls` fixture): Is Alive,
-Position Of, Health.
-Literals: numbers (signed), strings (escaped), `True`/`False`,
-`Global.<name>` references, `Event Player`.
-
-### Enums and constants
-- Color: `Color(Yellow)`, `Color(White)`, `Color(Red)`, `Color(Orange)`.
-- Beam: `Grapple Beam`, `Good Beam`.
-- Dynamic Effect: `Bad Explosion`.
-- Wait: `Ignore Condition`.
-- Vector constant: `Up`.
-- Hud Position: `Left`.
-- Hud Reevaluation: `Visible To Sort Order String and Color`, `Visible To
-  and String`.
-- Chase Time Reevaluation: `None`, `Destination and Duration`.
-- Chase Rate Reevaluation: `None`, `Destination and Rate`.
-- Spec Visibility: `Default Visibility`.
-- Team: `All Teams` (inside `All Players(All Teams)`).
-
-The bare `None` member spelling is shared by three enum domains
-(`ChaseTimeReeval.NONE`, `ChaseRateReeval.NONE`, and `Invis.NONE` all emit
-`None`). The Workshop parser resolves that ambiguity context-sensitively from
-the canonical signature metadata (#109/#111): when the enclosing call's
-signature pins exactly one expected domain, the bare spelling resolves to that
-domain: `Chase Global Variable Over Time(..., None)` reparses to
-`ChaseTimeReeval.NONE`, `Chase Global Variable At Rate(..., None)` and
-`Chase Player Variable At Rate(..., None)` to `ChaseRateReeval.NONE` (the
-`chase` keyword-argument dispatch surface, #110), and `Set Invisible(..., None)`
-to `Invis.NONE`. Context-free or wrong-context `None` (e.g.
-`Set Global Variable(g, None)`) still fails deterministically with the
-`ambiguous enum member 'None'` diagnostic, with no global spelling heuristics and
-no arbitrary domain precedence.
-
-### Settings and extensions
-- Emitted from native `.opy` `settings { ... }` blocks into the top-of-file
-  Workshop `settings` section. Reparsing emitted settings in the Workshop
-  frontend is a non-goal (a `.ws` decompiler is out of scope).
-
-## Localization matrix
-
-| Locale | Evidence | Status |
-| --- | --- | --- |
-| `en-US` | Full corpus Workshop text | Supported. |
-| `zh-CN` (and other OverPy-supported locales) | Oracle can emit localized reference output (verified for `zh-CN`); no committed samples yet | Investigation. Samples and catalog aliases require provenance/licensing review ([`docs/licensing.md`](../licensing.md), [ADR-0004](../adr/0004-overpy-licensing-boundary.md)). |
-
-Localization coverage is therefore explicit: `en-US` is the primary supported
-locale. Cross-locale behavior is not inferred from English-only fixtures.
-
-## Catalog and IR design
-
-1. Builtin references (`Action::Call`/`Value::Call` `name`) use canonical
-   identifiers (the `workshop-rs` catalog, `crates/workshop-rs/src/catalog/
-   data/catalog.json`) so no locale-specific spelling becomes semantic
-   identity.
-2. Enum spellings ("Grapple Beam", "Ignore Condition", …) map to
-   locale-independent canonical identities.
-3. Supported events cover `Global`, `EachPlayer`, `Subroutine`.
-4. Comparison operators appear inline in `Compare(...)`; parsing accepts
-   operator tokens as arguments.
-5. Catalog data updates follow the deterministic pipeline in
-   [`catalog-pipeline.md`](catalog-pipeline.md).
-
-## Supported surface and priorities
-
-- **Supported (corpus-evidenced, en-US):** variables, subroutines, rules,
-  the three corpus events, conditions, corpus actions/values/enums above,
-  deterministic en-US emission, same-locale round-trip, and analyzer integration.
-- **Deferred (data/licensing gated):** additional client locales,
-  cross-locale equivalence, additional events.
-- **Explicitly out of scope:** original-source recovery (comments/formatting)
-  in the Workshop emitter; reconstruction directions are owned by the
-  language providers (`opy-rs` through LPP; future DEL/OSTW provider)
-  through the shared driver
-  conversion operation (see
-  [`../opy/support-matrix.md`](../opy/support-matrix.md) and
-  [`../ostw/support-matrix.md`](../ostw/support-matrix.md)); OverPy
-  decompiler architecture, editor/browser integrations.
+New Workshop semantic support belongs in `workshop-rs`. New Wright tests should
+assert a Wright-owned boundary or cross-check an owner contract rather than
+recording a second owner snapshot.

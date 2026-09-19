@@ -1,10 +1,11 @@
-# OPY Compatibility Evidence Boundary
+# OPY integration boundary
 
-The authoritative OPY compatibility baseline is maintained by `opy-rs`,
-including the pinned OverPy identity, corpus, probes, diagnostics, normalized
-output comparison, and support matrix.
+`opy-rs` owns the OPY compatibility baseline: the pinned OverPy identity,
+source corpus, probes, diagnostics, normalized-output comparison, and support
+matrix.
 
-Wright records only consumer-side evidence: provider negotiation, stable CLI
-and machine-result contracts, canonical Workshop interoperability, and
-explicit unsupported-capability diagnostics. Wright does not run a local OPY
-parser, HIR/lowering pipeline, or reference adapter.
+Wright owns only the consumer contract around that implementation: provider
+selection, process/protocol handoff, provenance propagation, product result
+envelopes, and explicit unsupported or failed operations. Wright's Rust tests
+exercise those contracts directly and do not copy owner-side corpus or
+reference snapshots.

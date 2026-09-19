@@ -48,12 +48,12 @@ Results preserve three classes:
 
 1. source-language diagnostics from the owner;
 2. structured provider/process failures; and
-3. Wright-owned lint/analyze results built from canonical Workshop evidence.
+3. Wright-owned lint/analyze results built from canonical Workshop facts.
 
 Provider-returned canonical Workshop is parsed and validated through the
-canonical Workshop owner. Canonical evidence is mapped back to authored source
+canonical Workshop owner. Canonical facts are mapped back to authored source
 only when the contract carries a real mapping. Otherwise it is explicitly
-unmapped/generated/provider-artifact evidence; Wright never fabricates source
+unmapped/generated/provider-artifact data; Wright never fabricates source
 locations. Provider-backed stdin is rejected when the entry-based contract cannot
 represent it, rather than being assigned a synthetic path.
 
@@ -82,7 +82,7 @@ represent it, rather than being assigned a synthetic path.
 ## Compatibility impact
 
 The seam preserves structured diagnostics, source identity, canonical semantic
-evidence, and explicit failure classes. It intentionally does not promise
+facts, and explicit failure classes. It intentionally does not promise
 source-span mapping when the owner/provider cannot supply one. LPP wire
 versions and coordinate encodings remain owned by the protocol and adapter,
 not by this product-level ADR.
@@ -90,6 +90,6 @@ not by this product-level ADR.
 ## Scope boundaries
 
 - This ADR does not define a source-map contract for authored-source
-  attribution; adding one requires owner/protocol evidence.
+  attribution; adding one requires an owner/protocol contract and tests.
 - This ADR does not decide DEL/OSTW provider delivery; any such integration
-  requires owner-backed evidence and a separate decision when material.
+  requires an owner-backed contract, tests, and a separate decision when material.

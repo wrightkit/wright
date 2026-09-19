@@ -36,7 +36,7 @@ the contract that introduces an executable implementation path.
 
 ## Compatibility impact
 
-HIR and Workshop IR comparisons may support normalized-output evidence, but IR
+HIR and Workshop IR comparisons may support normalized-output tests, but IR
 equality alone does not establish semantic compatibility. Provenance and
 determinism are part of the transformation contract and should be covered by
 tests as the representations become executable.

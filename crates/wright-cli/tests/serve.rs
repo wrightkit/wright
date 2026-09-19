@@ -16,9 +16,9 @@ fn workspace_root() -> PathBuf {
 
 fn corpus_workshop(id: &str) -> PathBuf {
     workspace_root()
-        .join("compatibility/fixtures")
+        .join("tests/fixtures/workshop")
         .join(id)
-        .join("workshop.ws")
+        .with_extension("ws")
 }
 
 fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::Value> {

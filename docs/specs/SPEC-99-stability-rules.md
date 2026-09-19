@@ -155,16 +155,15 @@ indicator). No new `heuristic`-class rules are added in this set.
   `while-without-wait`'s positive fixture is a `While(true)` loop with no wait
   and asserts exactly one finding. Expected findings are deterministic and
   asserted by `cargo test -p wright-analyzer`.
-  Acceptance: fixtures exist with provenance notes; tests pass and pin exactly
-  the expected findings (code, severity, evidence, span, count) for every
+  Acceptance: focused fixtures exist with provenance notes; tests pass and pin
+  exactly the expected findings (code, severity, support class, span, count) for every
   fixture.
 
-- **REQ-005** [real-project/corpus evidence linkage]: Every new rule documents
-  its real-project/corpus evidence case, or an explicit synthetic justification
-  with the corpus-negative scan recorded. For `repeated-value`, the rule
-  documentation (or a linked evidence note in this spec) records the two pinned
-  corpus cases: overpy-santa (`oracle.json` `compile.workshop` lines 108-113:
-  `For Global Variable(i, 0, Count Of(Global.rectangleChimneys), 1)`; the
+- **REQ-005** [real-project test linkage]: Every new rule documents
+  its real-project motivation, or an explicit synthetic justification with the
+  negative scan recorded. For `repeated-value`, the rule documentation records
+  the two historical pinned cases maintained by `opy-rs`: overpy-santa (the
+  `For Global Variable(i, 0, Count Of(Global.rectangleChimneys), 1)` loop; the
   `Vector Towards(...)` sub-expression `A` appears 6 times across the four
   `Modify Global Variable` actions and each `Dot Product` action on lines 111
   and 112 contains the identical `Vector Towards` argument twice) and
@@ -173,25 +172,24 @@ indicator). No new `heuristic`-class rules are added in this set.
   (Local Player).textPos, Evaluate Once(Global.I)))` appears twice within one
   `Create In-World Text` action, and the identical `Subtract((Local Player).time,
   Value In Array((Local Player).timeOffsets, Evaluate Once(Global.I)))` appears
-  6 times in the same action). Both projects are pinned with provenance
-  (`fixture.json`: imported-example, Zezombye/overpy commit
-  `eea67adbcf6926c4004e35e25ab4be072624a44e`, GPL-3.0-only, redistributable).
-  For `while-without-wait`, the documentation records: a corpus scan of all 13
-  real-world fixtures found `While` loops only in overpy-cake and
-  overpy-client-to-server, and both contain waits (corpus-negative evidence);
+  6 times in the same action). Both projects are pinned by the owner repository
+  to Zezombye/overpy commit `eea67adbcf6926c4004e35e25ab4be072624a44e`,
+  GPL-3.0-only. For `while-without-wait`, the documentation records that the
+  owner corpus found `While` loops only in overpy-cake and
+  overpy-client-to-server, and both contain waits (a negative result);
   synthetic validation is documented as sufficient because the trigger is a
   statically exact structural fact (presence of a `wait` call in the loop body
-  tree) with a negligible false-positive surface. No rule claims corpus evidence
+  tree) with a negligible false-positive surface. No rule claims owner support
   it does not have.
-  Note (amendment): the earlier evidence review's per-additional-occurrence counts
+  Note (amendment): the earlier review's per-additional-occurrence counts
   (issue #99 §2.1: overpy-santa 4 findings,
   overpy-parabola 6 findings) are **superseded** by the amended per-shape
-  reporting rule (REQ-001, Q-001); the corpus occurrence structure this
+  reporting rule (REQ-001, Q-001); the occurrence structure this
   requirement records (6 `Vector Towards` occurrences in two families; 2
   `Distance Between` and 6 `Subtract` occurrences) is unchanged and remains the
-  rule's real-project evidence.
-  Acceptance: each new rule's metadata/evidence note states its corpus case or
-  synthetic justification and does not assert corpus backing for
+  rule's real-project motivation.
+  Acceptance: each new rule's metadata note states its owner case or synthetic
+  justification and does not assert owner backing for
   `while-without-wait`.
 
 - **REQ-006** [documentation and evidence labeling]: Each new rule's
@@ -294,18 +292,10 @@ indicator). No new `heuristic`-class rules are added in this set.
   in issue #98 (VERIFIED at `a54433b`); next step is PM
   acceptance of #98. The registry + lint surface exist in the current tree, so
   #99 may proceed on them.
-- **Corpus fixtures**: `../../compatibility/fixtures/real-world/` (13 pinned
-  projects with provenance in each `fixture.json`), present. Evidence boundary
-  (re-verified at spec time): only overpy-cake (1 `min-wait-loop` finding at
-  `source.opy:54` / workshop line 46) and overpy-pixelart (0 findings) parse
-  through the native OPY frontend; the other 11 fail the OPY frontend (e.g.,
-  santa.opy:192, parabola.opy:35), and corpus Workshop text is largely rejected
-  by the canonical Workshop parser (`settings` top-level section rejected;
-  settings-stripped pixelart parses with
-  0 findings).
-- **Provider evidence**: OPY syntax and semantic fixtures are generated and
-  maintained by `opy-rs`; Wright tests consume canonical Workshop or provider
-  results without a local adapter.
+- **Owner corpus**: OPY syntax and semantic cases are generated and maintained
+  by `opy-rs`. Wright keeps only focused analyzer inputs under
+  `tests/fixtures` and consumes canonical Workshop or provider results without
+  a local language adapter.
 
 ## Unresolved questions
 

@@ -139,6 +139,6 @@ mutation are unchanged.
 ## Scope boundaries
 
 - License selection and relicensing are outside this ADR; each repository or
-  product owner must decide them from its provenance and contributor evidence.
+  product owner must decide them from its provenance and contributor records.
 - LPP v1 schema and conformance requirements belong to
   `language-provider-protocol` and are outside this ownership decision.
