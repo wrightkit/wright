@@ -34,9 +34,10 @@ must not infer language completeness from a green product test.
 
 Wright does not store generic S/D/N/E results, a source-language corpus, or
 reference snapshots. A Wright result that intentionally compares with an owner
-must identify the owner contract, input/provenance, comparison method, and
-unsupported or inconclusive outcome in the test or CI output. Ordinary Wright
-CI is the Rust provider/product test suite described by ADR-0018.
+must identify the owner contract, input identity/source attribution, comparison
+method, and unsupported or inconclusive outcome in the test or CI output.
+Ordinary Wright CI is the Rust provider/product test suite described by
+ADR-0018.
 
 ## Consequences
 

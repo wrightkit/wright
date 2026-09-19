@@ -42,7 +42,8 @@ Wright separates four responsibilities:
    `warn`, or `error`, and supplies bounded options. Rule authors do not set
    project severity.
 4. **Findings and skips** are Wright results that preserve stable rule IDs,
-   source/provenance, support classification, and explicit unavailable/skip
+   source mapping/owner attribution, support classification, and explicit
+   unavailable/skip
    reasons when an owner fact is missing.
 
 Rules canonicalize localized or canonical Workshop spellings through
@@ -75,7 +76,7 @@ correctness or override Wright's support classification.
 - `analyze` can grow semantic facts without turning each fact into a lint
   finding, consistent with ADR-0011.
 - The same canonical rule semantics can be reused across source languages when
-  their owners provide sufficient canonical contracts and provenance.
+  their owners provide sufficient canonical contracts and source attribution.
 - Missing owner capability is explicit and does not become a guessed finding
   or a whole-run failure.
 - The rule and project configuration surfaces are stable enough for CLI,

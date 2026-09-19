@@ -31,9 +31,10 @@ contract checks, public CLI behavior, or real-project validation.
    consumes it. Keep the smallest input and expected result that protects that
    contract. Do not add a generic corpus, oracle, snapshot archive, or
    self-consistency test.
-4. A redistributed input keeps the source identity, immutable revision, and
-   licensing/provenance information needed to review its inclusion. This
-   attribution does not transfer semantic ownership to Wright.
+4. A redistributed input keeps the source identity, immutable revision,
+   license metadata, source attribution, and reproducibility information needed
+   to review its inclusion. This attribution does not transfer semantic
+   ownership to Wright.
 5. Provider refusal, unsupported capability, malformed input, and owner
    failures remain explicit product results. Removing duplicated reference
    data must not turn them into success or an empty result.
@@ -60,7 +61,7 @@ its integration suite.
 
 ## Scope boundaries
 
-Reference pinning, clean-room/licensing rules, and source provenance remain
-durable requirements where an owner repository or a named Wright test needs
-them. A future compatibility or differential result belongs to the owning
-repository unless it directly protects a Wright-owned public contract.
+Reference pinning, clean-room/licensing rules, and source mapping/owner
+attribution remain durable requirements where an owner repository or a named
+Wright test needs them. A future compatibility or differential result belongs to
+the owning repository unless it directly protects a Wright-owned public contract.

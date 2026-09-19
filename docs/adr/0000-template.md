@@ -23,7 +23,8 @@ Describe the direct benefits, costs, constraints, and follow-up work.
 
 State which syntax, diagnostic, normalized-output, or semantic compatibility
 claims are affected, and which tests, owner/reference comparisons, source
-provenance, or licensing provenance are required.
+mapping/location, owner attribution, license metadata, pinned version/revision,
+checksum, or reproducibility requirements are required.
 
 ## Scope boundaries
 

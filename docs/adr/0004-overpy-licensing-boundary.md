@@ -28,18 +28,18 @@ may use a separately installed and pinned OverPy version, but its presence is
 not required for the core to build or run. Adapters consume reviewed,
 documented boundaries and translate into Wright-owned representations.
 
-Reference fixtures and generated artifacts require provenance and a
-redistribution review before they enter the repository or a release. No
-OverPy-dependent component may be used without identifying and reviewing its
-license, owner, invocation method, and distribution status.
+Reference fixtures and generated artifacts require source identity, license
+metadata, and a redistribution review before they enter the repository or a
+release. No OverPy-dependent component may be used without identifying and
+reviewing its license, owner, invocation method, and distribution status.
 
 ## Consequences
 
 The core remains independently inspectable and can be distributed under its own
 license without silently absorbing OverPy implementation details. Compatibility
 work has an explicit setup and may require an external oracle. Contributors
-must preserve provenance and stop when the licensing terms of a dependency or
-fixture are unclear.
+must preserve source identity, license metadata, and invocation records, and
+stop when the licensing terms of a dependency or fixture are unclear.
 
 This policy may require duplicated boundary types or a reviewed interchange
 format. That cost is intentional because a third-party representation is not a
@@ -49,9 +49,9 @@ Wright public contract.
 
 The policy permits S/D/N/E compatibility tests under
 [`docs/compatibility.md`](../compatibility.md), but no compatibility level grants
-permission to copy or redistribute OverPy. Reference identity, fixture
-provenance, and the invocation or comparison method remain part of the test
-record.
+permission to copy or redistribute OverPy. Reference identity, fixture source
+identity and license metadata, and the invocation or comparison method remain
+part of the test record.
 
 ## Scope boundaries
 

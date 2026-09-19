@@ -20,8 +20,8 @@ Issue #3 requires a stable, versioned protocol between the temporary OverPy
 frontend and the Rust core. Tests against the pinned OverPy
 frontend (9.7.10) shows that its public compile API does not expose parsed rule
 ASTs, that its exported compiler class can be driven to produce parsed ASTs
-with source provenance, and that the protocol needs declarations, rules, events,
-conditions, statements, and expressions with spans.
+with source file/line/column mapping. The protocol needs declarations, rules,
+events, conditions, statements, and expressions with spans.
 
 ## Decision
 
@@ -32,7 +32,7 @@ The protocol:
 
 * models program declarations, rules, events, conditions, statements, and
   expressions with Wright-owned node kinds and operator spellings;
-* preserves file/line/column provenance through `files` and `span` fields;
+* preserves file/line/column source mapping through `files` and `span` fields;
 * keeps source-level macro calls explicit (`macroCall`) and records macro,
   constant, and preprocessor-define declarations so the payload is
   self-contained;
@@ -40,7 +40,7 @@ The protocol:
   reject an unknown name or major version before parsing, reject unknown node
   kinds as structured unsupported-node errors, and never silently ignore
   semantic content;
-* defines validation order (envelope, shape, provenance, identifiers,
+* defines validation order (envelope, shape, source mapping, identifiers,
   references, unsupported nodes) and stable debug output for tests and issue
   reports.
 

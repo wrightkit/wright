@@ -234,11 +234,12 @@ jobs:
   # -------------------------------------------------------------------------
   # [2] PRODUCT INTEGRATION  (Wright-owned provider and product contracts)
   # The source-language owners test language semantics. Wright tests its
-  # provider seam, failure routing, and user-facing product behavior directly.
+  # provider seam, provider distribution success path, failure routing, and
+  # user-facing product behavior directly.
   # -------------------------------------------------------------------------
   opy-integration:
     name: Product integration
-    needs: [paths, rust-quality, rust-msrv]
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -249,6 +250,13 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -271,6 +279,14 @@ jobs:
           cargo test --locked
           -p wright-cli --test cli --test diagnostics_schema --test serve
           && cargo test --locked -p wright-consumer --test consumer
+
+      - name: Install pinned OPY provider
+        run: target/debug/wright provider update opy --version 0.1.38
+
+      - name: Compile minimal OPY through provider boundary
+        run: >-
+          target/debug/wright compile tests/fixtures/opy/basic-rule.opy
+          --profile compat
 
   # -------------------------------------------------------------------------
   # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)

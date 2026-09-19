@@ -48,13 +48,13 @@ remain interpretable after a future rebaseline because their reference identity
 is explicit. Settings data outside the pin requires a reviewed owner pin change.
 
 Pin changes update the owner metadata, lockfile, owner test outputs, and
-provenance records together. Wright changes only when a provider or public
+version/checksum/license records together. Wright changes only when a provider or public
 product contract needs a focused integration regression.
 
 ## Compatibility impact
 
 This ADR preserves the durable reference identity, clean-room, licensing, and
-provenance rationale. ADR-0018 removes the former Wright-side reference-output
+reproducibility rationale. ADR-0018 removes the former Wright-side reference-output
 snapshot store and integrity gate; those files and comparisons remain an
 `opy-rs` responsibility.
 
