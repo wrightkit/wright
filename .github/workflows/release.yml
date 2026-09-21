@@ -305,13 +305,13 @@ jobs:
             fi
           }
 
-          existing_tag_commit="$(gh api \
+          if existing_tag_commit="$(gh api \
             "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
-            --jq '.sha' 2>/dev/null || true)"
-          if [[ -n "$existing_tag_commit" && \
-            "$existing_tag_commit" != "$RELEASE_COMMIT" ]]; then
-            echo "tag $RELEASE_TAG already points to $existing_tag_commit" >&2
-            exit 1
+            --jq '.sha' 2>/dev/null)"; then
+            if [[ "$existing_tag_commit" != "$RELEASE_COMMIT" ]]; then
+              echo "tag $RELEASE_TAG already points to $existing_tag_commit" >&2
+              exit 1
+            fi
           fi
 
           if draft="$(gh release view "$RELEASE_TAG" \
