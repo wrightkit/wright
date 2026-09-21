@@ -37,6 +37,7 @@ jobs:
       lpp: ${{ steps.filter.outputs.rust_core }}
       cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
+      release: ${{ steps.filter.outputs.release }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -48,6 +49,8 @@ jobs:
         uses: dorny/paths-filter@v4
         with:
           filters: |
+            release:
+              - '.release-please-manifest.json'
             rust_core:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -582,3 +585,32 @@ jobs:
       - name: Test WinGet channel
         if: matrix.channel == 'WinGet'
         run: python scripts/test-distribution-winget.py
+
+  # -------------------------------------------------------------------------
+  # [9] RELEASE PUBLICATION
+  # A Release Please manifest transition on main is the release intent.
+  # Publication remains downstream of every normal CI gate for this exact SHA.
+  # -------------------------------------------------------------------------
+  release:
+    name: Publish release
+    needs:
+      - paths
+      - rust-quality
+      - rust-msrv
+      - wright-cli-build
+      - workshop-integration
+      - opy-integration
+      - lpp-integration
+      - cli-behavior
+      - benchmark
+      - dist-cli-build
+      - dist-validation
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.paths.outputs.release == 'true'
+    permissions:
+      actions: read
+      contents: write
+    uses: ./.github/workflows/release.yml
+    secrets: inherit

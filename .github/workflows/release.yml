@@ -2,19 +2,6 @@ name: Release
 
 on:
   workflow_call:
-    inputs:
-      ref:
-        description: Git revision containing the release packages
-        required: true
-        type: string
-      tag:
-        description: Release tag to create after all release gates pass
-        required: true
-        type: string
-      commit:
-        description: Release commit used for version identity
-        required: true
-        type: string
     secrets:
       GH_TOKEN:
         description: Dedicated cross-repository token with write access to wrightkit/homebrew-tap
@@ -37,12 +24,25 @@ jobs:
   release-identity:
     name: Verify release identity and packages
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < version.txt)"
+          if [[ -z "$version" ]]; then
+            echo "version.txt is empty" >&2
+            exit 1
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -52,9 +52,9 @@ jobs:
       - name: Verify release revision and version identity
         run: >-
           python3 scripts/verify-release-identity.py
-          --tag "${{ inputs.tag }}"
-          --commit "${{ inputs.commit }}"
-          --ref "${{ inputs.ref }}"
+          --tag "${{ steps.version.outputs.tag }}"
+          --commit "${{ github.sha }}"
+          --ref "${{ github.sha }}"
 
       - name: Verify checked-in distribution metadata
         run: python3 scripts/verify-dist.py
@@ -83,15 +83,15 @@ jobs:
       run:
         shell: bash
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
+      RELEASE_COMMIT: ${{ github.sha }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -122,10 +122,10 @@ jobs:
       - name: Package archive with version stamp
         run: >-
           python scripts/package-release.py
-          --version "${{ inputs.tag }}"
+          --version "${{ needs.release-identity.outputs.tag }}"
           --target "$TARGET"
           --extension "$EXT"
-          --commit "${{ inputs.commit }}"
+          --commit "${{ github.sha }}"
           --runner-os "${{ runner.os }}"
 
       - name: Smoke test the packaged archive
@@ -150,15 +150,16 @@ jobs:
   upload-artifacts:
     name: Upload native release artifacts
     needs:
+      - release-identity
       - build
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ github.sha }}
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -169,9 +170,9 @@ jobs:
       - name: Verify the complete artifact set
         run: >-
           python3 scripts/verify-release-artifacts.py
-          --version "${{ inputs.tag }}"
-          --commit "${{ inputs.commit }}"
-          --tag "${{ inputs.tag }}"
+          --version "${{ needs.release-identity.outputs.tag }}"
+          --commit "${{ github.sha }}"
+          --tag "${{ needs.release-identity.outputs.tag }}"
           --artifacts-dir artifacts
           --output-dir release
 
@@ -184,15 +185,17 @@ jobs:
 
   package-manifests:
     name: Generate package-manager manifests
-    needs: upload-artifacts
+    needs:
+      - release-identity
+      - upload-artifacts
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Download verified release artifacts
@@ -204,7 +207,7 @@ jobs:
       - name: Generate manifests from the published checksums
         run: >-
           python3 scripts/generate-release-manifests.py
-          --version "${{ inputs.tag }}"
+          --version "${{ needs.release-identity.outputs.tag }}"
           --artifacts-dir artifacts
           --output-dir manifests
           --attach-dir attach
@@ -219,16 +222,17 @@ jobs:
   publish-tap:
     name: Publish formula to homebrew-tap
     needs:
+      - release-identity
       - package-manifests
       - publish-release
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ github.sha }}
       - name: Download generated Homebrew formula
         uses: actions/download-artifact@v8
         with:
@@ -252,6 +256,7 @@ jobs:
   publish-release:
     name: Publish completed GitHub Release
     needs:
+      - release-identity
       - upload-artifacts
       - package-manifests
     runs-on: ubuntu-latest
@@ -260,7 +265,7 @@ jobs:
       - name: Check out the exact release revision
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ github.sha }}
 
       - name: Download verified native release assets
         uses: actions/download-artifact@v8
@@ -277,14 +282,14 @@ jobs:
       - name: Prepare Release Please release notes
         run: >-
           python3 scripts/extract-release-notes.py
-          --tag "${{ inputs.tag }}"
+          --tag "${{ needs.release-identity.outputs.tag }}"
           --output release-notes.md
 
       - name: Create, resume, or verify the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
         run: |
           verify_release_assets() {
             expected_assets="$(for path in release/* attach/*; do basename "$path"; done | sort -u)"
@@ -351,11 +356,12 @@ jobs:
   publish-r2:
     name: Publish verified archives to R2
     needs:
+      - release-identity
       - upload-artifacts
       - publish-release
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       R2_BUCKET: wrightkit-release
       R2_PUBLIC_BASE_URL: https://releases.wrightkit.dev
       R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
@@ -366,7 +372,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ github.sha }}
       - name: Check R2 publication configuration
         run: aws --version
 
