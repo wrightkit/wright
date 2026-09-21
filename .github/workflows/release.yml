@@ -89,7 +89,7 @@ jobs:
           fi
 
           ci_run_id="$(
-            gh api --method GET "repos/$GITHUB_REPOSITORY/actions/runs"               -f head_sha="$RELEASE_COMMIT"               -f event=push               -f per_page=100               --jq '[.workflow_runs[] | select(.name == "CI" and .head_branch == "main" and .conclusion == "success")][0].id // empty'
+            gh api --method GET               "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$RELEASE_COMMIT&event=push&per_page=100"               --jq '[.workflow_runs[] | select(.name == "CI" and .head_branch == "main" and .conclusion == "success")][0].id // empty'
           )"
           if [[ -z "$ci_run_id" ]]; then
             echo "recovery commit $RELEASE_COMMIT has no successful exact-SHA CI push run on main" >&2
