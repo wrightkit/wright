@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_call:
+    inputs:
+      commit:
+        description: Exact release revision for explicit recovery; normal callers leave this empty
+        required: false
+        type: string
     secrets:
       GH_TOKEN:
         description: Dedicated cross-repository token with write access to wrightkit/homebrew-tap
@@ -15,6 +20,16 @@ on:
       CLOUDFLARE_ACCOUNT_ID:
         description: Cloudflare account ID for the R2 S3 API endpoint
         required: true
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact merged release commit to recover
+        required: true
+        type: string
+
+concurrency:
+  group: wright-release-publication
+  cancel-in-progress: false
 
 permissions:
   actions: read
@@ -25,24 +40,63 @@ jobs:
     name: Verify release identity and packages
     runs-on: ubuntu-latest
     outputs:
+      commit: ${{ steps.version.outputs.commit }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
 
       - name: Resolve release version
         id: version
         shell: bash
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit || github.sha }}
         run: |
           version="$(tr -d '\r\n' < version.txt)"
           if [[ -z "$version" ]]; then
             echo "version.txt is empty" >&2
             exit 1
           fi
+
+          manifest_version="$(jq -r '.["."] // empty' .release-please-manifest.json)"
+          if [[ "$manifest_version" != "$version" ]]; then
+            echo "release manifest version $manifest_version does not match version.txt $version" >&2
+            exit 1
+          fi
+
+          echo "commit=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify explicit recovery eligibility
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "release recovery must run from main" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main; then
+            echo "recovery commit $RELEASE_COMMIT is not contained in current main" >&2
+            exit 1
+          fi
+
+          ci_run_id="$(
+            gh api --method GET "repos/$GITHUB_REPOSITORY/actions/runs"               -f head_sha="$RELEASE_COMMIT"               -f event=push               -f per_page=100               --jq '[.workflow_runs[] | select(.name == "CI" and .head_branch == "main" and .conclusion == "success")][0].id // empty'
+          )"
+          if [[ -z "$ci_run_id" ]]; then
+            echo "recovery commit $RELEASE_COMMIT has no successful exact-SHA CI push run on main" >&2
+            exit 1
+          fi
+
+          echo "recovery commit $RELEASE_COMMIT passed CI in run $ci_run_id"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -53,8 +107,8 @@ jobs:
         run: >-
           python3 scripts/verify-release-identity.py
           --tag "${{ steps.version.outputs.tag }}"
-          --commit "${{ github.sha }}"
-          --ref "${{ github.sha }}"
+          --commit "${{ steps.version.outputs.commit }}"
+          --ref "${{ steps.version.outputs.commit }}"
 
       - name: Verify checked-in distribution metadata
         run: python3 scripts/verify-dist.py
@@ -84,14 +138,14 @@ jobs:
         shell: bash
     env:
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
-      RELEASE_COMMIT: ${{ github.sha }}
+      RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -125,7 +179,7 @@ jobs:
           --version "${{ needs.release-identity.outputs.tag }}"
           --target "$TARGET"
           --extension "$EXT"
-          --commit "${{ github.sha }}"
+          --commit "${{ needs.release-identity.outputs.commit }}"
           --runner-os "${{ runner.os }}"
 
       - name: Smoke test the packaged archive
@@ -159,7 +213,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -171,7 +225,7 @@ jobs:
         run: >-
           python3 scripts/verify-release-artifacts.py
           --version "${{ needs.release-identity.outputs.tag }}"
-          --commit "${{ github.sha }}"
+          --commit "${{ needs.release-identity.outputs.commit }}"
           --tag "${{ needs.release-identity.outputs.tag }}"
           --artifacts-dir artifacts
           --output-dir release
@@ -195,7 +249,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
           fetch-depth: 0
 
       - name: Download verified release artifacts
@@ -232,7 +286,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
       - name: Download generated Homebrew formula
         uses: actions/download-artifact@v8
         with:
@@ -265,7 +319,7 @@ jobs:
       - name: Check out the exact release revision
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
 
       - name: Download verified native release assets
         uses: actions/download-artifact@v8
@@ -289,7 +343,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
-          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
         run: |
           verify_release_assets() {
             expected_assets="$(for path in release/* attach/*; do basename "$path"; done | sort -u)"
@@ -372,7 +426,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
       - name: Check R2 publication configuration
         run: aws --version
 
