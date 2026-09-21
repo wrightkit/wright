@@ -2,10 +2,23 @@ name: Release
 
 on:
   workflow_call:
+    inputs:
+      channel:
+        description: Release channel to publish (nightly or stable)
+        required: true
+        type: string
+      commit:
+        description: Exact commit to build and publish
+        required: true
+        type: string
+      version:
+        description: Stable product version; omitted for nightly
+        required: false
+        type: string
     secrets:
       GH_TOKEN:
         description: Dedicated cross-repository token with write access to wrightkit/homebrew-tap
-        required: true
+        required: false
       R2_ACCESS_KEY_ID:
         description: Cloudflare R2 S3 API access key with write access to the release bucket
         required: true
@@ -22,39 +35,79 @@ permissions:
 
 jobs:
   release-identity:
-    name: Verify release identity and packages
+    name: Verify ${{ inputs.channel }} release identity
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.identity.outputs.channel }}
+      commit: ${{ steps.identity.outputs.commit }}
+      version: ${{ steps.identity.outputs.version }}
+      tag: ${{ steps.identity.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.commit }}
           fetch-depth: 0
-
-      - name: Resolve release version
-        id: version
-        shell: bash
-        run: |
-          version="$(tr -d '\r\n' < version.txt)"
-          if [[ -z "$version" ]]; then
-            echo "version.txt is empty" >&2
-            exit 1
-          fi
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
+      - name: Resolve and verify release identity
+        id: identity
+        shell: bash
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          case "$RELEASE_CHANNEL" in
+            nightly|stable) ;;
+            *) echo "unsupported release channel: $RELEASE_CHANNEL" >&2; exit 1 ;;
+          esac
+          if [[ "$GITHUB_REF" == refs/heads/* && "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "release workflows must run from main" >&2
+            exit 1
+          fi
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "wright-cli") | .version')"
+          if [[ -z "$version" || "$version" == null ]]; then
+            echo "wright-cli workspace version is unavailable" >&2
+            exit 1
+          fi
+          checked_in_version="$(tr -d '\r\n' < version.txt)"
+          if [[ "$checked_in_version" != "$version" ]]; then
+            echo "version.txt '$checked_in_version' does not match workspace version '$version'" >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_CHANNEL" == stable ]]; then
+            if [[ -z "$REQUESTED_VERSION" || "$REQUESTED_VERSION" != "$version" ]]; then
+              echo "stable input version '$REQUESTED_VERSION' does not match workspace version '$version'" >&2
+              exit 1
+            fi
+            tag="v$version"
+          else
+            if [[ -n "$REQUESTED_VERSION" ]]; then
+              echo "nightly releases must not accept a stable version input" >&2
+              exit 1
+            fi
+            tag="nightly-${RELEASE_COMMIT:0:12}"
+          fi
+          {
+            echo "channel=$RELEASE_CHANNEL"
+            echo "commit=$RELEASE_COMMIT"
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Verify release revision and version identity
         run: >-
           python3 scripts/verify-release-identity.py
-          --tag "${{ steps.version.outputs.tag }}"
-          --commit "${{ github.sha }}"
-          --ref "${{ github.sha }}"
+          --version "${{ steps.identity.outputs.version }}"
+          --tag "${{ steps.identity.outputs.tag }}"
+          --commit "${{ steps.identity.outputs.commit }}"
+          --ref "${{ steps.identity.outputs.commit }}"
 
       - name: Verify checked-in distribution metadata
         run: python3 scripts/verify-dist.py
@@ -83,15 +136,17 @@ jobs:
       run:
         shell: bash
     env:
+      RELEASE_CHANNEL: ${{ needs.release-identity.outputs.channel }}
+      RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
-      RELEASE_COMMIT: ${{ github.sha }}
+      RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
       TARGET: ${{ matrix.target }}
       EXT: ${{ matrix.ext }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -122,17 +177,18 @@ jobs:
       - name: Package archive with version stamp
         run: >-
           python scripts/package-release.py
-          --version "${{ needs.release-identity.outputs.tag }}"
+          --version "$RELEASE_VERSION"
+          --tag "$RELEASE_TAG"
           --target "$TARGET"
           --extension "$EXT"
-          --commit "${{ github.sha }}"
+          --commit "$RELEASE_COMMIT"
           --runner-os "${{ runner.os }}"
 
       - name: Smoke test the packaged archive
         run: >-
           python scripts/smoke-release-archive.py
-          --archive "dist/wright-${RELEASE_TAG#v}-${TARGET}.${EXT}"
-          --version "$RELEASE_TAG"
+          --archive "dist/wright-${RELEASE_VERSION}-${TARGET}.${EXT}"
+          --version "$RELEASE_VERSION"
           --target "$TARGET"
           --extension "$EXT"
 
@@ -154,12 +210,14 @@ jobs:
       - build
     runs-on: ubuntu-latest
     env:
+      RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -170,8 +228,8 @@ jobs:
       - name: Verify the complete artifact set
         run: >-
           python3 scripts/verify-release-artifacts.py
-          --version "${{ needs.release-identity.outputs.tag }}"
-          --commit "${{ github.sha }}"
+          --version "$RELEASE_VERSION"
+          --commit "$RELEASE_COMMIT"
           --tag "${{ needs.release-identity.outputs.tag }}"
           --artifacts-dir artifacts
           --output-dir release
@@ -188,14 +246,16 @@ jobs:
     needs:
       - release-identity
       - upload-artifacts
+    if: inputs.channel == 'stable'
     runs-on: ubuntu-latest
     env:
+      RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
           fetch-depth: 0
 
       - name: Download verified release artifacts
@@ -207,7 +267,7 @@ jobs:
       - name: Generate manifests from the published checksums
         run: >-
           python3 scripts/generate-release-manifests.py
-          --version "${{ needs.release-identity.outputs.tag }}"
+          --version "$RELEASE_VERSION"
           --artifacts-dir artifacts
           --output-dir manifests
           --attach-dir attach
@@ -225,6 +285,7 @@ jobs:
       - release-identity
       - package-manifests
       - publish-release
+    if: inputs.channel == 'stable'
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
@@ -232,7 +293,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
       - name: Download generated Homebrew formula
         uses: actions/download-artifact@v8
         with:
@@ -259,13 +320,14 @@ jobs:
       - release-identity
       - upload-artifacts
       - package-manifests
+    if: inputs.channel == 'stable'
     runs-on: ubuntu-latest
     environment: release
     steps:
       - name: Check out the exact release revision
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
 
       - name: Download verified native release assets
         uses: actions/download-artifact@v8
@@ -279,17 +341,11 @@ jobs:
           name: release-manifests
           path: attach
 
-      - name: Prepare Release Please release notes
-        run: >-
-          python3 scripts/extract-release-notes.py
-          --tag "${{ needs.release-identity.outputs.tag }}"
-          --output release-notes.md
-
-      - name: Create, resume, or verify the GitHub Release
+      - name: Create, resume, or verify the stable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
-          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
         run: |
           verify_release_assets() {
             expected_assets="$(for path in release/* attach/*; do basename "$path"; done | sort -u)"
@@ -320,6 +376,7 @@ jobs:
           fi
 
           python3 scripts/verify-release-identity.py \
+            --version "${{ needs.release-identity.outputs.version }}" \
             --tag "$RELEASE_TAG" \
             --commit "$RELEASE_COMMIT" \
             --ref "$RELEASE_COMMIT" \
@@ -338,7 +395,7 @@ jobs:
               --verify-tag \
               --target "$RELEASE_COMMIT" \
               --title "$RELEASE_TAG" \
-              --notes-file release-notes.md \
+              --generate-notes \
               --draft
             draft=true
           fi
@@ -348,8 +405,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --target "$RELEASE_COMMIT" \
-              --title "$RELEASE_TAG" \
-              --notes-file release-notes.md
+              --title "$RELEASE_TAG"
             gh release upload "$RELEASE_TAG" release/* attach/* \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
@@ -365,14 +421,21 @@ jobs:
           fi
 
   publish-r2:
-    name: Publish verified archives to R2
+    name: Publish ${{ inputs.channel }} archives to R2
     needs:
       - release-identity
       - upload-artifacts
       - publish-release
     runs-on: ubuntu-latest
+    if: >-
+      always() &&
+      ((inputs.channel == 'nightly' && needs.upload-artifacts.result == 'success') ||
+       (inputs.channel == 'stable' && needs.publish-release.result == 'success'))
     env:
+      RELEASE_CHANNEL: ${{ needs.release-identity.outputs.channel }}
+      RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
       R2_BUCKET: wrightkit-release
       R2_PUBLIC_BASE_URL: https://releases.wrightkit.dev
       R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
@@ -383,7 +446,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-identity.outputs.commit }}
       - name: Check R2 publication configuration
         run: aws --version
 

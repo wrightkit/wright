@@ -37,7 +37,6 @@ jobs:
       lpp: ${{ steps.filter.outputs.rust_core }}
       cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
-      release: ${{ steps.release.outputs.release }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -49,8 +48,6 @@ jobs:
         uses: dorny/paths-filter@v4
         with:
           filters: |
-            release:
-              - '.release-please-manifest.json'
             rust_core:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -76,25 +73,6 @@ jobs:
               - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
-      - name: Resolve release intent
-        id: release
-        shell: bash
-        run: |
-          release=false
-          if [[ "$GITHUB_EVENT_NAME" == "push" &&
-                "$GITHUB_REF" == "refs/heads/main" &&
-                "${{ steps.filter.outputs.release }}" == "true" ]]; then
-            version="$(jq -r '.["."] // empty' .release-please-manifest.json)"
-            if [[ -z "$version" ]]; then
-              echo "release manifest has no root version" >&2
-              exit 1
-            fi
-            if ! git rev-parse --verify --quiet "refs/tags/v${version}^{commit}" >/dev/null; then
-              release=true
-            fi
-          fi
-          echo "release=$release" >> "$GITHUB_OUTPUT"
-
   # -------------------------------------------------------------------------
   # [1] RUST QUALITY & TESTS  (fundamental gate)
   # All other Rust-based jobs depend on this.
@@ -603,32 +581,3 @@ jobs:
       - name: Test WinGet channel
         if: matrix.channel == 'WinGet'
         run: python scripts/test-distribution-winget.py
-
-  # -------------------------------------------------------------------------
-  # [9] RELEASE PUBLICATION
-  # A Release Please manifest transition on main is the release intent.
-  # Publication remains downstream of every normal CI gate for this exact SHA.
-  # -------------------------------------------------------------------------
-  release:
-    name: Publish release
-    needs:
-      - paths
-      - rust-quality
-      - rust-msrv
-      - wright-cli-build
-      - workshop-integration
-      - opy-integration
-      - lpp-integration
-      - cli-behavior
-      - benchmark
-      - dist-cli-build
-      - dist-validation
-    if: >-
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.paths.outputs.release == 'true'
-    permissions:
-      actions: read
-      contents: write
-    uses: ./.github/workflows/release.yml
-    secrets: inherit

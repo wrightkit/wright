@@ -4,6 +4,7 @@
 - Date: 2026-09-12 (backfill date)
 - Related: [Issue #261](https://github.com/wrightkit/wright/issues/261),
   [Issue #283](https://github.com/wrightkit/wright/issues/283),
+  [Issue #391](https://github.com/wrightkit/wright/issues/391),
   [PR #279](https://github.com/wrightkit/wright/pull/279),
   [PR #291](https://github.com/wrightkit/wright/pull/291),
   [PR #285](https://github.com/wrightkit/wright/pull/285),
@@ -51,6 +52,19 @@ after that verification. Versioned publication uses storage-level no-overwrite
 semantics. GitHub Releases remains the canonical release record and artifact
 source record; R2 is an exact installer distribution copy.
 
+The nightly channel uses the same immutable-object rule in a separate path:
+
+```text
+GET /wright/nightly/version
+GET /wright/nightly/<commit>/wright-<version>-<target>.<ext>
+GET /wright/nightly/<commit>/wright-<version>-<target>.<ext>.sha256
+```
+
+The nightly pointer contains the exact source commit. Nightly objects are not
+stable installer inputs, are not package-manager inputs, and do not create
+GitHub Releases; they provide the public R2 delivery route for successful
+`main` builds.
+
 The same repository-namespace/latest-pointer/versioned-artifact shape is used
 for first-party provider releases where the owner repository publishes that
 contract, but Wright's binary releases and provider releases remain separately
@@ -72,6 +86,8 @@ owned products.
 ## Consequences
 
 - Installers have one latest lookup and one immutable artifact route.
+- Nightly consumers have a separate commit-keyed lookup and cannot change
+  stable installer resolution.
 - Partial publication cannot advance the pointer to an incomplete version.
 - Existing released installers can be handled as cutover compatibility, but
   legacy root-level paths and latest-artifact aliases are not the durable
@@ -83,8 +99,9 @@ owned products.
 
 GitHub Release artifacts, checksums, target naming, package-manager ownership,
 and canonical release identity remain unchanged. The R2 object layout is the
-supported installer contract; the superseded root-level and duplicate latest
-artifact paths are not retained as a second supported route.
+supported stable installer and nightly delivery contract; the superseded
+root-level and duplicate latest-artifact paths are not retained as a second
+supported route.
 
 ## Scope boundaries
 

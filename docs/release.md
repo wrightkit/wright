@@ -19,9 +19,9 @@ immutable artifact, and latest-pointer contract is recorded in
   commit, build timestamp, and the runtime-dependency claim
   (`"requires": { "node": false, "overpy": false }`).
 
-This is the local staging path and the validation suite behind the release-please
-workflow; the reusable GitHub workflow publishes the per-platform archives,
-and this script verifies and packages the host platform.
+This is the local staging path for checking the release package on the host
+platform. GitHub Actions builds the complete native matrix for both release
+channels.
 
 ## What the release script verifies before stamping
 
@@ -50,48 +50,52 @@ envelope carries `wright.version` + `wright.contract`. The release archive's
 
 ## Public distribution contract
 
-A merge to `main` drives `.github/workflows/release-please.yml`. The release
-workflow is the single product release path:
+Wright has two release channels and one shared native build workflow:
 
-1. `release-please-action` maintains one root Release PR for the Wright
-   product. `release-please-config.json` uses the `simple` release type, with
-   `version.txt` and `CHANGELOG.md` as its product-level version and changelog
-   files. No workspace crate is published to crates.io. Every workspace
-   package explicitly sets `publish = false`, so Cargo package publication
-   cannot become an accidental release surface.
-2. The Release PR updates the shared workspace version, `Cargo.lock`, and the
-   checked-in `dist/` metadata. All workspace crate changes are included in the
-   product changelog decision.
-3. Merging that Release PR leaves the exact release commit on `main` without
-   creating a tag or GitHub Release. The `CI` workflow validates that commit.
-4. After that exact `CI` run succeeds, `release-publication.yml` starts the
-   reusable `release.yml` workflow. It verifies the version, builds and
-   smoke-tests the native matrix, verifies the complete archive/checksum set,
-   and generates package-manager manifests.
-5. The final `publish-release` job creates the `vX.Y.Z` tag and public GitHub
-   Release against that exact commit with the verified archives, checksums,
-   and manifests. Only then do R2 and Homebrew publication run.
+1. Every successful `CI` run on `main` is eligible for `.github/workflows/nightly.yml`.
+   The workflow is triggered by the completed CI run for that exact commit. It
+   builds and smoke-tests the native matrix, then publishes immutable objects
+   under `wright/nightly/<commit>/` and advances only
+   `wright/nightly/version`. Nightlies do not create Git tags, GitHub Releases,
+   or package-manager updates.
+2. A maintainer explicitly dispatches `.github/workflows/stable.yml` from
+   `main` with the exact workspace version. The workflow validates that the
+   selected commit's `Cargo.toml`, `version.txt`, and generated `dist/` metadata
+   agree, builds and smoke-tests the native matrix, and publishes the versioned
+   GitHub Release. The stable R2 objects and pointer are updated only after the
+   GitHub Release is complete.
 
-A failure before GitHub Release creation leaves no public release or tag for
-that candidate; rerun the failed release-publication workflow run to retry the
-same CI-qualified commit. If R2 publication fails afterward, the public
-GitHub Release remains the canonical record but `latest/version` is not
-advanced. A retry reuses only
-byte-identical immutable R2 objects and refuses any conflicting object.
+No workspace crate is published to crates.io. Every workspace package
+explicitly sets `publish = false`, so Cargo package publication cannot become
+an accidental release surface. A failed publication can be rerun for the same
+commit: stable tags and releases are checked for exact identity, while R2
+versioned objects are reused only when their bytes match.
 
 ### Creating a release
 
-The Release PR is the release decision point. Maintainers do not enter a
-version, edit version files, create a tag, or dispatch a second workflow for
-the normal case. Review and merge the automatically maintained Release PR;
-release-please derives the next version from Conventional Commits and records
-the version/changelog that the publication workflow later releases.
+The stable release decision is the reviewed version change on `main` followed
+by an explicit `workflow_dispatch` of `stable.yml`. The workflow does not infer
+SemVer changes from commits and does not turn ordinary merges into stable
+releases. `version.txt` remains the product-version input used by local
+distribution fixtures; it must match the Cargo workspace version in a version
+change.
 
-The `release-publication.yml` workflow is triggered by the completed `CI`
-workflow, so successful exact-commit CI is a native prerequisite. The reusable
-`release.yml` workflow is intentionally not triggered by a tag or Release
-event. Release creation is the final publication-stage job, so the default
-Actions token does not need to start a second workflow from a tag push.
+`nightly.yml` is triggered by completed `CI`, not by a tag or Release event.
+The reusable `release.yml` workflow receives the exact commit explicitly, so
+the artifacts cannot silently come from a later `main` head.
+
+### Dependency boundaries and updates
+
+`workshop-rs` is a normal compile-time Cargo dependency. Wright declares its
+ordinary SemVer-compatible requirement in `Cargo.toml`; a compatible owner
+release can be adopted by updating `Cargo.lock` without changing that manifest
+requirement. A breaking owner release requires an explicit Wright migration,
+manifest update, and validation before stable publication.
+
+OPY and DEL/OSTW remain independently released provider products. Wright does
+not bundle their versions into its product SemVer or dynamically replace
+`workshop-rs`; provider availability and compatibility are negotiated through
+the applicable LPP contract.
 
 ### Target matrix and artifact naming
 
@@ -114,9 +118,10 @@ supported through the channels below.
 ### R2 installer distribution
 
 `install.sh` uses the WrightKit R2 custom domain by default. GitHub Releases
-remain the canonical release record and provenance source; R2 contains exact
-copies of the archives and checksum files that the completed GitHub Release
-already exposes.
+remain the canonical stable release record and package-manager source; R2 is
+the HTTP installer/object-delivery channel and also carries the separate
+nightly channel. The stable R2 objects are exact copies of the archives in the
+completed GitHub Release.
 
 Pinned installs use immutable versioned objects:
 
@@ -138,7 +143,14 @@ API lookup.
 Versioned R2 objects are uploaded with `If-None-Match: *`; retries may reuse an
 already-present object only after comparing its bytes to the release artifact.
 The workflow retrieves every public copy and checks its bytes and cache headers
-before it advances `latest/version`.
+before it advances the channel pointer. Nightly objects are keyed by commit and
+the `wright/nightly/version` pointer contains that commit, so a nightly can be
+retrieved without changing stable installer resolution:
+
+```text
+https://releases.wrightkit.dev/wright/nightly/version
+https://releases.wrightkit.dev/wright/nightly/<commit>/wright-<version>-<target-triple>.<ext>
+```
 
 ### Manual GitHub Release fallback
 
@@ -207,16 +219,13 @@ not publish or modify any external package-manager repository.
 
 ### Repository configuration
 
-Enable Actions to create and approve pull requests. The release-please workflow
-uses the repository's `GH_TOKEN` secret as `GITHUB_TOKEN` so it can create and
-   update the Release PR.
 Create a protected `release` environment if publication approval is required;
-the final `publish-release` job is the only job that uses it.
+the stable `publish-release` job is the only job that uses it.
 
 Configure these optional/required environment secrets:
 
 * `GH_TOKEN` is a fine-grained token with write access to
-  `wrightkit/homebrew-tap`; it is required for automatic Homebrew tap updates.
+  `wrightkit/homebrew-tap`; it is required for the stable Homebrew tap update.
 * The workflow's built-in `GITHUB_TOKEN` creates the final GitHub Release and
   uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and

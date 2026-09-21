@@ -1,0 +1,28 @@
+name: Nightly
+
+# main is Wright's nightly channel. The release workflow is started only after
+# the complete CI workflow for the exact main commit succeeds.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: wright-nightly
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish nightly
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    uses: ./.github/workflows/release.yml
+    with:
+      channel: nightly
+      commit: ${{ github.event.workflow_run.head_sha }}
+    secrets: inherit

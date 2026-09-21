@@ -1,0 +1,41 @@
+name: Stable release
+
+# Stable publication is an explicit product decision. The selected main
+# revision must already carry the requested workspace version.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact workspace version to publish, for example 0.2.33
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: wright-stable
+  cancel-in-progress: false
+
+jobs:
+  verify-ref:
+    name: Verify stable release ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "stable releases must be dispatched from main" >&2
+            exit 1
+          fi
+
+  publish:
+    name: Publish stable
+    needs: verify-ref
+    uses: ./.github/workflows/release.yml
+    with:
+      channel: stable
+      commit: ${{ github.sha }}
+      version: ${{ inputs.version }}
+    secrets: inherit

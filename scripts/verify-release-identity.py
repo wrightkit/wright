@@ -11,7 +11,8 @@ import subprocess
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", required=True)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--tag")
     parser.add_argument("--commit", required=True)
     parser.add_argument("--ref", required=True)
     parser.add_argument(
@@ -34,7 +35,6 @@ def main() -> int:
         if tag_commit != args.commit:
             raise SystemExit(f"tag {args.tag} points to {tag_commit}, expected {args.commit}")
 
-    version = args.tag.removeprefix("v")
     metadata = json.loads(
         subprocess.check_output(
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
@@ -44,11 +44,13 @@ def main() -> int:
     package_version = next(
         package["version"] for package in metadata["packages"] if package["name"] == "wright-cli"
     )
-    if version != package_version:
+    if args.version != package_version:
         raise SystemExit(
-            f"tag {args.tag} does not match the workspace implementation version {package_version}"
+            f"requested version {args.version} does not match the workspace implementation version {package_version}"
         )
-    print(f"workspace version {package_version} matches tag {args.tag}")
+    if args.tag and args.tag.startswith("v") and args.tag.removeprefix("v") != args.version:
+        raise SystemExit(f"tag {args.tag} does not match requested version {args.version}")
+    print(f"workspace version {package_version} matches release version {args.version}")
     return 0
 
 
