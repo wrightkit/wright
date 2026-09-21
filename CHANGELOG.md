@@ -1,18 +1,5 @@
 # Changelog
 
-## [0.2.33](https://github.com/wrightkit/wright/compare/v0.2.32...v0.2.33) (2026-09-21)
-
-
-### Bug Fixes
-
-* **release:** use native CI orchestration ([#380](https://github.com/wrightkit/wright/pull/380))
-* **release:** handle missing tags and already-tagged manifest states during publication ([#387](https://github.com/wrightkit/wright/pull/387))
-
-
-### Dependencies
-
-* update workshop-rs to 0.4.4 ([#377](https://github.com/wrightkit/wright/pull/377))
-
 ## [0.2.32](https://github.com/wrightkit/wright/compare/v0.2.31...v0.2.32) (2026-09-17)
 
 
