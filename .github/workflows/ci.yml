@@ -606,21 +606,9 @@ jobs:
       - dist-cli-build
       - dist-validation
     if: >-
-      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      needs.paths.outputs.release == 'true' &&
-      needs.paths.result == 'success' &&
-      needs.rust-quality.result == 'success' &&
-      needs.rust-msrv.result == 'success' &&
-      needs.wright-cli-build.result == 'success' &&
-      needs.workshop-integration.result == 'success' &&
-      needs.opy-integration.result == 'success' &&
-      needs.lpp-integration.result == 'success' &&
-      needs.cli-behavior.result == 'success' &&
-      needs.benchmark.result == 'success' &&
-      needs.dist-cli-build.result == 'success' &&
-      needs.dist-validation.result == 'success'
+      needs.paths.outputs.release == 'true'
     permissions:
       actions: read
       contents: write
