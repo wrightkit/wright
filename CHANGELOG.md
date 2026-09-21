@@ -1,17 +1,5 @@
 # Changelog
 
-## [0.2.33](https://github.com/wrightkit/wright/compare/v0.2.32...v0.2.33) (2026-09-21)
-
-
-### Bug Fixes
-
-* **release:** use native CI orchestration ([#380](https://github.com/wrightkit/wright/issues/380)) ([2ee44d2](https://github.com/wrightkit/wright/commit/2ee44d2bb6ca348cfdc7dbeff2bd5bcbf0f0649a))
-
-
-### Dependencies
-
-* update workshop-rs to 0.4.4 ([#377](https://github.com/wrightkit/wright/issues/377)) ([a17266a](https://github.com/wrightkit/wright/commit/a17266ae219840e337308d62a191cd82b3d3ee41))
-
 ## [0.2.32](https://github.com/wrightkit/wright/compare/v0.2.31...v0.2.32) (2026-09-17)
 
 

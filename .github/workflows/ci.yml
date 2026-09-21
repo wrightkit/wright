@@ -37,7 +37,7 @@ jobs:
       lpp: ${{ steps.filter.outputs.rust_core }}
       cli: ${{ steps.filter.outputs.rust_core }}
       dist: ${{ steps.filter.outputs.dist }}
-      release: ${{ steps.filter.outputs.release }}
+      release: ${{ steps.release.outputs.release }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -76,6 +76,24 @@ jobs:
               - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
+      - name: Resolve release intent
+        id: release
+        shell: bash
+        run: |
+          release=false
+          if [[ "$GITHUB_EVENT_NAME" == "push" &&
+                "$GITHUB_REF" == "refs/heads/main" &&
+                "${{ steps.filter.outputs.release }}" == "true" ]]; then
+            version="$(jq -r '.["."] // empty' .release-please-manifest.json)"
+            if [[ -z "$version" ]]; then
+              echo "release manifest has no root version" >&2
+              exit 1
+            fi
+            if ! git rev-parse --verify --quiet "refs/tags/v${version}^{commit}" >/dev/null; then
+              release=true
+            fi
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------------
   # [1] RUST QUALITY & TESTS  (fundamental gate)
