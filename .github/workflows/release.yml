@@ -312,21 +312,11 @@ jobs:
               echo "tag $RELEASE_TAG already points to $existing_tag_commit" >&2
               exit 1
             fi
-          fi
-
-          if draft="$(gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json isDraft \
-            --jq '.isDraft' 2>/dev/null)"; then
-            echo "found existing $([[ "$draft" == true ]] && echo draft || echo public) release $RELEASE_TAG"
           else
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$RELEASE_COMMIT" \
-              --title "$RELEASE_TAG" \
-              --notes-file release-notes.md \
-              --draft
-            draft=true
+            gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$RELEASE_TAG" \
+              -f sha="$RELEASE_COMMIT" >/dev/null
           fi
 
           python3 scripts/verify-release-identity.py \
@@ -335,9 +325,29 @@ jobs:
             --ref "$RELEASE_COMMIT" \
             --verify-tag
 
+          draft="$(gh release list \
+            --repo "$GITHUB_REPOSITORY" \
+            --limit 100 \
+            --json tagName,isDraft \
+            --jq ".[] | select(.tagName == \"$RELEASE_TAG\") | .isDraft" | head -n 1)"
+          if [[ -n "$draft" ]]; then
+            echo "found existing $([[ "$draft" == true ]] && echo draft || echo public) release $RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --target "$RELEASE_COMMIT" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --draft
+            draft=true
+          fi
+
           if [[ "$draft" == true ]]; then
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --target "$RELEASE_COMMIT" \
               --title "$RELEASE_TAG" \
               --notes-file release-notes.md
             gh release upload "$RELEASE_TAG" release/* attach/* \
@@ -346,6 +356,7 @@ jobs:
             verify_release_assets
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
               --draft=false \
               --latest
           else
