@@ -25,7 +25,6 @@ jobs:
     name: Verify release identity and packages
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Check out repository
@@ -43,7 +42,6 @@ jobs:
             echo "version.txt is empty" >&2
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
