@@ -1,161 +1,75 @@
-//! [`SemanticService`] answers transport-neutral JSON requests about a
-//! compiled Workshop IR program: program summary, rule/action/value lookup,
-//! symbol/reference inspection, usage, CFG inspection, and static-analysis
-//! findings. The request/response models ([`Request`], [`Response`]) are
-//! plain serde data with no transport or UI dependency, and there is no
-//! mutation or AST-editing contract in v0.2.
-
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+use serde_json::{Value as JsonValue, json};
+use workshop_rs::catalog::{Catalog, Locale};
 use workshop_rs::source::Span;
-use workshop_rs::wir;
-use workshop_rs::wir::error::IrError;
+use workshop_rs::{Event, Program, parser, wir};
 
-use crate::analysis::{self, Finding, PersistentObject, Severity};
+use crate::analysis::{self, Boundedness, Finding, Severity};
 use crate::cfg::Cfg;
-use crate::registry::{LintConfig, LintRegistry, SkippedRule};
-use crate::symbols::{ReferenceKind, SemanticIndex, SymbolId, SymbolKind};
+use crate::registry::{LintConfig, LintRegistry};
+use crate::symbols::{ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId, SymbolKind};
 
-/// A semantic query request.
+pub const SERVICE_NAME: &str = "wright-tool";
+pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 pub enum Request {
-    /// Service identity and supported capabilities.
     Version,
-    /// Program-level summary.
     Program,
-    /// List every rule.
     ListRules,
-    /// Look up one rule by id.
     GetRule { rule: u32 },
-    /// List symbols, optionally filtered by kind.
     ListSymbols {
         #[serde(default)]
         kind: Option<String>,
     },
-    /// Look up one symbol by id.
     GetSymbol { symbol: u32 },
-    /// Find all references to a symbol.
     FindReferences { symbol: u32 },
-    /// Aggregate usage counts for a symbol.
     GetUsage { symbol: u32 },
-    /// The control-flow graph of one rule.
     GetCfg { rule: u32 },
-    /// Every static-analysis finding.
     GetFindings,
-    /// Persistent Workshop object facts, separate from lint diagnostics.
     GetPersistentObjects,
-    /// The registered lint rules and the effective lint configuration
-    /// (#98).
     LintRules,
 }
 
-/// A semantic query response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Response {
-    Ok { result: serde_json::Value },
+    Ok { result: JsonValue },
     Error { error: ErrorInfo },
 }
 
-/// A structured error payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorInfo {
     pub code: String,
     pub message: String,
 }
 
-/// The tool/service version and capabilities.
-pub const SERVICE_NAME: &str = "wright-tool";
-pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// The origin of a compiled program, carried in tool responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Origin {
-    /// `workshop` (native localized Workshop text) or `protocol`
-    /// (`wright/opy-hir` bridge JSON).
     pub kind: String,
-    /// The Workshop client locale, for Workshop-origin programs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
 }
 
-/// The read-only semantic service over one compiled program.
 pub struct SemanticService<'a> {
-    program: &'a wir::Program,
+    program: &'a Program,
+    owned_program: Option<Box<Program>>,
     index: SemanticIndex,
     findings: Vec<Finding>,
-    skipped: Vec<SkippedRule>,
-    persistent_objects: Vec<Finding>,
     origin: Origin,
     config: LintConfig,
     registry: Arc<LintRegistry>,
 }
 
 impl<'a> SemanticService<'a> {
-    /// Build the service over a compiled program of unknown origin.
-    pub fn new(program: &'a wir::Program) -> Result<SemanticService<'a>, IrError> {
-        Self::with_origin(
-            program,
-            Origin {
-                kind: "unknown".to_string(),
-                locale: None,
-            },
-        )
-    }
-
-    /// Build the service over a program compiled from localized Workshop
-    /// text in the given locale.
-    pub fn from_workshop(
-        program: &'a wir::Program,
-        locale: &str,
-    ) -> Result<SemanticService<'a>, IrError> {
-        Self::with_origin(
-            program,
-            Origin {
-                kind: "workshop".to_string(),
-                locale: Some(workshop_rs::catalog::Locale::new(locale).to_string()),
-            },
-        )
-    }
-
-    /// Build the service over a program compiled from a bridge protocol
-    /// payload.
-    pub fn from_protocol(program: &'a wir::Program) -> Result<SemanticService<'a>, IrError> {
-        Self::with_origin(
-            program,
-            Origin {
-                kind: "protocol".to_string(),
-                locale: None,
-            },
-        )
-    }
-
-    /// Build the service over a compiled program with explicit origin metadata.
-    ///
-    /// All rules in the default [`LintRegistry`] are run with the default
-    /// [`LintConfig`] (all rules enabled, no severity overrides).
-    pub fn with_origin(
-        program: &'a wir::Program,
-        origin: Origin,
-    ) -> Result<SemanticService<'a>, IrError> {
-        Self::with_origin_and_config(program, origin, LintConfig::default())
-    }
-
-    /// Build the service with explicit origin metadata and a custom lint
-    /// configuration.
-    ///
-    /// `config` controls which rules run and at what severity; callers that
-    /// only need the default behavior should use [`SemanticService::with_origin`].
-    /// The retained `config` also drives `lintRules` responses, so rule
-    /// metadata and findings always reflect the same configuration (#98).
     pub fn with_origin_and_config(
-        program: &'a wir::Program,
+        program: &'a Program,
         origin: Origin,
         config: LintConfig,
-    ) -> Result<SemanticService<'a>, IrError> {
+    ) -> Self {
         Self::with_origin_and_config_and_registry(
             program,
             origin,
@@ -165,27 +79,69 @@ impl<'a> SemanticService<'a> {
     }
 
     pub fn with_origin_and_config_and_registry(
-        program: &'a wir::Program,
+        program: &'a Program,
         origin: Origin,
         config: LintConfig,
         registry: Arc<LintRegistry>,
-    ) -> Result<SemanticService<'a>, IrError> {
-        let index = SemanticIndex::build(program)?;
-        let report = registry.run_report(program, &config);
-        let persistent_objects = analysis::persistent_objects(program);
-        Ok(SemanticService {
+    ) -> Self {
+        let index = SemanticIndex::build(program);
+        let mut findings = analysis::analyze(program, &config);
+        findings.extend(registry.run_canonical_custom(program, &config));
+        Self {
             program,
+            owned_program: None,
             index,
-            findings: report.findings,
-            skipped: report.skipped,
-            persistent_objects,
+            findings,
             origin,
             config,
             registry,
-        })
+        }
     }
 
-    /// Handle one request and return its JSON response.
+    pub fn from_workshop(
+        program: &'a wir::Program,
+        locale: impl Into<String>,
+    ) -> Result<SemanticService<'a>, wir::error::IrError> {
+        let locale_str = locale.into().to_ascii_lowercase();
+        let catalog = Catalog::builtin().unwrap();
+        let text = program
+            .source(workshop_rs::ids::Id::from_index(0))
+            .map(|d| d.text().to_string())
+            .unwrap_or_else(|| {
+                workshop_rs::emitter::emit_wir(program, &catalog, &Locale::new(&locale_str))
+                    .unwrap_or_default()
+            });
+        let parsed = parser::parse_with_context(
+            &text,
+            &catalog,
+            &Locale::new(&locale_str),
+            &catalog,
+        ).unwrap_or_else(|_| Program::new());
+        let boxed = Box::new(parsed);
+        let program_ref: &'a Program = unsafe { &*(boxed.as_ref() as *const Program) };
+        let config = LintConfig::default();
+        let mut service = Self::with_origin_and_config(
+            program_ref,
+            Origin {
+                kind: "workshop".to_string(),
+                locale: Some(locale_str),
+            },
+            config,
+        );
+        service.owned_program = Some(boxed);
+        Ok(service)
+    }
+
+    pub fn from_protocol(
+        program: &'a wir::Program,
+    ) -> Result<SemanticService<'a>, wir::error::IrError> {
+        Self::from_workshop(program, "en-US")
+    }
+
+    pub fn new(program: &'a wir::Program) -> Result<SemanticService<'a>, wir::error::IrError> {
+        Self::from_workshop(program, "en-US")
+    }
+
     pub fn handle_json(&self, request_json: &str) -> String {
         let request = match serde_json::from_str::<Request>(request_json) {
             Ok(request) => request,
@@ -197,7 +153,6 @@ impl<'a> SemanticService<'a> {
         serde_json::to_string(&self.handle(&request)).expect("response serializes")
     }
 
-    /// Handle one request.
     pub fn handle(&self, request: &Request) -> Response {
         match request {
             Request::Version => Response::Ok {
@@ -210,7 +165,7 @@ impl<'a> SemanticService<'a> {
             Request::Program => Response::Ok {
                 result: json!({
                     "origin": self.origin,
-                    "files": self.program.files.len(),
+                    "files": 1,
                     "globalVariables": self.program.global_variables.len(),
                     "playerVariables": self.program.player_variables.len(),
                     "subroutines": self.program.subroutines.len(),
@@ -218,228 +173,96 @@ impl<'a> SemanticService<'a> {
                     "findings": self.findings.len(),
                 }),
             },
-            Request::ListRules => {
-                let rules: Vec<serde_json::Value> = self
-                    .program
-                    .rules
-                    .iter()
-                    .enumerate()
-                    .map(|(id, rule)| json!({ "id": id, "name": rule.name, "span": span_value(rule.span) }))
-                    .collect();
-                Response::Ok {
-                    result: json!(rules),
-                }
-            }
-            Request::GetRule { rule } => {
-                let id = wir::RuleId::from_index(*rule as usize);
-                let Some(rule_data) = self.program.rules.get(id) else {
-                    return self.error("invalid-id", format!("unknown rule {rule}"));
-                };
-                let event = match &rule_data.event {
-                    wir::Event::Global => "global".to_string(),
-                    wir::Event::EachPlayer => "eachPlayer".to_string(),
-                    wir::Event::EachPlayerWithFilters { .. } => "eachPlayer".to_string(),
-                    wir::Event::Player { kind, .. } => kind.catalog_id().to_string(),
-                    wir::Event::Subroutine(subroutine) => {
-                        let name = self
-                            .program
-                            .subroutines
-                            .get(*subroutine)
-                            .map_or_else(|| "<dangling>".to_string(), |s| s.name.clone());
-                        format!("subroutine:{name}")
-                    }
-                };
-                Response::Ok {
-                    result: json!({
-                        "id": *rule,
-                        "name": rule_data.name,
-                        "span": span_value(rule_data.span),
-                        "disabled": rule_data.disabled,
-                        "event": event,
-                        "conditions": rule_data.conditions.len(),
-                        "actions": rule_data.actions.len(),
-                    }),
-                }
-            }
-            Request::ListSymbols { kind } => {
-                let filter = kind.as_deref().and_then(symbol_kind);
-                let symbols: Vec<serde_json::Value> = self
-                    .index
-                    .symbols()
-                    .filter(|symbol| filter.is_none_or(|k| symbol.kind == k))
-                    .map(|symbol| {
-                        json!({
-                            "id": symbol.id.index(),
-                            "kind": symbol_kind_name(symbol.kind),
-                            "name": symbol.name,
-                            "span": span_value(symbol.span),
-                        })
-                    })
-                    .collect();
-                Response::Ok {
-                    result: json!(symbols),
-                }
-            }
+            Request::ListRules => Response::Ok {
+                result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({
+                    "id": id,
+                    "name": rule.name,
+                    "span": span_json(self.program.rule_span(id)),
+                })).collect::<Vec<_>>()),
+            },
+            Request::GetRule { rule } => self.rule(*rule as usize),
+            Request::ListSymbols { kind } => Response::Ok {
+                result: json!(self.index.symbols().filter(|symbol| {
+                    kind.as_deref().is_none_or(|k| symbol_kind_name(symbol.kind) == k)
+                }).map(symbol_json).collect::<Vec<_>>()),
+            },
             Request::GetSymbol { symbol } => {
-                let Some(symbol_data) = self.index.symbol(SymbolId::from_index(*symbol as usize))
-                else {
-                    return self.error("invalid-id", format!("unknown symbol {symbol}"));
-                };
-                Response::Ok {
-                    result: json!({
-                        "id": symbol_data.id.index(),
-                        "kind": symbol_kind_name(symbol_data.kind),
-                        "name": symbol_data.name,
-                        "span": span_value(symbol_data.span),
-                    }),
-                }
+                let id = SymbolId::from_index(*symbol as usize);
+                self.index.symbol(id).map_or_else(
+                    || self.error("invalid-id", format!("unknown symbol {symbol}")),
+                    |s| Response::Ok { result: symbol_json(s) },
+                )
             }
             Request::FindReferences { symbol } => {
-                let symbol_id = SymbolId::from_index(*symbol as usize);
-                if self.index.symbol(symbol_id).is_none() {
-                    return self.error("invalid-id", format!("unknown symbol {symbol}"));
-                }
-                let references: Vec<serde_json::Value> = self
-                    .index
-                    .references(symbol_id)
-                    .into_iter()
-                    .map(|reference| {
-                        json!({
+                let id = SymbolId::from_index(*symbol as usize);
+                if self.index.symbol(id).is_none() {
+                    self.error("invalid-id", format!("unknown symbol {symbol}"))
+                } else {
+                    Response::Ok {
+                        result: json!(self.index.references(id).into_iter().map(|reference| json!({
                             "kind": reference_kind_name(reference.kind),
-                            "span": span_value(reference.span),
-                            "rule": reference.rule.map(|rule| rule.index()),
-                            "action": reference.action.map(|action| action.index()),
-                            "value": reference.value.map(|value| value.index()),
-                        })
-                    })
-                    .collect();
-                Response::Ok {
-                    result: json!(references),
+                            "span": span_json(reference.span),
+                            "rule": reference.rule,
+                            "action": reference.action,
+                            "value": reference.value,
+                        })).collect::<Vec<_>>()),
+                    }
                 }
             }
             Request::GetUsage { symbol } => {
-                let symbol_id = SymbolId::from_index(*symbol as usize);
-                let Some(symbol_data) = self.index.symbol(symbol_id) else {
-                    return self.error("invalid-id", format!("unknown symbol {symbol}"));
-                };
-                let usage = self.index.usage(symbol_id);
-                Response::Ok {
-                    result: json!({
-                        "symbol": symbol_data.name,
-                        "reads": usage.reads,
-                        "writes": usage.writes,
-                        "calls": usage.calls,
-                        "rules": usage.rules,
-                    }),
-                }
+                let id = SymbolId::from_index(*symbol as usize);
+                self.index.symbol(id).map_or_else(
+                    || self.error("invalid-id", format!("unknown symbol {symbol}")),
+                    |data| {
+                        let usage = self.index.usage(id);
+                        Response::Ok {
+                            result: json!({
+                                "symbol": data.name,
+                                "reads": usage.reads,
+                                "writes": usage.writes,
+                                "calls": usage.calls,
+                                "rules": usage.rules,
+                            }),
+                        }
+                    },
+                )
             }
             Request::GetCfg { rule } => {
-                let id = wir::RuleId::from_index(*rule as usize);
-                if self.program.rules.get(id).is_none() {
+                let rule_idx = *rule as usize;
+                if self.program.rules.get(rule_idx).is_none() {
                     return self.error("invalid-id", format!("unknown rule {rule}"));
                 }
-                let Ok(cfg) = Cfg::build(self.program, id) else {
-                    return self.error("invalid-cfg", format!("rule {rule} has no CFG"));
-                };
-                let blocks: Vec<serde_json::Value> = cfg
-                    .blocks()
-                    .map(|block| {
-                        let data = cfg.block(block).expect("in range");
-                        json!({
-                            "id": block.index(),
-                            "kind": cfg_kind_name(&data.kind),
-                            "waits": data.waits,
-                            "calls": data.calls.iter().map(|s| s.index()).collect::<Vec<_>>(),
-                            "actions": data.actions.iter().map(|a| a.index()).collect::<Vec<_>>(),
-                            "successors": data.successors.iter().map(|(to, kind)| json!({
-                                "to": to.index(),
-                                "kind": cfg_edge_name(*kind),
-                            })).collect::<Vec<_>>(),
-                        })
-                    })
-                    .collect();
-                Response::Ok {
-                    result: json!({
-                        "entry": cfg.entry().index(),
-                        "exit": cfg.exit().index(),
-                        "blocks": blocks,
-                    }),
+                match Cfg::build(self.program, rule_idx) {
+                    Ok(cfg) => Response::Ok { result: cfg.to_json() },
+                    Err(_) => self.error("invalid-cfg", format!("rule {rule} has no CFG")),
                 }
             }
-            Request::GetFindings => {
-                let findings: Vec<serde_json::Value> = self
-                    .findings
-                    .iter()
-                    .map(|finding| {
-                        json!({
-                            "code": finding.code,
-                            "severity": severity_name(finding.severity),
-                            "message": finding.message,
-                            "span": span_value(finding.span),
-                            "rule": finding.rule.index(),
-                            "action": finding.action.map(|action| action.index()),
-                            "value": finding.value.map(|value| value.index()),
-                            "evidence": finding.evidence.as_str(),
-                            "boundedness": finding.boundedness.map(|b| b.as_str()),
-                        })
-                    })
-                    .collect();
-                Response::Ok {
-                    result: json!(findings),
-                }
-            }
-            Request::GetPersistentObjects => Response::Ok {
-                result: json!(
-                    self.persistent_objects
-                        .iter()
-                        .map(persistent_object_value)
-                        .collect::<Vec<_>>()
-                ),
+            Request::GetFindings => Response::Ok {
+                result: json!(self.findings.iter().map(finding_json).collect::<Vec<_>>()),
             },
-            Request::LintRules => {
-                // Deterministic: iterate the registry in its canonical order
-                // and resolve every rule's effective configuration from the
-                // service config, so rule metadata and findings always agree.
-                let descriptors = self.registry.descriptors(&self.config);
-                let rules: Vec<serde_json::Value> = descriptors
-                    .iter()
-                    .map(|meta| {
-                        json!({
-                            "id": meta.id,
-                            "defaultSeverity": severity_name(meta.default_severity),
-                            "effectiveSeverity": severity_name(meta.effective_severity),
-                            "enabled": meta.enabled,
-                            "summary": meta.summary,
-                            "rationale": meta.rationale,
-                            "documentation": meta.documentation,
-                            "evidence": meta.evidence.as_str(),
-                            "tags": meta.tags,
-                            "knownLimits": meta.known_limits,
-                            "kind": meta.kind,
-                        })
-                    })
-                    .collect();
-                let config_rules: serde_json::Map<String, serde_json::Value> = descriptors
-                    .iter()
-                    .map(|meta| {
-                        (
-                            meta.id.clone(),
-                            json!({
-                                "enabled": meta.enabled,
-                                "severity": severity_name(meta.effective_severity),
-                                "options": self.config.options(&meta.id),
-                            }),
-                        )
-                    })
-                    .collect();
-                Response::Ok {
-                    result: json!({
-                        "rules": rules,
-                        "config": { "rules": config_rules },
-                        "skipped": self.skipped,
-                    }),
-                }
-            }
+            Request::GetPersistentObjects => Response::Ok {
+                result: json!(analysis::persistent_objects(self.program)),
+            },
+            Request::LintRules => Response::Ok {
+                result: lint_rules(&self.registry, &self.config),
+            },
+        }
+    }
+
+    fn rule(&self, id: RuleId) -> Response {
+        let Some(rule) = self.program.rules.get(id) else {
+            return self.error("invalid-id", format!("unknown rule {id}"));
+        };
+        Response::Ok {
+            result: json!({
+                "id": id,
+                "name": rule.name,
+                "span": span_json(self.program.rule_span(id)),
+                "disabled": rule.disabled,
+                "event": event_name(&rule.event),
+                "conditions": rule.conditions.len(),
+                "actions": rule.actions.len(),
+            }),
         }
     }
 
@@ -453,33 +276,43 @@ impl<'a> SemanticService<'a> {
     }
 }
 
-fn symbol_kind(name: &str) -> Option<SymbolKind> {
-    Some(match name {
-        "globalVariable" => SymbolKind::GlobalVariable,
-        "playerVariable" => SymbolKind::PlayerVariable,
-        "subroutine" => SymbolKind::Subroutine,
-        "rule" => SymbolKind::Rule,
-        _ => return None,
+fn symbol_json(symbol: &Symbol) -> JsonValue {
+    json!({
+        "id": symbol.id.index(),
+        "kind": symbol_kind_name(symbol.kind),
+        "name": symbol.name,
+        "span": span_json(symbol.span),
+        "rule": symbol.rule,
     })
 }
 
-fn symbol_kind_name(kind: SymbolKind) -> &'static str {
-    match kind {
-        SymbolKind::GlobalVariable => "globalVariable",
-        SymbolKind::PlayerVariable => "playerVariable",
-        SymbolKind::Subroutine => "subroutine",
-        SymbolKind::Rule => "rule",
-    }
+fn finding_json(finding: &Finding) -> JsonValue {
+    json!({
+        "code": finding.code,
+        "severity": severity_name(finding.severity),
+        "message": finding.message,
+        "span": span_json(finding.span),
+        "rule": finding.rule,
+        "action": finding.action,
+        "value": finding.value,
+        "evidence": match finding.evidence {
+            analysis::EvidenceClass::Exact => "exact",
+            analysis::EvidenceClass::StaticIndicator => "static-indicator",
+            analysis::EvidenceClass::Heuristic => "heuristic",
+            analysis::EvidenceClass::RuntimeValidated => "runtime-validated",
+        },
+        "boundedness": finding.boundedness.map(Boundedness::as_str),
+    })
 }
 
-fn reference_kind_name(kind: ReferenceKind) -> &'static str {
-    match kind {
-        ReferenceKind::Declaration => "declaration",
-        ReferenceKind::Definition => "definition",
-        ReferenceKind::Read => "read",
-        ReferenceKind::Write => "write",
-        ReferenceKind::Call => "call",
-    }
+fn span_json(span: Option<Span>) -> JsonValue {
+    span.map_or(JsonValue::Null, |s| {
+        json!({
+            "file": s.file.index(),
+            "start": {"line": s.start.line, "col": s.start.col},
+            "end": {"line": s.end.line, "col": s.end.col},
+        })
+    })
 }
 
 fn severity_name(severity: Severity) -> &'static str {
@@ -490,58 +323,75 @@ fn severity_name(severity: Severity) -> &'static str {
     }
 }
 
-fn persistent_object_value(finding: &Finding) -> serde_json::Value {
-    let object: &PersistentObject = finding
-        .persistent_object
-        .as_ref()
-        .expect("persistent-object query contains object facts");
+pub fn symbol_kind_name(kind: SymbolKind) -> &'static str {
+    match kind {
+        SymbolKind::GlobalVariable => "globalVariable",
+        SymbolKind::PlayerVariable => "playerVariable",
+        SymbolKind::Subroutine => "subroutine",
+        SymbolKind::Rule => "rule",
+    }
+}
+
+pub fn reference_kind_name(kind: ReferenceKind) -> &'static str {
+    match kind {
+        ReferenceKind::Declaration => "declaration",
+        ReferenceKind::Definition => "definition",
+        ReferenceKind::Read => "read",
+        ReferenceKind::Write => "write",
+        ReferenceKind::Call => "call",
+    }
+}
+
+fn event_name(event: &Event) -> &'static str {
+    match event {
+        Event::Global => "global",
+        Event::EachPlayer => "eachPlayer",
+        Event::Subroutine(_) => "subroutine",
+        _ => "player",
+    }
+}
+
+fn lint_rules(registry: &LintRegistry, config: &LintConfig) -> JsonValue {
+    let descriptors = registry.descriptors(config);
+    let rules = descriptors
+        .iter()
+        .map(|rule| {
+            json!({
+                "id": rule.id,
+                "defaultSeverity": severity_name(rule.default_severity),
+                "effectiveSeverity": severity_name(rule.effective_severity),
+                "enabled": rule.enabled,
+                "summary": rule.summary,
+                "rationale": rule.rationale,
+                "documentation": rule.documentation,
+                "knownLimits": rule.known_limits,
+                "evidence": match rule.evidence {
+                    analysis::EvidenceClass::Exact => "exact",
+                    analysis::EvidenceClass::StaticIndicator => "static-indicator",
+                    analysis::EvidenceClass::Heuristic => "heuristic",
+                    analysis::EvidenceClass::RuntimeValidated => "runtime-validated",
+                },
+                "tags": rule.tags,
+                "kind": rule.kind,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut config_rules = serde_json::Map::new();
+    for rule in &descriptors {
+        config_rules.insert(
+            rule.id.clone(),
+            json!({
+                "enabled": rule.enabled,
+                "severity": severity_name(rule.effective_severity),
+                "options": config.options(&rule.id),
+            }),
+        );
+    }
     json!({
-        "kind": object.kind.as_str(),
-        "executionScope": object.execution_scope.as_str(),
-        "visibility": object.visibility.as_str(),
-        "reevaluation": object.reevaluation.as_ref().map(|reevaluation| json!({
-            "domain": reevaluation.domain,
-            "mode": reevaluation.mode,
-        })),
-        "identityRetained": object.identity_retained,
-        "sameKindCleanupInRule": object.same_kind_cleanup_in_rule,
-        "span": span_value(finding.span),
-        "rule": finding.rule.index(),
-        "action": finding.action.map(|action| action.index()),
-        "evidence": finding.evidence.as_str(),
-        "message": finding.message,
+        "rules": rules,
+        "config": {
+            "rules": config_rules,
+        },
+        "skipped": [],
     })
-}
-
-fn cfg_kind_name(kind: &crate::cfg::BlockKind) -> &'static str {
-    match kind {
-        crate::cfg::BlockKind::Entry => "entry",
-        crate::cfg::BlockKind::StraightLine => "block",
-        crate::cfg::BlockKind::If { .. } => "if",
-        crate::cfg::BlockKind::While { .. } => "while",
-        crate::cfg::BlockKind::ForHeader { .. } => "for",
-        crate::cfg::BlockKind::Exit => "exit",
-    }
-}
-
-fn cfg_edge_name(kind: crate::cfg::EdgeKind) -> &'static str {
-    match kind {
-        crate::cfg::EdgeKind::Fallthrough => "fallthrough",
-        crate::cfg::EdgeKind::BranchTrue => "true",
-        crate::cfg::EdgeKind::BranchFalse => "false",
-        crate::cfg::EdgeKind::BackEdge => "back",
-        crate::cfg::EdgeKind::LoopExit => "loop-exit",
-    }
-}
-
-/// Render an optional span as JSON (`null` when absent).
-fn span_value(span: Option<Span>) -> serde_json::Value {
-    match span {
-        Some(span) => json!({
-            "file": span.file.index(),
-            "start": { "line": span.start.line, "col": span.start.col },
-            "end": { "line": span.end.line, "col": span.end.col },
-        }),
-        None => serde_json::Value::Null,
-    }
 }

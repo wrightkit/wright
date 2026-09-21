@@ -1,70 +1,19 @@
-//! Each analysis produces [`Finding`]s with a stable code, a severity, a
-//! human-readable message, and the offending rule/action/value and span. The
-//! v0.2 analysis set is deliberately small and low-false-positive:
-//!
-//! * [`MinWaitLoop`] (`min-wait-loop`) — a loop whose body waits at the
-//!   workshop minimum rate (~0.016s), i.e. it executes at maximum frequency.
-//! * [`DuplicateCondition`] (`duplicate-condition`) — the same condition
-//!   evaluated twice within one rule (a later branch can never be taken).
-//! * [`ExpensiveLoopCheck`] (`expensive-loop-check`) — a geometry predicate
-//!   (`distance`, `raycast`, `isInLoS`) evaluated inside a loop body.
-//! * [`OngoingConditionHotPath`] (`ongoing-condition-hot-path`) — a geometry
-//!   predicate evaluated along an ongoing-rule condition path.
-//! * [`RepeatedValue`] (`repeated-value`) — a value expression evaluated
-//!   more than once within one loop scope, reported once per maximal
-//!   duplicated shape.
-//! * [`WhileWithoutWait`] (`while-without-wait`) — a `While` loop whose body
-//!   tree contains no `wait` call, so it cannot yield while its condition
-//!   holds; each finding also classifies the loop's boundedness evidence
-//!   (`obviously-unbounded` / `statically-bounded` / `unknown`, #103).
-//!
-//! Known limits (documented, not silent): wait durations that are not
-//! statically known are treated as not-minimum; duplicate detection is
-//! structural (arena-id-independent) and rule-local; the expensive-call list
-//! is a heuristic that may miss or over-flag exotic predicates; repeated-value
-//! detection is structural (no value-flow) and loop-scope-local, reports each
-//! duplicated shape once at its maximal form (nested duplicates subsumed) and
-//! never flags single-call expressions such as bare array reads; the
-//! while-without-wait trigger is static but the impact (loop frequency) is an
-//! indicator, and `For Global Variable` loops are never flagged.
-//!
-//! Every [`Finding`] also carries the [`EvidenceClass`] of its rule (#98):
-//! whether the finding is an exact structural fact, a static indicator,
-//! a documented heuristic, or (reserved) runtime-validated.
-
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
+use serde_json::{Value as JsonValue, json};
 use workshop_rs::source::Span;
-use workshop_rs::wir::{
-    self, Action, ActionId, Event, GlobalVarId, ModifyOp, PlayerVarId, RuleId, Value, ValueId,
-};
+use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
-use crate::cfg::Cfg;
-use crate::registry::{LintConfig, LintRegistry};
+use crate::registry::LintConfig;
+use crate::symbols::{ActionId, RuleId, ValueId};
 
-/// The severity of a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    Error,
     Warning,
     Info,
-    Error,
 }
 
-/// How strongly a finding is supported by the available evidence.
-///
-/// Classifies the *kind* of evidence behind a rule's findings, not the
-/// severity or the certainty of an individual finding:
-///
-/// * `Exact` — a structural fact of the program (e.g. a duplicated
-///   condition) that holds regardless of runtime values.
-/// * `StaticIndicator` — the trigger is statically known but the impact
-///   (e.g. runtime loop frequency) is an indicator, not a measurement.
-/// * `Heuristic` — a documented fixed heuristic list that may miss or
-///   over-flag edge cases.
-/// * `RuntimeValidated` — reserved for rules whose findings are confirmed
-///   by runtime evaluation; not produced by the v0.2 static rule set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EvidenceClass {
@@ -74,36 +23,6 @@ pub enum EvidenceClass {
     RuntimeValidated,
 }
 
-impl EvidenceClass {
-    /// The stable serialized spelling of this class
-    /// (`"exact"`, `"static-indicator"`, `"heuristic"`,
-    /// `"runtime-validated"`).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            EvidenceClass::Exact => "exact",
-            EvidenceClass::StaticIndicator => "static-indicator",
-            EvidenceClass::Heuristic => "heuristic",
-            EvidenceClass::RuntimeValidated => "runtime-validated",
-        }
-    }
-}
-
-/// The boundedness evidence of a no-yield `While` loop (issue #103).
-///
-/// Classifies the loop's repetition evidence separately from the no-yield
-/// fact: whether the loop is statically provable to terminate (bounded),
-/// statically provable to never terminate on its own (obviously unbounded),
-/// or not statically decidable from the modeled WIR (unknown).
-///
-/// * `ObviouslyUnbounded` — the condition is statically `true`; the modeled
-///   WIR has no break/goto action, so a constant-true condition with no wait
-///   never terminates.
-/// * `StaticallyBounded` — the condition compares a variable against a
-///   numeric literal and every direct child of the body either provably moves
-///   the compared variable toward the literal by a non-zero literal step or
-///   provably cannot write it.
-/// * `Unknown` — any other condition shape (data-dependent, unrecognized
-///   counter pattern, conditional progress).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Boundedness {
@@ -112,117 +31,18 @@ pub enum Boundedness {
     Unknown,
 }
 
-/// The canonical kind of a Workshop object that remains live until destroyed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PersistentObjectKind {
-    HudText,
-    InWorldText,
-    Effect,
-}
-
-impl PersistentObjectKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PersistentObjectKind::HudText => "hud-text",
-            PersistentObjectKind::InWorldText => "in-world-text",
-            PersistentObjectKind::Effect => "effect",
-        }
-    }
-
-    fn identity_value(self) -> &'static str {
-        match self {
-            PersistentObjectKind::HudText | PersistentObjectKind::InWorldText => "lastTextId",
-            PersistentObjectKind::Effect => "lastCreatedEntity",
-        }
-    }
-
-    fn cleanup_action(self) -> &'static str {
-        match self {
-            PersistentObjectKind::HudText => "destroyHudText",
-            PersistentObjectKind::InWorldText => "destroyInWorldText",
-            PersistentObjectKind::Effect => "destroyEffect",
-        }
-    }
-}
-
-/// The execution scope of a persistent-object creation site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObjectExecutionScope {
-    Global,
-    PerPlayer,
-    Subroutine,
-}
-
-impl ObjectExecutionScope {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ObjectExecutionScope::Global => "global",
-            ObjectExecutionScope::PerPlayer => "per-player",
-            ObjectExecutionScope::Subroutine => "subroutine",
-        }
-    }
-}
-
-/// The statically visible audience shape of a persistent object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObjectVisibility {
-    AllPlayers,
-    EventPlayer,
-    ExplicitSet,
-    Dynamic,
-    Unknown,
-}
-
-impl ObjectVisibility {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ObjectVisibility::AllPlayers => "all-players",
-            ObjectVisibility::EventPlayer => "event-player",
-            ObjectVisibility::ExplicitSet => "explicit-set",
-            ObjectVisibility::Dynamic => "dynamic",
-            ObjectVisibility::Unknown => "unknown",
-        }
-    }
-}
-
-/// The canonical reevaluation mode attached to a persistent-object creation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ObjectReevaluation {
-    pub domain: String,
-    pub mode: String,
-}
-
-/// Structural lifecycle evidence attached to a persistent-object fact.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PersistentObject {
-    pub kind: PersistentObjectKind,
-    pub execution_scope: ObjectExecutionScope,
-    pub visibility: ObjectVisibility,
-    /// The canonical reevaluation enum when the creation call provides one.
-    pub reevaluation: Option<ObjectReevaluation>,
-    pub identity_retained: bool,
-    /// Whether the enclosing rule contains a destroy action for this object
-    /// kind. This does not establish that the action consumes this site's
-    /// identity or that it is reachable.
-    pub same_kind_cleanup_in_rule: bool,
-}
-
 impl Boundedness {
-    /// The stable serialized spelling of this class
-    /// (`"obviously-unbounded"`, `"statically-bounded"`, `"unknown"`).
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Boundedness::ObviouslyUnbounded => "obviously-unbounded",
-            Boundedness::StaticallyBounded => "statically-bounded",
-            Boundedness::Unknown => "unknown",
+            Self::ObviouslyUnbounded => "obviously-unbounded",
+            Self::StaticallyBounded => "statically-bounded",
+            Self::Unknown => "unknown",
         }
     }
 }
 
-/// One analysis finding, linked to its source location and IR node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
-    /// Stable machine-readable code, e.g. `min-wait-loop`.
     pub code: String,
     pub severity: Severity,
     pub message: String,
@@ -230,1050 +50,283 @@ pub struct Finding {
     pub rule: RuleId,
     pub action: Option<ActionId>,
     pub value: Option<ValueId>,
-    /// The evidence class of this finding, taken from the producing rule.
     pub evidence: EvidenceClass,
-    /// The boundedness evidence of a no-yield `While` loop finding
-    /// (`while-without-wait` only; `None` on every other rule).
     pub boundedness: Option<Boundedness>,
-    /// Structural lifecycle evidence for persistent-object facts only.
-    pub persistent_object: Option<PersistentObject>,
 }
 
-/// A Workshop-specific static analysis.
-pub trait Analysis: Send + Sync {
-    /// The stable analysis name (also the finding code).
-    fn name(&self) -> &'static str;
-    /// The evidence class of this rule's findings (single source of truth
-    /// for the `evidence` field on every [`Finding`] and on the rule's
-    /// metadata).
-    fn evidence(&self) -> EvidenceClass;
-    /// Run the analysis over one rule and its CFG.
-    fn run(&self, program: &wir::Program, rule: RuleId, cfg: &Cfg) -> Vec<Finding>;
-}
-
-/// Run every shipped analysis over every rule and return all findings.
-///
-/// This is a convenience wrapper over [`LintRegistry::default`] with the
-/// default [`LintConfig`] (all rules enabled, no severity overrides). Callers
-/// that need selective enabling/disabling or severity control should call
-/// [`LintRegistry::run`] directly with an explicit [`LintConfig`].
-pub fn analyze(program: &wir::Program) -> Vec<Finding> {
-    LintRegistry::default().run(program, &LintConfig::default())
-}
-
-/// A loop whose body waits at the workshop minimum rate.
-pub struct MinWaitLoop;
-
-/// The workshop minimum wait duration (seconds), ~60 iterations/second.
-pub const MIN_WAIT_SECONDS: f64 = 0.016;
-
-impl Analysis for MinWaitLoop {
-    fn name(&self) -> &'static str {
-        "min-wait-loop"
-    }
-
-    fn evidence(&self) -> EvidenceClass {
-        // The minimum-duration wait is statically known, but the loop's
-        // runtime frequency impact is an indicator, not a measurement.
-        EvidenceClass::StaticIndicator
-    }
-
-    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
-        let Some(rule_data) = program.rules.get(rule).cloned() else {
-            return Vec::new();
-        };
-        let mut findings = Vec::new();
-        visit_actions(program, &rule_data.actions, &mut |action_id, action| {
-            let (body, span) = match action {
-                Action::While { body, span, .. } => (body, span),
-                Action::ForGlobalVariable { body, span, .. } => (body, span),
-                _ => return,
-            };
-            if body_has_min_wait(program, body) {
-                findings.push(Finding {
-                    code: self.name().to_string(),
-                    severity: Severity::Warning,
-                    message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency"
-                        .to_string(),
-                    span: *span,
-                    rule,
-                    action: Some(action_id),
-                    value: None,
-                    evidence: self.evidence(),
-                    boundedness: None,
-                    persistent_object: None,
-                });
-            }
-        });
-        findings
-    }
-}
-
-/// Whether any action in the tree contains a `wait` at the minimum duration.
-fn body_has_min_wait(program: &wir::Program, actions: &[ActionId]) -> bool {
-    let mut found = false;
-    visit_actions(program, actions, &mut |_, action| {
-        if !found {
-            if let Action::Call { name, args, .. } = action {
-                if name == "wait" {
-                    if let Some(duration) = wait_duration(program, args) {
-                        if duration <= MIN_WAIT_SECONDS {
-                            found = true;
-                        }
-                    }
-                }
-            }
+pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for (rule_id, rule) in program.rules.iter().enumerate() {
+        if rule.disabled {
+            continue;
         }
-    });
-    found
-}
 
-/// The static duration of a `wait` call, when its first argument is a
-/// numeric literal.
-fn wait_duration(program: &wir::Program, args: &[ValueId]) -> Option<f64> {
-    let first = program.values.get(*args.first()?)?;
-    match &first.value {
-        Value::Number {
-            value: duration, ..
-        } => Some(*duration),
-        _ => None,
-    }
-}
-
-/// The same condition evaluated more than once within one rule.
-pub struct DuplicateCondition;
-
-impl Analysis for DuplicateCondition {
-    fn name(&self) -> &'static str {
-        "duplicate-condition"
-    }
-
-    fn evidence(&self) -> EvidenceClass {
-        // A duplicated condition is a structural fact of the rule: it holds
-        // for every execution, independent of runtime values.
-        EvidenceClass::Exact
-    }
-
-    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
-        let Some(rule_data) = program.rules.get(rule).cloned() else {
-            return Vec::new();
-        };
-        let mut conditions: Vec<(ValueId, Option<ActionId>, Option<Span>)> = Vec::new();
-        let mut findings = Vec::new();
-        visit_actions(program, &rule_data.actions, &mut |action_id, action| {
-            let rule_conditions: Vec<ValueId> = match action {
-                Action::While { condition, .. } => vec![*condition],
-                Action::If { branches, .. } => {
-                    branches.iter().map(|branch| branch.condition).collect()
-                }
-                _ => return,
-            };
-            for condition in rule_conditions {
-                let span = program.values.get(condition).and_then(|node| node.span);
-                let duplicate = conditions
-                    .iter()
-                    .any(|(earlier, _, _)| structurally_equal(program, *earlier, condition));
-                if duplicate {
+        // duplicate-condition
+        if config.is_enabled("duplicate-condition") {
+            let mut seen = Vec::new();
+            for (cond_idx, cond) in rule.conditions.iter().enumerate() {
+                if seen.iter().any(|prev: &&Value| values_equal(prev, &cond.value)) {
                     findings.push(Finding {
-                        code: self.name().to_string(),
+                        code: "duplicate-condition".into(),
                         severity: Severity::Warning,
-                        message: "condition is evaluated more than once in this rule; a later branch can never be taken"
-                            .to_string(),
-                        span,
-                        rule,
-                        action: Some(action_id),
-                        value: Some(condition),
-                        evidence: self.evidence(),
+                        message: "condition is evaluated more than once in this rule; a later branch can never be taken".into(),
+                        span: program.condition_span(rule_id, cond_idx),
+                        rule: rule_id,
+                        action: None,
+                        value: Some(cond_idx),
+                        evidence: EvidenceClass::Exact,
                         boundedness: None,
-                        persistent_object: None,
                     });
                 } else {
-                    conditions.push((condition, Some(action_id), span));
+                    seen.push(&cond.value);
                 }
             }
-        });
-        findings
-    }
-}
-
-/// A geometry predicate evaluated inside a loop body.
-pub struct ExpensiveLoopCheck;
-
-/// Predicates treated as potentially expensive per evaluation.
-pub const EXPENSIVE_PREDICATES: &[&str] = &["distance", "raycast", "isInLoS"];
-
-impl Analysis for ExpensiveLoopCheck {
-    fn name(&self) -> &'static str {
-        "expensive-loop-check"
-    }
-
-    fn evidence(&self) -> EvidenceClass {
-        // The expensive-call list is a documented fixed heuristic that may
-        // miss unusual predicates or over-flag cheap ones.
-        EvidenceClass::Heuristic
-    }
-
-    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
-        let Some(rule_data) = program.rules.get(rule).cloned() else {
-            return Vec::new();
-        };
-        let mut findings = Vec::new();
-        visit_actions(program, &rule_data.actions, &mut |action_id, action| {
-            let body = match action {
-                Action::While { body, .. } => body,
-                Action::ForGlobalVariable { body, .. } => body,
-                _ => return,
-            };
-            for value in expensive_values_in_actions(program, body) {
-                findings.push(Finding {
-                    code: self.name().to_string(),
-                    severity: Severity::Info,
-                    message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
-                        .to_string(),
-                    span: program.values.get(value).and_then(|node| node.span),
-                    rule,
-                    action: Some(action_id),
-                    value: Some(value),
-                    evidence: self.evidence(),
-                    boundedness: None,
-                    persistent_object: None,
-                });
-            }
-        });
-        findings
-    }
-}
-
-/// Every expensive predicate value inside a tree of actions.
-fn expensive_values_in_actions(program: &wir::Program, actions: &[ActionId]) -> Vec<ValueId> {
-    let mut found = Vec::new();
-    visit_actions(program, actions, &mut |_, action| {
-        visit_values_in_action(program, action, &mut |value_id| {
-            if is_expensive_predicate(program, value_id) {
-                found.push(value_id);
-            }
-        });
-    });
-    found
-}
-
-/// A potentially expensive predicate evaluated in an ongoing-rule condition.
-///
-/// Each Workshop tick evaluates ongoing-rule conditions in source order until
-/// one condition short-circuits the rule. A predicate in a later condition is
-/// reached only when every preceding condition passes. This rule reports only
-/// the established geometry-predicate heuristic; it does not infer measured
-/// cost or the selectivity of any condition.
-pub struct OngoingConditionHotPath;
-
-impl Analysis for OngoingConditionHotPath {
-    fn name(&self) -> &'static str {
-        "ongoing-condition-hot-path"
-    }
-
-    fn evidence(&self) -> EvidenceClass {
-        // Ongoing-event identity and condition order are canonical WIR facts,
-        // but the expensive-call list remains a fixed heuristic.
-        EvidenceClass::Heuristic
-    }
-
-    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
-        let Some(rule_data) = program.rules.get(rule) else {
-            return Vec::new();
-        };
-        if !is_ongoing_event(&rule_data.event) {
-            return Vec::new();
         }
 
-        let condition_count = rule_data.conditions.len();
-        let mut findings = Vec::new();
-        for (index, condition) in rule_data.conditions.iter().copied().enumerate() {
-            let preceding_conditions = index;
-            let later_conditions = condition_count - index - 1;
-            let mut expensive_values = Vec::new();
-            visit_value(program, condition, &mut |value_id| {
-                if is_expensive_predicate(program, value_id) {
-                    expensive_values.push(value_id);
+        // ongoing-condition-hot-path
+        if config.is_enabled("ongoing-condition-hot-path") && is_ongoing_event(&rule.event) {
+            let total = rule.conditions.len();
+            for (idx, cond) in rule.conditions.iter().enumerate() {
+                let mut expensive_spans = Vec::new();
+                collect_expensive_values(&cond.value, program.condition_span(rule_id, idx), &mut expensive_spans);
+                for span in expensive_spans {
+                    let preceding = idx;
+                    let later = total.saturating_sub(idx + 1);
+                    let evaluation = if preceding == 0 {
+                        "is evaluated every server tick".to_string()
+                    } else if preceding == 1 {
+                        "is evaluated only after 1 preceding condition passes".to_string()
+                    } else {
+                        format!("is evaluated only after {preceding} preceding conditions pass")
+                    };
+                    let later_gates = if later == 0 {
+                        String::new()
+                    } else {
+                        format!(", before {later} later short-circuit gate{}", if later == 1 { "" } else { "s" })
+                    };
+                    findings.push(Finding {
+                        code: "ongoing-condition-hot-path".into(),
+                        severity: Severity::Info,
+                        message: format!(
+                            "geometry predicate in an ongoing-rule condition {} of {total} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
+                            idx + 1
+                        ),
+                        span,
+                        rule: rule_id,
+                        action: None,
+                        value: Some(idx),
+                        evidence: EvidenceClass::Heuristic,
+                        boundedness: None,
+                    });
                 }
-            });
-            for value in expensive_values {
-                let evaluation = if preceding_conditions == 0 {
-                    "is evaluated every server tick".to_string()
-                } else if preceding_conditions == 1 {
-                    "is evaluated only after 1 preceding condition passes".to_string()
-                } else {
-                    format!(
-                        "is evaluated only after {preceding_conditions} preceding conditions pass",
-                    )
-                };
-                let later_gates = if later_conditions == 0 {
-                    String::new()
-                } else {
-                    format!(
-                        ", before {later_conditions} later short-circuit gate{}",
-                        if later_conditions == 1 { "" } else { "s" },
-                    )
-                };
-                findings.push(Finding {
-                    code: self.name().to_string(),
-                    severity: Severity::Info,
-                    message: format!(
-                        "geometry predicate in an ongoing-rule condition {} of {condition_count} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
-                        index + 1,
-                    ),
-                    span: program.values.get(value).and_then(|node| node.span),
-                    rule,
-                    action: None,
-                    value: Some(value),
-                    evidence: self.evidence(),
-                    boundedness: None,
-                    persistent_object: None,
-                });
             }
         }
-        findings
-    }
-}
 
-fn is_ongoing_event(event: &Event) -> bool {
-    matches!(
-        event,
-        Event::Global | Event::EachPlayer | Event::EachPlayerWithFilters { .. }
-    )
-}
-
-fn is_expensive_predicate(program: &wir::Program, value: ValueId) -> bool {
-    matches!(
-        program.values.get(value).map(|node| &node.value),
-        Some(Value::Call { name, .. }) if EXPENSIVE_PREDICATES.contains(&name.as_str())
-    )
-}
-
-/// The same value expression evaluated more than once within one loop scope.
-///
-/// Reports exactly one finding per maximal duplicated shape per loop scope:
-/// a shape is duplicated when it occurs at least twice and every occurrence
-/// contains at least two `Call` value nodes; nested duplicates are subsumed
-/// by their maximal enclosing duplicated shape (REQ-001, amended).
-pub struct RepeatedValue;
-
-impl Analysis for RepeatedValue {
-    fn name(&self) -> &'static str {
-        "repeated-value"
-    }
-
-    fn evidence(&self) -> EvidenceClass {
-        // A structurally identical value scheduled in the same loop scope is
-        // re-evaluated every time its enclosing action executes, independent
-        // of runtime values: a structural fact (the same basis as
-        // duplicate-condition's `exact`).
-        EvidenceClass::Exact
-    }
-
-    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
-        let Some(rule_data) = program.rules.get(rule).cloned() else {
-            return Vec::new();
-        };
-        let mut findings = Vec::new();
-        visit_actions(program, &rule_data.actions, &mut |action_id, action| {
-            let (condition, body) = match action {
-                Action::While {
-                    condition, body, ..
-                } => (Some(*condition), body),
-                Action::ForGlobalVariable { body, .. } => (None, body),
-                _ => return,
+        // Loop checks
+        for (action_id, action) in rule.actions.iter().enumerate() {
+            let Some((start, end)) = loop_body(rule, action_id) else {
+                continue;
             };
-            // The loop scope: the loop's own condition (`While`) plus the
-            // value positions of every action in the body, in deterministic
-            // program order. Nested loops are their own scopes and are
-            // excluded; `For Global Variable` bounds are excluded.
-            let mut scope: Vec<ValueId> = Vec::new();
-            let mut parents: HashMap<ValueId, ValueId> = HashMap::new();
-            if let Some(condition) = condition {
-                visit_value_with_parent(program, condition, &mut parents, &mut scope);
-            }
-            collect_loop_scope_values(program, body, &mut parents, &mut scope);
-            for family in duplicated_shapes(program, &scope, &parents) {
-                let first = family[0];
+            let body = &rule.actions[start..end];
+            let span = program.action_span(rule_id, action_id);
+
+            // min-wait-loop
+            if config.is_enabled("min-wait-loop") && body.iter().any(|a| is_wait(a, true)) {
                 findings.push(Finding {
-                    code: self.name().to_string(),
+                    code: "min-wait-loop".into(),
                     severity: Severity::Warning,
-                    message: format!(
-                        "this value expression is evaluated {} times within the same loop scope",
-                        family.len()
-                    ),
-                    span: program
-                        .values
-                        .get(first)
-                        .and_then(|node| node.span)
-                        .or_else(|| program.actions.get(action_id).and_then(Action::span)),
-                    rule,
-                    action: Some(action_id),
-                    value: Some(first),
-                    evidence: self.evidence(),
-                    boundedness: None,
-                    persistent_object: None,
-                });
-            }
-        });
-        findings
-    }
-}
-
-/// The maximal duplicated shapes of one loop scope: structural families with
-/// at least two members whose subtrees each contain at least two `Call`
-/// value nodes (the root counting), reported only when no member is a
-/// descendant of a member of a different candidate family (maximal-shape
-/// subsumption). Returned in first-occurrence order (families are grouped in
-/// program order, and survivors are re-sorted by their first-occurrence
-/// scope index).
-fn duplicated_shapes(
-    program: &wir::Program,
-    scope: &[ValueId],
-    parents: &HashMap<ValueId, ValueId>,
-) -> Vec<Vec<ValueId>> {
-    // Group scope values into structural families, keeping each family's
-    // members in first-occurrence (program) order.
-    let mut families: Vec<(usize, Vec<ValueId>)> = Vec::new();
-    for (position, &value) in scope.iter().enumerate() {
-        if let Some((_, family)) = families
-            .iter_mut()
-            .find(|(_, family)| structurally_equal(program, family[0], value))
-        {
-            family.push(value);
-        } else {
-            families.push((position, vec![value]));
-        }
-    }
-    // Candidate families: at least two occurrences, and every member's
-    // subtree contains at least two `Call` nodes. Structurally identical
-    // members share one call count, so the first member determines it.
-    let candidates: Vec<usize> = families
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, family))| family.len() >= 2 && call_count(program, family[0]) >= 2)
-        .map(|(index, _)| index)
-        .collect();
-    // Map every candidate member to its family so ancestry can be tested.
-    let mut member_to_family: HashMap<ValueId, usize> = HashMap::new();
-    for &family_index in &candidates {
-        for &member in &families[family_index].1 {
-            member_to_family.insert(member, family_index);
-        }
-    }
-    // Maximal-shape subsumption: a candidate family is reported only when no
-    // member of it is a descendant of a member of a different candidate
-    // family (nested duplicates are reported once, at the maximal shape).
-    let mut reported: Vec<usize> = Vec::new();
-    for &family_index in &candidates {
-        let subsumed = families[family_index].1.iter().any(|&member| {
-            ancestor_belongs_to_other_family(member, family_index, parents, &member_to_family)
-        });
-        if !subsumed {
-            reported.push(family_index);
-        }
-    }
-    // Deterministic order: source position of each shape's first occurrence
-    // (recorded while grouping in program order).
-    reported.sort_by_key(|&family_index| families[family_index].0);
-    let mut survivors = Vec::with_capacity(reported.len());
-    for family_index in reported {
-        survivors.push(std::mem::take(&mut families[family_index].1));
-    }
-    survivors
-}
-
-/// Whether walking `member`'s ancestor chain reaches a member of a different
-/// candidate family (i.e. `member` is nested inside a larger duplicated
-/// shape).
-fn ancestor_belongs_to_other_family(
-    mut member: ValueId,
-    own_family: usize,
-    parents: &HashMap<ValueId, ValueId>,
-    member_to_family: &HashMap<ValueId, usize>,
-) -> bool {
-    while let Some(&parent) = parents.get(&member) {
-        if let Some(&family) = member_to_family.get(&parent) {
-            if family != own_family {
-                return true;
-            }
-        }
-        member = parent;
-    }
-    false
-}
-
-/// The number of [`Value::Call`] nodes in the value subtree (the root
-/// counting).
-fn call_count(program: &wir::Program, id: ValueId) -> usize {
-    let mut count = 0;
-    visit_value(program, id, &mut |value_id| {
-        if let Value::Call { .. } = &program.values.get(value_id).expect("in range").value {
-            count += 1;
-        }
-    });
-    count
-}
-
-/// Collect the value surface of a loop body for [`RepeatedValue`]: every
-/// value reachable from each action's value positions, in program order,
-/// recording each child's parent (for ancestry tests). `If` branches are
-/// descended into; nested loops (`While`/`ForGlobalVariable`) are treated as
-/// their own scopes and excluded from the enclosing loop's scope.
-fn collect_loop_scope_values(
-    program: &wir::Program,
-    actions: &[ActionId],
-    parents: &mut HashMap<ValueId, ValueId>,
-    out: &mut Vec<ValueId>,
-) {
-    for action in actions {
-        let Some(data) = program.actions.get(*action) else {
-            continue;
-        };
-        match data {
-            Action::While { .. }
-            | Action::ForGlobalVariable { .. }
-            | Action::ForPlayerVariable { .. } => {
-                // Nested loops are analyzed as their own separate scopes.
-            }
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    visit_value_with_parent(program, branch.condition, parents, out);
-                    collect_loop_scope_values(program, &branch.body, parents, out);
-                }
-                if let Some(else_body) = else_body {
-                    collect_loop_scope_values(program, else_body, parents, out);
-                }
-            }
-            other => visit_action_value_roots(program, other, parents, out),
-        }
-    }
-}
-
-/// Visit the value positions of an action's arguments and conditions with
-/// parent tracking. Only called for non-loop, non-`If` actions by the loop
-/// scope walker; the `If`/loop arms mirror [`visit_values_in_action`] for
-/// exhaustiveness.
-fn visit_action_value_roots(
-    program: &wir::Program,
-    action: &Action,
-    parents: &mut HashMap<ValueId, ValueId>,
-    out: &mut Vec<ValueId>,
-) {
-    match action {
-        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
-            visit_value_with_parent(program, *value, parents, out);
-        }
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            visit_value_with_parent(program, *player, parents, out);
-            visit_value_with_parent(program, *value, parents, out);
-        }
-        Action::AssignMember { target, value, .. } => {
-            visit_value_with_parent(program, *target, parents, out);
-            visit_value_with_parent(program, *value, parents, out);
-        }
-        Action::CallSubroutine { .. } => {}
-        Action::If { branches, .. } => {
-            for branch in branches {
-                visit_value_with_parent(program, branch.condition, parents, out);
-            }
-        }
-        Action::While { .. }
-        | Action::ForGlobalVariable { .. }
-        | Action::ForPlayerVariable { .. } => {
-            // Nested loops are excluded from the enclosing loop's scope.
-        }
-        Action::Call { name, args, .. }
-            if name == "createHudText" && is_wright_hud_text_marker(program, args) =>
-        {
-            if let Some(value) = synthetic_hud_text_source_value(program, args) {
-                visit_value_with_parent(program, value, parents, out);
-            }
-        }
-        Action::Call { args, .. } => {
-            for arg in args {
-                visit_value_with_parent(program, *arg, parents, out);
-            }
-        }
-    }
-}
-
-fn is_wright_hud_text_marker(program: &wir::Program, args: &[ValueId]) -> bool {
-    // workshop-rs 0.1.18 has no action metadata field. The exact fixed
-    // canonical shape below is therefore the marker carried by Wright's
-    // debug/print lowering; ordinary createHudText calls keep full traversal.
-    let [
-        all_players,
-        header,
-        _body,
-        subheader,
-        position,
-        sort_order,
-        header_color,
-        subheader_color,
-        text_color,
-        reevaluation,
-        visibility,
-    ] = args
-    else {
-        return false;
-    };
-    let is_all_players = matches!(
-        program.values.get(*all_players).map(|node| &node.value),
-        Some(Value::Call { name, args })
-            if name == "allPlayers"
-                && args.len() == 1
-                && value_is_enum(program, args[0], "Team", "ALL")
-    );
-    is_all_players
-        && value_is_null(program, *header)
-        && value_is_null(program, *subheader)
-        && value_is_enum(program, *position, "HudPosition", "LEFT")
-        && value_is_number(program, *sort_order, -9999.0)
-        && value_is_enum(program, *header_color, "Color", "WHITE")
-        && value_is_enum(program, *subheader_color, "Color", "WHITE")
-        && value_is_enum(program, *text_color, "Color", "WHITE")
-        && value_is_enum(program, *reevaluation, "HudReeval", "VISIBILITY_AND_STRING")
-        && value_is_enum(program, *visibility, "SpecVisibility", "DEFAULT")
-}
-
-fn synthetic_hud_text_source_value(program: &wir::Program, args: &[ValueId]) -> Option<ValueId> {
-    let value = if args.get(1).is_some_and(|id| {
-        matches!(
-            program.values.get(*id).map(|node| &node.value),
-            Some(Value::Null)
-        )
-    }) {
-        args.get(2)
-    } else {
-        args.get(1)
-    }?;
-    match program.values.get(*value).map(|node| &node.value) {
-        Some(Value::Call { name, args }) if name == "customString" => {
-            args.get(1).copied().or(Some(*value))
-        }
-        _ => Some(*value),
-    }
-}
-
-fn value_is_null(program: &wir::Program, id: ValueId) -> bool {
-    matches!(
-        program.values.get(id).map(|node| &node.value),
-        Some(Value::Null)
-    )
-}
-
-fn value_is_enum(program: &wir::Program, id: ValueId, value_type: &str, value: &str) -> bool {
-    matches!(
-        program.values.get(id).map(|node| &node.value),
-        Some(Value::Enum {
-            value_type: actual_type,
-            value: actual_value,
-        }) if actual_type == value_type && actual_value == value
-    )
-}
-
-fn value_is_number(program: &wir::Program, id: ValueId, expected: f64) -> bool {
-    matches!(
-        program.values.get(id).map(|node| &node.value),
-        Some(Value::Number { value, .. }) if *value == expected
-    )
-}
-
-/// Collect a value and every value in its subtree into `out` (pre-order),
-/// recording each child's parent in `parents` for ancestry tests.
-fn visit_value_with_parent(
-    program: &wir::Program,
-    id: ValueId,
-    parents: &mut HashMap<ValueId, ValueId>,
-    out: &mut Vec<ValueId>,
-) {
-    out.push(id);
-    let Some(node) = program.values.get(id) else {
-        return;
-    };
-    visit_value_children(&node.value, &mut |child| {
-        parents.insert(child, id);
-        visit_value_with_parent(program, child, parents, out);
-    });
-}
-
-/// Visit every direct child value of a value.
-fn visit_value_children(value: &Value, f: &mut impl FnMut(ValueId)) {
-    match value {
-        Value::Array(elements) => {
-            for element in elements {
-                f(*element);
-            }
-        }
-        Value::Vector { x, y, z } => {
-            f(*x);
-            f(*y);
-            f(*z);
-        }
-        Value::PlayerVariable { player, .. } => f(*player),
-        Value::Call { args, .. } => {
-            for arg in args {
-                f(*arg);
-            }
-        }
-        Value::Number { .. }
-        | Value::String(_)
-        | Value::LocalizedString(_)
-        | Value::Bool(_)
-        | Value::Null
-        | Value::Enum { .. }
-        | Value::GlobalVariable(_)
-        | Value::Subroutine(_)
-        | Value::EventPlayer => {}
-    }
-}
-
-/// Persistent Workshop object facts.
-pub struct PersistentObjectLifecycle;
-
-/// Collect persistent-object facts without classifying any site as a lint.
-pub fn persistent_objects(program: &wir::Program) -> Vec<Finding> {
-    let analysis = PersistentObjectLifecycle;
-    let mut facts = Vec::new();
-    for index in 0..program.rules.len() {
-        let rule = RuleId::from_index(index);
-        if let Ok(cfg) = Cfg::build(program, rule) {
-            facts.extend(analysis.run(program, rule, &cfg));
-        }
-    }
-    facts
-}
-
-impl Analysis for PersistentObjectLifecycle {
-    fn name(&self) -> &'static str {
-        "persistent-object-lifecycle"
-    }
-
-    fn evidence(&self) -> EvidenceClass {
-        EvidenceClass::StaticIndicator
-    }
-
-    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
-        let Some(rule_data) = program.rules.get(rule) else {
-            return Vec::new();
-        };
-        let cleanup_actions = cleanup_actions_in_rule(program, &rule_data.actions);
-        let mut sites = Vec::new();
-        persistent_object_sites(program, &rule_data.actions, &mut sites);
-        sites
-            .into_iter()
-            .filter_map(|(action_id, next)| {
-                let action = program.actions.get(action_id)?;
-                let Action::Call { name, args, span } = action else {
-                    return None;
-                };
-                let kind = persistent_object_kind(name)?;
-                let identity_retained = next.is_some_and(|next| {
-                    action_retains_identity(program, next, kind.identity_value())
-                });
-                let same_kind_cleanup_in_rule = cleanup_actions.iter().any(|cleanup| {
-                    program.actions.get(*cleanup).is_some_and(|action| {
-                        matches!(action, Action::Call { name, .. } if name == kind.cleanup_action())
-                    })
-                });
-                let object = PersistentObject {
-                    kind,
-                    execution_scope: object_execution_scope(&rule_data.event),
-                    visibility: object_visibility(program, args),
-                    reevaluation: object_reevaluation(program, args, kind),
-                    identity_retained,
-                    same_kind_cleanup_in_rule,
-                };
-                Some(Finding {
-                    code: self.name().to_string(),
-                    severity: Severity::Info,
-                    message: persistent_object_message(&object),
-                    span: *span,
-                    rule,
+                    message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(),
+                    span,
+                    rule: rule_id,
                     action: Some(action_id),
                     value: None,
-                    evidence: self.evidence(),
+                    evidence: EvidenceClass::StaticIndicator,
                     boundedness: None,
-                    persistent_object: Some(object),
-                })
-            })
-            .collect()
-    }
-}
+                });
+            }
 
-fn persistent_object_kind(name: &str) -> Option<PersistentObjectKind> {
-    match name {
-        "createHudText" => Some(PersistentObjectKind::HudText),
-        "createInWorldText" => Some(PersistentObjectKind::InWorldText),
-        "createEffect" => Some(PersistentObjectKind::Effect),
-        _ => None,
-    }
-}
+            // expensive-loop-check
+            if config.is_enabled("expensive-loop-check") && body.iter().any(action_contains_expensive) {
+                findings.push(Finding {
+                    code: "expensive-loop-check".into(),
+                    severity: Severity::Warning,
+                    message: "loop body evaluates a potentially expensive geometry predicate".into(),
+                    span,
+                    rule: rule_id,
+                    action: Some(action_id),
+                    value: None,
+                    evidence: EvidenceClass::Heuristic,
+                    boundedness: None,
+                });
+            }
 
-fn object_execution_scope(event: &Event) -> ObjectExecutionScope {
-    match event {
-        Event::Global => ObjectExecutionScope::Global,
-        Event::Subroutine(_) => ObjectExecutionScope::Subroutine,
-        Event::EachPlayer | Event::EachPlayerWithFilters { .. } | Event::Player { .. } => {
-            ObjectExecutionScope::PerPlayer
-        }
-    }
-}
+            // while-without-wait
+            if matches!(action, Action::While { .. })
+                && config.is_enabled("while-without-wait")
+                && !body.iter().any(|a| is_wait(a, false))
+            {
+                let boundedness = while_boundedness(action, body);
+                findings.push(Finding {
+                    code: "while-without-wait".into(),
+                    severity: Severity::Warning,
+                    message: "loop body contains no wait call and may repeat without yielding".into(),
+                    span,
+                    rule: rule_id,
+                    action: Some(action_id),
+                    value: None,
+                    evidence: EvidenceClass::StaticIndicator,
+                    boundedness: Some(boundedness),
+                });
+            }
 
-fn object_visibility(program: &wir::Program, args: &[ValueId]) -> ObjectVisibility {
-    let Some(value) = args.first().and_then(|id| program.values.get(*id)) else {
-        return ObjectVisibility::Unknown;
-    };
-    match &value.value {
-        Value::EventPlayer => ObjectVisibility::EventPlayer,
-        Value::Array(_) => ObjectVisibility::ExplicitSet,
-        Value::Call { name, .. } if name == "allPlayers" => ObjectVisibility::AllPlayers,
-        Value::Call { .. } | Value::PlayerVariable { .. } | Value::GlobalVariable(_) => {
-            ObjectVisibility::Dynamic
-        }
-        _ => ObjectVisibility::Unknown,
-    }
-}
-
-fn object_reevaluation(
-    program: &wir::Program,
-    args: &[ValueId],
-    kind: PersistentObjectKind,
-) -> Option<ObjectReevaluation> {
-    let index = match kind {
-        PersistentObjectKind::HudText => 9,
-        PersistentObjectKind::InWorldText | PersistentObjectKind::Effect => 5,
-    };
-    let value = program.values.get(*args.get(index)?)?;
-    let Value::Enum { value_type, value } = &value.value else {
-        return None;
-    };
-    Some(ObjectReevaluation {
-        domain: value_type.clone(),
-        mode: value.clone(),
-    })
-}
-
-fn persistent_object_sites(
-    program: &wir::Program,
-    actions: &[ActionId],
-    out: &mut Vec<(ActionId, Option<ActionId>)>,
-) {
-    for (index, action_id) in actions.iter().copied().enumerate() {
-        let next = actions.get(index + 1).copied();
-        let Some(action) = program.actions.get(action_id) else {
-            continue;
-        };
-        if matches!(action, Action::Call { name, .. } if persistent_object_kind(name).is_some()) {
-            out.push((action_id, next));
-        }
-        match action {
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    persistent_object_sites(program, &branch.body, out);
+            // repeated-value
+            if config.is_enabled("repeated-value") {
+                let loop_cond = match action {
+                    Action::While { condition } => Some(condition),
+                    _ => None,
+                };
+                let mut values_in_scope = Vec::new();
+                if let Some(cond) = loop_cond {
+                    collect_values(cond, &mut values_in_scope);
                 }
-                if let Some(else_body) = else_body {
-                    persistent_object_sites(program, else_body, out);
+                for a in body {
+                    collect_action_values_shallow(a, &mut values_in_scope);
+                }
+                for (_family, count) in find_repeated_values(&values_in_scope) {
+                    findings.push(Finding {
+                        code: "repeated-value".into(),
+                        severity: Severity::Warning,
+                        message: format!("this value expression is evaluated {count} times within the same loop scope"),
+                        span,
+                        rule: rule_id,
+                        action: Some(action_id),
+                        value: None,
+                        evidence: EvidenceClass::Exact,
+                        boundedness: None,
+                    });
                 }
             }
-            Action::While { body, .. }
-            | Action::ForGlobalVariable { body, .. }
-            | Action::ForPlayerVariable { body, .. } => persistent_object_sites(program, body, out),
+        }
+    }
+
+    let registry = crate::registry::LintRegistry::default();
+    for finding in &mut findings {
+        if let Some(meta) = registry.rules().find(|meta| meta.id == finding.code) {
+            finding.severity = config.effective_severity(meta);
+        }
+    }
+    findings
+}
+
+fn loop_body(rule: &Rule, action: usize) -> Option<(usize, usize)> {
+    if !matches!(
+        rule.actions.get(action),
+        Some(Action::While { .. } | Action::ForGlobalVariable { .. } | Action::ForPlayerVariable { .. })
+    ) {
+        return None;
+    }
+    let mut depth = 0;
+    for index in action + 1..rule.actions.len() {
+        match rule.actions[index] {
+            Action::If { .. }
+            | Action::While { .. }
+            | Action::ForGlobalVariable { .. }
+            | Action::ForPlayerVariable { .. } => depth += 1,
+            Action::End if depth == 0 => return Some((action + 1, index)),
+            Action::End => depth -= 1,
             _ => {}
         }
     }
+    None
 }
 
-fn cleanup_actions_in_rule(program: &wir::Program, actions: &[ActionId]) -> Vec<ActionId> {
-    let mut cleanup = Vec::new();
-    visit_actions(program, actions, &mut |action_id, action| {
-        if matches!(action, Action::Call { name, .. } if matches!(name.as_str(), "destroyHudText" | "destroyInWorldText" | "destroyEffect"))
-        {
-            cleanup.push(action_id);
-        }
-    });
-    cleanup
-}
-
-fn action_retains_identity(program: &wir::Program, action_id: ActionId, identity: &str) -> bool {
-    let Some(action) = program.actions.get(action_id) else {
-        return false;
-    };
-    let value = match action {
-        Action::SetGlobalVariable { value, .. }
-        | Action::SetPlayerVariable { value, .. }
-        | Action::AssignMember { value, .. } => *value,
-        _ => return false,
-    };
+fn is_wait(action: &Action, minimum: bool) -> bool {
     matches!(
-        program.values.get(value).map(|node| &node.value),
-        Some(Value::Call { name, args }) if name == identity && args.is_empty()
+        action,
+        Action::Call { name, args }
+            if name == "wait" && (!minimum || matches!(args.first(), Some(Value::Number(v)) if *v <= 0.016))
     )
 }
 
-fn persistent_object_message(object: &PersistentObject) -> String {
-    let lifecycle = match (object.identity_retained, object.same_kind_cleanup_in_rule) {
-        (true, true) => {
-            "its identity is retained immediately and the rule contains a same-kind destroy action"
-        }
-        (false, false) => {
-            "its identity is not retained immediately and the rule has no same-kind destroy action"
-        }
-        (false, true) => {
-            "its identity is not retained immediately, although the rule contains a same-kind destroy action"
-        }
-        (true, false) => {
-            "its identity is retained immediately, but the rule has no same-kind destroy action"
-        }
-    };
-    format!(
-        "persistent {} is created in {} execution with {} visibility; {}; this is structural evidence, not a runtime object-count, aliasing, cleanup-correlation, or reachability proof",
-        object.kind.as_str(),
-        object.execution_scope.as_str(),
-        object.visibility.as_str(),
-        lifecycle,
-    )
+fn is_ongoing_event(event: &Event) -> bool {
+    matches!(event, Event::Global | Event::EachPlayer)
 }
 
-/// A `While` loop whose body tree contains no `wait` call.
-///
-/// Each flagged loop additionally carries a [`Boundedness`] classification
-/// (issue #103) that separates the static no-yield fact from the loop's
-/// repetition evidence: a statically bounded no-yield loop is reported at
-/// `info` severity and is explicitly NOT treated as equivalent to an
-/// obviously unbounded one (which, like an unknown one, reports at
-/// `warning`). The rule never claims a guaranteed crash or a measured
-/// runtime cost.
-pub struct WhileWithoutWait;
+fn is_expensive_name(name: &str) -> bool {
+    matches!(name, "distance" | "raycast" | "isInLoS")
+}
 
-impl Analysis for WhileWithoutWait {
-    fn name(&self) -> &'static str {
-        "while-without-wait"
-    }
-
-    fn evidence(&self) -> EvidenceClass {
-        // The absence of a `wait` call in the loop body is statically known,
-        // but the impact (loop frequency) is an indicator, not a measurement.
-        EvidenceClass::StaticIndicator
-    }
-
-    fn run(&self, program: &wir::Program, rule: RuleId, _cfg: &Cfg) -> Vec<Finding> {
-        let Some(rule_data) = program.rules.get(rule).cloned() else {
-            return Vec::new();
-        };
-        let mut findings = Vec::new();
-        visit_actions(program, &rule_data.actions, &mut |action_id, action| {
-            let Action::While {
-                condition,
-                body,
-                span,
-            } = action
-            else {
-                return;
-            };
-            if !body_has_wait(program, body) {
-                let class = boundedness_of(program, *condition, body);
-                findings.push(Finding {
-                    code: self.name().to_string(),
-                    severity: match class {
-                        Boundedness::StaticallyBounded => Severity::Info,
-                        Boundedness::ObviouslyUnbounded | Boundedness::Unknown => Severity::Warning,
-                    },
-                    message: no_wait_message(class),
-                    span: *span,
-                    rule,
-                    action: Some(action_id),
-                    value: None,
-                    evidence: self.evidence(),
-                    boundedness: Some(class),
-                    persistent_object: None,
-                });
-            }
-        });
-        findings
+fn action_contains_expensive(action: &Action) -> bool {
+    match action {
+        Action::Call { name, args } => is_expensive_name(name) || args.iter().any(value_contains_expensive),
+        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => value_contains_expensive(value),
+        Action::SetPlayerVariable { player, value, .. } | Action::ModifyPlayerVariable { player, value, .. } => {
+            value_contains_expensive(player) || value_contains_expensive(value)
+        }
+        Action::AssignMember { target, value, .. } => value_contains_expensive(target) || value_contains_expensive(value),
+        Action::If { condition } | Action::ElseIf { condition } | Action::While { condition } => value_contains_expensive(condition),
+        Action::ForGlobalVariable { start, stop, step, .. } => {
+            value_contains_expensive(start) || value_contains_expensive(stop) || value_contains_expensive(step)
+        }
+        Action::ForPlayerVariable { player, start, stop, step, .. } => {
+            value_contains_expensive(player) || value_contains_expensive(start) || value_contains_expensive(stop) || value_contains_expensive(step)
+        }
+        Action::Disabled { action } => action_contains_expensive(action),
+        _ => false,
     }
 }
 
-/// The human-readable message for a no-yield finding, stating the static
-/// fact AND the boundedness class explicitly without claiming a guaranteed
-/// crash or a measured runtime cost.
-fn no_wait_message(class: Boundedness) -> String {
-    match class {
-        Boundedness::ObviouslyUnbounded => {
-            "loop body contains no wait call and the loop condition is statically true, so the loop repeats without yielding and never terminates on its own; it runs without bound while the rule is active (exact server impact is not statically measurable)".to_string()
+fn value_contains_expensive(value: &Value) -> bool {
+    match value {
+        Value::Call { name, args } => is_expensive_name(name) || args.iter().any(value_contains_expensive),
+        Value::Array(elements) => elements.iter().any(value_contains_expensive),
+        Value::Vector { x, y, z } => value_contains_expensive(x) || value_contains_expensive(y) || value_contains_expensive(z),
+        Value::PlayerVariable { player, .. } => value_contains_expensive(player),
+        _ => false,
+    }
+}
+
+fn collect_expensive_values(value: &Value, span: Option<Span>, out: &mut Vec<Option<Span>>) {
+    if let Value::Call { name, args } = value {
+        if is_expensive_name(name) {
+            out.push(span);
         }
-        Boundedness::StaticallyBounded => {
-            "loop body contains no wait call; the loop is statically bounded by a counter against a literal bound, so it runs a finite number of back-to-back iterations".to_string()
-        }
-        Boundedness::Unknown => {
-            "loop body contains no wait call and the loop's boundedness is unknown (data-dependent condition with no static counter pattern), so the loop may repeat without yielding".to_string()
+        for arg in args {
+            collect_expensive_values(arg, span, out);
         }
     }
 }
 
-/// Classify the boundedness evidence of a `While` loop with a no-yield body.
-///
-/// Deliberately conservative and structural (issue #103):
-///
-/// * `ObviouslyUnbounded` — the condition is `Value::Bool(true)`. The modeled
-///   WIR has no break/goto action, so a constant-true condition with no wait
-///   never terminates.
-/// * `StaticallyBounded` — the condition is a literal-bound comparison
-///   (`<`, `<=`, `>`, `>=`) of one variable against a numeric literal, and
-///   EVERY direct child that can affect the compared variable either provably
-///   moves it toward the literal by a non-zero literal step or provably cannot
-///   write it (no away-direction modify, no `Set`/non-literal/zero-step
-///   modify, no `CallSubroutine`, no `If`/nested-loop subtree writing it),
-///   and no direct child is a nested loop whose termination is not statically
-///   provable (a non-terminating nested loop prevents the outer loop from
-///   completing an iteration).
-/// * `Unknown` — anything else.
-fn boundedness_of(program: &wir::Program, condition: ValueId, body: &[ActionId]) -> Boundedness {
-    if matches!(
-        program.values.get(condition).map(|node| &node.value),
-        Some(Value::Bool(true))
-    ) {
-        return Boundedness::ObviouslyUnbounded;
-    }
-    let Some((variable, toward)) = counter_comparison(program, condition) else {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CounterVar {
+    Global(String),
+    Player(String),
+}
+
+fn while_boundedness(action: &Action, body: &[Action]) -> Boundedness {
+    let Action::While { condition } = action else {
         return Boundedness::Unknown;
     };
+    if matches!(condition, Value::Bool(true)) {
+        return Boundedness::ObviouslyUnbounded;
+    }
+    let Some((variable, toward)) = counter_comparison(condition) else {
+        return Boundedness::Unknown;
+    };
+
     let mut progresses = false;
-    for action_id in body {
-        let Some(action) = program.actions.get(*action_id) else {
-            continue;
-        };
-        // A direct-child nested loop whose termination is not statically
-        // provable prevents the outer loop from completing an iteration, so
-        // the outer loop is not provably finite.
-        if action_has_unprovable_loop(program, *action_id) {
+    for a in body {
+        if body_action_has_unprovable_loop(a) {
             return Boundedness::Unknown;
         }
-        match modify_direction(program, action, &variable) {
-            Some(direction) if direction == toward => progresses = true,
-            // A direct child moves the compared variable away from the bound:
-            // progress is not provable.
+        match modify_direction(a, &variable) {
+            Some(dir) if dir == toward => progresses = true,
             Some(_) => return Boundedness::Unknown,
-            // A direct child that provably cannot progress the counter still
-            // writes the variable (Set, non-literal/zero-step Modify,
-            // CallSubroutine, or an If/nested-loop subtree writing it):
-            // progress is not provable.
-            None if action_writes(program, action, &variable) => return Boundedness::Unknown,
-            // Debug/Print and generic calls that are not user subroutines are
-            // documented non-writers.
+            None if action_writes_var(a, &variable) => return Boundedness::Unknown,
             None => {}
         }
     }
+
     if progresses {
         Boundedness::StaticallyBounded
     } else {
@@ -1281,238 +334,57 @@ fn boundedness_of(program: &wir::Program, condition: ValueId, body: &[ActionId])
     }
 }
 
-/// Whether the subtree rooted at one action id contains a nested loop whose
-/// termination is not statically provable. Recursion is well-founded: it
-/// descends the action tree, which strictly decreases in depth (the action
-/// arena is a tree).
-fn action_has_unprovable_loop(program: &wir::Program, id: ActionId) -> bool {
-    let Some(action) = program.actions.get(id) else {
-        return false;
-    };
-    match action {
-        // A nested `While` is provably finite only when its own boundedness
-        // classification is `StaticallyBounded` (reused verbatim: a nested
-        // `while true:` classifies `ObviouslyUnbounded`, so the outer loop
-        // cannot be proven to complete an iteration).
-        Action::While {
-            condition, body, ..
-        } => {
-            boundedness_of(program, *condition, body) != Boundedness::StaticallyBounded
-                || subtree_has_unprovable_loop(program, body)
-        }
-        // A nested `For Global Variable` is provably finite only with a
-        // non-zero literal step whose subtree does not write its own loop
-        // variable (the Workshop engine re-checks the control variable after
-        // each `+= Step`; a zero or dynamic step may not terminate).
-        Action::ForGlobalVariable {
-            variable,
-            step,
-            body,
-            ..
-        } => {
-            let finite = step_direction(program, &ModifyOp::Add, *step).is_some()
-                && !subtree_writes(program, id, &Variable::Global(*variable));
-            !finite || subtree_has_unprovable_loop(program, body)
-        }
-        Action::If {
-            branches,
-            else_body,
-            ..
-        } => {
-            branches
-                .iter()
-                .any(|branch| subtree_has_unprovable_loop(program, &branch.body))
-                || else_body
-                    .as_ref()
-                    .is_some_and(|body| subtree_has_unprovable_loop(program, body))
-        }
-        _ => false,
-    }
-}
-
-/// Whether any action in a slice has an unprovable nested loop in its
-/// subtree.
-fn subtree_has_unprovable_loop(program: &wir::Program, actions: &[ActionId]) -> bool {
-    actions
-        .iter()
-        .any(|id| action_has_unprovable_loop(program, *id))
-}
-
-/// Whether an action can write the compared variable.
-///
-/// Conservative and tree-walking: `Set`/`Modify` actions targeting the
-/// variable (for player variables, the player expression must be structurally
-/// identical to the one in the condition, so the write provably touches the
-/// same slot), `CallSubroutine` (the callee body may write any variable),
-/// `If`/`While`/`ForGlobalVariable` subtrees containing any of the above, and
-/// a generic `Call` whose name matches a user-defined subroutine (some
-/// frontends lower `def`-defined subroutine calls as generic calls rather
-/// than `CallSubroutine`) all count as writers. Generic `Action::Call`s that
-/// are not user subroutines are documented NON-writers:
-/// within the supported OPY/Workshop surface (docs/opy/support-matrix.md)
-/// user-variable writes lower only to `Set`/`Modify` actions (`.append`
-/// lowers to a `Modify` on the variable, so it is caught by the modify
-/// branch), and a generic `Call` that is not a user subroutine is a built-in
-/// workshop function.
-fn action_writes(program: &wir::Program, action: &Action, variable: &Variable) -> bool {
-    match action {
-        Action::SetGlobalVariable {
-            variable: target, ..
-        } => {
-            matches!(variable, Variable::Global(v) if *target == *v)
-        }
-        Action::SetPlayerVariable {
-            player,
-            variable: target,
-            ..
-        } => matches!(variable, Variable::Player(condition_player, v)
-            if *target == *v && structurally_equal(program, *condition_player, *player)),
-        Action::ModifyGlobalVariable {
-            variable: target, ..
-        } => {
-            matches!(variable, Variable::Global(v) if *target == *v)
-        }
-        Action::ModifyPlayerVariable {
-            player,
-            variable: target,
-            ..
-        } => matches!(variable, Variable::Player(condition_player, v)
-            if *target == *v && structurally_equal(program, *condition_player, *player)),
-        Action::CallSubroutine { .. } => true,
-        Action::Call { name, .. } => program
-            .subroutines
-            .iter()
-            .any(|subroutine| subroutine.name == *name),
-        Action::If {
-            branches,
-            else_body,
-            ..
-        } => {
-            branches.iter().any(|branch| {
-                branch
-                    .body
-                    .iter()
-                    .any(|id| subtree_writes(program, *id, variable))
-            }) || else_body
-                .as_ref()
-                .is_some_and(|body| body.iter().any(|id| subtree_writes(program, *id, variable)))
-        }
-        Action::While { body, .. }
-        | Action::ForGlobalVariable { body, .. }
-        | Action::ForPlayerVariable { body, .. } => {
-            body.iter().any(|id| subtree_writes(program, *id, variable))
-        }
-        Action::AssignMember { .. } => true,
-    }
-}
-
-/// Whether the subtree rooted at one action id can write the compared
-/// variable (used for `If`/`While`/`ForGlobalVariable` sub-trees).
-fn subtree_writes(program: &wir::Program, action_id: ActionId, variable: &Variable) -> bool {
-    program
-        .actions
-        .get(action_id)
-        .is_some_and(|action| action_writes(program, action, variable))
-}
-
-/// If `condition` is a literal-bound comparison of exactly one variable
-/// against a numeric literal, return the compared variable and the direction
-/// it must move to reach the literal (`+1` = increasing toward the bound,
-/// `-1` = decreasing). `==`/`!=` and other conditions are not recognized.
-fn counter_comparison(program: &wir::Program, condition: ValueId) -> Option<(Variable, i32)> {
-    let Value::Call { name, args } = &program.values.get(condition)?.value else {
+fn counter_comparison(condition: &Value) -> Option<(CounterVar, i32)> {
+    let Value::Call { name, args } = condition else {
         return None;
     };
     if args.len() != 2 {
         return None;
     }
-    let (left, right) = (program.values.get(args[0])?, program.values.get(args[1])?);
-    let variable_left = variable_of(&left.value);
-    let literal_left = matches!(&left.value, Value::Number { .. });
-    let variable_right = variable_of(&right.value);
-    let literal_right = matches!(&right.value, Value::Number { .. });
-    // Exactly one argument is the variable; the other is the literal.
-    let (variable, variable_is_left) = match (variable_left, literal_right) {
-        (Some(variable), true) => (variable, true),
-        (None, false) => match (literal_left, variable_right) {
-            (true, Some(variable)) => (variable, false),
+    let var_left = var_of_value(&args[0]);
+    let lit_left = matches!(&args[0], Value::Number(_));
+    let var_right = var_of_value(&args[1]);
+    let lit_right = matches!(&args[1], Value::Number(_));
+
+    let (variable, var_is_left) = match (var_left, lit_right) {
+        (Some(v), true) => (v, true),
+        (None, false) => match (lit_left, var_right) {
+            (true, Some(v)) => (v, false),
             _ => return None,
         },
         _ => return None,
     };
-    let toward = match (name.as_str(), variable_is_left) {
-        // V must INCREASE toward K: V < K, V <= K, K > V, K >= V.
+
+    let toward = match (name.as_str(), var_is_left) {
         ("<", true) | ("<=", true) | (">", false) | (">=", false) => 1,
-        // V must DECREASE toward K: V > K, V >= K, K < V, K <= V.
         (">", true) | (">=", true) | ("<", false) | ("<=", false) => -1,
         _ => return None,
     };
     Some((variable, toward))
 }
 
-/// A variable reference compared in a loop condition.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Variable {
-    Global(GlobalVarId),
-    Player(ValueId, PlayerVarId),
-}
-
-/// The variable read by a value, when it is a variable reference.
-fn variable_of(value: &Value) -> Option<Variable> {
+fn var_of_value(value: &Value) -> Option<CounterVar> {
     match value {
-        Value::GlobalVariable(variable) => Some(Variable::Global(*variable)),
-        Value::PlayerVariable { player, variable } => Some(Variable::Player(*player, *variable)),
+        Value::GlobalVariable(name) => Some(CounterVar::Global(name.clone())),
+        Value::PlayerVariable { variable, .. } => Some(CounterVar::Player(variable.clone())),
         _ => None,
     }
 }
 
-/// The effective iteration direction of a direct-child `Modify` action on
-/// `variable` (`+1` = the variable increases each iteration, `-1` =
-/// decreases), when the modify has a non-zero numeric literal step. For a
-/// player variable the player expression must be structurally identical to
-/// the one in the condition, so the modify provably touches the same slot.
-fn modify_direction(program: &wir::Program, action: &Action, variable: &Variable) -> Option<i32> {
+fn modify_direction(action: &Action, variable: &CounterVar) -> Option<i32> {
     match (action, variable) {
-        (
-            Action::ModifyGlobalVariable {
-                variable: target,
-                op,
-                value,
-                ..
-            },
-            Variable::Global(wanted),
-        ) => {
-            if target != wanted {
-                return None;
-            }
-            step_direction(program, op, *value)
+        (Action::ModifyGlobalVariable { variable: target, op, value }, CounterVar::Global(wanted)) if target == wanted => {
+            step_dir(op, value)
         }
-        (
-            Action::ModifyPlayerVariable {
-                player,
-                variable: target,
-                op,
-                value,
-                ..
-            },
-            Variable::Player(condition_player, wanted),
-        ) => {
-            if target != wanted {
-                return None;
-            }
-            if !structurally_equal(program, *condition_player, *player) {
-                return None;
-            }
-            step_direction(program, op, *value)
+        (Action::ModifyPlayerVariable { variable: target, op, value, .. }, CounterVar::Player(wanted)) if target == wanted => {
+            step_dir(op, value)
         }
         _ => None,
     }
 }
 
-/// The direction of a `Modify` op with a non-zero literal numeric step:
-/// `Add` steps by `sign(step)`, `Subtract` by `-sign(step)`.
-fn step_direction(program: &wir::Program, op: &ModifyOp, value: ValueId) -> Option<i32> {
-    let Value::Number { value: step, .. } = &program.values.get(value)?.value else {
+fn step_dir(op: &ModifyOp, value: &Value) -> Option<i32> {
+    let Value::Number(step) = value else {
         return None;
     };
     if *step == 0.0 {
@@ -1526,182 +398,240 @@ fn step_direction(program: &wir::Program, op: &ModifyOp, value: ValueId) -> Opti
     }
 }
 
-/// Whether any action in the tree contains a `wait` call (presence only;
-/// the wait duration does not matter).
-fn body_has_wait(program: &wir::Program, actions: &[ActionId]) -> bool {
-    let mut found = false;
-    visit_actions(program, actions, &mut |_, action| {
-        if !found {
-            if let Action::Call { name, .. } = action {
-                if name == "wait" {
-                    found = true;
-                }
-            }
-        }
-    });
-    found
-}
-
-/// Visit every action in a tree (including nested bodies), in program order.
-fn visit_actions(
-    program: &wir::Program,
-    actions: &[ActionId],
-    f: &mut impl FnMut(ActionId, &Action),
-) {
-    for action in actions {
-        let Some(data) = program.actions.get(*action) else {
-            continue;
-        };
-        f(*action, data);
-        match data {
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    visit_actions(program, &branch.body, f);
-                }
-                if let Some(else_body) = else_body {
-                    visit_actions(program, else_body, f);
-                }
-            }
-            Action::While { body, .. }
-            | Action::ForGlobalVariable { body, .. }
-            | Action::ForPlayerVariable { body, .. } => {
-                visit_actions(program, body, f);
-            }
-            Action::SetGlobalVariable { .. }
-            | Action::ModifyGlobalVariable { .. }
-            | Action::SetPlayerVariable { .. }
-            | Action::ModifyPlayerVariable { .. }
-            | Action::CallSubroutine { .. }
-            | Action::AssignMember { .. }
-            | Action::Call { .. } => {}
-        }
+fn action_writes_var(action: &Action, variable: &CounterVar) -> bool {
+    match (action, variable) {
+        (Action::SetGlobalVariable { variable: target, .. } | Action::ModifyGlobalVariable { variable: target, .. }, CounterVar::Global(w)) => target == w,
+        (Action::SetPlayerVariable { variable: target, .. } | Action::ModifyPlayerVariable { variable: target, .. }, CounterVar::Player(w)) => target == w,
+        (Action::CallSubroutine { .. } | Action::AssignMember { .. }, _) => true,
+        _ => false,
     }
 }
 
-/// Visit every value reachable from an action's arguments and conditions.
-fn visit_values_in_action(program: &wir::Program, action: &Action, f: &mut impl FnMut(ValueId)) {
+fn body_action_has_unprovable_loop(action: &Action) -> bool {
     match action {
-        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
-            visit_value(program, *value, f)
+        Action::While { condition } => !matches!(condition, Value::Bool(false)),
+        _ => false,
+    }
+}
+
+fn collect_values<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+    out.push(value);
+    match value {
+        Value::Call { args, .. } => {
+            for arg in args {
+                collect_values(arg, out);
+            }
         }
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            visit_value(program, *player, f);
-            visit_value(program, *value, f);
+        Value::Array(elements) => {
+            for el in elements {
+                collect_values(el, out);
+            }
+        }
+        Value::Vector { x, y, z } => {
+            collect_values(x, out);
+            collect_values(y, out);
+            collect_values(z, out);
+        }
+        Value::PlayerVariable { player, .. } => collect_values(player, out),
+        _ => {}
+    }
+}
+
+fn collect_action_values_shallow<'a>(action: &'a Action, out: &mut Vec<&'a Value>) {
+    match action {
+        Action::While { .. } | Action::ForGlobalVariable { .. } | Action::ForPlayerVariable { .. } => {}
+        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => collect_values(value, out),
+        Action::SetPlayerVariable { player, value, .. } | Action::ModifyPlayerVariable { player, value, .. } => {
+            collect_values(player, out);
+            collect_values(value, out);
         }
         Action::AssignMember { target, value, .. } => {
-            visit_value(program, *target, f);
-            visit_value(program, *value, f);
-        }
-        Action::CallSubroutine { .. } => {}
-        Action::If { branches, .. } => {
-            for branch in branches {
-                visit_value(program, branch.condition, f);
-            }
-        }
-        Action::While { condition, .. } => visit_value(program, *condition, f),
-        Action::ForGlobalVariable {
-            start, stop, step, ..
-        }
-        | Action::ForPlayerVariable {
-            start, stop, step, ..
-        } => {
-            visit_value(program, *start, f);
-            visit_value(program, *stop, f);
-            visit_value(program, *step, f);
-        }
-        Action::Call { name, args, .. }
-            if name == "createHudText" && is_wright_hud_text_marker(program, args) =>
-        {
-            if let Some(value) = synthetic_hud_text_source_value(program, args) {
-                visit_value(program, value, f);
-            }
+            collect_values(target, out);
+            collect_values(value, out);
         }
         Action::Call { args, .. } => {
             for arg in args {
-                visit_value(program, *arg, f);
+                collect_values(arg, out);
             }
         }
+        Action::If { condition } | Action::ElseIf { condition } => collect_values(condition, out),
+        _ => {}
     }
 }
 
-/// Visit a value and all its children.
-fn visit_value(program: &wir::Program, id: ValueId, f: &mut impl FnMut(ValueId)) {
-    f(id);
-    let Some(node) = program.values.get(id) else {
-        return;
-    };
-    visit_value_children(&node.value, &mut |child| visit_value(program, child, f));
+fn count_calls(value: &Value) -> usize {
+    let mut count = 0;
+    match value {
+        Value::Call { args, .. } => {
+            count += 1;
+            for arg in args {
+                count += count_calls(arg);
+            }
+        }
+        Value::Array(elements) => {
+            for el in elements {
+                count += count_calls(el);
+            }
+        }
+        Value::Vector { x, y, z } => count += count_calls(x) + count_calls(y) + count_calls(z),
+        Value::PlayerVariable { player, .. } => count += count_calls(player),
+        _ => {}
+    }
+    count
 }
 
-/// Structural equality of two values, ignoring arena ids (two separately
-/// lowered but identically shaped values are equal).
-fn structurally_equal(program: &wir::Program, a: ValueId, b: ValueId) -> bool {
-    let (Some(na), Some(nb)) = (program.values.get(a), program.values.get(b)) else {
+fn find_repeated_values<'a>(values: &[&'a Value]) -> Vec<(&'a Value, usize)> {
+    let mut families: Vec<(&'a Value, usize)> = Vec::new();
+    for &v in values {
+        if count_calls(v) < 2 {
+            continue;
+        }
+        if let Some((_, count)) = families.iter_mut().find(|(lead, _)| values_equal(lead, v)) {
+            *count += 1;
+        } else {
+            families.push((v, 1));
+        }
+    }
+    families.retain(|(_, count)| *count >= 2);
+    // Subsumption: exclude candidates that are subtrees of larger candidates
+    let mut survivors = Vec::new();
+    for i in 0..families.len() {
+        let is_subsumed = families.iter().enumerate().any(|(j, (other, _))| {
+            i != j && contains_value_subtree(other, families[i].0)
+        });
+        if !is_subsumed {
+            survivors.push(families[i]);
+        }
+    }
+    survivors
+}
+
+fn contains_value_subtree(tree: &Value, target: &Value) -> bool {
+    if values_equal(tree, target) {
         return false;
-    };
-    match (&na.value, &nb.value) {
-        (Value::Number { value: x, .. }, Value::Number { value: y, .. }) => x == y,
-        (Value::String(x), Value::String(y)) => x == y,
-        (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Null, Value::Null) => true,
-        (Value::Array(xs), Value::Array(ys)) => {
-            xs.len() == ys.len()
-                && xs
-                    .iter()
-                    .zip(ys.iter())
-                    .all(|(x, y)| structurally_equal(program, *x, *y))
+    }
+    match tree {
+        Value::Call { args, .. } => args.iter().any(|arg| values_equal(arg, target) || contains_value_subtree(arg, target)),
+        Value::Array(elements) => elements.iter().any(|el| values_equal(el, target) || contains_value_subtree(el, target)),
+        Value::Vector { x, y, z } => {
+            values_equal(x, target) || contains_value_subtree(x, target)
+                || values_equal(y, target) || contains_value_subtree(y, target)
+                || values_equal(z, target) || contains_value_subtree(z, target)
         }
-        (
-            Value::Vector {
-                x: x1,
-                y: y1,
-                z: z1,
-            },
-            Value::Vector {
-                x: x2,
-                y: y2,
-                z: z2,
-            },
-        ) => {
-            structurally_equal(program, *x1, *x2)
-                && structurally_equal(program, *y1, *y2)
-                && structurally_equal(program, *z1, *z2)
+        Value::PlayerVariable { player, .. } => values_equal(player, target) || contains_value_subtree(player, target),
+        _ => false,
+    }
+}
+
+pub fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => a == b,
+        (Value::String(a), Value::String(b))
+        | (Value::LocalizedString(a), Value::LocalizedString(b))
+        | (Value::GlobalVariable(a), Value::GlobalVariable(b))
+        | (Value::Subroutine(a), Value::Subroutine(b)) => a == b,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Null, Value::Null) | (Value::EventPlayer, Value::EventPlayer) => true,
+        (Value::Array(a), Value::Array(b)) => a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b)),
+        (Value::Call { name: an, args: aa }, Value::Call { name: bn, args: ba }) => {
+            an == bn && aa.len() == ba.len() && aa.iter().zip(ba).all(|(a, b)| values_equal(a, b))
         }
-        (
-            Value::Enum {
-                value_type: t1,
-                value: v1,
-            },
-            Value::Enum {
-                value_type: t2,
-                value: v2,
-            },
-        ) => t1 == t2 && v1 == v2,
-        (Value::GlobalVariable(x), Value::GlobalVariable(y)) => x == y,
-        (
-            Value::PlayerVariable {
-                player: p1,
-                variable: v1,
-            },
-            Value::PlayerVariable {
-                player: p2,
-                variable: v2,
-            },
-        ) => v1 == v2 && structurally_equal(program, *p1, *p2),
-        (Value::EventPlayer, Value::EventPlayer) => true,
-        (Value::Call { name: n1, args: a1 }, Value::Call { name: n2, args: a2 }) => {
-            n1 == n2
-                && a1.len() == a2.len()
-                && a1
-                    .iter()
-                    .zip(a2.iter())
-                    .all(|(x, y)| structurally_equal(program, *x, *y))
+        (Value::Vector { x: ax, y: ay, z: az }, Value::Vector { x: bx, y: by, z: bz }) => {
+            values_equal(ax, bx) && values_equal(ay, by) && values_equal(az, bz)
+        }
+        (Value::Enum { value_type: at, value: av }, Value::Enum { value_type: bt, value: bv }) => at == bt && av == bv,
+        (Value::PlayerVariable { player: ap, variable: av }, Value::PlayerVariable { player: bp, variable: bv }) => {
+            av == bv && values_equal(ap, bp)
         }
         _ => false,
+    }
+}
+
+pub fn persistent_objects(program: &Program) -> Vec<JsonValue> {
+    let mut output = Vec::new();
+    for (rule, data) in program.rules.iter().enumerate() {
+        for (action, action_data) in data.actions.iter().enumerate() {
+            let Action::Call { name, args } = action_data else {
+                continue;
+            };
+            let Some(kind) = persistent_object_kind(name) else {
+                continue;
+            };
+            let cleanup = match kind {
+                "hud-text" => "destroyHudText",
+                "in-world-text" => "destroyInWorldText",
+                "effect" => "destroyEffect",
+                _ => continue,
+            };
+            let identity_name = match kind {
+                "hud-text" | "in-world-text" => "lastTextId",
+                _ => "lastCreatedEntity",
+            };
+            let identity_retained = data.actions.get(action + 1).is_some_and(|next| {
+                action_retains_identity(next, identity_name)
+            });
+            let reevaluation_index = if kind == "hud-text" { 9 } else { 5 };
+            let reevaluation = args.get(reevaluation_index).and_then(|value| match value {
+                Value::Enum { value_type, value } => Some(json!({"domain": value_type, "mode": value})),
+                _ => None,
+            });
+            let span = program.action_span(rule, action).map_or(JsonValue::Null, |span| {
+                json!({
+                    "file": span.file.index(),
+                    "start": {"line": span.start.line, "col": span.start.col},
+                    "end": {"line": span.end.line, "col": span.end.col}
+                })
+            });
+            output.push(json!({
+                "kind": kind,
+                "rule": rule,
+                "action": action,
+                "executionScope": execution_scope(&data.event),
+                "visibility": object_visibility(args),
+                "reevaluation": reevaluation,
+                "identityRetained": identity_retained,
+                "sameKindCleanupInRule": data.actions.iter().any(|a| matches!(a, Action::Call { name, .. } if name == cleanup)),
+                "span": span,
+            }));
+        }
+    }
+    output
+}
+
+fn action_retains_identity(action: &Action, identity: &str) -> bool {
+    let value = match action {
+        Action::SetGlobalVariable { value, .. }
+        | Action::SetPlayerVariable { value, .. }
+        | Action::AssignMember { value, .. } => value,
+        _ => return false,
+    };
+    matches!(value, Value::Call { name, args } if name == identity && args.is_empty())
+}
+
+fn persistent_object_kind(name: &str) -> Option<&'static str> {
+    match name {
+        "createHudText" => Some("hud-text"),
+        "createInWorldText" => Some("in-world-text"),
+        "createEffect" => Some("effect"),
+        _ => None,
+    }
+}
+
+fn execution_scope(event: &Event) -> &'static str {
+    match event {
+        Event::Global => "global",
+        Event::EachPlayer => "per-player",
+        Event::Subroutine(_) => "subroutine",
+        _ => "unknown",
+    }
+}
+
+fn object_visibility(args: &[Value]) -> &'static str {
+    match args.first() {
+        Some(Value::EventPlayer) => "event-player",
+        Some(Value::Array(_)) => "explicit-set",
+        Some(Value::Call { name, .. }) if name == "allPlayers" => "all-players",
+        Some(Value::Call { .. } | Value::PlayerVariable { .. } | Value::GlobalVariable(_)) => "dynamic",
+        _ => "unknown",
     }
 }

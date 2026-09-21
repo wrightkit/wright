@@ -6,8 +6,7 @@ use workshop_rs::source::Span;
 use workshop_rs::wir::{self, Action, ActionId, Event, RuleId, Value, ValueId};
 use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
-use crate::analysis::{EvidenceClass, Finding as LegacyFinding, Severity};
-use crate::canonical::Finding as CanonicalFinding;
+use crate::analysis::{EvidenceClass, Finding, Severity};
 use crate::facts::{RuleFacts, SemanticFacts};
 
 const DEFAULT_LOCALE: &str = "en-US";
@@ -270,7 +269,7 @@ impl DeclarativeRule {
         rule: RuleId,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<LegacyFinding> {
+    ) -> Vec<Finding> {
         let Some(rule_facts) = facts.rule(rule) else {
             return Vec::new();
         };
@@ -309,7 +308,7 @@ impl DeclarativeRule {
             {
                 continue;
             }
-            findings.push(LegacyFinding {
+            findings.push(Finding {
                 code: self.id().to_string(),
                 severity: self.default_severity(),
                 message: format!(
@@ -318,12 +317,11 @@ impl DeclarativeRule {
                     if matched == 1 { "" } else { "s" }
                 ),
                 span: anchor,
-                rule,
-                action: scope_id,
+                rule: rule.index(),
+                action: scope_id.map(|id| id.index()),
                 value: None,
                 evidence: self.evidence(),
                 boundedness: None,
-                persistent_object: None,
             });
         }
         findings
@@ -339,7 +337,7 @@ impl DeclarativeRule {
         rule: usize,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<CanonicalFinding> {
+    ) -> Vec<Finding> {
         let Some(rule_data) = program.rules.get(rule) else {
             return Vec::new();
         };
@@ -384,7 +382,7 @@ impl DeclarativeRule {
             {
                 continue;
             }
-            findings.push(CanonicalFinding {
+            findings.push(Finding {
                 code: self.id().to_string(),
                 severity: self.default_severity(),
                 message: format!(
