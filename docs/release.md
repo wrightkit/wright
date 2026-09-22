@@ -81,8 +81,11 @@ distribution fixtures; it must match the Cargo workspace version in a version
 change.
 
 `nightly.yml` is triggered by completed `CI`, not by a tag or Release event.
-The reusable `release.yml` workflow receives the exact commit explicitly, so
-the artifacts cannot silently come from a later `main` head.
+Before starting the reusable `release.yml` workflow, it verifies that the
+completed CI commit is still the current default-branch head. A stale,
+out-of-order CI completion therefore cannot advance the nightly pointer.
+The reusable workflow still receives the exact commit explicitly, so the
+artifacts cannot silently come from a later `main` head.
 
 ### Dependency boundaries and updates
 

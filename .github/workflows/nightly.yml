@@ -16,11 +16,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  publish:
-    name: Publish nightly
+  verify-head:
+    name: Verify current main head
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require completed CI to be current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPLETED_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
+          if [[ "$current_sha" != "$COMPLETED_SHA" ]]; then
+            echo "CI completed for $COMPLETED_SHA, but $DEFAULT_BRANCH is now $current_sha" >&2
+            exit 1
+          fi
+
+  publish:
+    name: Publish nightly
+    needs: verify-head
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      needs.verify-head.result == 'success'
     uses: ./.github/workflows/release.yml
     with:
       channel: nightly
