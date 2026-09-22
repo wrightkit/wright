@@ -189,10 +189,14 @@ jobs:
   # owned by the released workshop-rs corpus.
   # -------------------------------------------------------------------------
   workshop-integration:
-    name: Workshop integration
-    needs: [paths, rust-quality, rust-msrv]
+    name: Workshop (${{ matrix.project }})
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        project: [ai-pve, bastion, defend, illari, rework]
     steps:
       - name: Checkout Wright
         uses: actions/checkout@v7
@@ -204,31 +208,20 @@ jobs:
           ref: f1f3c58f790e9aede9300ca6421698f2503f5f62 # v0.3.11
           path: workshop-rs-pinned
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
         with:
-          toolchain: stable
+          name: wright-cli-linux-stable-debug
+          path: target/debug
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
 
-      - name: Verify Workshop contract
-        env:
-          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-driver --test workshop_contract -- --ignored
-
-      - name: Check & lint real projects
-        env:
-          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-cli --test workshop_real_projects -- --ignored --nocapture
+      - name: Run public CLI dogfood
+        run: >-
+          python3 scripts/check-workshop-real-project.py
+          target/debug/wright
+          workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects/${{ matrix.project }}.ow
 
   # -------------------------------------------------------------------------
   # [2] PRODUCT INTEGRATION  (Wright-owned provider and product contracts)

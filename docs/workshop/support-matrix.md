@@ -6,13 +6,12 @@ Status: current Wright integration contract
 semantic completeness, localization, and real-project corpus. Wright does not
 derive a second Workshop feature matrix from source-language output.
 
-Wright verifies its integration through these named tests:
+Wright verifies its integration through these focused tests and CI dogfood:
 
 | Wright surface | Test contract |
 | --- | --- |
 | Analyzer | `crates/wright-analyzer/tests/workshop_integration.rs` runs semantic queries, findings, references, and source-span checks on localized Workshop inputs. |
-| Driver | `crates/wright-driver/tests/workshop_contract.rs` compares provider diagnostics with the released owner `Program` API over the owner corpus. |
-| CLI | `crates/wright-cli/tests/workshop_real_projects.rs` runs public `check` and `lint` and compares their diagnostics with the owner API. |
+| CLI | CI downloads the `wright-cli-build` artifact and runs `scripts/check-workshop-real-project.py` for each owner-pinned real project through public `check` and `lint`. |
 | Provider | `crates/wright-driver/tests/workshop_provider.rs` checks successful and malformed Workshop input through the provider boundary. |
 | Public consumers | `crates/wright-consumer/tests/consumer.rs` exercises the public embedding workflow on representative Workshop inputs. |
 
