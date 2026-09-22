@@ -105,12 +105,12 @@ jobs:
           ref: ${{ needs.resolve-trigger.outputs.commit }}
           fetch-depth: 0
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
-      - name: Resolve and verify release identity
+      - name: Verify release identity
         id: identity
         shell: bash
         env:
@@ -192,13 +192,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Restore release dependency cache
+      - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-${{ matrix.target }}-stable-release
@@ -212,7 +212,7 @@ jobs:
       - name: Build release binaries
         run: cargo build --locked --release -p wright-cli -p wright-lsp --target "$TARGET"
 
-      - name: Package archive with version stamp
+      - name: Package release archive
         run: >-
           python scripts/package-release.py
           --version "$RELEASE_VERSION"
@@ -222,7 +222,7 @@ jobs:
           --commit "$RELEASE_COMMIT"
           --runner-os "${{ runner.os }}"
 
-      - name: Smoke test the packaged archive
+      - name: Smoke test release archive
         run: >-
           python scripts/smoke-release-archive.py
           --archive "dist/wright-${RELEASE_VERSION}-${TARGET}.${EXT}"
@@ -230,7 +230,7 @@ jobs:
           --target "$TARGET"
           --extension "$EXT"
 
-      - name: Upload release artifacts
+      - name: Upload target artifacts
         uses: actions/upload-artifact@v7
         with:
           name: wright-${{ matrix.target }}
@@ -252,14 +252,14 @@ jobs:
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
     steps:
-      - name: Download release artifacts
+      - name: Download target artifacts
         uses: actions/download-artifact@v8
         with:
           pattern: wright-*
           path: release
           merge-multiple: true
 
-      - name: Check release archives and identities
+      - name: Verify archives and identities
         shell: bash
         run: |
           set -euo pipefail
@@ -294,7 +294,7 @@ jobs:
           done
           (cd verified && sha256sum wright-*.tar.gz wright-*.zip > SHA256SUMS)
 
-      - name: Upload checked release assets
+      - name: Upload verified release assets
         uses: actions/upload-artifact@v7
         with:
           name: verified-release-assets
@@ -318,13 +318,13 @@ jobs:
           ref: ${{ needs.release-identity.outputs.commit }}
           fetch-depth: 0
 
-      - name: Download verified release artifacts
+      - name: Download verified release assets
         uses: actions/download-artifact@v8
         with:
           name: verified-release-assets
           path: artifacts
 
-      - name: Generate manifests from the published checksums
+      - name: Generate package manifests
         run: >-
           python3 scripts/generate-release-manifests.py
           --version "$RELEASE_VERSION"
@@ -332,7 +332,7 @@ jobs:
           --output-dir manifests
           --attach-dir attach
 
-      - name: Upload verified package-manager manifests
+      - name: Upload package manifests
         uses: actions/upload-artifact@v7
         with:
           name: release-manifests
@@ -354,13 +354,13 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-identity.outputs.commit }}
-      - name: Download generated Homebrew formula
+      - name: Download Homebrew formula
         uses: actions/download-artifact@v8
         with:
           name: release-manifests
           path: formula
 
-      - name: Check out wrightkit/homebrew-tap
+      - name: Check out homebrew-tap
         uses: actions/checkout@v7
         with:
           repository: wrightkit/homebrew-tap
@@ -369,7 +369,7 @@ jobs:
           token: ${{ secrets.GH_TOKEN }}
           path: tap
 
-      - name: Update wright.rb and push to the tap
+      - name: Publish Homebrew formula
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: ./scripts/publish-homebrew-tap.sh
@@ -384,19 +384,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - name: Download verified native release assets
+      - name: Download verified release assets
         uses: actions/download-artifact@v8
         with:
           name: verified-release-assets
           path: release
 
-      - name: Download verified package-manager manifests
+      - name: Download package manifests
         uses: actions/download-artifact@v8
         with:
           name: release-manifests
           path: attach
 
-      - name: Create or resume the stable GitHub Release
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
@@ -471,16 +471,16 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-identity.outputs.commit }}
-      - name: Check R2 publication configuration
+      - name: Verify AWS CLI config
         run: aws --version
 
-      - name: Download verified release artifacts
+      - name: Download verified release assets
         uses: actions/download-artifact@v8
         with:
           name: verified-release-assets
           path: artifacts
 
-      - name: Publish immutable versioned objects, then advance latest
+      - name: Publish archives to R2
         env:
           ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
         run: ./scripts/publish-r2.sh

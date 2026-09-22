@@ -120,7 +120,7 @@ jobs:
       - name: Check formatting
         run: cargo +1.85.0 fmt --all -- --check
 
-      - name: Check Workshop dependency contract
+      - name: Check Workshop dependency
         env:
           RUSTUP_TOOLCHAIN: 1.85.0
         run: python3 scripts/check-workshop-dependency.py
@@ -220,7 +220,7 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Cross-validate owner contract
+      - name: Verify Workshop contract
         env:
           WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
         run: cargo test --locked -p wright-driver --test workshop_contract -- --ignored
@@ -267,13 +267,13 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Run provider and product integration tests
+      - name: Run provider/product tests
         run: >-
           cargo test --locked
           -p wright-driver --test driver --test source_provider --test service
           --test workshop_provider
 
-      - name: Run CLI and embedding integration tests
+      - name: Run CLI/embedding tests
         run: >-
           cargo test --locked
           -p wright-cli --test cli --test diagnostics_schema --test serve
@@ -282,7 +282,7 @@ jobs:
       - name: Install pinned OPY provider
         run: target/debug/wright provider update opy --version 0.1.38
 
-      - name: Compile minimal OPY through provider boundary
+      - name: Compile OPY via provider
         run: >-
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
           --profile compat
@@ -296,7 +296,7 @@ jobs:
     if: needs.paths.outputs.lpp == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Wright
         uses: actions/checkout@v7
 
       - name: Install Rust
@@ -330,7 +330,7 @@ jobs:
 
       # REQUIRED: these suites self-skip when LPP_MOCK_PROVIDER is absent,
       # so the variable must be set here for them to run at all.
-      - name: Run integration tests
+      - name: Run LPP tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
         run: scripts/test-lpp-integration.sh
@@ -396,21 +396,21 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Build benchmark
+      - name: Build benchmarks
         run: cargo build --locked -p wright-bench
 
       - name: Run benchmarks
         id: bench
         run: target/debug/wright-bench
 
-      - name: Upload reports
+      - name: Upload benchmark report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-report
           path: target/wright-bench-report.json
 
-      - name: Render summary
+      - name: Render benchmark summary
         if: always()
         run: python3 scripts/render-ci-summary.py --title "Performance Benchmarks" --kind benchmarks --report target/wright-bench-report.json --outcome "${{ steps.bench.outcome }}"
 
@@ -555,7 +555,7 @@ jobs:
           --wright target/debug/wright
           --wright-lsp target/debug/wright-lsp
 
-      - name: Validate package metadata & install script
+      - name: Validate package metadata and installers
         run: python scripts/verify-dist.py
 
       - name: Test install.sh (functional)
