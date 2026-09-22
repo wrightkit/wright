@@ -42,9 +42,10 @@ Any gate failure aborts the release before the version is stamped.
 
 The binaries report the workspace implementation version (one authoritative
 `version = "<release version>"` in `[workspace.package]`; every crate inherits it via
-`version.workspace = true`). A stable release operation synchronizes that
-version into `Cargo.lock`, `version.txt`, and the checked-in `dist/` manifests
-before committing the release version on `main`. `wright version` /
+`version.workspace = true`). A stable release accepts only a stable
+`MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. It
+synchronizes that version into `Cargo.lock`, `version.txt`, and the checked-in
+`dist/` manifests before committing the release version on `main`. `wright version` /
 `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
 banner, and the LSP `initialize` response carries `serverInfo.version`. Every
 `wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
@@ -63,8 +64,9 @@ Wright has two release channels and one shared native build workflow:
    updates.
 2. A maintainer explicitly dispatches `.github/workflows/release.yml` from
    `main`; `stable` is the default channel. An empty `version` input selects
-   the next patch version, while an explicit input selects a newer valid
-   SemVer. The workflow synchronizes the source and derived version state,
+   the next patch version, while an explicit input selects a newer stable
+   `MAJOR.MINOR.PATCH`; prerelease and build metadata are rejected. The workflow
+   synchronizes the source and derived version state,
    commits that change directly to `main`, and then builds and smoke-tests the
    native matrix from that post-bump commit. It publishes the versioned GitHub
    Release only after those artifacts and generated package-manager manifests
@@ -80,10 +82,11 @@ versioned objects are reused only when their bytes match.
 ### Creating a release
 
 The stable release decision is an explicit `workflow_dispatch` of `release.yml`
-from `main`. The workflow does not infer SemVer changes from commits and does
+from `main`. The workflow does not infer version changes from commits and does
 not turn ordinary merges into stable releases. With the default stable channel,
 an empty `version` input performs exactly the next patch bump; an explicit
-version must be valid and newer than the checked-in workspace version. The
+version must be a stable `MAJOR.MINOR.PATCH` newer than the checked-in workspace
+version. The
 workflow commits the resulting `Cargo.toml`, `Cargo.lock`, `version.txt`, and
 `dist/` synchronization directly to `main`, so the operator does not prepare a
 version commit or release PR. `version.txt` remains the product-version input
