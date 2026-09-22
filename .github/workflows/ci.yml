@@ -189,10 +189,26 @@ jobs:
   # owned by the released workshop-rs corpus.
   # -------------------------------------------------------------------------
   workshop-integration:
-    name: Workshop integration
-    needs: [paths, rust-quality, rust-msrv]
+    name: Workshop (${{ matrix.project }})
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - project: ai-pve
+            expected_exit: 0
+          - project: bastion
+            expected_exit: 0
+          # The pinned owner corpus admits this project's residual as a
+          # source-level failure; the other projects must remain clean.
+          - project: defend
+            expected_exit: 1
+          - project: illari
+            expected_exit: 0
+          - project: rework
+            expected_exit: 0
     steps:
       - name: Checkout Wright
         uses: actions/checkout@v7
@@ -204,31 +220,63 @@ jobs:
           ref: f1f3c58f790e9aede9300ca6421698f2503f5f62 # v0.3.11
           path: workshop-rs-pinned
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
         with:
-          toolchain: stable
+          name: wright-cli-linux-stable-debug
+          path: target/debug
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
 
-      - name: Verify Workshop contract
+      - name: Run public CLI dogfood
         env:
-          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-driver --test workshop_contract -- --ignored
+          EXPECTED_EXIT: ${{ matrix.expected_exit }}
+          PROJECT: workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects/${{ matrix.project }}.ow
+        run: |
+          set -euo pipefail
 
-      - name: Check & lint real projects
-        env:
-          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-cli --test workshop_real_projects -- --ignored --nocapture
+          run_workflow() {
+            local command="$1"
+            local output
+            local status
+
+            set +e
+            output="$(target/debug/wright "$command" --kind workshop "$PROJECT" --format json)"
+            status=$?
+            set -e
+
+            if [[ "$status" -ne "$EXPECTED_EXIT" ]]; then
+              echo "wright $command returned $status; expected $EXPECTED_EXIT for $PROJECT" >&2
+              return 1
+            fi
+
+            jq -e \
+              --arg command "$command" \
+              --argjson process_exit "$status" \
+              '(
+                .wright.contract == "wright-result/v1" and
+                .command == $command and
+                .exit == $process_exit and
+                .ok == ($process_exit == 0) and
+                (.diagnostics | type == "array") and
+                (all(.diagnostics[]; type == "object")) and
+                ([.diagnostics[] | select(.stage == "internal")] | length == 0)
+              )' <<<"$output" >/dev/null
+            printf '%s' "$output"
+          }
+
+          check_output="$(run_workflow check)"
+          lint_output="$(run_workflow lint)"
+          jq -e -n \
+            --argjson check "$check_output" \
+            --argjson lint "$lint_output" \
+            '(
+              $check.diagnostics == $lint.diagnostics and
+              $check.ok == $lint.ok and
+              $check.exit == $lint.exit and
+              ($lint.result.program.rules | numbers | . > 0)
+            )' >/dev/null
 
   # -------------------------------------------------------------------------
   # [2] PRODUCT INTEGRATION  (Wright-owned provider and product contracts)
