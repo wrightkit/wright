@@ -555,6 +555,9 @@ jobs:
           --wright target/debug/wright
           --wright-lsp target/debug/wright-lsp
 
+      - name: Validate release version contract
+        run: python scripts/test-release-version.py
+
       - name: Validate package metadata and installers
         run: python scripts/verify-dist.py
 
