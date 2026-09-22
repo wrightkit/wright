@@ -42,11 +42,15 @@ Any gate failure aborts the release before the version is stamped.
 
 The binaries report the workspace implementation version (one authoritative
 `version = "<release version>"` in `[workspace.package]`; every crate inherits it via
-`version.workspace = true`). `wright version` / `wright --version` prints the
-CLI banner, `wright-lsp --version` prints the LSP banner, and the LSP
-`initialize` response carries `serverInfo.version`. Every `wright-result/v1`
-envelope carries `wright.version` + `wright.contract`. The release archive's
-`version.json` is the authoritative stamp for a shipped artifact.
+`version.workspace = true`). A stable release accepts only a stable
+`MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. It
+synchronizes that version into `Cargo.lock`, `version.txt`, and the checked-in
+`dist/` manifests before committing the release version on `main`. `wright version` /
+`wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
+banner, and the LSP `initialize` response carries `serverInfo.version`. Every
+`wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
+release archive's `version.json` is the authoritative stamp for a shipped
+artifact.
 
 ## Public distribution contract
 
@@ -59,11 +63,15 @@ Wright has two release channels and one shared native build workflow:
    Nightlies do not create Git tags, GitHub Releases, or package-manager
    updates.
 2. A maintainer explicitly dispatches `.github/workflows/release.yml` from
-   `main`, selects the `stable` channel, and supplies the exact workspace
-   version. The workflow validates that the selected commit's `Cargo.toml`,
-   `version.txt`, and generated `dist/` metadata agree, builds and smoke-tests
-   the native matrix, and publishes the versioned GitHub Release. The stable R2
-   objects and pointer are updated only after the GitHub Release is complete.
+   `main`; `stable` is the default channel. An empty `version` input selects
+   the next patch version, while an explicit input selects a newer stable
+   `MAJOR.MINOR.PATCH`; prerelease and build metadata are rejected. The workflow
+   synchronizes the source and derived version state,
+   commits that change directly to `main`, and then builds and smoke-tests the
+   native matrix from that post-bump commit. It publishes the versioned GitHub
+   Release only after those artifacts and generated package-manager manifests
+   pass validation. The stable R2 objects and pointer are updated only after
+   the GitHub Release is complete.
 
 No workspace crate is published to crates.io. Every workspace package
 explicitly sets `publish = false`, so Cargo package publication cannot become
@@ -73,12 +81,16 @@ versioned objects are reused only when their bytes match.
 
 ### Creating a release
 
-The stable release decision is the reviewed version change on `main` followed
-by an explicit `workflow_dispatch` of `release.yml` with the `stable` channel.
-The workflow does not infer SemVer changes from commits and does not turn
-ordinary merges into stable releases. `version.txt` remains the product-version
-input used by local distribution fixtures; it must match the Cargo workspace
-version in a version change.
+The stable release decision is an explicit `workflow_dispatch` of `release.yml`
+from `main`. The workflow does not infer version changes from commits and does
+not turn ordinary merges into stable releases. With the default stable channel,
+an empty `version` input performs exactly the next patch bump; an explicit
+version must be a stable `MAJOR.MINOR.PATCH` newer than the checked-in workspace
+version. The
+workflow commits the resulting `Cargo.toml`, `Cargo.lock`, `version.txt`, and
+`dist/` synchronization directly to `main`, so the operator does not prepare a
+version commit or release PR. `version.txt` remains the product-version input
+used by local distribution fixtures and must match the Cargo workspace version.
 
 The nightly path is triggered by completed `CI`, not by a tag or Release event.
 It verifies that the completed CI commit is still the current default-branch
@@ -226,8 +238,10 @@ the stable `publish-release` job is the only job that uses it.
 
 Configure these optional/required environment secrets:
 
-* `GH_TOKEN` is a fine-grained token with write access to
-  `wrightkit/homebrew-tap`; it is required for the stable Homebrew tap update.
+* `GH_TOKEN` is the authorized release token with permission to push the
+  stable version commit to `main`, trigger and read the resulting `CI` run,
+  and write to `wrightkit/homebrew-tap`. The stable workflow uses it for the
+  main push and waits for that post-bump commit's `CI` before publication.
 * The workflow's built-in `GITHUB_TOKEN` creates the final GitHub Release and
   uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and

@@ -7,11 +7,12 @@ on:
         description: Release channel to publish (nightly or stable)
         required: true
         type: choice
+        default: stable
         options:
           - stable
           - nightly
       version:
-        description: Exact workspace version for a stable release; omit for nightly
+        description: Stable MAJOR.MINOR.PATCH override; blank selects the next patch version
         required: false
         type: string
   workflow_run:
@@ -51,7 +52,7 @@ jobs:
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_RUN_COMMIT: ${{ github.event.workflow_run.head_sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           if [[ "$EVENT_NAME" == workflow_run ]]; then
             if [[ "$WORKFLOW_RUN_CONCLUSION" != success || "$WORKFLOW_RUN_BRANCH" != "$DEFAULT_BRANCH" ]]; then
@@ -90,7 +91,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   release-identity:
-    name: Verify ${{ needs.resolve-trigger.outputs.channel }} release identity
+    name: Prepare ${{ needs.resolve-trigger.outputs.channel }} release
     needs: resolve-trigger
     runs-on: ubuntu-latest
     outputs:
@@ -104,13 +105,181 @@ jobs:
         with:
           ref: ${{ needs.resolve-trigger.outputs.commit }}
           fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
-      - name: Verify release identity
+      - name: Verify stable dispatch head
+        if: needs.resolve-trigger.outputs.channel == 'stable'
+        env:
+          RELEASE_COMMIT: ${{ needs.resolve-trigger.outputs.commit }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
+          test "$current_sha" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+
+      - name: Verify nightly release state
+        if: needs.resolve-trigger.outputs.channel == 'nightly'
+        run: python3 scripts/verify-dist.py
+
+      - name: Bump and commit stable version
+        id: bump
+        if: needs.resolve-trigger.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          REQUESTED_VERSION: ${{ needs.resolve-trigger.outputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          stable_version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          current_version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "wright-cli") | .version')"
+          if [[ ! "$current_version" =~ $stable_version_pattern ]]; then
+            echo "workspace version must be MAJOR.MINOR.PATCH: $current_version" >&2
+            exit 1
+          fi
+          test "$(tr -d '\r\n' < version.txt)" = "$current_version"
+
+          version_is_newer() {
+            local current="$1"
+            local candidate="$2"
+            local -a current_parts candidate_parts
+            local current_part candidate_part index
+            IFS=. read -r -a current_parts <<< "$current"
+            IFS=. read -r -a candidate_parts <<< "$candidate"
+            for index in 0 1 2; do
+              current_part="${current_parts[$index]}"
+              candidate_part="${candidate_parts[$index]}"
+              if (( ${#candidate_part} != ${#current_part} )); then
+                (( ${#candidate_part} > ${#current_part} ))
+                return
+              fi
+              if [[ "$candidate_part" != "$current_part" ]]; then
+                [[ "$candidate_part" > "$current_part" ]]
+                return
+              fi
+            done
+            return 1
+          }
+
+          increment_decimal() {
+            local value="$1"
+            local carry=1
+            local result=""
+            local digit
+            while [[ -n "$value" ]]; do
+              digit="${value: -1}"
+              value="${value:0:${#value}-1}"
+              if (( carry )); then
+                if [[ "$digit" == 9 ]]; then
+                  digit=0
+                else
+                  digit=$((digit + 1))
+                  carry=0
+                fi
+              fi
+              result="$digit$result"
+            done
+            if (( carry )); then
+              result="1$result"
+            fi
+            printf '%s' "$result"
+          }
+
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            if [[ ! "$REQUESTED_VERSION" =~ $stable_version_pattern ]]; then
+              echo "stable version must be MAJOR.MINOR.PATCH without prerelease or build metadata: $REQUESTED_VERSION" >&2
+              exit 1
+            fi
+            if ! version_is_newer "$current_version" "$REQUESTED_VERSION"; then
+              echo "stable version must be newer than $current_version: $REQUESTED_VERSION" >&2
+              exit 1
+            fi
+            version="$REQUESTED_VERSION"
+          else
+            IFS=. read -r major minor patch <<< "$current_version"
+            version="$major.$minor.$(increment_decimal "$patch")"
+          fi
+
+          cargo_tmp="Cargo.toml.release-version.tmp"
+          awk -v version="$version" '
+            /^\[workspace\.package\]$/ { in_workspace_package=1 }
+            in_workspace_package && /^version = / {
+              print "version = \"" version "\""
+              in_workspace_package=0
+              next
+            }
+            { print }
+          ' Cargo.toml > "$cargo_tmp"
+          mv "$cargo_tmp" Cargo.toml
+          printf '%s\n' "$version" > version.txt
+          python3 scripts/update-dist-manifests.py --version "$version"
+          cargo check --workspace --all-targets --all-features
+          python3 scripts/verify-dist.py
+          git diff --check
+          test "$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "wright-cli") | .version')" = "$version"
+          git add Cargo.toml Cargo.lock version.txt dist
+          for path in Cargo.toml Cargo.lock version.txt dist; do
+            git diff --cached --quiet -- "$path" && {
+              echo "stable version preparation did not update $path" >&2
+              exit 1
+            }
+          done
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(Cargo.toml|Cargo.lock|version.txt|dist/)' || true)"
+          test -z "$unexpected"
+          git diff --cached --quiet && {
+            echo "stable version preparation produced no changes" >&2
+            exit 1
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(main): release $version"
+          git push origin "HEAD:$DEFAULT_BRANCH"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for post-bump CI
+        if: needs.resolve-trigger.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          POST_BUMP_COMMIT: ${{ steps.bump.outputs.commit }}
+        run: |
+          set -euo pipefail
+          ci_run_id=
+          for _ in {1..120}; do
+            ci_run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow ci.yml \
+              --commit "$POST_BUMP_COMMIT" \
+              --event push \
+              --json databaseId \
+              --jq '.[0].databaseId // empty' \
+              --limit 1)"
+            if [[ -n "$ci_run_id" ]]; then
+              break
+            fi
+            sleep 15
+          done
+          if [[ -z "$ci_run_id" ]]; then
+            echo "timed out waiting for CI on $POST_BUMP_COMMIT" >&2
+            exit 1
+          fi
+          gh run watch "$ci_run_id" --interval 15 --exit-status
+
+      - name: Verify prepared release identity
         id: identity
         shell: bash
         env:
@@ -118,7 +287,7 @@ jobs:
           RELEASE_COMMIT: ${{ needs.resolve-trigger.outputs.commit }}
           REQUESTED_VERSION: ${{ needs.resolve-trigger.outputs.version }}
         run: |
-          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          set -euo pipefail
           version="$(cargo metadata --locked --no-deps --format-version 1 |
             jq -r '.packages[] | select(.name == "wright-cli") | .version')"
           if [[ -z "$version" || "$version" == null ]]; then
@@ -131,8 +300,14 @@ jobs:
             exit 1
           fi
           if [[ "$RELEASE_CHANNEL" == stable ]]; then
-            if [[ -z "$REQUESTED_VERSION" || "$REQUESTED_VERSION" != "$version" ]]; then
-              echo "stable input version '$REQUESTED_VERSION' does not match workspace version '$version'" >&2
+            if [[ -n "$REQUESTED_VERSION" ]]; then
+              if [[ "$REQUESTED_VERSION" != "$version" ]]; then
+                echo "stable input version '$REQUESTED_VERSION' does not match prepared workspace version '$version'" >&2
+                exit 1
+              fi
+            fi
+            if [[ "$(git rev-parse HEAD)" == "$RELEASE_COMMIT" ]]; then
+              echo "stable release did not create a post-bump commit" >&2
               exit 1
             fi
             tag="v$version"
@@ -141,11 +316,12 @@ jobs:
               echo "nightly releases must not accept a stable version input" >&2
               exit 1
             fi
+            test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
             tag="nightly-${RELEASE_COMMIT:0:12}"
           fi
           {
             echo "channel=$RELEASE_CHANNEL"
-            echo "commit=$RELEASE_COMMIT"
+            echo "commit=$(git rev-parse HEAD)"
             echo "version=$version"
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"

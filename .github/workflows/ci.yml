@@ -603,6 +603,7 @@ jobs:
           --wright target/debug/wright
           --wright-lsp target/debug/wright-lsp
 
+
       - name: Validate package metadata and installers
         run: python scripts/verify-dist.py
 

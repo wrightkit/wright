@@ -32,15 +32,20 @@ python3 scripts/update-dist-manifests.py --version 0.1.0 \
 ```
 
 Between releases the checked-in files carry the current workspace version
-with all-zero placeholder hashes. `scripts/verify-dist.py` (run in CI) fails
-when the committed metadata drifts from the workspace version or when the
-install script stops covering the declared target matrix.
+with all-zero placeholder hashes. The stable release workflow updates these
+version-only manifests in its post-bump `main` commit; the generated release
+manifests later replace the placeholders with hashes from the verified native
+archives. `scripts/verify-dist.py` (run in CI) fails when the committed
+metadata drifts from the workspace version or when the install script stops
+covering the declared target matrix.
 
 ## Publication process
 
-The explicit stable workflow builds the native matrix, verifies the checksums,
-then generates the Homebrew, WinGet, and Scoop manifests from those exact
-artifacts. It attaches the manifests to the GitHub Release as:
+The explicit stable workflow first synchronizes the version-only checked-in
+metadata and commits it to `main`. It then builds the native matrix, verifies
+the checksums, and generates the Homebrew, WinGet, and Scoop manifests from
+those exact artifacts. It attaches the generated manifests to the GitHub
+Release as:
 
 - `wright-<version>.homebrew.rb`
 - `wright-<version>.winget.zip` (unzip into a winget-pkgs checkout)
