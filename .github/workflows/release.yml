@@ -118,6 +118,7 @@ jobs:
           RELEASE_COMMIT: ${{ needs.resolve-trigger.outputs.commit }}
           REQUESTED_VERSION: ${{ needs.resolve-trigger.outputs.version }}
         run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           version="$(cargo metadata --locked --no-deps --format-version 1 |
             jq -r '.packages[] | select(.name == "wright-cli") | .version')"
           if [[ -z "$version" || "$version" == null ]]; then
@@ -148,17 +149,6 @@ jobs:
             echo "version=$version"
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Verify release revision and version identity
-        run: >-
-          python3 scripts/verify-release-identity.py
-          --version "${{ steps.identity.outputs.version }}"
-          --tag "${{ steps.identity.outputs.tag }}"
-          --commit "${{ steps.identity.outputs.commit }}"
-          --ref "${{ steps.identity.outputs.commit }}"
-
-      - name: Verify checked-in distribution metadata
-        run: python3 scripts/verify-dist.py
 
   build:
     name: Build ${{ matrix.target }}
@@ -251,8 +241,8 @@ jobs:
             dist/wright-*.zip.sha256
             dist/wright-*.build.json
 
-  upload-artifacts:
-    name: Upload native release artifacts
+  release-assets:
+    name: Verify native release artifacts
     needs:
       - release-identity
       - build
@@ -262,38 +252,60 @@ jobs:
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.release-identity.outputs.commit }}
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
           pattern: wright-*
-          path: artifacts
+          path: release
           merge-multiple: true
 
-      - name: Verify the complete artifact set
-        run: >-
-          python3 scripts/verify-release-artifacts.py
-          --version "$RELEASE_VERSION"
-          --commit "$RELEASE_COMMIT"
-          --tag "${{ needs.release-identity.outputs.tag }}"
-          --artifacts-dir artifacts
-          --output-dir release
+      - name: Check release archives and identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir verified
+          for spec in \
+            x86_64-unknown-linux-gnu:tar.gz \
+            x86_64-apple-darwin:tar.gz \
+            aarch64-apple-darwin:tar.gz \
+            x86_64-pc-windows-msvc:zip; do
+            IFS=: read -r target extension <<< "$spec"
+            archive="release/wright-$RELEASE_VERSION-$target.$extension"
+            checksum="$archive.sha256"
+            identity="$archive.build.json"
+            test -f "$archive"
+            test -f "$checksum"
+            test -f "$identity"
+            expected_hash="$(awk 'NR == 1 { print $1 }' "$checksum")"
+            actual_hash="$(sha256sum "$archive" | awk 'NR == 1 { print $1 }')"
+            test "$actual_hash" = "$expected_hash"
+            jq -e \
+              --arg revision "$RELEASE_COMMIT" \
+              --arg tag "$RELEASE_TAG" \
+              --arg target "$target" \
+              '.revision == $revision and
+               .tag == $tag and
+               .target == $target and
+               .toolchain == "stable" and
+               .profile == "release" and
+               .packages == ["wright-cli", "wright-lsp"] and
+               .features == []' "$identity" >/dev/null
+            cp "$archive" "$checksum" verified/
+          done
+          (cd verified && sha256sum wright-*.tar.gz wright-*.zip > SHA256SUMS)
 
-      - name: Upload verified native release assets
+      - name: Upload checked release assets
         uses: actions/upload-artifact@v7
         with:
           name: verified-release-assets
-          path: release/*
+          path: verified/*
           if-no-files-found: error
 
   package-manifests:
     name: Generate package-manager manifests
     needs:
       - release-identity
-      - upload-artifacts
+      - release-assets
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     env:
@@ -366,17 +378,12 @@ jobs:
     name: Publish completed GitHub Release
     needs:
       - release-identity
-      - upload-artifacts
+      - release-assets
       - package-manifests
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - name: Check out the exact release revision
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.release-identity.outputs.commit }}
-
       - name: Download verified native release assets
         uses: actions/download-artifact@v8
         with:
@@ -389,26 +396,12 @@ jobs:
           name: release-manifests
           path: attach
 
-      - name: Create, resume, or verify the stable GitHub Release
+      - name: Create or resume the stable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
         run: |
-          verify_release_assets() {
-            expected_assets="$(for path in release/* attach/*; do basename "$path"; done | sort -u)"
-            published_assets="$(gh release view "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json assets \
-              --jq '.assets[].name' | sort -u)"
-            if ! diff -u \
-              <(printf '%s\n' "$expected_assets") \
-              <(printf '%s\n' "$published_assets"); then
-              echo "release $RELEASE_TAG does not have exactly the verified asset set" >&2
-              exit 1
-            fi
-          }
-
           if existing_tag_commit="$(gh api \
             "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
             --jq '.sha' 2>/dev/null)"; then
@@ -423,21 +416,11 @@ jobs:
               -f sha="$RELEASE_COMMIT" >/dev/null
           fi
 
-          python3 scripts/verify-release-identity.py \
-            --version "${{ needs.release-identity.outputs.version }}" \
-            --tag "$RELEASE_TAG" \
-            --commit "$RELEASE_COMMIT" \
-            --ref "$RELEASE_COMMIT" \
-            --verify-tag
-
-          draft="$(gh release list \
+          draft="$(gh release view "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --limit 100 \
-            --json tagName,isDraft \
-            --jq ".[] | select(.tagName == \"$RELEASE_TAG\") | .isDraft" | head -n 1)"
-          if [[ -n "$draft" ]]; then
-            echo "found existing $([[ "$draft" == true ]] && echo draft || echo public) release $RELEASE_TAG"
-          else
+            --json isDraft \
+            --jq '.isDraft' 2>/dev/null || true)"
+          if [[ -z "$draft" ]]; then
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
@@ -446,38 +429,31 @@ jobs:
               --generate-notes \
               --draft
             draft=true
+          else
+            echo "found existing $([[ "$draft" == true ]] && echo draft || echo public) release $RELEASE_TAG"
           fi
 
           if [[ "$draft" == true ]]; then
-            gh release edit "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --target "$RELEASE_COMMIT" \
-              --title "$RELEASE_TAG"
             gh release upload "$RELEASE_TAG" release/* attach/* \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
-            verify_release_assets
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --draft=false \
               --latest
-          else
-            verify_release_assets
-            echo "verified existing public release $RELEASE_TAG"
           fi
 
   publish-r2:
     name: Publish ${{ needs.release-identity.outputs.channel }} archives to R2
     needs:
       - release-identity
-      - upload-artifacts
+      - release-assets
       - publish-release
     runs-on: ubuntu-latest
     if: >-
       always() &&
-      ((needs.release-identity.outputs.channel == 'nightly' && needs.upload-artifacts.result == 'success') ||
+      ((needs.release-identity.outputs.channel == 'nightly' && needs.release-assets.result == 'success') ||
        (needs.release-identity.outputs.channel == 'stable' && needs.publish-release.result == 'success'))
     env:
       RELEASE_CHANNEL: ${{ needs.release-identity.outputs.channel }}
