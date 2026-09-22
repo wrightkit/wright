@@ -28,6 +28,7 @@ def digest(path: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--tag")
     parser.add_argument("--target", required=True)
     parser.add_argument("--extension", choices=("tar.gz", "zip"), required=True)
     parser.add_argument("--commit", required=True)
@@ -77,7 +78,7 @@ def main() -> int:
     checksum.write_text(f"{digest(archive)}  {archive.name}\n")
     identity = {
         "revision": args.commit,
-        "tag": f"v{version}",
+        "tag": args.tag or f"v{version}",
         "target": args.target,
         "toolchain": "stable",
         "profile": "release",

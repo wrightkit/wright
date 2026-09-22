@@ -4,9 +4,8 @@
 # Builds the release artifacts, runs every v1 gate, proves standalone
 # operation without Node/OverPy, and packages the artifacts with version
 # metadata. The gates must pass before the release is stamped. This is the
-# local staging path and the validation suite behind the public tag-driven
-# release workflow (issue #101); the GitHub workflow publishes the per-target
-# archives, this script verifies and packages the host platform.
+# local staging path and validation suite for the explicit stable and nightly
+# publication workflows; GitHub Actions publishes the per-target archives.
 #
 # Usage: scripts/release.sh [version]
 

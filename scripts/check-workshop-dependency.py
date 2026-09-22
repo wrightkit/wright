@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -77,21 +78,22 @@ def main() -> int:
             f"dependencies are not allowed ({', '.join(aliases)})"
         )
 
-    expected_requirement = f"={workshop['version']}"
     requirements = {dependency["req"] for _, dependency in direct}
-    if requirements != {expected_requirement}:
+    if len(requirements) != 1 or not re.fullmatch(
+        r"\^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", next(iter(requirements), "")
+    ):
         consumers = ", ".join(
             f"{package} ({dependency['req']})" for package, dependency in direct
         )
         raise SystemExit(
             "workshop dependency validation failed: direct consumers must use "
-            f"{expected_requirement}, found {consumers}"
+            f"one ordinary compatible SemVer requirement, found {consumers}"
         )
 
     consumers = ", ".join(sorted(package for package, _ in direct))
     print(
         f"workshop-rs contract: {workshop['version']} from {source} "
-        f"({len(direct)} direct consumers: {consumers})"
+        f"({next(iter(requirements))}; {len(direct)} direct consumers: {consumers})"
     )
     return 0
 
