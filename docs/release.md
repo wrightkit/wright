@@ -52,18 +52,18 @@ envelope carries `wright.version` + `wright.contract`. The release archive's
 
 Wright has two release channels and one shared native build workflow:
 
-1. Every successful `CI` run on `main` is eligible for `.github/workflows/nightly.yml`.
-   The workflow is triggered by the completed CI run for that exact commit. It
-   builds and smoke-tests the native matrix, then publishes immutable objects
-   under `wright/nightly/<commit>/` and advances only
-   `wright/nightly/version`. Nightlies do not create Git tags, GitHub Releases,
-   or package-manager updates.
-2. A maintainer explicitly dispatches `.github/workflows/stable.yml` from
-   `main` with the exact workspace version. The workflow validates that the
-   selected commit's `Cargo.toml`, `version.txt`, and generated `dist/` metadata
-   agree, builds and smoke-tests the native matrix, and publishes the versioned
-   GitHub Release. The stable R2 objects and pointer are updated only after the
-   GitHub Release is complete.
+1. Every successful `CI` run on `main` triggers the `workflow_run` path of
+   `.github/workflows/release.yml` for that exact commit. It builds and
+   smoke-tests the native matrix, then publishes immutable objects under
+   `wright/nightly/<commit>/` and advances only `wright/nightly/version`.
+   Nightlies do not create Git tags, GitHub Releases, or package-manager
+   updates.
+2. A maintainer explicitly dispatches `.github/workflows/release.yml` from
+   `main`, selects the `stable` channel, and supplies the exact workspace
+   version. The workflow validates that the selected commit's `Cargo.toml`,
+   `version.txt`, and generated `dist/` metadata agree, builds and smoke-tests
+   the native matrix, and publishes the versioned GitHub Release. The stable R2
+   objects and pointer are updated only after the GitHub Release is complete.
 
 No workspace crate is published to crates.io. Every workspace package
 explicitly sets `publish = false`, so Cargo package publication cannot become
@@ -74,18 +74,17 @@ versioned objects are reused only when their bytes match.
 ### Creating a release
 
 The stable release decision is the reviewed version change on `main` followed
-by an explicit `workflow_dispatch` of `stable.yml`. The workflow does not infer
-SemVer changes from commits and does not turn ordinary merges into stable
-releases. `version.txt` remains the product-version input used by local
-distribution fixtures; it must match the Cargo workspace version in a version
-change.
+by an explicit `workflow_dispatch` of `release.yml` with the `stable` channel.
+The workflow does not infer SemVer changes from commits and does not turn
+ordinary merges into stable releases. `version.txt` remains the product-version
+input used by local distribution fixtures; it must match the Cargo workspace
+version in a version change.
 
-`nightly.yml` is triggered by completed `CI`, not by a tag or Release event.
-Before starting the reusable `release.yml` workflow, it verifies that the
-completed CI commit is still the current default-branch head. A stale,
-out-of-order CI completion therefore cannot advance the nightly pointer.
-The reusable workflow still receives the exact commit explicitly, so the
-artifacts cannot silently come from a later `main` head.
+The nightly path is triggered by completed `CI`, not by a tag or Release event.
+It verifies that the completed CI commit is still the current default-branch
+head before building, so a stale, out-of-order completion cannot advance the
+nightly pointer. Manual runs use the ref selected in the Actions UI; automatic
+nightly runs use the exact `workflow_run.head_sha`.
 
 ### Dependency boundaries and updates
 

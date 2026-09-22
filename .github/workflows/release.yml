@@ -1,41 +1,97 @@
 name: Release
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       channel:
         description: Release channel to publish (nightly or stable)
         required: true
-        type: string
-      commit:
-        description: Exact commit to build and publish
-        required: true
-        type: string
+        type: choice
+        options:
+          - stable
+          - nightly
       version:
-        description: Stable product version; omitted for nightly
+        description: Exact workspace version for a stable release; omit for nightly
         required: false
         type: string
-    secrets:
-      GH_TOKEN:
-        description: Dedicated cross-repository token with write access to wrightkit/homebrew-tap
-        required: false
-      R2_ACCESS_KEY_ID:
-        description: Cloudflare R2 S3 API access key with write access to the release bucket
-        required: true
-      R2_SECRET_ACCESS_KEY:
-        description: Cloudflare R2 S3 API secret key with write access to the release bucket
-        required: true
-      CLOUDFLARE_ACCOUNT_ID:
-        description: Cloudflare account ID for the R2 S3 API endpoint
-        required: true
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 permissions:
   actions: read
   contents: write
 
+concurrency:
+  group: wright-${{ inputs.channel || 'nightly' }}
+  cancel-in-progress: ${{ inputs.channel != 'stable' }}
+
 jobs:
+  resolve-trigger:
+    name: Resolve release trigger
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.trigger.outputs.channel }}
+      commit: ${{ steps.trigger.outputs.commit }}
+      version: ${{ steps.trigger.outputs.version }}
+    steps:
+      - name: Resolve channel and revision
+        id: trigger
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_CHANNEL: ${{ inputs.channel }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_COMMIT: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$EVENT_NAME" == workflow_run ]]; then
+            if [[ "$WORKFLOW_RUN_CONCLUSION" != success || "$WORKFLOW_RUN_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+              echo "nightly publication requires successful CI on $DEFAULT_BRANCH" >&2
+              exit 1
+            fi
+            current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
+            if [[ "$current_sha" != "$WORKFLOW_RUN_COMMIT" ]]; then
+              echo "CI completed for $WORKFLOW_RUN_COMMIT, but $DEFAULT_BRANCH is now $current_sha" >&2
+              exit 1
+            fi
+            channel=nightly
+            commit="$WORKFLOW_RUN_COMMIT"
+            version=
+          elif [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+              echo "manual releases must be dispatched from $DEFAULT_BRANCH" >&2
+              exit 1
+            fi
+            channel="$REQUESTED_CHANNEL"
+            commit="$GITHUB_SHA"
+            version="$REQUESTED_VERSION"
+          else
+            echo "unsupported release event: $EVENT_NAME" >&2
+            exit 1
+          fi
+
+          case "$channel" in
+            nightly|stable) ;;
+            *) echo "unsupported release channel: $channel" >&2; exit 1 ;;
+          esac
+          {
+            echo "channel=$channel"
+            echo "commit=$commit"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
   release-identity:
-    name: Verify ${{ inputs.channel }} release identity
+    name: Verify ${{ needs.resolve-trigger.outputs.channel }} release identity
+    needs: resolve-trigger
     runs-on: ubuntu-latest
     outputs:
       channel: ${{ steps.identity.outputs.channel }}
@@ -46,7 +102,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.resolve-trigger.outputs.commit }}
           fetch-depth: 0
 
       - name: Install Rust toolchain
@@ -58,18 +114,10 @@ jobs:
         id: identity
         shell: bash
         env:
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_COMMIT: ${{ inputs.commit }}
-          REQUESTED_VERSION: ${{ inputs.version }}
+          RELEASE_CHANNEL: ${{ needs.resolve-trigger.outputs.channel }}
+          RELEASE_COMMIT: ${{ needs.resolve-trigger.outputs.commit }}
+          REQUESTED_VERSION: ${{ needs.resolve-trigger.outputs.version }}
         run: |
-          case "$RELEASE_CHANNEL" in
-            nightly|stable) ;;
-            *) echo "unsupported release channel: $RELEASE_CHANNEL" >&2; exit 1 ;;
-          esac
-          if [[ "$GITHUB_REF" == refs/heads/* && "$GITHUB_REF" != refs/heads/main ]]; then
-            echo "release workflows must run from main" >&2
-            exit 1
-          fi
           version="$(cargo metadata --locked --no-deps --format-version 1 |
             jq -r '.packages[] | select(.name == "wright-cli") | .version')"
           if [[ -z "$version" || "$version" == null ]]; then
@@ -246,7 +294,7 @@ jobs:
     needs:
       - release-identity
       - upload-artifacts
-    if: inputs.channel == 'stable'
+    if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
@@ -285,7 +333,7 @@ jobs:
       - release-identity
       - package-manifests
       - publish-release
-    if: inputs.channel == 'stable'
+    if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
@@ -320,7 +368,7 @@ jobs:
       - release-identity
       - upload-artifacts
       - package-manifests
-    if: inputs.channel == 'stable'
+    if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -421,7 +469,7 @@ jobs:
           fi
 
   publish-r2:
-    name: Publish ${{ inputs.channel }} archives to R2
+    name: Publish ${{ needs.release-identity.outputs.channel }} archives to R2
     needs:
       - release-identity
       - upload-artifacts
@@ -429,8 +477,8 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       always() &&
-      ((inputs.channel == 'nightly' && needs.upload-artifacts.result == 'success') ||
-       (inputs.channel == 'stable' && needs.publish-release.result == 'success'))
+      ((needs.release-identity.outputs.channel == 'nightly' && needs.upload-artifacts.result == 'success') ||
+       (needs.release-identity.outputs.channel == 'stable' && needs.publish-release.result == 'success'))
     env:
       RELEASE_CHANNEL: ${{ needs.release-identity.outputs.channel }}
       RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
