@@ -52,7 +52,7 @@ jobs:
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_RUN_COMMIT: ${{ github.event.workflow_run.head_sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           if [[ "$EVENT_NAME" == workflow_run ]]; then
             if [[ "$WORKFLOW_RUN_CONCLUSION" != success || "$WORKFLOW_RUN_BRANCH" != "$DEFAULT_BRANCH" ]]; then
@@ -105,6 +105,7 @@ jobs:
         with:
           ref: ${{ needs.resolve-trigger.outputs.commit }}
           fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
           persist-credentials: true
 
       - name: Set up Python
@@ -122,7 +123,7 @@ jobs:
         env:
           RELEASE_COMMIT: ${{ needs.resolve-trigger.outputs.commit }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           set -euo pipefail
           current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
@@ -134,8 +135,10 @@ jobs:
         run: python3 scripts/verify-dist.py
 
       - name: Bump and commit stable version
+        id: bump
         if: needs.resolve-trigger.outputs.channel == 'stable'
         env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           REQUESTED_VERSION: ${{ needs.resolve-trigger.outputs.version }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
@@ -166,6 +169,35 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(main): release $version"
           git push origin "HEAD:$DEFAULT_BRANCH"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for post-bump CI
+        if: needs.resolve-trigger.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          POST_BUMP_COMMIT: ${{ steps.bump.outputs.commit }}
+        run: |
+          set -euo pipefail
+          ci_run_id=
+          for _ in {1..120}; do
+            ci_run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow ci.yml \
+              --commit "$POST_BUMP_COMMIT" \
+              --event push \
+              --json databaseId \
+              --jq '.[0].databaseId // empty' \
+              --limit 1)"
+            if [[ -n "$ci_run_id" ]]; then
+              break
+            fi
+            sleep 15
+          done
+          if [[ -z "$ci_run_id" ]]; then
+            echo "timed out waiting for CI on $POST_BUMP_COMMIT" >&2
+            exit 1
+          fi
+          gh run watch "$ci_run_id" --interval 15 --exit-status
 
       - name: Verify prepared release identity
         id: identity

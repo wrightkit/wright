@@ -235,8 +235,10 @@ the stable `publish-release` job is the only job that uses it.
 
 Configure these optional/required environment secrets:
 
-* `GH_TOKEN` is a fine-grained token with write access to
-  `wrightkit/homebrew-tap`; it is required for the stable Homebrew tap update.
+* `GH_TOKEN` is the authorized release token with permission to push the
+  stable version commit to `main`, trigger and read the resulting `CI` run,
+  and write to `wrightkit/homebrew-tap`. The stable workflow uses it for the
+  main push and waits for that post-bump commit's `CI` before publication.
 * The workflow's built-in `GITHUB_TOKEN` creates the final GitHub Release and
   uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and
