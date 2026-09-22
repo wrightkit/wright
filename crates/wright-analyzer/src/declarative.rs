@@ -528,6 +528,7 @@ fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) ->
     }
 }
 
+#[allow(unreachable_patterns)]
 fn public_event_id(event: &workshop_rs::Event) -> &str {
     match event {
         workshop_rs::Event::Global => "global",
@@ -546,6 +547,7 @@ fn public_event_id(event: &workshop_rs::Event) -> &str {
             workshop_rs::PlayerEventKind::ReceivedHealing => "playerReceivedHealing",
             workshop_rs::PlayerEventKind::ReceivedKnockback => "playerReceivedKnockback",
             workshop_rs::PlayerEventKind::TookDamage => "playerTookDamage",
+            _ => "unknown",
         },
         workshop_rs::Event::Subroutine(_) => "subroutine",
     }
