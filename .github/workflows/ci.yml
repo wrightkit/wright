@@ -196,7 +196,19 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        project: [ai-pve, bastion, defend, illari, rework]
+        include:
+          - project: ai-pve
+            expected_exit: 0
+          - project: bastion
+            expected_exit: 0
+          # The pinned owner corpus admits this project's residual as a
+          # source-level failure; the other projects must remain clean.
+          - project: defend
+            expected_exit: 1
+          - project: illari
+            expected_exit: 0
+          - project: rework
+            expected_exit: 0
     steps:
       - name: Checkout Wright
         uses: actions/checkout@v7
@@ -218,10 +230,53 @@ jobs:
         run: chmod +x target/debug/wright
 
       - name: Run public CLI dogfood
-        run: >-
-          python3 scripts/check-workshop-real-project.py
-          target/debug/wright
-          workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects/${{ matrix.project }}.ow
+        env:
+          EXPECTED_EXIT: ${{ matrix.expected_exit }}
+          PROJECT: workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects/${{ matrix.project }}.ow
+        run: |
+          set -euo pipefail
+
+          run_workflow() {
+            local command="$1"
+            local output
+            local status
+
+            set +e
+            output="$(target/debug/wright "$command" --kind workshop "$PROJECT" --format json)"
+            status=$?
+            set -e
+
+            if [[ "$status" -ne "$EXPECTED_EXIT" ]]; then
+              echo "wright $command returned $status; expected $EXPECTED_EXIT for $PROJECT" >&2
+              return 1
+            fi
+
+            jq -e \
+              --arg command "$command" \
+              --argjson process_exit "$status" \
+              '(
+                .wright.contract == "wright-result/v1" and
+                .command == $command and
+                .exit == $process_exit and
+                .ok == ($process_exit == 0) and
+                (.diagnostics | type == "array") and
+                (all(.diagnostics[]; type == "object")) and
+                ([.diagnostics[] | select(.stage == "internal")] | length == 0)
+              )' <<<"$output" >/dev/null
+            printf '%s' "$output"
+          }
+
+          check_output="$(run_workflow check)"
+          lint_output="$(run_workflow lint)"
+          jq -e -n \
+            --argjson check "$check_output" \
+            --argjson lint "$lint_output" \
+            '(
+              $check.diagnostics == $lint.diagnostics and
+              $check.ok == $lint.ok and
+              $check.exit == $lint.exit and
+              ($lint.result.program.rules | numbers | . > 0)
+            )' >/dev/null
 
   # -------------------------------------------------------------------------
   # [2] PRODUCT INTEGRATION  (Wright-owned provider and product contracts)

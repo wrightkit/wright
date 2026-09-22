@@ -11,7 +11,7 @@ Wright verifies its integration through these focused tests and CI dogfood:
 | Wright surface | Test contract |
 | --- | --- |
 | Analyzer | `crates/wright-analyzer/tests/workshop_integration.rs` runs semantic queries, findings, references, and source-span checks on localized Workshop inputs. |
-| CLI | CI downloads the `wright-cli-build` artifact and runs `scripts/check-workshop-real-project.py` for each owner-pinned real project through public `check` and `lint`. |
+| CLI | CI downloads the `wright-cli-build` artifact and runs each owner-pinned real project through public `check` and `lint`, asserting the pinned verdict and result contract. |
 | Provider | `crates/wright-driver/tests/workshop_provider.rs` checks successful and malformed Workshop input through the provider boundary. |
 | Public consumers | `crates/wright-consumer/tests/consumer.rs` exercises the public embedding workflow on representative Workshop inputs. |
 
