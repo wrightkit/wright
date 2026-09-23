@@ -1,4 +1,6 @@
-use workshop_rs::wir;
+use workshop_rs::format::format_number;
+use workshop_rs::ids::Id;
+use workshop_rs::wir::{self, Value};
 
 use crate::fold_constants::FoldConstants;
 use crate::profile::Profile;
@@ -10,6 +12,165 @@ pub trait Pass {
 
     /// Run the pass over the program and return its statistics.
     fn run(&self, program: &mut wir::Program) -> PassStats;
+}
+
+/// The `fold-constants` pass.
+impl Pass for FoldConstants {
+    fn name(&self) -> &'static str {
+        "fold-constants"
+    }
+
+    fn run(&self, program: &mut wir::Program) -> PassStats {
+        let nodes_before = program.values.len() + program.actions.len();
+        let mut changed = 0usize;
+        loop {
+            let mut iteration_changed = 0usize;
+            for index in 0..program.values.len() {
+                let id = Id::from_index(index);
+                let current = {
+                    let Some(node) = program.values.get_mut(id) else {
+                        continue;
+                    };
+                    std::mem::replace(&mut node.value, Value::Null)
+                };
+                match fold_wir_one(program, &current) {
+                    Some(folded) => {
+                        program.values.get_mut(id).expect("id in range").value = folded;
+                        iteration_changed += 1;
+                    }
+                    None => {
+                        program.values.get_mut(id).expect("id in range").value = current;
+                    }
+                }
+            }
+            if iteration_changed == 0 {
+                break;
+            }
+            changed += iteration_changed;
+        }
+        PassStats {
+            pass: self.name().to_string(),
+            changed,
+            nodes_before,
+            nodes_after: program.values.len() + program.actions.len(),
+        }
+    }
+}
+
+fn fold_wir_one(program: &wir::Program, value: &Value) -> Option<Value> {
+    match value {
+        Value::Call { name, args } => {
+            if args.len() == 2 {
+                let left = wir_number(program, args[0]);
+                let right = wir_number(program, args[1]);
+                if let (Some(left), Some(right)) = (left, right) {
+                    let folded = match name.as_str() {
+                        "+" | "add" => Some(folded_number(left + right)),
+                        "-" | "subtract" => Some(folded_number(left - right)),
+                        "*" | "multiply" => Some(folded_number(left * right)),
+                        "/" | "divide" => Some(folded_number(left / right)),
+                        "==" => Some(Value::Bool(left == right)),
+                        "!=" => Some(Value::Bool(left != right)),
+                        "<" => Some(Value::Bool(left < right)),
+                        "<=" => Some(Value::Bool(left <= right)),
+                        ">" => Some(Value::Bool(left > right)),
+                        ">=" => Some(Value::Bool(left >= right)),
+                        _ => None,
+                    };
+                    if folded.is_some() {
+                        return folded;
+                    }
+                }
+                if name == "and" || name == "or" {
+                    if let (Some(left), Some(right)) =
+                        (wir_bool(program, args[0]), wir_bool(program, args[1]))
+                    {
+                        return Some(Value::Bool(if name == "and" {
+                            left && right
+                        } else {
+                            left || right
+                        }));
+                    }
+                    if name == "or"
+                        && (wir_bool(program, args[0]) == Some(true)
+                            || wir_bool(program, args[1]) == Some(true))
+                    {
+                        return Some(Value::Bool(true));
+                    }
+                    if name == "and"
+                        && (wir_bool(program, args[0]) == Some(false)
+                            || wir_bool(program, args[1]) == Some(false))
+                    {
+                        return Some(Value::Bool(false));
+                    }
+                }
+                if name == "valueInArray"
+                    && args.len() == 2
+                    && wir_number(program, args[1]) == Some(0.0)
+                {
+                    return Some(Value::Call {
+                        name: "firstOf".to_string(),
+                        args: vec![args[0]],
+                    });
+                }
+            }
+            if args.len() == 1 {
+                if let Some(operand) = wir_number(program, args[0]) {
+                    match name.as_str() {
+                        "-" => return Some(folded_number(-operand)),
+                        "sqrt" | "squareRoot" => return Some(folded_number(operand.sqrt())),
+                        "abs" | "absoluteValue" => return Some(folded_number(operand.abs())),
+                        _ => {}
+                    }
+                }
+                if name == "not" {
+                    if let Some(operand) = wir_bool(program, args[0]) {
+                        return Some(Value::Bool(!operand));
+                    }
+                }
+            }
+            None
+        }
+        Value::Vector { x, y, z } => {
+            let (Some(x), Some(y), Some(z)) = (
+                wir_number(program, *x),
+                wir_number(program, *y),
+                wir_number(program, *z),
+            ) else {
+                return None;
+            };
+            if x == 0.0 && y == 1.0 && z == 0.0 {
+                Some(Value::Enum {
+                    value_type: "Vector".to_string(),
+                    value: "UP".to_string(),
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn folded_number(value: f64) -> Value {
+    Value::Number {
+        value,
+        text: format_number(value),
+    }
+}
+
+fn wir_number(program: &wir::Program, id: Id<wir::ValueNode>) -> Option<f64> {
+    match program.values.get(id)?.value {
+        Value::Number { value, .. } => Some(value),
+        _ => None,
+    }
+}
+
+fn wir_bool(program: &wir::Program, id: Id<wir::ValueNode>) -> Option<bool> {
+    match program.values.get(id)?.value {
+        Value::Bool(value) => Some(value),
+        _ => None,
+    }
 }
 
 /// Statistics for one pass run.
@@ -99,46 +260,52 @@ pub fn run_canonical(
 }
 
 fn fold_action_once(action: &mut workshop_rs::Action) -> usize {
-    use workshop_rs::Action;
+    use workshop_rs::Action::*;
+    let mut changed = 0;
     match action {
-        Action::SetGlobalVariable { value, .. }
-        | Action::ModifyGlobalVariable { value, .. }
-        | Action::If { condition: value }
-        | Action::ElseIf { condition: value }
-        | Action::While { condition: value } => usize::from(fold_value_once(value)),
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            usize::from(fold_value_once(player)) + usize::from(fold_value_once(value))
+        SetGlobalVariable { value, .. }
+        | ModifyGlobalVariable { value, .. }
+        | If { condition: value }
+        | ElseIf { condition: value }
+        | While { condition: value } => changed += usize::from(fold_value_once(value)),
+        SetPlayerVariable { player, value, .. }
+        | ModifyPlayerVariable { player, value, .. }
+        | AssignMember {
+            target: player,
+            value,
+            ..
+        } => {
+            changed += usize::from(fold_value_once(player)) + usize::from(fold_value_once(value));
         }
-        Action::AssignMember { target, value, .. } => {
-            usize::from(fold_value_once(target)) + usize::from(fold_value_once(value))
-        }
-        Action::ForGlobalVariable {
+        ForGlobalVariable {
             start, stop, step, ..
         } => {
-            usize::from(fold_value_once(start))
+            changed += usize::from(fold_value_once(start))
                 + usize::from(fold_value_once(stop))
-                + usize::from(fold_value_once(step))
+                + usize::from(fold_value_once(step));
         }
-        Action::ForPlayerVariable {
+        ForPlayerVariable {
             player,
             start,
             stop,
             step,
             ..
         } => {
-            usize::from(fold_value_once(player))
+            changed += usize::from(fold_value_once(player))
                 + usize::from(fold_value_once(start))
                 + usize::from(fold_value_once(stop))
-                + usize::from(fold_value_once(step))
+                + usize::from(fold_value_once(step));
         }
-        Action::Disabled { action } => fold_action_once(action),
-        Action::Call { args, .. } => args
-            .iter_mut()
-            .map(|value| usize::from(fold_value_once(value)))
-            .sum(),
-        Action::CallSubroutine { .. } | Action::Else | Action::End => 0,
+        Disabled { action } => changed += fold_action_once(action),
+        Call { args, .. } => {
+            changed += args
+                .iter_mut()
+                .map(|v| usize::from(fold_value_once(v)))
+                .sum::<usize>()
+        }
+        CallSubroutine { .. } | Else | End => {}
     }
+    changed
 }
 
 /// Fold one tree level. The caller repeats this pass to a fixpoint so a
@@ -416,5 +583,38 @@ mod tests {
             &args[3],
             Value::Enum { value_type, value } if value_type == "Vector" && value == "UP"
         ));
+    }
+
+    #[test]
+    fn canonical_pipeline_preserves_action_node_counts() {
+        use workshop_rs::{Action, Event, Program, Rule, Value};
+
+        let mut program = Program::new();
+        program.rule(Rule {
+            name: "counts".to_string(),
+            disabled: false,
+            event: Event::Global,
+            conditions: vec![],
+            actions: vec![
+                Action::CallSubroutine {
+                    subroutine: "sub".to_string(),
+                },
+                Action::Else,
+                Action::End,
+                Action::disabled(Action::SetGlobalVariable {
+                    variable: "A".to_string(),
+                    value: Value::Number(1.0),
+                }),
+                Action::ForPlayerVariable {
+                    player: Value::Number(1.0),
+                    variable: "A".to_string(),
+                    start: Value::Number(1.0),
+                    stop: Value::Number(2.0),
+                    step: Value::Number(1.0),
+                },
+            ],
+        });
+
+        assert_eq!(program_node_count(&program), 11);
     }
 }

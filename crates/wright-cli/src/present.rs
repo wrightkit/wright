@@ -1,9 +1,3 @@
-//! CLI-only presentation policy and renderers.
-//!
-//! The driver owns structured envelopes and diagnostics. This module owns how
-//! those existing values are presented to a terminal, a pipe, or GitHub
-//! Actions. JSON and source artifacts bypass every human/CI renderer.
-
 use std::io::{IsTerminal, Write};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -31,9 +25,6 @@ pub(crate) struct Presentation {
     interactive: bool,
 }
 
-/// A deliberately small, boundary-only activity indicator for interactive
-/// terminal runs. It never participates in the result contract and is never
-/// created for JSON, plain, CI, or GitHub Actions rendering.
 pub(crate) struct Activity {
     done: Arc<AtomicBool>,
     visible: Arc<AtomicBool>,
@@ -67,20 +58,20 @@ impl Activity {
         let frame = Arc::new(AtomicUsize::new(0));
         write_activity_line(&output, None, None);
         visible.store(true, Ordering::Release);
-        let thread_done = Arc::clone(&done);
-        let thread_status = Arc::clone(&status);
-        let thread_output = Arc::clone(&output);
+        let t_done = Arc::clone(&done);
+        let t_status = Arc::clone(&status);
+        let t_output = Arc::clone(&output);
         #[cfg(test)]
-        let thread_frame = Arc::clone(&frame);
+        let t_frame = Arc::clone(&frame);
         let handle = thread::spawn(move || {
             thread::sleep(Duration::from_millis(60));
-            let mut frame = 0;
-            while !thread_done.load(Ordering::Acquire) {
-                let event = *thread_status.lock().expect("activity status lock");
-                write_activity_line(&thread_output, event, Some(SPINNER[frame]));
-                frame = (frame + 1) % SPINNER.len();
+            let mut f = 0;
+            while !t_done.load(Ordering::Acquire) {
+                let event = *t_status.lock().expect("lock");
+                write_activity_line(&t_output, event, Some(SPINNER[f]));
+                f = (f + 1) % SPINNER.len();
                 #[cfg(test)]
-                thread_frame.store(frame, Ordering::Release);
+                t_frame.store(f, Ordering::Release);
                 thread::sleep(Duration::from_millis(80));
             }
         });
@@ -103,18 +94,18 @@ impl ProgressObserver for Activity {
         if self.done.load(Ordering::Acquire) {
             return;
         }
-        *self.status.lock().expect("activity status lock") = Some(event);
+        *self.status.lock().expect("lock") = Some(event);
         write_activity_line(&self.output, Some(event), None);
     }
 }
 
 fn write_activity_line(output: &Mutex<()>, event: Option<ProgressEvent>, spinner: Option<char>) {
-    let _guard = output.lock().expect("activity output lock");
+    let _guard = output.lock().expect("lock");
     let label = event
         .map(progress_label)
-        .unwrap_or("Starting workflow".to_string());
+        .unwrap_or_else(|| "Starting workflow".to_string());
     match spinner {
-        Some(spinner) => eprint!("\r\x1b[2K\r  {spinner} {label}…"),
+        Some(s) => eprint!("\r\x1b[2K\r  {s} {label}…"),
         None => eprint!("\r\x1b[2K\r  {label}…"),
     }
     let _ = std::io::stderr().flush();
@@ -122,28 +113,28 @@ fn write_activity_line(output: &Mutex<()>, event: Option<ProgressEvent>, spinner
 
 fn progress_label(event: ProgressEvent) -> String {
     let label = match event.phase {
-        ProgressPhase::InputResolution => "Resolving input".to_string(),
-        ProgressPhase::ProjectLoading => "Loading project".to_string(),
-        ProgressPhase::Parsing => "Parsing".to_string(),
-        ProgressPhase::Validation => "Validating".to_string(),
-        ProgressPhase::Lowering => "Lowering".to_string(),
-        ProgressPhase::SemanticAnalysis => "Resolving semantics".to_string(),
-        ProgressPhase::Linting => "Running lint rules".to_string(),
-        ProgressPhase::Emission => "Emitting Workshop".to_string(),
-        ProgressPhase::Conversion => "Reconstructing source".to_string(),
+        ProgressPhase::InputResolution => "Resolving input",
+        ProgressPhase::ProjectLoading => "Loading project",
+        ProgressPhase::Parsing => "Parsing",
+        ProgressPhase::Validation => "Validating",
+        ProgressPhase::Lowering => "Lowering",
+        ProgressPhase::SemanticAnalysis => "Resolving semantics",
+        ProgressPhase::Linting => "Running lint rules",
+        ProgressPhase::Emission => "Emitting Workshop",
+        ProgressPhase::Conversion => "Reconstructing source",
     };
     match (event.count, event.unit) {
         (Some(count), Some(ProgressUnit::Files)) => format!("{label} {count} files"),
         (Some(count), Some(ProgressUnit::Rules)) => format!("{label} {count} rules"),
-        _ => label,
+        _ => label.to_string(),
     }
 }
 
 impl Drop for Activity {
     fn drop(&mut self) {
         self.done.store(true, Ordering::Release);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
         }
         if self.visible.load(Ordering::Acquire) {
             clear_activity_line(&mut std::io::stderr());
@@ -152,8 +143,7 @@ impl Drop for Activity {
 }
 
 fn clear_activity_line(writer: &mut impl Write) {
-    let _ = write!(writer, "\r\x1b[2K\r");
-    let _ = writeln!(writer);
+    let _ = write!(writer, "\r\x1b[2K\r\n");
     let _ = writer.flush();
 }
 
@@ -182,7 +172,7 @@ impl RuntimeEnvironment {
             stdout_terminal: std::io::stdout().is_terminal(),
             no_color: std::env::var_os("NO_COLOR").is_some(),
             force_color: env_truthy("FORCE_COLOR"),
-            term_dumb: std::env::var("TERM").is_ok_and(|term| term == "dumb"),
+            term_dumb: std::env::var("TERM").is_ok_and(|t| t == "dumb"),
         }
     }
 }
@@ -205,16 +195,16 @@ impl Presentation {
         format: OutputFormat,
         renderer: RendererArg,
         color: ColorArg,
-        environment: RuntimeEnvironment,
+        env: RuntimeEnvironment,
     ) -> Self {
         let renderer = match renderer {
             RendererArg::Terminal => Renderer::Terminal,
             RendererArg::Plain => Renderer::Plain,
             RendererArg::GithubActions => Renderer::GithubActions,
             RendererArg::Auto => {
-                if environment.github_actions {
+                if env.github_actions {
                     Renderer::GithubActions
-                } else if environment.ci || !environment.stdout_terminal {
+                } else if env.ci || !env.stdout_terminal {
                     Renderer::Plain
                 } else {
                     Renderer::Terminal
@@ -225,19 +215,15 @@ impl Presentation {
             ColorArg::Always => renderer != Renderer::GithubActions,
             ColorArg::Never => false,
             ColorArg::Auto => {
-                renderer == Renderer::Terminal && !environment.no_color && !environment.term_dumb
-                    || environment.force_color
-                        && renderer == Renderer::Terminal
-                        && !environment.no_color
+                renderer == Renderer::Terminal && !env.no_color && !env.term_dumb
+                    || env.force_color && renderer == Renderer::Terminal && !env.no_color
             }
         };
         Self {
             format,
             renderer,
             color,
-            interactive: renderer == Renderer::Terminal
-                && environment.stdout_terminal
-                && !environment.term_dumb,
+            interactive: renderer == Renderer::Terminal && env.stdout_terminal && !env.term_dumb,
         }
     }
 
@@ -251,34 +237,32 @@ impl Presentation {
 }
 
 fn env_truthy(name: &str) -> bool {
-    match std::env::var(name) {
-        Ok(value) => !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
+    std::env::var(name).is_ok_and(|v| {
+        !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
             "" | "0" | "false" | "no"
-        ),
-        Err(_) => false,
-    }
+        )
+    })
 }
 
-/// Render one result envelope. JSON is deliberately handled before renderer
-/// selection so it can never receive ANSI, progress, or workflow commands.
 pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
-    presentation: Presentation,
+    pres: Presentation,
 ) {
-    if presentation.format == OutputFormat::Json {
-        let mut value = serde_json::to_value(envelope).expect("envelope serializes");
+    if pres.format == OutputFormat::Json {
+        let mut value = serde_json::to_value(envelope).expect("serializes");
         if envelope.command == "check" {
             value["schema_version"] = serde_json::Value::String("1".to_string());
         }
-        let text = serde_json::to_string_pretty(&value).expect("envelope serializes");
-        println!("{text}");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).expect("serializes")
+        );
         return;
     }
-
-    match presentation.renderer {
+    match pres.renderer {
         Renderer::GithubActions => render_github(envelope),
-        Renderer::Terminal | Renderer::Plain => render_text(envelope, presentation.color),
+        Renderer::Terminal | Renderer::Plain => render_text(envelope, pres.color),
     }
 }
 
@@ -286,8 +270,8 @@ fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>,
     if !matches!(envelope.command.as_str(), "compile" | "convert") {
         render_verdict(envelope, color);
     }
-    for diagnostic in &envelope.diagnostics {
-        render_diagnostic(diagnostic, color);
+    for diag in &envelope.diagnostics {
+        render_diagnostic(diag, color);
     }
     if envelope.command == "check" {
         envelope.result.render_check_summary();
@@ -298,7 +282,6 @@ fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>,
         }
         return;
     }
-
     envelope.result.render_body();
 }
 
@@ -331,11 +314,10 @@ fn dim(value: &str, color: bool) -> String {
 }
 
 fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) {
-    for diagnostic in &envelope.diagnostics {
-        emit_diagnostic_annotation(diagnostic);
+    for diag in &envelope.diagnostics {
+        emit_diagnostic_annotation(diag);
     }
     envelope.result.render_github_findings();
-
     eprintln!(
         "::group::{}",
         escape_workflow_data(&format!("wright {}", envelope.command))
@@ -343,8 +325,7 @@ fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T
     if matches!(envelope.command.as_str(), "compile" | "convert") {
         envelope.result.render_body();
     } else {
-        let status = summary_status(envelope);
-        eprintln!("{status} {}", envelope.command);
+        eprintln!("{} {}", summary_status(envelope), envelope.command);
     }
     eprintln!("::endgroup::");
     emit_summary(envelope);
@@ -356,26 +337,22 @@ fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
         Severity::Warning => "warning",
         Severity::Info => "notice",
     };
-    let mut properties = vec![format!(
+    let mut props = vec![format!(
         "title={}",
         escape_workflow_property(&diagnostic.code)
     )];
     if let Some(span) = diagnostic
         .span
         .as_ref()
-        .filter(|span| is_real_source_path(&span.path))
+        .filter(|s| is_real_source_path(&s.path))
     {
-        properties.insert(0, format!("file={}", escape_workflow_property(&span.path)));
-        properties.push(format!("line={}", span.start.line));
-        properties.push(format!("col={}", span.start.col));
-        properties.push(format!("endLine={}", span.end.line));
-        properties.push(format!("endColumn={}", span.end.col));
+        props.insert(0, format!("file={}", escape_workflow_property(&span.path)));
+        props.push(format!("line={}", span.start.line));
+        props.push(format!("col={}", span.start.col));
+        props.push(format!("endLine={}", span.end.line));
+        props.push(format!("endColumn={}", span.end.col));
     }
-    eprintln!(
-        "::{kind} {}::{}",
-        properties.join(","),
-        escape_workflow_data(&diagnostic.message)
-    );
+    emit_workflow_annotation(kind, &props, &diagnostic.message);
 }
 
 fn emit_finding_annotation(finding: &serde_json::Value) {
@@ -391,6 +368,11 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
         .and_then(serde_json::Value::as_str)
         .filter(|path| is_real_source_path(path));
     let Some(path) = path else { return };
+    let kind = match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "notice",
+    };
     let line = span_position(span, "start", "line").unwrap_or(1);
     let col = span_position(span, "start", "col").unwrap_or(1);
     let end_line = span_position(span, "end", "line").unwrap_or(line);
@@ -399,19 +381,28 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
         .get("code")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("finding");
-    let message = finding
+    let msg = finding
         .get("message")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let kind = match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "notice",
-    };
+    emit_workflow_annotation(
+        kind,
+        &[
+            format!("file={}", escape_workflow_property(path)),
+            format!("line={line}"),
+            format!("col={col}"),
+            format!("endLine={end_line}"),
+            format!("endColumn={end_col}"),
+            format!("title={}", escape_workflow_property(code)),
+        ],
+        msg,
+    );
+}
+
+fn emit_workflow_annotation(kind: &str, properties: &[String], message: &str) {
     eprintln!(
-        "::{kind} file={},line={line},col={col},endLine={end_line},endColumn={end_col},title={}::{}",
-        escape_workflow_property(path),
-        escape_workflow_property(code),
+        "::{kind} {}::{}",
+        properties.join(","),
         escape_workflow_data(message)
     );
 }
@@ -466,8 +457,6 @@ impl ResultPresentation for ConvertResult {
 
 impl ResultPresentation for CheckResult {
     fn render_body(&self) {}
-
-    fn render_check_summary(&self) {}
 }
 
 impl ResultPresentation for AnalyzeResult {
@@ -478,7 +467,6 @@ impl ResultPresentation for AnalyzeResult {
             self.facts.get("symbols").map_or(0, array_len),
         ))
     }
-
     fn render_body(&self) {
         render_analyze(self);
     }
@@ -489,14 +477,12 @@ impl ResultPresentation for LintResult {
         Some(format!(
             "{} finding(s) across {} rule(s)",
             array_len(&self.findings),
-            array_len(&self.rules),
+            array_len(&self.rules)
         ))
     }
-
     fn render_body(&self) {
         render_lint(self);
     }
-
     fn render_github_findings(&self) {
         if let Some(findings) = self.findings.as_array() {
             for finding in findings {
@@ -504,13 +490,11 @@ impl ResultPresentation for LintResult {
             }
         }
     }
-
     fn update_summary_status(&self, status: &mut SummaryStatus) {
         if let Some(findings) = self.findings.as_array() {
             for finding in findings {
-                if let Some(severity) = finding.get("severity").and_then(serde_json::Value::as_str)
-                {
-                    *status = (*status).max(SummaryStatus::from_finding_severity(severity));
+                if let Some(sev) = finding.get("severity").and_then(serde_json::Value::as_str) {
+                    *status = (*status).max(SummaryStatus::from_finding_severity(sev));
                 }
             }
         }
@@ -521,11 +505,10 @@ impl ResultPresentation for InspectResult {
     fn metadata(&self) -> Option<String> {
         Some(format!(
             "{} rule(s), {} symbol(s)",
-            array_len(&self.rules),
-            array_len(&self.symbols),
+            count(&self.program, "rules"),
+            array_len(&self.symbols)
         ))
     }
-
     fn render_body(&self) {
         render_inspect(self);
     }
@@ -539,8 +522,8 @@ fn summary_status<T: serde::Serialize + ResultPresentation>(
     } else {
         SummaryStatus::Error
     };
-    for diagnostic in &envelope.diagnostics {
-        status = status.max(match diagnostic.severity {
+    for diag in &envelope.diagnostics {
+        status = status.max(match diag.severity {
             Severity::Error => SummaryStatus::Error,
             Severity::Warning => SummaryStatus::Warn,
             Severity::Info => SummaryStatus::Pass,
@@ -576,8 +559,6 @@ fn emit_summary<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>
     }
 }
 
-/// GitHub workflow command escaping: properties additionally escape `:` and
-/// `,`; command data only needs `%`, CR, and LF escaping.
 pub(crate) fn escape_workflow_property(value: &str) -> String {
     escape_workflow_data(value)
         .replace(':', "%3A")
@@ -595,16 +576,15 @@ fn is_real_source_path(path: &str) -> bool {
     !path.is_empty() && !path.starts_with('<')
 }
 
-fn span_position(span: &serde_json::Value, edge: &str, coordinate: &str) -> Option<u64> {
+fn span_position(span: &serde_json::Value, edge: &str, coord: &str) -> Option<u64> {
     span.get(edge)
         .and_then(serde_json::Value::as_object)
-        .and_then(|position| position.get(coordinate))
+        .and_then(|p| p.get(coord))
         .and_then(serde_json::Value::as_u64)
 }
 
 fn render_compile(result: &CompileResult) {
     let Some(output) = result.output.as_ref() else {
-        eprintln!("compile: failed (no output produced)");
         return;
     };
     if output.written_to != "stdout" {
@@ -621,8 +601,15 @@ fn array_len(value: &serde_json::Value) -> usize {
     value.as_array().map_or(0, Vec::len)
 }
 
+fn count(value: &serde_json::Value, key: &str) -> usize {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize
+}
+
 fn render_analyze(result: &AnalyzeResult) {
-    let program = &result.program;
+    let p = &result.program;
     let facts = &result.facts;
     let symbols = facts
         .get("symbols")
@@ -632,113 +619,83 @@ fn render_analyze(result: &AnalyzeResult) {
         .get("rules")
         .and_then(serde_json::Value::as_array)
         .map_or(&[][..], Vec::as_slice);
+
     println!("\nProgram overview");
     println!(
         "  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s)",
-        count(program, "files"),
-        count(program, "rules"),
-        count(program, "globalVariables"),
-        count(program, "playerVariables"),
-        count(program, "subroutines"),
+        count(p, "files"),
+        count(p, "rules"),
+        count(p, "globalVariables"),
+        count(p, "playerVariables"),
+        count(p, "subroutines"),
     );
     println!("  evidence: [static] parsed program inventory");
 
-    let mut total_blocks = 0;
-    let mut total_edges = 0;
-    let mut total_loops = 0;
-    let mut total_waits = 0;
-    let mut rule_hotspots = Vec::new();
-    for rule in rules {
-        let flow = rule.get("controlFlow").cloned().unwrap_or_default();
-        let blocks = count(&flow, "blocks");
-        let edges = count(&flow, "edges");
-        let loops = count(&flow, "loopBlocks");
-        let waits = count(&flow, "waitBlocks");
-        total_blocks += blocks;
-        total_edges += edges;
-        total_loops += loops;
-        total_waits += waits;
-        rule_hotspots.push((
-            blocks + edges,
-            rule.get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<unnamed>"),
-            blocks,
-            edges,
-            loops,
-            waits,
-        ));
+    let (mut b_tot, mut e_tot, mut l_tot, mut w_tot) = (0, 0, 0, 0);
+    let mut hotspots = Vec::new();
+    for r in rules {
+        let f = &r["controlFlow"];
+        let (b, e, l, w) = (
+            count(f, "blocks"),
+            count(f, "edges"),
+            count(f, "loopBlocks"),
+            count(f, "waitBlocks"),
+        );
+        b_tot += b;
+        e_tot += e;
+        l_tot += l;
+        w_tot += w;
+        hotspots.push((b + e, r["name"].as_str().unwrap_or("<unnamed>"), b, e, l, w));
     }
-    rule_hotspots.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+    hotspots.sort_by(|l, r| r.0.cmp(&l.0).then_with(|| l.1.cmp(r.1)));
     println!("\nControl-flow summary");
-    println!(
-        "  {total_blocks} blocks, {total_edges} edges, {total_loops} loop block(s), {total_waits} wait block(s)"
-    );
+    println!("  {b_tot} blocks, {e_tot} edges, {l_tot} loop block(s), {w_tot} wait block(s)");
     println!("  Top rules (heuristic ranking: blocks + edges; facts are [static])");
-    if rule_hotspots.is_empty() {
+    if hotspots.is_empty() {
         println!("    none");
     } else {
-        for (_, name, blocks, edges, loops, waits) in rule_hotspots.iter().take(5) {
-            println!(
-                "    {name}: {blocks} blocks, {edges} edges, {loops} loop block(s), {waits} wait block(s)"
-            );
+        for (_, name, b, e, l, w) in hotspots.iter().take(5) {
+            println!("    {name}: {b} blocks, {e} edges, {l} loop block(s), {w} wait block(s)");
         }
     }
 
-    let mut coupled_symbols = symbols
+    let mut vars = symbols
         .iter()
-        .filter(|symbol| {
+        .filter(|s| {
             matches!(
-                symbol.get("kind").and_then(serde_json::Value::as_str),
+                s["kind"].as_str(),
                 Some("globalVariable" | "playerVariable")
             )
         })
-        .map(|symbol| {
-            let usage = symbol.get("usage").cloned().unwrap_or_default();
-            let rules = count(&usage, "rules");
-            let reads = count(&usage, "reads");
-            let writes = count(&usage, "writes");
+        .map(|s| {
+            let u = &s["usage"];
+            let (rules, reads, writes) = (count(u, "rules"), count(u, "reads"), count(u, "writes"));
             (
                 rules,
                 reads + writes,
-                symbol
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("variable"),
-                symbol
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("<unnamed>"),
+                s["kind"].as_str().unwrap_or("variable"),
+                s["name"].as_str().unwrap_or("<unnamed>"),
                 reads,
                 writes,
             )
         })
         .collect::<Vec<_>>();
-    coupled_symbols.sort_by(|left, right| {
-        right
-            .0
-            .cmp(&left.0)
-            .then_with(|| right.1.cmp(&left.1))
-            .then_with(|| left.3.cmp(right.3))
+    vars.sort_by(|l, r| {
+        r.0.cmp(&l.0)
+            .then_with(|| r.1.cmp(&l.1))
+            .then_with(|| l.3.cmp(r.3))
     });
     println!("\nState and coupling");
     println!("  Top variables (heuristic ranking: rules touched, then reads + writes)");
-    if coupled_symbols.is_empty() {
+    if vars.is_empty() {
         println!("    none");
     } else {
-        for (rules, _, kind, name, reads, writes) in coupled_symbols.iter().take(5) {
+        for (rules, _, kind, name, reads, writes) in vars.iter().take(5) {
             println!(
                 "    {kind} {name}: {rules} rule(s), {reads} read(s), {writes} write(s) [static]"
             );
         }
     }
-}
-
-fn count(value: &serde_json::Value, key: &str) -> usize {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize
 }
 
 fn render_lint(result: &LintResult) {
@@ -747,86 +704,61 @@ fn render_lint(result: &LintResult) {
     if findings.is_empty() {
         println!("  none");
     }
-    for finding in &findings {
-        let code = finding
-            .get("code")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("finding");
-        let severity = finding
-            .get("severity")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("info");
-        let evidence = finding
-            .get("evidence")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("exact");
-        let boundedness = finding
-            .get("boundedness")
-            .and_then(serde_json::Value::as_str);
-        let message = finding
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        match boundedness {
-            Some(value) => println!(
-                "  {severity}[{code}] (evidence: {evidence}) (boundedness: {value}): {message}"
-            ),
-            None => println!("  {severity}[{code}] (evidence: {evidence}): {message}"),
+    for f in &findings {
+        let code = f["code"].as_str().unwrap_or("finding");
+        let sev = f["severity"].as_str().unwrap_or("info");
+        let ev = f["evidence"].as_str().unwrap_or("exact");
+        let msg = f["message"].as_str().unwrap_or_default();
+        match f.get("boundedness").and_then(serde_json::Value::as_str) {
+            Some(v) => println!("  {sev}[{code}] (evidence: {ev}) (boundedness: {v}): {msg}"),
+            None => println!("  {sev}[{code}] (evidence: {ev}): {msg}"),
         }
-        if let Some(span) = finding.get("span") {
+        if let Some(span) = f.get("span") {
             print_span(span, "      ");
         }
     }
 }
 
 fn render_inspect(result: &InspectResult) {
-    let program = &result.program;
     let rules = result.rules.as_array().cloned().unwrap_or_default();
     let symbols = result.symbols.as_array().cloned().unwrap_or_default();
-    let count = program
-        .get("rules")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    println!("\nProgram structure");
-    println!("  {count} rule(s), {} symbol(s)", symbols.len());
-    for rule in &rules {
-        let id = rule
-            .get("id")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let name = rule
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("<unnamed>");
-        println!("  rule {id}: \"{name}\"");
+    println!(
+        "\nProgram structure\n  {} rule(s), {} symbol(s)",
+        count(&result.program, "rules"),
+        symbols.len()
+    );
+    for r in &rules {
+        println!(
+            "  rule {}: \"{}\"",
+            r.get("id").and_then(serde_json::Value::as_u64).unwrap_or(0),
+            r["name"].as_str().unwrap_or("<unnamed>")
+        );
     }
-    for symbol in &symbols {
-        let id = symbol
-            .get("id")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let kind = symbol
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("symbol");
-        let name = symbol
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("<unnamed>");
-        println!("  {kind} {id}: {name}");
+    for s in &symbols {
+        println!(
+            "  {} {}: {}",
+            s["kind"].as_str().unwrap_or("symbol"),
+            s.get("id").and_then(serde_json::Value::as_u64).unwrap_or(0),
+            s["name"].as_str().unwrap_or("<unnamed>")
+        );
     }
 }
 
 fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
-    let severity = match diagnostic.severity {
+    let sev = match diagnostic.severity {
         Severity::Error => "error",
         Severity::Warning => "warning",
         Severity::Info => "info",
     };
     let label = if color {
-        ansi_severity(diagnostic.severity, severity)
+        let code = match diagnostic.severity {
+            Severity::Error => "31",
+            Severity::Warning => "33",
+            Severity::Info => "36",
+        };
+        format!("\x1b[{code}m{sev}\x1b[0m")
     } else {
-        severity.to_string()
+        sev.to_string()
     };
     eprintln!(
         "{label}[{}] ({}): {}",
@@ -840,15 +772,6 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
     }
 }
 
-fn ansi_severity(severity: Severity, value: &str) -> String {
-    let code = match severity {
-        Severity::Error => "31",
-        Severity::Warning => "33",
-        Severity::Info => "36",
-    };
-    format!("\x1b[{code}m{value}\x1b[0m")
-}
-
 fn print_span(span: &serde_json::Value, indent: &str) {
     let path = span
         .get("path")
@@ -860,9 +783,6 @@ fn print_span(span: &serde_json::Value, indent: &str) {
     render_source_context(path, line as u32, col as u32, indent);
 }
 
-/// Add one source line only when the provenance path resolves in the current
-/// process. Structured output never calls this renderer, and an unresolved
-/// path remains a normal location-only presentation.
 fn render_source_context(path: &str, line: u32, col: u32, indent: &str) {
     let Ok(source) = std::fs::read_to_string(path) else {
         return;
@@ -870,15 +790,14 @@ fn render_source_context(path: &str, line: u32, col: u32, indent: &str) {
     let Some(text) = source.lines().nth(line.saturating_sub(1) as usize) else {
         return;
     };
-    let number_width = line.to_string().len();
-    println!("{indent}| {:>number_width$} | {text}", line);
-    let marker_col = col.saturating_sub(1) as usize;
+    let num_w = line.to_string().len();
+    println!("{indent}| {:>num_w$} | {text}", line);
     let prefix = text
         .chars()
-        .take(marker_col)
-        .map(|ch| if ch == '\t' { '\t' } else { ' ' })
+        .take(col.saturating_sub(1) as usize)
+        .map(|c| if c == '\t' { '\t' } else { ' ' })
         .collect::<String>();
-    println!("{indent}| {:>number_width$} | {prefix}^", "");
+    println!("{indent}| {:>num_w$} | {prefix}^", "");
 }
 
 #[cfg(test)]

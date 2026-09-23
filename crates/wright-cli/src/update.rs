@@ -1,24 +1,3 @@
-//! Resolves the latest stable Wright release from the canonical GitHub
-//! Release contract (the same archives and checksums `install.sh` and the
-//! package-manager manifests consume), verifies the published SHA-256
-//! checksum, extracts the platform archive, and atomically replaces the
-//! running `wright` and `wright-lsp` binaries.
-//!
-//! Package-manager-managed installations (Homebrew, Scoop, WinGet) are
-//! detected from the executable location and refused with guidance to the
-//! appropriate upgrade command; `wright update` never overwrites a binary it
-//! does not own.
-//!
-//! The command is text-only (it is not a compiler workflow, so it produces no
-//! `wright-result/v1` envelope) and uses the same environment overrides as
-//! [`install.sh`](https://wrightkit.dev/install.sh) for testing and advanced
-//! hooks:
-//!
-//! * `WRIGHT_INSTALL_BASE_URL` — base URL of release artifacts
-//! * `WRIGHT_API_URL` — URL used to resolve the latest release
-//! * `WRIGHT_INSTALL_OS` — override OS detection (linux | darwin)
-//! * `WRIGHT_INSTALL_ARCH` — override CPU detection (x86_64 | aarch64)
-
 use std::cmp::Ordering;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -27,82 +6,60 @@ use std::time::Duration;
 
 use sha2::Digest;
 
-/// The canonical release-artifact base URL (mirrors `install.sh`).
 const DEFAULT_BASE_URL: &str = "https://github.com/wrightkit/wright/releases/download";
-/// The canonical latest-release API URL (mirrors `install.sh`).
 const DEFAULT_API_URL: &str = "https://api.github.com/repos/wrightkit/wright/releases/latest";
-/// The user agent sent with release metadata and download requests.
 const USER_AGENT: &str = concat!("wright-update/", env!("CARGO_PKG_VERSION"));
 
-/// The exit-code contract for `update` (shared with the compiler commands).
 mod exit {
     pub(super) const SUCCESS: u8 = 0;
-    /// User error (refused downgrade).
     pub(super) const USER_ERROR: u8 = 1;
-    /// Usage error (unknown flag, invalid version argument).
     pub(super) const USAGE: u8 = 2;
-    /// Recognized but unsupported (package-manager-managed, unsupported platform).
     pub(super) const UNSUPPORTED: u8 = 3;
-    /// Internal/environment failure (network, checksum, I/O, smoke check).
     pub(super) const INTERNAL: u8 = 4;
 }
 
-/// A failure of `wright update`, carrying the actionable message the CLI
-/// prints to stderr.
 #[derive(Debug)]
 pub(crate) enum UpdateError {
-    /// The command was invoked incorrectly (exit 2).
     Usage(String),
-    /// The user's request cannot be satisfied as given (exit 1).
     Rejected(String),
-    /// The installation is recognized but must not be self-updated (exit 3).
     Unsupported(String),
-    /// The update could not be performed (exit 4).
     Failed(String),
 }
 
 impl UpdateError {
-    fn rejected(message: impl Into<String>) -> Self {
-        UpdateError::Rejected(message.into())
+    fn rejected(msg: impl Into<String>) -> Self {
+        Self::Rejected(msg.into())
     }
-    fn unsupported(message: impl Into<String>) -> Self {
-        UpdateError::Unsupported(message.into())
+    fn unsupported(msg: impl Into<String>) -> Self {
+        Self::Unsupported(msg.into())
     }
-    fn failed(message: impl Into<String>) -> Self {
-        UpdateError::Failed(message.into())
+    fn failed(msg: impl Into<String>) -> Self {
+        Self::Failed(msg.into())
     }
 
-    /// The process exit code for this error.
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
-            UpdateError::Usage(_) => exit::USAGE,
-            UpdateError::Rejected(_) => exit::USER_ERROR,
-            UpdateError::Unsupported(_) => exit::UNSUPPORTED,
-            UpdateError::Failed(_) => exit::INTERNAL,
+            Self::Usage(_) => exit::USAGE,
+            Self::Rejected(_) => exit::USER_ERROR,
+            Self::Unsupported(_) => exit::UNSUPPORTED,
+            Self::Failed(_) => exit::INTERNAL,
         }
     }
 
-    /// The message to print on stderr.
     pub(crate) fn message(&self) -> &str {
         match self {
-            UpdateError::Usage(message)
-            | UpdateError::Rejected(message)
-            | UpdateError::Unsupported(message)
-            | UpdateError::Failed(message) => message,
+            Self::Usage(m) | Self::Rejected(m) | Self::Unsupported(m) | Self::Failed(m) => m,
         }
     }
 }
 
-/// The release target triple for the host platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Platform {
     target: &'static str,
 }
 
-/// The installation provenance of the running binary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Provenance {
-    /// A standalone installation (`install.sh` or a manual release archive).
     Standalone,
     Homebrew,
     Scoop,
@@ -110,37 +67,29 @@ enum Provenance {
 }
 
 impl Provenance {
-    /// The upgrade command a package-manager-managed installation should use
-    /// instead of `wright update`.
     fn guidance(self) -> &'static str {
         match self {
-            Provenance::Standalone => unreachable!("standalone installations are self-updated"),
-            Provenance::Homebrew => "brew upgrade wrightkit/tap/wright",
-            Provenance::Scoop => "scoop update wright",
-            Provenance::WinGet => "winget upgrade WrightKit.Wright",
+            Self::Standalone => unreachable!(),
+            Self::Homebrew => "brew upgrade wrightkit/tap/wright",
+            Self::Scoop => "scoop update wright",
+            Self::WinGet => "winget upgrade WrightKit.Wright",
         }
     }
 
     fn channel(self) -> &'static str {
         match self {
-            Provenance::Standalone => unreachable!("standalone installations are self-updated"),
-            Provenance::Homebrew => "Homebrew",
-            Provenance::Scoop => "Scoop",
-            Provenance::WinGet => "WinGet",
+            Self::Standalone => unreachable!(),
+            Self::Homebrew => "Homebrew",
+            Self::Scoop => "Scoop",
+            Self::WinGet => "WinGet",
         }
     }
 }
 
-/// Run the `update` workflow and return the process exit code.
-///
-/// `check_only` reports availability without modifying the installation;
-/// `requested` pins an exact version instead of resolving the latest stable
-/// release.
 pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateError> {
     let platform = detect_platform()?;
-    let exe = std::env::current_exe().map_err(|error| {
-        UpdateError::failed(format!("could not locate the wright binary: {error}"))
-    })?;
+    let exe = std::env::current_exe()
+        .map_err(|e| UpdateError::failed(format!("could not locate the wright binary: {e}")))?;
     let provenance = detect_provenance(&exe);
     if provenance != Provenance::Standalone {
         return Err(UpdateError::unsupported(format!(
@@ -157,7 +106,6 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
             exe.display()
         ))
     })?;
-    // Both binaries must be replaced together so they stay on one version.
     if !install_dir.join("wright-lsp").is_file() {
         return Err(UpdateError::failed(format!(
             "wright-lsp was not found next to wright at {}; this installation was not created by the official installer — reinstall with `curl -fsSL https://wrightkit.dev/install.sh | bash` to restore a matched pair",
@@ -167,9 +115,9 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
 
     let current = env!("CARGO_PKG_VERSION").to_string();
     let (target_version, client) = match requested {
-        Some(version) => {
-            parse_version(version)?;
-            (version.trim_start_matches('v').to_string(), None)
+        Some(v) => {
+            parse_version(v)?;
+            (v.trim_start_matches('v').to_string(), None)
         }
         None => {
             let client = update_client()?;
@@ -206,7 +154,7 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
 
     println!("==> installing wright {current} -> {target_version}");
     let client = match client {
-        Some(client) => client,
+        Some(c) => c,
         None => update_client()?,
     };
     install_version(
@@ -219,21 +167,16 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
     Ok(exit::SUCCESS)
 }
 
-/// Detect the host platform and map it to the release target triple.
 fn detect_platform() -> Result<Platform, UpdateError> {
     detect_platform_for(&env_os(), &env_arch())
 }
 
-/// Map an OS/arch pair to the release target triple.
 fn detect_platform_for(os: &str, arch: &str) -> Result<Platform, UpdateError> {
-    // Standalone self-update is a Unix-channel feature; Windows installs are
-    // package-manager-managed (WinGet/Scoop), which update themselves.
     if os == "windows" {
         return Err(UpdateError::unsupported(
             "standalone self-update is not supported on Windows; upgrade with `winget upgrade WrightKit.Wright` or `scoop update wright`",
         ));
     }
-
     let target = match (os, arch) {
         ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
         ("darwin", "x86_64") => "x86_64-apple-darwin",
@@ -247,71 +190,51 @@ fn detect_platform_for(os: &str, arch: &str) -> Result<Platform, UpdateError> {
     Ok(Platform { target })
 }
 
-/// The OS name for platform detection (`WRIGHT_INSTALL_OS` override first).
 fn env_os() -> String {
-    match std::env::var("WRIGHT_INSTALL_OS") {
-        Ok(override_os) => override_os,
-        Err(_) => match std::env::consts::OS {
-            "linux" => "linux".to_string(),
-            "macos" => "darwin".to_string(),
-            "windows" => "windows".to_string(),
-            other => other.to_string(),
-        },
-    }
+    std::env::var("WRIGHT_INSTALL_OS").unwrap_or_else(|_| match std::env::consts::OS {
+        "macos" => "darwin".to_string(),
+        other => other.to_string(),
+    })
 }
 
-/// The CPU architecture for platform detection (`WRIGHT_INSTALL_ARCH` first).
 fn env_arch() -> String {
-    match std::env::var("WRIGHT_INSTALL_ARCH") {
-        Ok(override_arch) => override_arch,
-        Err(_) => std::env::consts::ARCH.to_string(),
-    }
+    std::env::var("WRIGHT_INSTALL_ARCH").unwrap_or_else(|_| std::env::consts::ARCH.to_string())
 }
 
-/// Detect the installation provenance of the running executable from its
-/// resolved location: package-manager directories are never self-updated.
 fn detect_provenance(exe: &Path) -> Provenance {
     let path = std::fs::canonicalize(exe)
         .unwrap_or_else(|_| exe.to_path_buf())
         .to_string_lossy()
         .to_lowercase();
     if path.contains("homebrew") || path.contains("cellar") {
-        return Provenance::Homebrew;
+        Provenance::Homebrew
+    } else if path.contains("scoop") {
+        Provenance::Scoop
+    } else if path.contains("winget") {
+        Provenance::WinGet
+    } else {
+        Provenance::Standalone
     }
-    if path.contains("scoop") {
-        return Provenance::Scoop;
-    }
-    if path.contains("winget") {
-        return Provenance::WinGet;
-    }
-    Provenance::Standalone
 }
 
-/// Resolve the latest stable release version from the GitHub Releases API.
 fn resolve_latest(
     client: &reqwest::blocking::Client,
     api_url: &str,
 ) -> Result<String, UpdateError> {
     let body = fetch_text(client, api_url)?;
-    let value: serde_json::Value = serde_json::from_str(&body).map_err(|error| {
+    let val: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
         UpdateError::failed(format!(
-            "could not parse the latest-release response from {api_url}: {error}"
+            "could not parse the latest-release response from {api_url}: {e}"
         ))
     })?;
-    let tag = value
-        .get("tag_name")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            UpdateError::failed(format!(
-                "could not find the latest release tag in the response from {api_url}; pin a version with `wright update --version`"
-            ))
-        })?;
+    let tag = val.get("tag_name").and_then(serde_json::Value::as_str).ok_or_else(|| {
+        UpdateError::failed(format!("could not find the latest release tag in the response from {api_url}; pin a version with `wright update --version`"))
+    })?;
     let version = tag.trim_start_matches('v');
     parse_version(version)?;
     Ok(version.to_string())
 }
 
-/// Download, verify, extract, and atomically install the release archive.
 fn install_version(
     client: &reqwest::blocking::Client,
     version: &str,
@@ -332,18 +255,15 @@ fn install_version(
     ensure_writable(install_dir)?;
     let staging = staging_dir(install_dir)?;
     let result = (|| -> Result<(), UpdateError> {
-        // Extract inside the install directory so the final rename is on one
-        // filesystem (rename cannot cross mounts).
         unpack(&archive, &staging, version, platform.target)?;
         let payload = validated_payload(&staging, version, platform.target)?;
-        // The LSP binary first so the primary `wright` is the last write.
         replace_binary(&payload.join("wright-lsp"), &install_dir.join("wright-lsp"))?;
         replace_binary(&payload.join("wright"), &install_dir.join("wright"))?;
         Ok(())
     })();
     let _ = std::fs::remove_dir_all(&staging);
-
     result?;
+
     smoke_check(install_dir, version)?;
     println!(
         "==> done: wright and wright-lsp {version} installed in {}",
@@ -353,37 +273,33 @@ fn install_version(
     Ok(())
 }
 
-/// Create a private staging directory inside `install_dir`.
 fn staging_dir(install_dir: &Path) -> Result<PathBuf, UpdateError> {
     let staging = install_dir.join(format!(
         ".wright-update-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
+            .map(|d| d.as_nanos())
             .unwrap_or_default()
     ));
-    std::fs::create_dir_all(&staging).map_err(|error| {
+    std::fs::create_dir_all(&staging).map_err(|e| {
         UpdateError::failed(format!(
-            "could not create a staging directory in {}: {error}",
+            "could not create a staging directory in {}: {e}",
             install_dir.display()
         ))
     })?;
     Ok(staging)
 }
 
-/// Extract a release archive into `dest`.
 fn unpack(archive: &[u8], dest: &Path, version: &str, target: &str) -> Result<(), UpdateError> {
     let decoder = flate2::read::GzDecoder::new(archive);
-    let mut tar = tar::Archive::new(decoder);
-    tar.unpack(dest).map_err(|error| {
+    tar::Archive::new(decoder).unpack(dest).map_err(|e| {
         UpdateError::failed(format!(
-            "failed to extract wright-{version}-{target}.tar.gz: {error}"
+            "failed to extract wright-{version}-{target}.tar.gz: {e}"
         ))
     })
 }
 
-/// Validate the extracted archive layout and return the payload directory.
 fn validated_payload(staging: &Path, version: &str, target: &str) -> Result<PathBuf, UpdateError> {
     let payload = staging.join(format!("wright-{version}-{target}"));
     if !payload.join("wright").is_file() || !payload.join("wright-lsp").is_file() {
@@ -395,7 +311,6 @@ fn validated_payload(staging: &Path, version: &str, target: &str) -> Result<Path
     Ok(payload)
 }
 
-/// Verify the archive's SHA-256 against the published checksum file.
 fn verify_checksum(
     archive: &[u8],
     checksum_file: &str,
@@ -405,7 +320,7 @@ fn verify_checksum(
         .split_whitespace()
         .next()
         .ok_or_else(|| UpdateError::failed(format!("empty checksum file for {archive_name}")))?;
-    if published.len() != 64 || !published.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if published.len() != 64 || !published.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(UpdateError::failed(format!(
             "invalid checksum file for {archive_name}: expected one SHA-256 hex digest (got '{}')",
             truncate(published)
@@ -420,22 +335,15 @@ fn verify_checksum(
     Ok(())
 }
 
-/// Compute the lowercase hex SHA-256 of `bytes`.
 fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = sha2::Sha256::digest(bytes);
-    digest.iter().fold(String::new(), |mut output, byte| {
-        use std::fmt::Write as _;
-        let _ = write!(output, "{byte:02x}");
-        output
-    })
+    format!("{:x}", sha2::Sha256::digest(bytes))
 }
 
-/// Refuse to touch an installation directory that cannot accept new files.
 fn ensure_writable(install_dir: &Path) -> Result<(), UpdateError> {
     let probe = install_dir.join(format!(".wright-update-probe-{}", std::process::id()));
-    std::fs::write(&probe, b"").map_err(|error| {
+    std::fs::write(&probe, b"").map_err(|e| {
         UpdateError::failed(format!(
-            "installation directory {} is not writable ({error}); fix permissions or reinstall with the official installer (curl -fsSL https://wrightkit.dev/install.sh | bash)",
+            "installation directory {} is not writable ({e}); fix permissions or reinstall with the official installer (curl -fsSL https://wrightkit.dev/install.sh | bash)",
             install_dir.display()
         ))
     })?;
@@ -443,23 +351,18 @@ fn ensure_writable(install_dir: &Path) -> Result<(), UpdateError> {
     Ok(())
 }
 
-/// Atomically replace `destination` with `source` (same directory, so the
-/// rename cannot cross filesystems and is atomic on POSIX).
 fn replace_binary(source: &Path, destination: &Path) -> Result<(), UpdateError> {
-    // Ensure the extracted binary is executable before it goes live.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(source)
-            .map_err(|error| {
-                UpdateError::failed(format!("could not read {}: {error}", source.display()))
-            })?
+            .map_err(|e| UpdateError::failed(format!("could not read {}: {e}", source.display())))?
             .permissions()
             .mode();
         std::fs::set_permissions(source, std::fs::Permissions::from_mode(mode | 0o111)).map_err(
-            |error| {
+            |e| {
                 UpdateError::failed(format!(
-                    "could not make {} executable: {error}",
+                    "could not make {} executable: {e}",
                     source.display()
                 ))
             },
@@ -473,13 +376,11 @@ fn replace_binary(source: &Path, destination: &Path) -> Result<(), UpdateError> 
     })
 }
 
-/// Run the installed binaries and confirm they report `version`.
 fn smoke_check(install_dir: &Path, version: &str) -> Result<(), UpdateError> {
     check_version(&install_dir.join("wright"), version)?;
     check_version(&install_dir.join("wright-lsp"), version)
 }
 
-/// Run one installed binary's `--version` and confirm it reports `version`.
 fn check_version(exe: &Path, version: &str) -> Result<(), UpdateError> {
     let output = Process::new(exe)
         .arg("--version")
@@ -501,36 +402,26 @@ fn check_version(exe: &Path, version: &str) -> Result<(), UpdateError> {
     Ok(())
 }
 
-/// Fetch `url` and return the response body as UTF-8 text.
 fn update_client() -> Result<reqwest::blocking::Client, UpdateError> {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(Duration::from_secs(60))
         .build()
-        .map_err(|error| {
+        .map_err(|e| {
             UpdateError::failed(format!(
-                "could not initialize HTTPS client for release downloads: {error}"
+                "could not initialize HTTPS client for release downloads: {e}"
             ))
         })
 }
 
 fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, UpdateError> {
     let bytes = fetch(client, url)?;
-    String::from_utf8(bytes).map_err(|error| {
-        UpdateError::failed(format!("could not decode the response from {url}: {error}"))
-    })
+    String::from_utf8(bytes)
+        .map_err(|e| UpdateError::failed(format!("could not decode the response from {url}: {e}")))
 }
 
-/// Fetch `url` and return the raw response body (bounded to 128 MiB).
 fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, UpdateError> {
-    let response = client
-        .get(url)
-        .send()
-        .map_err(|error| {
-            UpdateError::failed(format!(
-                "could not download {url} ({error}); check the network connection or pin a version with `wright update --version`"
-            ))
-        })?;
+    let response = client.get(url).send().map_err(|e| UpdateError::failed(format!("could not download {url} ({e}); check the network connection or pin a version with `wright update --version`")))?;
     if !response.status().is_success() {
         return Err(UpdateError::failed(format!(
             "could not download {url} (HTTP {})",
@@ -541,11 +432,10 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, Updat
     response
         .take(128 * 1024 * 1024)
         .read_to_end(&mut bytes)
-        .map_err(|error| UpdateError::failed(format!("could not download {url}: {error}")))?;
+        .map_err(|e| UpdateError::failed(format!("could not download {url}: {e}")))?;
     Ok(bytes)
 }
 
-/// Parse a strict numeric semver (`X.Y.Z`, optionally `v`-prefixed).
 fn parse_version(version: &str) -> Result<(u64, u64, u64), UpdateError> {
     let core = version.strip_prefix('v').unwrap_or(version);
     let mut parts = core.split('.');
@@ -566,14 +456,12 @@ fn parse_version(version: &str) -> Result<(u64, u64, u64), UpdateError> {
     Ok((parse(major)?, parse(minor)?, parse(patch)?))
 }
 
-/// Compare two strict numeric semver versions.
 fn compare_versions(a: &str, b: &str) -> Ordering {
     let a = parse_version(a).expect("current version is a valid semver");
     let b = parse_version(b).expect("resolved/requested version is a valid semver");
     a.cmp(&b)
 }
 
-/// Shorten a string for error messages.
 fn truncate(value: &str) -> String {
     let mut chars = value.chars();
     let head: String = chars.by_ref().take(16).collect();
@@ -584,12 +472,10 @@ fn truncate(value: &str) -> String {
     }
 }
 
-/// The effective release-artifact base URL.
 fn env_base_url() -> String {
     std::env::var("WRIGHT_INSTALL_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
 }
 
-/// The effective latest-release API URL.
 fn env_api_url() -> String {
     std::env::var("WRIGHT_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string())
 }

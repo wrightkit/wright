@@ -1,7 +1,6 @@
 use std::fmt;
 use std::io::{Read, Write};
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use flate2::read::GzDecoder;
@@ -12,21 +11,15 @@ const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/opy-rs/releases";
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 const PROVIDER_ARCHIVE_EXTENSION: &str = "tar.gz";
 
-/// The LPP language id served by the first-party OPY provider.
 pub const OPY_LANGUAGE_ID: &str = "opy";
 
-/// Settings for first-party OPY provider resolution.
 #[derive(Debug, Clone, Default)]
 pub struct OpyProviderConfig {
-    /// An explicitly selected local executable. It has highest precedence.
     pub executable: Option<PathBuf>,
-    /// Override the per-user provider store, primarily for embedding/tests.
     pub store_dir: Option<PathBuf>,
 }
 
 impl OpyProviderConfig {
-    /// Select a local provider executable without enabling first-party
-    /// download behavior.
     pub fn with_executable(path: impl Into<PathBuf>) -> Self {
         Self {
             executable: Some(path.into()),
@@ -34,34 +27,23 @@ impl OpyProviderConfig {
         }
     }
 
-    /// Resolve using this configuration.
     pub fn resolve(&self) -> Result<ResolvedOpyProvider, OpyProviderError> {
-        let resolver =
-            OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir));
-        resolver.resolve(self.executable.as_deref())
+        OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
+            .resolve(self.executable.as_deref())
     }
 
-    /// Explicitly install/update a provider version. Unlike [`Self::resolve`]
-    /// for an already installed provider, this operation may contact the
-    /// release source by design.
     pub fn update(&self, version: Option<&str>) -> Result<ResolvedOpyProvider, OpyProviderError> {
-        let resolver =
-            OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir));
-        resolver.update(version)
+        OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
+            .update(version)
     }
 }
 
-/// A resolved executable ready to pass to `wright-lpp::ProviderRegistry`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedOpyProvider {
-    /// The local executable path.
     pub executable: PathBuf,
-    /// The installed release version, if this came from the first-party
-    /// store. Explicit local providers have no release version.
     pub version: Option<String>,
 }
 
-/// First-party OPY provider resolver and installer.
 #[derive(Debug, Clone)]
 pub struct OpyProviderResolver {
     store_dir: PathBuf,
@@ -71,7 +53,6 @@ pub struct OpyProviderResolver {
 }
 
 impl OpyProviderResolver {
-    /// Create a resolver using the current supported host target.
     pub fn new(store_dir: impl Into<PathBuf>) -> Self {
         Self {
             store_dir: store_dir.into(),
@@ -81,14 +62,11 @@ impl OpyProviderResolver {
         }
     }
 
-    /// Override the target triple. This is useful for deterministic tests and
-    /// cross-target embedding; normal callers should leave it unset.
     pub fn with_target(mut self, target: impl Into<String>) -> Self {
         self.target = Some(target.into());
         self
     }
 
-    /// Override the release endpoints without changing the artifact layout.
     pub fn with_release_urls(
         mut self,
         latest_version_url: impl Into<String>,
@@ -99,8 +77,6 @@ impl OpyProviderResolver {
         self
     }
 
-    /// Resolve an OPY provider in precedence order: explicit local executable,
-    /// active installed provider, then lazy first-party bootstrap.
     pub fn resolve(
         &self,
         explicit: Option<&Path>,
@@ -108,7 +84,6 @@ impl OpyProviderResolver {
         if let Some(path) = explicit {
             return validate_explicit(path);
         }
-
         let target = self.target()?;
         if let Some((version, executable)) = self.active_provider(&target)? {
             return Ok(ResolvedOpyProvider {
@@ -116,13 +91,9 @@ impl OpyProviderResolver {
                 version: Some(version),
             });
         }
-
         self.install_release(None, &target)
     }
 
-    /// Explicitly update/bootstrap the provider from the first-party release
-    /// source. No caller should invoke this as part of an ordinary source
-    /// command.
     pub fn update(
         &self,
         requested_version: Option<&str>,
@@ -133,7 +104,7 @@ impl OpyProviderResolver {
 
     fn target(&self) -> Result<String, OpyProviderError> {
         let target = match &self.target {
-            Some(target) => Ok(target.clone()),
+            Some(t) => Ok(t.clone()),
             None => current_target(),
         }?;
         if matches!(
@@ -154,21 +125,21 @@ impl OpyProviderResolver {
     fn active_provider(&self, target: &str) -> Result<Option<(String, PathBuf)>, OpyProviderError> {
         let active = self.store_dir.join("active");
         let version = match std::fs::read_to_string(&active) {
-            Ok(value) => normalize_version(value.trim())?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
+            Ok(val) => normalize_version(val.trim())?,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
                 return Err(OpyProviderError::install(format!(
-                    "cannot read active OPY provider pointer '{}': {error}",
+                    "cannot read active OPY provider pointer '{}': {err}",
                     active.display()
                 )));
             }
         };
         let executable = self.provider_path(&version, target);
-        if is_executable(&executable) {
-            Ok(Some((version, executable)))
+        Ok(if is_executable(&executable) {
+            Some((version, executable))
         } else {
-            Ok(None)
-        }
+            None
+        })
     }
 
     fn provider_path(&self, version: &str, target: &str) -> PathBuf {
@@ -186,7 +157,7 @@ impl OpyProviderResolver {
         let requested_version = requested_version.map(normalize_version).transpose()?;
         let client = provider_client()?;
         let version = match requested_version {
-            Some(version) => version,
+            Some(v) => v,
             None => self.fetch_latest_version(&client)?,
         };
         let archive_name = format!("opy-provider-{version}-{target}.{PROVIDER_ARCHIVE_EXTENSION}");
@@ -219,9 +190,9 @@ impl OpyProviderResolver {
         target: &str,
         archive: &[u8],
     ) -> Result<(), OpyProviderError> {
-        std::fs::create_dir_all(&self.store_dir).map_err(|error| {
+        std::fs::create_dir_all(&self.store_dir).map_err(|e| {
             OpyProviderError::install(format!(
-                "cannot create the OPY provider store '{}': {error}",
+                "cannot create the OPY provider store '{}': {e}",
                 self.store_dir.display()
             ))
         })?;
@@ -261,18 +232,17 @@ impl OpyProviderResolver {
     ) -> Result<(), OpyProviderError> {
         let final_dir = self.store_dir.join(version).join(target);
         let final_executable = final_dir.join(provider_binary(target));
-        std::fs::create_dir_all(final_dir.parent().expect("provider target has a parent"))
-            .map_err(|error| {
-                OpyProviderError::install(format!(
-                    "cannot create OPY provider version directory '{}': {error}",
-                    final_dir.display()
-                ))
-            })?;
+        std::fs::create_dir_all(final_dir.parent().expect("parent exists")).map_err(|e| {
+            OpyProviderError::install(format!(
+                "cannot create OPY provider version directory '{}': {e}",
+                final_dir.display()
+            ))
+        })?;
         match std::fs::rename(staging, &final_dir) {
             Ok(()) => self.activate(version, target),
             Err(_) if is_executable(&final_executable) => self.activate(version, target),
-            Err(error) => Err(OpyProviderError::install(format!(
-                "cannot activate staged OPY provider '{}': {error}",
+            Err(e) => Err(OpyProviderError::install(format!(
+                "cannot activate staged OPY provider '{}': {e}",
                 final_dir.display()
             ))),
         }
@@ -285,15 +255,15 @@ impl OpyProviderResolver {
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .map(|duration| duration.as_nanos())
+                    .map(|d| d.as_nanos())
                     .unwrap_or_default()
             ));
             match std::fs::create_dir(&staging) {
                 Ok(()) => return Ok(staging),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => {
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
                     return Err(OpyProviderError::install(format!(
-                        "cannot create OPY provider staging directory '{}': {error}",
+                        "cannot create OPY provider staging directory '{}': {e}",
                         staging.display()
                     )));
                 }
@@ -311,29 +281,30 @@ impl OpyProviderResolver {
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
+                .map(|d| d.as_nanos())
                 .unwrap_or_default()
         ));
-        let result = (|| -> Result<(), OpyProviderError> {
-            let mut file = std::fs::File::create(&temporary).map_err(|error| {
+        let res = (|| -> Result<(), OpyProviderError> {
+            let mut file = std::fs::File::create(&temporary).map_err(|e| {
                 OpyProviderError::install(format!(
-                    "cannot write temporary OPY provider pointer '{}': {error}",
+                    "cannot write temporary OPY provider pointer '{}': {e}",
                     temporary.display()
                 ))
             })?;
-            file.write_all(version.as_bytes()).map_err(|error| {
+            write!(file, "{version}").map_err(|e| {
                 OpyProviderError::install(format!(
-                    "cannot write temporary OPY provider pointer '{}': {error}",
+                    "cannot write temporary OPY provider pointer '{}': {e}",
                     temporary.display()
                 ))
             })?;
-            file.sync_all().map_err(|error| {
+            file.sync_all().map_err(|e| {
                 OpyProviderError::install(format!(
-                    "cannot persist temporary OPY provider pointer '{}': {error}",
+                    "cannot persist temporary OPY provider pointer '{}': {e}",
                     temporary.display()
                 ))
             })?;
-            match std::fs::rename(&temporary, self.store_dir.join("active")) {
+            let active = self.store_dir.join("active");
+            match std::fs::rename(&temporary, &active) {
                 Ok(()) => Ok(()),
                 Err(_) if matches!(self.active_provider(target)?, Some((active, _)) if active == version) => {
                     Ok(())
@@ -343,79 +314,10 @@ impl OpyProviderResolver {
                 ))),
             }
         })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&temporary);
-        }
-        result
+        let _ = std::fs::remove_file(&temporary);
+        res
     }
 }
-
-/// A machine-readable provider distribution failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OpyProviderError {
-    Missing(String),
-    UnsupportedPlatform(String),
-    Offline(String),
-    Download(String),
-    Integrity(String),
-    Install(String),
-}
-
-impl OpyProviderError {
-    fn missing(message: impl Into<String>) -> Self {
-        Self::Missing(message.into())
-    }
-    fn unsupported(message: impl Into<String>) -> Self {
-        Self::UnsupportedPlatform(message.into())
-    }
-    fn offline(message: impl Into<String>) -> Self {
-        Self::Offline(message.into())
-    }
-    fn download(message: impl Into<String>) -> Self {
-        Self::Download(message.into())
-    }
-    fn integrity(message: impl Into<String>) -> Self {
-        Self::Integrity(message.into())
-    }
-    fn install(message: impl Into<String>) -> Self {
-        Self::Install(message.into())
-    }
-
-    /// Stable machine-readable error code.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Missing(_) => "provider-missing",
-            Self::UnsupportedPlatform(_) => "provider-unsupported-platform",
-            Self::Offline(_) => "provider-offline",
-            Self::Download(_) => "provider-download",
-            Self::Integrity(_) => "provider-integrity",
-            Self::Install(_) => "provider-install",
-        }
-    }
-
-    /// The CLI exit code for this failure.
-    pub fn exit_code(&self) -> u8 {
-        match self {
-            Self::UnsupportedPlatform(_) => crate::result::exit::UNSUPPORTED,
-            _ => crate::result::exit::INTERNAL,
-        }
-    }
-}
-
-impl fmt::Display for OpyProviderError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Missing(message)
-            | Self::UnsupportedPlatform(message)
-            | Self::Offline(message)
-            | Self::Download(message)
-            | Self::Integrity(message)
-            | Self::Install(message) => formatter.write_str(message),
-        }
-    }
-}
-
-impl std::error::Error for OpyProviderError {}
 
 fn validate_explicit(path: &Path) -> Result<ResolvedOpyProvider, OpyProviderError> {
     if !is_executable(path) {
@@ -466,20 +368,25 @@ fn default_store_dir() -> PathBuf {
 }
 
 fn normalize_version(version: &str) -> Result<String, OpyProviderError> {
-    let version = version.trim_start_matches('v');
-    let mut parts = version.split('.');
-    let valid = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(a), Some(b), Some(c), None) => [a, b, c]
-            .into_iter()
-            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())),
-        _ => false,
-    };
-    if !valid {
+    let core = version.trim_start_matches('v');
+    let mut parts = core.split('.');
+    let (Some(major), Some(minor), Some(patch), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
         return Err(OpyProviderError::download(format!(
-            "invalid OPY provider release version '{version}' (expected X.Y.Z)"
+            "invalid OPY provider release version '{core}' (expected X.Y.Z)"
         )));
+    };
+    if [major, minor, patch]
+        .into_iter()
+        .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        Ok(core.to_string())
+    } else {
+        Err(OpyProviderError::download(format!(
+            "invalid OPY provider release version '{core}' (expected X.Y.Z)"
+        )))
     }
-    Ok(version.to_string())
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -505,18 +412,17 @@ fn provider_client() -> Result<reqwest::blocking::Client, OpyProviderError> {
         .user_agent(concat!("wright-opy-provider/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(60))
         .build()
-        .map_err(|error| {
+        .map_err(|e| {
             OpyProviderError::offline(format!(
-                "cannot initialize HTTPS client for OPY provider release source: {error}"
+                "cannot initialize HTTPS client for OPY provider release source: {e}"
             ))
         })
 }
 
 fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, OpyProviderError> {
     let bytes = fetch(client, url)?;
-    String::from_utf8(bytes).map_err(|error| {
-        OpyProviderError::download(format!("cannot decode response from {url}: {error}"))
-    })
+    String::from_utf8(bytes)
+        .map_err(|e| OpyProviderError::download(format!("cannot decode response from {url}: {e}")))
 }
 
 fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, OpyProviderError> {
@@ -535,9 +441,7 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, OpyPr
     response
         .take(MAX_DOWNLOAD_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| {
-            OpyProviderError::download(format!("cannot read response from {url}: {error}"))
-        })?;
+        .map_err(|e| OpyProviderError::download(format!("cannot read response from {url}: {e}")))?;
     if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
         return Err(OpyProviderError::download(format!(
             "response from {url} exceeds the 128 MiB provider artifact limit"
@@ -559,17 +463,11 @@ fn verify_checksum(
             "invalid SHA-256 checksum for {archive_name}"
         )));
     }
-    let actual = Sha256::digest(archive);
-    let actual = actual
-        .iter()
-        .fold(String::with_capacity(64), |mut output, byte| {
-            use std::fmt::Write as _;
-            let _ = write!(output, "{byte:02x}");
-            output
-        });
-    if !actual.eq_ignore_ascii_case(published) {
+    let expected = published;
+    let actual = format!("{:x}", Sha256::digest(archive));
+    if !actual.eq_ignore_ascii_case(expected) {
         return Err(OpyProviderError::integrity(format!(
-            "SHA-256 verification failed for {archive_name} (published {published}, got {actual}); the active provider was not changed"
+            "SHA-256 verification failed for {archive_name} (published {expected}, got {actual}); the active provider was not changed"
         )));
     }
     Ok(())
@@ -577,16 +475,16 @@ fn verify_checksum(
 
 fn extract_provider(
     archive: &[u8],
-    destination: &Path,
+    dest: &Path,
     target: &str,
-) -> Result<(), OpyProviderError> {
+) -> Result<PathBuf, OpyProviderError> {
     let binary = provider_binary(target);
     let decoder = GzDecoder::new(archive);
     let mut archive = tar::Archive::new(decoder);
-    let mut found = false;
     let entries = archive.entries().map_err(|error| {
         OpyProviderError::install(format!("cannot read OPY provider archive: {error}"))
     })?;
+    let mut found = false;
     for entry in entries {
         let mut entry = entry.map_err(|error| {
             OpyProviderError::install(format!("cannot read OPY provider archive entry: {error}"))
@@ -604,7 +502,7 @@ fn extract_provider(
                 "OPY provider archive executable is not a regular file",
             ));
         }
-        let output = destination.join(binary);
+        let output = dest.join(binary);
         let mut file = std::fs::File::create(&output).map_err(|error| {
             OpyProviderError::install(format!(
                 "cannot create staged OPY provider '{}': {error}",
@@ -638,12 +536,13 @@ fn extract_provider(
         }
         found = true;
     }
-    if !found || !is_executable(&destination.join(binary)) {
+    let candidate = dest.join(binary);
+    if !found || !is_executable(&candidate) {
         return Err(OpyProviderError::install(
             "OPY provider archive does not contain an executable provider",
         ));
     }
-    Ok(())
+    Ok(candidate)
 }
 
 fn provider_binary(target: &str) -> &'static str {
@@ -653,6 +552,70 @@ fn provider_binary(target: &str) -> &'static str {
         "opy-provider"
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpyProviderError {
+    Missing(String),
+    UnsupportedPlatform(String),
+    Offline(String),
+    Download(String),
+    Integrity(String),
+    Install(String),
+}
+
+impl OpyProviderError {
+    fn missing(msg: impl Into<String>) -> Self {
+        Self::Missing(msg.into())
+    }
+    fn unsupported(msg: impl Into<String>) -> Self {
+        Self::UnsupportedPlatform(msg.into())
+    }
+    fn offline(msg: impl Into<String>) -> Self {
+        Self::Offline(msg.into())
+    }
+    fn download(msg: impl Into<String>) -> Self {
+        Self::Download(msg.into())
+    }
+    fn integrity(msg: impl Into<String>) -> Self {
+        Self::Integrity(msg.into())
+    }
+    fn install(msg: impl Into<String>) -> Self {
+        Self::Install(msg.into())
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Missing(_) => "provider-missing",
+            Self::UnsupportedPlatform(_) => "provider-unsupported-platform",
+            Self::Offline(_) => "provider-offline",
+            Self::Download(_) => "provider-download",
+            Self::Integrity(_) => "provider-integrity",
+            Self::Install(_) => "provider-install",
+        }
+    }
+
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            Self::UnsupportedPlatform(_) => crate::result::exit::UNSUPPORTED,
+            _ => crate::result::exit::INTERNAL,
+        }
+    }
+}
+
+impl fmt::Display for OpyProviderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing(m)
+            | Self::UnsupportedPlatform(m)
+            | Self::Offline(m)
+            | Self::Download(m)
+            | Self::Integrity(m)
+            | Self::Install(m) => write!(f, "{m}"),
+        }
+    }
+}
+
+impl std::error::Error for OpyProviderError {}
 
 #[cfg(test)]
 mod tests {

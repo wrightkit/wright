@@ -6,3 +6,4 @@ pub mod facts;
 pub mod registry;
 pub mod service;
 pub mod symbols;
+mod traversal;

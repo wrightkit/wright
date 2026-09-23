@@ -1,16 +1,15 @@
 use wright_driver::service::{ToolRequest, ToolService};
 use wright_driver::{CompilerSession, InputSpec, Profile, SessionConfig, SourceKind};
 
-/// Run every public-API workflow over one input (testable in-process).
 pub fn run_consumer(input: &str) -> Result<(), String> {
-    let source = std::fs::read_to_string(input).map_err(|error| error.to_string())?;
+    let source = std::fs::read_to_string(input).map_err(|e| e.to_string())?;
     let config = SessionConfig {
         input: InputSpec::Path(input.into()),
         kind: SourceKind::Auto,
         profile: Profile::Compat,
         ..SessionConfig::default()
     };
-    let mut session = CompilerSession::new(config).map_err(|error| error.message)?;
+    let mut session = CompilerSession::new(config).map_err(|e| e.message)?;
 
     let check = session.check();
     assert!(check.ok, "check passes: {:?}", check.diagnostics);
@@ -41,7 +40,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         lint.result.rules.as_array().unwrap().len()
     );
 
-    let service = ToolService::new(&mut session).map_err(|error| error.message)?;
+    let service = ToolService::new(&mut session).map_err(|e| e.message)?;
     let capabilities = service.handle(&ToolRequest::Capabilities);
     match capabilities {
         wright_driver::service::ToolResponse::Ok { result } => {
@@ -67,12 +66,10 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         ToolRequest::CostEstimate,
         ToolRequest::TargetMetadata,
     ] {
-        let response = service.handle(&request);
-        match response {
+        match service.handle(&request) {
             wright_driver::service::ToolResponse::Ok { result } => {
                 if matches!(request, ToolRequest::Lint) {
-                    let findings = result["findings"].as_array().unwrap();
-                    for finding in findings {
+                    for finding in result["findings"].as_array().unwrap() {
                         assert!(
                             finding.get("evidence").is_some(),
                             "lint findings carry evidence"
@@ -81,7 +78,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
                 }
             }
             wright_driver::service::ToolResponse::Error { error } => {
-                panic!("query failed: {error:?}");
+                panic!("query failed: {error:?}")
             }
         }
     }
@@ -99,7 +96,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
                     source_identity: identity,
                 },
             )
-            .map_err(|error| error.message)?;
+            .map_err(|e| e.message)?;
             let sources = std::collections::BTreeMap::from([(input.to_string(), source.clone())]);
             let validation = wright_driver::edit::validate_transaction(
                 &SessionConfig {
@@ -107,8 +104,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
                     ..SessionConfig::default()
                 },
                 &sources,
-                &wright_driver::edit::EditTransaction::new(vec![rename])
-                    .map_err(|error| error.message)?,
+                &wright_driver::edit::EditTransaction::new(vec![rename]).map_err(|e| e.message)?,
             );
             assert!(
                 validation.ok,
@@ -121,7 +117,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .any(|preview| preview.new_text.contains("renamed_by_consumer"))
+                    .any(|p| p.new_text.contains("renamed_by_consumer"))
             );
             println!("edit: safe rename validated and previewed");
         } else {
@@ -133,7 +129,6 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The name of the first global variable declared in the source.
 fn first_global(source: &str) -> Option<&str> {
     source
         .lines()

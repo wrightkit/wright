@@ -42,6 +42,7 @@ use workshop_rs::wir::{
 
 use crate::cfg::Cfg;
 use crate::registry::{LintConfig, LintRegistry};
+use crate::traversal::visit_actions;
 
 /// The severity of a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1540,46 +1541,6 @@ fn body_has_wait(program: &wir::Program, actions: &[ActionId]) -> bool {
         }
     });
     found
-}
-
-/// Visit every action in a tree (including nested bodies), in program order.
-fn visit_actions(
-    program: &wir::Program,
-    actions: &[ActionId],
-    f: &mut impl FnMut(ActionId, &Action),
-) {
-    for action in actions {
-        let Some(data) = program.actions.get(*action) else {
-            continue;
-        };
-        f(*action, data);
-        match data {
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    visit_actions(program, &branch.body, f);
-                }
-                if let Some(else_body) = else_body {
-                    visit_actions(program, else_body, f);
-                }
-            }
-            Action::While { body, .. }
-            | Action::ForGlobalVariable { body, .. }
-            | Action::ForPlayerVariable { body, .. } => {
-                visit_actions(program, body, f);
-            }
-            Action::SetGlobalVariable { .. }
-            | Action::ModifyGlobalVariable { .. }
-            | Action::SetPlayerVariable { .. }
-            | Action::ModifyPlayerVariable { .. }
-            | Action::CallSubroutine { .. }
-            | Action::AssignMember { .. }
-            | Action::Call { .. } => {}
-        }
-    }
 }
 
 /// Visit every value reachable from an action's arguments and conditions.
