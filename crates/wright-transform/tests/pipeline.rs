@@ -1,84 +1,31 @@
-//! WIR transformation pipeline tests (#51/#52): `off` is a no-op, the compat
+//! Transformation pipeline tests (#51/#52): `off` is a no-op, the compat
 //! pass is evidence-backed with before/after metrics, and every pass leaves
-//! the WIR validated. Source-semantic initializer synthesis is owned by the
-//! profile-independent HIR → WIR lowering, not by this pipeline (#112).
+//! the program validated. Source-semantic initializer synthesis is owned by
+//! the frontend, not by this pipeline (#112).
 
-use workshop_rs::wir::{self, Action, Value, ValueNode};
+use workshop_rs::{Action, Event, Program, Rule, Value, Variable};
 use wright_transform::profile::Profile;
 use wright_transform::run;
 
-/// Build a program with `x = len(a) + 2 * 3`.
-fn arithmetic_program() -> wir::Program {
-    let mut program = wir::Program::default();
-    program
-        .files
-        .push(workshop_rs::source::SourceFile::new("test.opy"));
+/// Build a program with `x = len(points) + 2 * 3`.
+fn arithmetic_program() -> Program {
+    let mut program = Program::new();
+    program.global_variable(Variable::with_index("points", 1));
+    program.global_variable(Variable::with_index("result", 0));
 
-    let points = program.global_variables.push(wir::WorkshopVariable {
-        name: "points".to_string(),
-        index: 1,
-        span: None,
-        name_span: None,
-    });
-    let variable = program.global_variables.push(wir::WorkshopVariable {
-        name: "result".to_string(),
-        index: 0,
-        span: None,
-        name_span: None,
-    });
+    let len = Value::call("len", [Value::global_variable("points")]);
+    let multiply = Value::call("*", [Value::number(2.0), Value::number(3.0)]);
+    let add = Value::call("+", [len, multiply]);
 
-    let two = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 2.0,
-            text: "2".to_string(),
-        },
-        None,
-    ));
-    let three = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 3.0,
-            text: "3".to_string(),
-        },
-        None,
-    ));
-    let multiply = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "*".to_string(),
-            args: vec![two, three],
-        },
-        None,
-    ));
-    let points_ref = program
-        .values
-        .push(ValueNode::new(Value::GlobalVariable(points), None));
-    let len = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "len".to_string(),
-            args: vec![points_ref],
-        },
-        None,
-    ));
-    let add = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "+".to_string(),
-            args: vec![len, multiply],
-        },
-        None,
-    ));
-    let action = program.actions.push(Action::SetGlobalVariable {
-        variable,
-        value: add,
-        span: None,
-        target_span: None,
-    });
-    program.rules.push(wir::Rule {
+    program.rule(Rule {
         name: "compute".to_string(),
-        span: None,
-        name_span: None,
         disabled: false,
-        event: wir::Event::Global,
+        event: Event::Global,
         conditions: vec![],
-        actions: vec![action],
+        actions: vec![Action::SetGlobalVariable {
+            variable: "result".to_string(),
+            value: add,
+        }],
     });
     program
 }
@@ -89,7 +36,7 @@ fn off_profile_performs_no_transformation() {
     let before = program.dump();
     let results = run(&mut program, Profile::Off).unwrap();
     assert!(results.is_empty(), "off runs no passes");
-    assert_eq!(program.dump(), before, "off leaves the WIR untouched");
+    assert_eq!(program.dump(), before, "off leaves the program untouched");
     assert!(program.validate().is_ok());
 }
 
@@ -106,55 +53,36 @@ fn compat_profile_folds_constants_with_metrics() {
         .expect("fold-constants ran");
     assert!(fold.stats.changed >= 1, "changed: {}", fold.stats.changed);
 
-    // The folded expression is now the literal 6 in the action.
-    let rule = program
-        .rules
-        .get(workshop_rs::ids::Id::from_index(0))
-        .expect("rule");
-    let Action::SetGlobalVariable { value, .. } = program.actions.get(rule.actions[0]).unwrap()
-    else {
+    // The folded expression is now Add(len(points), 6).
+    let rule = &program.rules[0];
+    let Action::SetGlobalVariable { value, .. } = &rule.actions[0] else {
         panic!("expected Set Global Variable");
     };
-    let node = program.values.get(*value).unwrap();
-    match &node.value {
-        Value::Call { name, args } => {
-            assert_eq!(
-                name, "+",
-                "folding keeps source-level names (emission maps them)"
-            );
-            let right = program.values.get(args[1]).unwrap();
-            match right.value {
-                Value::Number { value: n, .. } => assert_eq!(n, 6.0, "2 * 3 folds to 6"),
-                ref other => panic!("right side should be the literal 6, got {other:?}"),
-            }
-        }
-        other => panic!("expected an add call, got {other:?}"),
-    }
+    let Value::Call { name, args } = value else {
+        panic!("expected Call");
+    };
+    assert_eq!(name, "+");
+    assert_eq!(args.len(), 2);
+    assert!(matches!(&args[1], Value::Number(num) if *num == 6.0));
     assert!(program.validate().is_ok());
 }
 
 #[test]
 fn compat_profile_folds_canonical_square_root() {
     let mut program = arithmetic_program();
-    let two = program.values.push(ValueNode::new(
-        Value::Number {
-            value: 2.0,
-            text: "2".to_string(),
-        },
-        None,
-    ));
-    let square_root = program.values.push(ValueNode::new(
-        Value::Call {
-            name: "squareRoot".to_string(),
-            args: vec![two],
-        },
-        None,
-    ));
+    let square_root = Value::call("squareRoot", [Value::number(2.0)]);
+    program.rules[0].actions.push(Action::SetGlobalVariable {
+        variable: "result".to_string(),
+        value: square_root,
+    });
 
     run(&mut program, Profile::Compat).unwrap();
 
-    match &program.values.get(square_root).unwrap().value {
-        Value::Number { value, .. } => assert_eq!(*value, 2.0_f64.sqrt()),
+    let Action::SetGlobalVariable { value, .. } = &program.rules[0].actions[1] else {
+        panic!("expected Set Global Variable");
+    };
+    match value {
+        Value::Number(value) => assert_eq!(*value, 2.0_f64.sqrt()),
         other => panic!("canonical squareRoot should fold to a number, got {other:?}"),
     }
 }

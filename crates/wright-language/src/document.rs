@@ -281,7 +281,7 @@ mod tests {
         // column 16) starts at UTF-16 offset 16 and ends at 21.
         let source = "    debug(\"🎯\", score)\n";
         let span = workshop_rs::source::Span::new(
-            workshop_rs::ids::Id::from_index(0),
+            workshop_rs::source::FileId::from_index(0),
             workshop_rs::source::Position::new(1, 16),
             workshop_rs::source::Position::new(1, 21),
         );

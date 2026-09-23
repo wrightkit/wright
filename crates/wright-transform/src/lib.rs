@@ -16,7 +16,6 @@
 //! [`run`] validates the WIR before and after the pipeline, so a pass can
 //! never leave the program in an invalid state.
 
-pub mod fold_constants;
 pub mod pipeline;
 pub mod profile;
 

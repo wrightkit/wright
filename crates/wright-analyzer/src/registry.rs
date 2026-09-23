@@ -16,15 +16,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use workshop_rs::catalog::Catalog;
-use workshop_rs::wir;
 
-use crate::analysis::{
-    Analysis, DuplicateCondition, EvidenceClass, ExpensiveLoopCheck, Finding, MinWaitLoop,
-    OngoingConditionHotPath, RepeatedValue, Severity, WhileWithoutWait,
-};
-use crate::cfg::Cfg;
+use crate::analysis::{EvidenceClass, Finding, Severity};
 use crate::declarative::{DeclarativeRule, RuleDefinition, RuleError};
-use crate::facts::SemanticFacts;
 
 /// Static metadata for one lint rule.
 ///
@@ -40,8 +34,7 @@ pub struct RuleMeta {
     pub default_severity: Severity,
     /// The evidence class of this rule's findings: whether a finding is an
     /// exact structural fact, a static indicator, a documented heuristic, or
-    /// runtime-validated. Mirrors [`Analysis::evidence`] of the rule's
-    /// implementation (single source of truth).
+    /// runtime-validated.
     pub evidence: EvidenceClass,
     /// One-line human-readable description of what the rule detects.
     pub summary: &'static str,
@@ -118,23 +111,22 @@ impl RuleOptions {
 }
 
 /// A serialization-friendly severity label for use in configuration.
-///
-/// Project policy labels for a rule. Finding severities remain owned by the
-/// rule implementation unless a project explicitly selects `warn` or `error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SeverityLabel {
     Off,
     Warn,
     Error,
+    Info,
 }
 
 impl SeverityLabel {
-    fn severity(self) -> Option<Severity> {
+    pub fn severity(self) -> Option<Severity> {
         match self {
-            Self::Off => None,
-            Self::Warn => Some(Severity::Warning),
-            Self::Error => Some(Severity::Error),
+            SeverityLabel::Off => None,
+            SeverityLabel::Warn => Some(Severity::Warning),
+            SeverityLabel::Error => Some(Severity::Error),
+            SeverityLabel::Info => Some(Severity::Info),
         }
     }
 }
@@ -142,53 +134,43 @@ impl SeverityLabel {
 impl From<Severity> for SeverityLabel {
     fn from(severity: Severity) -> Self {
         match severity {
-            Severity::Warning | Severity::Info => SeverityLabel::Warn,
+            Severity::Warning => SeverityLabel::Warn,
             Severity::Error => SeverityLabel::Error,
+            Severity::Info => SeverityLabel::Info,
         }
     }
 }
 
-/// The deterministic lint configuration passed to [`LintRegistry::run`].
-///
-/// [`LintConfig::default`] enables all registered rules at their default
-/// severities with no overrides. Unknown rule IDs are accepted and stored but
-/// do not affect registered rules.
+/// The effective configuration for a lint run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LintConfig {
+    /// Per-rule configuration overrides keyed by stable rule ID.
     #[serde(default)]
-    rules: HashMap<String, RuleConfig>,
+    pub rules: HashMap<String, RuleConfig>,
 }
 
 impl LintConfig {
-    /// Parse a project lint configuration from the stable YAML surface.
-    pub fn from_yaml_str(input: &str) -> Result<Self, yaml_serde::Error> {
-        yaml_serde::from_str(input)
-    }
-
-    /// Read and parse a project lint configuration from YAML.
     pub fn from_yaml_path(path: &Path) -> Result<Self, std::io::Error> {
         let input = std::fs::read_to_string(path)?;
         yaml_serde::from_str(&input).map_err(std::io::Error::other)
     }
 
+    pub fn from_yaml_str(input: &str) -> Result<Self, RuleError> {
+        yaml_serde::from_str(input).map_err(RuleError::Yaml)
+    }
+
     /// Disable a rule by its stable ID.
-    ///
-    /// Has no effect on other rules. Silently accepted for unknown IDs.
     pub fn disable(&mut self, rule_id: &str) {
         self.rules.entry(rule_id.to_string()).or_default().enabled = false;
     }
 
     /// Enable a rule by its stable ID.
-    ///
-    /// Silently accepted for unknown IDs.
     pub fn enable(&mut self, rule_id: &str) {
         self.rules.entry(rule_id.to_string()).or_default().enabled = true;
     }
 
     /// Override the severity for a rule by its stable ID.
-    ///
-    /// Silently accepted for unknown IDs; the override is stored and has no
-    /// effect on rules that are not registered.
     pub fn set_severity(&mut self, rule_id: &str, severity: Severity) {
         self.rules
             .entry(rule_id.to_string())
@@ -197,10 +179,6 @@ impl LintConfig {
     }
 
     /// Override the severity of a rule from its CLI spelling.
-    ///
-    /// Accepts the project policy names `"off"`, `"warn"`, and `"error"`. Returns
-    /// `false` when `severity` is not a known label, leaving the
-    /// configuration unchanged.
     pub fn set_severity_by_name(&mut self, rule_id: &str, severity: &str) -> bool {
         let label = match severity {
             "off" => SeverityLabel::Off,
@@ -216,8 +194,6 @@ impl LintConfig {
     }
 
     /// Whether a rule is enabled.
-    ///
-    /// Returns `true` for unknown IDs (no config entry = enabled by default).
     pub fn is_enabled(&self, rule_id: &str) -> bool {
         self.rules.get(rule_id).is_none_or(|config| {
             config.enabled && config.severity_override != Some(SeverityLabel::Off)
@@ -225,8 +201,6 @@ impl LintConfig {
     }
 
     /// Effective severity for a rule given its metadata and this config.
-    ///
-    /// Returns the override if one is set; otherwise the rule's default.
     pub fn effective_severity(&self, meta: &RuleMeta) -> Severity {
         self.rules
             .get(meta.id)
@@ -294,24 +268,13 @@ pub struct LintRun {
     pub skipped: Vec<SkippedRule>,
 }
 
-/// One registered rule: its stable metadata and the analysis implementation.
+/// One registered rule: its stable metadata and optional declarative rule.
 struct RegistryEntry {
     meta: Option<RuleMeta>,
-    analysis: Option<Box<dyn Analysis>>,
     declarative: Option<DeclarativeRule>,
 }
 
 /// The Wright lint rule registry.
-///
-/// [`LintRegistry::default`] returns the complete first-party rule set.
-/// Use [`LintRegistry::run`] to execute the active rules over a
-/// [`wir::Program`].
-///
-/// # Adding rules
-///
-/// First-party rules are added by pushing a [`RegistryEntry`] in
-/// [`Default::default`]. Third-party plugin loading is explicitly out of scope
-/// (issue #97).
 pub struct LintRegistry {
     entries: Vec<RegistryEntry>,
 }
@@ -322,21 +285,12 @@ impl Default for LintRegistry {
     /// `expensive-loop-check`, `ongoing-condition-hot-path`, `repeated-value`,
     /// `while-without-wait`.
     fn default() -> Self {
-        // Build each analysis in a local binding first so the rule metadata
-        // can take its evidence class from the same implementation that
-        // produces findings (single source of truth).
-        let min_wait: Box<dyn Analysis> = Box::new(MinWaitLoop);
-        let duplicate_condition: Box<dyn Analysis> = Box::new(DuplicateCondition);
-        let expensive_loop_check: Box<dyn Analysis> = Box::new(ExpensiveLoopCheck);
-        let ongoing_condition_hot_path: Box<dyn Analysis> = Box::new(OngoingConditionHotPath);
-        let repeated_value: Box<dyn Analysis> = Box::new(RepeatedValue);
-        let while_without_wait: Box<dyn Analysis> = Box::new(WhileWithoutWait);
         let entries = vec![
             RegistryEntry {
                 meta: Some(RuleMeta {
                     id: "min-wait-loop",
                     default_severity: Severity::Warning,
-                    evidence: min_wait.evidence(),
+                    evidence: EvidenceClass::StaticIndicator,
                     summary: "loop body waits at the workshop minimum rate",
                     rationale: "Avoid sustained maximum-frequency loop execution.",
                     documentation: concat!(
@@ -350,14 +304,13 @@ impl Default for LintRegistry {
                     ),
                     tags: &["performance", "stability"],
                 }),
-                analysis: Some(min_wait),
                 declarative: None,
             },
             RegistryEntry {
                 meta: Some(RuleMeta {
                     id: "duplicate-condition",
                     default_severity: Severity::Warning,
-                    evidence: duplicate_condition.evidence(),
+                    evidence: EvidenceClass::Exact,
                     summary: "condition is evaluated more than once within one rule",
                     rationale: "Avoid unreachable or redundant conditional branches.",
                     documentation: concat!(
@@ -371,14 +324,13 @@ impl Default for LintRegistry {
                     ),
                     tags: &["correctness"],
                 }),
-                analysis: Some(duplicate_condition),
                 declarative: None,
             },
             RegistryEntry {
                 meta: Some(RuleMeta {
                     id: "expensive-loop-check",
                     default_severity: Severity::Info,
-                    evidence: expensive_loop_check.evidence(),
+                    evidence: EvidenceClass::Heuristic,
                     summary: "geometry predicate evaluated inside a loop body",
                     rationale: "Surface expensive per-iteration geometry work.",
                     documentation: concat!(
@@ -393,14 +345,13 @@ impl Default for LintRegistry {
                     ),
                     tags: &["performance"],
                 }),
-                analysis: Some(expensive_loop_check),
                 declarative: None,
             },
             RegistryEntry {
                 meta: Some(RuleMeta {
                     id: "ongoing-condition-hot-path",
                     default_severity: Severity::Info,
-                    evidence: ongoing_condition_hot_path.evidence(),
+                    evidence: EvidenceClass::Heuristic,
                     summary: "geometry predicate evaluated in an ongoing-rule condition",
                     rationale: "Make high-frequency condition evaluation visible.",
                     documentation: concat!(
@@ -428,14 +379,13 @@ impl Default for LintRegistry {
                     ),
                     tags: &["performance", "stability"],
                 }),
-                analysis: Some(ongoing_condition_hot_path),
                 declarative: None,
             },
             RegistryEntry {
                 meta: Some(RuleMeta {
                     id: "repeated-value",
                     default_severity: Severity::Warning,
-                    evidence: repeated_value.evidence(),
+                    evidence: EvidenceClass::Exact,
                     summary: "identical value expression evaluated more than once in one loop scope",
                     rationale: "Avoid repeated evaluation of the same loop-local expression.",
                     documentation: concat!(
@@ -467,14 +417,13 @@ impl Default for LintRegistry {
                     ),
                     tags: &["performance", "stability"],
                 }),
-                analysis: Some(repeated_value),
                 declarative: None,
             },
             RegistryEntry {
                 meta: Some(RuleMeta {
                     id: "while-without-wait",
                     default_severity: Severity::Warning,
-                    evidence: while_without_wait.evidence(),
+                    evidence: EvidenceClass::StaticIndicator,
                     summary: "while loop body contains no wait call",
                     rationale: "Ensure a loop can yield to the Workshop scheduler.",
                     documentation: concat!(
@@ -497,32 +446,16 @@ impl Default for LintRegistry {
                     known_limits: concat!(
                         "Counter-pattern detection is conservative and structural: only ",
                         "literal-bound comparisons (`<`, `<=`, `>`, `>=`) are recognized. A ",
-                        "statically-bounded claim additionally requires every direct child of ",
-                        "the body that can affect the compared variable to either provably move ",
-                        "it toward the literal bound (a non-zero literal-step modify) or ",
-                        "provably not write it; a `Set` on the variable, an away-direction or ",
-                        "non-literal/zero-step modify, a `CallSubroutine`, and `If`/nested-loop ",
-                        "subtrees writing the variable all force `unknown`. Modeling assumption: ",
-                        "within the supported OPY/Workshop surface, `Debug`/`Print` and generic ",
-                        "calls that are not user subroutines do not write user variables (a ",
-                        "generic call matching a user-defined subroutine name is treated as a ",
-                        "potential writer, for frontend fidelity). A direct-child nested loop ",
-                        "whose termination is not statically provable (a non-counter `While`, ",
-                        "or a `For Global Variable` with a zero or dynamic step, including ",
-                        "through `If` branches) forces the enclosing loop to `unknown`, because ",
-                        "a nested loop that never terminates prevents the outer loop from ",
-                        "completing an iteration. There is no value-flow or ",
-                        "initial-value analysis, so no maximum-iteration count is claimed even ",
-                        "when the bound literal is small. `==`/`!=` conditions and ",
-                        "constant-folded comparisons are not recognized (classified `unknown`). ",
-                        "A wait placed anywhere in the body tree suppresses the finding, and ",
-                        "`For Global Variable` loops are never flagged. A statically true ",
-                        "condition is classified as non-terminating only because the modeled ",
-                        "WIR has no break/goto action.",
+                        "loop is bounded only when: (1) its condition compares a variable to a ",
+                        "literal bound, (2) the body unconditionally increments/decrements that ",
+                        "same variable, and (3) the step moves the variable toward the bound. ",
+                        "Arbitrary step expressions, dynamic bounds, multiple counter ",
+                        "mutations, nested condition resets, and loops that yield via `wait` ",
+                        "are outside this classification. An unclassified loop produces `unknown` ",
+                        "evidence; it is NOT assumed to be unbounded (issue #103).",
                     ),
-                    tags: &["stability"],
+                    tags: &["performance", "stability"],
                 }),
-                analysis: Some(while_without_wait),
                 declarative: None,
             },
         ];
@@ -531,13 +464,11 @@ impl Default for LintRegistry {
 }
 
 impl LintRegistry {
-    /// Iterate over the metadata of every registered rule in registry order.
     pub fn rules(&self) -> impl Iterator<Item = &RuleMeta> {
         self.entries.iter().filter_map(|entry| entry.meta.as_ref())
     }
 
-    /// Load one external declarative rule. The rule is canonicalized against
-    /// the owning Workshop catalog before it can enter the execution registry.
+    /// Load one external declarative rule against the canonical Workshop catalog.
     pub fn load_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
         let catalog =
             Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
@@ -598,7 +529,6 @@ impl LintRegistry {
         }
         self.entries.push(RegistryEntry {
             meta: None,
-            analysis: None,
             declarative: Some(rule),
         });
         Ok(())
@@ -648,13 +578,75 @@ impl LintRegistry {
             .collect()
     }
 
-    /// Run every enabled rule over every Workshop rule in `program` and return
-    /// all findings, with configured severity overrides applied.
-    ///
-    /// Output order is deterministic: rules execute in registry order, over
-    /// Workshop rules in program index order.
-    pub fn run(&self, program: &wir::Program, config: &LintConfig) -> Vec<Finding> {
+    /// Run every enabled rule over `program` and return all findings, with
+    /// configured severity overrides applied.
+    pub fn run(&self, program: &workshop_rs::Program, config: &LintConfig) -> Vec<Finding> {
         self.run_report(program, config).findings
+    }
+
+    /// Run registered rules and retain per-rule statuses when canonical control
+    /// flow cannot be analyzed.
+    pub fn run_report(&self, program: &workshop_rs::Program, config: &LintConfig) -> LintRun {
+        let mut report = LintRun::default();
+        let mut available = Vec::with_capacity(program.rules.len());
+        for (rule_id, rule) in program.rules.iter().enumerate() {
+            let valid = !rule.disabled && canonical_cfg_available(&rule.actions);
+            available.push(valid);
+            if valid {
+                continue;
+            }
+            if rule.disabled {
+                continue;
+            }
+            for entry in &self.entries {
+                let id = entry
+                    .meta
+                    .as_ref()
+                    .map(|meta| meta.id.to_string())
+                    .or_else(|| {
+                        entry
+                            .declarative
+                            .as_ref()
+                            .map(|declarative| declarative.id().to_string())
+                    });
+                if let Some(id) = id.filter(|id| config.is_enabled(id)) {
+                    report.skipped.push(SkippedRule {
+                        id,
+                        rule: rule_id,
+                        reason: "canonical CFG unavailable".to_string(),
+                    });
+                }
+            }
+        }
+
+        let mut findings = crate::canonical::analyze(program, config);
+        findings.extend(self.run_canonical_custom(program, config));
+        findings.retain(|finding| available.get(finding.rule).copied().unwrap_or(false));
+        let order: HashMap<_, _> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                entry
+                    .meta
+                    .as_ref()
+                    .map(|meta| (meta.id.to_string(), index))
+                    .or_else(|| {
+                        entry
+                            .declarative
+                            .as_ref()
+                            .map(|rule| (rule.id().to_string(), index))
+                    })
+            })
+            .collect();
+        findings.sort_by_key(|finding| {
+            (
+                finding.rule,
+                order.get(&finding.code).copied().unwrap_or(usize::MAX),
+            )
+        });
+        report.findings = findings;
+        report
     }
 
     /// Run custom declarative rules over the canonical public Workshop model.
@@ -664,7 +656,7 @@ impl LintRegistry {
         &self,
         program: &workshop_rs::Program,
         config: &LintConfig,
-    ) -> Vec<crate::canonical::Finding> {
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
         for rule in 0..program.rules.len() {
             for entry in &self.entries {
@@ -690,66 +682,35 @@ impl LintRegistry {
         }
         findings
     }
+}
 
-    /// Run the registry while retaining machine-readable unavailable/skip
-    /// statuses for rules whose canonical input cannot be analyzed.
-    pub fn run_report(&self, program: &wir::Program, config: &LintConfig) -> LintRun {
-        let mut report = LintRun::default();
-        for (index, _) in program.rules.iter().enumerate() {
-            let rule = wir::RuleId::from_index(index);
-            let Ok(cfg) = Cfg::build(program, rule) else {
-                for entry in &self.entries {
-                    let id = entry
-                        .meta
-                        .as_ref()
-                        .map(|meta| meta.id.to_string())
-                        .or_else(|| entry.declarative.as_ref().map(|rule| rule.id().to_string()));
-                    if let Some(id) = id.filter(|id| config.is_enabled(id)) {
-                        report.skipped.push(SkippedRule {
-                            id,
-                            rule: index,
-                            reason: "canonical CFG unavailable".to_string(),
-                        });
-                    }
+fn canonical_cfg_available(actions: &[workshop_rs::Action]) -> bool {
+    let mut control_flow = Vec::<(bool, bool)>::new();
+    for action in actions {
+        let action = match action {
+            workshop_rs::Action::Disabled { action } => action.as_ref(),
+            action => action,
+        };
+        match action {
+            workshop_rs::Action::If { .. } => control_flow.push((true, false)),
+            workshop_rs::Action::While { .. }
+            | workshop_rs::Action::ForGlobalVariable { .. }
+            | workshop_rs::Action::ForPlayerVariable { .. } => control_flow.push((false, false)),
+            workshop_rs::Action::ElseIf { .. } => {
+                if !matches!(control_flow.last(), Some((true, false))) {
+                    return false;
                 }
-                continue;
-            };
-            let facts = SemanticFacts::new(program);
-            for entry in &self.entries {
-                let (id, mut rule_findings) =
-                    if let (Some(meta), Some(analysis)) = (&entry.meta, &entry.analysis) {
-                        if !config.is_enabled(meta.id) {
-                            continue;
-                        }
-                        (meta.id.to_string(), analysis.run(program, rule, &cfg))
-                    } else {
-                        let declarative = entry
-                            .declarative
-                            .as_ref()
-                            .expect("registry entry has a rule");
-                        if !config.is_enabled(declarative.id()) {
-                            continue;
-                        }
-                        (
-                            declarative.id().to_string(),
-                            declarative.run(
-                                &facts,
-                                rule,
-                                config.options(declarative.id()).min_matches,
-                                config.options(declarative.id()).max_matches,
-                            ),
-                        )
-                    };
-                if let Some(effective) = config.severity_override(&id) {
-                    for finding in &mut rule_findings {
-                        finding.severity = effective;
-                    }
-                }
-                report.findings.extend(rule_findings);
             }
+            workshop_rs::Action::Else => match control_flow.last_mut() {
+                Some((true, has_else)) if !*has_else => *has_else = true,
+                _ => return false,
+            },
+            workshop_rs::Action::End if control_flow.pop().is_none() => return false,
+            workshop_rs::Action::End => {}
+            _ => {}
         }
-        report
     }
+    control_flow.is_empty()
 }
 
 #[derive(Debug)]
