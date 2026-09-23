@@ -352,11 +352,7 @@ fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
         props.push(format!("endLine={}", span.end.line));
         props.push(format!("endColumn={}", span.end.col));
     }
-    eprintln!(
-        "::{kind} {}::{}",
-        props.join(","),
-        escape_workflow_data(&diagnostic.message)
-    );
+    emit_workflow_annotation(kind, &props, &diagnostic.message);
 }
 
 fn emit_finding_annotation(finding: &serde_json::Value) {
@@ -389,11 +385,25 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
         .get("message")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
+    emit_workflow_annotation(
+        kind,
+        &[
+            format!("file={}", escape_workflow_property(path)),
+            format!("line={line}"),
+            format!("col={col}"),
+            format!("endLine={end_line}"),
+            format!("endColumn={end_col}"),
+            format!("title={}", escape_workflow_property(code)),
+        ],
+        msg,
+    );
+}
+
+fn emit_workflow_annotation(kind: &str, properties: &[String], message: &str) {
     eprintln!(
-        "::{kind} file={},line={line},col={col},endLine={end_line},endColumn={end_col},title={}::{}",
-        escape_workflow_property(path),
-        escape_workflow_property(code),
-        escape_workflow_data(msg)
+        "::{kind} {}::{}",
+        properties.join(","),
+        escape_workflow_data(message)
     );
 }
 

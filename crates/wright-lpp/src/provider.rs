@@ -438,12 +438,7 @@ impl LanguageProvider for StdioLanguageProvider {
         project_root: Option<&str>,
         locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        self.require_capability(Capability::ProjectLoading)?;
-        self.call(
-            Capability::Check,
-            "lpp/check",
-            entry_params(target, project_root, locale),
-        )
+        self.check_entry(target, project_root, locale)
     }
 
     fn compile(
@@ -478,12 +473,7 @@ impl LanguageProvider for StdioLanguageProvider {
         project_root: Option<&str>,
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        self.require_capability(Capability::ProjectLoading)?;
-        self.call(
-            Capability::Compile,
-            "lpp/compile",
-            entry_params(target, project_root, locale),
-        )
+        self.compile_entry(target, project_root, locale)
     }
 
     fn reconstruct(

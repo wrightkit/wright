@@ -109,61 +109,50 @@ pub fn semantic_rename(
         Err(diag) => return refusal(vec![diag], None),
     };
 
-    if let Err(diag) = check_preconditions(&transaction, &request.sources) {
-        return refusal(vec![diag], None);
-    }
-
-    let previews = match transaction.apply(&request.sources) {
-        Ok(p) => p,
-        Err(diag) => return refusal(vec![diag], None),
-    };
-
-    if let Err(r) = validate_pipeline(
+    finish_transaction(
         provider,
         &request.documents,
-        &transaction,
-        &previews,
+        transaction,
+        &request.sources,
         request.project_root.as_deref(),
-    ) {
-        return refusal(r.0, r.1);
-    }
-
-    ProviderMutation {
-        ok: true,
-        transaction: Some(transaction),
-        diagnostics: Vec::new(),
-        preview: Some(previews),
-        provider_code: None,
-        provider_message: None,
-    }
+    )
 }
 
 pub fn validate_transaction(
     provider: &mut dyn wright_lpp::LanguageProvider,
     request: &ProviderValidateRequest,
 ) -> ProviderMutation {
-    if let Err(diag) = check_preconditions(&request.transaction, &request.sources) {
-        return refusal(vec![diag], None);
-    }
-
-    let previews = match request.transaction.apply(&request.sources) {
-        Ok(p) => p,
-        Err(diag) => return refusal(vec![diag], None),
-    };
-
-    if let Err(r) = validate_pipeline(
+    finish_transaction(
         provider,
         &request.documents,
-        &request.transaction,
-        &previews,
+        request.transaction.clone(),
+        &request.sources,
         request.project_root.as_deref(),
-    ) {
-        return refusal(r.0, r.1);
-    }
+    )
+}
 
+fn finish_transaction(
+    provider: &mut dyn wright_lpp::LanguageProvider,
+    documents: &wright_lpp::DocumentSet,
+    transaction: EditTransaction,
+    sources: &BTreeMap<String, String>,
+    project_root: Option<&str>,
+) -> ProviderMutation {
+    if let Err(diag) = check_preconditions(&transaction, sources) {
+        return refusal(vec![diag], None);
+    }
+    let previews = match transaction.apply(sources) {
+        Ok(previews) => previews,
+        Err(diag) => return refusal(vec![diag], None),
+    };
+    if let Err((diagnostics, provider)) =
+        validate_pipeline(provider, documents, &transaction, &previews, project_root)
+    {
+        return refusal(diagnostics, provider);
+    }
     ProviderMutation {
         ok: true,
-        transaction: Some(request.transaction.clone()),
+        transaction: Some(transaction),
         diagnostics: Vec::new(),
         preview: Some(previews),
         provider_code: None,

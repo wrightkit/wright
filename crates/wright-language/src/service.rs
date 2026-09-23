@@ -112,30 +112,24 @@ impl LanguageService {
         let analysis = self.analyze(document);
         let mut diagnostics = Vec::new();
         for error in &analysis.parse_errors {
-            let (source, range) = self.diagnostic_location(&analysis.files, document, error.span);
-            let source_version = self.source_version(&source, document);
-            diagnostics.push(SourceDiagnostic {
-                source,
-                range,
-                severity: "error".to_string(),
-                code: error.code.clone(),
-                message: error.message.clone(),
-                source_version,
-                document_version: document.version,
-            });
+            diagnostics.push(self.source_diagnostic(
+                &analysis.files,
+                document,
+                error.span,
+                "error",
+                &error.code,
+                &error.message,
+            ));
         }
         for finding in &analysis.findings {
-            let (source, range) = self.diagnostic_location(&analysis.files, document, finding.span);
-            let source_version = self.source_version(&source, document);
-            diagnostics.push(SourceDiagnostic {
-                source,
-                range,
-                severity: severity_name(finding.severity).to_string(),
-                code: finding.code.clone(),
-                message: finding.message.clone(),
-                source_version,
-                document_version: document.version,
-            });
+            diagnostics.push(self.source_diagnostic(
+                &analysis.files,
+                document,
+                finding.span,
+                severity_name(finding.severity),
+                &finding.code,
+                &finding.message,
+            ));
         }
         diagnostics
     }
@@ -586,6 +580,28 @@ impl LanguageService {
             .and_then(|uri| self.store.document(&uri))
             .map(|document| document.version)
             .unwrap_or(0)
+    }
+
+    fn source_diagnostic(
+        &self,
+        files: &[SourceFile],
+        document: &Document,
+        span: Option<workshop_rs::source::Span>,
+        severity: &str,
+        code: &str,
+        message: &str,
+    ) -> SourceDiagnostic {
+        let (source, range) = self.diagnostic_location(files, document, span);
+        let source_version = self.source_version(&source, document);
+        SourceDiagnostic {
+            source,
+            range,
+            severity: severity.to_string(),
+            code: code.to_string(),
+            message: message.to_string(),
+            source_version,
+            document_version: document.version,
+        }
     }
 
     fn diagnostic_location(
