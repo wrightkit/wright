@@ -10,6 +10,16 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
+CANDIDATE_SOURCE = re.compile(
+    r"^git\+https://github\.com/wrightkit/workshop-rs\.git\?rev=([0-9a-f]{40})#([0-9a-f]{40})$"
+)
+
+
+def is_pinned_git_candidate(source: str | None) -> bool:
+    if source is None:
+        return False
+    match = CANDIDATE_SOURCE.fullmatch(source)
+    return match is not None and match.group(1) == match.group(2)
 
 
 def metadata() -> dict:
@@ -50,11 +60,7 @@ def main() -> int:
     workshop = workshop_packages[0]
     source = workshop.get("source")
     is_registry = bool(source and source.startswith("registry+"))
-    is_pinned_git = bool(
-        source
-        and source.startswith("git+https://github.com/wrightkit/workshop-rs")
-        and ("?rev=" in source or "#" in source)
-    )
+    is_pinned_git = is_pinned_git_candidate(source)
 
     if not (is_registry or is_pinned_git):
         raise SystemExit(

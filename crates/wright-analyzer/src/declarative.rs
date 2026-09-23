@@ -289,7 +289,7 @@ impl DeclarativeRule {
         {
             return Vec::new();
         }
-        let scopes = public_scopes(rule_data);
+        let scopes = public_scopes(program, rule, rule_data, self.definition.matcher.scope);
         let mut findings = Vec::new();
         for (scope_id, actions, values, anchor) in scopes {
             if let Some(pattern) = &self.conditions {
@@ -350,53 +350,126 @@ type PublicScope<'a> = (
     Option<Span>,
 );
 
-fn public_scopes(rule: &workshop_rs::Rule) -> Vec<PublicScope<'_>> {
-    match rule.actions.iter().enumerate().find(|(_, action)| {
-        matches!(
-            action,
-            PublicAction::While { .. }
+fn public_scopes<'a>(
+    program: &PublicProgram,
+    rule_id: usize,
+    rule: &'a workshop_rs::Rule,
+    scope: Scope,
+) -> Vec<PublicScope<'a>> {
+    if matches!(scope, Scope::Rule) {
+        return vec![(
+            None,
+            public_scope_actions(&rule.actions, 0, rule.actions.len()),
+            rule.conditions
+                .iter()
+                .filter(|condition| !condition.disabled)
+                .map(|condition| &condition.value)
+                .collect(),
+            program.rule_span(rule_id),
+        )];
+    }
+
+    let mut result = Vec::new();
+    for (index, action) in rule.actions.iter().enumerate() {
+        let matches_scope = matches!(
+            (scope, action),
+            (Scope::While, PublicAction::While { .. })
+                | (
+                    Scope::ForGlobalVariable,
+                    PublicAction::ForGlobalVariable { .. }
+                )
+                | (
+                    Scope::ForPlayerVariable,
+                    PublicAction::ForPlayerVariable { .. }
+                )
+                | (Scope::If, PublicAction::If { .. })
+        );
+        if !matches_scope {
+            continue;
+        }
+        let Some(close) = public_matching_end(&rule.actions, index) else {
+            continue;
+        };
+        let values = match action {
+            PublicAction::While { condition } => vec![condition],
+            PublicAction::If { condition } => {
+                public_if_conditions(&rule.actions, index, close, condition)
+            }
+            _ => Vec::new(),
+        };
+        result.push((
+            Some(index),
+            public_scope_actions(&rule.actions, index + 1, close),
+            values,
+            program.action_span(rule_id, index),
+        ));
+    }
+    result
+}
+
+fn public_scope_actions(actions: &[PublicAction], start: usize, end: usize) -> Vec<&PublicAction> {
+    let mut result = Vec::new();
+    let mut index = start;
+    while index < end {
+        match &actions[index] {
+            PublicAction::Else | PublicAction::ElseIf { .. } | PublicAction::End => index += 1,
+            action => {
+                result.push(action);
+                index = public_matching_end(actions, index).map_or(index + 1, |close| close + 1);
+            }
+        }
+    }
+    result
+}
+
+fn public_if_conditions<'a>(
+    actions: &'a [PublicAction],
+    start: usize,
+    close: usize,
+    first: &'a PublicValue,
+) -> Vec<&'a PublicValue> {
+    let mut conditions = vec![first];
+    let mut index = start + 1;
+    while index < close {
+        match &actions[index] {
+            PublicAction::ElseIf { condition } => conditions.push(condition),
+            _ => {
+                if let Some(nested_close) = public_matching_end(actions, index) {
+                    index = nested_close + 1;
+                    continue;
+                }
+            }
+        }
+        index += 1;
+    }
+    conditions
+}
+
+fn public_matching_end(actions: &[PublicAction], start: usize) -> Option<usize> {
+    if !matches!(
+        actions.get(start),
+        Some(
+            PublicAction::If { .. }
+                | PublicAction::While { .. }
                 | PublicAction::ForGlobalVariable { .. }
                 | PublicAction::ForPlayerVariable { .. }
         )
-    }) {
-        Some((index, _)) => {
-            let mut depth = 0;
-            let end = rule.actions[index + 1..]
-                .iter()
-                .enumerate()
-                .find_map(|(offset, action)| {
-                    match action {
-                        PublicAction::If { .. }
-                        | PublicAction::While { .. }
-                        | PublicAction::ForGlobalVariable { .. }
-                        | PublicAction::ForPlayerVariable { .. } => depth += 1,
-                        PublicAction::End if depth == 0 => return Some(index + 1 + offset),
-                        PublicAction::End => depth -= 1,
-                        _ => {}
-                    }
-                    None
-                })
-                .unwrap_or(rule.actions.len());
-            vec![(
-                Some(index),
-                rule.actions[index + 1..end].iter().collect(),
-                rule.conditions
-                    .iter()
-                    .map(|condition| &condition.value)
-                    .collect(),
-                None,
-            )]
-        }
-        None => vec![(
-            None,
-            rule.actions.iter().collect(),
-            rule.conditions
-                .iter()
-                .map(|condition| &condition.value)
-                .collect(),
-            None,
-        )],
+    ) {
+        return None;
     }
+    let mut depth = 0;
+    for (index, action) in actions.iter().enumerate().skip(start + 1) {
+        match action {
+            PublicAction::If { .. }
+            | PublicAction::While { .. }
+            | PublicAction::ForGlobalVariable { .. }
+            | PublicAction::ForPlayerVariable { .. } => depth += 1,
+            PublicAction::End if depth == 0 => return Some(index),
+            PublicAction::End => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 fn public_action_matches(action: &PublicAction, pattern: &CanonicalActionPattern) -> bool {
@@ -683,15 +756,6 @@ fn validate_identity(id: &str) -> Result<(), RuleError> {
     {
         return Err(RuleError::InvalidIdentity(id.to_string()));
     }
-    if !namespace
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        || !rule_id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        return Err(RuleError::InvalidIdentity(id.to_string()));
-    }
     Ok(())
 }
 
@@ -729,7 +793,7 @@ impl fmt::Display for RuleError {
             RuleError::Yaml(err) => write!(f, "invalid rule YAML: {err}"),
             RuleError::InvalidIdentity(id) => write!(
                 f,
-                "invalid rule ID '{id}': must be '<namespace>/<id>' in kebab-case and '<namespace>' cannot be 'wright'"
+                "invalid rule ID '{id}': must be '<namespace>/<id>' and '<namespace>' cannot be 'wright'"
             ),
             RuleError::UnsupportedLocale(locale) => {
                 write!(f, "unsupported catalog locale: {locale}")

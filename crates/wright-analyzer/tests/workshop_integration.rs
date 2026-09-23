@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use workshop_rs::catalog::{Catalog, Locale};
 use workshop_rs::parser;
+use workshop_rs::{Action, Condition, Event, Program, Rule, Value as WorkshopValue, Variable};
 use wright_analyzer::service::SemanticService;
 
 fn workshop_path(fixture_id: &str) -> PathBuf {
@@ -22,15 +23,19 @@ fn fixture_text(fixture_id: &str) -> String {
 }
 
 fn workshop_service(fixture_id: &str) -> SemanticService<'static> {
+    let text = fixture_text(fixture_id);
+    workshop_service_from_text(&text)
+}
+
+fn workshop_service_from_text(text: &str) -> SemanticService<'static> {
     // SAFETY-free approach: the service borrows the program; keep both in a
     // leaked box for the test scope. The catalog supplies the canonical
     // expected enum domains (e.g. Create HUD Text's Reevaluation argument is
     // HudReeval), resolving bare members that are ambiguous across the
     // catalog's enum domains (#118).
-    let text = fixture_text(fixture_id);
     let catalog = Catalog::builtin().unwrap();
-    let program = parser::parse_with_context(&text, &catalog, &Locale::new("en-US"), &catalog)
-        .unwrap_or_else(|error| panic!("{fixture_id} must parse: {error}"));
+    let program = parser::parse_with_context(text, &catalog, &Locale::new("en-US"), &catalog)
+        .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"));
     let program = Box::leak(Box::new(program));
     SemanticService::from_workshop(program, "en-US")
 }
@@ -83,6 +88,7 @@ fn workshop_input_runs_all_semantic_queries() {
         serde_json::from_str(&service.handle_json(r#"{"op":"program"}"#)).unwrap();
     assert_eq!(program_response["result"]["origin"]["kind"], "workshop");
     assert_eq!(program_response["result"]["origin"]["locale"], "en-us");
+    assert_eq!(program_response["result"]["files"], Value::Null);
 }
 
 #[test]
@@ -106,6 +112,225 @@ fn workshop_input_analysis_findings_are_available() {
 }
 
 #[test]
+fn workshop_analysis_preserves_lint_semantics() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("analysis parity") {
+    event {
+        Ongoing - Global;
+    }
+    conditions {
+        Compare(Global.index, ==, 0);
+        Compare(Distance Between(Event Player, Event Player), <, 5);
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+        Else If(Compare(Global.index, ==, 0));
+        End;
+        While(Compare(Global.index, ==, 0));
+            Wait(0.016, Ignore Condition);
+        End;
+        While(True);
+            Modify Global Variable(other, Add, 1);
+        End;
+        While(Compare(Global.index, <, 3));
+            Modify Global Variable(other, Add, 1);
+        End;
+        While(Compare(Global.index, <, 3));
+            Modify Global Variable(index, Add, 1);
+        End;
+        While(Compare(Global.index, <, 3));
+            Modify Global Variable(index, Subtract, 1);
+        End;
+        While(Compare(Global.index, <, 3));
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+        End;
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let findings = findings.as_array().unwrap();
+
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "ongoing-condition-hot-path"
+            && finding["message"]
+                .as_str()
+                .unwrap()
+                .contains("condition 2 of 2")
+    }));
+    assert!(
+        findings
+            .iter()
+            .filter(|finding| finding["code"] == "duplicate-condition")
+            .count()
+            >= 2,
+        "identical If/ElseIf and If/While control-flow conditions are detected"
+    );
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "repeated-value"
+            && finding["message"]
+                .as_str()
+                .unwrap()
+                .contains("evaluated 2 times")
+    }));
+
+    let boundedness: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "while-without-wait")
+        .map(|finding| finding["boundedness"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        boundedness,
+        [
+            "obviously-unbounded",
+            "unknown",
+            "statically-bounded",
+            "unknown",
+            "unknown"
+        ]
+    );
+}
+
+#[test]
+fn disabled_conditions_are_excluded_from_ongoing_gate_counts() {
+    let mut program = Program::new();
+    program.rule(
+        Rule::new("disabled gates", Event::Global)
+            .condition(Condition::disabled(WorkshopValue::call("distance", [])))
+            .condition(WorkshopValue::Bool(false))
+            .condition(WorkshopValue::call("distance", []))
+            .condition(Condition::disabled(WorkshopValue::call("distance", [])))
+            .condition(WorkshopValue::call("distance", [])),
+    );
+    let program = Box::leak(Box::new(program));
+    let service = SemanticService::new(program);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let findings = findings.as_array().unwrap();
+    assert_eq!(findings.len(), 2);
+    assert!(
+        findings[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("condition 2 of 3")
+    );
+    assert!(
+        findings[1]["message"]
+            .as_str()
+            .unwrap()
+            .contains("condition 3 of 3")
+    );
+}
+
+#[test]
+fn workshop_cfg_preserves_branches_and_actions_around_loops() {
+    let source = r#"
+variables {
+    global:
+        0: index
+}
+subroutines {
+    0: helper
+}
+rule ("mixed control flow") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(index, 0);
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(index, 1);
+        Else;
+            Set Global Variable(index, 2);
+        End;
+        While(Compare(Global.index, <, 3));
+            Modify Global Variable(index, Add, 1);
+            Wait(0.016, Ignore Condition);
+        End;
+        Call Subroutine(helper);
+        Set Global Variable(index, 0);
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let rule = id_for(
+        &service,
+        serde_json::json!({"op": "listRules"}),
+        "mixed control flow",
+    );
+    let cfg = query(&service, serde_json::json!({"op": "getCfg", "rule": rule}));
+    let blocks = cfg["blocks"].as_array().unwrap();
+    assert!(blocks.iter().any(|block| block["kind"] == "if"));
+    assert!(blocks.iter().any(|block| block["kind"] == "while"));
+    for action in [0, 1, 2, 4, 6, 7, 8, 10, 11] {
+        assert!(
+            blocks.iter().any(|block| {
+                block["actions"]
+                    .as_array()
+                    .is_some_and(|actions| actions.contains(&serde_json::json!(action)))
+            }),
+            "CFG must retain action {action}: {blocks:?}"
+        );
+    }
+    assert!(blocks.iter().any(|block| block["waits"] == true));
+    assert!(blocks.iter().any(|block| {
+        block["calls"]
+            .as_array()
+            .is_some_and(|calls| calls.contains(&serde_json::json!(0)))
+    }));
+    assert!(blocks.iter().any(|block| {
+        block["successors"].as_array().is_some_and(|edges| {
+            edges.iter().any(|edge| edge["kind"] == "true")
+                && edges.iter().any(|edge| edge["kind"] == "false")
+        })
+    }));
+}
+
+#[test]
+fn persistent_object_identity_reflects_the_immediate_assignment() {
+    let mut program = Program::new();
+    program.global_variable(Variable::new("effectId"));
+    program.rule(
+        Rule::new("retained", Event::Global)
+            .action(Action::call("createEffect", []))
+            .action(Action::SetGlobalVariable {
+                variable: "effectId".into(),
+                value: WorkshopValue::call("lastCreatedEntity", []),
+            }),
+    );
+    program.rule(Rule::new("unretained", Event::Global).action(Action::call("createEffect", [])));
+    program.rule(
+        Rule::new("delayed", Event::Global)
+            .action(Action::call("createEffect", []))
+            .action(Action::call("print", []))
+            .action(Action::SetGlobalVariable {
+                variable: "effectId".into(),
+                value: WorkshopValue::call("lastCreatedEntity", []),
+            }),
+    );
+    program.rule(
+        Rule::new("wrong identity", Event::Global)
+            .action(Action::call("createEffect", []))
+            .action(Action::SetGlobalVariable {
+                variable: "effectId".into(),
+                value: WorkshopValue::call("lastTextId", []),
+            }),
+    );
+    let program = Box::leak(Box::new(program));
+    let service = SemanticService::new(program);
+    let objects = query(&service, serde_json::json!({"op": "getPersistentObjects"}));
+    assert_eq!(objects[0]["identityRetained"], true);
+    assert_eq!(objects[1]["identityRetained"], false);
+    assert_eq!(objects[2]["identityRetained"], false);
+    assert_eq!(objects[3]["identityRetained"], false);
+}
+
+#[test]
 fn workshop_input_references_preserve_source_spans() {
     let service = workshop_service("synthetic/declarations-rules");
     let symbol = id_for(
@@ -124,4 +349,54 @@ fn workshop_input_references_preserve_source_spans() {
             .any(|reference| reference["kind"] == "write" && reference["span"].is_object()),
         "workshop input references must carry usable spans: {references:?}"
     );
+}
+
+#[test]
+fn workshop_action_argument_reads_keep_their_authored_spans() {
+    let source = r#"
+variables {
+    global:
+        0: result
+        1: source
+    player:
+        0: state
+}
+rule ("argument spans") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(result, Global.source);
+        Set Player Variable(Event Player, state, Global.source);
+        For Global Variable(result, Global.source, Global.source, Global.source);
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let symbol = id_for(&service, serde_json::json!({"op": "listSymbols"}), "source");
+    let references = query(
+        &service,
+        serde_json::json!({"op": "findReferences", "symbol": symbol}),
+    );
+    let reads: Vec<_> = references
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|reference| reference["kind"] == "read")
+        .collect();
+    let expected: Vec<_> = source
+        .lines()
+        .enumerate()
+        .flat_map(|(line, text)| {
+            text.match_indices("Global.source")
+                .map(move |(column, _)| (line + 1, column + 1))
+        })
+        .collect();
+    assert_eq!(reads.len(), expected.len());
+    for (reference, (line, column)) in reads.iter().zip(expected) {
+        assert_eq!(reference["span"]["start"]["line"], line);
+        assert_eq!(reference["span"]["start"]["col"], column);
+    }
 }

@@ -376,7 +376,7 @@ impl SemanticIndex {
                     rule,
                     Some(action_id),
                     None,
-                    program.action_argument_span(rule, action_id, 1),
+                    program.action_argument_span(rule, action_id, 0),
                     program,
                 );
             }
@@ -424,7 +424,7 @@ impl SemanticIndex {
                     rule,
                     Some(action_id),
                     None,
-                    program.action_argument_span(rule, action_id, 2),
+                    program.action_argument_span(rule, action_id, 1),
                     program,
                 );
             }
@@ -489,7 +489,7 @@ impl SemanticIndex {
                     rule,
                     Some(action_id),
                     None,
-                    program.action_argument_span(rule, action_id, 1),
+                    program.action_argument_span(rule, action_id, 0),
                     program,
                 );
                 self.walk_value(
@@ -497,7 +497,7 @@ impl SemanticIndex {
                     rule,
                     Some(action_id),
                     None,
-                    program.action_argument_span(rule, action_id, 2),
+                    program.action_argument_span(rule, action_id, 1),
                     program,
                 );
                 self.walk_value(
@@ -505,7 +505,7 @@ impl SemanticIndex {
                     rule,
                     Some(action_id),
                     None,
-                    program.action_argument_span(rule, action_id, 3),
+                    program.action_argument_span(rule, action_id, 2),
                     program,
                 );
             }
@@ -1008,6 +1008,9 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
         if rule.disabled {
             continue;
         }
+        if config.is_enabled("ongoing-condition-hot-path") {
+            findings.extend(ongoing_condition_findings(program, rule_id, rule));
+        }
         for (action_id, action) in rule.actions.iter().enumerate() {
             let Some((start, end)) = loop_body(rule, action_id) else {
                 continue;
@@ -1033,36 +1036,38 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                     boundedness: None,
                 });
             }
-            if matches!(action, Action::While { .. })
-                && config.is_enabled("while-without-wait")
-                && !body.iter().any(|action| is_wait(action, false))
+            if let Action::While { condition } = action {
+                if config.is_enabled("while-without-wait")
+                    && !body.iter().any(|action| is_wait(action, false))
+                {
+                    let boundedness = while_boundedness(condition, body, &program.subroutines);
+                    findings.push(Finding {
+                        code: "while-without-wait".into(),
+                        severity: Severity::Warning,
+                        message: "loop body contains no wait call and may repeat without yielding"
+                            .into(),
+                        span: program.action_span(rule_id, action_id),
+                        rule: rule_id,
+                        action: Some(action_id),
+                        value: None,
+                        evidence: EvidenceClass::StaticIndicator,
+                        boundedness: Some(boundedness),
+                    });
+                }
+            }
+            if config.is_enabled("repeated-value")
+                && matches!(
+                    action,
+                    Action::While { .. } | Action::ForGlobalVariable { .. }
+                )
             {
-                let boundedness = while_boundedness(action, body);
-                findings.push(Finding {
-                    code: "while-without-wait".into(),
-                    severity: Severity::Warning,
-                    message: "loop body contains no wait call and may repeat without yielding"
-                        .into(),
-                    span: program.action_span(rule_id, action_id),
-                    rule: rule_id,
-                    action: Some(action_id),
-                    value: None,
-                    evidence: EvidenceClass::StaticIndicator,
-                    boundedness: Some(boundedness),
-                });
+                findings.extend(repeated_value_findings(
+                    program, rule_id, rule, action_id, start, body,
+                ));
             }
         }
         if config.is_enabled("duplicate-condition") {
-            let mut seen = Vec::new();
-            for (condition, value) in rule.conditions.iter().enumerate() {
-                if seen
-                    .iter()
-                    .any(|previous: &&Value| values_equal(previous, &value.value))
-                {
-                    findings.push(Finding { code: "duplicate-condition".into(), severity: Severity::Warning, message: "condition is evaluated more than once in this rule; a later branch can never be taken".into(), span: program.condition_span(rule_id, condition), rule: rule_id, action: None, value: Some(condition), evidence: EvidenceClass::Exact, boundedness: None });
-                }
-                seen.push(&value.value);
-            }
+            findings.extend(duplicate_condition_findings(program, rule_id, rule));
         }
     }
     let registry = crate::registry::LintRegistry::default();
@@ -1198,27 +1203,569 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         _ => false,
     }
 }
-fn while_boundedness(action: &Action, body: &[Action]) -> Boundedness {
-    if matches!(
-        action,
-        Action::While {
-            condition: Value::Bool(true)
-        }
+fn ongoing_condition_findings(program: &Program, rule_id: RuleId, rule: &Rule) -> Vec<Finding> {
+    if !matches!(
+        &rule.event,
+        Event::Global | Event::EachPlayer | Event::EachPlayerWithFilters { .. }
     ) {
-        Boundedness::ObviouslyUnbounded
-    } else if body.iter().any(|action| {
-        matches!(
-            action,
-            Action::ModifyGlobalVariable {
-                op: ModifyOp::Add | ModifyOp::Subtract,
-                value: Value::Number(_),
-                ..
+        return Vec::new();
+    }
+
+    let active_conditions: Vec<_> = rule
+        .conditions
+        .iter()
+        .enumerate()
+        .filter(|(_, condition)| !condition.disabled)
+        .collect();
+    let condition_count = active_conditions.len();
+    let mut findings = Vec::new();
+    for (index, &(source_index, condition)) in active_conditions.iter().enumerate() {
+        let mut expensive = Vec::new();
+        collect_expensive_values(&condition.value, &mut expensive);
+        for value in expensive {
+            let preceding = index;
+            let later = condition_count - index - 1;
+            let evaluation = match preceding {
+                0 => "is evaluated every server tick".to_string(),
+                1 => "is evaluated only after 1 preceding condition passes".to_string(),
+                count => format!("is evaluated only after {count} preceding conditions pass"),
+            };
+            let later_gates = if later == 0 {
+                String::new()
+            } else {
+                format!(
+                    ", before {later} later short-circuit gate{}",
+                    if later == 1 { "" } else { "s" }
+                )
+            };
+            let name = match value {
+                Value::Call { name, .. } => name,
+                _ => unreachable!("only expensive call values are collected"),
+            };
+            let span = program.condition_span(rule_id, source_index);
+            findings.push(Finding {
+                code: "ongoing-condition-hot-path".into(),
+                severity: Severity::Info,
+                message: format!(
+                    "geometry predicate in an ongoing-rule condition {} of {condition_count} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
+                    index + 1,
+                ),
+                span: value_occurrence(program, span, name).or(span),
+                rule: rule_id,
+                action: None,
+                value: None,
+                evidence: EvidenceClass::Heuristic,
+                boundedness: None,
+            });
+        }
+    }
+    findings
+}
+
+fn collect_expensive_values<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+    match value {
+        Value::Call { name, args } => {
+            if ["distance", "raycast", "isInLoS"].contains(&name.as_str()) {
+                out.push(value);
             }
-        )
-    }) {
+            for argument in args {
+                collect_expensive_values(argument, out);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_expensive_values(value, out);
+            }
+        }
+        Value::Vector { x, y, z } => {
+            collect_expensive_values(x, out);
+            collect_expensive_values(y, out);
+            collect_expensive_values(z, out);
+        }
+        Value::PlayerVariable { player, .. } => collect_expensive_values(player, out),
+        _ => {}
+    }
+}
+
+fn duplicate_condition_findings(program: &Program, rule_id: RuleId, rule: &Rule) -> Vec<Finding> {
+    let mut seen: Vec<&Value> = Vec::new();
+    let mut findings = Vec::new();
+    for (action_id, action) in rule.actions.iter().enumerate() {
+        let condition = match action {
+            Action::If { condition }
+            | Action::ElseIf { condition }
+            | Action::While { condition } => condition,
+            _ => continue,
+        };
+        if seen
+            .iter()
+            .any(|previous| values_equal(previous, condition))
+        {
+            let span = program.action_argument_span(rule_id, action_id, 0);
+            findings.push(Finding {
+                code: "duplicate-condition".into(),
+                severity: Severity::Warning,
+                message: "condition is evaluated more than once in this rule; a later branch can never be taken".into(),
+                span: span.or_else(|| program.action_span(rule_id, action_id)),
+                rule: rule_id,
+                action: Some(action_id),
+                value: None,
+                evidence: EvidenceClass::Exact,
+                boundedness: None,
+            });
+        } else {
+            seen.push(condition);
+        }
+    }
+    findings
+}
+
+fn repeated_value_findings(
+    program: &Program,
+    rule_id: RuleId,
+    rule: &Rule,
+    loop_action: ActionId,
+    body_start: usize,
+    body: &[Action],
+) -> Vec<Finding> {
+    let mut values = Vec::new();
+    let mut parents = Vec::new();
+    let mut spans = Vec::new();
+    if let Action::While { condition } = &rule.actions[loop_action] {
+        collect_value_tree(
+            condition,
+            None,
+            program.action_argument_span(rule_id, loop_action, 0),
+            &mut values,
+            &mut parents,
+            &mut spans,
+        );
+    }
+    let mut action = 0;
+    while action < body.len() {
+        if matches!(
+            body[action],
+            Action::While { .. }
+                | Action::ForGlobalVariable { .. }
+                | Action::ForPlayerVariable { .. }
+        ) {
+            action = matching_end(body, action).map_or(action + 1, |end| end + 1);
+            continue;
+        }
+        let action_id = body_start + action;
+        visit_action_roots(&body[action], &mut |argument, value| {
+            collect_value_tree(
+                value,
+                None,
+                program.action_argument_span(rule_id, action_id, argument),
+                &mut values,
+                &mut parents,
+                &mut spans,
+            );
+        });
+        action += 1;
+    }
+
+    duplicated_value_families(&values, &parents)
+        .into_iter()
+        .map(|family| {
+            let first = family[0];
+            Finding {
+                code: "repeated-value".into(),
+                severity: Severity::Warning,
+                message: format!(
+                    "this value expression is evaluated {} times within the same loop scope",
+                    family.len()
+                ),
+                span: spans[first].or_else(|| program.action_span(rule_id, loop_action)),
+                rule: rule_id,
+                action: Some(loop_action),
+                value: None,
+                evidence: EvidenceClass::Exact,
+                boundedness: None,
+            }
+        })
+        .collect()
+}
+
+fn visit_action_roots<'a>(action: &'a Action, visit: &mut impl FnMut(usize, &'a Value)) {
+    match action {
+        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
+            visit(0, value)
+        }
+        Action::SetPlayerVariable { player, value, .. }
+        | Action::ModifyPlayerVariable { player, value, .. } => {
+            visit(0, player);
+            visit(1, value);
+        }
+        Action::AssignMember { target, value, .. } => {
+            visit(0, target);
+            visit(1, value);
+        }
+        Action::If { condition } | Action::ElseIf { condition } | Action::While { condition } => {
+            visit(0, condition);
+        }
+        Action::ForGlobalVariable {
+            start, stop, step, ..
+        } => {
+            visit(0, start);
+            visit(1, stop);
+            visit(2, step);
+        }
+        Action::ForPlayerVariable {
+            player,
+            start,
+            stop,
+            step,
+            ..
+        } => {
+            visit(0, player);
+            visit(1, start);
+            visit(2, stop);
+            visit(3, step);
+        }
+        Action::Call { args, .. } => {
+            for (index, value) in args.iter().enumerate() {
+                visit(index, value);
+            }
+        }
+        Action::CallSubroutine { .. } | Action::Else | Action::End | Action::Disabled { .. } => {}
+    }
+}
+
+fn collect_value_tree<'a>(
+    value: &'a Value,
+    parent: Option<usize>,
+    span: Option<Span>,
+    values: &mut Vec<&'a Value>,
+    parents: &mut Vec<Option<usize>>,
+    spans: &mut Vec<Option<Span>>,
+) {
+    let index = values.len();
+    values.push(value);
+    parents.push(parent);
+    spans.push(span);
+    match value {
+        Value::Array(children) | Value::Call { args: children, .. } => {
+            for child in children {
+                collect_value_tree(child, Some(index), span, values, parents, spans);
+            }
+        }
+        Value::Vector { x, y, z } => {
+            for child in [x, y, z] {
+                collect_value_tree(child, Some(index), span, values, parents, spans);
+            }
+        }
+        Value::PlayerVariable { player, .. } => {
+            collect_value_tree(player, Some(index), span, values, parents, spans);
+        }
+        _ => {}
+    }
+}
+
+fn duplicated_value_families(values: &[&Value], parents: &[Option<usize>]) -> Vec<Vec<usize>> {
+    let mut families: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (position, value) in values.iter().enumerate() {
+        if let Some((_, family)) = families
+            .iter_mut()
+            .find(|(_, family)| values_equal(values[family[0]], value))
+        {
+            family.push(position);
+        } else {
+            families.push((position, vec![position]));
+        }
+    }
+
+    let candidates: Vec<usize> = families
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, family))| family.len() >= 2 && value_call_count(values[family[0]]) >= 2)
+        .map(|(index, _)| index)
+        .collect();
+    let mut member_family = vec![None; values.len()];
+    for &family in &candidates {
+        for &member in &families[family].1 {
+            member_family[member] = Some(family);
+        }
+    }
+    let mut reported: Vec<usize> = candidates
+        .into_iter()
+        .filter(|&family| {
+            !families[family].1.iter().any(|&member| {
+                let mut ancestor = parents[member];
+                while let Some(index) = ancestor {
+                    if member_family[index].is_some_and(|other| other != family) {
+                        return true;
+                    }
+                    ancestor = parents[index];
+                }
+                false
+            })
+        })
+        .collect();
+    reported.sort_by_key(|&family| families[family].0);
+    reported
+        .into_iter()
+        .map(|family| std::mem::take(&mut families[family].1))
+        .collect()
+}
+
+fn value_call_count(value: &Value) -> usize {
+    match value {
+        Value::Call { args, .. } => 1 + args.iter().map(value_call_count).sum::<usize>(),
+        Value::Array(values) => values.iter().map(value_call_count).sum(),
+        Value::Vector { x, y, z } => {
+            value_call_count(x) + value_call_count(y) + value_call_count(z)
+        }
+        Value::PlayerVariable { player, .. } => value_call_count(player),
+        _ => 0,
+    }
+}
+
+fn while_boundedness(
+    condition: &Value,
+    body: &[Action],
+    subroutines: &[workshop_rs::Subroutine],
+) -> Boundedness {
+    if matches!(condition, Value::Bool(true)) {
+        return Boundedness::ObviouslyUnbounded;
+    }
+    let Some((variable, toward)) = counter_comparison(condition) else {
+        return Boundedness::Unknown;
+    };
+    let mut progresses = false;
+    for (start, end) in direct_action_ranges(body) {
+        if action_has_unprovable_loop(body, start, end, subroutines) {
+            return Boundedness::Unknown;
+        }
+        match modify_direction(&body[start], &variable) {
+            Some(direction) if direction == toward => progresses = true,
+            Some(_) => return Boundedness::Unknown,
+            None if region_writes(&body[start..end], &variable, subroutines) => {
+                return Boundedness::Unknown;
+            }
+            None => {}
+        }
+    }
+    if progresses {
         Boundedness::StaticallyBounded
     } else {
         Boundedness::Unknown
+    }
+}
+
+#[derive(Debug, Clone)]
+enum CounterVariable {
+    Global(String),
+    Player { player: Value, variable: String },
+}
+
+fn counter_comparison(condition: &Value) -> Option<(CounterVariable, i32)> {
+    let Value::Call { name, args } = condition else {
+        return None;
+    };
+    if args.len() != 2 {
+        return None;
+    }
+    let left_variable = variable_of(&args[0]);
+    let right_variable = variable_of(&args[1]);
+    let left_literal = matches!(&args[0], Value::Number(_));
+    let right_literal = matches!(&args[1], Value::Number(_));
+    let (variable, variable_is_left) = match (left_variable, right_literal) {
+        (Some(variable), true) => (variable, true),
+        (None, false) if left_literal => (right_variable?, false),
+        _ => return None,
+    };
+    let direction = match (name.as_str(), variable_is_left) {
+        ("<", true) | ("<=", true) | (">", false) | (">=", false) => 1,
+        (">", true) | (">=", true) | ("<", false) | ("<=", false) => -1,
+        _ => return None,
+    };
+    Some((variable, direction))
+}
+
+fn variable_of(value: &Value) -> Option<CounterVariable> {
+    match value {
+        Value::GlobalVariable(name) => Some(CounterVariable::Global(name.clone())),
+        Value::PlayerVariable { player, variable } => Some(CounterVariable::Player {
+            player: player.as_ref().clone(),
+            variable: variable.clone(),
+        }),
+        _ => None,
+    }
+}
+
+fn modify_direction(action: &Action, variable: &CounterVariable) -> Option<i32> {
+    let (op, value) = match action {
+        Action::ModifyGlobalVariable {
+            variable: target,
+            op,
+            value,
+        } if matches!(variable, CounterVariable::Global(name) if name == target) => (op, value),
+        Action::ModifyPlayerVariable {
+            player,
+            variable: target,
+            op,
+            value,
+        } => {
+            let CounterVariable::Player {
+                player: expected_player,
+                variable: expected_variable,
+            } = variable
+            else {
+                return None;
+            };
+            if target != expected_variable || !values_equal(player, expected_player) {
+                return None;
+            }
+            (op, value)
+        }
+        _ => return None,
+    };
+    let Value::Number(step) = value else {
+        return None;
+    };
+    if *step == 0.0 {
+        return None;
+    }
+    let sign = if *step > 0.0 { 1 } else { -1 };
+    match op {
+        ModifyOp::Add => Some(sign),
+        ModifyOp::Subtract => Some(-sign),
+        _ => None,
+    }
+}
+
+fn region_writes(
+    actions: &[Action],
+    variable: &CounterVariable,
+    subroutines: &[workshop_rs::Subroutine],
+) -> bool {
+    actions
+        .iter()
+        .any(|action| action_writes(action, variable, subroutines))
+}
+
+fn action_writes(
+    action: &Action,
+    variable: &CounterVariable,
+    subroutines: &[workshop_rs::Subroutine],
+) -> bool {
+    match action {
+        Action::SetGlobalVariable {
+            variable: target, ..
+        }
+        | Action::ModifyGlobalVariable {
+            variable: target, ..
+        } => {
+            matches!(variable, CounterVariable::Global(name) if name == target)
+        }
+        Action::SetPlayerVariable {
+            player,
+            variable: target,
+            ..
+        }
+        | Action::ModifyPlayerVariable {
+            player,
+            variable: target,
+            ..
+        } => {
+            matches!(variable, CounterVariable::Player { player: expected_player, variable: expected_variable }
+            if target == expected_variable && values_equal(player, expected_player))
+        }
+        Action::CallSubroutine { .. } | Action::AssignMember { .. } => true,
+        Action::Call { name, .. } => subroutines
+            .iter()
+            .any(|subroutine| subroutine.name == *name),
+        Action::Disabled { action } => action_writes(action, variable, subroutines),
+        _ => false,
+    }
+}
+
+fn action_has_unprovable_loop(
+    actions: &[Action],
+    start: usize,
+    end: usize,
+    subroutines: &[workshop_rs::Subroutine],
+) -> bool {
+    let inner = if end > start + 1 {
+        &actions[start + 1..end - 1]
+    } else {
+        &[]
+    };
+    match &actions[start] {
+        Action::While { condition } => {
+            while_boundedness(condition, inner, subroutines) != Boundedness::StaticallyBounded
+                || region_has_unprovable_loop(inner, subroutines)
+        }
+        Action::ForGlobalVariable { variable, step, .. } => {
+            let finite_step = step_direction(step).is_some();
+            !finite_step
+                || region_writes(
+                    inner,
+                    &CounterVariable::Global(variable.clone()),
+                    subroutines,
+                )
+                || region_has_unprovable_loop(inner, subroutines)
+        }
+        Action::ForPlayerVariable { .. } => true,
+        Action::If { .. } => region_has_unprovable_loop(inner, subroutines),
+        _ => false,
+    }
+}
+
+fn region_has_unprovable_loop(actions: &[Action], subroutines: &[workshop_rs::Subroutine]) -> bool {
+    direct_action_ranges(actions)
+        .into_iter()
+        .any(|(start, end)| action_has_unprovable_loop(actions, start, end, subroutines))
+}
+
+fn direct_action_ranges(actions: &[Action]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    while start < actions.len() {
+        let end = matching_end(actions, start).map_or(start + 1, |end| end + 1);
+        ranges.push((start, end));
+        start = end;
+    }
+    ranges
+}
+
+fn matching_end(actions: &[Action], start: usize) -> Option<usize> {
+    if !matches!(
+        actions.get(start),
+        Some(
+            Action::If { .. }
+                | Action::While { .. }
+                | Action::ForGlobalVariable { .. }
+                | Action::ForPlayerVariable { .. }
+        )
+    ) {
+        return None;
+    }
+    let mut depth = 0;
+    for (index, action) in actions.iter().enumerate().skip(start + 1) {
+        match action {
+            Action::If { .. }
+            | Action::While { .. }
+            | Action::ForGlobalVariable { .. }
+            | Action::ForPlayerVariable { .. } => depth += 1,
+            Action::End if depth == 0 => return Some(index),
+            Action::End => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+fn step_direction(step: &Value) -> Option<i32> {
+    let Value::Number(step) = step else {
+        return None;
+    };
+    if *step == 0.0 {
+        None
+    } else {
+        Some(if *step > 0.0 { 1 } else { -1 })
     }
 }
 
@@ -1231,45 +1778,218 @@ fn cfg_response(program: &Program, rule: RuleId) -> Response {
             },
         };
     };
-    let loop_actions: Vec<(usize, &str)> = data
-        .actions
-        .iter()
-        .enumerate()
-        .filter_map(|(action, action_data)| {
-            let kind = match action_data {
-                Action::While { .. } => "while",
-                Action::ForGlobalVariable { .. } | Action::ForPlayerVariable { .. } => "for",
-                _ => return None,
-            };
-            Some((action, kind))
-        })
-        .collect();
-    let exit = loop_actions.len() + 1;
-    let mut blocks = vec![json!({
-        "id": 0,
-        "kind": "entry",
-        "waits": data.actions.iter().any(|action| is_wait(action, false)),
-        "calls": [],
-        "actions": if loop_actions.is_empty() { (0..data.actions.len()).collect::<Vec<_>>() } else { Vec::new() },
-        "successors": [{"to": 1, "kind": "fallthrough"}]
-    })];
-    for (offset, (action, kind)) in loop_actions.iter().enumerate() {
-        blocks.push(json!({
-            "id": offset + 1,
-            "kind": kind,
-            "waits": is_wait(&data.actions[*action], false),
-            "calls": [],
-            "actions": [action],
-            "successors": [
-                {"to": offset + 1, "kind": "back-edge"},
-                {"to": if offset + 1 == exit { exit } else { offset + 2 }, "kind": "fallthrough"}
-            ]
-        }));
-    }
-    blocks.push(json!({"id": exit, "kind": "exit", "waits": false, "calls": [], "actions": [], "successors": []}));
+    let mut builder = CanonicalCfgBuilder {
+        program,
+        actions: &data.actions,
+        blocks: Vec::new(),
+    };
+    let (entry, terminal) = builder.sequence(0, data.actions.len(), "entry");
+    let exit = builder.new_block("exit");
+    builder.edge(terminal, exit, "fallthrough");
     Response::Ok {
-        result: json!({"entry": 0, "exit": exit, "blocks": blocks}),
+        result: json!({
+            "entry": entry,
+            "exit": exit,
+            "blocks": builder.blocks.iter().enumerate().map(|(id, block)| json!({
+                "id": id,
+                "kind": block.kind,
+                "waits": block.waits,
+                "calls": block.calls,
+                "actions": block.actions,
+                "successors": block.successors.iter().map(|(to, kind)| json!({"to": to, "kind": kind})).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }),
     }
+}
+
+struct CanonicalCfgBlock {
+    kind: &'static str,
+    waits: bool,
+    calls: Vec<usize>,
+    actions: Vec<usize>,
+    successors: Vec<(usize, &'static str)>,
+}
+
+struct CanonicalCfgBuilder<'a> {
+    program: &'a Program,
+    actions: &'a [Action],
+    blocks: Vec<CanonicalCfgBlock>,
+}
+
+struct IfBranch {
+    condition_action: usize,
+    body_start: usize,
+    body_end: usize,
+}
+
+struct IfParts {
+    close: usize,
+    branches: Vec<IfBranch>,
+    else_body: Option<(usize, usize)>,
+}
+
+impl CanonicalCfgBuilder<'_> {
+    fn new_block(&mut self, kind: &'static str) -> usize {
+        let id = self.blocks.len();
+        self.blocks.push(CanonicalCfgBlock {
+            kind,
+            waits: false,
+            calls: Vec::new(),
+            actions: Vec::new(),
+            successors: Vec::new(),
+        });
+        id
+    }
+
+    fn edge(&mut self, from: usize, to: usize, kind: &'static str) {
+        self.blocks[from].successors.push((to, kind));
+    }
+
+    fn sequence(&mut self, start: usize, end: usize, entry_kind: &'static str) -> (usize, usize) {
+        let entry = self.new_block(entry_kind);
+        let mut current = entry;
+        let mut index = start;
+        while index < end {
+            if matches!(self.actions[index], Action::If { .. }) {
+                if let Some(parts) = if_parts(self.actions, index) {
+                    let merge = self.new_block("block");
+                    let mut false_target = if let Some((else_start, else_end)) = parts.else_body {
+                        let (else_entry, else_exit) = self.sequence(else_start, else_end, "block");
+                        self.edge(else_exit, merge, "fallthrough");
+                        Some(else_entry)
+                    } else {
+                        None
+                    };
+                    for branch_data in parts.branches.into_iter().rev() {
+                        let branch = self.new_block("if");
+                        self.blocks[branch]
+                            .actions
+                            .push(branch_data.condition_action);
+                        let (body_entry, body_exit) =
+                            self.sequence(branch_data.body_start, branch_data.body_end, "block");
+                        self.edge(branch, body_entry, "true");
+                        self.edge(body_exit, merge, "fallthrough");
+                        self.edge(branch, false_target.unwrap_or(merge), "false");
+                        false_target = Some(branch);
+                    }
+                    self.edge(current, false_target.unwrap_or(merge), "fallthrough");
+                    current = merge;
+                    index = parts.close + 1;
+                    continue;
+                }
+            }
+            if matches!(
+                self.actions[index],
+                Action::While { .. }
+                    | Action::ForGlobalVariable { .. }
+                    | Action::ForPlayerVariable { .. }
+            ) {
+                if let Some(close) = matching_end(self.actions, index) {
+                    let kind = if matches!(self.actions[index], Action::While { .. }) {
+                        "while"
+                    } else {
+                        "for"
+                    };
+                    let header = self.new_block(kind);
+                    self.blocks[header].actions.push(index);
+                    self.edge(current, header, "fallthrough");
+                    let (body_entry, body_exit) = self.sequence(index + 1, close, "block");
+                    self.edge(
+                        header,
+                        body_entry,
+                        if kind == "while" {
+                            "true"
+                        } else {
+                            "fallthrough"
+                        },
+                    );
+                    self.edge(body_exit, header, "back");
+                    let after = self.new_block("block");
+                    self.edge(header, after, "loop-exit");
+                    current = after;
+                    index = close + 1;
+                    continue;
+                }
+            }
+            match &self.actions[index] {
+                Action::Else | Action::ElseIf { .. } | Action::End => {}
+                action => {
+                    let block = &mut self.blocks[current];
+                    block.actions.push(index);
+                    if is_wait(action, false) {
+                        block.waits = true;
+                    }
+                    if let Some(subroutine) = action_subroutine(self.program, action) {
+                        block.calls.push(subroutine);
+                    }
+                }
+            }
+            index += 1;
+        }
+        (entry, current)
+    }
+}
+
+fn if_parts(actions: &[Action], start: usize) -> Option<IfParts> {
+    let close = matching_end(actions, start)?;
+    let mut branches = Vec::new();
+    let mut condition_action = start;
+    let mut body_start = start + 1;
+    let mut index = body_start;
+    let mut else_body = None;
+    while index < close {
+        match actions[index] {
+            Action::ElseIf { .. } => {
+                branches.push(IfBranch {
+                    condition_action,
+                    body_start,
+                    body_end: index,
+                });
+                condition_action = index;
+                body_start = index + 1;
+            }
+            Action::Else => {
+                branches.push(IfBranch {
+                    condition_action,
+                    body_start,
+                    body_end: index,
+                });
+                else_body = Some((index + 1, close));
+                break;
+            }
+            _ => {
+                if let Some(nested_close) = matching_end(actions, index) {
+                    index = nested_close + 1;
+                    continue;
+                }
+            }
+        }
+        index += 1;
+    }
+    if else_body.is_none() {
+        branches.push(IfBranch {
+            condition_action,
+            body_start,
+            body_end: close,
+        });
+    }
+    Some(IfParts {
+        close,
+        branches,
+        else_body,
+    })
+}
+
+fn action_subroutine(program: &Program, action: &Action) -> Option<usize> {
+    let name = match action {
+        Action::CallSubroutine { subroutine } => subroutine,
+        Action::Call { name, .. } => name,
+        _ => return None,
+    };
+    program
+        .subroutines
+        .iter()
+        .position(|subroutine| subroutine.name == *name)
 }
 
 fn persistent_objects(program: &Program) -> Vec<JsonValue> {
@@ -1295,6 +2015,15 @@ fn persistent_objects(program: &Program) -> Vec<JsonValue> {
                 }
                 _ => None,
             });
+            let identity = match kind {
+                "hud-text" | "in-world-text" => "lastTextId",
+                "effect" => "lastCreatedEntity",
+                _ => unreachable!(),
+            };
+            let identity_retained = data
+                .actions
+                .get(action + 1)
+                .is_some_and(|next| action_retains_identity(next, identity));
             let span = span_json(program.action_span(rule, action));
             output.push(json!({
                 "kind": kind,
@@ -1303,7 +2032,7 @@ fn persistent_objects(program: &Program) -> Vec<JsonValue> {
                 "executionScope": execution_scope(&data.event),
                 "visibility": object_visibility(args),
                 "reevaluation": reevaluation,
-                "identityRetained": true,
+                "identityRetained": identity_retained,
                 "sameKindCleanupInRule": data.actions.iter().any(|action| matches!(action, Action::Call { name, .. } if name == cleanup)),
                 "span": span,
             }));
@@ -1324,10 +2053,21 @@ fn persistent_object_kind(name: &str) -> Option<&'static str> {
 fn execution_scope(event: &Event) -> &'static str {
     match event {
         Event::Global => "global",
-        Event::EachPlayer => "per-player",
+        Event::EachPlayer | Event::EachPlayerWithFilters { .. } | Event::Player { .. } => {
+            "per-player"
+        }
         Event::Subroutine(_) => "subroutine",
-        _ => "unknown",
     }
+}
+
+fn action_retains_identity(action: &Action, identity: &str) -> bool {
+    let value = match action {
+        Action::SetGlobalVariable { value, .. }
+        | Action::SetPlayerVariable { value, .. }
+        | Action::AssignMember { value, .. } => value,
+        _ => return false,
+    };
+    matches!(value, Value::Call { name, args } if name == identity && args.is_empty())
 }
 
 fn object_visibility(args: &[Value]) -> &'static str {
@@ -1380,8 +2120,10 @@ fn lint_rules(registry: &crate::registry::LintRegistry, config: &LintConfig) -> 
         "skipped": [],
     })
 }
-fn file_count(_program: &Program) -> usize {
-    1
+fn file_count(_program: &Program) -> Option<usize> {
+    // The public Program API exposes source lookup by FileId but not a file
+    // iterator or count, so the exact count is unavailable at this boundary.
+    None
 }
 fn span_json(span: Option<Span>) -> JsonValue {
     span.map_or(JsonValue::Null, |span| json!({"file": span.file.index(), "start": {"line": span.start.line, "col": span.start.col}, "end": {"line": span.end.line, "col": span.end.col}}))
