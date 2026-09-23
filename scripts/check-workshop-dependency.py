@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Wright's single released workshop-rs dependency contract."""
+"""Validate Wright's single released or candidate workshop-rs dependency contract."""
 
 from __future__ import annotations
 
@@ -49,10 +49,17 @@ def main() -> int:
 
     workshop = workshop_packages[0]
     source = workshop.get("source")
-    if not source or not source.startswith("registry+"):
+    is_registry = bool(source and source.startswith("registry+"))
+    is_pinned_git = bool(
+        source
+        and source.startswith("git+https://github.com/wrightkit/workshop-rs")
+        and ("?rev=" in source or "#" in source)
+    )
+
+    if not (is_registry or is_pinned_git):
         raise SystemExit(
             "workshop dependency validation failed: workshop-rs must come from a "
-            f"released registry, got {source or 'unpublished'}"
+            f"released registry or pinned git candidate, got {source or 'unpublished'}"
         )
 
     direct = []
@@ -79,16 +86,26 @@ def main() -> int:
         )
 
     requirements = {dependency["req"] for _, dependency in direct}
-    if len(requirements) != 1 or not re.fullmatch(
-        r"\^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", next(iter(requirements), "")
-    ):
-        consumers = ", ".join(
-            f"{package} ({dependency['req']})" for package, dependency in direct
-        )
-        raise SystemExit(
-            "workshop dependency validation failed: direct consumers must use "
-            f"one ordinary compatible SemVer requirement, found {consumers}"
-        )
+    if is_registry:
+        if len(requirements) != 1 or not re.fullmatch(
+            r"\^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", next(iter(requirements), "")
+        ):
+            consumers = ", ".join(
+                f"{package} ({dependency['req']})" for package, dependency in direct
+            )
+            raise SystemExit(
+                "workshop dependency validation failed: direct consumers must use "
+                f"one ordinary compatible SemVer requirement, found {consumers}"
+            )
+    else:
+        if requirements != {"*"}:
+            consumers = ", ".join(
+                f"{package} ({dependency['req']})" for package, dependency in direct
+            )
+            raise SystemExit(
+                "workshop dependency validation failed: git candidate direct consumers "
+                f"must use '*', found {consumers}"
+            )
 
     consumers = ", ".join(sorted(package for package, _ in direct))
     print(
