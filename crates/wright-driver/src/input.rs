@@ -254,7 +254,7 @@ fn directory_source_count_error(path: &Path, kind: SourceKind, files: &[PathBuf]
         )
     };
     Diagnostic::error(
-        "input-kind-directory-ambiguous",
+        "input-kind-ambiguous",
         Stage::Discovery,
         format!(
             "Workshop directory '{}' must contain exactly one source file; {detail}; pass an explicit file path",
@@ -383,8 +383,10 @@ mod tests {
             .expect("write OPY source");
         std::fs::write(directory.join("generated.txt"), "rule (\"generated\") {}\n")
             .expect("write Workshop source");
+        std::fs::write(directory.join("another.txt"), "rule (\"another\") {}\n")
+            .expect("write second Workshop source");
 
-        let config = SessionConfig {
+        let mut config = SessionConfig {
             input: InputSpec::Path(directory.clone()),
             kind: SourceKind::Auto,
             ..SessionConfig::default()
@@ -393,6 +395,10 @@ mod tests {
         assert_eq!(error.code, "input-kind-ambiguous");
         assert!(error.message.contains("opy"));
         assert!(error.message.contains("workshop"));
+
+        config.kind = SourceKind::Workshop;
+        let error = resolve(&config).expect_err("multiple Workshop files must be ambiguous");
+        assert_eq!(error.code, "input-kind-ambiguous");
 
         std::fs::remove_dir_all(directory).expect("remove test directory");
     }

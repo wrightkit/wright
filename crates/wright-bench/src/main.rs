@@ -220,32 +220,28 @@ fn compile(
 
 fn count_action(action: &workshop_rs::Action) -> usize {
     use workshop_rs::Action::*;
-    match action {
-        CallSubroutine { .. } | Else | End => 0,
-        Disabled { action } => 1 + count_action(action),
-        Call { args, .. } => 1 + args.iter().map(count_value).sum::<usize>(),
+    1 + match action {
         SetGlobalVariable { value, .. }
         | ModifyGlobalVariable { value, .. }
         | If { condition: value }
         | ElseIf { condition: value }
-        | While { condition: value } => 1 + count_value(value),
+        | While { condition: value } => count_value(value),
         SetPlayerVariable { player, value, .. }
         | ModifyPlayerVariable { player, value, .. }
         | AssignMember {
             target: player,
             value,
             ..
-        } => 1 + count_value(player) + count_value(value),
+        } => count_value(player) + count_value(value),
         ForGlobalVariable {
             start, stop, step, ..
-        } => 1 + count_value(start) + count_value(stop) + count_value(step),
+        } => count_value(start) + count_value(stop) + count_value(step),
         ForPlayerVariable {
-            player,
-            start,
-            stop,
-            step,
-            ..
-        } => 1 + count_value(player) + count_value(start) + count_value(stop) + count_value(step),
+            start, stop, step, ..
+        } => count_value(start) + count_value(stop) + count_value(step),
+        Disabled { action } => count_action(action),
+        Call { args, .. } => args.iter().map(count_value).sum(),
+        CallSubroutine { .. } | Else | End => 0,
     }
 }
 
@@ -283,5 +279,39 @@ fn peak_rss_mb() -> f64 {
         } else {
             0.0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_action;
+    use workshop_rs::{Action, Value};
+
+    #[test]
+    fn benchmark_action_counts_preserve_v1_semantics() {
+        assert_eq!(
+            count_action(&Action::CallSubroutine {
+                subroutine: "sub".to_string(),
+            }),
+            1
+        );
+        assert_eq!(count_action(&Action::Else), 1);
+        assert_eq!(count_action(&Action::End), 1);
+        assert_eq!(
+            count_action(&Action::disabled(Action::CallSubroutine {
+                subroutine: "sub".to_string(),
+            })),
+            2
+        );
+        assert_eq!(
+            count_action(&Action::ForPlayerVariable {
+                player: Value::Number(99.0),
+                variable: "A".to_string(),
+                start: Value::Number(1.0),
+                stop: Value::Number(2.0),
+                step: Value::Number(1.0),
+            }),
+            4
+        );
     }
 }

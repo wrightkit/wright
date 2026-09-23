@@ -436,38 +436,38 @@ fn program_node_count(program: &workshop_rs::Program) -> usize {
 }
 
 fn action_node_count(action: &workshop_rs::Action) -> usize {
-    use workshop_rs::Action::*;
-    match action {
-        CallSubroutine { .. } | Else | End => 0,
-        Disabled { action } => action_node_count(action),
-        SetGlobalVariable { value, .. }
-        | ModifyGlobalVariable { value, .. }
-        | If { condition: value }
-        | ElseIf { condition: value }
-        | While { condition: value } => 1 + value_node_count(value),
-        SetPlayerVariable { player, value, .. }
-        | ModifyPlayerVariable { player, value, .. }
-        | AssignMember {
-            target: player,
-            value,
-            ..
-        } => 1 + value_node_count(player) + value_node_count(value),
-        ForGlobalVariable {
+    use workshop_rs::Action;
+    1 + match action {
+        Action::SetGlobalVariable { value, .. }
+        | Action::ModifyGlobalVariable { value, .. }
+        | Action::If { condition: value }
+        | Action::ElseIf { condition: value }
+        | Action::While { condition: value } => value_node_count(value),
+        Action::SetPlayerVariable { player, value, .. }
+        | Action::ModifyPlayerVariable { player, value, .. } => {
+            value_node_count(player) + value_node_count(value)
+        }
+        Action::AssignMember { target, value, .. } => {
+            value_node_count(target) + value_node_count(value)
+        }
+        Action::ForGlobalVariable {
             start, stop, step, ..
-        } => 1 + value_node_count(start) + value_node_count(stop) + value_node_count(step),
-        ForPlayerVariable {
+        } => value_node_count(start) + value_node_count(stop) + value_node_count(step),
+        Action::ForPlayerVariable {
             player,
             start,
             stop,
             step,
             ..
         } => {
-            1 + value_node_count(player)
+            value_node_count(player)
                 + value_node_count(start)
                 + value_node_count(stop)
                 + value_node_count(step)
         }
-        Call { args, .. } => 1 + args.iter().map(value_node_count).sum::<usize>(),
+        Action::Disabled { action } => action_node_count(action),
+        Action::Call { args, .. } => args.iter().map(value_node_count).sum(),
+        Action::CallSubroutine { .. } | Action::Else | Action::End => 0,
     }
 }
 
@@ -583,5 +583,38 @@ mod tests {
             &args[3],
             Value::Enum { value_type, value } if value_type == "Vector" && value == "UP"
         ));
+    }
+
+    #[test]
+    fn canonical_pipeline_preserves_action_node_counts() {
+        use workshop_rs::{Action, Event, Program, Rule, Value};
+
+        let mut program = Program::new();
+        program.rule(Rule {
+            name: "counts".to_string(),
+            disabled: false,
+            event: Event::Global,
+            conditions: vec![],
+            actions: vec![
+                Action::CallSubroutine {
+                    subroutine: "sub".to_string(),
+                },
+                Action::Else,
+                Action::End,
+                Action::disabled(Action::SetGlobalVariable {
+                    variable: "A".to_string(),
+                    value: Value::Number(1.0),
+                }),
+                Action::ForPlayerVariable {
+                    player: Value::Number(1.0),
+                    variable: "A".to_string(),
+                    start: Value::Number(1.0),
+                    stop: Value::Number(2.0),
+                    step: Value::Number(1.0),
+                },
+            ],
+        });
+
+        assert_eq!(program_node_count(&program), 11);
     }
 }

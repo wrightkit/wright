@@ -443,16 +443,26 @@ pub(crate) fn refresh_installed_completions() -> Result<usize, String> {
     for shell in shells {
         let filename = filename_for(shell);
         for dir in candidate_dirs_for(shell) {
-            if dir.join(filename).is_file() {
-                if let Ok(InstallStatus::Updated(p) | InstallStatus::Created(p)) =
-                    install_for_shell(shell, Some(&dir), false, false)
-                {
-                    println!(
-                        "==> refreshed {} completion in {}",
-                        shell.as_str(),
-                        p.display()
-                    );
-                    refreshed += 1;
+            let target_file = dir.join(filename);
+            if target_file.is_file() {
+                match install_for_shell(shell, Some(&dir), false, false) {
+                    Ok(InstallStatus::Updated(path) | InstallStatus::Created(path)) => {
+                        println!(
+                            "==> refreshed {} completion in {}",
+                            shell.as_str(),
+                            path.display()
+                        );
+                        refreshed += 1;
+                    }
+                    Ok(InstallStatus::UpToDate(_) | InstallStatus::DryRun(_)) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "warning: could not refresh {} completion in {}: {}",
+                            shell.as_str(),
+                            target_file.display(),
+                            error.message()
+                        );
+                    }
                 }
             }
         }

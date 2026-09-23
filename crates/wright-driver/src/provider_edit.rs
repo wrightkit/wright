@@ -122,10 +122,14 @@ pub fn validate_transaction(
     provider: &mut dyn wright_lpp::LanguageProvider,
     request: &ProviderValidateRequest,
 ) -> ProviderMutation {
+    let transaction = match EditTransaction::new(request.transaction.edits.clone()) {
+        Ok(transaction) => transaction,
+        Err(diagnostic) => return refusal(vec![diagnostic], None),
+    };
     finish_transaction(
         provider,
         &request.documents,
-        request.transaction.clone(),
+        transaction,
         &request.sources,
         request.project_root.as_deref(),
     )
@@ -1016,6 +1020,33 @@ mod tests {
             mutation.diagnostics
         );
         assert!(mutation.preview.is_some());
+    }
+
+    #[test]
+    fn validate_transaction_rejects_a_directly_constructed_empty_transaction() {
+        let request = ProviderValidateRequest {
+            documents: document_set(),
+            transaction: EditTransaction { edits: Vec::new() },
+            sources: sources(CLEAN),
+            project_root: None,
+        };
+        let mut provider = ScriptedProvider {
+            rename: Ok(RenameResult { edits: vec![] }),
+            validate_edits: Ok(ValidateEditsResult {
+                valid: true,
+                version: 3,
+                reason: None,
+                failing_edit_index: None,
+            }),
+            check: Ok(ok_check()),
+        };
+
+        let mutation = validate_transaction(&mut provider, &request);
+
+        assert!(!mutation.ok);
+        assert_eq!(mutation.diagnostics[0].code, "edit-empty-transaction");
+        assert!(mutation.transaction.is_none());
+        assert!(mutation.preview.is_none());
     }
 
     #[test]
