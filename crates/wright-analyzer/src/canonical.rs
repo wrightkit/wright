@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::{Value as JsonValue, json};
-use workshop_rs::ids::Id;
 use workshop_rs::source::Span;
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
@@ -13,6 +12,19 @@ use crate::service::{ErrorInfo, Origin, Request, Response};
 pub type RuleId = usize;
 pub type ActionId = usize;
 pub type ValueId = usize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SymbolId(pub usize);
+
+impl SymbolId {
+    pub const fn from_index(index: usize) -> Self {
+        Self(index)
+    }
+
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
@@ -40,8 +52,6 @@ pub struct Symbol {
     pub occurrence: Option<Span>,
     pub rule: Option<RuleId>,
 }
-
-pub type SymbolId = Id<Symbol>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
@@ -781,7 +791,10 @@ fn is_code_position(chars: &[char], position: usize) -> bool {
 
 fn action_occurrence(program: &Program, span: Option<Span>, name: &str) -> Option<Span> {
     let span = span?;
-    let source = program.source(span.file)?.text();
+    let Some(source_doc) = program.source(span.file) else {
+        return Some(span);
+    };
+    let source = source_doc.text();
     let name_chars: Vec<char> = name.chars().collect();
     for line_number in span.start.line..=span.end.line {
         let line = source.lines().nth(line_number.saturating_sub(1) as usize)?;
@@ -796,7 +809,7 @@ fn action_occurrence(program: &Program, span: Option<Span>, name: &str) -> Optio
         } else {
             chars.len()
         };
-        if let Some(operator) = line.find("=") {
+        if let Some(operator) = line.find('=') {
             upper = upper.min(operator);
         }
         for start in lower.min(chars.len())..=upper.min(chars.len()) {
@@ -818,12 +831,15 @@ fn action_occurrence(program: &Program, span: Option<Span>, name: &str) -> Optio
             ));
         }
     }
-    None
+    Some(span)
 }
 
 fn value_occurrence(program: &Program, span: Option<Span>, name: &str) -> Option<Span> {
     let span = span?;
-    let source = program.source(span.file)?.text();
+    let Some(source_doc) = program.source(span.file) else {
+        return Some(span);
+    };
+    let source = source_doc.text();
     let name_chars: Vec<char> = name.chars().collect();
     for line_number in span.start.line..=span.end.line {
         let line = source.lines().nth(line_number.saturating_sub(1) as usize)?;
@@ -857,7 +873,7 @@ fn value_occurrence(program: &Program, span: Option<Span>, name: &str) -> Option
             ));
         }
     }
-    None
+    Some(span)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -883,6 +899,27 @@ pub struct SemanticService<'a> {
 }
 
 impl<'a> SemanticService<'a> {
+    pub fn new(program: &'a Program) -> Self {
+        Self::with_origin(
+            program,
+            Origin {
+                kind: "unknown".to_string(),
+                locale: None,
+            },
+        )
+    }
+    pub fn from_workshop(program: &'a Program, locale: &str) -> Self {
+        Self::with_origin(
+            program,
+            Origin {
+                kind: "workshop".to_string(),
+                locale: Some(workshop_rs::catalog::Locale::new(locale).to_string()),
+            },
+        )
+    }
+    pub fn with_origin(program: &'a Program, origin: Origin) -> Self {
+        Self::with_origin_and_config(program, origin, LintConfig::default())
+    }
     pub fn with_origin_and_config(
         program: &'a Program,
         origin: Origin,
@@ -913,6 +950,22 @@ impl<'a> SemanticService<'a> {
             registry,
         }
     }
+    pub fn handle_json(&self, request_json: &str) -> String {
+        let request: Request = match serde_json::from_str(request_json) {
+            Ok(req) => req,
+            Err(err) => {
+                return serde_json::to_string(&Response::Error {
+                    error: ErrorInfo {
+                        code: "invalid-json".to_string(),
+                        message: format!("could not parse request JSON: {err}"),
+                    },
+                })
+                .expect("error response serializes");
+            }
+        };
+        let response = self.handle(&request);
+        serde_json::to_string(&response).expect("response serializes")
+    }
     pub fn handle(&self, request: &Request) -> Response {
         match request {
             Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": env!("CARGO_PKG_VERSION"), "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
@@ -920,9 +973,9 @@ impl<'a> SemanticService<'a> {
             Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
             Request::ListSymbols { kind } => Response::Ok { result: json!(self.index.symbols().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol_kind_name(symbol.kind) == kind)).map(symbol_json).collect::<Vec<_>>()) },
-            Request::GetSymbol { symbol } => self.index.symbol(Id::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: symbol_json(symbol) }),
-            Request::FindReferences { symbol } => { let id = Id::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: json!(self.index.references(id).into_iter().map(|reference| json!({"kind": reference_kind_name(reference.kind), "span": span_json(reference.span), "rule": reference.rule, "action": reference.action, "value": reference.value})).collect::<Vec<_>>()) } } }
-            Request::GetUsage { symbol } => { let id = Id::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
+            Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: symbol_json(symbol) }),
+            Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: json!(self.index.references(id).into_iter().map(|reference| json!({"kind": reference_kind_name(reference.kind), "span": span_json(reference.span), "rule": reference.rule, "action": reference.action, "value": reference.value})).collect::<Vec<_>>()) } } }
+            Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
             Request::GetCfg { rule } => cfg_response(self.program, *rule as usize),
             Request::GetFindings => Response::Ok { result: json!(self.findings.iter().map(finding_json).collect::<Vec<_>>()) },
             Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program)) },

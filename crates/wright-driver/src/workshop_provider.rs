@@ -37,18 +37,18 @@ impl LanguageProvider for WorkshopProvider {
     }
 }
 
-fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> ProviderDiagnostic {
+fn map_issue(issue: workshop_rs::rules::SemanticIssue, path: &Path) -> ProviderDiagnostic {
     let (kind_code, severity) = match issue.kind {
-        workshop_rs::semantic::IncompletenessKind::RawSetting => {
+        workshop_rs::rules::IncompletenessKind::RawSetting => {
             ("raw-setting", ProviderSeverity::Warning)
         }
-        workshop_rs::semantic::IncompletenessKind::UnknownAction => {
+        workshop_rs::rules::IncompletenessKind::UnknownAction => {
             ("unknown-action", ProviderSeverity::Error)
         }
-        workshop_rs::semantic::IncompletenessKind::UnknownValue => {
+        workshop_rs::rules::IncompletenessKind::UnknownValue => {
             ("unknown-value", ProviderSeverity::Error)
         }
-        workshop_rs::semantic::IncompletenessKind::OpaqueAction => {
+        workshop_rs::rules::IncompletenessKind::OpaqueAction => {
             ("opaque-action", ProviderSeverity::Error)
         }
     };
@@ -70,16 +70,14 @@ fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> Provid
 }
 
 pub fn status_for_classification(
-    classification: workshop_rs::semantic::ResidualClassification,
+    classification: workshop_rs::rules::ResidualClassification,
 ) -> Status {
     match classification {
-        workshop_rs::semantic::ResidualClassification::ProjectDefinedConstruct
-        | workshop_rs::semantic::ResidualClassification::SourceDeclaredVariable => Status::Partial,
-        workshop_rs::semantic::ResidualClassification::ProducerExtension
-        | workshop_rs::semantic::ResidualClassification::LegacyOpaque
-        | workshop_rs::semantic::ResidualClassification::UnresolvedIdentifier => {
-            Status::Unsupported
-        }
+        workshop_rs::rules::ResidualClassification::ProjectDefinedConstruct
+        | workshop_rs::rules::ResidualClassification::SourceDeclaredVariable => Status::Partial,
+        workshop_rs::rules::ResidualClassification::ProducerExtension
+        | workshop_rs::rules::ResidualClassification::LegacyOpaque
+        | workshop_rs::rules::ResidualClassification::UnresolvedIdentifier => Status::Unsupported,
     }
 }
 
@@ -128,29 +126,29 @@ mod tests {
     fn maps_residual_classifications_fail_closed() {
         assert_eq!(
             status_for_classification(
-                workshop_rs::semantic::ResidualClassification::ProjectDefinedConstruct
+                workshop_rs::rules::ResidualClassification::ProjectDefinedConstruct
             ),
             Status::Partial
         );
         assert_eq!(
             status_for_classification(
-                workshop_rs::semantic::ResidualClassification::SourceDeclaredVariable
+                workshop_rs::rules::ResidualClassification::SourceDeclaredVariable
             ),
             Status::Partial
         );
         assert_eq!(
             status_for_classification(
-                workshop_rs::semantic::ResidualClassification::ProducerExtension
+                workshop_rs::rules::ResidualClassification::ProducerExtension
             ),
             Status::Unsupported
         );
         assert_eq!(
-            status_for_classification(workshop_rs::semantic::ResidualClassification::LegacyOpaque),
+            status_for_classification(workshop_rs::rules::ResidualClassification::LegacyOpaque),
             Status::Unsupported
         );
         assert_eq!(
             status_for_classification(
-                workshop_rs::semantic::ResidualClassification::UnresolvedIdentifier
+                workshop_rs::rules::ResidualClassification::UnresolvedIdentifier
             ),
             Status::Unsupported
         );

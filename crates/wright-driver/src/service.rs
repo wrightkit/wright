@@ -571,7 +571,7 @@ impl<'a> ToolService<'a> {
             }
         };
         json!({
-            "catalogVersion": catalog.schema_version,
+            "catalogVersion": catalog.catalog_version(),
             "locales": catalog.locales().iter().map(|l| l.to_string()).collect::<Vec<_>>(),
             "actions": catalog.entries_of(workshop_rs::catalog::Kind::Action).count(),
             "values": catalog.entries_of(workshop_rs::catalog::Kind::Value).count(),

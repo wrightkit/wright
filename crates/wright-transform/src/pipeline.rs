@@ -1,16 +1,4 @@
-use workshop_rs::wir;
-
-use crate::fold_constants::FoldConstants;
 use crate::profile::Profile;
-
-/// A transformation pass over validated WIR.
-pub trait Pass {
-    /// The stable pass name (reported in metrics and regression fixtures).
-    fn name(&self) -> &'static str;
-
-    /// Run the pass over the program and return its statistics.
-    fn run(&self, program: &mut wir::Program) -> PassStats;
-}
 
 /// Statistics for one pass run.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -31,31 +19,13 @@ pub struct PassResult {
     pub stats: PassStats,
 }
 
-/// Run the pipeline for a profile over a validated program.
-///
-/// The program is validated before and after the pipeline; `Err` is returned
-/// if the input was invalid or a pass left it invalid (a pass bug).
-///
-/// Source-semantic behavior (declaration initializers) is owned by the
-/// profile-independent HIR → WIR lowering and never appears in this pass
-/// pipeline (#112): profiles may only change semantics-preserving
-/// representation/resource behavior.
+/// Run the semantics-preserving transform profile over the canonical public
+/// Workshop program model.
 pub fn run(
-    program: &mut wir::Program,
+    program: &mut workshop_rs::Program,
     profile: Profile,
-) -> Result<Vec<PassResult>, workshop_rs::wir::error::IrError> {
-    program.validate()?;
-    let passes: Vec<Box<dyn Pass>> = match profile {
-        Profile::Off => Vec::new(),
-        Profile::Compat | Profile::Aggressive => vec![Box::new(FoldConstants)],
-    };
-    let mut results = Vec::new();
-    for pass in passes {
-        let stats = pass.run(program);
-        program.validate()?;
-        results.push(PassResult { stats });
-    }
-    Ok(results)
+) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
+    run_canonical(program, profile)
 }
 
 /// Run the semantics-preserving transform profile over the canonical public
@@ -322,26 +292,25 @@ mod tests {
     use super::*;
     use workshop_rs::settings::{Settings, SettingsNode};
 
-    fn program_with_settings() -> wir::Program {
-        wir::Program {
-            settings: Some(Settings {
-                span: None,
+    fn program_with_settings() -> workshop_rs::Program {
+        let mut program = workshop_rs::Program::new();
+        program.settings = Some(Settings {
+            span: None,
+            children: vec![SettingsNode::Group {
+                name: "gamemodes".to_string(),
                 children: vec![SettingsNode::Group {
-                    name: "gamemodes".to_string(),
-                    children: vec![SettingsNode::Group {
-                        name: "skirmish".to_string(),
-                        children: vec![SettingsNode::List {
-                            name: "enabledMaps".to_string(),
-                            elements: vec![],
-                            span: None,
-                        }],
+                    name: "skirmish".to_string(),
+                    children: vec![SettingsNode::List {
+                        name: "enabledMaps".to_string(),
+                        elements: vec![],
                         span: None,
                     }],
                     span: None,
                 }],
-            }),
-            ..wir::Program::default()
-        }
+                span: None,
+            }],
+        });
+        program
     }
 
     #[test]

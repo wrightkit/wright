@@ -105,12 +105,12 @@ pub struct Diagnostic {
 /// Build a source span from the IR source model, resolving the file path.
 pub fn span_from_ir(
     span: Option<workshop_rs::source::Span>,
-    files: &workshop_rs::arena::Arena<workshop_rs::source::SourceFile>,
+    files: &[workshop_rs::source::SourceFile],
 ) -> Option<SourceSpan> {
     let span = span?;
     let file = span.file.index();
     let path = files
-        .get(span.file)
+        .get(file)
         .map(|source_file| source_file.path.clone())
         .unwrap_or_else(|| format!("<file {file}>"));
     Some(SourceSpan {

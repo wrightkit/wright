@@ -3,12 +3,10 @@ use std::fmt;
 use serde::Deserialize;
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
-use workshop_rs::wir::{self, Action, ActionId, Event, RuleId, Value, ValueId};
 use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
-use crate::analysis::{EvidenceClass, Finding as LegacyFinding, Severity};
-use crate::canonical::Finding as CanonicalFinding;
-use crate::facts::{RuleFacts, SemanticFacts};
+use crate::analysis::{EvidenceClass, Severity};
+use crate::canonical::Finding;
 
 const DEFAULT_LOCALE: &str = "en-US";
 
@@ -181,8 +179,6 @@ struct CanonicalActionPattern {
     present: bool,
 }
 
-type ScopeMatch = (Option<ActionId>, Vec<ActionId>, Vec<ValueId>, Option<Span>);
-
 #[derive(Debug, Clone)]
 enum CanonicalValuePattern {
     Any,
@@ -254,7 +250,7 @@ impl DeclarativeRule {
     }
 
     /// Declarative matchers only report exact structural facts from canonical
-    /// WIR; they do not claim runtime behavior.
+    /// Workshop representations; they do not claim runtime behavior.
     pub fn evidence(&self) -> EvidenceClass {
         EvidenceClass::Exact
     }
@@ -264,82 +260,25 @@ impl DeclarativeRule {
         Severity::Warning
     }
 
+    /// Run a declarative matcher over the canonical public Workshop program.
     pub fn run(
         &self,
-        facts: &SemanticFacts<'_>,
-        rule: RuleId,
+        program: &PublicProgram,
+        rule: usize,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<LegacyFinding> {
-        let Some(rule_facts) = facts.rule(rule) else {
-            return Vec::new();
-        };
-        let scopes = matching_scopes(&rule_facts, self.definition.matcher.scope);
-        let mut findings = Vec::new();
-        for (scope_id, actions, conditions, anchor) in scopes {
-            if self
-                .event
-                .as_deref()
-                .is_some_and(|event| event != event_id(rule_facts.event()))
-            {
-                continue;
-            }
-            if let Some(pattern) = &self.conditions {
-                let count = matching_values(&rule_facts, conditions, &pattern.value);
-                if !pattern.count.accepts(count) {
-                    continue;
-                }
-            }
-            let mut counts = Vec::new();
-            if self.actions.iter().any(|pattern| {
-                let count = matching_actions(&rule_facts, &actions, pattern);
-                let accepted = if pattern.present {
-                    pattern.count.accepts(count)
-                } else {
-                    count == 0 && pattern.count.accepts(0)
-                };
-                counts.push(count);
-                !accepted
-            }) {
-                continue;
-            }
-            let matched = counts.iter().copied().max().unwrap_or(1);
-            if min_matches.is_some_and(|min| matched < min)
-                || max_matches.is_some_and(|max| matched > max)
-            {
-                continue;
-            }
-            findings.push(LegacyFinding {
-                code: self.id().to_string(),
-                severity: self.default_severity(),
-                message: format!(
-                    "{} (matched {matched} node{})",
-                    self.metadata().summary,
-                    if matched == 1 { "" } else { "s" }
-                ),
-                span: anchor,
-                rule,
-                action: scope_id,
-                value: None,
-                evidence: self.evidence(),
-                boundedness: None,
-                persistent_object: None,
-            });
-        }
-        findings
+    ) -> Vec<Finding> {
+        self.run_canonical(program, rule, min_matches, max_matches)
     }
 
     /// Run a declarative matcher over the canonical public Workshop program.
-    /// This keeps custom lint rules on the same public semantic boundary as
-    /// first-party analysis; the WIR matcher above remains for legacy tests
-    /// and internal consumers.
     pub fn run_canonical(
         &self,
         program: &PublicProgram,
         rule: usize,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<CanonicalFinding> {
+    ) -> Vec<Finding> {
         let Some(rule_data) = program.rules.get(rule) else {
             return Vec::new();
         };
@@ -384,7 +323,7 @@ impl DeclarativeRule {
             {
                 continue;
             }
-            findings.push(CanonicalFinding {
+            findings.push(Finding {
                 code: self.id().to_string(),
                 severity: self.default_severity(),
                 message: format!(
@@ -524,6 +463,17 @@ fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) ->
                     .enumerate()
                     .all(|(index, expected)| public_value_matches(&actual_args[index], expected))
         }
+        (CanonicalValuePattern::Comparison { operator, value }, PublicValue::Number(actual)) => {
+            let CanonicalValuePattern::Number(expected) = value.as_ref() else {
+                return false;
+            };
+            match operator {
+                ComparisonOperator::Less => *actual < *expected,
+                ComparisonOperator::LessOrEqual => *actual <= *expected,
+                ComparisonOperator::Greater => *actual > *expected,
+                ComparisonOperator::GreaterOrEqual => *actual >= *expected,
+            }
+        }
         _ => false,
     }
 }
@@ -553,211 +503,6 @@ fn public_event_id(event: &workshop_rs::Event) -> &str {
     }
 }
 
-fn matching_scopes(facts: &RuleFacts<'_>, scope: Scope) -> Vec<ScopeMatch> {
-    if matches!(scope, Scope::Rule) {
-        return vec![(
-            None,
-            facts.actions().to_vec(),
-            facts.conditions().to_vec(),
-            facts
-                .program()
-                .rules
-                .get(facts.id())
-                .and_then(|rule| rule.span),
-        )];
-    }
-    let mut result = Vec::new();
-    visit_actions(facts.program(), facts.actions(), &mut |id, action| {
-        let matches = matches!(
-            (scope, action),
-            (Scope::While, Action::While { .. })
-                | (Scope::ForGlobalVariable, Action::ForGlobalVariable { .. })
-                | (Scope::ForPlayerVariable, Action::ForPlayerVariable { .. })
-                | (Scope::If, Action::If { .. })
-        );
-        if !matches {
-            return;
-        }
-        let (body, conditions) = match action {
-            Action::While {
-                condition, body, ..
-            } => (body.clone(), vec![*condition]),
-            Action::ForGlobalVariable { body, .. } | Action::ForPlayerVariable { body, .. } => {
-                (body.clone(), Vec::new())
-            }
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                let mut body = branches
-                    .iter()
-                    .flat_map(|branch| branch.body.clone())
-                    .collect::<Vec<_>>();
-                if let Some(else_body) = else_body {
-                    body.extend(else_body);
-                }
-                let conditions = branches.iter().map(|branch| branch.condition).collect();
-                (body, conditions)
-            }
-            _ => (Vec::new(), Vec::new()),
-        };
-        result.push((Some(id), body, conditions, action.span()));
-    });
-    result
-}
-
-fn matching_actions(
-    facts: &RuleFacts<'_>,
-    actions: &[ActionId],
-    pattern: &CanonicalActionPattern,
-) -> usize {
-    let mut count = 0;
-    visit_actions(facts.program(), actions, &mut |id, action| {
-        if action_matches(facts, id, action, pattern) {
-            count += 1;
-        }
-    });
-    count
-}
-
-fn action_matches(
-    facts: &RuleFacts<'_>,
-    _id: ActionId,
-    action: &Action,
-    pattern: &CanonicalActionPattern,
-) -> bool {
-    if let Some(kind) = pattern.kind {
-        let matches = matches!(
-            (kind, action),
-            (ActionKind::Any, _)
-                | (ActionKind::Call, Action::Call { .. })
-                | (ActionKind::While, Action::While { .. })
-                | (
-                    ActionKind::ForGlobalVariable,
-                    Action::ForGlobalVariable { .. }
-                )
-                | (
-                    ActionKind::ForPlayerVariable,
-                    Action::ForPlayerVariable { .. }
-                )
-                | (ActionKind::If, Action::If { .. })
-        );
-        if !matches {
-            return false;
-        }
-    }
-    let Some((name, args)) = (match action {
-        Action::Call { name, args, .. } => Some((name, args)),
-        _ => None,
-    }) else {
-        return pattern.name.is_none() && pattern.args.is_empty();
-    };
-    if pattern
-        .name
-        .as_deref()
-        .is_some_and(|expected| expected != name)
-    {
-        return false;
-    }
-    pattern.args.iter().enumerate().all(|(index, expected)| {
-        args.get(index)
-            .is_some_and(|actual| value_matches(facts, *actual, expected))
-    }) && pattern.parameters.iter().all(|(index, expected)| {
-        args.get(*index)
-            .is_some_and(|actual| value_matches(facts, *actual, expected))
-    })
-}
-
-fn matching_values(
-    facts: &RuleFacts<'_>,
-    values: Vec<ValueId>,
-    pattern: &CanonicalValuePattern,
-) -> usize {
-    values
-        .into_iter()
-        .filter(|value| value_matches(facts, *value, pattern))
-        .count()
-}
-
-fn value_matches(facts: &RuleFacts<'_>, id: ValueId, pattern: &CanonicalValuePattern) -> bool {
-    let Some(value) = facts.value(id) else {
-        return false;
-    };
-    match (pattern, value) {
-        (CanonicalValuePattern::Any, _) => true,
-        (CanonicalValuePattern::Number(expected), Value::Number { value, .. }) => expected == value,
-        (CanonicalValuePattern::String(expected), Value::String(actual))
-        | (CanonicalValuePattern::String(expected), Value::LocalizedString(actual)) => {
-            expected == actual
-        }
-        (CanonicalValuePattern::Boolean(expected), Value::Bool(actual)) => expected == actual,
-        (CanonicalValuePattern::Enum { domain, member }, Value::Enum { value_type, value }) => {
-            domain == value_type && member == value
-        }
-        (
-            CanonicalValuePattern::Call { name, args },
-            Value::Call {
-                name: actual,
-                args: actual_args,
-            },
-        ) => {
-            name == actual
-                && args.len() <= actual_args.len()
-                && args
-                    .iter()
-                    .enumerate()
-                    .all(|(index, expected)| value_matches(facts, actual_args[index], expected))
-        }
-        (
-            CanonicalValuePattern::Comparison { operator, value },
-            Value::Number { value: actual, .. },
-        ) => {
-            let CanonicalValuePattern::Number(expected) = value.as_ref() else {
-                return false;
-            };
-            match operator {
-                ComparisonOperator::Less => actual < expected,
-                ComparisonOperator::LessOrEqual => actual <= expected,
-                ComparisonOperator::Greater => actual > expected,
-                ComparisonOperator::GreaterOrEqual => actual >= expected,
-            }
-        }
-        _ => false,
-    }
-}
-
-fn visit_actions(
-    program: &wir::Program,
-    actions: &[ActionId],
-    f: &mut impl FnMut(ActionId, &Action),
-) {
-    for id in actions {
-        let Some(action) = program.actions.get(*id) else {
-            continue;
-        };
-        f(*id, action);
-        match action {
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    visit_actions(program, &branch.body, f);
-                }
-                if let Some(body) = else_body {
-                    visit_actions(program, body, f);
-                }
-            }
-            Action::While { body, .. }
-            | Action::ForGlobalVariable { body, .. }
-            | Action::ForPlayerVariable { body, .. } => visit_actions(program, body, f),
-            _ => {}
-        }
-    }
-}
-
 fn canonical_node(
     pattern: &NodePattern,
     catalog: &Catalog,
@@ -779,24 +524,23 @@ fn canonical_action(
         .as_deref()
         .map(|name| resolve(catalog, Kind::Action, locale, name))
         .transpose()?;
-    let parameters = pattern
-        .parameters
-        .iter()
-        .map(|parameter| {
-            let action = name
-                .as_deref()
-                .and_then(|name| catalog.entry(Kind::Action, name))
-                .ok_or_else(|| RuleError::ParameterNeedsActionName(parameter.name.clone()))?;
-            let index = resolve_parameter(action, locale, &parameter.name).ok_or_else(|| {
-                RuleError::UnknownParameter {
-                    action: action.id.clone(),
-                    spelling: parameter.name.clone(),
-                    locale: locale.to_string(),
-                }
-            })?;
-            Ok((index, canonical_value(&parameter.value, catalog, locale)?))
-        })
-        .collect::<Result<Vec<_>, RuleError>>()?;
+    let action_entry = name
+        .as_deref()
+        .and_then(|id| catalog.entry(Kind::Action, id));
+    let mut parameters = Vec::new();
+    for param in &pattern.parameters {
+        let Some(entry) = action_entry else {
+            return Err(RuleError::NamedParameterRequiresAction);
+        };
+        let Some(index) = resolve_parameter(entry, locale, &param.name) else {
+            return Err(RuleError::UnknownParameter {
+                action: entry.id.clone(),
+                parameter: param.name.clone(),
+                locale: locale.to_string(),
+            });
+        };
+        parameters.push((index, canonical_value(&param.value, catalog, locale)?));
+    }
     Ok(CanonicalActionPattern {
         kind: pattern.kind,
         name,
@@ -928,15 +672,6 @@ fn resolve_enum_domain(
         })
 }
 
-fn event_id(event: &Event) -> &str {
-    match event {
-        Event::Global => "global",
-        Event::EachPlayer | Event::EachPlayerWithFilters { .. } => "eachPlayer",
-        Event::Player { kind, .. } => kind.catalog_id(),
-        Event::Subroutine(_) => "subroutine",
-    }
-}
-
 fn validate_identity(id: &str) -> Result<(), RuleError> {
     let Some((namespace, rule_id)) = id.split_once('/') else {
         return Err(RuleError::InvalidIdentity(id.to_string()));
@@ -945,6 +680,15 @@ fn validate_identity(id: &str) -> Result<(), RuleError> {
         || rule_id.is_empty()
         || id.matches('/').count() != 1
         || namespace == "wright"
+    {
+        return Err(RuleError::InvalidIdentity(id.to_string()));
+    }
+    if !namespace
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        || !rule_id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     {
         return Err(RuleError::InvalidIdentity(id.to_string()));
     }
@@ -971,10 +715,10 @@ pub enum RuleError {
     },
     UnknownParameter {
         action: String,
-        spelling: String,
+        parameter: String,
         locale: String,
     },
-    ParameterNeedsActionName(String),
+    NamedParameterRequiresAction,
     AmbiguousValuePattern,
     ComparisonNeedsNumber,
 }
@@ -982,39 +726,35 @@ pub enum RuleError {
 impl fmt::Display for RuleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Yaml(error) => write!(f, "invalid rule YAML: {error}"),
-            Self::InvalidIdentity(id) => write!(
+            RuleError::Yaml(err) => write!(f, "invalid rule YAML: {err}"),
+            RuleError::InvalidIdentity(id) => write!(
                 f,
-                "external rule ID '{id}' must be <namespace>/<rule-id>; namespace 'wright' is reserved"
+                "invalid rule ID '{id}': must be '<namespace>/<id>' in kebab-case and '<namespace>' cannot be 'wright'"
             ),
-            Self::UnsupportedLocale(locale) => write!(
-                f,
-                "rule locale '{locale}' is not supported by the Workshop catalog"
-            ),
-            Self::UnknownSpelling {
+            RuleError::UnsupportedLocale(locale) => {
+                write!(f, "unsupported catalog locale: {locale}")
+            }
+            RuleError::UnknownSpelling {
                 kind,
                 spelling,
                 locale,
-            } => write!(
-                f,
-                "unknown {kind} spelling '{spelling}' in locale '{locale}'"
-            ),
-            Self::UnknownParameter {
+            } => write!(f, "unknown {kind} '{spelling}' for locale {locale}"),
+            RuleError::UnknownParameter {
                 action,
-                spelling,
+                parameter,
                 locale,
             } => write!(
                 f,
-                "unknown parameter '{spelling}' for action '{action}' in locale '{locale}'"
+                "unknown parameter '{parameter}' for action '{action}' in locale {locale}"
             ),
-            Self::ParameterNeedsActionName(parameter) => {
-                write!(f, "parameter '{parameter}' requires an action name")
+            RuleError::NamedParameterRequiresAction => {
+                write!(f, "parameter matchers require an exact action name")
             }
-            Self::AmbiguousValuePattern => {
-                f.write_str("a value pattern must select at most one literal or call shape")
+            RuleError::AmbiguousValuePattern => {
+                write!(f, "value pattern specifies more than one pattern kind")
             }
-            Self::ComparisonNeedsNumber => {
-                f.write_str("comparison patterns require a numeric literal")
+            RuleError::ComparisonNeedsNumber => {
+                write!(f, "comparison pattern value must be a number pattern")
             }
         }
     }
