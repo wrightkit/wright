@@ -4,518 +4,54 @@ Status: accepted baseline (living driver and CLI contract)
 Scope: `wright` executable, `wright-driver` crate, and their machine-readable
 contracts
 
+This file is the stable CLI/driver entry point. Detailed contracts are split by
+responsibility so implementation and review tasks can load only the relevant
+surface.
+
 ## CLI presentation and completion (#164, #186)
 
-The `wright` command model is defined once with `clap`. The same model drives
-argv parsing, generated help, and shell completion:
-
-```text
-# Pure completion generation (stdout)
-wright completion bash
-wright completion zsh
-wright completion fish
-wright completion powershell
-
-# Automatic or explicit user-local completion installation
-wright completion install
-wright completion install zsh
-wright completion install --dir <DIR>
-wright completion install --dry-run
-wright completion install --all
-```
-
-### Shell completion lifecycle (#186)
-
-Wright manages its completion lifecycle directly so installations and updates
-provide working completions without duplicating shell filesystem logic or
-mutating shell startup configuration:
-
-* `wright completion <shell>`: generates pure static completion scripts for
-  Bash, Zsh, Fish, or PowerShell (`pwsh`) directly to stdout for manual setup or
-  package-manager packaging.
-* `wright completion install [SHELL]`: detects the current shell (or takes an
-  explicit shell/`--shell` override) and installs generated completion into the
-  standard conventional user-local directories without modifying `.zshrc`,
-  `.bashrc`, or user startup scripts.
-  - `--dir <DIR>` overrides the target directory.
-  - `--dry-run` prints planned installation paths without writing files.
-  - `--all` installs/refreshes completions for all supported shells.
-  - `--force` forces re-writing existing completion files.
-* **Shell detection**: resolves `$WRIGHT_SHELL` first, then inspects `$SHELL`
-  path/filename, followed by shell environment variables (`ZSH_VERSION`,
-  `BASH_VERSION`, `FISH_VERSION`, `PSModulePath`), falling back to PowerShell on
-  Windows.
-* **Conventional installation locations**:
-  - **Fish**: `~/.config/fish/completions/wright.fish` (or
-    `~/.local/share/fish/vendor_completions.d/wright.fish`), automatically loaded
-    by Fish.
-  - **Bash**: `~/.local/share/bash-completion/completions/wright` (or
-    `~/.bash_completion.d/wright`), loaded automatically when `bash-completion`
-    is active.
-  - **Zsh**: `$ZSH_CUSTOM/completions/_wright` (if `$ZSH_CUSTOM` set),
-    `~/.oh-my-zsh/custom/completions/_wright` (if Oh My Zsh exists),
-    `~/.zfunc/_wright`, `~/.zsh/completions/_wright`, or
-    `~/.local/share/zsh/site-functions/_wright`.
-  - **PowerShell**: `~/Documents/PowerShell/Scripts/_wright.ps1` (Windows) or
-    `~/.config/powershell/completions/_wright.ps1` (Unix).
-* **Install and Update integration**:
-  - `install.sh` invokes `wright completion install` post-installation and
-    reports non-fatal guidance if automatic completion installation cannot run.
-  - `wright update` refreshes existing Wright completion files in conventional
-    locations upon replacing the binaries so completions stay aligned with the
-    installed command model.
-* **Package-manager boundaries**: Homebrew, Scoop, and WinGet packaging
-  consume `wright completion <shell>` generation using native package conventions
-  rather than maintaining hand-written completion scripts.
-
-Workflow commands accept these CLI-only presentation options:
-
-* `--format text|json` selects human or machine output (`-f` remains an alias).
-* `--renderer auto|terminal|plain|github-actions` selects the presentation
-  environment. `auto` selects GitHub Actions when `GITHUB_ACTIONS` is truthy,
-  plain output for generic `CI` or a non-TTY, and terminal output otherwise.
-* `--color auto|always|never` controls ANSI color. Explicit options take
-  precedence over environment detection; GitHub Actions keeps workflow
-  command lines free of ANSI even when color is explicitly requested.
-
-JSON output is one `wright-result/v1` envelope on stdout with no ANSI, progress,
-or workflow commands. `compile` and `convert` source artifacts remain the only
-stdout payload in text mode, including when GitHub Actions presentation is
-selected. GitHub Actions diagnostics and findings are emitted as escaped
-workflow annotations; grouping is sent to the workflow command stream and a
-concise PASS/WARN/ERROR line is appended to `GITHUB_STEP_SUMMARY` when the
-runner provides that file. The summary uses the highest structured severity:
-errors produce `ERROR`, warnings produce `WARN`, and info/notice-only results
-produce `PASS`.
-
-Interactive terminal mode is TUI-lite by design. For text workflows selected
-as `terminal`, Wright prints immediate activity feedback and then renders
-truthful session phases such as input resolution, parsing, semantic analysis,
-linting, emission, or conversion. A lightweight spinner starts only after a
-short anti-flicker threshold; phase output is transient and is fully cleared
-before the final verdict, diagnostics, report, or source artifact is rendered.
-Completed `check`, `lint`, `analyze`, and `inspect` commands print a
-command-specific PASS/WARN/ERROR verdict and compact summary before details;
-diagnostics and findings include a one-line source context when the reported
-provenance path is readable. The driver exposes typed progress events through
-`ProgressObserver`; no terminal strings, spinner frames, ANSI sequence, or
-source context enters the driver envelope or JSON. Plain output,
-redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and explicit JSON
-rendering remain static and deterministic.
-
-This document is the normative contract for the compiler driver and CLI.
-It defines the shared driver model, the command surface, exit codes,
-stdout/stderr ownership, and the `wright-result/v1` envelope that CI and
-agents consume.
+See [presentation and completion](cli/presentation.md).
 
 ## Architecture
 
-```text
-input (file | directory | `-` stdin)
-    ↓  discovery: kind detection, locale, root, identity (wright-driver::input)
-CompilerSession (wright-driver)
-    ├─ source adapter: OPY | Workshop | protocol JSON
-    ├─ validation (WIR)
-    ├─ lowering (HIR → WIR)
-    ├─ analysis (SemanticService: semantic facts, symbols, references, CFG)
-    ├─ emission (Workshop text)
-    └─ reconstruction (WIR → canonical OPY source, #126)
-            ↓
-   Envelope<T> (typed result + diagnostics + exit code)
-            ↓
-  `wright` CLI: text rendering | JSON serialization
-```
-
-The CLI is a thin argv/presentation layer. Library consumers construct a
-[`CompilerSession`] directly and receive the same typed envelopes; CLI JSON
-output is the serialization of that exact model, never a separately formatted
-result.
+See [architecture, commands, and conversion](cli/commands.md).
 
 ## Commands
 
-| Command | Purpose | Text-mode stdout |
-| --- | --- | --- |
-| `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
-| `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
-| `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
-| `wright analyze [INPUT]` | Summarize project structure, ranked CFG hotspots, and cross-cutting state | bounded semantic report with static evidence labels |
-| `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
-| `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary |
-| `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
-| `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
-| `wright update` | Self-update a standalone installation | update progress (text only) |
-
-`wright version` and `wright --version` print the implementation version
-banner (`wright <version> (wright-driver <version>)`); the version is the
-single authoritative workspace implementation version and is also reported
-inside every `wright-result/v1` envelope.
-
-All commands accept a file path, a project directory, or `-` for stdin. An
-omitted input uses the current directory. Input kind is detected from the
-extension (`.opy`, `.ostw`/`.del`, `.json`, `.txt`/`.ws`) or, for a directory,
-from the source files it contains; mixed source kinds fail with structured
-ambiguity guidance. Stdin content is auto-detected (protocol JSON starts with
-`{`, otherwise Workshop text). Detection can be overridden with
-`--kind auto|opy|ostw|workshop|protocol`. `--locale`
-overrides Workshop client-locale detection; `--root` sets the include/project
-root; `-o/--output` writes compiled output to a file. `.ostw`/`.del` inputs
-remain recognized source kinds for a future provider, but Wright does not ship
-a static DEL/OSTW adapter. Every DEL/OSTW workflow fails with the structured
-`source-provider-unavailable` diagnostic (exit 4), without partial output or
-an upstream/static fallback. DEL/OSTW provider support is not currently
-shipped with Wright and is outside this contract. OPY, Workshop, and protocol
-inputs continue through their existing owner-backed paths.
-
-The rationale for current-directory defaults, directory targets, and explicit
-ownership ambiguity is recorded in
-[`ADR-0016`](adr/0016-current-directory-and-directory-project-targets.md).
+See [architecture, commands, and conversion](cli/commands.md).
 
 ## `wright convert` and the reconstruction surface (#126)
 
-`wright convert [INPUT] --target opy|ostw` reconstructs **validated Workshop
-input** as canonical OPY source, or refuses the recognized OSTW target because
-DEL/OSTW provider support is not currently shipped, through the shared
-driver/session conversion operation (`CompilerSession::convert`). The CLI is
-a thin passthrough: it parses argv, builds the session, calls the driver
-workflow, and renders the envelope. Reconstruction logic lives in the underlying
-language crates rather than the CLI layer. The driver reuses its own `load()` path (kind detection, Workshop
-parsing, WIR validation) and delegates OPY reconstruction to the language-owned
-reconstructor; OSTW is an explicit provider boundary and never uses a static
-Wright implementation.
-
-* The target flag is **required and explicit** (`--target opy|ostw`); a
-  missing or unknown target is a usage error (exit 2), and `--target` on any
-  other command is a usage error too.
-* Only Workshop input is accepted: the available conversion surface is
-  Workshop → OPY. Workshop → OSTW is recognized but unavailable because no
-  DEL/OSTW provider is shipped, with **no direct OPY ↔ OSTW path**.
-  A non-Workshop input fails with the structured `convert-input-kind`
-  diagnostic (exit 1).
-* The result is **canonical reconstructed source** for the selected target
-  (`result.text`) plus its deterministic SHA-256 (`result.sha256`) and the
-  target (`result.target`). Reconstruction is semantic, not original-source
-  recovery: comments, formatting, macros, functions, and source abstractions
-  are not recovered (see the support matrices for the exact reconstructed and
-  rejected surfaces).
-* Non-representable constructs fail deterministically with the
-  reconstructor's stable structured diagnostics (stage `reconstruction`,
-  exit code 3) and **never carry partial source**. The supported directions
-  and their limits are documented in
-  [`docs/opy/support-matrix.md`](opy/support-matrix.md) and
-  [`docs/ostw/support-matrix.md`](ostw/support-matrix.md).
-
-The conversion boundary is covered by the CLI and driver contract tests. They
-assert the available Workshop → OPY provider handoff and the explicit
-Workshop → OSTW refusal; owner reconstruction semantics are tested in the
-owning language repository.
+See [architecture, commands, and conversion](cli/commands.md).
 
 ## `wright lint` and the lint configuration
 
-`wright lint` runs through the same compiler/session pipeline as the other
-commands and reports structured findings with stable rule IDs, configured
-severity, an evidence class, and original source identity/spans where
-available. It reuses the lint registry, so rule enable/disable/severity
-configuration is deterministic and identical across CLI and programmatic
-(`CompilerSession::lint`, tool/agent `lint`) use.
-
-The following lint-only flags configure the registry and are repeatable:
-
-* `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
-  `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
-  `ongoing-condition-hot-path`, `while-without-wait`).
-* `--rule-severity <ID>:<off|warn|error>`: override a rule's project policy.
-
-These flags are usage errors on every other command (exit 2).
-
-`ongoing-condition-hot-path` is a heuristic about the per-tick evaluation of
-an `Ongoing - Global` or `Ongoing - Each Player` rule's conditions. Each tick
-evaluates conditions in source order until one short-circuits the rule, so a
-predicate in a later condition is reached only after every preceding condition
-passes. It does not claim that the rule's action block executes every tick
-while conditions remain true, measure server cost, or infer the selectivity of
-any condition.
-
-The `lint` result envelope carries `input_identity` (the SHA-256 source
-identity; the tool/agent API exposes the same value as `inputIdentity`),
-`program`, `rules`, `config`, and `findings`:
-
-```json
-{
-  "wright": { "version": "0.1.0", "contract": "wright-result/v1" },
-  "command": "lint",
-  "ok": true,
-  "exit": 0,
-  "diagnostics": [],
-  "result": {
-    "input_identity": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-    "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2, "findings": 1 },
-    "rules": [
-      {
-        "id": "min-wait-loop",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "loop body waits at the workshop minimum rate",
-        "evidence": "static-indicator",
-        "tags": ["performance", "stability"],
-        "knownLimits": "Wait durations that are not statically known ..."
-      },
-      {
-        "id": "duplicate-condition",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "condition is evaluated more than once within one rule",
-        "evidence": "exact",
-        "tags": ["correctness"],
-        "knownLimits": "Detection is structural (not value-flow) and rule-local ..."
-      },
-      {
-        "id": "expensive-loop-check",
-        "defaultSeverity": "info",
-        "effectiveSeverity": "info",
-        "enabled": true,
-        "summary": "geometry predicate evaluated inside a loop body",
-        "evidence": "heuristic",
-        "tags": ["performance"],
-        "knownLimits": "The expensive-call list is a fixed heuristic ..."
-      },
-      {
-        "id": "ongoing-condition-hot-path",
-        "defaultSeverity": "info",
-        "effectiveSeverity": "info",
-        "enabled": true,
-        "summary": "geometry predicate evaluated in an ongoing-rule condition",
-        "evidence": "heuristic",
-        "tags": ["performance", "stability"],
-        "knownLimits": "The geometry-predicate list is a fixed heuristic; the analysis does not measure runtime cost or infer selectivity ..."
-      },
-      {
-        "id": "repeated-value",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "identical value expression evaluated more than once in one loop scope",
-        "evidence": "exact",
-        "tags": ["performance", "stability"],
-        "knownLimits": "Detection is rule-local and structural ..."
-      },
-      {
-        "id": "while-without-wait",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "while loop body contains no wait call",
-        "evidence": "static-indicator",
-        "tags": ["stability"],
-        "knownLimits": "Counter-pattern detection is conservative and structural: only literal-bound comparisons (<, <=, >, >=) are recognized. A statically-bounded claim additionally requires every direct child ..."
-      }
-    ],
-    "config": { "rules": { "min-wait-loop": { "enabled": true, "severity": "warning" } } },
-    "findings": [
-      {
-        "code": "min-wait-loop",
-        "severity": "warning",
-        "evidence": "static-indicator",
-        "message": "loop body waits at the workshop minimum rate; ...",
-        "span": { "file": 0, "path": "program.txt", "start": { "line": 28, "col": 9 }, "end": { "line": 31, "col": 13 } }
-      }
-    ]
-  }
-}
-```
-
-The core workflows have separate contracts:
-
-* `check` is the correctness gate. It reports discovery, source implementation, project,
-  semantic, lowering, and validation diagnostics. Ordinary configurable lint
-  findings such as `duplicate-condition` and `min-wait-loop` are not emitted
-  by default.
-* `lint` executes the configurable `LintRegistry` and returns stable rule IDs,
-  severity, evidence class, boundedness where applicable, source spans, rule
-  metadata, and effective configuration.
-* `analyze` returns semantic facts rather than lint findings. Human text output
-  is a bounded report with a program overview, aggregate CFG measurements,
-  ranked rule hotspots, and ranked cross-cutting variables. The displayed
-  facts are static; rankings are heuristics based on CFG size or usage
-  coupling. `analyze --format json` retains the complete `result.facts`
-  payload for agents and embedding, while `inspect` is the human-facing
-  exhaustive structural/semantic view. These facts can inform future lint
-  rules without making analysis a view of the registry.
-
-Analysis findings (`lint` and the tool/agent `getFindings`/`lint` responses)
-carry an `evidence` field classifying how strongly the finding is supported
-(`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
-
-Finding spans carry a machine-readable `path` resolved root-relative to the
-input include root (`--root`, defaulting to the input's directory): file 0 is
-the main input, and additional files in a multi-file program resolve from the
-program file registry. The same source location therefore reports the same
-`path` across `lint` and the tool/agent `Findings`/`Lint` surfaces regardless
-of how the input was spelled (absolute, relative, or cwd-relative); stdin
-inputs report `<stdin>`.
-
-`while-without-wait` findings additionally carry a machine-readable
-`boundedness` field (`obviously-unbounded` | `statically-bounded` | `unknown`)
-classifying the no-yield loop's repetition evidence, and their severity is
-derived from that evidence class: `warning` for an obviously unbounded or
-unknown loop, `info` for a statically bounded no-yield loop. A statically
-bounded no-yield loop is never treated as equivalent to an unbounded one. For
-example, the agent-lab repro `loop-waitless.opy` (wrightkit/agent-lab#68) is a
-finite 10-iteration counter loop and reports as a statically bounded `info`
-finding:
-
-```json
-{ "code": "while-without-wait", "severity": "info", "boundedness": "statically-bounded", "message": "loop body contains no wait call; the loop is statically bounded by a counter against a literal bound, ..." }
-```
-
-Non-`while-without-wait` findings carry `"boundedness": null`.
+See [lint configuration and findings](cli/lint.md).
 
 ## Exit codes
 
-| Code | Meaning | Examples |
-| --- | --- | --- |
-| 0 | success | clean check, compiled artifact produced, reconstructed source produced |
-| 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade, non-Workshop `convert` input |
-| 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target` |
-| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation, unsupported platform for `update`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface) |
-| 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure |
-
-Exit codes are deterministic for identical inputs and configuration and are
-also carried inside the JSON envelope (`exit` field), so agents never need to
-infer them from process state alone.
+See [machine-readable CLI contracts](cli/machine-contract.md).
 
 ## `wright update` (self-update)
 
-`wright update` upgrades a **standalone** installation (one created by
-`install.sh` or by unpacking a release archive manually) from the canonical
-GitHub Release artifacts (the same archives and checksums the installer and
-the package-manager manifests consume). It is not a compiler workflow, so it
-is text-only and produces no `wright-result/v1` envelope.
-
-* `wright update`: resolve the latest stable release, download the platform
-  archive and its published SHA-256 checksum, verify the checksum before
-  touching anything, extract, and atomically replace `wright` and
-  `wright-lsp` in the running executable's directory, then smoke-check both
-  binaries report the new version.
-* `wright update --check`: resolve and report whether an update is
-  available without modifying the installation.
-* `wright update --version <VERSION>`: install an exact version instead of
-  the latest stable release. Refuses a downgrade (the installed version is
-  newer) with exit 1.
-
-Supported platforms mirror `install.sh`: Linux x86_64 and macOS
-(x86_64/arm64), mapped to the release target matrix in `docs/release.md`.
-On Windows, standalone self-update is refused with guidance to
-`winget upgrade WrightKit.Wright` / `scoop update wright` (exit 3).
-
-Package-manager-managed installations are detected from the executable's
-location (Homebrew/Cellar, Scoop, WinGet paths) and refused with guidance to
-the channel's own upgrade command (exit 3); `wright update` never overwrites
-a binary it does not own. A missing `wright-lsp` next to `wright`, or an
-unwritable installation directory, fails with reinstall guidance (exit 4).
-
-Environment overrides (test/advanced hooks, matching `install.sh`):
-
-* `WRIGHT_INSTALL_BASE_URL`: base URL of release artifacts
-* `WRIGHT_API_URL`: URL used to resolve the latest release
-* `WRIGHT_INSTALL_OS` / `WRIGHT_INSTALL_ARCH`: override platform detection
+See [self-update](cli/update.md).
 
 ## stdout / stderr ownership
 
-* Text mode: the command result goes to stdout; diagnostics go to stderr.
-* JSON mode: exactly one envelope goes to stdout; stderr stays empty on
-  success. Usage errors are the only case that writes to stderr without an
-  envelope (exit 2).
-* `wright compile` without `-o` writes the raw artifact to stdout in text
-  mode; in JSON mode the artifact is the `result.output.text` field of the
-  envelope.
+See [machine-readable CLI contracts](cli/machine-contract.md).
 
 ## `wright-result/v1` envelope
 
-```json
-{
-  "wright": { "version": "0.1.0", "contract": "wright-result/v1" },
-  "command": "analyze",
-  "ok": true,
-  "exit": 0,
-  "diagnostics": [],
-  "result": {
-    "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2 },
-    "facts": {
-      "symbols": [{ "id": 0, "kind": "globalVariable", "name": "counter", "usage": { "reads": 1, "writes": 1, "calls": 0, "rules": 1 } }],
-      "rules": [{ "id": 0, "name": "loop", "controlFlow": { "blocks": 4, "edges": 4, "loopBlocks": 1, "waitBlocks": 1 } }]
-    }
-  }
-}
-```
-
-Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
-`diagnostics[].code/stage/severity/span/source`, and each command's
-`result` shape. Human-readable `message` wording is explicitly not part of the
-machine contract.
-
-Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
-`unsupported-construct`, `settings-invalid`, `settings-placement` (frontend),
-`settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/
-`lower-error` (lowering), `validation-error` (validation), `input-*`/
-`stdin-*` (discovery), `output-io` (emission), analysis findings reuse the
-analyzer's codes, and `*-internal` / `*-unavailable` (internal).
-`source-provider-unavailable` marks the explicit DEL/OSTW provider boundary
-and is reported at the internal stage.
-A `convert`
-reconstruction rejection carries the language-owned reconstructor's stable
-code (e.g. `unsupported-per-player-loop` from `wright-opy`,
-`reconstruct-unsupported-action` from an OSTW provider) with stage
-`reconstruction`; `convert-input-kind` (discovery) rejects non-Workshop
-`convert` input, and `manifest-error`/`catalog-error` from a reconstructor
-map to the internal stage.
-
-The native `.opy` frontend's builtin-resolution stage adds the stable codes
-`unknown-action`, `unknown-value`, `unknown-member`, `invalid-arity`,
-`invalid-receiver`, `enum-domain-mismatch`, `action-in-value-position`,
-`value-in-action-position`, `invalid-call-context`, and `invalid-iterable`
-(semantic resolution against the OPY compatibility manifest, #109; all
-source-located). Named/keyword argument binding adds `unknown-keyword`,
-`duplicate-argument`, `missing-argument`, `positional-after-keyword`,
-`keyword-required`, `keyword-unsupported`, and `invalid-argument`
-(variable-required parameters; #110).
+See [machine-readable CLI contracts](cli/machine-contract.md).
 
 ## Determinism
 
-For identical inputs and configuration, JSON output is byte-deterministic
-(no timestamps, no environment-dependent ordering). Input identity is the
-SHA-256 of the input bytes (`result.output.input_identity`); for provider-backed
-directory targets, the owner supplies the identity of its selected primary
-source text. Emitted artifacts carry their own SHA-256
-(`result.output.sha256`).
+See [machine-readable CLI contracts](cli/machine-contract.md).
 
 ## The `.opy` source implementation
 
-`.opy` `check`, `compile`, `lint`, and `analyze` inputs use the owner-backed
-`opy-rs` implementation through Wright's narrow LPP adapter. File targets use
-LPP 1.1; directory targets use LPP 1.2 so `opy-rs` owns project entry
-discovery. No Node or OverPy is involved, and provider failures
-never fall back to the native frontend. `lint` and `analyze` parse the
-provider's canonical Workshop artifact through `workshop-rs` and reuse the
-existing Wright analyzer and lint registry. Provider artifacts have no OPY
-span map, so their analysis origin and lint spans are explicitly
-`provider-artifact` / `<provider-artifact>` rather than fabricated OPY
-locations. An entry path is required for provider-backed workflows, so stdin
-`.opy` is rejected; `--root` supplies the project root for file and directory
-inputs. The
-provider executable is resolved by the #244 bootstrap path and can be
-overridden with `--opy-provider`. `inspect` remains on the native frontend for
-explicit OPY file targets; OPY directory targets use the owner-backed compile
-path so the owner selects the project entry.
-The source surface is declared in
-[`opy/support-matrix.md`](opy/support-matrix.md).
+See [source-provider and library integration](cli/integration.md).
 
 ## Library reuse
 
-External Rust consumers depend on `wright-driver` (never the CLI) and drive
-`CompilerSession::new(config)` → `compile`/`check`/`analyze`/`inspect`/`lint`
-or `convert(ConvertTarget)`, each returning a typed `Envelope<T>`. Loading is
-idempotent (`Session::load`), and the driver exposes the resolved locale,
-input identity, and origin metadata. See `crates/wright-driver/tests/driver.rs`
-and the provider/integration tests for the reusable test surface.
+See [source-provider and library integration](cli/integration.md).
