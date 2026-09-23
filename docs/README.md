@@ -86,7 +86,7 @@ roadmap snapshots in durable architecture documents.
 ## Repository entry points
 
 - [`README.md`](../README.md): public product overview and quick start.
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md): contributor onboarding and checks.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): contributor onboarding and checks.
 - [`AGENTS.md`](../AGENTS.md): implementation routing, ownership, verification,
   and delivery rules.
 - [`LICENSE`](../LICENSE): repository license.

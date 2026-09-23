@@ -199,7 +199,7 @@ maintainer references are indexed in [`docs/README.md`](docs/README.md).
 
 ## Contributing
 
-Read [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md) before
+Read [`AGENTS.md`](AGENTS.md) and [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) before
 making changes. Do not push directly to `main`; deliver implementation changes
 through focused branches and PRs.
 
