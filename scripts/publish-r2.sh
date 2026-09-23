@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Publish verified release archives to immutable R2 objects and advance latest.
+# Publish verified stable or nightly archives to immutable R2 objects.
 
 set -euo pipefail
 
-: "${RELEASE_TAG:?RELEASE_TAG is required}"
+: "${RELEASE_CHANNEL:?RELEASE_CHANNEL is required}"
+: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
+: "${RELEASE_COMMIT:?RELEASE_COMMIT is required}"
 : "${R2_BUCKET:?R2_BUCKET is required}"
 : "${R2_ENDPOINT:?R2_ENDPOINT is required}"
 : "${R2_PUBLIC_BASE_URL:?R2_PUBLIC_BASE_URL is required}"
@@ -12,8 +14,25 @@ set -euo pipefail
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 : "${ARTIFACTS_DIR:?ARTIFACTS_DIR is required}"
 
-version="${RELEASE_TAG#v}"
-release_dir="$GITHUB_WORKSPACE/r2-release"
+version="$RELEASE_VERSION"
+case "$RELEASE_CHANNEL" in
+  stable)
+    object_prefix="wright/releases/$version"
+    pointer_key="wright/latest/version"
+    pointer_value="$version"
+    ;;
+  nightly)
+    object_prefix="wright/nightly/$RELEASE_COMMIT"
+    pointer_key="wright/nightly/version"
+    pointer_value="$RELEASE_COMMIT"
+    ;;
+  *)
+    echo "unsupported R2 release channel: $RELEASE_CHANNEL" >&2
+    exit 1
+    ;;
+esac
+
+release_dir="$GITHUB_WORKSPACE/r2-$RELEASE_CHANNEL"
 mkdir -p "$release_dir"
 for triple in x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
   ext="tar.gz"
@@ -59,16 +78,15 @@ for archive in "$release_dir"/wright-*.tar.gz "$release_dir"/wright-*.zip; do
   actual_hash="$(sha256sum "$archive" | awk 'NR == 1 { print $1 }')"
   test "$actual_hash" = "$expected_hash"
   name="$(basename "$archive")"
-  put_immutable "$archive" "wright/releases/$version/$name" 'public, max-age=31536000, immutable' 'application/octet-stream'
-  put_immutable "$checksum" "wright/releases/$version/$name.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
-  verify_public "wright/releases/$version/$name" "$archive" 'max-age=31536000.*immutable'
-  verify_public "wright/releases/$version/$name.sha256" "$checksum" 'max-age=31536000.*immutable'
+  put_immutable "$archive" "$object_prefix/$name" 'public, max-age=31536000, immutable' 'application/octet-stream'
+  put_immutable "$checksum" "$object_prefix/$name.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
+  verify_public "$object_prefix/$name" "$archive" 'max-age=31536000.*immutable'
+  verify_public "$object_prefix/$name.sha256" "$checksum" 'max-age=31536000.*immutable'
 done
 
-latest_version="$GITHUB_WORKSPACE/latest-version"
-printf '%s\n' "$version" > "$latest_version"
-aws s3api put-object --bucket "$R2_BUCKET" --key wright/latest/version --body "$latest_version" \
+pointer_file="$GITHUB_WORKSPACE/r2-$RELEASE_CHANNEL-pointer"
+printf '%s\n' "$pointer_value" > "$pointer_file"
+aws s3api put-object --bucket "$R2_BUCKET" --key "$pointer_key" --body "$pointer_file" \
   --cache-control 'no-store, max-age=0' --content-type 'text/plain; charset=utf-8' \
   --endpoint-url "$R2_ENDPOINT" >/dev/null
-verify_public wright/latest/version "$latest_version" 'no-store'
-rm -f "$latest_version"
+verify_public "$pointer_key" "$pointer_file" 'no-store'

@@ -32,33 +32,36 @@ python3 scripts/update-dist-manifests.py --version 0.1.0 \
 ```
 
 Between releases the checked-in files carry the current workspace version
-with all-zero placeholder hashes. `scripts/verify-dist.py` (run in CI) fails
-when the committed metadata drifts from the workspace version or when the
-install script stops covering the declared target matrix.
+with all-zero placeholder hashes. The stable release workflow updates these
+version-only manifests in its post-bump `main` commit; the generated release
+manifests later replace the placeholders with hashes from the verified native
+archives. `scripts/verify-dist.py` (run in CI) fails when the committed
+metadata drifts from the workspace version or when the install script stops
+covering the declared target matrix.
 
 ## Publication process
 
-The release-please workflow only maintains the Release PR and checked-in
-version/changelog. After the exact release commit's `CI` workflow succeeds,
-`release-publication.yml` calls the reusable release workflow (`release.yml`):
+The explicit stable workflow first synchronizes the version-only checked-in
+metadata and commits it to `main`. It then builds the native matrix, verifies
+the checksums, and generates the Homebrew, WinGet, and Scoop manifests from
+those exact artifacts. It attaches the generated manifests to the GitHub
+Release as:
 
-1. `package-manifests` regenerates the Homebrew, WinGet, and Scoop manifests from
-   the native release checksums and stages them for the final GitHub Release as:
-   - `wright-<version>.homebrew.rb`
-   - `wright-<version>.winget.zip` (unzip into a winget-pkgs checkout)
-   - `wright-<version>.scoop.json`
+- `wright-<version>.homebrew.rb`
+- `wright-<version>.winget.zip` (unzip into a winget-pkgs checkout)
+- `wright-<version>.scoop.json`
 
-2. `publish-release` creates the tag and public GitHub Release with the
-   complete verified asset set after the native and package-manager stages
-   succeed.
+Only stable releases update package-manager metadata. The nightly workflow
+publishes commit-keyed archives to the separate R2 nightly namespace and does
+not update any file under `dist/` or any package-manager channel.
 
 ### Homebrew
 
 - Repository: `wrightkit/homebrew-tap` (create it once under the WrightKit
   organization; taps are plain git repositories with the formula at the root).
-- Publication is automatic: the `publish-tap` job of the release workflow
-  pushes the generated `wright.rb` (the same formula attached to the Release
-  as `wright-<version>.homebrew.rb`) into the tap on every release. It needs a
+- Publication is automatic after the explicit stable workflow: the
+  `publish-tap` job pushes the generated `wright.rb` (the same formula attached
+  to the Release as `wright-<version>.homebrew.rb`) into the tap. It needs a
   fine-grained PAT with `Contents: Read and write` on `wrightkit/homebrew-tap`,
   stored as the `GH_TOKEN` Actions secret available to this repository. The
   formula downloads the exact published macOS archives for both Apple Silicon

@@ -281,67 +281,15 @@ indicator). No new `heuristic`-class rules are added in this set.
   `.opy` source + pinned adapter `.json` payload, Wright-authored. Constraint:
   new fixtures follow the same provenance and regeneration process.
 
-## Dependencies
+## Related contracts
 
-- **#97 (registry)**: CLOSED, implemented at `c5b46f3`
-  (`feat(analyzer): establish lint rule registry and configuration contract
-  (M12)`); present in the current tree. Ready.
-- **#98 (lint surface)**: implementation at `a54433b`
-  (`feat(cli): add first-class lint command with shared structured results
-  (M12)`), issue still OPEN; independent QA verification recorded
-  in issue #98 (VERIFIED at `a54433b`); next step is PM
-  acceptance of #98. The registry + lint surface exist in the current tree, so
-  #99 may proceed on them.
-- **Owner corpus**: OPY syntax and semantic cases are generated and maintained
-  by `opy-rs`. Wright keeps only focused analyzer inputs under
-  `tests/fixtures` and consumes canonical Workshop or provider results without
-  a local language adapter.
-
-## Unresolved questions
-
-- **Q-001 [product]: RESOLVED**: `repeated-value` reporting rule and finding
-  density. Measured on the implemented rule: `wright lint` on the overpy-cake
-  real-project fixture reports 62 findings (61 `repeated-value` + 1
-  pre-existing `min-wait-loop`), collapsing to 15 distinct spans, with 11
-  identical findings at line 49:13 and 9 at line 51:13. Two root causes in the
-  implemented contract: (1) per-additional-occurrence reporting over
-  recursively collected value nodes, so nested duplicates stack at one span;
-  (2) a ≥1-call non-trivial filter that admits bare single-call array reads
-  (`Value In Array` is a `Call` node). PM decision (recorded as the REQ-001
-  amendment): raise the non-trivial filter to **≥2 call nodes** and report
-  **exactly one finding per maximal duplicated shape per loop scope** (nested
-  duplicates subsumed). This preserves every corpus-evidence shape (parabola
-  `Distance Between` = 4 calls, `Subtract` = 3 calls; santa families ≥7 calls)
-  while eliminating identical-span spam and single-call array-read noise.
-  Verified outcome on overpy-cake (re-derived from the implemented rule):
-  **10 `repeated-value` findings**, all genuinely satisfying the amended
-  contract, plus the unchanged `min-wait-loop` at `source.opy:54:5`: 1 at
-  `32:31` (the `random.uniform(...)` shape, count 2, in the `range(28)`
-  loop), 8 `cakePos[N]+vect(0,i2,0)` corner shapes at `38:9` ×2, `39:9`,
-  `40:9`, `41:9`, `42:9`, `43:9`, `44:9` (each count 2, one per corner pair
-  in the `range(0.125, 1, 0.125)` loop), and 1
-  `CAKE_LONG-(abs(i2)-CAKE_SIDE_LENGTH/2)` shape at `49:13` (count 2). The
-  earlier "~2" estimate undercounted the eight macro-inlined corner shapes
-  and is corrected here; the `cakePos[N]`/`candlePos[i2]` bare reads remain
-  unfired, as expected. The `38:9` pair are two distinct shapes (`cakePos[0]`
-  and `cakePos[1]` families) whose first-occurrence spans collide via OverPy
-  macro-inlining span assignment; both are true positives and are retained
-  (PM Decision A; see REQ-001 smoke criterion and REQ-006 known-limits). 10
-  findings on a ~50-line real file is accepted as the amended contract's
-  expected low-noise density (vs 62 pre-amendment; no single-call spam;
-  per-shape, deterministic). This question is fully resolved; the
-  acceptance-revisit option is closed, and the density is pinned by the
-  REQ-004 fixture counts for QA verification.
-  Owner: PM.
-- **Q-002 [verification]**: Whether the corpus evidence case (santa/parabola
-  workshop-text duplicate counts) needs an automated re-verification script or
-  is acceptable as a documented snapshot with fixture provenance. The evidence
-  is a pinned, immutable corpus artifact, so a snapshot note is likely
-  sufficient; QA decides in the test plan. Owner: QA.
-- **Q-003 [product]**: `while-without-wait` is the only rule in this set
-  without corpus positive evidence. PM decision: include at `warning` /
-  `static-indicator` with the documented synthetic justification, because the
-  trigger is a statically exact structural fact and the corpus-negative scan
-  is recorded. If QA's plan cannot produce convincing synthetic evidence that
-  the finding is low-noise on realistic input, PM will reconsider severity or
-  defer the rule. Owner: PM.
+- The lint registry and configuration contract is implemented by
+  `crates/wright-analyzer/src/registry.rs`.
+- The public lint surface is defined by [the CLI/driver contract](../cli.md)
+  and the shared driver/tool result contracts.
+- OPY source-language compatibility and corpus ownership belong to
+  `wrightkit/opy-rs`; Wright keeps only focused analyzer/provider integration
+  regressions required by Wright-owned behavior.
+- Historical implementation, verification, dependency, and acceptance state
+  for this feature remains in Issues #97–#100 and their PR/CI history rather
+  than this durable specification.

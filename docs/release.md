@@ -19,9 +19,9 @@ immutable artifact, and latest-pointer contract is recorded in
   commit, build timestamp, and the runtime-dependency claim
   (`"requires": { "node": false, "overpy": false }`).
 
-This is the local staging path and the validation suite behind the release-please
-workflow; the reusable GitHub workflow publishes the per-platform archives,
-and this script verifies and packages the host platform.
+This is the local staging path for checking the release package on the host
+platform. GitHub Actions builds the complete native matrix for both release
+channels.
 
 ## What the release script verifies before stamping
 
@@ -42,56 +42,74 @@ Any gate failure aborts the release before the version is stamped.
 
 The binaries report the workspace implementation version (one authoritative
 `version = "<release version>"` in `[workspace.package]`; every crate inherits it via
-`version.workspace = true`). `wright version` / `wright --version` prints the
-CLI banner, `wright-lsp --version` prints the LSP banner, and the LSP
-`initialize` response carries `serverInfo.version`. Every `wright-result/v1`
-envelope carries `wright.version` + `wright.contract`. The release archive's
-`version.json` is the authoritative stamp for a shipped artifact.
+`version.workspace = true`). A stable release accepts only a stable
+`MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. It
+synchronizes that version into `Cargo.lock`, `version.txt`, and the checked-in
+`dist/` manifests before committing the release version on `main`. `wright version` /
+`wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
+banner, and the LSP `initialize` response carries `serverInfo.version`. Every
+`wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
+release archive's `version.json` is the authoritative stamp for a shipped
+artifact.
 
 ## Public distribution contract
 
-A merge to `main` drives `.github/workflows/release-please.yml`. The release
-workflow is the single product release path:
+Wright has two release channels and one shared native build workflow:
 
-1. `release-please-action` maintains one root Release PR for the Wright
-   product. `release-please-config.json` uses the `simple` release type, with
-   `version.txt` and `CHANGELOG.md` as its product-level version and changelog
-   files. No workspace crate is published to crates.io. Every workspace
-   package explicitly sets `publish = false`, so Cargo package publication
-   cannot become an accidental release surface.
-2. The Release PR updates the shared workspace version, `Cargo.lock`, and the
-   checked-in `dist/` metadata. All workspace crate changes are included in the
-   product changelog decision.
-3. Merging that Release PR leaves the exact release commit on `main` without
-   creating a tag or GitHub Release. The `CI` workflow validates that commit.
-4. After that exact `CI` run succeeds, `release-publication.yml` starts the
-   reusable `release.yml` workflow. It verifies the version, builds and
-   smoke-tests the native matrix, verifies the complete archive/checksum set,
-   and generates package-manager manifests.
-5. The final `publish-release` job creates the `vX.Y.Z` tag and public GitHub
-   Release against that exact commit with the verified archives, checksums,
-   and manifests. Only then do R2 and Homebrew publication run.
+1. Every successful `CI` run on `main` triggers the `workflow_run` path of
+   `.github/workflows/release.yml` for that exact commit. It builds and
+   smoke-tests the native matrix, then publishes immutable objects under
+   `wright/nightly/<commit>/` and advances only `wright/nightly/version`.
+   Nightlies do not create Git tags, GitHub Releases, or package-manager
+   updates.
+2. A maintainer explicitly dispatches `.github/workflows/release.yml` from
+   `main`; `stable` is the default channel. An empty `version` input selects
+   the next patch version, while an explicit input selects a newer stable
+   `MAJOR.MINOR.PATCH`; prerelease and build metadata are rejected. The workflow
+   synchronizes the source and derived version state,
+   commits that change directly to `main`, and then builds and smoke-tests the
+   native matrix from that post-bump commit. It publishes the versioned GitHub
+   Release only after those artifacts and generated package-manager manifests
+   pass validation. The stable R2 objects and pointer are updated only after
+   the GitHub Release is complete.
 
-A failure before GitHub Release creation leaves no public release or tag for
-that candidate; rerun the failed release-publication workflow run to retry the
-same CI-qualified commit. If R2 publication fails afterward, the public
-GitHub Release remains the canonical record but `latest/version` is not
-advanced. A retry reuses only
-byte-identical immutable R2 objects and refuses any conflicting object.
+No workspace crate is published to crates.io. Every workspace package
+explicitly sets `publish = false`, so Cargo package publication cannot become
+an accidental release surface. A failed publication can be rerun for the same
+commit: stable tags and releases are checked for exact identity, while R2
+versioned objects are reused only when their bytes match.
 
 ### Creating a release
 
-The Release PR is the release decision point. Maintainers do not enter a
-version, edit version files, create a tag, or dispatch a second workflow for
-the normal case. Review and merge the automatically maintained Release PR;
-release-please derives the next version from Conventional Commits and records
-the version/changelog that the publication workflow later releases.
+The stable release decision is an explicit `workflow_dispatch` of `release.yml`
+from `main`. The workflow does not infer version changes from commits and does
+not turn ordinary merges into stable releases. With the default stable channel,
+an empty `version` input performs exactly the next patch bump; an explicit
+version must be a stable `MAJOR.MINOR.PATCH` newer than the checked-in workspace
+version. The
+workflow commits the resulting `Cargo.toml`, `Cargo.lock`, `version.txt`, and
+`dist/` synchronization directly to `main`, so the operator does not prepare a
+version commit or release PR. `version.txt` remains the product-version input
+used by local distribution fixtures and must match the Cargo workspace version.
 
-The `release-publication.yml` workflow is triggered by the completed `CI`
-workflow, so successful exact-commit CI is a native prerequisite. The reusable
-`release.yml` workflow is intentionally not triggered by a tag or Release
-event. Release creation is the final publication-stage job, so the default
-Actions token does not need to start a second workflow from a tag push.
+The nightly path is triggered by completed `CI`, not by a tag or Release event.
+It verifies that the completed CI commit is still the current default-branch
+head before building, so a stale, out-of-order completion cannot advance the
+nightly pointer. Manual runs use the ref selected in the Actions UI; automatic
+nightly runs use the exact `workflow_run.head_sha`.
+
+### Dependency boundaries and updates
+
+`workshop-rs` is a normal compile-time Cargo dependency. Wright declares its
+ordinary SemVer-compatible requirement in `Cargo.toml`; a compatible owner
+release can be adopted by updating `Cargo.lock` without changing that manifest
+requirement. A breaking owner release requires an explicit Wright migration,
+manifest update, and validation before stable publication.
+
+OPY and DEL/OSTW remain independently released provider products. Wright does
+not bundle their versions into its product SemVer or dynamically replace
+`workshop-rs`; provider availability and compatibility are negotiated through
+the applicable LPP contract.
 
 ### Target matrix and artifact naming
 
@@ -114,9 +132,10 @@ supported through the channels below.
 ### R2 installer distribution
 
 `install.sh` uses the WrightKit R2 custom domain by default. GitHub Releases
-remain the canonical release record and provenance source; R2 contains exact
-copies of the archives and checksum files that the completed GitHub Release
-already exposes.
+remain the canonical stable release record and package-manager source; R2 is
+the HTTP installer/object-delivery channel and also carries the separate
+nightly channel. The stable R2 objects are exact copies of the archives in the
+completed GitHub Release.
 
 Pinned installs use immutable versioned objects:
 
@@ -138,7 +157,14 @@ API lookup.
 Versioned R2 objects are uploaded with `If-None-Match: *`; retries may reuse an
 already-present object only after comparing its bytes to the release artifact.
 The workflow retrieves every public copy and checks its bytes and cache headers
-before it advances `latest/version`.
+before it advances the channel pointer. Nightly objects are keyed by commit and
+the `wright/nightly/version` pointer contains that commit, so a nightly can be
+retrieved without changing stable installer resolution:
+
+```text
+https://releases.wrightkit.dev/wright/nightly/version
+https://releases.wrightkit.dev/wright/nightly/<commit>/wright-<version>-<target-triple>.<ext>
+```
 
 ### Manual GitHub Release fallback
 
@@ -207,16 +233,15 @@ not publish or modify any external package-manager repository.
 
 ### Repository configuration
 
-Enable Actions to create and approve pull requests. The release-please workflow
-uses the repository's `GH_TOKEN` secret as `GITHUB_TOKEN` so it can create and
-   update the Release PR.
 Create a protected `release` environment if publication approval is required;
-the final `publish-release` job is the only job that uses it.
+the stable `publish-release` job is the only job that uses it.
 
 Configure these optional/required environment secrets:
 
-* `GH_TOKEN` is a fine-grained token with write access to
-  `wrightkit/homebrew-tap`; it is required for automatic Homebrew tap updates.
+* `GH_TOKEN` is the authorized release token with permission to push the
+  stable version commit to `main`, trigger and read the resulting `CI` run,
+  and write to `wrightkit/homebrew-tap`. The stable workflow uses it for the
+  main push and waits for that post-bump commit's `CI` before publication.
 * The workflow's built-in `GITHUB_TOKEN` creates the final GitHub Release and
   uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and

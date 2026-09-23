@@ -2082,18 +2082,19 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "0.4.1"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3adc18aef0fccfce918d9c6d0203e00ee6e8524b9d95879df03fb8099592b92b"
+checksum = "10e34c23bb786045641bcf621cf29c50d42ff50b5c4410cff65a27c6af6e80fc"
 dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "unicode-ident",
 ]
 
 [[package]]
 name = "wright-analyzer"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "serde",
  "serde_json",
@@ -2103,7 +2104,7 @@ dependencies = [
 
 [[package]]
 name = "wright-bench"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "libc",
  "serde",
@@ -2114,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "wright-cli"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2133,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "wright-consumer"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "serde_json",
  "wright-driver",
@@ -2141,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "wright-driver"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "flate2",
  "reqwest",
@@ -2158,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "wright-language"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "libc",
  "serde",
@@ -2171,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "wright-lpp"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "os_pipe",
  "serde",
@@ -2180,7 +2181,7 @@ dependencies = [
 
 [[package]]
 name = "wright-lsp"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "lsp-types",
  "serde_json",
@@ -2189,7 +2190,7 @@ dependencies = [
 
 [[package]]
 name = "wright-transform"
-version = "0.2.32"
+version = "0.2.34"
 dependencies = [
  "serde",
  "workshop-rs",

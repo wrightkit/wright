@@ -73,7 +73,6 @@ jobs:
               - 'tests/fixtures/**'
               - 'scripts/**'
               - '.github/workflows/**'
-
   # -------------------------------------------------------------------------
   # [1] RUST QUALITY & TESTS  (fundamental gate)
   # All other Rust-based jobs depend on this.
@@ -121,7 +120,7 @@ jobs:
       - name: Check formatting
         run: cargo +1.85.0 fmt --all -- --check
 
-      - name: Check Workshop dependency contract
+      - name: Check Workshop dependency
         env:
           RUSTUP_TOOLCHAIN: 1.85.0
         run: python3 scripts/check-workshop-dependency.py
@@ -181,7 +180,15 @@ jobs:
           if-no-files-found: error
 
       - name: Record CLI provenance
-        run: python3 scripts/report-cli-artifact.py
+        shell: bash
+        run: |
+          digest="$(sha256sum target/debug/wright | cut -d ' ' -f1)"
+          {
+            printf '%s\n\n' '## Wright CLI artifact'
+            printf -- "- Revision: \`%s\`\n" "$GITHUB_SHA"
+            printf '%s\n' '- Build identity: stable / debug / ubuntu-latest'
+            printf -- "- SHA-256: \`%s\`\n" "$digest"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
   # [1b] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
@@ -190,10 +197,26 @@ jobs:
   # owned by the released workshop-rs corpus.
   # -------------------------------------------------------------------------
   workshop-integration:
-    name: Workshop integration
-    needs: [paths, rust-quality, rust-msrv]
+    name: Workshop (${{ matrix.project }})
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - project: ai-pve
+            expected_exit: 0
+          - project: bastion
+            expected_exit: 0
+          # The pinned owner corpus admits this project's residual as a
+          # source-level failure; the other projects must remain clean.
+          - project: defend
+            expected_exit: 1
+          - project: illari
+            expected_exit: 0
+          - project: rework
+            expected_exit: 0
     steps:
       - name: Checkout Wright
         uses: actions/checkout@v7
@@ -205,31 +228,63 @@ jobs:
           ref: f1f3c58f790e9aede9300ca6421698f2503f5f62 # v0.3.11
           path: workshop-rs-pinned
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
         with:
-          toolchain: stable
+          name: wright-cli-linux-stable-debug
+          path: target/debug
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-quality-stable-dev-test
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          save-if: false
-          cache-on-failure: false
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
 
-      - name: Cross-validate owner contract
+      - name: Run public CLI dogfood
         env:
-          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-driver --test workshop_contract -- --ignored
+          EXPECTED_EXIT: ${{ matrix.expected_exit }}
+          PROJECT: workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects/${{ matrix.project }}.ow
+        run: |
+          set -euo pipefail
 
-      - name: Check & lint real projects
-        env:
-          WRIGHTKIT_WORKSHOP_CORPUS_DIR: ${{ github.workspace }}/workshop-rs-pinned/crates/workshop-rs/tests/fixtures/real-projects
-        run: cargo test --locked -p wright-cli --test workshop_real_projects -- --ignored --nocapture
+          run_workflow() {
+            local command="$1"
+            local output
+            local status
+
+            set +e
+            output="$(target/debug/wright "$command" --kind workshop "$PROJECT" --format json)"
+            status=$?
+            set -e
+
+            if [[ "$status" -ne "$EXPECTED_EXIT" ]]; then
+              echo "wright $command returned $status; expected $EXPECTED_EXIT for $PROJECT" >&2
+              return 1
+            fi
+
+            jq -e \
+              --arg command "$command" \
+              --argjson process_exit "$status" \
+              '(
+                .wright.contract == "wright-result/v1" and
+                .command == $command and
+                .exit == $process_exit and
+                .ok == ($process_exit == 0) and
+                (.diagnostics | type == "array") and
+                (all(.diagnostics[]; type == "object")) and
+                ([.diagnostics[] | select(.stage == "internal")] | length == 0)
+              )' <<<"$output" >/dev/null
+            printf '%s' "$output"
+          }
+
+          check_output="$(run_workflow check)"
+          lint_output="$(run_workflow lint)"
+          jq -e -n \
+            --argjson check "$check_output" \
+            --argjson lint "$lint_output" \
+            '(
+              $check.diagnostics == $lint.diagnostics and
+              $check.ok == $lint.ok and
+              $check.exit == $lint.exit and
+              ($lint.result.program.rules | numbers | . > 0)
+            )' >/dev/null
 
   # -------------------------------------------------------------------------
   # [2] PRODUCT INTEGRATION  (Wright-owned provider and product contracts)
@@ -268,13 +323,13 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Run provider and product integration tests
+      - name: Run provider/product tests
         run: >-
           cargo test --locked
           -p wright-driver --test driver --test source_provider --test service
           --test workshop_provider
 
-      - name: Run CLI and embedding integration tests
+      - name: Run CLI/embedding tests
         run: >-
           cargo test --locked
           -p wright-cli --test cli --test diagnostics_schema --test serve
@@ -283,7 +338,7 @@ jobs:
       - name: Install pinned OPY provider
         run: target/debug/wright provider update opy --version 0.1.38
 
-      - name: Compile minimal OPY through provider boundary
+      - name: Compile OPY via provider
         run: >-
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
           --profile compat
@@ -297,7 +352,7 @@ jobs:
     if: needs.paths.outputs.lpp == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Wright
         uses: actions/checkout@v7
 
       - name: Install Rust
@@ -331,7 +386,7 @@ jobs:
 
       # REQUIRED: these suites self-skip when LPP_MOCK_PROVIDER is absent,
       # so the variable must be set here for them to run at all.
-      - name: Run integration tests
+      - name: Run LPP tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
         run: scripts/test-lpp-integration.sh
@@ -397,23 +452,19 @@ jobs:
           save-if: false
           cache-on-failure: false
 
-      - name: Build benchmark
+      - name: Build benchmarks
         run: cargo build --locked -p wright-bench
 
       - name: Run benchmarks
         id: bench
         run: target/debug/wright-bench
 
-      - name: Upload reports
+      - name: Upload benchmark report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-report
           path: target/wright-bench-report.json
-
-      - name: Render summary
-        if: always()
-        run: python3 scripts/render-ci-summary.py --title "Performance Benchmarks" --kind benchmarks --report target/wright-bench-report.json --outcome "${{ steps.bench.outcome }}"
 
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
@@ -556,7 +607,9 @@ jobs:
           --wright target/debug/wright
           --wright-lsp target/debug/wright-lsp
 
-      - name: Validate package metadata & install script
+
+      - name: Validate package metadata and installers
+        if: matrix.channel == 'install.sh' || matrix.channel == 'install.ps1'
         run: python scripts/verify-dist.py
 
       - name: Test install.sh (functional)

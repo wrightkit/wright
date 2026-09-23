@@ -28,6 +28,7 @@ def main() -> int:
     target = f"packaging-smoke-{runner_os.lower()}"
     version = "0.0.0-packaging-smoke"
     commit = "packaging-smoke-commit"
+    tag = "nightly-packaging-commit"
     build_dir = ROOT / "target" / target / "release"
     build_dir.mkdir(parents=True, exist_ok=True)
     for binary in ("wright", "wright-lsp"):
@@ -44,6 +45,8 @@ def main() -> int:
                     str(ROOT / "scripts/package-release.py"),
                     "--version",
                     version,
+                    "--tag",
+                    tag,
                     "--target",
                     target,
                     "--extension",
@@ -68,7 +71,11 @@ def main() -> int:
                     raise SystemExit(f"missing package smoke output: {path}")
 
             identity = json.loads(identity_path.read_text())
-            if identity["revision"] != commit or identity["target"] != target:
+            if (
+                identity["revision"] != commit
+                or identity["tag"] != tag
+                or identity["target"] != target
+            ):
                 raise SystemExit("release package identity does not match smoke input")
 
             version_member = f"{payload_name}/version.json"
