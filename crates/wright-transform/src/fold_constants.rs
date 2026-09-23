@@ -1,3 +1,3 @@
-//! Re-export of FoldConstants pass.
+//! Constant-folding transformation pass type.
 
-pub use crate::pipeline::FoldConstants;
+pub struct FoldConstants;

@@ -254,11 +254,11 @@ impl<'a> ToolService<'a> {
                 sources,
                 transaction,
             ))
-            .expect("edit validation serializes")),
+            .expect("serializes")),
             ToolRequest::SemanticRename { sources, target } => self.ok(serde_json::to_value(
                 crate::edit::semantic_rename(&self.session.config, sources, target),
             )
-            .expect("semantic rename serializes")),
+            .expect("serializes")),
             ToolRequest::ProviderSemanticRename {
                 language_id,
                 documents,
@@ -268,7 +268,7 @@ impl<'a> ToolService<'a> {
                 project_root,
                 sources,
             } => {
-                let request = crate::provider_edit::ProviderRenameRequest {
+                let req = crate::provider_edit::ProviderRenameRequest {
                     documents: documents.clone(),
                     position_document_uri: position_document_uri.clone(),
                     position: *position,
@@ -277,10 +277,10 @@ impl<'a> ToolService<'a> {
                     sources: sources.clone(),
                 };
                 self.ok(
-                    serde_json::to_value(self.run_provider_flow(language_id, |provider| {
-                        crate::provider_edit::semantic_rename(provider, &request)
+                    serde_json::to_value(self.run_provider_flow(language_id, |p| {
+                        crate::provider_edit::semantic_rename(p, &req)
                     }))
-                    .expect("provider semantic rename serializes"),
+                    .expect("serializes"),
                 )
             }
             ToolRequest::ProviderValidateEdit {
@@ -290,17 +290,17 @@ impl<'a> ToolService<'a> {
                 sources,
                 project_root,
             } => {
-                let request = crate::provider_edit::ProviderValidateRequest {
+                let req = crate::provider_edit::ProviderValidateRequest {
                     documents: documents.clone(),
                     transaction: transaction.clone(),
                     sources: sources.clone(),
                     project_root: project_root.clone(),
                 };
                 self.ok(
-                    serde_json::to_value(self.run_provider_flow(language_id, |provider| {
-                        crate::provider_edit::validate_transaction(provider, &request)
+                    serde_json::to_value(self.run_provider_flow(language_id, |p| {
+                        crate::provider_edit::validate_transaction(p, &req)
                     }))
-                    .expect("provider edit validation serializes"),
+                    .expect("serializes"),
                 )
             }
         }
@@ -480,10 +480,7 @@ impl<'a> ToolService<'a> {
             &wright_analyzer::registry::LintConfig::default(),
         );
         json!({
-            "origin": {
-                "kind": self.loaded.origin.kind,
-                "locale": self.loaded.origin.locale,
-            },
+            "origin": { "kind": self.loaded.origin.kind, "locale": self.loaded.origin.locale },
             "inputIdentity": self.loaded.input.identity,
             "files": self.loaded.source_files.len().max(1),
             "globalVariables": self.loaded.program.global_variables.len(),
@@ -495,36 +492,32 @@ impl<'a> ToolService<'a> {
         })
     }
 
-    /// The subroutine call graph: every caller rule → callee subroutines.
     fn call_graph(&self) -> serde_json::Value {
-        let mut edges: Vec<serde_json::Value> = Vec::new();
-        for rule in self.loaded.program.rules.iter() {
-            for action in &rule.actions {
-                if let workshop_rs::Action::CallSubroutine { subroutine } = action {
-                    edges.push(json!({
-                        "caller": rule.name,
-                        "callee": subroutine,
-                    }));
-                }
-            }
-        }
+        let edges = self
+            .loaded
+            .program
+            .rules
+            .iter()
+            .flat_map(|rule| {
+                rule.actions.iter().filter_map(move |action| match action {
+                    workshop_rs::Action::CallSubroutine { subroutine } => {
+                        Some(json!({ "caller": rule.name, "callee": subroutine }))
+                    }
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
         serde_json::Value::Array(edges)
     }
 
-    /// Generated-resource cost estimates.
-    ///
-    /// Exact counts: emitted bytes, canonical value/action/rule counts, and wait
-    /// actions. Static indicators: analysis findings (e.g. `min-wait-loop`).
-    /// Compiler-host performance is measured by the `wright-bench` harness, not
-    /// in-process.
     fn cost_estimate(&self) -> serde_json::Value {
-        let catalog = workshop_rs::catalog::Catalog::builtin().expect("built-in catalog loads");
+        let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
         let locale = self
             .loaded
             .origin
             .locale
-            .clone()
-            .map(|locale| workshop_rs::catalog::Locale::new(&locale))
+            .as_deref()
+            .map(workshop_rs::catalog::Locale::new)
             .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
         let text =
             workshop_rs::emitter::emit(&self.loaded.program, &catalog, &locale).unwrap_or_default();
@@ -533,10 +526,8 @@ impl<'a> ToolService<'a> {
             .program
             .rules
             .iter()
-            .flat_map(|rule| rule.actions.iter())
-            .filter(
-                |action| matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait"),
-            )
+            .flat_map(|r| &r.actions)
+            .filter(|a| matches!(a, workshop_rs::Action::Call { name, .. } if name == "wait"))
             .count();
         let findings = wright_analyzer::canonical::analyze(
             &self.loaded.program,
@@ -545,14 +536,14 @@ impl<'a> ToolService<'a> {
         json!({
             "exact": {
                 "emittedBytes": text.len(),
-                "programActions": self.loaded.program.rules.iter().map(|rule| rule.actions.len()).sum::<usize>(),
+                "programActions": self.loaded.program.rules.iter().map(|r| r.actions.len()).sum::<usize>(),
                 "programRules": self.loaded.program.rules.len(),
                 "waitActions": waits,
             },
-            "findings": findings.iter().map(|finding| json!({
-                "code": finding.code,
-                "severity": severity_name(finding.severity),
-                "message": finding.message,
+            "findings": findings.iter().map(|f| json!({
+                "code": f.code,
+                "severity": severity_name(f.severity),
+                "message": f.message,
             })).collect::<Vec<_>>(),
             "kind": {
                 "exact": "exact target-resource counts",
@@ -562,13 +553,9 @@ impl<'a> ToolService<'a> {
         })
     }
 
-    /// Target/catalog metadata for reasoning about Workshop operations.
     fn target_metadata(&self) -> serde_json::Value {
-        let catalog = match workshop_rs::catalog::Catalog::builtin() {
-            Ok(catalog) => catalog,
-            Err(error) => {
-                return json!({ "error": error.to_string() });
-            }
+        let Ok(catalog) = workshop_rs::catalog::Catalog::builtin() else {
+            return json!({ "error": "catalog load failed" });
         };
         json!({
             "catalogVersion": catalog.schema_version,

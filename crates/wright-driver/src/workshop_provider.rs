@@ -38,65 +38,50 @@ impl LanguageProvider for WorkshopProvider {
 }
 
 fn map_issue(issue: workshop_rs::semantic::SemanticIssue, path: &Path) -> ProviderDiagnostic {
+    use workshop_rs::semantic::IncompletenessKind::*;
     let (kind_code, severity) = match issue.kind {
-        workshop_rs::semantic::IncompletenessKind::RawSetting => {
-            ("raw-setting", ProviderSeverity::Warning)
-        }
-        workshop_rs::semantic::IncompletenessKind::UnknownAction => {
-            ("unknown-action", ProviderSeverity::Error)
-        }
-        workshop_rs::semantic::IncompletenessKind::UnknownValue => {
-            ("unknown-value", ProviderSeverity::Error)
-        }
-        workshop_rs::semantic::IncompletenessKind::OpaqueAction => {
-            ("opaque-action", ProviderSeverity::Error)
-        }
+        RawSetting => ("raw-setting", ProviderSeverity::Warning),
+        UnknownAction => ("unknown-action", ProviderSeverity::Error),
+        UnknownValue => ("unknown-value", ProviderSeverity::Error),
+        OpaqueAction => ("opaque-action", ProviderSeverity::Error),
     };
-    let code = diagnostic_code(kind_code, &issue.name);
     let status = status_for_classification(issue.classification);
-    let message = format!(
-        "Workshop construct '{}' is {} ({})",
-        issue.name,
-        status_name(status),
-        issue.classification.as_str()
-    );
     ProviderDiagnostic {
-        code,
+        code: diagnostic_code(kind_code, &issue.name),
         severity,
         status,
         span: provider_span(issue.span, path),
-        message,
+        message: format!(
+            "Workshop construct '{}' is {} ({})",
+            issue.name,
+            status_name(status),
+            issue.classification.as_str()
+        ),
     }
 }
 
 pub fn status_for_classification(
     classification: workshop_rs::semantic::ResidualClassification,
 ) -> Status {
+    use workshop_rs::semantic::ResidualClassification::*;
     match classification {
-        workshop_rs::semantic::ResidualClassification::ProjectDefinedConstruct
-        | workshop_rs::semantic::ResidualClassification::SourceDeclaredVariable => Status::Partial,
-        workshop_rs::semantic::ResidualClassification::ProducerExtension
-        | workshop_rs::semantic::ResidualClassification::LegacyOpaque
-        | workshop_rs::semantic::ResidualClassification::UnresolvedIdentifier => {
-            Status::Unsupported
-        }
+        ProjectDefinedConstruct | SourceDeclaredVariable => Status::Partial,
+        _ => Status::Unsupported,
     }
 }
 
 pub fn diagnostic_code(kind: &str, identity: &str) -> String {
-    format!(
-        "workshop.{kind}.{}",
-        identity
-            .chars()
-            .map(|character| {
-                if character.is_ascii_alphanumeric() {
-                    character.to_ascii_lowercase()
-                } else {
-                    '-'
-                }
-            })
-            .collect::<String>()
-    )
+    let clean: String = identity
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("workshop.{kind}.{clean}")
 }
 
 fn status_name(status: Status) -> &'static str {

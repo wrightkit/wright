@@ -3,11 +3,13 @@ use std::fmt;
 use serde::Deserialize;
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::source::Span;
-use workshop_rs::wir::{self, Action, ActionId, Event, RuleId, Value, ValueId};
+use workshop_rs::wir::{Action, ActionId, Event, RuleId, Value, ValueId};
 use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
-use crate::analysis::{EvidenceClass, Finding, Severity};
+use crate::analysis::{EvidenceClass, Finding as LegacyFinding, Severity};
+use crate::canonical::Finding as CanonicalFinding;
 use crate::facts::{RuleFacts, SemanticFacts};
+use crate::traversal::visit_actions;
 
 const DEFAULT_LOCALE: &str = "en-US";
 
@@ -269,7 +271,7 @@ impl DeclarativeRule {
         rule: RuleId,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<Finding> {
+    ) -> Vec<LegacyFinding> {
         let Some(rule_facts) = facts.rule(rule) else {
             return Vec::new();
         };
@@ -289,26 +291,15 @@ impl DeclarativeRule {
                     continue;
                 }
             }
-            let mut counts = Vec::new();
-            if self.actions.iter().any(|pattern| {
-                let count = matching_actions(&rule_facts, &actions, pattern);
-                let accepted = if pattern.present {
-                    pattern.count.accepts(count)
-                } else {
-                    count == 0 && pattern.count.accepts(0)
-                };
-                counts.push(count);
-                !accepted
-            }) {
+            let Some(matched) = matched_action_count(
+                &self.actions,
+                |pattern| matching_actions(&rule_facts, &actions, pattern),
+                min_matches,
+                max_matches,
+            ) else {
                 continue;
-            }
-            let matched = counts.iter().copied().max().unwrap_or(1);
-            if min_matches.is_some_and(|min| matched < min)
-                || max_matches.is_some_and(|max| matched > max)
-            {
-                continue;
-            }
-            findings.push(Finding {
+            };
+            findings.push(LegacyFinding {
                 code: self.id().to_string(),
                 severity: self.default_severity(),
                 message: format!(
@@ -317,11 +308,12 @@ impl DeclarativeRule {
                     if matched == 1 { "" } else { "s" }
                 ),
                 span: anchor,
-                rule: rule.index(),
-                action: scope_id.map(|id| id.index()),
+                rule,
+                action: scope_id,
                 value: None,
                 evidence: self.evidence(),
                 boundedness: None,
+                persistent_object: None,
             });
         }
         findings
@@ -337,7 +329,7 @@ impl DeclarativeRule {
         rule: usize,
         min_matches: Option<usize>,
         max_matches: Option<usize>,
-    ) -> Vec<Finding> {
+    ) -> Vec<CanonicalFinding> {
         let Some(rule_data) = program.rules.get(rule) else {
             return Vec::new();
         };
@@ -360,29 +352,20 @@ impl DeclarativeRule {
                     continue;
                 }
             }
-            let mut counts = Vec::new();
-            if self.actions.iter().any(|pattern| {
-                let count = actions
-                    .iter()
-                    .filter(|action| public_action_matches(action, pattern))
-                    .count();
-                let accepted = if pattern.present {
-                    pattern.count.accepts(count)
-                } else {
-                    count == 0 && pattern.count.accepts(0)
-                };
-                counts.push(count);
-                !accepted
-            }) {
+            let Some(matched) = matched_action_count(
+                &self.actions,
+                |pattern| {
+                    actions
+                        .iter()
+                        .filter(|action| public_action_matches(action, pattern))
+                        .count()
+                },
+                min_matches,
+                max_matches,
+            ) else {
                 continue;
-            }
-            let matched = counts.iter().copied().max().unwrap_or(1);
-            if min_matches.is_some_and(|min| matched < min)
-                || max_matches.is_some_and(|max| matched > max)
-            {
-                continue;
-            }
-            findings.push(Finding {
+            };
+            findings.push(CanonicalFinding {
                 code: self.id().to_string(),
                 severity: self.default_severity(),
                 message: format!(
@@ -399,6 +382,33 @@ impl DeclarativeRule {
             });
         }
         findings
+    }
+}
+
+fn matched_action_count(
+    patterns: &[CanonicalActionPattern],
+    mut count: impl FnMut(&CanonicalActionPattern) -> usize,
+    min_matches: Option<usize>,
+    max_matches: Option<usize>,
+) -> Option<usize> {
+    let mut matched = 1;
+    for pattern in patterns {
+        let count = count(pattern);
+        let accepted = if pattern.present {
+            pattern.count.accepts(count)
+        } else {
+            count == 0 && pattern.count.accepts(0)
+        };
+        if !accepted {
+            return None;
+        }
+        matched = matched.max(count);
+    }
+    if min_matches.is_some_and(|min| matched < min) || max_matches.is_some_and(|max| matched > max)
+    {
+        None
+    } else {
+        Some(matched)
     }
 }
 
@@ -720,37 +730,6 @@ fn value_matches(facts: &RuleFacts<'_>, id: ValueId, pattern: &CanonicalValuePat
             }
         }
         _ => false,
-    }
-}
-
-fn visit_actions(
-    program: &wir::Program,
-    actions: &[ActionId],
-    f: &mut impl FnMut(ActionId, &Action),
-) {
-    for id in actions {
-        let Some(action) = program.actions.get(*id) else {
-            continue;
-        };
-        f(*id, action);
-        match action {
-            Action::If {
-                branches,
-                else_body,
-                ..
-            } => {
-                for branch in branches {
-                    visit_actions(program, &branch.body, f);
-                }
-                if let Some(body) = else_body {
-                    visit_actions(program, body, f);
-                }
-            }
-            Action::While { body, .. }
-            | Action::ForGlobalVariable { body, .. }
-            | Action::ForPlayerVariable { body, .. } => visit_actions(program, body, f),
-            _ => {}
-        }
     }
 }
 

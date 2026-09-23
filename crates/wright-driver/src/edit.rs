@@ -1,20 +1,5 @@
 //! Tools and agents propose edits as validated, source-oriented
-//! [`SourceEdit`]s — never as mutations of Wright's internal IR. One
-//! [`EditTransaction`] carries one or more file edits with exact source
-//! ranges plus per-source identity/version preconditions, and
-//! [`validate_transaction`] rejects stale versions, overlapping edits, and
-//! out-of-range spans, then routes source-language validation through the
-//! owner provider. Unsupported
-//! source kinds fail explicitly with structured diagnostics and no partial
-//! preview.
-//!
-//! Validation is atomic: a transaction either applies and previews in full
-//! or is refused with diagnostics; the caller decides whether to write any
-//! file. Application/writing is always separate from validation.
-//!
-//! The first evidence-backed refactoring is symbol rename ([`rename_symbol`]),
-//! which proposes an edit carrying the source identity precondition; callers
-//! validate it inside a transaction with [`validate_transaction`].
+//! [`SourceEdit`]s — never as mutations of Wright's internal IR.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -29,24 +14,15 @@ use crate::result::exit_code_from;
 /// One proposed source edit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceEdit {
-    /// The kind of edit (drives validation and preview semantics).
     #[serde(rename = "kind")]
     pub edit_kind: String,
-    /// The source file identity the edit applies to (a path as given by the
-    /// caller), so one transaction can target multiple files.
     pub source: String,
-    /// The SHA-256 identity of the source text this edit applies to (stale
-    /// versions are rejected).
     pub source_identity: String,
-    /// The target source range, 1-based line/character column, end exclusive
-    /// (matching the compiler's span convention).
     pub range: EditRange,
-    /// The replacement text.
     pub new_text: String,
 }
 
-/// A source range (1-based line and character column, half-open; `end` is
-/// exclusive).
+/// A source range (1-based line and character column, half-open; `end` is exclusive).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditRange {
     pub start_line: u32,
@@ -55,30 +31,14 @@ pub struct EditRange {
     pub end_col: u32,
 }
 
-/// One validated source transaction: multiple file edits applied and
-/// validated atomically against one project.
-///
-/// Construction orders the edits deterministically (by source identity, then
-/// position), rejects overlapping edits within one source, and refuses
-/// order-dependent zero-width combinations at the same position.
+/// One validated source transaction: multiple file edits applied and validated atomically.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditTransaction {
-    /// The edits, in deterministic order (source, then position).
     pub edits: Vec<SourceEdit>,
 }
 
 impl EditTransaction {
-    /// Build a transaction from proposed edits.
-    ///
-    /// The edits are ordered deterministically (by source identity, then
-    /// position) and overlapping edits within one source are rejected
-    /// (`edit-overlap`). Order-dependent zero-width combinations are refused
-    /// as conflicts (`edit-zero-width-conflict`): two edits at the same
-    /// position where at least one is a zero-width insertion would apply
-    /// differently depending on their order, so the transaction refuses
-    /// instead of defining an arbitrary result. An empty transaction is
-    /// rejected (`edit-empty-transaction`).
-    pub fn new(edits: Vec<SourceEdit>) -> Result<EditTransaction, Diagnostic> {
+    pub fn new(mut edits: Vec<SourceEdit>) -> Result<EditTransaction, Diagnostic> {
         if edits.is_empty() {
             return Err(Diagnostic::error(
                 "edit-empty-transaction",
@@ -86,19 +46,23 @@ impl EditTransaction {
                 "a source-edit transaction must carry at least one edit",
             ));
         }
-        let mut edits = edits;
         edits.sort_by(|a, b| {
             a.source
                 .cmp(&b.source)
-                .then_with(|| start_position(a).cmp(&start_position(b)))
-                .then_with(|| end_position(a).cmp(&end_position(b)))
+                .then_with(|| {
+                    (a.range.start_line, a.range.start_col)
+                        .cmp(&(b.range.start_line, b.range.start_col))
+                })
+                .then_with(|| {
+                    (a.range.end_line, a.range.end_col).cmp(&(b.range.end_line, b.range.end_col))
+                })
         });
         for pair in edits.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
             if a.source != b.source {
                 continue;
             }
-            if start_position(b) < end_position(a) {
+            if (b.range.start_line, b.range.start_col) < (a.range.end_line, a.range.end_col) {
                 return Err(Diagnostic::error(
                     "edit-overlap",
                     Stage::Discovery,
@@ -114,13 +78,14 @@ impl EditTransaction {
                     ),
                 ));
             }
-            if start_position(a) == start_position(b) && (is_zero_width(a) || is_zero_width(b)) {
+            if (a.range.start_line, a.range.start_col) == (b.range.start_line, b.range.start_col)
+                && (is_zero_width(a) || is_zero_width(b))
+            {
                 return Err(Diagnostic::error(
                     "edit-zero-width-conflict",
                     Stage::Discovery,
                     format!(
-                        "the transaction carries order-dependent zero-width edits in '{}' at {}:{}; \
-                         refusing rather than defining an arbitrary insertion order",
+                        "the transaction carries order-dependent zero-width edits in '{}' at {}:{}; refusing rather than defining an arbitrary insertion order",
                         a.source, a.range.start_line, a.range.start_col
                     ),
                 ));
@@ -129,15 +94,6 @@ impl EditTransaction {
         Ok(EditTransaction { edits })
     }
 
-    /// Apply the transaction's edits to the caller-provided current texts,
-    /// returning the complete edited text of every affected source.
-    ///
-    /// Every range addresses the same original source snapshot (per source,
-    /// the edits apply in descending position order), so an earlier
-    /// replacement's length or newline changes can never shift a later
-    /// range. Application is mechanical and separate from validation:
-    /// callers validate the result with [`validate_transaction`] before
-    /// applying it to real files. Malformed ranges refuse explicitly.
     pub fn apply(
         &self,
         sources: &BTreeMap<String, String>,
@@ -146,77 +102,127 @@ impl EditTransaction {
     }
 }
 
-fn start_position(edit: &SourceEdit) -> (u32, u32) {
-    (edit.range.start_line, edit.range.start_col)
-}
-
-fn end_position(edit: &SourceEdit) -> (u32, u32) {
-    (edit.range.end_line, edit.range.end_col)
-}
-
-/// Whether an edit covers no characters (a pure insertion).
 fn is_zero_width(edit: &SourceEdit) -> bool {
-    start_position(edit) == end_position(edit)
+    (edit.range.start_line, edit.range.start_col) == (edit.range.end_line, edit.range.end_col)
 }
 
 /// The edited text of one source in a validated transaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcePreview {
-    /// The source file identity the preview belongs to.
     pub source: String,
-    /// The complete edited source text.
     pub new_text: String,
-    /// The SHA-256 identity of the edited text (the new-source precondition).
     pub source_identity: String,
 }
 
 /// The result of validating a proposed transaction.
 #[derive(Debug, Clone, Serialize)]
 pub struct EditValidation {
-    /// Whether the transaction is safe to apply.
     pub ok: bool,
-    /// The intended process exit code (source-error semantics).
     pub exit: u8,
     pub diagnostics: Vec<Diagnostic>,
-    /// The edited source texts (the preview), one per affected source, when
-    /// the transaction applied. `None` when a precondition refused it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<Vec<SourcePreview>>,
 }
 
-/// Validate and preview a source-edit transaction against one project.
-///
-/// `config` is the *original* project/session configuration of the edited
-/// code: its source kind selects the provider boundary, its root is preserved,
-/// and its transformation profile (when set) applies exactly as the session
-/// would apply it. `sources` supplies the current text of every source the
-/// transaction touches, keyed by the same source identity the edits carry, so
-/// the identity/version preconditions can be verified and the edited project
-/// compiled without reading or rewriting the user's files.
-///
-/// The edited project is validated through the OPY provider boundary with
-/// edited files as include overlays. Refusals are atomic and structured:
-/// stale sources, overlapping/unknown edits, unavailable providers, and
-/// provider errors produce diagnostics and no partial preview.
+struct ProjectContext {
+    kind: SourceKind,
+    main_path: PathBuf,
+    root: PathBuf,
+    main_text: String,
+    overlay: BTreeMap<String, String>,
+    resolved: ResolvedInput,
+}
+
+fn project_context(
+    config: &SessionConfig,
+    sources: &BTreeMap<String, String>,
+    previews: Option<&[SourcePreview]>,
+) -> Result<ProjectContext, Diagnostic> {
+    let Some(main_path) = config.input.path().cloned() else {
+        return Err(Diagnostic::error(
+            "edit-input-stdin",
+            Stage::Discovery,
+            "edit validation requires a path-based input so the edited project's main source identity is established; stdin has no project identity",
+        ));
+    };
+    let kind = resolve_kind(config, &main_path)?;
+    let root = config.root.clone().unwrap_or_else(|| {
+        main_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    });
+
+    let main_text = if let Some(prevs) = previews {
+        preview_of(prevs, &main_path)
+            .map(|p| p.new_text.clone())
+            .or_else(|| {
+                sources
+                    .get(&main_path.to_string_lossy().into_owned())
+                    .cloned()
+            })
+    } else {
+        sources
+            .get(&main_path.to_string_lossy().into_owned())
+            .cloned()
+    };
+    let main_text = match main_text {
+        Some(text) => text,
+        None => std::fs::read_to_string(&main_path).map_err(|e| {
+            Diagnostic::error(
+                "input-io",
+                Stage::Discovery,
+                format!("cannot read input '{}': {e}", main_path.display()),
+            )
+        })?,
+    };
+
+    let overlay = if let Some(prevs) = previews {
+        build_overlay(
+            kind,
+            &root,
+            &main_path,
+            prevs
+                .iter()
+                .map(|p| (p.source.as_str(), p.new_text.as_str())),
+        )
+    } else {
+        build_overlay(
+            kind,
+            &root,
+            &main_path,
+            sources.iter().map(|(s, t)| (s.as_str(), t.as_str())),
+        )
+    };
+    let resolved = resolved_input(
+        kind,
+        &main_path,
+        &root,
+        &main_text,
+        config.locale.as_deref(),
+    );
+    Ok(ProjectContext {
+        kind,
+        main_path,
+        root,
+        main_text,
+        overlay,
+        resolved,
+    })
+}
+
 pub fn validate_transaction(
     config: &SessionConfig,
     sources: &BTreeMap<String, String>,
     transaction: &EditTransaction,
 ) -> EditValidation {
     let mut diagnostics = Vec::new();
-
-    // Preconditions: every edited source must be known and current, so a
-    // stale or fabricated version can never apply.
     for edit in &transaction.edits {
         let Some(current) = sources.get(&edit.source) else {
             diagnostics.push(Diagnostic::error(
                 "edit-unknown-source",
                 Stage::Discovery,
-                format!(
-                    "the edit targets '{}' but no current text was provided for it; \
-                     supply the current source so the version precondition can be verified",
-                    edit.source
-                ),
+                format!("the edit targets '{}' but no current text was provided for it; supply the current source so the version precondition can be verified", edit.source),
             ));
             continue;
         };
@@ -224,11 +230,7 @@ pub fn validate_transaction(
             diagnostics.push(Diagnostic::error(
                 "edit-stale-source",
                 Stage::Discovery,
-                format!(
-                    "the edit for '{}' targets a different source version (identity mismatch); \
-                     re-fetch the source and retry",
-                    edit.source
-                ),
+                format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", edit.source),
             ));
         }
     }
@@ -236,7 +238,6 @@ pub fn validate_transaction(
         return refusal(diagnostics);
     }
 
-    // Apply the exact ranges to build the per-source previews.
     let previews = match apply_transaction(sources, transaction) {
         Ok(previews) => previews,
         Err(diagnostic) => {
@@ -245,78 +246,18 @@ pub fn validate_transaction(
         }
     };
 
-    // The project under validation: the main source is the configured input;
-    // a path-based input is required because the project/source graph needs a
-    // stable main-file identity.
-    let Some(main_path) = config.input.path().cloned() else {
-        diagnostics.push(Diagnostic::error(
-            "edit-input-stdin",
-            Stage::Discovery,
-            "edit validation requires a path-based input so the edited project's \
-             main source identity is established; stdin has no project identity",
-        ));
-        return refusal(diagnostics);
-    };
-    let kind = match resolve_kind(config, &main_path) {
-        Ok(kind) => kind,
+    let ctx = match project_context(config, sources, Some(&previews)) {
+        Ok(ctx) => ctx,
         Err(diagnostic) => {
             diagnostics.push(diagnostic);
             return refusal(diagnostics);
         }
     };
-    let root = config.root.clone().unwrap_or_else(|| {
-        main_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default()
-    });
 
-    // The edited main text: the transaction's preview when the main source is
-    // edited, else the caller-provided current text, else the filesystem.
-    let main_text = match preview_of(&previews, &main_path) {
-        Some(preview) => preview.new_text.clone(),
-        None => match sources.get(&main_path.to_string_lossy().into_owned()) {
-            Some(text) => text.clone(),
-            None => match std::fs::read_to_string(&main_path) {
-                Ok(text) => text,
-                Err(error) => {
-                    diagnostics.push(Diagnostic::error(
-                        "input-io",
-                        Stage::Discovery,
-                        format!("cannot read input '{}': {error}", main_path.display()),
-                    ));
-                    return refusal(diagnostics);
-                }
-            },
-        },
-    };
-
-    // Edited non-main sources become in-memory overlays keyed for the
-    // provider of the project's original source kind.
-    let overlay = build_overlay(
-        kind,
-        &root,
-        &main_path,
-        previews
-            .iter()
-            .map(|preview| (preview.source.as_str(), preview.new_text.as_str())),
-    );
-    let resolved = resolved_input(
-        kind,
-        &main_path,
-        &root,
-        &main_text,
-        config.locale.as_deref(),
-    );
-
-    match compile_project(kind, &resolved, &overlay, config.profile) {
-        Ok(_) => {}
-        Err(errors) => diagnostics.extend(errors),
+    if let Err(errors) = compile_project(ctx.kind, &ctx.resolved, &ctx.overlay, config.profile) {
+        diagnostics.extend(errors);
     }
 
-    // Validation is atomic: a transaction that fails any check — stale
-    // sources, malformed ranges, or compiled errors — returns no validated
-    // preview, never a partial or unvalidated edit set.
     let ok = !has_error(&diagnostics);
     EditValidation {
         ok,
@@ -326,7 +267,6 @@ pub fn validate_transaction(
     }
 }
 
-/// An atomic refusal: structured diagnostics and no preview.
 fn refusal(diagnostics: Vec<Diagnostic>) -> EditValidation {
     EditValidation {
         ok: false,
@@ -336,56 +276,23 @@ fn refusal(diagnostics: Vec<Diagnostic>) -> EditValidation {
     }
 }
 
-/// A semantic rename target: the exact identifier occurrence at a 1-based
-/// line/column in one source of the project (#129).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameTarget {
-    /// The source identity the position names (a key of the current-sources
-    /// map, or a path spelling of the main source).
     pub source: String,
-    /// The 1-based line of the identifier.
     pub line: u32,
-    /// The 1-based column of the identifier.
     pub col: u32,
-    /// The new name.
     pub to: String,
 }
 
-/// The outcome of a semantic rename: a validated multi-source transaction or
-/// structured refusal diagnostics (#129).
-///
-/// The transaction edits exactly the resolved semantic identity's occurrence
-/// ranges — never a whole-word scan or whole-document replacement — and is
-/// validated through the shared [`validate_transaction`] boundary before
-/// success is reported. The contract carries no LSP protocol types and
-/// exposes no mutable IR.
 #[derive(Debug, Clone, Serialize)]
 pub struct SemanticRename {
-    /// Whether the rename is safe to apply.
     pub ok: bool,
-    /// The validated exact-range transaction, when the rename resolved.
     pub transaction: Option<EditTransaction>,
-    /// Structured refusal/validation diagnostics.
     pub diagnostics: Vec<Diagnostic>,
-    /// The per-source previews of the validated transaction.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<Vec<SourcePreview>>,
 }
 
-/// Rename the symbol whose declaration or reference occurrence sits at a
-/// position in one source of a project (#129).
-///
-/// `config` and `sources` are the project and current-source snapshot of the
-/// *unmodified* code, exactly as [`validate_transaction`] takes them. The
-/// target symbol is resolved through the shared semantic index of the
-/// project compiled through its original provider; only occurrences
-/// belonging to that resolved semantic identity (the declaration identifier,
-/// the definition identifier, and every reference identifier) are edited,
-/// each as an exact-range edit carrying the source's identity precondition.
-/// Ambiguous positions, target-name collisions, occurrences without an exact
-/// identifier span, sources without a current text, and edited projects that
-/// fail validation refuse with deterministic structured diagnostics and no
-/// transaction.
 pub fn semantic_rename(
     config: &SessionConfig,
     sources: &BTreeMap<String, String>,
@@ -405,68 +312,26 @@ pub fn semantic_rename(
             "rename requires a non-empty new name",
         )]);
     }
-    let Some(main_path) = config.input.path().cloned() else {
-        return refuse(vec![Diagnostic::error(
-            "edit-input-stdin",
-            Stage::Discovery,
-            "semantic rename requires a path-based input so the project's \
-             main source identity is established; stdin has no project identity",
-        )]);
-    };
-    let kind = match resolve_kind(config, &main_path) {
-        Ok(kind) => kind,
-        Err(diagnostic) => return refuse(vec![diagnostic]),
-    };
-    let root = config.root.clone().unwrap_or_else(|| {
-        main_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default()
-    });
 
-    // The current project state: the main text from the caller's snapshot
-    // (or the filesystem), every other source as an in-memory overlay.
-    let main_text = match sources.get(&main_path.to_string_lossy().into_owned()) {
-        Some(text) => text.clone(),
-        None => match std::fs::read_to_string(&main_path) {
-            Ok(text) => text,
-            Err(error) => {
-                return refuse(vec![Diagnostic::error(
-                    "input-io",
-                    Stage::Discovery,
-                    format!("cannot read input '{}': {error}", main_path.display()),
-                )]);
-            }
-        },
+    let ctx = match project_context(config, sources, None) {
+        Ok(c) => c,
+        Err(d) => return refuse(vec![d]),
     };
-    let overlay = build_overlay(
-        kind,
-        &root,
-        &main_path,
-        sources
-            .iter()
-            .map(|(source, text)| (source.as_str(), text.as_str())),
-    );
-    let resolved = resolved_input(
-        kind,
-        &main_path,
-        &root,
-        &main_text,
-        config.locale.as_deref(),
-    );
 
-    let (program, files) = match compile_project(kind, &resolved, &overlay, config.profile) {
-        Ok(result) => result,
-        Err(diagnostics) => return refuse(diagnostics),
-    };
+    let (program, files) =
+        match compile_project(ctx.kind, &ctx.resolved, &ctx.overlay, config.profile) {
+            Ok(result) => result,
+            Err(diagnostics) => return refuse(diagnostics),
+        };
     let source_texts = files
         .iter()
         .filter_map(|file| {
-            let source = source_key_for_file(&files, &root, &main_path, sources, file.id as usize)?;
+            let source =
+                source_key_for_file(&files, &ctx.root, &ctx.main_path, sources, file.id as usize)?;
             let text = sources
                 .get(&source)
                 .cloned()
-                .or_else(|| (file.id == 0).then_some(main_text.clone()))?;
+                .or_else(|| (file.id == 0).then_some(ctx.main_text.clone()))?;
             Some((
                 workshop_rs::source::FileId::from_index(file.id as usize),
                 text,
@@ -476,22 +341,20 @@ pub fn semantic_rename(
     let index =
         wright_analyzer::canonical::SemanticIndex::build_with_sources(&program, &source_texts);
 
-    // The position names one file of the compiled project; refuse when the
-    // source is not part of it (e.g. an include outside the project closure).
-    let Some(file_id) = file_id_for_source(&files, &root, &target.source) else {
+    let Some(file_id) = file_id_for_source(&files, &ctx.root, &target.source) else {
         return refuse(vec![Diagnostic::error(
             "rename-unresolved",
             Stage::Discovery,
             format!(
-                "'{}' is not part of the compiled project; the rename position \
-                 must name a project source",
+                "'{}' is not part of the compiled project; the rename position must name a project source",
                 target.source
             ),
         )]);
     };
-    let declaration_source = source_key_for_file(&files, &root, &main_path, sources, file_id)
-        .and_then(|source| sources.get(&source).cloned())
-        .or_else(|| (file_id == 0).then_some(main_text.clone()));
+    let declaration_source =
+        source_key_for_file(&files, &ctx.root, &ctx.main_path, sources, file_id)
+            .and_then(|s| sources.get(&s).cloned())
+            .or_else(|| (file_id == 0).then_some(ctx.main_text.clone()));
     let Some(symbol) = symbol_at(&index, file_id, target.line, target.col).or_else(|| {
         declaration_source
             .as_deref()
@@ -507,9 +370,6 @@ pub fn semantic_rename(
         )]);
     };
 
-    // A same-spelled symbol in a different namespace is not a collision (the
-    // semantic index distinguishes identities by symbol id); only a genuine
-    // target-name conflict with another declared symbol refuses.
     if index
         .symbols()
         .any(|other| other.id != symbol.id && other.name == target.to)
@@ -524,25 +384,20 @@ pub fn semantic_rename(
         )]);
     }
 
-    // Collect the exact occurrence spans of the resolved semantic identity.
     let mut occurrences = Vec::new();
-    if let Some(occurrence) = symbol.occurrence {
-        occurrences.push(occurrence);
+    if let Some(occ) = symbol.occurrence {
+        occurrences.push(occ);
     }
     for reference in index.references(symbol.id) {
         match (reference.occurrence, reference.span) {
-            (Some(occurrence), _) => occurrences.push(occurrence),
-            (None, Some(_span)) => {
-                // A reference with a source location but no exact identifier
-                // occurrence: an exact target cannot be established, so the
-                // rename refuses rather than broadening to a statement span.
-                let path = target.source.clone();
+            (Some(occ), _) => occurrences.push(occ),
+            (None, Some(_)) => {
                 return refuse(vec![Diagnostic::error(
                     "rename-unresolved-target",
                     Stage::Discovery,
                     format!(
-                        "a semantic occurrence in {path} has no exact identifier span; \
-                         refusing the rename rather than broadening to a statement span"
+                        "a semantic occurrence in {} has no exact identifier span; refusing the rename rather than broadening to a statement span",
+                        target.source
                     ),
                 )]);
             }
@@ -551,13 +406,14 @@ pub fn semantic_rename(
     }
     for file in &files {
         let file_id = file.id as usize;
-        let Some(source) = source_key_for_file(&files, &root, &main_path, sources, file_id) else {
+        let Some(source) = source_key_for_file(&files, &ctx.root, &ctx.main_path, sources, file_id)
+        else {
             continue;
         };
         let current = sources
             .get(&source)
             .cloned()
-            .unwrap_or_else(|| main_text.clone());
+            .unwrap_or_else(|| ctx.main_text.clone());
         occurrences.extend(declaration_occurrences(
             file_id,
             &current,
@@ -566,38 +422,37 @@ pub fn semantic_rename(
         ));
     }
 
-    // One exact-range edit per occurrence, carrying the current text's
-    // identity precondition; the transaction orders and overlap-checks them.
     let mut edits: BTreeMap<String, BTreeSet<(u32, u32, u32, u32)>> = BTreeMap::new();
-    for occurrence in occurrences {
-        let file = occurrence.file.index();
-        let Some(source) = source_key_for_file(&files, &root, &main_path, sources, file) else {
+    for occ in occurrences {
+        let file = occ.file.index();
+        let Some(source) = source_key_for_file(&files, &ctx.root, &ctx.main_path, sources, file)
+        else {
             return refuse(vec![Diagnostic::error(
                 "edit-unknown-source",
                 Stage::Discovery,
-                "no current text was provided for a source the rename would edit; \
-                 supply the current text of every project source",
+                "no current text was provided for a source the rename would edit; supply the current text of every project source",
             )]);
         };
         let current = sources
             .get(&source)
             .cloned()
-            .unwrap_or_else(|| main_text.clone());
-        for occurrence in exact_identifier_occurrences(occurrence, &current, &symbol.name) {
+            .unwrap_or_else(|| ctx.main_text.clone());
+        for exact in exact_identifier_occurrences(occ, &current, &symbol.name) {
             edits.entry(source.clone()).or_default().insert((
-                occurrence.start.line,
-                occurrence.start.col,
-                occurrence.end.line,
-                occurrence.end.col,
+                exact.start.line,
+                exact.start.col,
+                exact.end.line,
+                exact.end.col,
             ));
         }
     }
+
     let mut source_edits = Vec::new();
     for (source, ranges) in edits {
         let current = sources
             .get(&source)
             .cloned()
-            .unwrap_or_else(|| main_text.clone());
+            .unwrap_or_else(|| ctx.main_text.clone());
         let identity = crate::input_identity(&current);
         for (start_line, start_col, end_line, end_col) in ranges {
             source_edits.push(SourceEdit {
@@ -615,12 +470,10 @@ pub fn semantic_rename(
         }
     }
     let transaction = match EditTransaction::new(source_edits) {
-        Ok(transaction) => transaction,
+        Ok(tx) => tx,
         Err(diagnostic) => return refuse(vec![diagnostic]),
     };
 
-    // Validate the resulting transaction through #128 before success; an
-    // unvalidated transaction is never returned.
     let validation = validate_transaction(config, sources, &transaction);
     if validation.ok {
         SemanticRename {
@@ -639,50 +492,48 @@ pub fn semantic_rename(
     }
 }
 
-/// Narrow an owner-provided semantic span to exact identifier occurrences
-/// proven by the corresponding source text.
 fn exact_identifier_occurrences(
     span: workshop_rs::source::Span,
     source: &str,
     name: &str,
 ) -> Vec<workshop_rs::source::Span> {
-    let name_chars: Vec<char> = name.chars().collect();
-    if name_chars.is_empty() {
+    if name.is_empty() {
         return Vec::new();
     }
     let lines: Vec<&str> = source.lines().collect();
     let mut occurrences = Vec::new();
-    for line_number in span.start.line..=span.end.line {
-        let Some(line) = lines.get(line_number.saturating_sub(1) as usize) else {
+    for line_num in span.start.line..=span.end.line {
+        let Some(line) = lines.get(line_num.saturating_sub(1) as usize) else {
             continue;
         };
-        let chars: Vec<char> = line.chars().collect();
-        let lower = if line_number == span.start.line {
+        let lower = if line_num == span.start.line {
             span.start.col.saturating_sub(1) as usize
         } else {
             0
         };
-        let upper = if line_number == span.end.line {
+        let upper = if line_num == span.end.line {
             span.end.col.saturating_sub(1) as usize
         } else {
-            chars.len()
+            line.chars().count()
         };
+        let chars: Vec<char> = line.chars().collect();
+        let name_chars: Vec<char> = name.chars().collect();
         for start in lower.min(chars.len())..=upper.min(chars.len()) {
-            let end = start.saturating_add(name_chars.len());
+            let end = start + name_chars.len();
             if end > upper || chars.get(start..end) != Some(name_chars.as_slice()) {
                 continue;
             }
-            let before = start.checked_sub(1).and_then(|index| chars.get(index));
+            let before = start.checked_sub(1).and_then(|i| chars.get(i));
             let after = chars.get(end);
-            if before.is_some_and(|character| character.is_alphanumeric() || *character == '_')
-                || after.is_some_and(|character| character.is_alphanumeric() || *character == '_')
+            if before.is_some_and(|c| c.is_alphanumeric() || *c == '_')
+                || after.is_some_and(|c| c.is_alphanumeric() || *c == '_')
             {
                 continue;
             }
             occurrences.push(workshop_rs::source::Span::new(
                 span.file,
-                workshop_rs::source::Position::new(line_number, start as u32 + 1),
-                workshop_rs::source::Position::new(line_number, end as u32 + 1),
+                workshop_rs::source::Position::new(line_num, start as u32 + 1),
+                workshop_rs::source::Position::new(line_num, end as u32 + 1),
             ));
         }
     }
@@ -704,58 +555,45 @@ fn declaration_occurrences(
     source
         .lines()
         .enumerate()
-        .filter_map(|(index, line)| {
+        .filter_map(|(idx, line)| {
             let start = line.find(prefix)? + prefix.len();
-            let line = &line[start..];
-            let name_start = line.find(name)?;
+            let rest = &line[start..];
+            let name_start = rest.find(name)?;
             let before = name_start
                 .checked_sub(1)
-                .and_then(|position| line.as_bytes().get(position));
-            let after = line.as_bytes().get(name_start + name.len());
-            if before
-                .is_some_and(|character| character.is_ascii_alphanumeric() || *character == b'_')
-                || after.is_some_and(|character| {
-                    character.is_ascii_alphanumeric() || *character == b'_'
-                })
+                .and_then(|p| rest.as_bytes().get(p));
+            let after = rest.as_bytes().get(name_start + name.len());
+            if before.is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+                || after.is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
             {
                 return None;
             }
             Some(workshop_rs::source::Span::new(
                 workshop_rs::source::FileId::from_index(file),
                 workshop_rs::source::Position::new(
-                    index as u32 + 1,
-                    (start + name_start) as u32 + 1,
+                    (idx + 1) as u32,
+                    (start + name_start + 1) as u32,
                 ),
                 workshop_rs::source::Position::new(
-                    index as u32 + 1,
-                    (start + name_start + name.len()) as u32 + 1,
+                    (idx + 1) as u32,
+                    (start + name_start + name.len() + 1) as u32,
                 ),
             ))
         })
         .collect()
 }
 
-/// The program file id whose registry path matches a caller source identity.
-///
-/// Matching walks the program file registry without assuming a fixed main
-/// source file id and
-/// tries the registry path as given, root-joined, and canonicalized, so
-/// display-relative spellings (e.g. the driver's cwd-relative display paths)
-/// and project-relative spellings both match.
 fn file_id_for_source(files: &[SourceFile], root: &Path, source: &str) -> Option<usize> {
     files.iter().find_map(|file| {
         registry_path_matches(source, root, &file.path).then_some(file.id as usize)
     })
 }
 
-/// Whether a source identity names the same file as a registry path spelling.
 fn registry_path_matches(source: &str, root: &Path, registry_path: &str) -> bool {
     let path = Path::new(registry_path);
     same_file(source, path) || (path.is_relative() && same_file(source, &root.join(path)))
 }
 
-/// The caller's source identity (a `sources` key) for a program file id,
-/// matching file registry paths against the provided current texts.
 fn source_key_for_file(
     files: &[SourceFile],
     root: &Path,
@@ -770,41 +608,31 @@ fn source_key_for_file(
             .cloned()
             .or_else(|| Some(main_path.to_string_lossy().into_owned()));
     }
-    let registry_path = files
-        .iter()
-        .find(|record| record.id as usize == file)?
-        .path
-        .as_str();
+    let reg = files.iter().find(|r| r.id as usize == file)?.path.as_str();
     sources
         .keys()
-        .find(|key| registry_path_matches(key, root, registry_path))
+        .find(|key| registry_path_matches(key, root, reg))
         .cloned()
 }
 
-/// The symbol whose declaration or reference occurrence span in `file_id`
-/// contains a 1-based line/column; spans in other files are never considered.
 fn symbol_at(
     index: &wright_analyzer::canonical::SemanticIndex,
     file_id: usize,
     line: u32,
     col: u32,
 ) -> Option<wright_analyzer::canonical::Symbol> {
-    for symbol in index.symbols() {
-        let symbol_id = symbol.id;
-        if let Some(span) = symbol.span {
-            if span.file.index() == file_id && span_contains(span, line, col) {
-                return Some(symbol.clone());
-            }
-        }
-        for reference in index.references(symbol_id) {
-            if let Some(span) = reference.span {
-                if span.file.index() == file_id && span_contains(span, line, col) {
-                    return Some(symbol.clone());
-                }
-            }
-        }
-    }
-    None
+    index
+        .symbols()
+        .find(|s| {
+            s.span
+                .is_some_and(|sp| sp.file.index() == file_id && span_contains(sp, line, col))
+                || index.references(s.id).iter().any(|r| {
+                    r.span.is_some_and(|sp| {
+                        sp.file.index() == file_id && span_contains(sp, line, col)
+                    })
+                })
+        })
+        .cloned()
 }
 
 fn declaration_symbol_at(
@@ -835,7 +663,7 @@ fn declaration_symbol_at(
         let name = line_text[name_start..]
             .split_whitespace()
             .next()
-            .map(|name| name.trim_matches('"'))?;
+            .map(|n| n.trim_matches('"'))?;
         let start = name_start as u32 + 1;
         let end = start + name.chars().count() as u32;
         if !(start..end).contains(&col) {
@@ -843,7 +671,7 @@ fn declaration_symbol_at(
         }
         return index
             .symbols()
-            .find(|symbol| symbol.kind == kind && symbol.name == name)
+            .find(|s| s.kind == kind && s.name == name)
             .cloned();
     }
     None
@@ -859,12 +687,9 @@ fn span_contains(span: workshop_rs::source::Span, line: u32, col: u32) -> bool {
 }
 
 fn has_error(diagnostics: &[Diagnostic]) -> bool {
-    diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.severity == Severity::Error)
+    diagnostics.iter().any(|d| d.severity == Severity::Error)
 }
 
-/// The origin metadata of a resolved input for the given source kind.
 fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
     Origin {
         kind: kind.as_str().to_string(),
@@ -872,7 +697,6 @@ fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
     }
 }
 
-/// The resolved-input snapshot a validation/rename compile runs against.
 fn resolved_input(
     kind: SourceKind,
     main_path: &Path,
@@ -893,8 +717,6 @@ fn resolved_input(
     }
 }
 
-/// Validate an OPY project through the provider boundary with include overlays
-/// and the shared validation configuration.
 #[derive(Debug, Clone)]
 struct SourceFile {
     id: u32,
@@ -911,16 +733,14 @@ fn compile_project(
     Err(vec![source_provider_unavailable()])
 }
 
-/// The concrete source kind to validate against: the configured kind, or
-/// detection from the main file extension for `Auto`.
 fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, Diagnostic> {
     match config.kind {
         SourceKind::Opy => Ok(SourceKind::Opy),
         SourceKind::Ostw => Err(source_provider_unavailable()),
         SourceKind::Auto => match main_path
             .extension()
-            .and_then(|extension| extension.to_str())
-            .map(|extension| extension.to_ascii_lowercase())
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
             .as_deref()
         {
             Some("opy") => Ok(SourceKind::Opy),
@@ -929,8 +749,7 @@ fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, 
                 "edit-unsupported-kind",
                 Stage::Discovery,
                 format!(
-                    "cannot detect the source kind of '{}' for edit validation; \
-                     pass an explicit `opy` source kind",
+                    "cannot detect the source kind of '{}' for edit validation; pass an explicit `opy` source kind",
                     main_path.display()
                 ),
             )),
@@ -939,41 +758,23 @@ fn resolve_kind(config: &SessionConfig, main_path: &Path) -> Result<SourceKind, 
             "edit-unsupported-kind",
             Stage::Discovery,
             format!(
-                "edit validation is declared over the OPY source provider; \
-                 '{}' input is not an editable source kind",
+                "edit validation is declared over the OPY source provider; '{}' input is not an editable source kind",
                 other.as_str()
             ),
         )),
     }
 }
 
-/// The edited text of the source matching `main_path`, when the transaction
-/// edits the main source.
 fn preview_of<'a>(previews: &'a [SourcePreview], main_path: &Path) -> Option<&'a SourcePreview> {
-    previews
-        .iter()
-        .find(|preview| same_file(&preview.source, main_path))
+    previews.iter().find(|p| same_file(&p.source, main_path))
 }
 
-/// Whether two spellings identify the same file: canonical paths when both
-/// resolve, else the exact path strings.
 fn same_file(a: &str, b: &Path) -> bool {
-    let b = b.to_string_lossy();
-    if a == b {
-        return true;
-    }
-    match (Path::new(a).canonicalize(), Path::new(&*b).canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
+    let b_str = b.to_string_lossy();
+    a == b_str
+        || matches!((Path::new(a).canonicalize(), b.canonicalize()), (Ok(ca), Ok(cb)) if ca == cb)
 }
 
-/// Build the in-memory overlay of non-main OPY sources, keyed for the provider.
-///
-/// OPY includes resolve against the include root by include string and by
-/// canonical path; the overlay carries the as-given, canonical, root-relative,
-/// and basename spellings (the same spellings the language service overlays
-/// use). The main source is never overlaid.
 fn build_overlay<'a>(
     kind: SourceKind,
     root: &Path,
@@ -988,14 +789,14 @@ fn build_overlay<'a>(
         if kind == SourceKind::Opy {
             let path = PathBuf::from(source);
             overlay.insert(path.to_string_lossy().into_owned(), text.to_string());
-            if let Ok(canonical) = path.canonicalize() {
-                overlay.insert(canonical.to_string_lossy().into_owned(), text.to_string());
+            if let Ok(c) = path.canonicalize() {
+                overlay.insert(c.to_string_lossy().into_owned(), text.to_string());
             }
-            if let Ok(relative) = path.strip_prefix(root) {
-                overlay.insert(relative.to_string_lossy().into_owned(), text.to_string());
+            if let Ok(r) = path.strip_prefix(root) {
+                overlay.insert(r.to_string_lossy().into_owned(), text.to_string());
             }
-            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                overlay.insert(name.to_string(), text.to_string());
+            if let Some(n) = path.file_name().and_then(|n| n.to_str()) {
+                overlay.insert(n.to_string(), text.to_string());
             }
         }
     }
@@ -1010,23 +811,17 @@ fn source_provider_unavailable() -> Diagnostic {
     )
 }
 
-/// Apply every edit of a transaction to the caller-provided current texts,
-/// returning one complete edited source per affected source.
-///
-/// All ranges address the same original source snapshot: per source, the
-/// edits are already deterministically ordered ascending by position, and
-/// they are applied in descending order, so an earlier replacement's length
-/// or newline changes can never shift a later range. Ranges outside the
-/// source, invalid columns, and other malformed ranges refuse explicitly.
 fn apply_transaction(
     sources: &BTreeMap<String, String>,
     transaction: &EditTransaction,
 ) -> Result<Vec<SourcePreview>, Diagnostic> {
-    let mut previews: Vec<SourcePreview> = Vec::new();
-    for (source, edits) in group_by_source(&transaction.edits) {
-        let original = sources
-            .get(source)
-            .expect("precondition check already verified every edited source");
+    let mut grouped: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
+    for edit in &transaction.edits {
+        grouped.entry(&edit.source).or_default().push(edit);
+    }
+    let mut previews = Vec::new();
+    for (source, edits) in grouped {
+        let original = sources.get(source).expect("precondition verified");
         let mut new_text = original.clone();
         for edit in edits.iter().rev() {
             new_text = apply_edit(&new_text, edit)?;
@@ -1040,151 +835,76 @@ fn apply_transaction(
     Ok(previews)
 }
 
-/// Group a transaction's edits by source, preserving the deterministic
-/// ascending per-source order established by [`EditTransaction::new`].
-fn group_by_source(edits: &[SourceEdit]) -> BTreeMap<&str, Vec<&SourceEdit>> {
-    let mut grouped: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
-    for edit in edits {
-        grouped.entry(&edit.source).or_default().push(edit);
-    }
-    grouped
-}
-
-/// Apply an edit's replacement text at its range (1-based character columns,
-/// end exclusive).
-///
-/// Columns are validated strictly against the declared 1-based exact-range
-/// contract: every column must be in `1..=char_count + 1` for its line
-/// (`end` is exclusive, so `char_count + 1` is a valid line-end insertion or
-/// full-line replacement point). A column of `0` or a column beyond the line
-/// is rejected (`edit-invalid-range`), never clamped to a different
-/// location.
 fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     let lines: Vec<&str> = source.split('\n').collect();
-    if edit.range.start_line < 1
-        || edit.range.end_line < 1
-        || edit.range.end_line as usize > lines.len()
-        || edit.range.end_line < edit.range.start_line
-        || (edit.range.start_line == edit.range.end_line
-            && edit.range.end_col < edit.range.start_col)
-    {
+    let (sl, sc, el, ec) = (
+        edit.range.start_line,
+        edit.range.start_col,
+        edit.range.end_line,
+        edit.range.end_col,
+    );
+    if sl < 1 || el < 1 || el as usize > lines.len() || el < sl || (sl == el && ec < sc) {
         return Err(Diagnostic::error(
             "edit-invalid-range",
             Stage::Discovery,
             format!(
-                "edit range {}-{}:{}-{} is outside the source ({} lines)",
-                edit.range.start_line,
-                edit.range.start_col,
-                edit.range.end_line,
-                edit.range.end_col,
+                "edit range {sl}-{sc}:{el}-{ec} is outside the source ({} lines)",
                 lines.len()
             ),
         ));
     }
-    let start_char_count = char_count(
-        lines
-            .get(edit.range.start_line as usize - 1)
-            .expect("start line validated in range"),
-    ) as u32;
-    let end_char_count = char_count(
-        lines
-            .get(edit.range.end_line as usize - 1)
-            .expect("end line validated in range"),
-    ) as u32;
-    if edit.range.start_col < 1
-        || edit.range.start_col > start_char_count + 1
-        || edit.range.end_col < 1
-        || edit.range.end_col > end_char_count + 1
-    {
+    let start_char_count = char_count(lines[sl as usize - 1]) as u32;
+    let end_char_count = char_count(lines[el as usize - 1]) as u32;
+    if sc < 1 || sc > start_char_count + 1 || ec < 1 || ec > end_char_count + 1 {
         return Err(Diagnostic::error(
             "edit-invalid-range",
             Stage::Discovery,
             format!(
-                "edit range {}-{}:{}-{} has columns outside the source lines \
-                 (line {} has {} characters, line {} has {}); columns are 1-based \
-                 and may not be 0 or beyond the line end",
-                edit.range.start_line,
-                edit.range.start_col,
-                edit.range.end_line,
-                edit.range.end_col,
-                edit.range.start_line,
-                start_char_count,
-                edit.range.end_line,
-                end_char_count
+                "edit range {sl}-{sc}:{el}-{ec} has columns outside the source lines (line {sl} has {start_char_count} characters, line {el} has {end_char_count}); columns are 1-based and may not be 0 or beyond the line end"
             ),
         ));
     }
-    let mut out: Vec<String> = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let line_number = (index + 1) as u32;
-        if line_number < edit.range.start_line || line_number > edit.range.end_line {
+    let mut out = Vec::new();
+    for (idx, line) in lines.iter().enumerate() {
+        let ln = (idx + 1) as u32;
+        if ln < sl || ln > el {
             out.push((*line).to_string());
-            continue;
-        }
-        if line_number == edit.range.start_line && line_number == edit.range.end_line {
-            let col = char_col(line, edit.range.start_col);
-            let end = char_col(line, edit.range.end_col);
-            let mut replacement = String::new();
-            replacement.push_str(&line[..col]);
-            replacement.push_str(&edit.new_text);
-            replacement.push_str(&line[end..]);
-            out.push(replacement);
-        } else if line_number == edit.range.start_line {
-            let col = char_col(line, edit.range.start_col);
-            let mut replacement = String::new();
-            replacement.push_str(&line[..col]);
-            replacement.push_str(&edit.new_text);
-            out.push(replacement);
-        } else if line_number == edit.range.end_line {
-            let end = char_col(line, edit.range.end_col);
-            out.push(line[end..].to_string());
-        } else {
-            // A wholly covered middle line is removed.
-            continue;
+        } else if ln == sl && ln == el {
+            let s = char_col(line, sc);
+            let e = char_col(line, ec);
+            out.push(format!("{}{}{}", &line[..s], edit.new_text, &line[e..]));
+        } else if ln == sl {
+            let s = char_col(line, sc);
+            out.push(format!("{}{}", &line[..s], edit.new_text));
+        } else if ln == el {
+            let e = char_col(line, ec);
+            out.push(line[e..].to_string());
         }
     }
     Ok(out.join("\n"))
 }
 
-/// The number of characters in a line.
 fn char_count(line: &str) -> usize {
     line.chars().count()
 }
 
-/// Convert a 1-based character column to a byte offset.
-///
-/// The caller validates the column against the line first; this conversion
-/// never clamps (a column of `0` or beyond the line is a caller bug).
 fn char_col(line: &str, col: u32) -> usize {
     let skip = col.saturating_sub(1) as usize;
     line.char_indices()
         .nth(skip)
-        .map(|(offset, _)| offset)
+        .map(|(off, _)| off)
         .unwrap_or(line.len())
 }
 
-/// A proposed symbol rename.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameRequest {
-    /// The symbol's kind (`globalVariable`, `playerVariable`, `subroutine`).
     pub symbol_kind: String,
-    /// The current name.
     pub from: String,
-    /// The new name.
     pub to: String,
-    /// The source file identity the rename applies to.
     pub source: String,
-    /// The source identity this rename applies to.
     pub source_identity: String,
 }
 
-/// Rename a declared symbol across the source.
-///
-/// Returns a single multi-line [`SourceEdit`] covering every occurrence of
-/// `from` (declaration and references), carrying the source identity
-/// precondition. The caller validates it inside a transaction with
-/// [`validate_transaction`], which recompiles the result. Names that are not
-/// declared fail explicitly (`unknown-symbol`).
 pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit, Diagnostic> {
     if request.from.is_empty() || request.to.is_empty() {
         return Err(Diagnostic::error(
@@ -1193,9 +913,6 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
             "rename requires non-empty `from` and `to` names",
         ));
     }
-    // Verify the symbol is declared and collect every reference by scanning
-    // the source for the declared name (declaration + references share the
-    // spelling in the declared surface). A declared symbol must exist.
     let declared = source
         .lines()
         .any(|line| line_has_declaration(line, &request.symbol_kind, &request.from));
@@ -1209,7 +926,6 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
             ),
         ));
     }
-
     rename_occurrences(
         source,
         &request.from,
@@ -1219,14 +935,6 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
     )
 }
 
-/// Rename every whole-word occurrence of `from` to `to`, returning a
-/// full-document [`SourceEdit`] carrying the source identity precondition.
-///
-/// Unlike [`rename_symbol`], this does not require a declaration in `source`.
-/// This is the established textual contract: it is name- and boundary-driven, so the
-/// caller must guarantee semantic identity (the project-wide rename in
-/// `wright-language` targets exact semantic spans instead, so it never routes
-/// through this whole-word scan).
 pub fn rename_occurrences(
     source: &str,
     from: &str,
@@ -1241,7 +949,6 @@ pub fn rename_occurrences(
             "rename requires non-empty `from` and `to` names",
         ));
     }
-
     let mut out = String::new();
     for line in source.split('\n') {
         out.push_str(&rename_in_line(line, from, to));
@@ -1282,7 +989,7 @@ fn line_has_declaration(line: &str, kind: &str, name: &str) -> bool {
     let rest = trimmed[keyword.len()..].trim_start();
     rest.split(|c: char| c.is_whitespace() || c == '=')
         .next()
-        .is_some_and(|candidate| candidate == name)
+        .is_some_and(|c| c == name)
 }
 
 fn rename_in_line(line: &str, from: &str, to: &str) -> String {
@@ -1314,7 +1021,6 @@ fn rename_in_line(line: &str, from: &str, to: &str) -> String {
     out
 }
 
-/// Render an edit range as a source span for diagnostics.
 pub fn range_as_span(range: &EditRange) -> SourceSpan {
     SourceSpan {
         file: 0,

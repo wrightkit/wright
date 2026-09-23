@@ -1,43 +1,27 @@
-//! A [`Document`] is one open source file with a stable URI, its current
-//! text, and a monotonically increasing version assigned by the host on every
-//! change. A [`DocumentStore`] owns the workspace's open documents and the
-//! project root. Positions and ranges are editor-neutral 0-based line/column
-//! pairs (the LSP convention), converted at the service boundary to the
-//! compiler's 1-based spans. Results carry the document version they were
-//! computed for, so stale results are detectable and replaceable (#64).
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// A 0-based line/character position (editor convention).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Position {
     pub line: u32,
     pub character: u32,
 }
 
-/// A 0-based half-open range (editor convention).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Range {
     pub start: Position,
     pub end: Position,
 }
 
-/// One open document.
 #[derive(Debug, Clone)]
 pub struct Document {
-    /// A stable URI/path identity (e.g. `file:///project/main.opy`).
     pub uri: String,
-    /// The current source text.
     pub text: String,
-    /// The host-assigned version (monotonic across edits).
     pub version: i32,
-    /// The project root used for include resolution.
     pub root: PathBuf,
 }
 
 impl Document {
-    /// Create a document with an explicit client version.
     pub fn with_version(
         uri: impl Into<String>,
         text: impl Into<String>,
@@ -52,16 +36,10 @@ impl Document {
         }
     }
 
-    /// Create a document at version 0 (used when the host does not supply a
-    /// version, e.g. in-process consumers).
     pub fn new(uri: impl Into<String>, text: impl Into<String>, root: PathBuf) -> Document {
         Self::with_version(uri, text, root, 0)
     }
 
-    /// The 1-based line/column of a 0-based editor position (clamped).
-    ///
-    /// The editor `character` is a UTF-16 code-unit offset (the LSP
-    /// convention); the compiler column is a Unicode scalar-value column.
     pub fn to_line_col(&self, position: Position) -> (u32, u32) {
         let line = (position.line as usize).min(self.text.lines().count().max(1) - 1);
         let line_text = self.text.lines().nth(line).unwrap_or_default();
@@ -69,14 +47,11 @@ impl Document {
         (line as u32 + 1, character as u32 + 1)
     }
 
-    /// Convert a 1-based compiler span into a 0-based editor range, where
-    /// the editor character is a UTF-16 code-unit offset.
     pub fn from_span(&self, span: &workshop_rs::source::Span) -> Range {
         span_to_range(span, &self.text)
     }
 }
 
-/// The workspace's open documents, keyed by URI.
 #[derive(Debug, Default)]
 pub struct DocumentStore {
     documents: BTreeMap<String, Document>,
@@ -84,7 +59,6 @@ pub struct DocumentStore {
 }
 
 impl DocumentStore {
-    /// A store with the given project root.
     pub fn new(root: PathBuf) -> DocumentStore {
         DocumentStore {
             documents: BTreeMap::new(),
@@ -92,16 +66,10 @@ impl DocumentStore {
         }
     }
 
-    /// Open (or replace) a document.
     pub fn open(&mut self, document: Document) {
         self.documents.insert(document.uri.clone(), document);
     }
 
-    /// Apply a full-document change with the client's document version.
-    ///
-    /// Out-of-order or stale versions (a version less than or equal to the
-    /// currently stored version) are rejected: they cannot overwrite newer
-    /// semantic state. Returns `true` when the change was applied.
     pub fn change(&mut self, uri: &str, new_text: &str, version: i32) -> bool {
         let Some(document) = self.documents.get_mut(uri) else {
             return false;
@@ -114,76 +82,54 @@ impl DocumentStore {
         true
     }
 
-    /// Close a document.
     pub fn close(&mut self, uri: &str) {
         self.documents.remove(uri);
     }
 
-    /// The current document for a URI.
     pub fn document(&self, uri: &str) -> Option<&Document> {
         self.documents.get(uri)
     }
 
-    /// Every open document URI.
     pub fn uris(&self) -> impl Iterator<Item = &str> {
         self.documents.keys().map(String::as_str)
     }
 
-    /// The text of a filesystem path, preferring an open unsaved document
-    /// overlay and falling back to the filesystem.
     pub fn text_for_path(&self, path: &PathBuf) -> Option<String> {
-        for document in self.documents.values() {
-            if let Some(document_path) = uri_to_path(&document.uri) {
-                if document_path == *path {
-                    return Some(document.text.clone());
-                }
+        for doc in self.documents.values() {
+            if uri_to_path(&doc.uri).is_some_and(|p| p == *path) {
+                return Some(doc.text.clone());
             }
         }
         std::fs::read_to_string(path).ok()
     }
 
-    /// The open document URI for a filesystem path, when one is open.
     pub fn uri_for_path(&self, path: &PathBuf) -> Option<String> {
-        for document in self.documents.values() {
-            if let Some(document_path) = uri_to_path(&document.uri) {
-                if document_path == *path {
-                    return Some(document.uri.clone());
-                }
+        for doc in self.documents.values() {
+            if uri_to_path(&doc.uri).is_some_and(|p| p == *path) {
+                return Some(doc.uri.clone());
             }
         }
         None
     }
 
-    /// Build an overlay map for include resolution: open documents keyed by
-    /// their include-relative path and their absolute filesystem path, so
-    /// unsaved editor buffers participate in include resolution rather than
-    /// being silently ignored.
     pub fn overlay(&self, root: &PathBuf) -> BTreeMap<String, String> {
         let mut overlay = BTreeMap::new();
-        for document in self.documents.values() {
-            let Some(path) = uri_to_path(&document.uri) else {
+        for doc in self.documents.values() {
+            let Some(path) = uri_to_path(&doc.uri) else {
                 continue;
             };
-            overlay.insert(path.to_string_lossy().into_owned(), document.text.clone());
-            if let Ok(relative) = path.strip_prefix(root) {
-                overlay.insert(
-                    relative.to_string_lossy().into_owned(),
-                    document.text.clone(),
-                );
+            overlay.insert(path.to_string_lossy().into_owned(), doc.text.clone());
+            if let Ok(rel) = path.strip_prefix(root) {
+                overlay.insert(rel.to_string_lossy().into_owned(), doc.text.clone());
             }
-            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                overlay.insert(name.to_string(), document.text.clone());
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                overlay.insert(name.to_string(), doc.text.clone());
             }
         }
         overlay
     }
 }
 
-/// Convert a standard `file://` URI to a filesystem path, when applicable.
-///
-/// Handles percent-encoding, spaces, Unicode filenames, and platform-specific
-/// path behavior through the standard URL parser, so an open document's URI
-/// identity maps to the same filesystem path the include resolver produces.
 pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     let url = url::Url::parse(uri).ok()?;
     if url.scheme() != "file" {
@@ -192,21 +138,10 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     url.to_file_path().ok()
 }
 
-/// Convert a filesystem path to a standard `file://` URI string, when
-/// applicable. The reverse of [`uri_to_path`].
 pub fn path_to_uri(path: &Path) -> Option<String> {
-    url::Url::from_file_path(path)
-        .ok()
-        .map(|url| url.to_string())
+    url::Url::from_file_path(path).ok().map(|u| u.to_string())
 }
 
-/// Normalize a source identity — a file URI or a resolved filesystem path —
-/// into a standard `file://` URI string, when applicable.
-///
-/// Both directions (`uri_to_path` and this) go through the same URL parser,
-/// so a produced URI always decodes back to the intended path and round-trips
-/// through the standard encoding for spaces, percent-encoding, Unicode
-/// filenames, and platform drive paths.
 pub fn source_to_uri(source: &str) -> Option<String> {
     if let Ok(url) = url::Url::parse(source) {
         if url.scheme() == "file" {
@@ -216,13 +151,10 @@ pub fn source_to_uri(source: &str) -> Option<String> {
     path_to_uri(Path::new(source))
 }
 
-/// The UTF-16 code-unit length of a string (non-BMP chars count 2).
 pub fn utf16_len(s: &str) -> usize {
     s.chars().map(|c| c.len_utf16()).sum()
 }
 
-/// Convert a 0-based UTF-16 code-unit offset to a 0-based character offset
-/// (clamped to the line's character count).
 pub fn utf16_offset_to_char(line: &str, utf16_offset: usize) -> usize {
     let mut chars = 0usize;
     let mut utf16 = 0usize;
@@ -236,33 +168,28 @@ pub fn utf16_offset_to_char(line: &str, utf16_offset: usize) -> usize {
     chars
 }
 
-/// Convert a 0-based character offset to a 0-based UTF-16 code-unit offset
-/// (clamped to the line's UTF-16 length).
 pub fn char_offset_to_utf16(line: &str, char_offset: usize) -> usize {
     line.chars().take(char_offset).map(|c| c.len_utf16()).sum()
 }
 
-/// Convert a 1-based compiler span to a 0-based editor range with UTF-16
-/// character offsets, using the source text to resolve each line's length.
-pub fn span_to_range(span: &workshop_rs::source::Span, source_text: &str) -> Range {
-    let start_line = source_text
-        .lines()
-        .nth(span.start.line.saturating_sub(1) as usize)
-        .unwrap_or_default();
-    let end_line = source_text
-        .lines()
-        .nth(span.end.line.saturating_sub(1) as usize)
-        .unwrap_or_default();
+pub fn span_to_range(span: &workshop_rs::source::Span, source: &str) -> Range {
+    let sl = span.start.line.saturating_sub(1) as usize;
+    let el = span.end.line.saturating_sub(1) as usize;
+    let lines: Vec<&str> = source.lines().collect();
+    let sc = lines.get(sl).map_or(0, |line| {
+        char_offset_to_utf16(line, span.start.col.saturating_sub(1) as usize)
+    });
+    let ec = lines.get(el).map_or(0, |line| {
+        char_offset_to_utf16(line, span.end.col.saturating_sub(1) as usize)
+    });
     Range {
         start: Position {
-            line: span.start.line.saturating_sub(1),
-            character: char_offset_to_utf16(start_line, span.start.col.saturating_sub(1) as usize)
-                as u32,
+            line: sl as u32,
+            character: sc as u32,
         },
         end: Position {
-            line: span.end.line.saturating_sub(1),
-            character: char_offset_to_utf16(end_line, span.end.col.saturating_sub(1) as usize)
-                as u32,
+            line: el as u32,
+            character: ec as u32,
         },
     }
 }

@@ -2,6 +2,7 @@ use workshop_rs::format::format_number;
 use workshop_rs::ids::Id;
 use workshop_rs::wir::{self, Value};
 
+use crate::fold_constants::FoldConstants;
 use crate::profile::Profile;
 
 /// A transformation pass over validated WIR.
@@ -14,8 +15,6 @@ pub trait Pass {
 }
 
 /// The `fold-constants` pass.
-pub struct FoldConstants;
-
 impl Pass for FoldConstants {
     fn name(&self) -> &'static str {
         "fold-constants"
@@ -86,16 +85,29 @@ fn fold_wir_one(program: &wir::Program, value: &Value) -> Option<Value> {
                     if let (Some(left), Some(right)) =
                         (wir_bool(program, args[0]), wir_bool(program, args[1]))
                     {
-                        return Some(Value::Bool(if name == "and" { left && right } else { left || right }));
+                        return Some(Value::Bool(if name == "and" {
+                            left && right
+                        } else {
+                            left || right
+                        }));
                     }
-                    if name == "or" && (wir_bool(program, args[0]) == Some(true) || wir_bool(program, args[1]) == Some(true)) {
+                    if name == "or"
+                        && (wir_bool(program, args[0]) == Some(true)
+                            || wir_bool(program, args[1]) == Some(true))
+                    {
                         return Some(Value::Bool(true));
                     }
-                    if name == "and" && (wir_bool(program, args[0]) == Some(false) || wir_bool(program, args[1]) == Some(false)) {
+                    if name == "and"
+                        && (wir_bool(program, args[0]) == Some(false)
+                            || wir_bool(program, args[1]) == Some(false))
+                    {
                         return Some(Value::Bool(false));
                     }
                 }
-                if name == "valueInArray" && args.len() == 2 && wir_number(program, args[1]) == Some(0.0) {
+                if name == "valueInArray"
+                    && args.len() == 2
+                    && wir_number(program, args[1]) == Some(0.0)
+                {
                     return Some(Value::Call {
                         name: "firstOf".to_string(),
                         args: vec![args[0]],
@@ -248,46 +260,52 @@ pub fn run_canonical(
 }
 
 fn fold_action_once(action: &mut workshop_rs::Action) -> usize {
-    use workshop_rs::Action;
+    use workshop_rs::Action::*;
+    let mut changed = 0;
     match action {
-        Action::SetGlobalVariable { value, .. }
-        | Action::ModifyGlobalVariable { value, .. }
-        | Action::If { condition: value }
-        | Action::ElseIf { condition: value }
-        | Action::While { condition: value } => usize::from(fold_value_once(value)),
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            usize::from(fold_value_once(player)) + usize::from(fold_value_once(value))
+        SetGlobalVariable { value, .. }
+        | ModifyGlobalVariable { value, .. }
+        | If { condition: value }
+        | ElseIf { condition: value }
+        | While { condition: value } => changed += usize::from(fold_value_once(value)),
+        SetPlayerVariable { player, value, .. }
+        | ModifyPlayerVariable { player, value, .. }
+        | AssignMember {
+            target: player,
+            value,
+            ..
+        } => {
+            changed += usize::from(fold_value_once(player)) + usize::from(fold_value_once(value));
         }
-        Action::AssignMember { target, value, .. } => {
-            usize::from(fold_value_once(target)) + usize::from(fold_value_once(value))
-        }
-        Action::ForGlobalVariable {
+        ForGlobalVariable {
             start, stop, step, ..
         } => {
-            usize::from(fold_value_once(start))
+            changed += usize::from(fold_value_once(start))
                 + usize::from(fold_value_once(stop))
-                + usize::from(fold_value_once(step))
+                + usize::from(fold_value_once(step));
         }
-        Action::ForPlayerVariable {
+        ForPlayerVariable {
             player,
             start,
             stop,
             step,
             ..
         } => {
-            usize::from(fold_value_once(player))
+            changed += usize::from(fold_value_once(player))
                 + usize::from(fold_value_once(start))
                 + usize::from(fold_value_once(stop))
-                + usize::from(fold_value_once(step))
+                + usize::from(fold_value_once(step));
         }
-        Action::Disabled { action } => fold_action_once(action),
-        Action::Call { args, .. } => args
-            .iter_mut()
-            .map(|value| usize::from(fold_value_once(value)))
-            .sum(),
-        Action::CallSubroutine { .. } | Action::Else | Action::End => 0,
+        Disabled { action } => changed += fold_action_once(action),
+        Call { args, .. } => {
+            changed += args
+                .iter_mut()
+                .map(|v| usize::from(fold_value_once(v)))
+                .sum::<usize>()
+        }
+        CallSubroutine { .. } | Else | End => {}
     }
+    changed
 }
 
 /// Fold one tree level. The caller repeats this pass to a fixpoint so a
@@ -418,38 +436,38 @@ fn program_node_count(program: &workshop_rs::Program) -> usize {
 }
 
 fn action_node_count(action: &workshop_rs::Action) -> usize {
-    use workshop_rs::Action;
-    1 + match action {
-        Action::SetGlobalVariable { value, .. }
-        | Action::ModifyGlobalVariable { value, .. }
-        | Action::If { condition: value }
-        | Action::ElseIf { condition: value }
-        | Action::While { condition: value } => value_node_count(value),
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            value_node_count(player) + value_node_count(value)
-        }
-        Action::AssignMember { target, value, .. } => {
-            value_node_count(target) + value_node_count(value)
-        }
-        Action::ForGlobalVariable {
+    use workshop_rs::Action::*;
+    match action {
+        CallSubroutine { .. } | Else | End => 0,
+        Disabled { action } => action_node_count(action),
+        SetGlobalVariable { value, .. }
+        | ModifyGlobalVariable { value, .. }
+        | If { condition: value }
+        | ElseIf { condition: value }
+        | While { condition: value } => 1 + value_node_count(value),
+        SetPlayerVariable { player, value, .. }
+        | ModifyPlayerVariable { player, value, .. }
+        | AssignMember {
+            target: player,
+            value,
+            ..
+        } => 1 + value_node_count(player) + value_node_count(value),
+        ForGlobalVariable {
             start, stop, step, ..
-        } => value_node_count(start) + value_node_count(stop) + value_node_count(step),
-        Action::ForPlayerVariable {
+        } => 1 + value_node_count(start) + value_node_count(stop) + value_node_count(step),
+        ForPlayerVariable {
             player,
             start,
             stop,
             step,
             ..
         } => {
-            value_node_count(player)
+            1 + value_node_count(player)
                 + value_node_count(start)
                 + value_node_count(stop)
                 + value_node_count(step)
         }
-        Action::Disabled { action } => action_node_count(action),
-        Action::Call { args, .. } => args.iter().map(value_node_count).sum(),
-        Action::CallSubroutine { .. } | Action::Else | Action::End => 0,
+        Call { args, .. } => 1 + args.iter().map(value_node_count).sum::<usize>(),
     }
 }
 

@@ -1,22 +1,13 @@
-//! The product layer selects a source target and receives source diagnostics
-//! plus canonical Workshop text. Provider transport, document synchronization,
-//! and compiler implementation types stay behind the adapter that implements
-//! this trait. A provider owns project discovery from the selected entry; the
-//! target deliberately carries no project graph or preloaded document set.
-
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 
-/// A source language that can participate in the product boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceLanguage {
-    /// OverPy, whose provider owns `#!mainFile`, includes, and preprocessing.
     Opy,
 }
 
-/// The filesystem target shape handed to a source owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceTargetKind {
     File,
@@ -24,56 +15,36 @@ pub enum SourceTargetKind {
 }
 
 impl SourceLanguage {
-    /// The stable product spelling.
     pub const fn as_str(self) -> &'static str {
         match self {
-            SourceLanguage::Opy => "opy",
+            Self::Opy => "opy",
         }
     }
 }
 
-/// Whether a source language is loaded natively or through an injected
-/// provider. The choice is explicit so provider failures cannot select a
-/// different implementation by accident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SourceBackend {
-    /// Use the implementation linked into Wright for the selected source kind.
     #[default]
     Native,
-    /// Select the provider only after the resolved target's source owner is known.
     Auto,
-    /// Require the explicitly injected source provider.
     Provider,
 }
 
-/// The user-selected source target passed to a provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceTarget {
-    /// The language selected by the product layer.
     pub language: SourceLanguage,
-    /// The one path selected by the user, resolved relative to [`cwd`].
     pub entry: PathBuf,
-    /// Whether `entry` names a file entry or a project directory.
     pub kind: SourceTargetKind,
-    /// The invocation working directory used to resolve relative CLI paths.
     pub cwd: PathBuf,
-    /// The CLI-supplied project root, when one was provided.
     pub project_root: Option<PathBuf>,
 }
 
-/// The provenance contract for the canonical Workshop result.
-///
-/// The current provider boundary has no canonical-Workshop-to-authored-source
-/// span map, so provider results remain explicitly unmapped. A mapped variant
-/// must not be added without carrying and consuming the actual mapping data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceProvenance {
-    /// The canonical artifact has no authored-source mapping.
     Unmapped,
 }
 
 impl SourceTarget {
-    /// Construct an entry target and resolve a relative path from `cwd`.
     pub fn new(
         language: SourceLanguage,
         entry: impl Into<PathBuf>,
@@ -95,7 +66,6 @@ impl SourceTarget {
         }
     }
 
-    /// Construct a directory target and resolve it from `cwd`.
     pub fn directory(
         language: SourceLanguage,
         directory: impl Into<PathBuf>,
@@ -106,44 +76,30 @@ impl SourceTarget {
         target
     }
 
-    /// Attach the CLI-supplied project root without changing owner-side
-    /// project discovery.
     pub fn with_project_root(mut self, project_root: PathBuf) -> Self {
         self.project_root = Some(project_root);
         self
     }
 
-    /// The entry path as a [`Path`].
     pub fn entry_path(&self) -> &Path {
         &self.entry
     }
 
-    /// Whether this target delegates entry discovery to the source owner.
     pub fn is_directory(&self) -> bool {
         self.kind == SourceTargetKind::Directory
     }
 }
 
-/// The result of a provider-owned source compilation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceCompilation {
-    /// Canonical Workshop source returned by the provider, when compilation
-    /// succeeded. The driver validates and parses this text through
-    /// `workshop-rs`; it never consumes provider-internal IR.
     pub workshop_text: Option<String>,
-    /// Workshop client locale for the returned canonical source.
     pub locale: Option<String>,
-    /// Whether canonical Workshop spans can be mapped to authored source.
     pub provenance: SourceProvenance,
-    /// Diagnostics already attributed to their authored source files by the
-    /// provider adapter. These are preserved alongside Wright diagnostics.
     pub diagnostics: Vec<Diagnostic>,
-    /// SHA-256 identity of the provider-selected primary source text.
     pub source_identity: Option<String>,
 }
 
 impl SourceCompilation {
-    /// A successful canonical Workshop result without diagnostics.
     pub fn success(workshop_text: impl Into<String>) -> Self {
         Self {
             workshop_text: Some(workshop_text.into()),
@@ -155,80 +111,60 @@ impl SourceCompilation {
     }
 }
 
-/// A failure at the source-provider boundary, distinct from a source
-/// diagnostic returned by the provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceProviderError {
-    /// The requested provider was not injected for a provider-backed session.
     NotConfigured { language: SourceLanguage },
-    /// The provider cannot perform the requested product operation.
     Unsupported { message: String },
-    /// The provider or its process failed independently of source contents.
     Failed { code: String, message: String },
 }
 
 impl SourceProviderError {
-    /// Stable machine-readable error code.
     pub fn code(&self) -> &str {
         match self {
-            SourceProviderError::NotConfigured { .. } => "source-provider-not-configured",
-            SourceProviderError::Unsupported { .. } => "source-provider-unsupported",
-            SourceProviderError::Failed { code, .. } => code,
+            Self::NotConfigured { .. } => "source-provider-not-configured",
+            Self::Unsupported { .. } => "source-provider-unsupported",
+            Self::Failed { code, .. } => code,
         }
     }
 
-    /// Convert the boundary failure to the driver's structured diagnostic.
     pub fn diagnostic(&self) -> Diagnostic {
-        let message = self.to_string();
         let stage = match self {
-            SourceProviderError::Unsupported { .. } => Stage::Frontend,
-            SourceProviderError::NotConfigured { .. } | SourceProviderError::Failed { .. } => {
-                Stage::Internal
-            }
+            Self::Unsupported { .. } => Stage::Frontend,
+            Self::NotConfigured { .. } | Self::Failed { .. } => Stage::Internal,
         };
-        Diagnostic::error(self.code(), stage, message)
+        Diagnostic::error(self.code(), stage, self.to_string())
     }
 }
 
 impl fmt::Display for SourceProviderError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SourceProviderError::NotConfigured { language } => write!(
-                formatter,
+            Self::NotConfigured { language } => write!(
+                f,
                 "no source provider is configured for '{}'",
                 language.as_str()
             ),
-            SourceProviderError::Unsupported { message }
-            | SourceProviderError::Failed { message, .. } => formatter.write_str(message),
+            Self::Unsupported { message } | Self::Failed { message, .. } => f.write_str(message),
         }
     }
 }
 
 impl std::error::Error for SourceProviderError {}
 
-/// The provider implementation consumed by the product layer.
 pub trait SourceProvider {
-    /// The source language served by this provider.
     fn language(&self) -> SourceLanguage;
-
-    /// Check the user-selected entry and return owner diagnostics.
     fn check(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
         self.compile(target)
     }
-
-    /// Compile the user-selected entry. Project discovery and source closure
-    /// are owned by the implementation behind this boundary.
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError>;
 }
 
-/// The Wright adapter for a first-party LPP source provider.
 pub struct LppSourceProvider {
     provider: Box<dyn wright_lpp::LanguageProvider>,
     locale: Option<String>,
 }
 
 impl LppSourceProvider {
-    /// Construct an already initialized LPP provider adapter.
     pub fn new(provider: Box<dyn wright_lpp::LanguageProvider>, locale: Option<String>) -> Self {
         Self { provider, locale }
     }
@@ -262,36 +198,8 @@ impl LppSourceProvider {
         target
             .project_root
             .as_deref()
-            .and_then(|root| url::Url::from_directory_path(root).ok())
-            .map(|uri| uri.to_string())
-    }
-
-    fn check_result(
-        &mut self,
-        target: &SourceTarget,
-    ) -> Result<SourceCompilation, SourceProviderError> {
-        let entry = self.entry(target)?;
-        let result = if target.is_directory() {
-            self.provider.check_target(
-                &entry,
-                Self::project_root_uri(target).as_deref(),
-                self.locale.as_deref(),
-            )
-        } else {
-            self.provider.check_entry(
-                &entry,
-                Self::project_root_uri(target).as_deref(),
-                self.locale.as_deref(),
-            )
-        }
-        .map_err(provider_error)?;
-        Ok(SourceCompilation {
-            workshop_text: None,
-            locale: self.locale.clone(),
-            provenance: SourceProvenance::Unmapped,
-            diagnostics: provider_diagnostics(result.documents, self.locale.as_deref()),
-            source_identity: None,
-        })
+            .and_then(|r| url::Url::from_directory_path(r).ok())
+            .map(|u| u.to_string())
     }
 }
 
@@ -307,33 +215,44 @@ impl SourceProvider for LppSourceProvider {
     }
 
     fn check(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
-        self.check_result(target)
+        let entry = self.entry(target)?;
+        let root_uri = Self::project_root_uri(target);
+        let res = if target.is_directory() {
+            self.provider
+                .check_target(&entry, root_uri.as_deref(), self.locale.as_deref())
+        } else {
+            self.provider
+                .check_entry(&entry, root_uri.as_deref(), self.locale.as_deref())
+        }
+        .map_err(provider_error)?;
+        Ok(SourceCompilation {
+            workshop_text: None,
+            locale: self.locale.clone(),
+            provenance: SourceProvenance::Unmapped,
+            diagnostics: provider_diagnostics(res.documents, self.locale.as_deref()),
+            source_identity: None,
+        })
     }
 
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
         let entry = self.entry(target)?;
-        let result = if target.is_directory() {
-            self.provider.compile_target(
-                &entry,
-                Self::project_root_uri(target).as_deref(),
-                self.locale.as_deref(),
-            )
+        let root_uri = Self::project_root_uri(target);
+        let res = if target.is_directory() {
+            self.provider
+                .compile_target(&entry, root_uri.as_deref(), self.locale.as_deref())
         } else {
-            self.provider.compile_entry(
-                &entry,
-                Self::project_root_uri(target).as_deref(),
-                self.locale.as_deref(),
-            )
+            self.provider
+                .compile_entry(&entry, root_uri.as_deref(), self.locale.as_deref())
         }
         .map_err(provider_error)?;
-        let workshop_text = match result.artifact {
-            Some(artifact) if artifact.format == "workshop-rs/text-v1" => Some(artifact.content),
-            Some(artifact) => {
+        let workshop_text = match res.artifact {
+            Some(a) if a.format == "workshop-rs/text-v1" => Some(a.content),
+            Some(a) => {
                 return Err(SourceProviderError::Failed {
                     code: "provider-artifact-format".to_string(),
                     message: format!(
                         "the source provider returned unsupported artifact format '{}', expected 'workshop-rs/text-v1'",
-                        artifact.format
+                        a.format
                     ),
                 });
             }
@@ -343,8 +262,8 @@ impl SourceProvider for LppSourceProvider {
             workshop_text,
             locale: self.locale.clone(),
             provenance: SourceProvenance::Unmapped,
-            diagnostics: provider_diagnostics(result.diagnostics, self.locale.as_deref()),
-            source_identity: result.source_identity,
+            diagnostics: provider_diagnostics(res.diagnostics, self.locale.as_deref()),
+            source_identity: res.source_identity,
         })
     }
 }
@@ -363,29 +282,25 @@ fn provider_diagnostics(
     documents
         .into_iter()
         .enumerate()
-        .flat_map(|(file, document)| {
-            let path = provider_uri_path(&document.uri);
-            document.diagnostics.into_iter().map(move |diagnostic| {
-                let severity = match diagnostic.severity {
+        .flat_map(|(file, doc)| {
+            let path = provider_uri_path(&doc.uri);
+            doc.diagnostics.into_iter().map(move |d| {
+                let severity = match d.severity {
                     wright_lpp::DiagnosticSeverity::Error => Severity::Error,
                     wright_lpp::DiagnosticSeverity::Warning => Severity::Warning,
-                    wright_lpp::DiagnosticSeverity::Info | wright_lpp::DiagnosticSeverity::Hint => {
-                        Severity::Info
-                    }
+                    _ => Severity::Info,
                 };
                 Diagnostic {
-                    code: diagnostic
-                        .code
-                        .unwrap_or_else(|| "provider-diagnostic".to_string()),
+                    code: d.code.unwrap_or_else(|| "provider-diagnostic".to_string()),
                     stage: Stage::Frontend,
                     severity,
-                    message: diagnostic.message,
+                    message: d.message,
                     status: None,
                     span: Some(SourceSpan {
                         file,
                         path: path.clone(),
-                        start: provider_position(diagnostic.range.start),
-                        end: provider_position(diagnostic.range.end),
+                        start: provider_position(d.range.start),
+                        end: provider_position(d.range.end),
                     }),
                     source: Some(Origin {
                         kind: SourceLanguage::Opy.as_str().to_string(),
@@ -400,15 +315,15 @@ fn provider_diagnostics(
 fn provider_uri_path(uri: &str) -> String {
     url::Url::parse(uri)
         .ok()
-        .and_then(|url| url.to_file_path().ok())
-        .map(|path| path.display().to_string())
+        .and_then(|u| u.to_file_path().ok())
+        .map(|p| p.display().to_string())
         .unwrap_or_else(|| uri.to_string())
 }
 
-fn provider_position(position: wright_lpp::Position) -> Position {
+fn provider_position(pos: wright_lpp::Position) -> Position {
     Position {
-        line: position.line.saturating_add(1),
-        col: position.character.saturating_add(1),
+        line: pos.line.saturating_add(1),
+        col: pos.character.saturating_add(1),
     }
 }
 

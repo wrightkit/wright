@@ -240,14 +240,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 ConvertTargetArg::Opy => wright_driver::ConvertTarget::Opy,
                 ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
             };
-            let activity = Arc::new(presentation.activity());
-            session.set_progress_observer(activity.clone());
-            let envelope = session.convert(target);
-            session.clear_progress_observer();
-            drop(activity);
-            let code = envelope.exit;
-            present::render(&envelope, presentation);
-            code
+            run_command(&mut session, |s| s.convert(target), presentation)
         }
         _ => unreachable!("all workflow commands are mapped"),
     };
@@ -359,7 +352,7 @@ fn is_directory_input(common: &CommonArgs) -> bool {
 /// Run one driver workflow and render its envelope in the CLI presentation.
 fn run_command<T: serde::Serialize + present::ResultPresentation>(
     session: &mut wright_driver::CompilerSession,
-    run: fn(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
+    run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
 ) -> u8 {
     let activity = Arc::new(presentation.activity());

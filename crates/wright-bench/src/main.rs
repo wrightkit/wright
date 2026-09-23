@@ -1,9 +1,4 @@
-//! Measures compile latency, peak RSS, and generated-resource usage (emitted
-//! Workshop bytes and canonical Program counts for representative Workshop inputs
-//! through the real driver path (`CompilerSession::compile`), and enforces declared
-//! regression thresholds. Output is versioned machine-readable JSON:
-//! `target/wright-bench-report.json`. Exits non-zero when a threshold is
-//! exceeded.
+//! Measures compile latency, peak RSS, and generated-resource usage.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -13,10 +8,7 @@ use wright_driver::CompilerSession;
 use wright_driver::Profile;
 use wright_driver::config::{SessionConfig, SourceKind};
 
-/// The bench contract version (report consumers depend on it).
 const BENCH_CONTRACT: &str = "wright-bench/v1";
-
-/// Benchmark configuration with declared regression thresholds.
 const BENCH_CONFIG: &str = r#"{
   "iterations": 5,
   "warmup": 1,
@@ -29,22 +21,17 @@ const BENCH_CONFIG: &str = r#"{
 
 fn main() -> ExitCode {
     match run() {
-        Ok(ok) => {
-            if ok {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(1)
-            }
-        }
-        Err(message) => {
-            eprintln!("wright-bench: {message}");
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::from(1),
+        Err(m) => {
+            eprintln!("wright-bench: {m}");
             ExitCode::from(2)
         }
     }
 }
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 fn benchmark_cases() -> Vec<(&'static str, PathBuf)> {
@@ -93,23 +80,18 @@ struct Report {
 }
 
 fn run() -> Result<bool, String> {
-    let config: serde_json::Value = serde_json::from_str(BENCH_CONFIG)
-        .map_err(|error| format!("invalid bench config: {error}"))?;
+    let config: serde_json::Value =
+        serde_json::from_str(BENCH_CONFIG).map_err(|e| format!("invalid bench config: {e}"))?;
     let iterations = config["iterations"].as_u64().unwrap_or(5) as usize;
     let warmup = config["warmup"].as_u64().unwrap_or(1) as usize;
+    let root = workspace_root().join("tests/fixtures/workshop");
 
     let mut reports = Vec::new();
     let mut regressions = Vec::new();
 
     for (id, path) in benchmark_cases() {
         let source = std::fs::read_to_string(&path)
-            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        let root = path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-
-        // Warmup (also populates caches deterministically).
+            .map_err(|e| format!("cannot read fixture '{id}': {e}"))?;
         for _ in 0..warmup {
             compile(&source, id, &root)?;
         }
@@ -117,6 +99,7 @@ fn run() -> Result<bool, String> {
         let mut latencies = Vec::new();
         let mut last_output = None;
         let mut last_nodes = (0, 0, 0);
+
         for _ in 0..iterations {
             let start = Instant::now();
             let (output, nodes) = compile(&source, id, &root)?;
@@ -157,7 +140,6 @@ fn run() -> Result<bool, String> {
         reports.push(report);
     }
 
-    // Peak RSS across the whole run (a stable, coarse resource bound).
     let rss_mb = peak_rss_mb();
     if rss_mb
         > config["thresholds"]["maxRssMb"]
@@ -174,25 +156,19 @@ fn run() -> Result<bool, String> {
         iterations,
         thresholds: config["thresholds"].clone(),
         fixtures: reports,
-        summary: serde_json::json!({
-            "peakRssMb": rss_mb,
-            "regressions": regressions,
-        }),
+        summary: serde_json::json!({ "peakRssMb": rss_mb, "regressions": regressions }),
     };
     let out = workspace_root().join("target");
-    std::fs::create_dir_all(&out).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     std::fs::write(
         out.join("wright-bench-report.json"),
         serde_json::to_string_pretty(&report).unwrap(),
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|e| e.to_string())?;
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
-
     Ok(regressions.is_empty())
 }
 
-/// Compile one canonical Workshop source through the real driver path (compat profile)
-/// and return the emitted text plus canonical program node counts.
 fn compile(
     source: &str,
     fixture: &str,
@@ -200,12 +176,12 @@ fn compile(
 ) -> Result<(String, (usize, usize, usize)), String> {
     let safe_name = fixture.replace('/', "-");
     let input_dir = workspace_root().join("target/wright-bench-inputs");
-    std::fs::create_dir_all(&input_dir).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
     let path = input_dir.join(format!(
         "wright-bench-{}-{safe_name}.ws",
         std::process::id()
     ));
-    std::fs::write(&path, source).map_err(|error| error.to_string())?;
+    std::fs::write(&path, source).map_err(|e| e.to_string())?;
     let mut session = CompilerSession::new(SessionConfig {
         input: wright_driver::config::InputSpec::Path(path.clone()),
         kind: SourceKind::Workshop,
@@ -213,7 +189,7 @@ fn compile(
         profile: Profile::Compat,
         ..SessionConfig::default()
     })
-    .map_err(|error| error.message)?;
+    .map_err(|e| e.message)?;
     let envelope = session.compile();
     if !envelope.ok {
         return Err(format!(
@@ -222,90 +198,78 @@ fn compile(
         ));
     }
     let output = envelope.result.output.expect("compiled output");
-    let loaded = session.load().map_err(|error| error.message)?;
+    let loaded = session.load().map_err(|e| e.message)?;
     let nodes = (
         loaded
             .program
             .rules
             .iter()
-            .flat_map(|rule| {
-                rule.conditions
+            .flat_map(|r| {
+                r.conditions
                     .iter()
-                    .map(|condition| count_value(&condition.value))
-                    .chain(rule.actions.iter().map(count_action))
+                    .map(|c| count_value(&c.value))
+                    .chain(r.actions.iter().map(count_action))
             })
             .sum(),
-        loaded
-            .program
-            .rules
-            .iter()
-            .map(|rule| rule.actions.len())
-            .sum(),
+        loaded.program.rules.iter().map(|r| r.actions.len()).sum(),
         loaded.program.rules.len(),
     );
     let _ = std::fs::remove_file(&path);
     Ok((output.text, nodes))
 }
 
-fn count_value(value: &workshop_rs::Value) -> usize {
-    1 + match value {
-        workshop_rs::Value::Array(values) | workshop_rs::Value::Call { args: values, .. } => {
-            values.iter().map(count_value).sum()
-        }
-        workshop_rs::Value::Vector { x, y, z } => count_value(x) + count_value(y) + count_value(z),
-        workshop_rs::Value::PlayerVariable { player, .. } => count_value(player),
-        _ => 0,
-    }
-}
-
 fn count_action(action: &workshop_rs::Action) -> usize {
-    1 + match action {
-        workshop_rs::Action::SetGlobalVariable { value, .. }
-        | workshop_rs::Action::ModifyGlobalVariable { value, .. } => count_value(value),
-        workshop_rs::Action::SetPlayerVariable { player, value, .. }
-        | workshop_rs::Action::ModifyPlayerVariable { player, value, .. } => {
-            count_value(player) + count_value(value)
-        }
-        workshop_rs::Action::AssignMember { target, value, .. } => {
-            count_value(target) + count_value(value)
-        }
-        workshop_rs::Action::If { condition }
-        | workshop_rs::Action::ElseIf { condition }
-        | workshop_rs::Action::While { condition } => count_value(condition),
-        workshop_rs::Action::ForGlobalVariable {
+    use workshop_rs::Action::*;
+    match action {
+        CallSubroutine { .. } | Else | End => 0,
+        Disabled { action } => 1 + count_action(action),
+        Call { args, .. } => 1 + args.iter().map(count_value).sum::<usize>(),
+        SetGlobalVariable { value, .. }
+        | ModifyGlobalVariable { value, .. }
+        | If { condition: value }
+        | ElseIf { condition: value }
+        | While { condition: value } => 1 + count_value(value),
+        SetPlayerVariable { player, value, .. }
+        | ModifyPlayerVariable { player, value, .. }
+        | AssignMember {
+            target: player,
+            value,
+            ..
+        } => 1 + count_value(player) + count_value(value),
+        ForGlobalVariable {
             start, stop, step, ..
-        }
-        | workshop_rs::Action::ForPlayerVariable {
-            start, stop, step, ..
-        } => count_value(start) + count_value(stop) + count_value(step),
-        workshop_rs::Action::Disabled { action } => count_action(action),
-        workshop_rs::Action::Call { args, .. } => args.iter().map(count_value).sum(),
-        workshop_rs::Action::CallSubroutine { .. }
-        | workshop_rs::Action::Else
-        | workshop_rs::Action::End => 0,
+        } => 1 + count_value(start) + count_value(stop) + count_value(step),
+        ForPlayerVariable {
+            player,
+            start,
+            stop,
+            step,
+            ..
+        } => 1 + count_value(player) + count_value(start) + count_value(stop) + count_value(step),
     }
 }
 
-fn mean(latencies: &[Duration]) -> f64 {
-    latencies.iter().map(|d| d.as_secs_f64()).sum::<f64>() / latencies.len() as f64
+fn count_value(value: &workshop_rs::Value) -> usize {
+    use workshop_rs::Value::*;
+    match value {
+        Array(elements) => 1 + elements.iter().map(count_value).sum::<usize>(),
+        Vector { x, y, z } => 1 + count_value(x) + count_value(y) + count_value(z),
+        PlayerVariable { player, .. } => 1 + count_value(player),
+        Call { args, .. } => 1 + args.iter().map(count_value).sum::<usize>(),
+        _ => 1,
+    }
 }
 
-fn min(latencies: &[Duration]) -> f64 {
-    latencies
-        .iter()
-        .map(|d| d.as_secs_f64())
-        .fold(f64::MAX, f64::min)
+fn mean(d: &[Duration]) -> f64 {
+    d.iter().map(|t| t.as_secs_f64()).sum::<f64>() / d.len() as f64
+}
+fn min(d: &[Duration]) -> f64 {
+    d.iter().map(|t| t.as_secs_f64()).fold(f64::MAX, f64::min)
+}
+fn max(d: &[Duration]) -> f64 {
+    d.iter().map(|t| t.as_secs_f64()).fold(0.0, f64::max)
 }
 
-fn max(latencies: &[Duration]) -> f64 {
-    latencies
-        .iter()
-        .map(|d| d.as_secs_f64())
-        .fold(0.0, f64::max)
-}
-
-/// Peak resident set size of this process, in MB.
-/// `ru_maxrss` is bytes on macOS and KiB on Linux.
 fn peak_rss_mb() -> f64 {
     unsafe {
         let mut usage: libc::rusage = std::mem::zeroed();

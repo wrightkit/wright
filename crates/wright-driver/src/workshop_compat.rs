@@ -20,29 +20,36 @@ pub struct WorkshopSemanticSide {
     pub dump: Option<String>,
 }
 
-/// Compare two emitted Workshop texts using canonical `Program` equivalence.
 pub fn compare_workshop_texts(expected: &str, actual: &str) -> WorkshopSemanticComparison {
     let catalog = match workshop_rs::catalog::Catalog::builtin() {
-        Ok(catalog) => catalog,
-        Err(error) => return catalog_failure(error.to_string()),
+        Ok(c) => c,
+        Err(e) => return catalog_failure(e.to_string()),
     };
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    let expected = parse_side(expected, &catalog, &locale);
-    let actual = parse_side(actual, &catalog, &locale);
-    let equivalent = match (&expected.program, &actual.program) {
-        (Some(expected), Some(actual)) => workshop_rs::roundtrip::equivalent(expected, actual),
-        _ => false,
-    };
+    let exp = parse_side(expected, &catalog, &locale);
+    let act = parse_side(actual, &catalog, &locale);
+    let equivalent = matches!((&exp.program, &act.program), (Some(e), Some(a)) if workshop_rs::roundtrip::equivalent(e, a));
     WorkshopSemanticComparison {
         equivalent,
-        expected: expected.side,
-        actual: actual.side,
+        expected: exp.side,
+        actual: act.side,
     }
 }
 
 struct ParsedSide {
     side: WorkshopSemanticSide,
     program: Option<workshop_rs::Program>,
+}
+
+fn err_side(error: String) -> ParsedSide {
+    ParsedSide {
+        side: WorkshopSemanticSide {
+            parsed: false,
+            error: Some(error),
+            dump: None,
+        },
+        program: None,
+    }
 }
 
 fn parse_side(
@@ -52,27 +59,11 @@ fn parse_side(
 ) -> ParsedSide {
     let mut program = match workshop_rs::parser::parse_with_context(text, catalog, locale, catalog)
     {
-        Ok(program) => program,
-        Err(error) => {
-            return ParsedSide {
-                side: WorkshopSemanticSide {
-                    parsed: false,
-                    error: Some(error.to_string()),
-                    dump: None,
-                },
-                program: None,
-            };
-        }
+        Ok(p) => p,
+        Err(e) => return err_side(e.to_string()),
     };
-    if let Err(error) = program.validate() {
-        return ParsedSide {
-            side: WorkshopSemanticSide {
-                parsed: false,
-                error: Some(error.to_string()),
-                dump: None,
-            },
-            program: None,
-        };
+    if let Err(e) = program.validate() {
+        return err_side(e.to_string());
     }
     canonicalize_debug_hud(&mut program);
     let dump = program.dump();
@@ -86,9 +77,6 @@ fn parse_side(
     }
 }
 
-/// Debug HUD text is Wright presentation, not Workshop semantic identity.
-/// Normalize only the established debug marker before asking the owner
-/// equivalence contract to compare the canonical programs.
 fn canonicalize_debug_hud(program: &mut workshop_rs::Program) {
     for rule in &mut program.rules {
         for action in &mut rule.actions {
@@ -102,22 +90,21 @@ fn canonicalize_debug_action(action: &mut workshop_rs::Action) {
     match action {
         Action::Disabled { action } => canonicalize_debug_action(action),
         Action::Call { name, args } => {
-            if name != "createHudText" || args.len() < 3 {
+            if name != "createHudText"
+                || args.len() < 3
+                || !matches!(args.get(1), Some(Value::Null))
+            {
                 return;
             }
-            if !matches!(args.get(1), Some(Value::Null)) {
-                return;
-            }
-            let Some(Value::Call {
+            if let Some(Value::Call {
                 name: body_name,
                 args: body_args,
             }) = args.get_mut(2)
-            else {
-                return;
-            };
-            if body_name == "customString" {
-                for value in body_args {
-                    canonicalize_debug_strings(value);
+            {
+                if body_name == "customString" {
+                    for value in body_args {
+                        canonicalize_debug_strings(value);
+                    }
                 }
             }
         }
@@ -128,10 +115,10 @@ fn canonicalize_debug_action(action: &mut workshop_rs::Action) {
 fn canonicalize_debug_strings(value: &mut workshop_rs::Value) {
     use workshop_rs::Value;
     match value {
-        Value::String(value) => *value = "<wright-debug-string>".to_string(),
+        Value::String(val) => *val = "<wright-debug-string>".to_string(),
         Value::Array(values) => {
-            for value in values {
-                canonicalize_debug_strings(value);
+            for v in values {
+                canonicalize_debug_strings(v);
             }
         }
         Value::Vector { x, y, z } => {
@@ -141,8 +128,8 @@ fn canonicalize_debug_strings(value: &mut workshop_rs::Value) {
         }
         Value::PlayerVariable { player, .. } => canonicalize_debug_strings(player),
         Value::Call { args, .. } => {
-            for value in args {
-                canonicalize_debug_strings(value);
+            for v in args {
+                canonicalize_debug_strings(v);
             }
         }
         _ => {}
