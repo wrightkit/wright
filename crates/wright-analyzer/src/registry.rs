@@ -351,7 +351,7 @@ impl Default for LintRegistry {
                 meta: Some(RuleMeta {
                     id: "ongoing-condition-hot-path",
                     default_severity: Severity::Info,
-                    evidence: EvidenceClass::StaticIndicator,
+                    evidence: EvidenceClass::Heuristic,
                     summary: "geometry predicate evaluated in an ongoing-rule condition",
                     rationale: "Make high-frequency condition evaluation visible.",
                     documentation: concat!(
@@ -385,7 +385,7 @@ impl Default for LintRegistry {
                 meta: Some(RuleMeta {
                     id: "repeated-value",
                     default_severity: Severity::Warning,
-                    evidence: EvidenceClass::StaticIndicator,
+                    evidence: EvidenceClass::Exact,
                     summary: "identical value expression evaluated more than once in one loop scope",
                     rationale: "Avoid repeated evaluation of the same loop-local expression.",
                     documentation: concat!(
@@ -466,6 +466,16 @@ impl Default for LintRegistry {
 impl LintRegistry {
     pub fn rules(&self) -> impl Iterator<Item = &RuleMeta> {
         self.entries.iter().filter_map(|entry| entry.meta.as_ref())
+    }
+
+    /// Load one external declarative rule against the canonical Workshop catalog.
+    pub fn load_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
+        let catalog =
+            Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
+        let definition = RuleDefinition::from_yaml_str(input).map_err(RuleRegistryError::Rule)?;
+        let rule = DeclarativeRule::from_definition(definition, &catalog)
+            .map_err(RuleRegistryError::Rule)?;
+        self.insert_declarative(rule)
     }
 
     /// Load all `.yaml`/`.yml` files in a path, or one file, in lexical order.
@@ -571,9 +581,72 @@ impl LintRegistry {
     /// Run every enabled rule over `program` and return all findings, with
     /// configured severity overrides applied.
     pub fn run(&self, program: &workshop_rs::Program, config: &LintConfig) -> Vec<Finding> {
+        self.run_report(program, config).findings
+    }
+
+    /// Run registered rules and retain per-rule statuses when canonical control
+    /// flow cannot be analyzed.
+    pub fn run_report(&self, program: &workshop_rs::Program, config: &LintConfig) -> LintRun {
+        let mut report = LintRun::default();
+        let mut available = Vec::with_capacity(program.rules.len());
+        for (rule_id, rule) in program.rules.iter().enumerate() {
+            let valid = !rule.disabled && canonical_cfg_available(&rule.actions);
+            available.push(valid);
+            if valid {
+                continue;
+            }
+            if rule.disabled {
+                continue;
+            }
+            for entry in &self.entries {
+                let id = entry
+                    .meta
+                    .as_ref()
+                    .map(|meta| meta.id.to_string())
+                    .or_else(|| {
+                        entry
+                            .declarative
+                            .as_ref()
+                            .map(|declarative| declarative.id().to_string())
+                    });
+                if let Some(id) = id.filter(|id| config.is_enabled(id)) {
+                    report.skipped.push(SkippedRule {
+                        id,
+                        rule: rule_id,
+                        reason: "canonical CFG unavailable".to_string(),
+                    });
+                }
+            }
+        }
+
         let mut findings = crate::canonical::analyze(program, config);
         findings.extend(self.run_canonical_custom(program, config));
-        findings
+        findings.retain(|finding| available.get(finding.rule).copied().unwrap_or(false));
+        let order: HashMap<_, _> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                entry
+                    .meta
+                    .as_ref()
+                    .map(|meta| (meta.id.to_string(), index))
+                    .or_else(|| {
+                        entry
+                            .declarative
+                            .as_ref()
+                            .map(|rule| (rule.id().to_string(), index))
+                    })
+            })
+            .collect();
+        findings.sort_by_key(|finding| {
+            (
+                finding.rule,
+                order.get(&finding.code).copied().unwrap_or(usize::MAX),
+            )
+        });
+        report.findings = findings;
+        report
     }
 
     /// Run custom declarative rules over the canonical public Workshop model.
@@ -609,6 +682,35 @@ impl LintRegistry {
         }
         findings
     }
+}
+
+fn canonical_cfg_available(actions: &[workshop_rs::Action]) -> bool {
+    let mut control_flow = Vec::<(bool, bool)>::new();
+    for action in actions {
+        let action = match action {
+            workshop_rs::Action::Disabled { action } => action.as_ref(),
+            action => action,
+        };
+        match action {
+            workshop_rs::Action::If { .. } => control_flow.push((true, false)),
+            workshop_rs::Action::While { .. }
+            | workshop_rs::Action::ForGlobalVariable { .. }
+            | workshop_rs::Action::ForPlayerVariable { .. } => control_flow.push((false, false)),
+            workshop_rs::Action::ElseIf { .. } => {
+                if !matches!(control_flow.last(), Some((true, false))) {
+                    return false;
+                }
+            }
+            workshop_rs::Action::Else => match control_flow.last_mut() {
+                Some((true, has_else)) if !*has_else => *has_else = true,
+                _ => return false,
+            },
+            workshop_rs::Action::End if control_flow.pop().is_none() => return false,
+            workshop_rs::Action::End => {}
+            _ => {}
+        }
+    }
+    control_flow.is_empty()
 }
 
 #[derive(Debug)]

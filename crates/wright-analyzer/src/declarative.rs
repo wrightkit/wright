@@ -408,18 +408,15 @@ fn public_scopes<'a>(
 }
 
 fn public_scope_actions(actions: &[PublicAction], start: usize, end: usize) -> Vec<&PublicAction> {
-    let mut result = Vec::new();
-    let mut index = start;
-    while index < end {
-        match &actions[index] {
-            PublicAction::Else | PublicAction::ElseIf { .. } | PublicAction::End => index += 1,
-            action => {
-                result.push(action);
-                index = public_matching_end(actions, index).map_or(index + 1, |close| close + 1);
-            }
-        }
-    }
-    result
+    actions[start..end]
+        .iter()
+        .filter(|action| {
+            !matches!(
+                action,
+                PublicAction::Else | PublicAction::ElseIf { .. } | PublicAction::End
+            )
+        })
+        .collect()
 }
 
 fn public_if_conditions<'a>(
@@ -552,7 +549,7 @@ fn public_value_matches(value: &PublicValue, pattern: &CanonicalValuePattern) ->
 }
 
 #[allow(unreachable_patterns)]
-fn public_event_id(event: &workshop_rs::Event) -> &str {
+pub(crate) fn public_event_id(event: &workshop_rs::Event) -> &str {
     match event {
         workshop_rs::Event::Global => "global",
         workshop_rs::Event::EachPlayer | workshop_rs::Event::EachPlayerWithFilters { .. } => {

@@ -1,7 +1,8 @@
 use workshop_rs::catalog::Catalog;
 use workshop_rs::{Action, Event, Program, Rule, Value};
+use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::declarative::{DeclarativeRule, RuleDefinition};
-use wright_analyzer::registry::LintConfig;
+use wright_analyzer::registry::{LintConfig, LintRegistry};
 
 #[test]
 fn lint_config_yaml_round_trips_through_yaml_serialization() {
@@ -83,6 +84,11 @@ fn declarative_scopes_match_all_requested_public_control_flow_regions() {
                 condition: Value::Bool(true),
             })
             .action(Action::call("wait", []))
+            .action(Action::If {
+                condition: Value::Bool(true),
+            })
+            .action(Action::call("wait", []))
+            .action(Action::End)
             .action(Action::End)
             .action(Action::While {
                 condition: Value::Bool(false),
@@ -110,20 +116,28 @@ fn declarative_scopes_match_all_requested_public_control_flow_regions() {
             .iter()
             .map(|finding| finding.action)
             .collect::<Vec<_>>(),
-        [Some(4), Some(7)]
+        [Some(4), Some(10)]
     );
+    assert!(while_findings[0].message.contains("matched 2 nodes"));
+    assert!(while_findings[1].message.contains("matched 1 node"));
 
     let if_findings =
         scoped_call_rule(&catalog, "community/if", "if", true).run(&program, 0, None, None);
-    assert_eq!(if_findings.len(), 1);
-    assert_eq!(if_findings[0].action, Some(10));
-    assert!(if_findings[0].message.contains("matched 3 nodes"));
+    assert_eq!(
+        if_findings
+            .iter()
+            .map(|finding| finding.action)
+            .collect::<Vec<_>>(),
+        [Some(6), Some(13)]
+    );
+    assert!(if_findings[0].message.contains("matched 1 node"));
+    assert!(if_findings[1].message.contains("matched 3 nodes"));
 
     let rule_findings =
         scoped_call_rule(&catalog, "community/rule", "rule", false).run(&program, 0, None, None);
     assert_eq!(rule_findings.len(), 1);
     assert_eq!(rule_findings[0].action, None);
-    assert!(rule_findings[0].message.contains("matched 2 nodes"));
+    assert!(rule_findings[0].message.contains("matched 9 nodes"));
 }
 
 fn scoped_call_rule(
@@ -142,6 +156,76 @@ fn scoped_call_rule(
     );
     let definition = RuleDefinition::from_yaml_str(&yaml).unwrap();
     DeclarativeRule::from_definition(definition, catalog).unwrap()
+}
+
+#[test]
+fn lint_registry_keeps_yaml_loading_and_skipped_rule_reports() {
+    let mut registry = LintRegistry::default();
+    registry
+        .load_yaml_str(
+            r#"
+id: community/has-wait
+metadata:
+  summary: summary
+  rationale: rationale
+  documentation: documentation
+  known-limits: limits
+  tags: []
+matcher:
+  scope: rule
+  actions:
+    - kind: call
+"#,
+        )
+        .unwrap();
+
+    let mut program = Program::new();
+    program.rule(
+        Rule::new("valid", Event::Global)
+            .action(Action::While {
+                condition: Value::Bool(true),
+            })
+            .action(Action::call("wait", [Value::Number(0.016)]))
+            .action(Action::End),
+    );
+    program.rule(
+        Rule::new("unbalanced", Event::Global)
+            .action(Action::While {
+                condition: Value::Bool(true),
+            })
+            .action(Action::call("wait", [Value::Number(0.016)])),
+    );
+
+    let report = registry.run_report(&program, &LintConfig::default());
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "community/has-wait" && finding.rule == 0)
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|rule| rule.id == "community/has-wait" && rule.rule == 1)
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|rule| rule.id == "min-wait-loop" && rule.rule == 1)
+    );
+
+    let service = SemanticService::new(&program);
+    let response: serde_json::Value =
+        serde_json::from_str(&service.handle_json(r#"{"op":"lintRules"}"#)).unwrap();
+    assert!(
+        response["result"]["skipped"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| { rule["id"] == "min-wait-loop" && rule["rule"] == 1 })
+    );
 }
 
 #[test]

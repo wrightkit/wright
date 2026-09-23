@@ -8,7 +8,13 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use workshop_rs::catalog::{Catalog, Locale};
 use workshop_rs::parser;
-use workshop_rs::{Action, Condition, Event, Program, Rule, Value as WorkshopValue, Variable};
+use workshop_rs::{
+    Action, Condition, Event, EventTarget, EventTeam, PlayerEventKind, Program, Rule,
+    Value as WorkshopValue, Variable,
+};
+use wright_analyzer::analysis::Severity;
+use wright_analyzer::canonical::analyze;
+use wright_analyzer::registry::LintConfig;
 use wright_analyzer::service::SemanticService;
 
 fn workshop_path(fixture_id: &str) -> PathBuf {
@@ -88,7 +94,24 @@ fn workshop_input_runs_all_semantic_queries() {
         serde_json::from_str(&service.handle_json(r#"{"op":"program"}"#)).unwrap();
     assert_eq!(program_response["result"]["origin"]["kind"], "workshop");
     assert_eq!(program_response["result"]["origin"]["locale"], "en-us");
-    assert_eq!(program_response["result"]["files"], Value::Null);
+    assert_eq!(program_response["result"]["files"], 1);
+}
+
+#[test]
+fn player_event_queries_keep_catalog_event_ids() {
+    let mut program = Program::new();
+    program.rule(Rule::new(
+        "dealt damage",
+        Event::Player {
+            kind: PlayerEventKind::DealtDamage,
+            team: EventTeam::All,
+            target: EventTarget::All,
+        },
+    ));
+    let program = Box::leak(Box::new(program));
+    let service = SemanticService::new(program);
+    let rule = query(&service, serde_json::json!({"op": "getRule", "rule": 0}));
+    assert_eq!(rule["event"], "playerDealtDamage");
 }
 
 #[test]
@@ -118,6 +141,8 @@ variables {
     global:
         0: index
         1: other
+    player:
+        0: playerIndex
 }
 rule ("analysis parity") {
     event {
@@ -150,6 +175,10 @@ rule ("analysis parity") {
             Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
             Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
         End;
+        For Player Variable(Event Player, playerIndex, 0, 1, 1);
+            Wait(0.016, Ignore Condition);
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+        End;
     }
 }
 "#;
@@ -172,17 +201,51 @@ rule ("analysis parity") {
             >= 2,
         "identical If/ElseIf and If/While control-flow conditions are detected"
     );
-    assert!(findings.iter().any(|finding| {
-        finding["code"] == "repeated-value"
-            && finding["message"]
-                .as_str()
-                .unwrap()
-                .contains("evaluated 2 times")
-    }));
+    let minimum_waits: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "min-wait-loop")
+        .collect();
+    assert_eq!(minimum_waits.len(), 1);
+    assert_eq!(minimum_waits[0]["severity"], "warning");
+    assert_eq!(minimum_waits[0]["evidence"], "static-indicator");
 
-    let boundedness: Vec<_> = findings
+    let expensive: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "expensive-loop-check")
+        .collect();
+    assert_eq!(expensive.len(), 2);
+    assert!(
+        expensive
+            .iter()
+            .all(|finding| { finding["severity"] == "info" && finding["evidence"] == "heuristic" })
+    );
+
+    let repeated = findings
+        .iter()
+        .find(|finding| finding["code"] == "repeated-value")
+        .unwrap();
+    assert!(
+        repeated["message"]
+            .as_str()
+            .unwrap()
+            .contains("evaluated 2 times")
+    );
+    assert_eq!(repeated["severity"], "warning");
+    assert_eq!(repeated["evidence"], "exact");
+
+    let ongoing = findings
+        .iter()
+        .find(|finding| finding["code"] == "ongoing-condition-hot-path")
+        .unwrap();
+    assert_eq!(ongoing["severity"], "info");
+    assert_eq!(ongoing["evidence"], "heuristic");
+
+    let no_yield: Vec<_> = findings
         .iter()
         .filter(|finding| finding["code"] == "while-without-wait")
+        .collect();
+    let boundedness: Vec<_> = no_yield
+        .iter()
         .map(|finding| finding["boundedness"].as_str().unwrap())
         .collect();
     assert_eq!(
@@ -194,6 +257,85 @@ rule ("analysis parity") {
             "unknown",
             "unknown"
         ]
+    );
+    let severities: Vec<_> = no_yield
+        .iter()
+        .map(|finding| finding["severity"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        severities,
+        ["warning", "warning", "info", "warning", "warning"]
+    );
+    assert!(
+        no_yield[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("statically true")
+    );
+    assert!(
+        no_yield[1]["message"]
+            .as_str()
+            .unwrap()
+            .contains("boundedness is unknown")
+    );
+    assert!(
+        no_yield[2]["message"]
+            .as_str()
+            .unwrap()
+            .contains("finite number")
+    );
+
+    let descriptors = query(&service, serde_json::json!({"op": "lintRules"}));
+    let descriptors = descriptors["rules"].as_array().unwrap();
+    for (id, evidence) in [
+        ("ongoing-condition-hot-path", "heuristic"),
+        ("repeated-value", "exact"),
+        ("expensive-loop-check", "heuristic"),
+    ] {
+        assert!(
+            descriptors
+                .iter()
+                .any(|descriptor| { descriptor["id"] == id && descriptor["evidence"] == evidence })
+        );
+    }
+}
+
+#[test]
+fn while_without_wait_severity_override_applies_to_each_boundedness_class() {
+    let source = r#"
+variables {
+    global:
+        0: index
+}
+rule ("severity override") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(True);
+            Modify Global Variable(index, Add, 1);
+        End;
+        While(Compare(Global.index, <, 3));
+            Modify Global Variable(index, Add, 1);
+        End;
+    }
+}
+"#;
+    let catalog = Catalog::builtin().unwrap();
+    let program = parser::parse_with_context(source, &catalog, &Locale::new("en-US"), &catalog)
+        .expect("Workshop source parses");
+    let mut config = LintConfig::default();
+    config.set_severity("while-without-wait", Severity::Error);
+
+    let findings: Vec<_> = analyze(&program, &config)
+        .into_iter()
+        .filter(|finding| finding.code == "while-without-wait")
+        .collect();
+    assert_eq!(findings.len(), 2);
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.severity == Severity::Error)
     );
 }
 
@@ -395,6 +537,18 @@ rule ("argument spans") {
         })
         .collect();
     assert_eq!(reads.len(), expected.len());
+    let value_ids: Vec<_> = reads
+        .iter()
+        .map(|reference| reference["value"].as_u64().expect("action value identity"))
+        .collect();
+    assert_eq!(
+        value_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        value_ids.len(),
+        "each authored action value has a local semantic identity"
+    );
     for (reference, (line, column)) in reads.iter().zip(expected) {
         assert_eq!(reference["span"]["start"]["line"], line);
         assert_eq!(reference["span"]["start"]["col"], column);

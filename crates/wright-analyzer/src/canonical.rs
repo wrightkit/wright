@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::{Value as JsonValue, json};
-use workshop_rs::source::Span;
+use workshop_rs::source::{FileId, Span};
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
-use crate::registry::LintConfig;
+use crate::registry::{LintConfig, SkippedRule};
 use crate::service::{ErrorInfo, Origin, Request, Response};
 
 pub type RuleId = usize;
@@ -76,6 +76,84 @@ pub struct UsageSummary {
 pub struct SemanticIndex {
     symbols: Vec<Symbol>,
     references: Vec<Reference>,
+    value_ids: HashMap<usize, ValueId>,
+}
+
+fn value_identity_map(program: &Program) -> HashMap<usize, ValueId> {
+    fn visit_value(value: &Value, identities: &mut HashMap<usize, ValueId>) {
+        let id = identities.len();
+        identities.insert((value as *const Value) as usize, id);
+        match value {
+            Value::PlayerVariable { player, .. } => visit_value(player, identities),
+            Value::Array(values) | Value::Call { args: values, .. } => {
+                for value in values {
+                    visit_value(value, identities);
+                }
+            }
+            Value::Vector { x, y, z } => {
+                visit_value(x, identities);
+                visit_value(y, identities);
+                visit_value(z, identities);
+            }
+            _ => {}
+        }
+    }
+
+    fn visit_action(action: &Action, identities: &mut HashMap<usize, ValueId>) {
+        match action {
+            Action::SetGlobalVariable { value, .. }
+            | Action::ModifyGlobalVariable { value, .. } => visit_value(value, identities),
+            Action::SetPlayerVariable { player, value, .. }
+            | Action::ModifyPlayerVariable { player, value, .. } => {
+                visit_value(player, identities);
+                visit_value(value, identities);
+            }
+            Action::AssignMember { target, value, .. } => {
+                visit_value(target, identities);
+                visit_value(value, identities);
+            }
+            Action::If { condition }
+            | Action::ElseIf { condition }
+            | Action::While { condition } => visit_value(condition, identities),
+            Action::ForGlobalVariable {
+                start, stop, step, ..
+            } => {
+                visit_value(start, identities);
+                visit_value(stop, identities);
+                visit_value(step, identities);
+            }
+            Action::ForPlayerVariable {
+                player,
+                start,
+                stop,
+                step,
+                ..
+            } => {
+                visit_value(player, identities);
+                visit_value(start, identities);
+                visit_value(stop, identities);
+                visit_value(step, identities);
+            }
+            Action::Call { args, .. } => {
+                for value in args {
+                    visit_value(value, identities);
+                }
+            }
+            Action::Disabled { action } => visit_action(action, identities),
+            Action::CallSubroutine { .. } | Action::Else | Action::End => {}
+        }
+    }
+
+    let mut identities = HashMap::new();
+    for rule in &program.rules {
+        for condition in &rule.conditions {
+            visit_value(&condition.value, &mut identities);
+        }
+        for action in &rule.actions {
+            visit_action(action, &mut identities);
+        }
+    }
+    identities
 }
 
 impl SemanticIndex {
@@ -131,6 +209,7 @@ impl SemanticIndex {
         let mut index = Self {
             symbols,
             references: Vec::new(),
+            value_ids: value_identity_map(program),
         };
         for symbol in index.symbols.clone() {
             if let Some(span) = symbol.occurrence {
@@ -160,6 +239,7 @@ impl SemanticIndex {
                 index.walk_action(value, rule, action, program);
             }
         }
+        index.value_ids.clear();
         index
     }
 
@@ -580,10 +660,14 @@ impl SemanticIndex {
         value: &Value,
         rule: RuleId,
         action: Option<ActionId>,
-        value_id: Option<ValueId>,
+        _value_id: Option<ValueId>,
         span: Option<Span>,
         program: &Program,
     ) {
+        let value_id = self
+            .value_ids
+            .get(&((value as *const Value) as usize))
+            .copied();
         match value {
             Value::GlobalVariable(name) => {
                 if let Some(symbol) = self.global(name) {
@@ -893,6 +977,7 @@ pub struct SemanticService<'a> {
     program: &'a Program,
     index: SemanticIndex,
     findings: Vec<Finding>,
+    skipped: Vec<SkippedRule>,
     origin: Origin,
     config: LintConfig,
     registry: Arc<crate::registry::LintRegistry>,
@@ -939,12 +1024,12 @@ impl<'a> SemanticService<'a> {
         registry: Arc<crate::registry::LintRegistry>,
     ) -> Self {
         let index = SemanticIndex::build(program);
-        let mut findings = analyze(program, &config);
-        findings.extend(registry.run_canonical_custom(program, &config));
+        let report = registry.run_report(program, &config);
         Self {
             program,
             index,
-            findings,
+            findings: report.findings,
+            skipped: report.skipped,
             origin,
             config,
             registry,
@@ -980,8 +1065,8 @@ impl<'a> SemanticService<'a> {
             Request::GetFindings => Response::Ok { result: json!(self.findings.iter().map(finding_json).collect::<Vec<_>>()) },
             Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program)) },
             Request::LintRules => Response::Ok {
-                result: lint_rules(&self.registry, &self.config),
-            },
+                result: lint_rules(&self.registry, &self.config, &self.skipped),
+            }
         }
     }
     fn rule(&self, id: RuleId) -> Response {
@@ -1003,13 +1088,16 @@ impl<'a> SemanticService<'a> {
 }
 
 pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
+    let value_ids = value_identity_map(program);
     let mut findings = Vec::new();
     for (rule_id, rule) in program.rules.iter().enumerate() {
         if rule.disabled {
             continue;
         }
         if config.is_enabled("ongoing-condition-hot-path") {
-            findings.extend(ongoing_condition_findings(program, rule_id, rule));
+            findings.extend(ongoing_condition_findings(
+                program, rule_id, rule, &value_ids,
+            ));
         }
         for (action_id, action) in rule.actions.iter().enumerate() {
             let Some((start, end)) = loop_body(rule, action_id) else {
@@ -1020,32 +1108,46 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             {
                 findings.push(Finding { code: "min-wait-loop".into(), severity: Severity::Warning, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: EvidenceClass::StaticIndicator, boundedness: None });
             }
-            if config.is_enabled("expensive-loop-check")
-                && body.iter().any(action_contains_expensive)
-            {
-                findings.push(Finding {
-                    code: "expensive-loop-check".into(),
-                    severity: Severity::Warning,
-                    message: "loop body evaluates a potentially expensive geometry predicate"
-                        .into(),
-                    span: program.action_span(rule_id, action_id),
-                    rule: rule_id,
-                    action: Some(action_id),
-                    value: None,
-                    evidence: EvidenceClass::Heuristic,
-                    boundedness: None,
-                });
+            if config.is_enabled("expensive-loop-check") {
+                for (offset, body_action) in body.iter().enumerate() {
+                    let mut expensive = Vec::new();
+                    collect_action_expensive_values(body_action, &mut expensive);
+                    for value in expensive {
+                        let Value::Call { name, .. } = value else {
+                            unreachable!("only expensive calls are collected")
+                        };
+                        findings.push(Finding {
+                            code: "expensive-loop-check".into(),
+                            severity: Severity::Info,
+                            message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
+                                .into(),
+                            span: value_occurrence(
+                                program,
+                                program.action_span(rule_id, start + offset),
+                                name,
+                            ),
+                            rule: rule_id,
+                            action: Some(action_id),
+                            value: value_ids.get(&(value as *const Value as usize)).copied(),
+                            evidence: EvidenceClass::Heuristic,
+                            boundedness: None,
+                        });
+                    }
+                }
             }
             if let Action::While { condition } = action {
                 if config.is_enabled("while-without-wait")
                     && !body.iter().any(|action| is_wait(action, false))
                 {
                     let boundedness = while_boundedness(condition, body, &program.subroutines);
+                    let severity = match boundedness {
+                        Boundedness::StaticallyBounded => Severity::Info,
+                        Boundedness::ObviouslyUnbounded | Boundedness::Unknown => Severity::Warning,
+                    };
                     findings.push(Finding {
                         code: "while-without-wait".into(),
-                        severity: Severity::Warning,
-                        message: "loop body contains no wait call and may repeat without yielding"
-                            .into(),
+                        severity,
+                        message: while_without_wait_message(boundedness),
                         span: program.action_span(rule_id, action_id),
                         rule: rule_id,
                         action: Some(action_id),
@@ -1062,18 +1164,19 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 )
             {
                 findings.extend(repeated_value_findings(
-                    program, rule_id, rule, action_id, start, body,
+                    program, rule_id, rule, action_id, start, body, &value_ids,
                 ));
             }
         }
         if config.is_enabled("duplicate-condition") {
-            findings.extend(duplicate_condition_findings(program, rule_id, rule));
+            findings.extend(duplicate_condition_findings(
+                program, rule_id, rule, &value_ids,
+            ));
         }
     }
-    let registry = crate::registry::LintRegistry::default();
     for finding in &mut findings {
-        if let Some(meta) = registry.rules().find(|meta| meta.id == finding.code) {
-            finding.severity = config.effective_severity(meta);
+        if let Some(severity) = config.severity_override(&finding.code) {
+            finding.severity = severity;
         }
     }
     findings
@@ -1082,11 +1185,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
 fn loop_body(rule: &Rule, action: usize) -> Option<(usize, usize)> {
     if !matches!(
         rule.actions.get(action),
-        Some(
-            Action::While { .. }
-                | Action::ForGlobalVariable { .. }
-                | Action::ForPlayerVariable { .. }
-        )
+        Some(Action::While { .. } | Action::ForGlobalVariable { .. })
     ) {
         return None;
     }
@@ -1108,49 +1207,49 @@ fn loop_body(rule: &Rule, action: usize) -> Option<(usize, usize)> {
 fn is_wait(action: &Action, minimum: bool) -> bool {
     matches!(action, Action::Call { name, args } if name == "wait" && (!minimum || matches!(args.first(), Some(Value::Number(value)) if *value <= 0.016)))
 }
-fn action_contains_expensive(action: &Action) -> bool {
+fn collect_action_expensive_values<'a>(action: &'a Action, out: &mut Vec<&'a Value>) {
     match action {
-        Action::Call { name, args } => {
-            ["distance", "raycast", "isInLoS"].contains(&name.as_str())
-                || args.iter().any(value_contains_expensive)
+        Action::Call { args, .. } => {
+            for value in args {
+                collect_expensive_values(value, out);
+            }
         }
         Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
-            value_contains_expensive(value)
+            collect_expensive_values(value, out)
         }
         Action::SetPlayerVariable { player, value, .. }
         | Action::ModifyPlayerVariable { player, value, .. } => {
-            value_contains_expensive(player) || value_contains_expensive(value)
+            collect_expensive_values(player, out);
+            collect_expensive_values(value, out);
         }
         Action::AssignMember { target, value, .. } => {
-            value_contains_expensive(target) || value_contains_expensive(value)
+            collect_expensive_values(target, out);
+            collect_expensive_values(value, out);
         }
         Action::If { condition } | Action::ElseIf { condition } | Action::While { condition } => {
-            value_contains_expensive(condition)
+            collect_expensive_values(condition, out)
         }
         Action::ForGlobalVariable {
             start, stop, step, ..
+        } => {
+            collect_expensive_values(start, out);
+            collect_expensive_values(stop, out);
+            collect_expensive_values(step, out);
         }
-        | Action::ForPlayerVariable {
-            start, stop, step, ..
-        } => [start, stop, step]
-            .iter()
-            .any(|value| value_contains_expensive(value)),
-        Action::Disabled { action } => action_contains_expensive(action),
-        _ => false,
-    }
-}
-fn value_contains_expensive(value: &Value) -> bool {
-    match value {
-        Value::Call { name, args } => {
-            ["distance", "raycast", "isInLoS"].contains(&name.as_str())
-                || args.iter().any(value_contains_expensive)
+        Action::ForPlayerVariable {
+            player,
+            start,
+            stop,
+            step,
+            ..
+        } => {
+            collect_expensive_values(player, out);
+            collect_expensive_values(start, out);
+            collect_expensive_values(stop, out);
+            collect_expensive_values(step, out);
         }
-        Value::Array(values) => values.iter().any(value_contains_expensive),
-        Value::Vector { x, y, z } => [x, y, z]
-            .iter()
-            .any(|value| value_contains_expensive(value)),
-        Value::PlayerVariable { player, .. } => value_contains_expensive(player),
-        _ => false,
+        Action::Disabled { action } => collect_action_expensive_values(action, out),
+        Action::CallSubroutine { .. } | Action::Else | Action::End => {}
     }
 }
 fn values_equal(left: &Value, right: &Value) -> bool {
@@ -1203,7 +1302,12 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         _ => false,
     }
 }
-fn ongoing_condition_findings(program: &Program, rule_id: RuleId, rule: &Rule) -> Vec<Finding> {
+fn ongoing_condition_findings(
+    program: &Program,
+    rule_id: RuleId,
+    rule: &Rule,
+    value_ids: &HashMap<usize, ValueId>,
+) -> Vec<Finding> {
     if !matches!(
         &rule.event,
         Event::Global | Event::EachPlayer | Event::EachPlayerWithFilters { .. }
@@ -1253,7 +1357,7 @@ fn ongoing_condition_findings(program: &Program, rule_id: RuleId, rule: &Rule) -
                 span: value_occurrence(program, span, name).or(span),
                 rule: rule_id,
                 action: None,
-                value: None,
+                value: value_ids.get(&(value as *const Value as usize)).copied(),
                 evidence: EvidenceClass::Heuristic,
                 boundedness: None,
             });
@@ -1287,7 +1391,12 @@ fn collect_expensive_values<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
     }
 }
 
-fn duplicate_condition_findings(program: &Program, rule_id: RuleId, rule: &Rule) -> Vec<Finding> {
+fn duplicate_condition_findings(
+    program: &Program,
+    rule_id: RuleId,
+    rule: &Rule,
+    value_ids: &HashMap<usize, ValueId>,
+) -> Vec<Finding> {
     let mut seen: Vec<&Value> = Vec::new();
     let mut findings = Vec::new();
     for (action_id, action) in rule.actions.iter().enumerate() {
@@ -1309,7 +1418,7 @@ fn duplicate_condition_findings(program: &Program, rule_id: RuleId, rule: &Rule)
                 span: span.or_else(|| program.action_span(rule_id, action_id)),
                 rule: rule_id,
                 action: Some(action_id),
-                value: None,
+                value: value_ids.get(&(condition as *const Value as usize)).copied(),
                 evidence: EvidenceClass::Exact,
                 boundedness: None,
             });
@@ -1327,6 +1436,7 @@ fn repeated_value_findings(
     loop_action: ActionId,
     body_start: usize,
     body: &[Action],
+    value_ids: &HashMap<usize, ValueId>,
 ) -> Vec<Finding> {
     let mut values = Vec::new();
     let mut parents = Vec::new();
@@ -1380,7 +1490,9 @@ fn repeated_value_findings(
                 span: spans[first].or_else(|| program.action_span(rule_id, loop_action)),
                 rule: rule_id,
                 action: Some(loop_action),
-                value: None,
+                value: value_ids
+                    .get(&(values[first] as *const Value as usize))
+                    .copied(),
                 evidence: EvidenceClass::Exact,
                 boundedness: None,
             }
@@ -1519,6 +1631,14 @@ fn value_call_count(value: &Value) -> usize {
         }
         Value::PlayerVariable { player, .. } => value_call_count(player),
         _ => 0,
+    }
+}
+
+fn while_without_wait_message(boundedness: Boundedness) -> String {
+    match boundedness {
+        Boundedness::ObviouslyUnbounded => "loop body contains no wait call and the loop condition is statically true, so the loop repeats without yielding and never terminates on its own; it runs without bound while the rule is active (exact server impact is not statically measurable)".to_string(),
+        Boundedness::StaticallyBounded => "loop body contains no wait call; the loop is statically bounded by a counter against a literal bound, so it runs a finite number of back-to-back iterations".to_string(),
+        Boundedness::Unknown => "loop body contains no wait call and the loop's boundedness is unknown (data-dependent condition with no static counter pattern), so the loop may repeat without yielding".to_string(),
     }
 }
 
@@ -2081,7 +2201,11 @@ fn object_visibility(args: &[Value]) -> &'static str {
         _ => "unknown",
     }
 }
-fn lint_rules(registry: &crate::registry::LintRegistry, config: &LintConfig) -> JsonValue {
+fn lint_rules(
+    registry: &crate::registry::LintRegistry,
+    config: &LintConfig,
+    skipped: &[SkippedRule],
+) -> JsonValue {
     let descriptors = registry.descriptors(config);
     let rules = descriptors
         .iter()
@@ -2117,13 +2241,15 @@ fn lint_rules(registry: &crate::registry::LintRegistry, config: &LintConfig) -> 
     json!({
         "rules": rules,
         "config": {"rules": config_rules},
-        "skipped": [],
+        "skipped": skipped,
     })
 }
-fn file_count(_program: &Program) -> Option<usize> {
-    // The public Program API exposes source lookup by FileId but not a file
-    // iterator or count, so the exact count is unavailable at this boundary.
-    None
+fn file_count(program: &Program) -> usize {
+    let mut count = 0;
+    while program.source(FileId::from_index(count)).is_some() {
+        count += 1;
+    }
+    count
 }
 fn span_json(span: Option<Span>) -> JsonValue {
     span.map_or(JsonValue::Null, |span| json!({"file": span.file.index(), "start": {"line": span.start.line, "col": span.start.col}, "end": {"line": span.end.line, "col": span.end.col}}))
@@ -2160,9 +2286,7 @@ fn severity_name(severity: Severity) -> &'static str {
 }
 fn event_name(event: &Event) -> String {
     match event {
-        Event::Global => "global".into(),
-        Event::EachPlayer | Event::EachPlayerWithFilters { .. } => "eachPlayer".into(),
-        Event::Player { kind, .. } => format!("{kind:?}"),
         Event::Subroutine(name) => format!("subroutine:{name}"),
+        _ => crate::declarative::public_event_id(event).to_string(),
     }
 }
