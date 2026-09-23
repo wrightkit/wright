@@ -1,14 +1,14 @@
 # Contributing to Wright
 
-Wright is being built incrementally. Read [`AGENTS.md`](AGENTS.md),
-[`docs/architecture.md`](docs/architecture.md), [`docs/compatibility.md`](docs/compatibility.md),
-and [`docs/licensing.md`](docs/licensing.md) before changing compiler
+Wright is being built incrementally. Read [`AGENTS.md`](../AGENTS.md),
+[`architecture.md`](architecture.md), [`compatibility.md`](compatibility.md),
+and [`licensing.md`](licensing.md) before changing compiler
 boundaries or integration verification.
 
 ## Toolchain policy
 
 The repository's local default is the Rust `stable` toolchain configured by
-[`rust-toolchain.toml`](rust-toolchain.toml). The minimum supported Rust
+[`rust-toolchain.toml`](../rust-toolchain.toml). The minimum supported Rust
 version (MSRV) is Rust 1.85.0, which is also the workspace's Edition 2024
 baseline. CI checks both stable and the MSRV.
 
@@ -37,7 +37,7 @@ cargo +1.85.0 test --workspace --all-targets --all-features
 
 ## Wright-specific Rust policy
 
-The workspace lint baseline in [`Cargo.toml`](Cargo.toml) is intentionally
+The workspace lint baseline in [`Cargo.toml`](../Cargo.toml) is intentionally
 small. `rustc`/`rustfmt` and the normal Clippy defaults continue to own
 mechanical style; the workspace additionally denies unsafe operations that are
 not explicitly scoped, unreachable public items, correctness/suspicious
