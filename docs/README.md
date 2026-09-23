@@ -59,12 +59,11 @@ Current language support claims must come from the owning repositories:
 - `wrightkit/workshop-rs` for canonical raw Workshop/WIR/catalog/settings/
   localization/validation/emission.
 
-Historical Wright-side OPY/OSTW/Workshop support matrices, compatibility
-baselines, manifests, HIR migration documents, and catalog-pipeline notes may
-remain useful migration/reference material while consumers still exist, but
-they do not override the current owner contracts or upgrade current support.
-Do not create new source-language semantic truth in Wright to keep those
-historical assets current.
+Older Wright-side OPY/OSTW/Workshop paths may remain only as concise compatibility
+pointers when external links still need a landing page. They must route to the
+owning repository instead of retaining duplicate semantic, HIR, catalog, or
+compatibility authority. Do not keep historical implementation documents current
+inside Wright after ownership has moved.
 
 ## Architecture decision history
 

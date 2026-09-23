@@ -1,50 +1,40 @@
 use std::path::PathBuf;
 
+use crate::source_provider::SourceBackend;
 pub use wright_analyzer::registry::LintConfig;
 
-use crate::source_provider::SourceBackend;
-
-/// The concrete input frontend to use, or automatic detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
-    /// Detect from the input path extension or stdin content.
     Auto,
-    /// `.opy` source through the explicitly selected backend.
     Opy,
-    /// `.ostw` / `.del` source through a configured provider.
     Ostw,
-    /// Localized vanilla Workshop text handled in-process by workshop-rs.
     Workshop,
-    /// A legacy Opy HIR v1 protocol payload (JSON), recognized and refused.
     Protocol,
 }
 
 impl SourceKind {
-    /// The canonical name used in CLI arguments, docs, and diagnostics.
     pub fn as_str(self) -> &'static str {
         match self {
-            SourceKind::Auto => "auto",
-            SourceKind::Opy => "opy",
-            SourceKind::Ostw => "ostw",
-            SourceKind::Workshop => "workshop",
-            SourceKind::Protocol => "protocol",
+            Self::Auto => "auto",
+            Self::Opy => "opy",
+            Self::Ostw => "ostw",
+            Self::Workshop => "workshop",
+            Self::Protocol => "protocol",
         }
     }
 
-    /// Parse a CLI spelling into a source kind (`None` for unknown names).
     pub fn parse(name: &str) -> Option<SourceKind> {
-        Some(match name {
-            "auto" => SourceKind::Auto,
-            "opy" => SourceKind::Opy,
-            "ostw" => SourceKind::Ostw,
-            "workshop" | "ws" => SourceKind::Workshop,
-            "protocol" | "hir" | "json" => SourceKind::Protocol,
-            _ => return None,
-        })
+        match name {
+            "auto" => Some(Self::Auto),
+            "opy" => Some(Self::Opy),
+            "ostw" => Some(Self::Ostw),
+            "workshop" | "ws" => Some(Self::Workshop),
+            "protocol" | "hir" | "json" => Some(Self::Protocol),
+            _ => None,
+        }
     }
 }
 
-/// The machine-readable (`json`) or human-readable (`text`) result mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
     Text,
@@ -54,81 +44,48 @@ pub enum OutputFormat {
 impl OutputFormat {
     pub fn as_str(self) -> &'static str {
         match self {
-            OutputFormat::Text => "text",
-            OutputFormat::Json => "json",
+            Self::Text => "text",
+            Self::Json => "json",
         }
     }
 
     pub fn parse(name: &str) -> Option<OutputFormat> {
-        Some(match name {
-            "text" | "human" => OutputFormat::Text,
-            "json" | "machine" => OutputFormat::Json,
-            _ => return None,
-        })
-    }
-}
-
-/// Where the driver reads its input from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InputSpec {
-    /// A path on disk.
-    Path(PathBuf),
-    /// Standard input.
-    Stdin,
-}
-
-impl InputSpec {
-    /// The path when this spec names a file, otherwise `None` (stdin).
-    pub fn path(&self) -> Option<&PathBuf> {
-        match self {
-            InputSpec::Path(path) => Some(path),
-            InputSpec::Stdin => None,
+        match name {
+            "text" | "human" => Some(Self::Text),
+            "json" | "machine" => Some(Self::Json),
+            _ => None,
         }
     }
 }
 
-/// One driver run's configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputSpec {
+    Path(PathBuf),
+    Stdin,
+}
+
+impl InputSpec {
+    pub fn path(&self) -> Option<&PathBuf> {
+        match self {
+            Self::Path(path) => Some(path),
+            Self::Stdin => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
-    /// The input source (file path or stdin).
     pub input: InputSpec,
-    /// Frontend selection; `Auto` detects from path/stdin.
     pub kind: SourceKind,
-    /// The source implementation selected for source-language workflows.
-    /// Raw Workshop is always handled in-process; the provider backend is
-    /// currently reserved for the first-party OPY provider.
     pub source_backend: SourceBackend,
-    /// Workshop client-locale override (bypasses auto-detection).
     pub locale: Option<String>,
-    /// Include root for `.opy` inputs (defaults to the input's directory).
     pub root: Option<PathBuf>,
-    /// Compiled output destination for `compile` (defaults to stdout).
     pub output: Option<PathBuf>,
-    /// The requested result presentation format.
     pub format: OutputFormat,
-    /// The canonical-program transformation policy (`off` by default; `compat`/`aggressive`
-    /// opt into evidence-backed passes).
     pub profile: wright_transform::Profile,
-    /// The lint rule configuration used by `lint` (#97/#98).
-    ///
-    /// [`LintConfig::default`] enables every registered rule at its default
-    /// severity; `--disable-rule`/`--rule-severity` on the CLI and library
-    /// consumers override it here, so CLI and programmatic lint runs apply
-    /// the same deterministic configuration.
     pub lint: LintConfig,
-    /// Local YAML rule files or directories loaded for this session (#309).
     pub lint_rule_paths: Vec<PathBuf>,
-    /// LPP provider configurations, keyed by opaque language id (#142).
-    ///
-    /// [`CompilerSession::language_provider`] spawns a provider client for a
-    /// language id from this registry; when no provider is configured the
-    /// refusal is explicit and there is no fallback to in-process frontends.
-    /// The registry is empty by default; providers are registered explicitly
-    /// through `wright_lpp::ProviderRegistry` (integration tests and CI
-    /// locate the mock provider through the `LPP_MOCK_PROVIDER`
-    /// environment variable).
     pub providers: wright_lpp::ProviderRegistry,
-    /// First-party OPY provider resolution settings (#244).
     pub opy_provider: crate::opy_provider::OpyProviderConfig,
 }
 
@@ -152,7 +109,6 @@ impl Default for SessionConfig {
 }
 
 impl SessionConfig {
-    /// A config that reads `path` with automatic frontend detection.
     pub fn from_path(path: impl Into<PathBuf>) -> SessionConfig {
         SessionConfig {
             input: InputSpec::Path(path.into()),

@@ -355,6 +355,17 @@ impl StdioLanguageProvider {
             }),
         }
     }
+
+    fn call<T: DeserializeOwned>(
+        &mut self,
+        cap: Capability,
+        method: &str,
+        params: Value,
+    ) -> Result<T, ProviderError> {
+        self.require_capability(cap)?;
+        let val = self.request(method, params)?;
+        parse_result(val, method)
+    }
 }
 
 impl Drop for StdioLanguageProvider {
@@ -400,9 +411,11 @@ impl LanguageProvider for StdioLanguageProvider {
         documents: &DocumentSet,
         project_root: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        self.require_capability(Capability::Check)?;
-        let value = self.request("lpp/check", documents_params(documents, project_root))?;
-        parse_result(value, "lpp/check")
+        self.call(
+            Capability::Check,
+            "lpp/check",
+            documents_params(documents, project_root),
+        )
     }
 
     fn check_entry(
@@ -411,10 +424,12 @@ impl LanguageProvider for StdioLanguageProvider {
         project_root: Option<&str>,
         locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        self.require_capability(Capability::Check)?;
         self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/check", entry_params(entry, project_root, locale))?;
-        parse_result(value, "lpp/check")
+        self.call(
+            Capability::Check,
+            "lpp/check",
+            entry_params(entry, project_root, locale),
+        )
     }
 
     fn check_target(
@@ -423,10 +438,7 @@ impl LanguageProvider for StdioLanguageProvider {
         project_root: Option<&str>,
         locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        self.require_capability(Capability::Check)?;
-        self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/check", entry_params(target, project_root, locale))?;
-        parse_result(value, "lpp/check")
+        self.check_entry(target, project_root, locale)
     }
 
     fn compile(
@@ -434,9 +446,11 @@ impl LanguageProvider for StdioLanguageProvider {
         documents: &DocumentSet,
         project_root: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        self.require_capability(Capability::Compile)?;
-        let value = self.request("lpp/compile", documents_params(documents, project_root))?;
-        parse_result(value, "lpp/compile")
+        self.call(
+            Capability::Compile,
+            "lpp/compile",
+            documents_params(documents, project_root),
+        )
     }
 
     fn compile_entry(
@@ -445,10 +459,12 @@ impl LanguageProvider for StdioLanguageProvider {
         project_root: Option<&str>,
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        self.require_capability(Capability::Compile)?;
         self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/compile", entry_params(entry, project_root, locale))?;
-        parse_result(value, "lpp/compile")
+        self.call(
+            Capability::Compile,
+            "lpp/compile",
+            entry_params(entry, project_root, locale),
+        )
     }
 
     fn compile_target(
@@ -457,21 +473,18 @@ impl LanguageProvider for StdioLanguageProvider {
         project_root: Option<&str>,
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        self.require_capability(Capability::Compile)?;
-        self.require_capability(Capability::ProjectLoading)?;
-        let value = self.request("lpp/compile", entry_params(target, project_root, locale))?;
-        parse_result(value, "lpp/compile")
+        self.compile_entry(target, project_root, locale)
     }
 
     fn reconstruct(
         &mut self,
         artifact: &WorkshopArtifact,
     ) -> Result<ReconstructResult, ProviderError> {
-        self.require_capability(Capability::Reconstruct)?;
-        let params =
-            json!({ "artifact": serde_json::to_value(artifact).expect("artifact serializes") });
-        let value = self.request("lpp/reconstruct", params)?;
-        parse_result(value, "lpp/reconstruct")
+        self.call(
+            Capability::Reconstruct,
+            "lpp/reconstruct",
+            json!({ "artifact": artifact }),
+        )
     }
 
     fn symbols(
@@ -479,9 +492,11 @@ impl LanguageProvider for StdioLanguageProvider {
         documents: &DocumentSet,
         project_root: Option<&str>,
     ) -> Result<SymbolsResult, ProviderError> {
-        self.require_capability(Capability::Symbols)?;
-        let value = self.request("lpp/symbols", documents_params(documents, project_root))?;
-        parse_result(value, "lpp/symbols")
+        self.call(
+            Capability::Symbols,
+            "lpp/symbols",
+            documents_params(documents, project_root),
+        )
     }
 
     fn definition(
@@ -489,13 +504,11 @@ impl LanguageProvider for StdioLanguageProvider {
         document: &Document,
         position: Position,
     ) -> Result<LocationsResult, ProviderError> {
-        self.require_capability(Capability::Definition)?;
-        let params = json!({
-            "document": serde_json::to_value(document).expect("document serializes"),
-            "position": serde_json::to_value(position).expect("position serializes"),
-        });
-        let value = self.request("lpp/definition", params)?;
-        parse_result(value, "lpp/definition")
+        self.call(
+            Capability::Definition,
+            "lpp/definition",
+            json!({ "document": document, "position": position }),
+        )
     }
 
     fn references(
@@ -504,14 +517,15 @@ impl LanguageProvider for StdioLanguageProvider {
         position: Position,
         include_declaration: bool,
     ) -> Result<LocationsResult, ProviderError> {
-        self.require_capability(Capability::References)?;
-        let params = json!({
-            "document": serde_json::to_value(document).expect("document serializes"),
-            "position": serde_json::to_value(position).expect("position serializes"),
-            "includeDeclaration": include_declaration,
-        });
-        let value = self.request("lpp/references", params)?;
-        parse_result(value, "lpp/references")
+        self.call(
+            Capability::References,
+            "lpp/references",
+            json!({
+                "document": document,
+                "position": position,
+                "includeDeclaration": include_declaration,
+            }),
+        )
     }
 
     fn rename(
@@ -522,18 +536,16 @@ impl LanguageProvider for StdioLanguageProvider {
         new_name: &str,
         project_root: Option<&str>,
     ) -> Result<RenameResult, ProviderError> {
-        self.require_capability(Capability::Rename)?;
         let mut params = json!({
-            "documents": serde_json::to_value(documents).expect("document set serializes"),
+            "documents": documents,
             "positionDocumentUri": position_document_uri,
-            "position": serde_json::to_value(position).expect("position serializes"),
+            "position": position,
             "newName": new_name,
         });
         if let Some(root) = project_root {
             params["projectRoot"] = json!(root);
         }
-        let value = self.request("lpp/rename", params)?;
-        parse_result(value, "lpp/rename")
+        self.call(Capability::Rename, "lpp/rename", params)
     }
 
     fn validate_edits(
@@ -541,13 +553,14 @@ impl LanguageProvider for StdioLanguageProvider {
         document: &Document,
         edits: &[TextEdit],
     ) -> Result<ValidateEditsResult, ProviderError> {
-        self.require_capability(Capability::EditValidation)?;
-        let params = json!({
-            "document": serde_json::to_value(document).expect("document serializes"),
-            "edits": serde_json::to_value(edits).expect("edits serialize"),
-        });
-        let value = self.request("lpp/validateEdits", params)?;
-        parse_result(value, "lpp/validateEdits")
+        self.call(
+            Capability::EditValidation,
+            "lpp/validateEdits",
+            json!({
+                "document": document,
+                "edits": edits,
+            }),
+        )
     }
 
     fn shutdown(&mut self) -> Result<(), ProviderError> {

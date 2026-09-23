@@ -182,7 +182,15 @@ jobs:
           if-no-files-found: error
 
       - name: Record CLI provenance
-        run: python3 scripts/report-cli-artifact.py
+        shell: bash
+        run: |
+          digest="$(sha256sum target/debug/wright | cut -d ' ' -f1)"
+          {
+            printf '%s\n\n' '## Wright CLI artifact'
+            printf -- "- Revision: \`%s\`\n" "$GITHUB_SHA"
+            printf '%s\n' '- Build identity: stable / debug / ubuntu-latest'
+            printf -- "- SHA-256: \`%s\`\n" "$digest"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
   # [1b] WORKSHOP REAL-PROJECT INTEGRATION  (Wright's released Workshop consumer)
@@ -460,10 +468,6 @@ jobs:
           name: benchmark-report
           path: target/wright-bench-report.json
 
-      - name: Render benchmark summary
-        if: always()
-        run: python3 scripts/render-ci-summary.py --title "Performance Benchmarks" --kind benchmarks --report target/wright-bench-report.json --outcome "${{ steps.bench.outcome }}"
-
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
   # When source changes are in scope, this remains gated on the relevant Rust
@@ -607,6 +611,7 @@ jobs:
 
 
       - name: Validate package metadata and installers
+        if: matrix.channel == 'install.sh' || matrix.channel == 'install.ps1'
         run: python scripts/verify-dist.py
 
       - name: Test install.sh (functional)

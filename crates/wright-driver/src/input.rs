@@ -1,61 +1,33 @@
-//! The driver resolves one [`SessionConfig`] into a concrete
-//! [`ResolvedInput`]: the input text, the concrete frontend kind, a stable
-//! display identity for diagnostics, an include root for `.opy`, and a
-//! deterministic SHA-256 input identity. Automatic detection fails
-//! explicitly with actionable guidance whenever the input is ambiguous or
-//! outside the supported surface; an explicit `--kind`/locale override always
-//! wins over detection.
-
-use std::path::{Path, PathBuf};
-
-use sha2::{Digest, Sha256};
+//! The driver resolves one [`SessionConfig`] into a concrete [`ResolvedInput`].
 
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Origin, Stage};
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
-/// Whether a resolved input is a single source file or a project target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputTarget {
     File,
     Directory,
 }
 
-/// A resolved, ready-to-load input.
 #[derive(Debug, Clone)]
 pub struct ResolvedInput {
-    /// The concrete frontend kind (never `Auto`).
     pub kind: SourceKind,
-    /// The input text.
     pub text: String,
-    /// The on-disk path, when the input came from a file.
     pub path: Option<PathBuf>,
-    /// The resolved filesystem target shape.
     pub target: InputTarget,
-    /// The include root (`.opy` include base); the input's directory by default.
     pub root: PathBuf,
-    /// The invocation working directory used to resolve a relative entry.
     pub cwd: PathBuf,
-    /// A stable display identity used in diagnostics (`<stdin>` for stdin).
     pub display: String,
-    /// SHA-256 hex of the input bytes (deterministic input identity).
     pub identity: String,
-    /// Origin metadata carried into diagnostics and results.
     pub origin: Origin,
 }
 
-/// SHA-256 hex digest of a byte slice.
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(64);
-    for byte in digest {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
+    format!("{:x}", Sha256::digest(bytes))
 }
 
-/// Resolve a session config into a concrete, loadable input.
 pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     match &config.input {
         InputSpec::Path(path) => resolve_path(path, config),
@@ -64,11 +36,11 @@ pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
 }
 
 fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
-    let cwd = std::env::current_dir().map_err(|error| {
+    let cwd = std::env::current_dir().map_err(|e| {
         Diagnostic::error(
             "cwd-io",
             Stage::Discovery,
-            format!("cannot determine the invocation working directory: {error}"),
+            format!("cannot determine the invocation working directory: {e}"),
         )
     })?;
     let path = if path.is_absolute() {
@@ -76,17 +48,18 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
     } else {
         cwd.join(path)
     };
-    let metadata = std::fs::metadata(&path).map_err(|error| {
+    let metadata = std::fs::metadata(&path).map_err(|e| {
         Diagnostic::error(
             "input-io",
             Stage::Discovery,
-            format!("cannot read input '{}': {error}", path.display()),
+            format!("cannot read input '{}': {e}", path.display()),
         )
     })?;
     if metadata.is_dir() {
-        return resolve_directory(&path, config, cwd);
+        resolve_directory(&path, config, cwd)
+    } else {
+        resolve_file(&path, config, cwd)
     }
-    resolve_file(&path, config, cwd)
 }
 
 fn resolve_file(
@@ -94,11 +67,11 @@ fn resolve_file(
     config: &SessionConfig,
     cwd: PathBuf,
 ) -> Result<ResolvedInput, Diagnostic> {
-    let bytes = std::fs::read(path).map_err(|error| {
+    let bytes = std::fs::read(path).map_err(|e| {
         Diagnostic::error(
             "input-io",
             Stage::Discovery,
-            format!("cannot read input '{}': {error}", path.display()),
+            format!("cannot read input '{}': {e}", path.display()),
         )
     })?;
     let text = String::from_utf8_lossy(&bytes).into_owned();
@@ -107,8 +80,8 @@ fn resolve_file(
         other => other,
     };
     let root = match &config.root {
-        Some(root) if root.is_absolute() => root.clone(),
-        Some(root) => cwd.join(root),
+        Some(r) if r.is_absolute() => r.clone(),
+        Some(r) => cwd.join(r),
         None => path
             .parent()
             .map(Path::to_path_buf)
@@ -183,7 +156,7 @@ fn resolve_directory(
     let root = config
         .root
         .as_ref()
-        .map(|root| absolute_from(&cwd, root))
+        .map(|r| absolute_from(&cwd, r))
         .unwrap_or_else(|| path.to_path_buf());
     let display = display_path(path);
     let origin = origin_for(kind, config.locale.as_deref());
@@ -195,9 +168,6 @@ fn resolve_directory(
         root,
         cwd,
         display,
-        // A directory has no Wright-owned source bytes. Provider-backed
-        // compile results replace this placeholder with the owner-selected
-        // primary source identity before it reaches result contracts.
         identity: String::new(),
         origin,
     })
@@ -214,7 +184,7 @@ fn absolute_from(cwd: &Path, path: &Path) -> PathBuf {
 fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
     let opy_project = [path.join("main.opy"), path.join("src/main.opy")]
         .iter()
-        .any(|candidate| candidate.is_file());
+        .any(|c| c.is_file());
     let ostw_project =
         path.join("ds.toml").is_file() || !direct_source_files(path, SourceKind::Ostw).is_empty();
     let workshop_project = !direct_source_files(path, SourceKind::Workshop).is_empty();
@@ -225,11 +195,10 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
     if ostw_project {
         kinds.push(SourceKind::Ostw);
     }
-    // A Workshop file cannot be distinguished from an owner-generated artifact
-    // during Wright's minimum inspection, so retain it as an ambiguity signal.
     if workshop_project {
         kinds.push(SourceKind::Workshop);
     }
+
     match kinds.as_slice() {
         [kind] => Ok(*kind),
         [] => Err(Diagnostic::error(
@@ -248,7 +217,7 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
                 path.display(),
                 kinds
                     .iter()
-                    .map(|kind| kind.as_str())
+                    .map(|k| k.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -295,32 +264,53 @@ fn directory_source_count_error(path: &Path, kind: SourceKind, files: &[PathBuf]
     )
 }
 
+fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+        return Err(Diagnostic::error(
+            "input-kind-unknown",
+            Stage::Discovery,
+            format!(
+                "cannot detect the input kind of '{}' (no extension); pass `--kind opy|ostw|workshop|protocol` to override",
+                path.display()
+            ),
+        ));
+    };
+    match ext.to_ascii_lowercase().as_str() {
+        "opy" => Ok(SourceKind::Opy),
+        "ostw" | "del" => Ok(SourceKind::Ostw),
+        "txt" | "ow" | "ws" | "workshop" => Ok(SourceKind::Workshop),
+        "json" => Ok(SourceKind::Protocol),
+        other => Err(Diagnostic::error(
+            "input-kind-unknown",
+            Stage::Discovery,
+            format!(
+                "cannot detect the input kind of '{}' (unknown extension '.{other}'); pass `--kind opy|ostw|workshop|protocol` to override",
+                path.display()
+            ),
+        )),
+    }
+}
+
 fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     use std::io::Read;
     let mut bytes = Vec::new();
-    std::io::stdin()
-        .lock()
-        .read_to_end(&mut bytes)
-        .map_err(|error| {
-            Diagnostic::error(
-                "stdin-io",
-                Stage::Discovery,
-                format!("cannot read standard input: {error}"),
-            )
-        })?;
+    std::io::stdin().read_to_end(&mut bytes).map_err(|e| {
+        Diagnostic::error(
+            "stdin-io",
+            Stage::Discovery,
+            format!("cannot read standard input: {e}"),
+        )
+    })?;
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let kind = match config.kind {
         SourceKind::Auto => kind_from_stdin(&text)?,
-        // The native `.opy` frontend reads source from stdin; the include root
-        // defaults to the working directory.
         other => other,
     };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = config
         .root
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let display = "<stdin>".to_string();
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
         kind,
@@ -329,44 +319,12 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
         target: InputTarget::File,
         root,
         cwd,
-        display,
+        display: "<stdin>".to_string(),
         identity: sha256_hex(&bytes),
         origin,
     })
 }
 
-/// Map a file extension to a source kind; unknown extensions fail explicitly.
-fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
-    let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
-        return Err(Diagnostic::error(
-            "input-kind-unknown",
-            Stage::Discovery,
-            format!(
-                "cannot detect the input kind of '{}' (no extension); \
-                 pass `--kind opy|ostw|workshop|protocol` to override",
-                path.display()
-            ),
-        ));
-    };
-    match extension.to_ascii_lowercase().as_str() {
-        "opy" => Ok(SourceKind::Opy),
-        "ostw" | "del" => Ok(SourceKind::Ostw),
-        "json" => Ok(SourceKind::Protocol),
-        "txt" | "ow" | "ws" | "workshop" => Ok(SourceKind::Workshop),
-        other => Err(Diagnostic::error(
-            "input-kind-unknown",
-            Stage::Discovery,
-            format!(
-                "cannot detect the input kind of '{}' (unknown extension '.{other}'); \
-                 pass `--kind opy|ostw|workshop|protocol` to override",
-                path.display()
-            ),
-        )),
-    }
-}
-
-/// Detect the frontend kind of stdin text: protocol JSON starts with `{`,
-/// Workshop text does not. Anything else fails explicitly.
 fn kind_from_stdin(text: &str) -> Result<SourceKind, Diagnostic> {
     let trimmed = text.trim_start();
     if trimmed.is_empty() {
@@ -383,39 +341,25 @@ fn kind_from_stdin(text: &str) -> Result<SourceKind, Diagnostic> {
     }
 }
 
-/// A stable display path: relative to the cwd when possible, else absolute.
 pub fn display_path(path: &Path) -> String {
     if let Ok(cwd) = std::env::current_dir() {
-        if let Ok(relative) = path.strip_prefix(&cwd) {
-            if !relative.as_os_str().is_empty() {
-                return relative.display().to_string();
+        if let Ok(rel) = path.strip_prefix(&cwd) {
+            if !rel.as_os_str().is_empty() {
+                return rel.display().to_string();
             }
         }
     }
     path.display().to_string()
 }
 
-/// Origin metadata for a resolved input.
 fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
     match kind {
-        SourceKind::Opy => Origin {
-            kind: "opy".to_string(),
-            locale: None,
-        },
-        SourceKind::Ostw => Origin {
-            kind: "ostw".to_string(),
-            locale: None,
-        },
         SourceKind::Workshop => Origin {
             kind: "workshop".to_string(),
             locale: locale.map(str::to_string),
         },
-        SourceKind::Protocol => Origin {
-            kind: "protocol".to_string(),
-            locale: None,
-        },
-        SourceKind::Auto => Origin {
-            kind: "auto".to_string(),
+        _ => Origin {
+            kind: kind.as_str().to_string(),
             locale: None,
         },
     }
@@ -439,8 +383,10 @@ mod tests {
             .expect("write OPY source");
         std::fs::write(directory.join("generated.txt"), "rule (\"generated\") {}\n")
             .expect("write Workshop source");
+        std::fs::write(directory.join("another.txt"), "rule (\"another\") {}\n")
+            .expect("write second Workshop source");
 
-        let config = SessionConfig {
+        let mut config = SessionConfig {
             input: InputSpec::Path(directory.clone()),
             kind: SourceKind::Auto,
             ..SessionConfig::default()
@@ -449,6 +395,10 @@ mod tests {
         assert_eq!(error.code, "input-kind-ambiguous");
         assert!(error.message.contains("opy"));
         assert!(error.message.contains("workshop"));
+
+        config.kind = SourceKind::Workshop;
+        let error = resolve(&config).expect_err("multiple Workshop files must be ambiguous");
+        assert_eq!(error.code, "input-kind-ambiguous");
 
         std::fs::remove_dir_all(directory).expect("remove test directory");
     }
