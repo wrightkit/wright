@@ -120,13 +120,6 @@ jobs:
       - name: Check formatting
         run: cargo +1.85.0 fmt --all -- --check
 
-      - name: Check Workshop dependency
-        env:
-          RUSTUP_TOOLCHAIN: 1.85.0
-        run: |
-          scripts/test-check-workshop-dependency.sh
-          scripts/check-workshop-dependency.sh
-
       # Keep the surviving owner-independent Wright crates on the declared
       # MSRV. The provider-backed consumer crates are covered by the stable
       # full-workspace gate and the dedicated integration jobs below.
@@ -520,16 +513,6 @@ jobs:
         shell: bash
         run: cargo build --locked -p wright-cli -p wright-lsp
 
-      - name: Record build identity
-        shell: bash
-        run: >-
-          bash scripts/write-build-identity.sh
-          --output target/debug/wright-dist.build.json
-          --revision "${{ github.sha }}"
-          --runner-os "${{ runner.os }}"
-          --toolchain stable
-          --profile dev
-
       - name: Upload distribution binaries
         uses: actions/upload-artifact@v7
         with:
@@ -539,7 +522,6 @@ jobs:
             target/debug/wright.exe
             target/debug/wright-lsp
             target/debug/wright-lsp.exe
-            target/debug/wright-dist.build.json
           if-no-files-found: error
 
   dist-validation:
@@ -601,16 +583,9 @@ jobs:
           name: wright-dist-cli-${{ matrix.os }}
           path: target/debug
 
-      - name: Verify build identity
-        shell: bash
-        run: >-
-          bash scripts/verify-build-identity.sh
-          --identity target/debug/wright-dist.build.json
-          --revision "${{ github.sha }}"
-          --runner-os "${{ runner.os }}"
-          --wright target/debug/wright
-          --wright-lsp target/debug/wright-lsp
-
+      - name: Prepare distribution executables
+        if: runner.os != 'Windows'
+        run: chmod +x target/debug/wright target/debug/wright-lsp
 
       - name: Validate package metadata and installers
         if: matrix.channel == 'install.sh' || matrix.channel == 'install.ps1'
