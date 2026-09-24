@@ -124,8 +124,8 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: 1.85.0
         run: |
-          python3 -m unittest discover -s scripts -p 'test_check_workshop_dependency.py'
-          python3 scripts/check-workshop-dependency.py
+          scripts/test-check-workshop-dependency.sh
+          scripts/check-workshop-dependency.sh
 
       # Keep the surviving owner-independent Wright crates on the declared
       # MSRV. The provider-backed consumer crates are covered by the stable
@@ -521,8 +521,9 @@ jobs:
         run: cargo build --locked -p wright-cli -p wright-lsp
 
       - name: Record build identity
+        shell: bash
         run: >-
-          python3 scripts/write-build-identity.py
+          bash scripts/write-build-identity.sh
           --output target/debug/wright-dist.build.json
           --revision "${{ github.sha }}"
           --runner-os "${{ runner.os }}"
@@ -601,8 +602,9 @@ jobs:
           path: target/debug
 
       - name: Verify build identity
+        shell: bash
         run: >-
-          python scripts/verify-build-identity.py
+          bash scripts/verify-build-identity.sh
           --identity target/debug/wright-dist.build.json
           --revision "${{ github.sha }}"
           --runner-os "${{ runner.os }}"
