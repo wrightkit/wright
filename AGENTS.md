@@ -115,8 +115,10 @@ clear.
   first-party workflow.
 - Never duplicate canonical Workshop data or semantics in Wright.
 - Never invent Wright-only OPY/DEL syntax.
-- Compatibility targets observable semantics, not output-text identity,
-  formatting, optimizer shape, temporary variables, or upstream internals.
+- Source-language compilation converges structurally on the established
+  upstream compiler output, compared as `workshop-rs`-parsed canonical programs
+  and owned by the language repositories (goal principle 7); formatting and
+  upstream internals are not criteria.
 - Source-oriented validated edits are preferred over full-file regeneration.
 
 Current support claims must be grounded in the owning repositories and executable
