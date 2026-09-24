@@ -384,7 +384,9 @@ jobs:
       - name: Run LPP tests
         env:
           LPP_MOCK_PROVIDER: ${{ github.workspace }}/language-provider-protocol/target/debug/lpp-mock-provider
-        run: scripts/test-lpp-integration.sh
+        run: >-
+          cargo test --locked -p wright-lpp -p wright-driver
+          --test mock_provider --test lpp --test provider_edit
 
   # -------------------------------------------------------------------------
   # [4] CLI BEHAVIOR  (Wright CLI GitHub Actions renderer smoke test)
