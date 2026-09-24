@@ -73,8 +73,11 @@ Workshop → OPY and Workshop → DEL reconstruction are not treated as supporte
 WrightKit capabilities until the owning language implementations provide and
 test those reconstruction paths.
 
-Compatibility targets observable semantics, not compiler-output identity,
-formatting, temporary variables, optimizer shape, or internal architecture.
+Compiled output converges structurally on the established upstream compiler
+(rule order, element identities, control flow, conditions, values, variable
+names and indices, and element cost), compared as canonical Workshop programs
+rather than text. Formatting and upstream internal architecture are not
+criteria. The owning language implementations hold these compatibility tests.
 
 ## Why Wright exists alongside standalone implementations
 
