@@ -330,37 +330,35 @@ mod tests {
         use workshop_rs::{Action, Condition, Event, Program, Rule, Value};
 
         let mut program = Program::new();
-        program.rule(Rule {
-            name: "r".to_string(),
-            disabled: false,
-            event: Event::Global,
-            conditions: vec![Condition::new(Value::call(
-                "+",
-                [Value::call("*", [2.0.into(), 3.0.into()]), 4.0.into()],
-            ))],
-            actions: vec![Action::Call {
-                name: "probe".to_string(),
-                args: vec![
-                    Value::Array(vec![
-                        Value::call("+", [1.0.into(), 2.0.into()]),
-                        Value::call("==", [4.0.into(), 4.0.into()]),
-                    ]),
-                    Value::call("and", [true.into(), false.into()]),
-                    Value::call(
-                        "valueInArray",
-                        [
-                            Value::Array(vec![1.0.into(), 2.0.into()]),
-                            Value::call("+", [0.0.into(), 0.0.into()]),
-                        ],
-                    ),
-                    Value::Vector {
-                        x: Box::new(0.0.into()),
-                        y: Box::new(1.0.into()),
-                        z: Box::new(0.0.into()),
-                    },
-                ],
-            }],
-        });
+        program.rule(
+            Rule::new("r", Event::Global)
+                .condition(Condition::new(Value::call(
+                    "+",
+                    [Value::call("*", [2.0.into(), 3.0.into()]), 4.0.into()],
+                )))
+                .action(Action::Call {
+                    name: "probe".to_string(),
+                    args: vec![
+                        Value::Array(vec![
+                            Value::call("+", [1.0.into(), 2.0.into()]),
+                            Value::call("==", [4.0.into(), 4.0.into()]),
+                        ]),
+                        Value::call("and", [true.into(), false.into()]),
+                        Value::call(
+                            "valueInArray",
+                            [
+                                Value::Array(vec![1.0.into(), 2.0.into()]),
+                                Value::call("+", [0.0.into(), 0.0.into()]),
+                            ],
+                        ),
+                        Value::Vector {
+                            x: Box::new(0.0.into()),
+                            y: Box::new(1.0.into()),
+                            z: Box::new(0.0.into()),
+                        },
+                    ],
+                }),
+        );
 
         let results = run_canonical(&mut program, Profile::Compat).expect("canonical pipeline");
         assert!(results[0].stats.changed > 0);

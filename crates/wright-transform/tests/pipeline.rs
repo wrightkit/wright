@@ -17,16 +17,12 @@ fn arithmetic_program() -> Program {
     let multiply = Value::call("*", [Value::number(2.0), Value::number(3.0)]);
     let add = Value::call("+", [len, multiply]);
 
-    program.rule(Rule {
-        name: "compute".to_string(),
-        disabled: false,
-        event: Event::Global,
-        conditions: vec![],
-        actions: vec![Action::SetGlobalVariable {
+    program.rule(
+        Rule::new("compute", Event::Global).action(Action::SetGlobalVariable {
             variable: "result".to_string(),
             value: add,
-        }],
-    });
+        }),
+    );
     program
 }
 
