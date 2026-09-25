@@ -347,6 +347,21 @@ fn mapped_provenance(
     wright_driver::SourceProvenance::Mapped(mapped.map)
 }
 
+/// Every span object (`file`, `start`, `end`) nested anywhere in `value`.
+fn collect_spans(value: &serde_json::Value, spans: &mut Vec<serde_json::Value>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if object.contains_key("file") && object.contains_key("start") {
+                spans.push(value.clone());
+            } else {
+                object.values().for_each(|v| collect_spans(v, spans));
+            }
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|v| collect_spans(v, spans)),
+        _ => {}
+    }
+}
+
 fn mapped_lint_session(
     dir: &Path,
     entry: PathBuf,
@@ -401,27 +416,13 @@ fn mapped_provider_artifact_attributes_findings_to_authored_source() {
 
 #[test]
 fn mapped_analyze_locations_resolve_to_authored_source() {
-    fn collect(value: &serde_json::Value, spans: &mut Vec<serde_json::Value>) {
-        match value {
-            serde_json::Value::Object(object) => {
-                if object.contains_key("file") && object.contains_key("start") {
-                    spans.push(value.clone());
-                } else {
-                    object.values().for_each(|v| collect(v, spans));
-                }
-            }
-            serde_json::Value::Array(items) => items.iter().for_each(|v| collect(v, spans)),
-            _ => {}
-        }
-    }
-
     let (dir, entry) = temp_entry();
     let mut session = mapped_lint_session(&dir, entry, |_| {});
 
     let analyze = session.analyze();
     assert!(analyze.ok, "mapped analyze: {:?}", analyze.diagnostics);
     let mut spans = Vec::new();
-    collect(&analyze.result.facts, &mut spans);
+    collect_spans(&analyze.result.facts, &mut spans);
     assert!(!spans.is_empty(), "analyze facts carry spans");
     assert!(spans.iter().all(|span| span["path"] == "main.opy"));
     cleanup(dir);
@@ -580,13 +581,21 @@ fn pinned_bastion_findings_resolve_to_authored_opy_locations() {
         wright_driver::Provenance::Mapped,
         "the provider must hand off a source map"
     );
-    let findings = lint.result.findings.as_array().expect("finding array");
-    let mut mapped = 0;
-    for finding in findings {
-        let span = &finding["span"];
-        if span.is_null() {
-            continue;
-        }
+    let mut spans = Vec::new();
+    collect_spans(&lint.result.findings, &mut spans);
+    let lint_spans = spans.len();
+    let analyze = session.analyze();
+    assert!(analyze.ok, "Bastion analyze: {:?}", analyze.diagnostics);
+    collect_spans(&analyze.result.facts, &mut spans);
+    assert!(
+        lint_spans > 0,
+        "no Bastion finding resolved to an authored location"
+    );
+    assert!(
+        spans.len() > lint_spans,
+        "no Bastion analyze location resolved to an authored location"
+    );
+    for span in &spans {
         let path = span["path"].as_str().expect("span path");
         assert!(path.ends_with(".opy"), "not an authored path: {path}");
         let source = std::fs::read_to_string(root.join(path)).expect("authored file");
@@ -595,12 +604,7 @@ fn pinned_bastion_findings_resolve_to_authored_opy_locations() {
             (1..=source.lines().count()).contains(&line),
             "{path}:{line} is outside the authored file"
         );
-        mapped += 1;
     }
-    assert!(
-        mapped > 0,
-        "no Bastion finding resolved to an authored location"
-    );
 }
 
 #[test]
