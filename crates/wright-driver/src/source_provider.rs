@@ -1,10 +1,8 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use workshop_rs::program::{MAPPED_TEXT_V1, TEXT_V1};
 use workshop_rs::{MappedText, SourceMap};
-
-const TEXT_V1: &str = "workshop-rs/text-v1";
-const MAPPED_TEXT_V1: &str = "workshop-rs/mapped-text-v1";
 
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 

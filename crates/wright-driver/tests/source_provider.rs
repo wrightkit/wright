@@ -400,6 +400,98 @@ fn mapped_provider_artifact_attributes_findings_to_authored_source() {
 }
 
 #[test]
+fn mapped_analyze_locations_resolve_to_authored_source() {
+    fn collect(value: &serde_json::Value, spans: &mut Vec<serde_json::Value>) {
+        match value {
+            serde_json::Value::Object(object) => {
+                if object.contains_key("file") && object.contains_key("start") {
+                    spans.push(value.clone());
+                } else {
+                    object.values().for_each(|v| collect(v, spans));
+                }
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|v| collect(v, spans)),
+            _ => {}
+        }
+    }
+
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |_| {});
+
+    let analyze = session.analyze();
+    assert!(analyze.ok, "mapped analyze: {:?}", analyze.diagnostics);
+    let mut spans = Vec::new();
+    collect(&analyze.result.facts, &mut spans);
+    assert!(!spans.is_empty(), "analyze facts carry spans");
+    assert!(spans.iter().all(|span| span["path"] == "main.opy"));
+    cleanup(dir);
+}
+
+/// A conforming pre-1.4 provider allows one `lpp/initialize` per process, so
+/// the fallback after a refused 1.4 negotiation must use a restarted process.
+#[cfg(unix)]
+#[test]
+fn pre_lpp_14_provider_is_restarted_before_the_unmapped_fallback() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+artifact = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifact.ws")).read()
+initialized = False
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        first = not initialized
+        initialized = True
+        if not first:
+            lpp_error(id, "alreadyInitialized", {}, "already initialized")
+        elif request["params"]["protocolVersion"] != "1.1":
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": ["1.1"]}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": "1.1", "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True, "compile": True, "reconstruct": False, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let (dir, entry) = temp_entry();
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    std::fs::write(
+        dir.join("artifact.ws"),
+        workshop_fixture("synthetic/control-flow"),
+    )
+    .expect("artifact");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
+        ..SessionConfig::default()
+    })
+    .expect("session");
+
+    let lint = session.lint();
+    assert!(lint.ok, "fallback lint: {:?}", lint.diagnostics);
+    assert_eq!(
+        session.load().expect("loaded").provenance,
+        wright_driver::Provenance::Unmapped
+    );
+    cleanup(dir);
+}
+
+#[test]
 fn nodes_without_an_authored_origin_stay_explicitly_unmapped() {
     let (dir, entry) = temp_entry();
     let mut session = mapped_lint_session(&dir, entry, |artifact| {
