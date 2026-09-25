@@ -322,6 +322,195 @@ fn provider_backend_lint_and_analyze_use_the_canonical_artifact_without_opy_span
     cleanup(dir);
 }
 
+/// A source map for `text` whose spans point into `authored`, edited by
+/// `edit` before decoding, as a provider would return it.
+fn mapped_provenance(
+    text: &str,
+    authored: &Path,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> wright_driver::SourceProvenance {
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog");
+    let locale = workshop_rs::catalog::Locale::new("en-US");
+    let program = workshop_rs::parser::parse_with_context(text, &catalog, &locale, &catalog)
+        .expect("fixture parses");
+    let json = workshop_rs::MappedText {
+        text: text.to_string(),
+        map: workshop_rs::SourceMap::extract(&program),
+    }
+    .to_json();
+    let mut artifact: serde_json::Value = serde_json::from_str(&json).expect("mapped JSON");
+    artifact["files"] = serde_json::json!([{
+        "path": url::Url::from_file_path(authored).expect("file URI").to_string(),
+    }]);
+    edit(&mut artifact);
+    let mapped = workshop_rs::MappedText::from_json(&artifact.to_string()).expect("mapped text");
+    wright_driver::SourceProvenance::Mapped(mapped.map)
+}
+
+fn mapped_lint_session(
+    dir: &Path,
+    entry: PathBuf,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> CompilerSession {
+    let text = workshop_fixture("synthetic/control-flow");
+    let provenance = mapped_provenance(&text, &dir.join("main.opy"), edit);
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: Some(SourceCompilation {
+            workshop_text: Some(text),
+            locale: None,
+            provenance,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        }),
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    CompilerSession::with_source_provider(config, Box::new(provider)).expect("provider session")
+}
+
+#[test]
+fn mapped_provider_artifact_attributes_findings_to_authored_source() {
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |_| {});
+
+    let lint = session.lint();
+    assert!(lint.ok, "mapped lint: {:?}", lint.diagnostics);
+    assert_eq!(
+        session.load().expect("loaded").provenance,
+        wright_driver::Provenance::Mapped
+    );
+    assert_eq!(lint.result.program["origin"]["kind"], "opy");
+    let findings = lint.result.findings.as_array().expect("finding array");
+    assert!(!findings.is_empty(), "fixture supplies a lint finding");
+    assert!(findings.iter().all(|finding| {
+        finding.pointer("/span/path") == Some(&serde_json::Value::String("main.opy".to_string()))
+            && finding
+                .pointer("/span/start/line")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|line| line > 0)
+    }));
+    cleanup(dir);
+}
+
+#[test]
+fn nodes_without_an_authored_origin_stay_explicitly_unmapped() {
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |artifact| {
+        artifact["spans"]
+            .as_array_mut()
+            .expect("span list")
+            .retain(|node| node["node"] != "action");
+    });
+
+    let lint = session.lint();
+    assert!(lint.ok, "mapped lint: {:?}", lint.diagnostics);
+    let findings = lint.result.findings.as_array().expect("finding array");
+    assert!(!findings.is_empty(), "fixture supplies a lint finding");
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.get("span") == Some(&serde_json::Value::Null)),
+        "action findings lose their span instead of borrowing another location: {findings:?}"
+    );
+    cleanup(dir);
+}
+
+#[test]
+fn shape_mismatch_falls_back_to_unmapped_findings_with_a_diagnostic() {
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |artifact| {
+        artifact["shape"]["rules"]
+            .as_array_mut()
+            .expect("rule shapes")
+            .push(serde_json::json!({ "conditions": 0, "actions": 0 }));
+    });
+
+    let lint = session.lint();
+    assert!(
+        lint.ok,
+        "mismatched map must not fail lint: {:?}",
+        lint.diagnostics
+    );
+    assert_eq!(
+        session.load().expect("loaded").provenance,
+        wright_driver::Provenance::Unmapped
+    );
+    let mismatch = lint
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "source-map-mismatch")
+        .expect("mismatch diagnostic");
+    assert_eq!(mismatch.severity, wright_driver::Severity::Warning);
+    let findings = lint.result.findings.as_array().expect("finding array");
+    assert!(!findings.is_empty(), "fixture supplies a lint finding");
+    assert!(findings.iter().all(|finding| finding.pointer("/span/path")
+        == Some(&serde_json::Value::String(
+            "<provider-artifact>".to_string()
+        ))));
+    cleanup(dir);
+}
+
+/// Set `WRIGHT_BASTION_MAIN` to `src/main.opy` of OWBastion/Bastion at revision
+/// c010e1a2d468ec7140f474e334067e5ab8d02d89 and `WRIGHT_OPY_PROVIDER` to an
+/// `opy-provider` that emits `workshop-rs/mapped-text-v1` to run the pinned
+/// real-project attribution check.
+#[test]
+fn pinned_bastion_findings_resolve_to_authored_opy_locations() {
+    let (Ok(main), Ok(provider)) = (
+        std::env::var("WRIGHT_BASTION_MAIN"),
+        std::env::var("WRIGHT_OPY_PROVIDER"),
+    ) else {
+        eprintln!("SKIPPED: WRIGHT_BASTION_MAIN and WRIGHT_OPY_PROVIDER are not set");
+        return;
+    };
+    let main = PathBuf::from(main);
+    let root = main.parent().expect("project source root").to_path_buf();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(main),
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        opy_provider: wright_driver::OpyProviderConfig::with_executable(PathBuf::from(provider)),
+        ..SessionConfig::default()
+    })
+    .expect("session");
+
+    let lint = session.lint();
+    assert!(lint.ok, "Bastion lint: {:?}", lint.diagnostics);
+    assert_eq!(
+        session.load().expect("loaded").provenance,
+        wright_driver::Provenance::Mapped,
+        "the provider must hand off a source map"
+    );
+    let findings = lint.result.findings.as_array().expect("finding array");
+    let mut mapped = 0;
+    for finding in findings {
+        let span = &finding["span"];
+        if span.is_null() {
+            continue;
+        }
+        let path = span["path"].as_str().expect("span path");
+        assert!(path.ends_with(".opy"), "not an authored path: {path}");
+        let source = std::fs::read_to_string(root.join(path)).expect("authored file");
+        let line = span["start"]["line"].as_u64().expect("span line") as usize;
+        assert!(
+            (1..=source.lines().count()).contains(&line),
+            "{path}:{line} is outside the authored file"
+        );
+        mapped += 1;
+    }
+    assert!(
+        mapped > 0,
+        "no Bastion finding resolved to an authored location"
+    );
+}
+
 #[test]
 fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
     let config = SessionConfig {

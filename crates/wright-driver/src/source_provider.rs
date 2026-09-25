@@ -1,6 +1,11 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use workshop_rs::{MappedText, SourceMap};
+
+const TEXT_V1: &str = "workshop-rs/text-v1";
+const MAPPED_TEXT_V1: &str = "workshop-rs/mapped-text-v1";
+
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,9 +44,14 @@ pub struct SourceTarget {
     pub project_root: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How a compiled Workshop artifact relates to the authored source.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceProvenance {
+    /// The artifact carries no mapping to the authored source.
     Unmapped,
+    /// The provider returned `workshop-rs/mapped-text-v1`; the map applies to
+    /// the program parsed from the artifact's Workshop text.
+    Mapped(SourceMap),
 }
 
 impl SourceTarget {
@@ -237,7 +247,17 @@ impl SourceProvider for LppSourceProvider {
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
         let entry = self.entry(target)?;
         let root_uri = Self::project_root_uri(target);
-        let res = if target.is_directory() {
+        let negotiates_artifacts = self.provider.capabilities().is_ok_and(|c| {
+            c.protocol_version == wright_lpp::LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION
+        });
+        let res = if negotiates_artifacts {
+            self.provider.compile_target_accepting(
+                &entry,
+                root_uri.as_deref(),
+                self.locale.as_deref(),
+                &[MAPPED_TEXT_V1, TEXT_V1],
+            )
+        } else if target.is_directory() {
             self.provider
                 .compile_target(&entry, root_uri.as_deref(), self.locale.as_deref())
         } else {
@@ -245,23 +265,34 @@ impl SourceProvider for LppSourceProvider {
                 .compile_entry(&entry, root_uri.as_deref(), self.locale.as_deref())
         }
         .map_err(provider_error)?;
-        let workshop_text = match res.artifact {
-            Some(a) if a.format == "workshop-rs/text-v1" => Some(a.content),
+        let (workshop_text, provenance) = match res.artifact {
+            Some(a) if a.format == TEXT_V1 => (Some(a.content), SourceProvenance::Unmapped),
+            Some(a) if negotiates_artifacts && a.format == MAPPED_TEXT_V1 => {
+                let mapped = MappedText::from_json(&a.content).map_err(|error| {
+                    SourceProviderError::Failed {
+                        code: "provider-artifact-format".to_string(),
+                        message: format!(
+                            "the source provider returned an invalid '{MAPPED_TEXT_V1}' artifact: {error}"
+                        ),
+                    }
+                })?;
+                (Some(mapped.text), SourceProvenance::Mapped(mapped.map))
+            }
             Some(a) => {
                 return Err(SourceProviderError::Failed {
                     code: "provider-artifact-format".to_string(),
                     message: format!(
-                        "the source provider returned unsupported artifact format '{}', expected 'workshop-rs/text-v1'",
+                        "the source provider returned unsupported artifact format '{}', expected '{TEXT_V1}'",
                         a.format
                     ),
                 });
             }
-            None => None,
+            None => (None, SourceProvenance::Unmapped),
         };
         Ok(SourceCompilation {
             workshop_text,
             locale: self.locale.clone(),
-            provenance: SourceProvenance::Unmapped,
+            provenance,
             diagnostics: provider_diagnostics(res.diagnostics, self.locale.as_deref()),
             source_identity: res.source_identity,
         })
@@ -312,7 +343,7 @@ fn provider_diagnostics(
         .collect()
 }
 
-fn provider_uri_path(uri: &str) -> String {
+pub(crate) fn provider_uri_path(uri: &str) -> String {
     url::Url::parse(uri)
         .ok()
         .and_then(|u| u.to_file_path().ok())

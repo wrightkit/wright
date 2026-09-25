@@ -10,8 +10,8 @@ license = "AGPL-3.0-or-later"
 repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
-# Canonical Workshop core; pinned to the workshop-rs 1.0 release candidate (workshop-rs#268).
-workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "ac5a6a4cf15bfccc5597cfd6ccb7b5028dfd5053" }
+# Canonical Workshop core; pinned to the workshop-rs 1.0 release candidate (workshop-rs v0.6.4).
+workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "712c839f09f9c4daaf65aa7ae619f4fca065e34d" }
 libc = "0.2"
 serde = "1"
 serde_json = "1"
