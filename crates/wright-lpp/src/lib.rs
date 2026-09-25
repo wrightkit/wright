@@ -44,6 +44,9 @@ pub const LPP_PROJECT_LOADING_PROTOCOL_VERSION: &str = "1.1";
 /// The LPP 1.2 version that adds provider-owned directory targets.
 pub const LPP_DIRECTORY_TARGET_PROTOCOL_VERSION: &str = "1.2";
 
+/// The LPP 1.4 version that adds artifact format negotiation on `lpp/compile`.
+pub const LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION: &str = "1.4";
+
 /// The client name reported in `lpp/initialize` `clientInfo`.
 pub const LPP_CLIENT_NAME: &str = "wright";
 

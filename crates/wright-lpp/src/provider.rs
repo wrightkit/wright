@@ -23,7 +23,10 @@ use crate::types::{
     InitializeResult, LocationsResult, Position, ProjectEntry, ReconstructResult, RenameResult,
     SymbolsResult, TextEdit, ValidateEditsResult, WorkshopArtifact,
 };
-use crate::{LPP_DIRECTORY_TARGET_PROTOCOL_VERSION, LPP_PROTOCOL_VERSION};
+use crate::{
+    LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION, LPP_DIRECTORY_TARGET_PROTOCOL_VERSION,
+    LPP_PROTOCOL_VERSION,
+};
 
 /// The negotiated result of a successful `lpp/initialize`.
 #[derive(Debug, Clone)]
@@ -98,6 +101,19 @@ pub trait LanguageProvider {
         })
     }
 
+    /// Initialize with LPP 1.4 for `lpp/compile` artifact format negotiation.
+    fn initialize_artifact_negotiation(
+        &mut self,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        let _ = client_info;
+        Err(ProviderError::ProtocolVersionMismatch {
+            supported: Vec::new(),
+            message: "the provider client does not support LPP 1.4 artifact negotiation"
+                .to_string(),
+        })
+    }
+
     /// The negotiated capabilities, after a successful initialize.
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError>;
 
@@ -169,6 +185,23 @@ pub trait LanguageProvider {
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
         let _ = (target, project_root, locale);
+        Err(ProviderError::lpp(
+            crate::error::LppErrorKind::CapabilityUnavailable,
+            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
+            "capability 'projectLoading' is not available in this provider client",
+        ))
+    }
+
+    /// `lpp/compile` over a file or directory target in an LPP 1.4 session,
+    /// stating the artifact formats the client accepts, most preferred first.
+    fn compile_target_accepting(
+        &mut self,
+        target: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+        accepted_artifact_formats: &[&str],
+    ) -> Result<CompileResult, ProviderError> {
+        let _ = (target, project_root, locale, accepted_artifact_formats);
         Err(ProviderError::lpp(
             crate::error::LppErrorKind::CapabilityUnavailable,
             json!({ "capability": "projectLoading", "method": "lpp/compile" }),
@@ -398,6 +431,13 @@ impl LanguageProvider for StdioLanguageProvider {
         self.initialize_with_version(LPP_DIRECTORY_TARGET_PROTOCOL_VERSION, client_info)
     }
 
+    fn initialize_artifact_negotiation(
+        &mut self,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        self.initialize_with_version(LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION, client_info)
+    }
+
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError> {
         self.negotiated
             .as_ref()
@@ -474,6 +514,26 @@ impl LanguageProvider for StdioLanguageProvider {
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
         self.compile_entry(target, project_root, locale)
+    }
+
+    fn compile_target_accepting(
+        &mut self,
+        target: &ProjectEntry,
+        project_root: Option<&str>,
+        locale: Option<&str>,
+        accepted_artifact_formats: &[&str],
+    ) -> Result<CompileResult, ProviderError> {
+        self.require_capability(Capability::ProjectLoading)?;
+        let negotiated = self.capabilities()?.protocol_version.clone();
+        if negotiated != LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION {
+            return Err(ProviderError::ProtocolVersionMismatch {
+                supported: vec![negotiated],
+                message: "acceptedArtifactFormats is valid only in an LPP 1.4 session".to_string(),
+            });
+        }
+        let mut params = entry_params(target, project_root, locale);
+        params["acceptedArtifactFormats"] = json!(accepted_artifact_formats);
+        self.call(Capability::Compile, "lpp/compile", params)
     }
 
     fn reconstruct(
@@ -751,6 +811,12 @@ mod tests {
         result
     }
 
+    fn init_result_artifact_negotiation_json() -> Value {
+        let mut result = init_result_project_loading_json();
+        result["protocolVersion"] = json!("1.4");
+        result
+    }
+
     fn ok_response(result: Value) -> Value {
         json!({ "jsonrpc": "2.0", "id": 0, "result": result })
     }
@@ -926,6 +992,62 @@ mod tests {
         )
         .expect("check JSON");
         assert_eq!(check["params"]["entry"]["kind"], "directory");
+        fake.assert_only_requests(1);
+    }
+
+    #[test]
+    fn accepted_artifact_formats_are_sent_only_in_an_lpp_14_session() {
+        let target = ProjectEntry {
+            uri: "file:///project/main.opy".to_string(),
+            language_id: "opy".to_string(),
+            version: 1,
+            kind: crate::types::ProjectTargetKind::File,
+        };
+        let (mut provider, fake) = Fake::spawn(vec![
+            FakeStep::Respond(ok_response(init_result_artifact_negotiation_json())),
+            FakeStep::Respond(ok_response(json!({ "diagnostics": [], "artifact": null }))),
+        ]);
+        provider
+            .initialize_artifact_negotiation(None)
+            .expect("LPP 1.4 initialize");
+        provider
+            .compile_target_accepting(
+                &target,
+                None,
+                None,
+                &["workshop-rs/mapped-text-v1", "workshop-rs/text-v1"],
+            )
+            .expect("negotiated compile");
+        let initialize: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("initialize request"),
+        )
+        .expect("initialize JSON");
+        assert_eq!(initialize["params"]["protocolVersion"], "1.4");
+        let compile: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("compile request"),
+        )
+        .expect("compile JSON");
+        assert_eq!(
+            compile["params"]["acceptedArtifactFormats"],
+            json!(["workshop-rs/mapped-text-v1", "workshop-rs/text-v1"])
+        );
+
+        let (mut older, fake) = Fake::spawn(vec![FakeStep::Respond(ok_response(
+            init_result_directory_target_json(),
+        ))]);
+        older
+            .initialize_project_target(None)
+            .expect("LPP 1.2 initialize");
+        let error = older
+            .compile_target_accepting(&target, None, None, &["workshop-rs/text-v1"])
+            .expect_err("pre-1.4 session");
+        assert_eq!(error.supported_protocol_versions(), vec!["1.2"]);
         fake.assert_only_requests(1);
     }
 }

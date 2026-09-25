@@ -24,7 +24,7 @@ use crate::result::{
 };
 use crate::source_provider::{
     SourceBackend, SourceLanguage, SourceProvenance, SourceProvider, SourceProviderError,
-    SourceTarget,
+    SourceTarget, provider_uri_path,
 };
 
 fn error_kind(error: &opy_provider::OpyProviderError) -> wright_lpp::LocalProviderErrorKind {
@@ -64,6 +64,9 @@ pub enum Provenance {
     Source,
     /// The program came from an unmapped provider-returned canonical artifact.
     Unmapped,
+    /// The program came from a provider-returned canonical artifact whose
+    /// source map was applied; nodes without an authored origin stay unmapped.
+    Mapped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,23 +298,40 @@ impl CompilerSession {
         }
         .with_project_root(resolved.root.clone());
         if self.source_provider.is_none() {
-            let mut provider = self
-                .language_provider(opy_provider::OPY_LANGUAGE_ID)
-                .map_err(|error| {
-                    SourceProviderError::Failed {
-                        code: error.code().to_string(),
-                        message: error.to_string(),
-                    }
-                    .diagnostic()
-                })?;
+            let spawn = |session: &Self| {
+                session
+                    .language_provider(opy_provider::OPY_LANGUAGE_ID)
+                    .map_err(|error| {
+                        SourceProviderError::Failed {
+                            code: error.code().to_string(),
+                            message: error.to_string(),
+                        }
+                        .diagnostic()
+                    })
+            };
+            let mut provider = spawn(self)?;
             let client_info = wright_lpp::ClientInfo {
                 name: wright_lpp::LPP_CLIENT_NAME.to_string(),
                 version: crate::result::DRIVER_VERSION.to_string(),
             };
-            let initialize = match resolved.target {
-                InputTarget::File => provider.initialize_project_loading(Some(&client_info)),
-                InputTarget::Directory => provider.initialize_project_target(Some(&client_info)),
-            };
+            // LPP 1.4 lets the provider return a source-mapped artifact. A
+            // provider without it keeps the unmapped LPP 1.1/1.2 session on a
+            // restarted process, as the protocol requires after a version
+            // mismatch.
+            let mut initialize = provider.initialize_artifact_negotiation(Some(&client_info));
+            if initialize
+                .as_ref()
+                .is_err_and(|error| error.code() == "protocol-version-mismatch")
+            {
+                let _ = provider.shutdown();
+                provider = spawn(self)?;
+                initialize = match resolved.target {
+                    InputTarget::File => provider.initialize_project_loading(Some(&client_info)),
+                    InputTarget::Directory => {
+                        provider.initialize_project_target(Some(&client_info))
+                    }
+                };
+            }
             initialize.map_err(|error| {
                 SourceProviderError::Failed {
                     code: error.code().to_string(),
@@ -371,8 +391,10 @@ impl CompilerSession {
             return Err(first);
         }
         self.diagnostics.extend(provider_diagnostics);
-        let SourceProvenance::Unmapped = compilation.provenance;
-        let provenance = Provenance::Unmapped;
+        let source_map = match compilation.provenance {
+            SourceProvenance::Unmapped => None,
+            SourceProvenance::Mapped(map) => Some(map),
+        };
         let locale_name = compilation
             .locale
             .or_else(|| resolved.origin.locale.clone())
@@ -383,7 +405,7 @@ impl CompilerSession {
                 program: Arc::new(Program::default()),
                 origin: resolved.origin.clone(),
                 input: resolved.clone(),
-                provenance,
+                provenance: Provenance::Unmapped,
                 source_files: Arc::new(vec![resolved.display.clone()]),
             });
         }
@@ -401,11 +423,36 @@ impl CompilerSession {
             &locale,
             &self.catalog,
         )
-        .map_err(|error| workshop_diag_for_unmapped_provider_artifact(error, resolved))?;
+        .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
+        let mut provenance = Provenance::Unmapped;
+        let mut source_files = vec![resolved.display.clone()];
+        if let Some(map) = &source_map {
+            match map.apply(&mut program) {
+                Ok(()) => {
+                    provenance = Provenance::Mapped;
+                    source_files = map.files().iter().map(|f| provider_uri_path(f)).collect();
+                }
+                Err(error) => self.diagnostics.push(Diagnostic::warning(
+                    "source-map-mismatch",
+                    Stage::Frontend,
+                    format!(
+                        "the provider source map does not match its Workshop artifact ({error}); findings are reported as unmapped"
+                    ),
+                )),
+            }
+        }
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        program
-            .validate()
-            .map_err(|error| workshop_diag_for_unmapped_provider_artifact(error, resolved))?;
+        program.validate().map_err(|error| {
+            workshop_diag_for_provider_artifact(
+                error,
+                resolved,
+                if provenance == Provenance::Mapped {
+                    &source_files
+                } else {
+                    &[]
+                },
+            )
+        })?;
         if self.config.profile != wright_transform::Profile::Off {
             self.progress(ProgressEvent::new(ProgressPhase::Lowering));
             wright_transform::run_canonical(&mut program, self.config.profile).map_err(
@@ -424,7 +471,7 @@ impl CompilerSession {
             origin: resolved.origin.clone(),
             input: resolved.clone(),
             provenance,
-            source_files: Arc::new(vec![resolved.display.clone()]),
+            source_files: Arc::new(source_files),
         };
         self.loaded = Some(loaded.clone());
         self.loaded_operation = Some(operation);
@@ -594,7 +641,10 @@ impl CompilerSession {
         if let serde_json::Value::Object(object) = &mut program {
             object.remove("findings");
         }
-        let facts = semantic_facts(&service);
+        let mut facts = semantic_facts(&service);
+        if loaded.provenance == Provenance::Mapped {
+            resolve_nested_span_paths(&mut facts, &loaded);
+        }
         self.finish("analyze", AnalyzeResult { program, facts })
     }
 
@@ -1006,33 +1056,66 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
         let Some(span) = finding.get_mut("span") else {
             continue;
         };
-        if !span.is_object() {
-            continue;
+        if span.is_object() {
+            span["path"] = serde_json::Value::String(span_path(span, loaded));
         }
-        let path = if loaded.provenance == Provenance::Unmapped {
-            "<provider-artifact>".to_string()
-        } else if let Some(file) = span.get("file").and_then(serde_json::Value::as_u64) {
-            if let Some(source) = loaded.source_files.get(file as usize) {
-                let p = if file == 0 {
-                    loaded
-                        .input
-                        .path
-                        .as_deref()
-                        .or_else(|| Some(Path::new(source)))
-                } else if Path::new(source).is_absolute() {
-                    Some(Path::new(source))
-                } else {
-                    None
-                };
-                p.and_then(|path| root_relative(Some(path), &loaded.input.root))
-                    .unwrap_or_else(|| source.clone())
+    }
+}
+
+/// Add the resolved `path` to every span object nested anywhere in `value`.
+fn resolve_nested_span_paths(value: &mut serde_json::Value, loaded: &Loaded) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if ["file", "start", "end"]
+                .iter()
+                .all(|key| object.contains_key(*key))
+            {
+                let path = span_path(&serde_json::Value::Object(object.clone()), loaded);
+                object.insert("path".to_string(), serde_json::Value::String(path));
             } else {
-                format!("<file {file}>")
+                object
+                    .values_mut()
+                    .for_each(|v| resolve_nested_span_paths(v, loaded));
             }
+        }
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .for_each(|v| resolve_nested_span_paths(v, loaded)),
+        _ => {}
+    }
+}
+
+fn span_path(span: &serde_json::Value, loaded: &Loaded) -> String {
+    if loaded.provenance == Provenance::Unmapped {
+        "<provider-artifact>".to_string()
+    } else if loaded.provenance == Provenance::Mapped {
+        // Every mapped file is an authored source; file 0 is not the input.
+        let file = span.get("file").and_then(serde_json::Value::as_u64);
+        match file.and_then(|file| loaded.source_files.get(file as usize)) {
+            Some(source) => root_relative(Some(Path::new(source)), &loaded.input.root)
+                .unwrap_or_else(|| source.clone()),
+            None => "<provider-artifact>".to_string(),
+        }
+    } else if let Some(file) = span.get("file").and_then(serde_json::Value::as_u64) {
+        if let Some(source) = loaded.source_files.get(file as usize) {
+            let p = if file == 0 {
+                loaded
+                    .input
+                    .path
+                    .as_deref()
+                    .or_else(|| Some(Path::new(source)))
+            } else if Path::new(source).is_absolute() {
+                Some(Path::new(source))
+            } else {
+                None
+            };
+            p.and_then(|path| root_relative(Some(path), &loaded.input.root))
+                .unwrap_or_else(|| source.clone())
         } else {
-            loaded.input.display.clone()
-        };
-        span["path"] = serde_json::Value::String(path);
+            format!("<file {file}>")
+        }
+    } else {
+        loaded.input.display.clone()
     }
 }
 
@@ -1119,15 +1202,33 @@ fn provider_artifact_origin(resolved: &ResolvedInput) -> Origin {
     }
 }
 
-fn workshop_diag_for_unmapped_provider_artifact(
+/// Map a Workshop error on a provider artifact to a driver diagnostic.
+///
+/// `mapped_files` is the applied source map's file table: a span into it is an
+/// authored location. Without one, the span points into the provider artifact.
+fn workshop_diag_for_provider_artifact(
     error: workshop_rs::WorkshopError,
     resolved: &ResolvedInput,
+    mapped_files: &[String],
 ) -> Diagnostic {
     let mut diagnostic = workshop_diag(error, resolved);
-    if let Some(span) = &mut diagnostic.span {
-        span.path = "<provider-artifact>".to_string();
+    if mapped_files.is_empty() {
+        if let Some(span) = &mut diagnostic.span {
+            span.path = "<provider-artifact>".to_string();
+        }
+        diagnostic.source = Some(provider_artifact_origin(resolved));
+    } else if let Some(span) = &mut diagnostic.span {
+        match mapped_files.get(span.file) {
+            Some(path) => {
+                span.path = root_relative(Some(Path::new(path)), &resolved.root)
+                    .unwrap_or_else(|| path.clone());
+            }
+            None => diagnostic.span = None,
+        }
     }
-    diagnostic.source = Some(provider_artifact_origin(resolved));
+    if diagnostic.span.is_none() {
+        diagnostic.source = Some(provider_artifact_origin(resolved));
+    }
     diagnostic
 }
 
