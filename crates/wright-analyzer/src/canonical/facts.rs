@@ -9,27 +9,18 @@ pub(super) fn persistent_objects(program: &Program) -> Vec<JsonValue> {
             let Action::Call { name, args } = action_data else {
                 continue;
             };
-            let Some(kind) = persistent_object_kind(name) else {
-                continue;
-            };
-            let cleanup = match kind {
-                "hud-text" => "destroyHudText",
-                "in-world-text" => "destroyInWorldText",
-                "effect" => "destroyEffect",
+            let (kind, cleanup, reevaluation_index, identity) = match name.as_str() {
+                "createHudText" => ("hud-text", "destroyHudText", 9, "lastTextId"),
+                "createInWorldText" => ("in-world-text", "destroyInWorldText", 5, "lastTextId"),
+                "createEffect" => ("effect", "destroyEffect", 5, "lastCreatedEntity"),
                 _ => continue,
             };
-            let reevaluation_index = if kind == "hud-text" { 9 } else { 5 };
             let reevaluation = args.get(reevaluation_index).and_then(|value| match value {
                 Value::Enum { value_type, value } => {
                     Some(json!({"domain": value_type, "mode": value}))
                 }
                 _ => None,
             });
-            let identity = match kind {
-                "hud-text" | "in-world-text" => "lastTextId",
-                "effect" => "lastCreatedEntity",
-                _ => unreachable!(),
-            };
             let identity_retained = data
                 .actions
                 .get(action + 1)
@@ -49,15 +40,6 @@ pub(super) fn persistent_objects(program: &Program) -> Vec<JsonValue> {
         }
     }
     output
-}
-
-fn persistent_object_kind(name: &str) -> Option<&'static str> {
-    match name {
-        "createHudText" => Some("hud-text"),
-        "createInWorldText" => Some("in-world-text"),
-        "createEffect" => Some("effect"),
-        _ => None,
-    }
 }
 
 fn execution_scope(event: &Event) -> &'static str {
