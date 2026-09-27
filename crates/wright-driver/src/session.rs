@@ -842,11 +842,7 @@ impl CompilerSession {
                     self.diagnostics.push(Diagnostic {
                         code: d.code,
                         stage: Stage::Analysis,
-                        severity: match d.severity {
-                            crate::provider::Severity::Error => Severity::Error,
-                            crate::provider::Severity::Warning => Severity::Warning,
-                            crate::provider::Severity::Info => Severity::Info,
-                        },
+                        severity: d.severity,
                         message: d.message,
                         span: Some(SourceSpan {
                             file: 0,
@@ -1097,18 +1093,7 @@ pub(crate) fn workshop_diag(
     resolved: &ResolvedInput,
 ) -> Diagnostic {
     let to_span = |s: Option<workshop_rs::source::Span>| {
-        s.map(|span| SourceSpan {
-            file: span.file.index(),
-            path: resolved.display.clone(),
-            start: Position {
-                line: span.start.line,
-                col: span.start.col,
-            },
-            end: Position {
-                line: span.end.line,
-                col: span.end.col,
-            },
-        })
+        s.map(|span| crate::diag::source_span(span, resolved.display.clone()))
     };
     let (code, stage, span) = match &error {
         workshop_rs::WorkshopError::Catalog(catalog) => {

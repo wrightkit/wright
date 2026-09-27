@@ -436,7 +436,7 @@ fn publish_to(
     diagnostics: Vec<LspDiagnostic>,
 ) -> Result<(), String> {
     let params = PublishDiagnosticsParams {
-        uri: Uri::from_str(&publication_uri(source)).unwrap_or_else(|_| fallback_uri()),
+        uri: source_to_uri(source),
         diagnostics,
         version,
     };

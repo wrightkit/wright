@@ -329,11 +329,7 @@ fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T
 }
 
 fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
-    let kind = match diagnostic.severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "notice",
-    };
+    let kind = workflow_severity(diagnostic.severity);
     let mut props = vec![format!(
         "title={}",
         escape_workflow_property(&diagnostic.code)
@@ -365,11 +361,7 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
         .and_then(serde_json::Value::as_str)
         .filter(|path| is_real_source_path(path));
     let Some(path) = path else { return };
-    let kind = match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "notice",
-    };
+    let kind = workflow_severity(severity);
     let line = span_position(span, "start", "line").unwrap_or(1);
     let col = span_position(span, "start", "col").unwrap_or(1);
     let end_line = span_position(span, "end", "line").unwrap_or(line);
@@ -402,6 +394,14 @@ fn emit_workflow_annotation(kind: &str, properties: &[String], message: &str) {
         properties.join(","),
         escape_workflow_data(message)
     );
+}
+
+fn workflow_severity(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "notice",
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]

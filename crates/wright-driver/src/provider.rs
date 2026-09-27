@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+pub use crate::diag::Severity;
+
 pub type Result<T> = std::result::Result<T, ProviderError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,14 +31,6 @@ impl std::error::Error for ProviderError {}
 
 pub trait LanguageProvider {
     fn check(&self, source: &str, path: &Path) -> Result<Vec<Diagnostic>>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

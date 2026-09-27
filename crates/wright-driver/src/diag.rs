@@ -5,28 +5,10 @@
 //! model, so automation never needs to scrape terminal text.
 
 use serde::{Deserialize, Serialize};
-
 /// The severity of a diagnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    /// Blocks the workflow; the result is not usable.
-    Error,
-    /// Does not block the workflow, but should be reviewed.
-    Warning,
-    /// Informational.
-    Info,
-}
-
-impl Severity {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Error => "error",
-            Self::Warning => "warning",
-            Self::Info => "info",
-        }
-    }
-}
+pub use wright_analyzer::analysis::Severity;
+/// The origin of a loaded program.
+pub use wright_analyzer::service::Origin;
 
 /// The pipeline stage that produced a diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,16 +65,6 @@ pub struct SourceSpan {
     pub end: Position,
 }
 
-/// The origin of a loaded program (mirrors the semantic-service origin).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Origin {
-    /// `workshop`, `protocol`, or `opy` (provider bridge).
-    pub kind: String,
-    /// The Workshop client locale for workshop-origin programs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locale: Option<String>,
-}
-
 /// One structured diagnostic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Diagnostic {
@@ -123,8 +95,12 @@ pub fn span_from_ir(
         .get(file)
         .map(|source_file| source_file.path.clone())
         .unwrap_or_else(|| format!("<file {file}>"));
-    Some(SourceSpan {
-        file,
+    Some(source_span(span, path))
+}
+
+pub(crate) fn source_span(span: workshop_rs::source::Span, path: String) -> SourceSpan {
+    SourceSpan {
+        file: span.file.index(),
         path,
         start: Position {
             line: span.start.line,
@@ -134,7 +110,7 @@ pub fn span_from_ir(
             line: span.end.line,
             col: span.end.col,
         },
-    })
+    }
 }
 
 /// Convenience constructors for internal diagnostics.
@@ -158,15 +134,9 @@ impl Diagnostic {
         stage: Stage,
         message: impl Into<String>,
     ) -> Diagnostic {
-        Diagnostic {
-            code: code.into(),
-            stage,
-            severity: Severity::Warning,
-            message: message.into(),
-            status: None,
-            span: None,
-            source: None,
-        }
+        let mut diagnostic = Self::error(code, stage, message);
+        diagnostic.severity = Severity::Warning;
+        diagnostic
     }
 }
 

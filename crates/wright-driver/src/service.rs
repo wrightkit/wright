@@ -17,6 +17,10 @@ use crate::diag::Diagnostic;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
 use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
 use wright_analyzer::canonical::{SemanticIndex, SemanticService};
+/// A structured tool error.
+pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
+/// A tool response: a structured owned result or a structured error.
+pub use wright_analyzer::service::Response as ToolResponse;
 use wright_analyzer::service::{Origin, Request, Response};
 
 /// The tool-service name and version.
@@ -132,21 +136,6 @@ pub enum ToolRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_root: Option<String>,
     },
-}
-
-/// A tool response: a structured owned result or a structured error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ToolResponse {
-    Ok { result: serde_json::Value },
-    Error { error: ToolErrorInfo },
-}
-
-/// A structured tool error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolErrorInfo {
-    pub code: String,
-    pub message: String,
 }
 
 /// The capability/version contract of the service.
@@ -412,15 +401,7 @@ impl<'a> ToolService<'a> {
         request: Request,
         config: wright_analyzer::registry::LintConfig,
     ) -> ToolResponse {
-        match self.semantic_service(config).handle(&request) {
-            Response::Ok { result } => ToolResponse::Ok { result },
-            Response::Error { error } => ToolResponse::Error {
-                error: ToolErrorInfo {
-                    code: error.code,
-                    message: error.message,
-                },
-            },
-        }
+        self.semantic_service(config).handle(&request)
     }
 
     fn semantic_service(
