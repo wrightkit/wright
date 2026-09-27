@@ -474,10 +474,10 @@ impl<'a> ToolService<'a> {
     }
 
     fn cost_estimate(&self) -> serde_json::Value {
-        let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
         let locale = CompilerSession::locale_for(&self.loaded);
         let text =
-            workshop_rs::emitter::emit(&self.loaded.program, &catalog, &locale).unwrap_or_default();
+            workshop_rs::emitter::emit(&self.loaded.program, self.session.catalog(), &locale)
+                .unwrap_or_default();
         let waits = self
             .loaded
             .program
