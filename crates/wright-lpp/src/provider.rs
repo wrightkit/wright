@@ -104,9 +104,8 @@ pub trait LanguageProvider {
     /// Initialize with LPP 1.4 for `lpp/compile` artifact format negotiation.
     fn initialize_artifact_negotiation(
         &mut self,
-        client_info: Option<&ClientInfo>,
+        _client_info: Option<&ClientInfo>,
     ) -> Result<InitializeResult, ProviderError> {
-        let _ = client_info;
         Err(ProviderError::ProtocolVersionMismatch {
             supported: Vec::new(),
             message: "the provider client does not support LPP 1.4 artifact negotiation"
@@ -127,22 +126,20 @@ pub trait LanguageProvider {
     /// `lpp/check` over a provider-owned filesystem project entry.
     fn check_entry(
         &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _entry: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        let _ = (entry, project_root, locale);
         capability_unavailable("projectLoading", "lpp/check")
     }
 
     /// `lpp/check` over an LPP 1.2 file or directory target.
     fn check_target(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _target: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        let _ = (target, project_root, locale);
         capability_unavailable("projectLoading", "lpp/check")
     }
 
@@ -157,22 +154,20 @@ pub trait LanguageProvider {
     /// `lpp/compile` over a provider-owned filesystem project entry.
     fn compile_entry(
         &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _entry: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        let _ = (entry, project_root, locale);
         capability_unavailable("projectLoading", "lpp/compile")
     }
 
     /// `lpp/compile` over an LPP 1.2 file or directory target.
     fn compile_target(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _target: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        let _ = (target, project_root, locale);
         capability_unavailable("projectLoading", "lpp/compile")
     }
 
@@ -180,12 +175,11 @@ pub trait LanguageProvider {
     /// stating the artifact formats the client accepts, most preferred first.
     fn compile_target_accepting(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-        accepted_artifact_formats: &[&str],
+        _target: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
+        _accepted_artifact_formats: &[&str],
     ) -> Result<CompileResult, ProviderError> {
-        let _ = (target, project_root, locale, accepted_artifact_formats);
         capability_unavailable("projectLoading", "lpp/compile")
     }
 
