@@ -5,17 +5,14 @@ use workshop_rs::program::{MAPPED_TEXT_V1, TEXT_V1};
 use workshop_rs::{MappedText, SourceMap};
 
 use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
+use crate::input::InputTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceLanguage {
     Opy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceTargetKind {
-    File,
-    Directory,
-}
+pub type SourceTargetKind = InputTarget;
 
 impl SourceLanguage {
     pub const fn as_str(self) -> &'static str {
@@ -68,7 +65,7 @@ impl SourceTarget {
         Self {
             language,
             entry,
-            kind: SourceTargetKind::File,
+            kind: InputTarget::File,
             cwd,
             project_root: None,
         }
@@ -80,7 +77,7 @@ impl SourceTarget {
         cwd: impl Into<PathBuf>,
     ) -> Self {
         let mut target = Self::new(language, directory, cwd);
-        target.kind = SourceTargetKind::Directory;
+        target.kind = InputTarget::Directory;
         target
     }
 
@@ -94,7 +91,7 @@ impl SourceTarget {
     }
 
     pub fn is_directory(&self) -> bool {
-        self.kind == SourceTargetKind::Directory
+        self.kind == InputTarget::Directory
     }
 }
 

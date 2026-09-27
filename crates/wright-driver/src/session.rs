@@ -265,11 +265,9 @@ impl CompilerSession {
             .path
             .clone()
             .unwrap_or_else(|| Path::new("<stdin>").to_path_buf());
-        let target = match resolved.target {
-            InputTarget::File => SourceTarget::new(language, entry, resolved.cwd.clone()),
-            InputTarget::Directory => {
-                SourceTarget::directory(language, entry, resolved.cwd.clone())
-            }
+        let target = SourceTarget {
+            kind: resolved.target,
+            ..SourceTarget::new(language, entry, resolved.cwd.clone())
         }
         .with_project_root(resolved.root.clone());
         if self.source_provider.is_none() {
