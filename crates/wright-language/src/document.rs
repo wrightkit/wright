@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub use wright_driver::edit::{char_offset_to_utf16, utf16_offset_to_char};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Position {
     pub line: u32,
@@ -95,21 +97,20 @@ impl DocumentStore {
     }
 
     pub fn text_for_path(&self, path: &PathBuf) -> Option<String> {
-        for doc in self.documents.values() {
-            if uri_to_path(&doc.uri).is_some_and(|p| p == *path) {
-                return Some(doc.text.clone());
-            }
-        }
-        std::fs::read_to_string(path).ok()
+        self.document_for_path(path)
+            .map(|document| document.text.clone())
+            .or_else(|| std::fs::read_to_string(path).ok())
     }
 
     pub fn uri_for_path(&self, path: &PathBuf) -> Option<String> {
-        for doc in self.documents.values() {
-            if uri_to_path(&doc.uri).is_some_and(|p| p == *path) {
-                return Some(doc.uri.clone());
-            }
-        }
-        None
+        self.document_for_path(path)
+            .map(|document| document.uri.clone())
+    }
+
+    fn document_for_path(&self, path: &PathBuf) -> Option<&Document> {
+        self.documents.values().find(|document| {
+            uri_to_path(&document.uri).is_some_and(|document_path| document_path == *path)
+        })
     }
 
     pub fn overlay(&self, root: &PathBuf) -> BTreeMap<String, String> {
@@ -153,23 +154,6 @@ pub fn source_to_uri(source: &str) -> Option<String> {
 
 pub fn utf16_len(s: &str) -> usize {
     s.chars().map(|c| c.len_utf16()).sum()
-}
-
-pub fn utf16_offset_to_char(line: &str, utf16_offset: usize) -> usize {
-    let mut chars = 0usize;
-    let mut utf16 = 0usize;
-    for c in line.chars() {
-        if utf16 >= utf16_offset {
-            break;
-        }
-        utf16 += c.len_utf16();
-        chars += 1;
-    }
-    chars
-}
-
-pub fn char_offset_to_utf16(line: &str, char_offset: usize) -> usize {
-    line.chars().take(char_offset).map(|c| c.len_utf16()).sum()
 }
 
 pub fn span_to_range(span: &workshop_rs::source::Span, source: &str) -> Range {

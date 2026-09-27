@@ -2184,6 +2184,7 @@ name = "wright-lsp"
 version = "0.2.40"
 dependencies = [
  "lsp-types",
+ "serde",
  "serde_json",
  "wright-language",
 ]

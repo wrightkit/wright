@@ -17,7 +17,11 @@ use crate::diag::Diagnostic;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
 use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
 use wright_analyzer::canonical::{SemanticIndex, SemanticService};
-use wright_analyzer::service::{Origin, Request, Response};
+/// A structured tool error.
+pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
+/// A tool response: a structured owned result or a structured error.
+pub use wright_analyzer::service::Response as ToolResponse;
+use wright_analyzer::service::{Request, Response};
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
@@ -132,21 +136,6 @@ pub enum ToolRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_root: Option<String>,
     },
-}
-
-/// A tool response: a structured owned result or a structured error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ToolResponse {
-    Ok { result: serde_json::Value },
-    Error { error: ToolErrorInfo },
-}
-
-/// A structured tool error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolErrorInfo {
-    pub code: String,
-    pub message: String,
 }
 
 /// The capability/version contract of the service.
@@ -382,22 +371,18 @@ impl<'a> ToolService<'a> {
     /// `analyze`/`lint` workflows, so one file identity holds per finding
     /// across every surface (#102).
     fn findings(&self) -> ToolResponse {
-        let response = self.semantic_query(Request::GetFindings);
-        match response {
-            ToolResponse::Ok { mut result } => {
-                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
-                ToolResponse::Ok { result }
-            }
-            other => other,
-        }
+        self.semantic_query_with_resolved_span_paths(Request::GetFindings)
     }
 
     /// `persistentObjects`: persistent-object facts with resolved source paths.
     fn persistent_objects(&self) -> ToolResponse {
-        let response = self.semantic_query(Request::GetPersistentObjects);
-        match response {
+        self.semantic_query_with_resolved_span_paths(Request::GetPersistentObjects)
+    }
+
+    fn semantic_query_with_resolved_span_paths(&self, request: Request) -> ToolResponse {
+        match self.semantic_query(request) {
             ToolResponse::Ok { mut result } => {
-                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
+                crate::session::resolve_span_paths(&mut result, &self.loaded);
                 ToolResponse::Ok { result }
             }
             other => other,
@@ -416,25 +401,14 @@ impl<'a> ToolService<'a> {
         request: Request,
         config: wright_analyzer::registry::LintConfig,
     ) -> ToolResponse {
-        let origin = Origin {
-            kind: self.loaded.origin.kind.clone(),
-            locale: self.loaded.origin.locale.clone(),
-        };
-        let service = SemanticService::with_origin_and_config_and_registry(
-            &self.loaded.program,
-            origin,
-            config,
-            std::sync::Arc::clone(self.session.lint_registry()),
-        );
-        match service.handle(&request) {
-            Response::Ok { result } => ToolResponse::Ok { result },
-            Response::Error { error } => ToolResponse::Error {
-                error: ToolErrorInfo {
-                    code: error.code,
-                    message: error.message,
-                },
-            },
-        }
+        self.semantic_service(config).handle(&request)
+    }
+
+    fn semantic_service(
+        &self,
+        config: wright_analyzer::registry::LintConfig,
+    ) -> SemanticService<'_> {
+        self.session.service_with(&self.loaded, config)
     }
 
     /// `lint`: rule metadata, effective configuration, and findings over the
@@ -442,34 +416,23 @@ impl<'a> ToolService<'a> {
     /// `lint` workflow (no duplicated rule execution, #98).
     fn lint(&self) -> ToolResponse {
         let config = self.session.config.lint.clone();
-        let origin = Origin {
-            kind: self.loaded.origin.kind.clone(),
-            locale: self.loaded.origin.locale.clone(),
+        let service = self.semantic_service(config);
+        let lint_rules = match service.handle(&Request::LintRules) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!({}),
         };
-        {
-            let service = SemanticService::with_origin_and_config_and_registry(
-                &self.loaded.program,
-                origin,
-                config,
-                std::sync::Arc::clone(self.session.lint_registry()),
-            );
-            let lint_rules = match service.handle(&Request::LintRules) {
-                Response::Ok { result } => result,
-                Response::Error { .. } => serde_json::json!({}),
-            };
-            let mut findings = match service.handle(&Request::GetFindings) {
-                Response::Ok { result } => result,
-                Response::Error { .. } => serde_json::json!([]),
-            };
-            crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
-            self.ok(json!({
-                "inputIdentity": self.loaded.input.identity,
-                "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
-                "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
-                "findings": findings,
-                "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
-            }))
-        }
+        let mut findings = match service.handle(&Request::GetFindings) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!([]),
+        };
+        crate::session::resolve_span_paths(&mut findings, &self.loaded);
+        self.ok(json!({
+            "inputIdentity": self.loaded.input.identity,
+            "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
+            "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
+            "findings": findings,
+            "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
+        }))
     }
 
     /// Program summary with origin and source identity.
@@ -511,16 +474,10 @@ impl<'a> ToolService<'a> {
     }
 
     fn cost_estimate(&self) -> serde_json::Value {
-        let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
-        let locale = self
-            .loaded
-            .origin
-            .locale
-            .as_deref()
-            .map(workshop_rs::catalog::Locale::new)
-            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        let locale = CompilerSession::locale_for(&self.loaded);
         let text =
-            workshop_rs::emitter::emit(&self.loaded.program, &catalog, &locale).unwrap_or_default();
+            workshop_rs::emitter::emit(&self.loaded.program, self.session.catalog(), &locale)
+                .unwrap_or_default();
         let waits = self
             .loaded
             .program
@@ -542,7 +499,7 @@ impl<'a> ToolService<'a> {
             },
             "findings": findings.iter().map(|f| json!({
                 "code": f.code,
-                "severity": severity_name(f.severity),
+                "severity": f.severity.as_str(),
                 "message": f.message,
             })).collect::<Vec<_>>(),
             "kind": {
@@ -554,9 +511,7 @@ impl<'a> ToolService<'a> {
     }
 
     fn target_metadata(&self) -> serde_json::Value {
-        let Ok(catalog) = workshop_rs::catalog::Catalog::builtin() else {
-            return json!({ "error": "catalog load failed" });
-        };
+        let catalog = self.session.catalog();
         json!({
             "catalogVersion": catalog.catalog_version(),
             "locales": catalog.locales().iter().map(|l| l.to_string()).collect::<Vec<_>>(),
@@ -569,14 +524,5 @@ impl<'a> ToolService<'a> {
                 "members": domain.members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
-    }
-}
-
-/// The canonical severity name of a finding.
-fn severity_name(severity: wright_analyzer::analysis::Severity) -> &'static str {
-    match severity {
-        wright_analyzer::analysis::Severity::Error => "error",
-        wright_analyzer::analysis::Severity::Warning => "warning",
-        wright_analyzer::analysis::Severity::Info => "info",
     }
 }

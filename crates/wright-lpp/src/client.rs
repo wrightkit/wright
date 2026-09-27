@@ -36,6 +36,12 @@ struct Shared {
     exited: Option<ProviderError>,
 }
 
+impl Shared {
+    fn dead_error(&self) -> Option<ProviderError> {
+        self.violation.clone().or_else(|| self.exited.clone())
+    }
+}
+
 pub struct JsonRpcClient {
     writer: Option<Box<dyn Write + Send>>,
     shared: Arc<Mutex<Shared>>,
@@ -75,6 +81,18 @@ impl JsonRpcClient {
         self.timeout
     }
 
+    fn require_ready(&self, method: &str) -> Result<(), ProviderError> {
+        match self.phase {
+            ClientPhase::Fresh => Err(ProviderError::NotInitialized {
+                method: method.to_string(),
+            }),
+            ClientPhase::ShutDown => Err(ProviderError::ShutDown {
+                method: method.to_string(),
+            }),
+            ClientPhase::Ready => Ok(()),
+        }
+    }
+
     pub fn initialize(&mut self, params: Value) -> Result<Value, ProviderError> {
         match self.phase {
             ClientPhase::Fresh => {}
@@ -91,41 +109,15 @@ impl JsonRpcClient {
     }
 
     pub fn request(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
-        match self.phase {
-            ClientPhase::Fresh => {
-                return Err(ProviderError::NotInitialized {
-                    method: method.into(),
-                });
-            }
-            ClientPhase::ShutDown => {
-                return Err(ProviderError::ShutDown {
-                    method: method.into(),
-                });
-            }
-            ClientPhase::Ready => {}
-        }
+        self.require_ready(method)?;
         self.send(method, params)
     }
 
     pub fn shutdown(&mut self) -> Result<(), ProviderError> {
-        match self.phase {
-            ClientPhase::Fresh => {
-                return Err(ProviderError::NotInitialized {
-                    method: "lpp/shutdown".into(),
-                });
-            }
-            ClientPhase::ShutDown => {
-                return Err(ProviderError::ShutDown {
-                    method: "lpp/shutdown".into(),
-                });
-            }
-            ClientPhase::Ready => {}
-        }
+        self.require_ready("lpp/shutdown")?;
         let value = self.send("lpp/shutdown", json!({}))?;
         if !value.is_null() {
-            return Err(ProviderError::Malformed {
-                detail: "lpp/shutdown result must be null".to_string(),
-            });
+            return Err(malformed("lpp/shutdown result must be null"));
         }
         self.phase = ClientPhase::ShutDown;
         Ok(())
@@ -144,8 +136,8 @@ impl JsonRpcClient {
     fn send(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
         {
             let shared = self.shared.lock().expect("lock poisoned");
-            if let Some(err) = shared.violation.as_ref().or(shared.exited.as_ref()) {
-                return Err(err.clone());
+            if let Some(error) = shared.dead_error() {
+                return Err(error);
             }
         }
 
@@ -154,8 +146,8 @@ impl JsonRpcClient {
         let (tx, rx) = mpsc::channel();
         {
             let mut shared = self.shared.lock().expect("lock poisoned");
-            if let Some(err) = shared.violation.as_ref().or(shared.exited.as_ref()) {
-                return Err(err.clone());
+            if let Some(error) = shared.dead_error() {
+                return Err(error);
             }
             shared.pending.insert(id, tx);
         }
@@ -183,8 +175,8 @@ impl JsonRpcClient {
             }),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let shared = self.shared.lock().expect("lock poisoned");
-                if let Some(err) = shared.violation.as_ref().or(shared.exited.as_ref()) {
-                    return Err(err.clone());
+                if let Some(error) = shared.dead_error() {
+                    return Err(error);
                 }
                 Err(ProviderError::Exited {
                     status: None,
@@ -233,47 +225,20 @@ fn dispatch_line(shared: &Arc<Mutex<Shared>>, line: &str) -> bool {
     let parsed: Value = match serde_json::from_str(line) {
         Ok(val) => val,
         Err(e) => {
-            terminate_shared(
-                shared,
-                true,
-                ProviderError::Malformed {
-                    detail: format!("line is not valid JSON: {e}"),
-                },
-            );
-            return false;
+            return protocol_violation(shared, format!("line is not valid JSON: {e}"));
         }
     };
     let Some(object) = parsed.as_object() else {
-        terminate_shared(
-            shared,
-            true,
-            ProviderError::Malformed {
-                detail: "provider sent a batch or non-object message".into(),
-            },
-        );
-        return false;
+        return protocol_violation(shared, "provider sent a batch or non-object message");
     };
     if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        terminate_shared(
-            shared,
-            true,
-            ProviderError::Malformed {
-                detail: "provider message lacks jsonrpc \"2.0\"".into(),
-            },
-        );
-        return false;
+        return protocol_violation(shared, "provider message lacks jsonrpc \"2.0\"");
     }
     let Some(id) = object.get("id").and_then(Value::as_i64) else {
-        terminate_shared(
+        return protocol_violation(
             shared,
-            true,
-            ProviderError::Malformed {
-                detail:
-                    "provider message has no integer request id (LPP v1 defines no notifications)"
-                        .into(),
-            },
+            "provider message has no integer request id (LPP v1 defines no notifications)",
         );
-        return false;
     };
 
     let sender = {
@@ -282,14 +247,10 @@ fn dispatch_line(shared: &Arc<Mutex<Shared>>, line: &str) -> bool {
             Some(s) => s,
             None => {
                 drop(guard);
-                terminate_shared(
+                return protocol_violation(
                     shared,
-                    true,
-                    ProviderError::Malformed {
-                        detail: format!("provider response id {id} matches no pending request"),
-                    },
+                    format!("provider response id {id} matches no pending request"),
                 );
-                return false;
             }
         }
     };
@@ -298,18 +259,27 @@ fn dispatch_line(shared: &Arc<Mutex<Shared>>, line: &str) -> bool {
     true
 }
 
+fn protocol_violation(shared: &Arc<Mutex<Shared>>, detail: impl Into<String>) -> bool {
+    terminate_shared(shared, true, malformed(detail));
+    false
+}
+
+fn malformed(detail: impl Into<String>) -> ProviderError {
+    ProviderError::Malformed {
+        detail: detail.into(),
+    }
+}
+
 fn response_outcome(object: &Map<String, Value>) -> Result<Value, ProviderError> {
     match (object.contains_key("result"), object.contains_key("error")) {
         (true, false) => Ok(object.get("result").cloned().unwrap_or(Value::Null)),
         (false, true) => Err(error_from_response(
             object.get("error").cloned().unwrap_or(Value::Null),
         )),
-        (true, true) => Err(ProviderError::Malformed {
-            detail: "provider response carries both result and error".into(),
-        }),
-        (false, false) => Err(ProviderError::Malformed {
-            detail: "provider response carries neither result nor error".into(),
-        }),
+        (true, true) => Err(malformed("provider response carries both result and error")),
+        (false, false) => Err(malformed(
+            "provider response carries neither result nor error",
+        )),
     }
 }
 
@@ -334,14 +304,10 @@ fn error_from_response(error: Value) -> ProviderError {
                     message,
                 })
             }
-            None => ProviderError::Malformed {
-                detail: format!("LPP error code -32000 without data.lpp: {message}"),
-            },
+            None => malformed(format!("LPP error code -32000 without data.lpp: {message}")),
         },
         (Some(code), Some(message)) => ProviderError::JsonRpc { code, message },
-        _ => ProviderError::Malformed {
-            detail: format!("provider error response is malformed: {error}"),
-        },
+        _ => malformed(format!("provider error response is malformed: {error}")),
     }
 }
 

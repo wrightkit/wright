@@ -12,6 +12,16 @@ pub enum Severity {
     Error,
 }
 
+impl Severity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+        }
+    }
+}
+
 /// How strongly a finding is supported by the available evidence.
 ///
 /// Classifies the *kind* of evidence behind a rule's findings, not the

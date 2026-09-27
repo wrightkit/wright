@@ -61,7 +61,7 @@ pub const SERVICE_NAME: &str = "wright-tool";
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The origin of a compiled program, carried in tool responses.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Origin {
     /// `workshop` (native localized Workshop text) or `protocol`
     /// (`wright/opy-hir` bridge JSON).

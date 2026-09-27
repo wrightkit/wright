@@ -116,34 +116,36 @@ fn main() -> ExitCode {
 }
 
 fn run_workflow(command: Command) -> ExitCode {
-    let (name, config, presentation, convert_target) = match command {
+    match command {
         Command::Compile(args) => {
             let mut config = config_from_common(&args.common, true);
             config.output = args.output;
-            (
-                "compile",
+            run_configured(
                 config,
                 present::Presentation::from_common(&args.common),
-                None,
+                wright_driver::CompilerSession::compile,
             )
         }
-        Command::Convert(args) => (
-            "convert",
-            config_from_common(&args.common, false),
-            present::Presentation::from_common(&args.common),
-            Some(args.target),
-        ),
-        Command::Check(args) => (
-            "check",
+        Command::Convert(args) => {
+            let target = match args.target {
+                ConvertTargetArg::Opy => wright_driver::ConvertTarget::Opy,
+                ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
+            };
+            run_configured(
+                config_from_common(&args.common, false),
+                present::Presentation::from_common(&args.common),
+                move |session: &mut wright_driver::CompilerSession| session.convert(target),
+            )
+        }
+        Command::Check(args) => run_configured(
             config_from_common(&args, true),
             present::Presentation::from_common(&args),
-            None,
+            wright_driver::CompilerSession::check,
         ),
-        Command::Analyze(args) => (
-            "analyze",
+        Command::Analyze(args) => run_configured(
             config_from_common(&args, true),
             present::Presentation::from_common(&args),
-            None,
+            wright_driver::CompilerSession::analyze,
         ),
         Command::Lint(args) => {
             let mut config = config_from_common(&args.common, true);
@@ -178,18 +180,16 @@ fn run_workflow(command: Command) -> ExitCode {
                     return ExitCode::from(exit::USAGE);
                 }
             }
-            (
-                "lint",
+            run_configured(
                 config,
                 present::Presentation::from_common(&args.common),
-                None,
+                wright_driver::CompilerSession::lint,
             )
         }
-        Command::Inspect(args) => (
-            "inspect",
+        Command::Inspect(args) => run_configured(
             config_from_common(&args, false),
             present::Presentation::from_common(&args),
-            None,
+            wright_driver::CompilerSession::inspect,
         ),
         Command::Completion(_)
         | Command::Update(_)
@@ -199,8 +199,14 @@ fn run_workflow(command: Command) -> ExitCode {
         | Command::SemanticCompare(_) => {
             unreachable!("non-workflow command handled before run_workflow")
         }
-    };
+    }
+}
 
+fn run_configured<T: serde::Serialize + present::ResultPresentation>(
+    config: SessionConfig,
+    presentation: present::Presentation,
+    run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
+) -> ExitCode {
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
         Err(diagnostic) => {
@@ -209,42 +215,7 @@ fn run_workflow(command: Command) -> ExitCode {
         }
     };
 
-    let code = match name {
-        "compile" => run_command(
-            &mut session,
-            wright_driver::CompilerSession::compile,
-            presentation,
-        ),
-        "check" => run_command(
-            &mut session,
-            wright_driver::CompilerSession::check,
-            presentation,
-        ),
-        "analyze" => run_command(
-            &mut session,
-            wright_driver::CompilerSession::analyze,
-            presentation,
-        ),
-        "lint" => run_command(
-            &mut session,
-            wright_driver::CompilerSession::lint,
-            presentation,
-        ),
-        "inspect" => run_command(
-            &mut session,
-            wright_driver::CompilerSession::inspect,
-            presentation,
-        ),
-        "convert" => {
-            let target = match convert_target.expect("convert target is required") {
-                ConvertTargetArg::Opy => wright_driver::ConvertTarget::Opy,
-                ConvertTargetArg::Ostw => wright_driver::ConvertTarget::Ostw,
-            };
-            run_command(&mut session, |s| s.convert(target), presentation)
-        }
-        _ => unreachable!("all workflow commands are mapped"),
-    };
-    ExitCode::from(code)
+    ExitCode::from(run_command(&mut session, run, presentation))
 }
 
 fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {

@@ -25,70 +25,74 @@ pub fn run(
     program: &mut workshop_rs::Program,
     profile: Profile,
 ) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
-    run_canonical(program, profile)
-}
-
-/// Run the semantics-preserving transform profile over the canonical public
-/// Workshop program model.
-pub fn run_canonical(
-    program: &mut workshop_rs::Program,
-    profile: Profile,
-) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
     program.validate()?;
     if profile == Profile::Off {
         return Ok(Vec::new());
     }
-    let nodes_before = program_node_count(program);
     let mut changed = 0;
-    loop {
+    let mut first_iteration = true;
+    let mut nodes_before = 0;
+    let nodes_after = loop {
+        let mut nodes = 0;
         let iteration_changed = program
             .rules
             .iter_mut()
             .map(|rule| {
                 rule.conditions
                     .iter_mut()
-                    .map(|condition| usize::from(fold_value_once(&mut condition.value)))
+                    .map(|condition| usize::from(fold_value_once(&mut condition.value, &mut nodes)))
                     .sum::<usize>()
-                    + rule.actions.iter_mut().map(fold_action_once).sum::<usize>()
+                    + rule
+                        .actions
+                        .iter_mut()
+                        .map(|action| fold_action_once(action, &mut nodes))
+                        .sum::<usize>()
             })
             .sum::<usize>();
+        if first_iteration {
+            nodes_before = nodes;
+            first_iteration = false;
+        }
         if iteration_changed == 0 {
-            break;
+            break nodes;
         }
         changed += iteration_changed;
-    }
+    };
     program.validate()?;
     Ok(vec![PassResult {
         stats: PassStats {
             pass: "fold-constants".to_string(),
             changed,
             nodes_before,
-            nodes_after: program_node_count(program),
+            nodes_after,
         },
     }])
 }
 
-fn fold_action_once(action: &mut workshop_rs::Action) -> usize {
+pub use self::run as run_canonical;
+
+fn fold_action_once(action: &mut workshop_rs::Action, nodes: &mut usize) -> usize {
+    *nodes += 1;
     use workshop_rs::Action;
     match action {
         Action::SetGlobalVariable { value, .. }
         | Action::ModifyGlobalVariable { value, .. }
         | Action::If { condition: value }
         | Action::ElseIf { condition: value }
-        | Action::While { condition: value } => usize::from(fold_value_once(value)),
+        | Action::While { condition: value } => usize::from(fold_value_once(value, nodes)),
         Action::SetPlayerVariable { player, value, .. }
         | Action::ModifyPlayerVariable { player, value, .. } => {
-            usize::from(fold_value_once(player)) + usize::from(fold_value_once(value))
+            usize::from(fold_value_once(player, nodes)) + usize::from(fold_value_once(value, nodes))
         }
         Action::AssignMember { target, value, .. } => {
-            usize::from(fold_value_once(target)) + usize::from(fold_value_once(value))
+            usize::from(fold_value_once(target, nodes)) + usize::from(fold_value_once(value, nodes))
         }
         Action::ForGlobalVariable {
             start, stop, step, ..
         } => {
-            usize::from(fold_value_once(start))
-                + usize::from(fold_value_once(stop))
-                + usize::from(fold_value_once(step))
+            usize::from(fold_value_once(start, nodes))
+                + usize::from(fold_value_once(stop, nodes))
+                + usize::from(fold_value_once(step, nodes))
         }
         Action::ForPlayerVariable {
             player,
@@ -97,15 +101,15 @@ fn fold_action_once(action: &mut workshop_rs::Action) -> usize {
             step,
             ..
         } => {
-            usize::from(fold_value_once(player))
-                + usize::from(fold_value_once(start))
-                + usize::from(fold_value_once(stop))
-                + usize::from(fold_value_once(step))
+            usize::from(fold_value_once(player, nodes))
+                + usize::from(fold_value_once(start, nodes))
+                + usize::from(fold_value_once(stop, nodes))
+                + usize::from(fold_value_once(step, nodes))
         }
-        Action::Disabled { action } => fold_action_once(action),
+        Action::Disabled { action } => fold_action_once(action, nodes),
         Action::Call { args, .. } => args
             .iter_mut()
-            .map(|value| usize::from(fold_value_once(value)))
+            .map(|value| usize::from(fold_value_once(value, nodes)))
             .sum(),
         Action::CallSubroutine { .. } | Action::Else | Action::End => 0,
     }
@@ -113,20 +117,21 @@ fn fold_action_once(action: &mut workshop_rs::Action) -> usize {
 
 /// Fold one tree level. The caller repeats this pass to a fixpoint so a
 /// parent sees values produced by a previous pass, matching the WIR pass.
-fn fold_value_once(value: &mut workshop_rs::Value) -> bool {
+fn fold_value_once(value: &mut workshop_rs::Value, nodes: &mut usize) -> bool {
+    *nodes += 1;
     use workshop_rs::Value;
     match value {
         Value::Array(values) => {
             values
                 .iter_mut()
-                .map(|value| usize::from(fold_value_once(value)))
+                .map(|value| usize::from(fold_value_once(value, nodes)))
                 .sum::<usize>()
                 > 0
         }
         Value::Vector { x, y, z } => {
-            let child_changed = usize::from(fold_value_once(x))
-                + usize::from(fold_value_once(y))
-                + usize::from(fold_value_once(z));
+            let child_changed = usize::from(fold_value_once(x, nodes))
+                + usize::from(fold_value_once(y, nodes))
+                + usize::from(fold_value_once(z, nodes));
             let is_up = matches!((&**x, &**y, &**z), (
                 Value::Number(x),
                 Value::Number(y),
@@ -142,11 +147,11 @@ fn fold_value_once(value: &mut workshop_rs::Value) -> bool {
                 child_changed > 0
             }
         }
-        Value::PlayerVariable { player, .. } => fold_value_once(player),
+        Value::PlayerVariable { player, .. } => fold_value_once(player, nodes),
         Value::Call { name, args } => {
             let mut changed = args
                 .iter_mut()
-                .map(|value| usize::from(fold_value_once(value)))
+                .map(|value| usize::from(fold_value_once(value, nodes)))
                 .sum::<usize>()
                 > 0;
             if args.len() == 2 {
@@ -221,69 +226,6 @@ fn fold_value_once(value: &mut workshop_rs::Value) -> bool {
             changed
         }
         _ => false,
-    }
-}
-
-fn program_node_count(program: &workshop_rs::Program) -> usize {
-    program
-        .rules
-        .iter()
-        .map(|rule| {
-            rule.conditions
-                .iter()
-                .map(|condition| value_node_count(&condition.value))
-                .sum::<usize>()
-                + rule.actions.iter().map(action_node_count).sum::<usize>()
-        })
-        .sum()
-}
-
-fn action_node_count(action: &workshop_rs::Action) -> usize {
-    use workshop_rs::Action;
-    1 + match action {
-        Action::SetGlobalVariable { value, .. }
-        | Action::ModifyGlobalVariable { value, .. }
-        | Action::If { condition: value }
-        | Action::ElseIf { condition: value }
-        | Action::While { condition: value } => value_node_count(value),
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            value_node_count(player) + value_node_count(value)
-        }
-        Action::AssignMember { target, value, .. } => {
-            value_node_count(target) + value_node_count(value)
-        }
-        Action::ForGlobalVariable {
-            start, stop, step, ..
-        } => value_node_count(start) + value_node_count(stop) + value_node_count(step),
-        Action::ForPlayerVariable {
-            player,
-            start,
-            stop,
-            step,
-            ..
-        } => {
-            value_node_count(player)
-                + value_node_count(start)
-                + value_node_count(stop)
-                + value_node_count(step)
-        }
-        Action::Disabled { action } => action_node_count(action),
-        Action::Call { args, .. } => args.iter().map(value_node_count).sum(),
-        Action::CallSubroutine { .. } | Action::Else | Action::End => 0,
-    }
-}
-
-fn value_node_count(value: &workshop_rs::Value) -> usize {
-    use workshop_rs::Value;
-    1 + match value {
-        Value::Array(values) => values.iter().map(value_node_count).sum(),
-        Value::Vector { x, y, z } => {
-            value_node_count(x) + value_node_count(y) + value_node_count(z)
-        }
-        Value::PlayerVariable { player, .. } => value_node_count(player),
-        Value::Call { args, .. } => args.iter().map(value_node_count).sum(),
-        _ => 0,
     }
 }
 
