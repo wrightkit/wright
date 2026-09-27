@@ -564,12 +564,7 @@ impl CompilerSession {
 
     fn compile_output(&mut self) -> Result<CompiledOutput, Diagnostic> {
         let loaded = self.load_with_operation(ProviderOperation::Compile)?;
-        let locale = loaded
-            .origin
-            .locale
-            .as_deref()
-            .map(workshop_rs::catalog::Locale::new)
-            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        let locale = Self::locale_for(&loaded);
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
             .map_err(|error| workshop_diag(error, &loaded.input))?;
@@ -749,12 +744,7 @@ impl CompilerSession {
     }
 
     fn convert_opy(&mut self, loaded: &Loaded) -> Result<String, ()> {
-        let locale = loaded
-            .origin
-            .locale
-            .as_deref()
-            .map(workshop_rs::catalog::Locale::new)
-            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        let locale = Self::locale_for(loaded);
         let artifact = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
             .map_err(|e| {
                 self.diagnostics.push(Diagnostic::error(
@@ -786,6 +776,15 @@ impl CompilerSession {
             })?;
         let _ = provider.shutdown();
         Ok(result.source)
+    }
+
+    fn locale_for(loaded: &Loaded) -> workshop_rs::catalog::Locale {
+        loaded
+            .origin
+            .locale
+            .as_deref()
+            .map(workshop_rs::catalog::Locale::new)
+            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"))
     }
 
     /// Build the semantic service over a loaded program.
@@ -875,18 +874,11 @@ impl CompilerSession {
 
     fn finish<T: serde::Serialize>(&mut self, command: &str, result: T) -> Envelope<T> {
         let diagnostics = std::mem::take(&mut self.diagnostics);
-        let has_error = diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.severity == crate::diag::Severity::Error);
-        let exit = if has_error {
-            exit_code_from(&diagnostics)
-        } else {
-            crate::result::exit::SUCCESS
-        };
+        let exit = exit_code_from(&diagnostics);
         Envelope {
             wright: version_info(),
             command: command.to_string(),
-            ok: !has_error,
+            ok: exit == crate::result::exit::SUCCESS,
             exit,
             diagnostics,
             result,
