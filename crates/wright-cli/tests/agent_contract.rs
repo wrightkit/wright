@@ -5,7 +5,8 @@ use std::process::{Command, Stdio};
 
 use jsonschema::JSONSchema;
 use serde_json::{Value, json};
-use wright_driver::service::{AGENT_CONTRACT, ToolRequest};
+use wright_driver::service::{AGENT_CONTRACT, ToolRequest, ToolResponse, ToolService};
+use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
 
 const EXPECTED_V1_OPERATIONS: &[&str] = &[
     "capabilities",
@@ -125,6 +126,45 @@ fn requests() -> Vec<Value> {
     ]
 }
 
+fn service_responses() -> Vec<(String, Value)> {
+    let input = workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session starts");
+    let mut service = ToolService::new(&mut session).expect("service loads the project");
+
+    let rule = match service.handle(&ToolRequest::Rules) {
+        ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
+        ToolResponse::Error { error } => panic!("rules failed: {error:?}"),
+    };
+    let symbol = match service.handle(&ToolRequest::Symbols { kind: None }) {
+        ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
+        ToolResponse::Error { error } => panic!("symbols failed: {error:?}"),
+    };
+
+    requests()
+        .into_iter()
+        .map(|mut request| {
+            let operation = request["op"].as_str().unwrap().to_string();
+            match operation.as_str() {
+                "references" | "usage" => request["symbol"] = json!(symbol),
+                "cfg" => request["rule"] = json!(rule),
+                _ => {}
+            }
+            let parsed =
+                serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
+            let response = service.handle(&parsed);
+            let ToolResponse::Ok { result } = response else {
+                panic!("{operation} returned a service error: {response:?}");
+            };
+            (operation, result)
+        })
+        .collect()
+}
+
 #[test]
 fn agent_v1_schema_covers_every_advertised_request_and_response() {
     let root = workspace_root();
@@ -141,6 +181,10 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
     capabilities_document["$ref"] = Value::String("#/$defs/Capabilities".to_string());
     let capabilities_schema =
         JSONSchema::compile(&capabilities_document).expect("capability schema compiles");
+    let mut edit_range_document = schema.clone();
+    edit_range_document["$ref"] = Value::String("#/$defs/EditRange".to_string());
+    let edit_range_schema =
+        JSONSchema::compile(&edit_range_document).expect("range schema compiles");
 
     assert_eq!(AGENT_CONTRACT, "wright-agent/v1");
     assert_eq!(
@@ -159,8 +203,8 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         schema["$defs"]["Capabilities"]["properties"]["operations"]["items"]["type"],
         "string"
     );
-    let requests = requests();
-    let request_operations = requests
+    let request_examples = requests();
+    let request_operations = request_examples
         .iter()
         .map(|request| request["op"].as_str().unwrap().to_string())
         .collect::<BTreeSet<_>>();
@@ -180,7 +224,7 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         .unwrap()
         .push(json!("futureOperation"));
     assert!(capabilities_schema.is_valid(&future_capabilities));
-    for request in requests {
+    for request in request_examples {
         assert!(
             request_schema.is_valid(&request),
             "invalid request: {request}"
@@ -188,9 +232,10 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
     }
 
-    assert!(response_schema.is_valid(&json!({"result":{"ok":true}})));
+    let capabilities_response = json!({"result":current});
+    assert!(response_schema.is_valid(&capabilities_response));
     assert!(response_schema.is_valid(&json!({
-        "result":{"ok":true},
+        "result":current,
         "future_metadata":{"version":2}
     })));
     assert!(response_schema.is_valid(&json!({
@@ -199,4 +244,60 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
     })));
     assert!(!response_schema.is_valid(&json!({"result":{},"error":{"code":"x","message":"y"}})));
     assert!(!request_schema.is_valid(&json!({"op":"check","unexpected":true})));
+
+    let operation_results = [
+        ("capabilities", "CapabilitiesResult"),
+        ("compile", "CompileResult"),
+        ("check", "CheckResult"),
+        ("analyze", "AnalyzeResult"),
+        ("inspect", "InspectResult"),
+        ("project", "ProjectResult"),
+        ("rules", "RulesResult"),
+        ("symbols", "SymbolsResult"),
+        ("references", "ReferencesResult"),
+        ("usage", "UsageResult"),
+        ("cfg", "CfgResult"),
+        ("findings", "FindingsResult"),
+        ("persistentObjects", "PersistentObjectsResult"),
+        ("lint", "LintResult"),
+        ("lintRules", "LintRulesResult"),
+        ("callGraph", "CallGraphResult"),
+        ("costEstimate", "CostEstimateResult"),
+        ("targetMetadata", "TargetMetadataResult"),
+        ("validateEditTransaction", "ValidateEditTransactionResult"),
+        ("semanticRename", "SemanticRenameResult"),
+        ("providerSemanticRename", "ProviderSemanticRenameResult"),
+        ("providerValidateEdit", "ProviderValidateEditResult"),
+    ];
+    let live_responses = service_responses();
+    assert_eq!(live_responses.len(), operation_results.len());
+    for ((operation, result), (expected_operation, definition)) in
+        live_responses.iter().zip(operation_results)
+    {
+        assert_eq!(operation, expected_operation);
+        let response = json!({"result":result});
+        assert!(
+            response_schema.is_valid(&response),
+            "ToolResponse schema rejected {operation}: {response}"
+        );
+        let mut operation_document = schema.clone();
+        operation_document["$ref"] = Value::String(format!("#/$defs/{definition}"));
+        let operation_schema =
+            JSONSchema::compile(&operation_document).expect("operation result schema compiles");
+        assert!(
+            operation_schema.is_valid(result),
+            "{operation} result does not match {definition}: {result}"
+        );
+    }
+
+    let valid_range = json!({"start_line":1,"start_col":1,"end_line":1,"end_col":1});
+    assert!(edit_range_schema.is_valid(&valid_range));
+    for coordinate in ["start_line", "start_col", "end_line", "end_col"] {
+        let mut zero_range = valid_range.clone();
+        zero_range[coordinate] = json!(0);
+        assert!(
+            !edit_range_schema.is_valid(&zero_range),
+            "EditRange accepted 0 for {coordinate}"
+        );
+    }
 }
