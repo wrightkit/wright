@@ -132,11 +132,7 @@ pub trait LanguageProvider {
         locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
         let _ = (entry, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/check" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/check")
     }
 
     /// `lpp/check` over an LPP 1.2 file or directory target.
@@ -147,11 +143,7 @@ pub trait LanguageProvider {
         locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
         let _ = (target, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/check" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/check")
     }
 
     /// `lpp/compile`: compile a document set into one opaque Workshop
@@ -170,11 +162,7 @@ pub trait LanguageProvider {
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
         let _ = (entry, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/compile")
     }
 
     /// `lpp/compile` over an LPP 1.2 file or directory target.
@@ -185,11 +173,7 @@ pub trait LanguageProvider {
         locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
         let _ = (target, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/compile")
     }
 
     /// `lpp/compile` over a file or directory target in an LPP 1.4 session,
@@ -202,11 +186,7 @@ pub trait LanguageProvider {
         accepted_artifact_formats: &[&str],
     ) -> Result<CompileResult, ProviderError> {
         let _ = (target, project_root, locale, accepted_artifact_formats);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/compile")
     }
 
     /// `lpp/reconstruct`: reconstruct source from a provider-owned artifact.
@@ -640,6 +620,14 @@ fn entry_params(entry: &ProjectEntry, project_root: Option<&str>, locale: Option
         params["locale"] = json!(locale);
     }
     params
+}
+
+fn capability_unavailable<T>(capability: &str, method: &str) -> Result<T, ProviderError> {
+    Err(ProviderError::lpp(
+        crate::error::LppErrorKind::CapabilityUnavailable,
+        json!({ "capability": capability, "method": method }),
+        format!("capability '{capability}' is not available in this provider client"),
+    ))
 }
 
 /// Parse a typed result, converting shape failures into a deterministic

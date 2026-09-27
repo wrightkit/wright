@@ -142,8 +142,10 @@ fn finish_transaction(
     sources: &BTreeMap<String, String>,
     project_root: Option<&str>,
 ) -> ProviderMutation {
-    if let Err(diag) = check_preconditions(&transaction, sources) {
-        return refusal(vec![diag], None);
+    for edit in &transaction.edits {
+        if let Some(diagnostic) = crate::edit::source_precondition(edit, sources) {
+            return refusal(vec![diagnostic], None);
+        }
     }
     let previews = match transaction.apply(sources) {
         Ok(previews) => previews,
@@ -162,35 +164,6 @@ fn finish_transaction(
         provider_code: None,
         provider_message: None,
     }
-}
-
-fn check_preconditions(
-    transaction: &EditTransaction,
-    sources: &BTreeMap<String, String>,
-) -> Result<(), Diagnostic> {
-    for edit in &transaction.edits {
-        let Some(current) = sources.get(&edit.source) else {
-            return Err(Diagnostic::error(
-                "edit-unknown-source",
-                Stage::Discovery,
-                format!(
-                    "the edit targets '{}' but no current text was provided for it; supply the current source so the version precondition can be verified",
-                    edit.source
-                ),
-            ));
-        };
-        if crate::input_identity(current) != edit.source_identity {
-            return Err(Diagnostic::error(
-                "edit-stale-source",
-                Stage::Discovery,
-                format!(
-                    "the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry",
-                    edit.source
-                ),
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn validate_pipeline(

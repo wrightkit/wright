@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{SessionConfig, SourceKind};
-use crate::diag::{Diagnostic, Origin, Position, Severity, SourceSpan, Stage};
+use crate::diag::{
+    Diagnostic, Origin, Position, Severity, SourceSpan, Stage, source_provider_unavailable,
+};
 use crate::input::ResolvedInput;
 use crate::result::exit_code_from;
 
@@ -218,20 +220,8 @@ pub fn validate_transaction(
 ) -> EditValidation {
     let mut diagnostics = Vec::new();
     for edit in &transaction.edits {
-        let Some(current) = sources.get(&edit.source) else {
-            diagnostics.push(Diagnostic::error(
-                "edit-unknown-source",
-                Stage::Discovery,
-                format!("the edit targets '{}' but no current text was provided for it; supply the current source so the version precondition can be verified", edit.source),
-            ));
-            continue;
-        };
-        if crate::input_identity(current) != edit.source_identity {
-            diagnostics.push(Diagnostic::error(
-                "edit-stale-source",
-                Stage::Discovery,
-                format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", edit.source),
-            ));
+        if let Some(diagnostic) = source_precondition(edit, sources) {
+            diagnostics.push(diagnostic);
         }
     }
     if has_error(&diagnostics) {
@@ -785,12 +775,27 @@ fn build_overlay<'a>(
     overlay
 }
 
-fn source_provider_unavailable() -> Diagnostic {
-    Diagnostic::error(
-        "source-provider-unavailable",
-        Stage::Internal,
-        "the requested source-provider workflow is not currently shipped with Wright",
-    )
+pub(crate) fn source_precondition(
+    edit: &SourceEdit,
+    sources: &BTreeMap<String, String>,
+) -> Option<Diagnostic> {
+    let Some(current) = sources.get(&edit.source) else {
+        return Some(Diagnostic::error(
+            "edit-unknown-source",
+            Stage::Discovery,
+            format!(
+                "the edit targets '{}' but no current text was provided for it; supply the current source so the version precondition can be verified",
+                edit.source
+            ),
+        ));
+    };
+    (crate::input_identity(current) != edit.source_identity).then(|| {
+        Diagnostic::error(
+            "edit-stale-source",
+            Stage::Discovery,
+            format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", edit.source),
+        )
+    })
 }
 
 fn apply_transaction(

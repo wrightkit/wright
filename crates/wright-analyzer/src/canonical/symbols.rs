@@ -393,53 +393,50 @@ impl SemanticIndex {
         program: &Program,
     ) {
         let span = program.action_span(rule, action_id);
+        let variable = match action {
+            Action::SetGlobalVariable { variable, .. } => {
+                Some((SymbolKind::GlobalVariable, variable, false))
+            }
+            Action::ModifyGlobalVariable { variable, .. } => {
+                Some((SymbolKind::GlobalVariable, variable, true))
+            }
+            Action::SetPlayerVariable { variable, .. } => {
+                Some((SymbolKind::PlayerVariable, variable, false))
+            }
+            Action::ModifyPlayerVariable { variable, .. } => {
+                Some((SymbolKind::PlayerVariable, variable, true))
+            }
+            Action::ForGlobalVariable { variable, .. } => {
+                Some((SymbolKind::GlobalVariable, variable, false))
+            }
+            Action::ForPlayerVariable { variable, .. } => {
+                Some((SymbolKind::PlayerVariable, variable, false))
+            }
+            _ => None,
+        };
+        if let Some((kind, name, reads_old_value)) = variable {
+            if let Some(symbol) = self.find_symbol(kind, name) {
+                self.push(
+                    symbol,
+                    ReferenceKind::Write,
+                    Some(rule),
+                    Some(action_id),
+                    None,
+                    action_occurrence(program, span, name),
+                );
+                if reads_old_value {
+                    self.push(
+                        symbol,
+                        ReferenceKind::Read,
+                        Some(rule),
+                        Some(action_id),
+                        None,
+                        span,
+                    );
+                }
+            }
+        }
         match action {
-            Action::SetGlobalVariable { variable, .. }
-            | Action::ModifyGlobalVariable { variable, .. } => {
-                if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, variable) {
-                    self.push(
-                        symbol,
-                        ReferenceKind::Write,
-                        Some(rule),
-                        Some(action_id),
-                        None,
-                        action_occurrence(program, span, variable),
-                    );
-                    if matches!(action, Action::ModifyGlobalVariable { .. }) {
-                        self.push(
-                            symbol,
-                            ReferenceKind::Read,
-                            Some(rule),
-                            Some(action_id),
-                            None,
-                            span,
-                        );
-                    }
-                }
-            }
-            Action::SetPlayerVariable { variable, .. }
-            | Action::ModifyPlayerVariable { variable, .. } => {
-                if let Some(symbol) = self.find_symbol(SymbolKind::PlayerVariable, variable) {
-                    self.push(
-                        symbol,
-                        ReferenceKind::Write,
-                        Some(rule),
-                        Some(action_id),
-                        None,
-                        action_occurrence(program, span, variable),
-                    );
-                    if matches!(action, Action::ModifyPlayerVariable { .. }) {
-                        self.push(
-                            symbol,
-                            ReferenceKind::Read,
-                            Some(rule),
-                            Some(action_id),
-                            None,
-                            span,
-                        );
-                    }
-                }
-            }
             Action::CallSubroutine { subroutine } => {
                 if let Some(symbol) = self.find_symbol(SymbolKind::Subroutine, subroutine) {
                     self.push(
@@ -449,30 +446,6 @@ impl SemanticIndex {
                         Some(action_id),
                         None,
                         span,
-                    );
-                }
-            }
-            Action::ForGlobalVariable { variable, .. } => {
-                if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, variable) {
-                    self.push(
-                        symbol,
-                        ReferenceKind::Write,
-                        Some(rule),
-                        Some(action_id),
-                        None,
-                        action_occurrence(program, span, variable),
-                    );
-                }
-            }
-            Action::ForPlayerVariable { variable, .. } => {
-                if let Some(symbol) = self.find_symbol(SymbolKind::PlayerVariable, variable) {
-                    self.push(
-                        symbol,
-                        ReferenceKind::Write,
-                        Some(rule),
-                        Some(action_id),
-                        None,
-                        action_occurrence(program, span, variable),
                     );
                 }
             }
@@ -541,26 +514,10 @@ fn declaration_span(program: &Program, prefix: &str, name: &str) -> Option<Span>
         let Some(source) = program.source(file) else {
             continue;
         };
-        for (line_index, line) in source.text().lines().enumerate() {
-            let Some(rest) = line.strip_prefix(prefix) else {
-                continue;
-            };
-            let Some(found) = rest.split_whitespace().next() else {
-                continue;
-            };
-            let found = found.trim_matches('"');
-            if found != name {
-                continue;
-            }
-            let start = prefix.chars().count() as u32 + 1;
-            return Some(Span::new(
-                file,
-                workshop_rs::source::Position::new(line_index as u32 + 1, start),
-                workshop_rs::source::Position::new(
-                    line_index as u32 + 1,
-                    start + name.chars().count() as u32,
-                ),
-            ));
+        if let Some(span) =
+            declaration_span_in_source(file, source.text(), std::slice::from_ref(&prefix), name)
+        {
+            return Some(span);
         }
     }
     None
@@ -572,28 +529,39 @@ fn declaration_span_in_sources(
     name: &str,
 ) -> Option<Span> {
     for (file, source) in sources {
-        for (line_index, line) in source.lines().enumerate() {
-            for prefix in prefixes {
-                let Some(rest) = line.strip_prefix(prefix) else {
-                    continue;
-                };
-                let Some(found) = rest.split_whitespace().next() else {
-                    continue;
-                };
-                let found = found.trim_matches('"');
-                if found != name {
-                    continue;
-                }
-                let start = prefix.chars().count() as u32 + 1;
-                return Some(Span::new(
-                    *file,
-                    workshop_rs::source::Position::new(line_index as u32 + 1, start),
-                    workshop_rs::source::Position::new(
-                        line_index as u32 + 1,
-                        start + name.chars().count() as u32,
-                    ),
-                ));
+        if let Some(span) = declaration_span_in_source(*file, source, prefixes, name) {
+            return Some(span);
+        }
+    }
+    None
+}
+
+fn declaration_span_in_source(
+    file: workshop_rs::source::FileId,
+    source: &str,
+    prefixes: &[&str],
+    name: &str,
+) -> Option<Span> {
+    for (line_index, line) in source.lines().enumerate() {
+        for prefix in prefixes {
+            let Some(rest) = line.strip_prefix(prefix) else {
+                continue;
+            };
+            let Some(found) = rest.split_whitespace().next() else {
+                continue;
+            };
+            if found.trim_matches('"') != name {
+                continue;
             }
+            let start = prefix.chars().count() as u32 + 1;
+            return Some(Span::new(
+                file,
+                workshop_rs::source::Position::new(line_index as u32 + 1, start),
+                workshop_rs::source::Position::new(
+                    line_index as u32 + 1,
+                    start + name.chars().count() as u32,
+                ),
+            ));
         }
     }
     None
@@ -631,6 +599,17 @@ fn occurrence_in_sources(
         .iter()
         .find(|(file, _)| *file == span.file)
         .map(|(_, source)| source.as_str())?;
+    find_occurrence(source, span, name, before_assignment, ordinal, true)
+}
+
+fn find_occurrence(
+    source: &str,
+    span: Span,
+    name: &str,
+    before_assignment: bool,
+    ordinal: usize,
+    skip_non_code: bool,
+) -> Option<Span> {
     let name_chars: Vec<char> = name.chars().collect();
     let mut found_index = 0;
     for line_number in span.start.line..=span.end.line {
@@ -656,7 +635,7 @@ fn occurrence_in_sources(
             if end > upper || chars.get(start..end) != Some(name_chars.as_slice()) {
                 continue;
             }
-            if !is_code_position(&chars, start) {
+            if skip_non_code && !is_code_position(&chars, start) {
                 continue;
             }
             let before = start.checked_sub(1).and_then(|index| chars.get(index));
@@ -702,44 +681,7 @@ fn action_occurrence(program: &Program, span: Option<Span>, name: &str) -> Optio
     let Some(source_doc) = program.source(span.file) else {
         return Some(span);
     };
-    let source = source_doc.text();
-    let name_chars: Vec<char> = name.chars().collect();
-    for line_number in span.start.line..=span.end.line {
-        let line = source.lines().nth(line_number.saturating_sub(1) as usize)?;
-        let chars: Vec<char> = line.chars().collect();
-        let lower = if line_number == span.start.line {
-            span.start.col.saturating_sub(1) as usize
-        } else {
-            0
-        };
-        let mut upper = if line_number == span.end.line {
-            span.end.col.saturating_sub(1) as usize
-        } else {
-            chars.len()
-        };
-        if let Some(operator) = line.find('=') {
-            upper = upper.min(operator);
-        }
-        for start in lower.min(chars.len())..=upper.min(chars.len()) {
-            let end = start.saturating_add(name_chars.len());
-            if end > upper || chars.get(start..end) != Some(name_chars.as_slice()) {
-                continue;
-            }
-            let before = start.checked_sub(1).and_then(|index| chars.get(index));
-            let after = chars.get(end);
-            if before.is_some_and(|character| character.is_alphanumeric() || *character == '_')
-                || after.is_some_and(|character| character.is_alphanumeric() || *character == '_')
-            {
-                continue;
-            }
-            return Some(Span::new(
-                span.file,
-                workshop_rs::source::Position::new(line_number, start as u32 + 1),
-                workshop_rs::source::Position::new(line_number, end as u32 + 1),
-            ));
-        }
-    }
-    Some(span)
+    Some(find_occurrence(source_doc.text(), span, name, true, 0, false).unwrap_or(span))
 }
 
 pub(super) fn value_occurrence(program: &Program, span: Option<Span>, name: &str) -> Option<Span> {
@@ -747,39 +689,5 @@ pub(super) fn value_occurrence(program: &Program, span: Option<Span>, name: &str
     let Some(source_doc) = program.source(span.file) else {
         return Some(span);
     };
-    let source = source_doc.text();
-    let name_chars: Vec<char> = name.chars().collect();
-    for line_number in span.start.line..=span.end.line {
-        let line = source.lines().nth(line_number.saturating_sub(1) as usize)?;
-        let chars: Vec<char> = line.chars().collect();
-        let lower = if line_number == span.start.line {
-            span.start.col.saturating_sub(1) as usize
-        } else {
-            0
-        };
-        let upper = if line_number == span.end.line {
-            span.end.col.saturating_sub(1) as usize
-        } else {
-            chars.len()
-        };
-        for start in lower.min(chars.len())..=upper.min(chars.len()) {
-            let end = start.saturating_add(name_chars.len());
-            if end > upper || chars.get(start..end) != Some(name_chars.as_slice()) {
-                continue;
-            }
-            let before = start.checked_sub(1).and_then(|index| chars.get(index));
-            let after = chars.get(end);
-            if before.is_some_and(|character| character.is_alphanumeric() || *character == '_')
-                || after.is_some_and(|character| character.is_alphanumeric() || *character == '_')
-            {
-                continue;
-            }
-            return Some(Span::new(
-                span.file,
-                workshop_rs::source::Position::new(line_number, start as u32 + 1),
-                workshop_rs::source::Position::new(line_number, end as u32 + 1),
-            ));
-        }
-    }
-    Some(span)
+    Some(find_occurrence(source_doc.text(), span, name, false, 0, false).unwrap_or(span))
 }

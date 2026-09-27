@@ -169,3 +169,11 @@ impl Diagnostic {
         }
     }
 }
+
+pub(crate) fn source_provider_unavailable() -> Diagnostic {
+    Diagnostic::error(
+        "source-provider-unavailable",
+        Stage::Internal,
+        "the requested source-provider workflow is not currently shipped with Wright",
+    )
+}

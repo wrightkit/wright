@@ -202,19 +202,11 @@ impl LintConfig {
 
     /// Effective severity for a rule given its metadata and this config.
     pub fn effective_severity(&self, meta: &RuleMeta) -> Severity {
-        self.rules
-            .get(meta.id)
-            .and_then(|config| config.severity_override)
-            .and_then(SeverityLabel::severity)
-            .unwrap_or(meta.default_severity)
+        self.effective_severity_for(meta.id, meta.default_severity)
     }
 
     pub fn effective_severity_for(&self, id: &str, default: Severity) -> Severity {
-        self.rules
-            .get(id)
-            .and_then(|config| config.severity_override)
-            .and_then(SeverityLabel::severity)
-            .unwrap_or(default)
+        self.severity_override(id).unwrap_or(default)
     }
 
     pub fn severity_override(&self, id: &str) -> Option<Severity> {
@@ -268,10 +260,19 @@ pub struct LintRun {
     pub skipped: Vec<SkippedRule>,
 }
 
-/// One registered rule: its stable metadata and optional declarative rule.
-struct RegistryEntry {
-    meta: Option<RuleMeta>,
-    declarative: Option<DeclarativeRule>,
+/// One registered rule and the implementation that owns it.
+enum RegistryEntry {
+    Native(RuleMeta),
+    Declarative(Box<DeclarativeRule>),
+}
+
+impl RegistryEntry {
+    fn id(&self) -> &str {
+        match self {
+            Self::Native(meta) => meta.id,
+            Self::Declarative(rule) => rule.id(),
+        }
+    }
 }
 
 /// The Wright lint rule registry.
@@ -286,178 +287,160 @@ impl Default for LintRegistry {
     /// `while-without-wait`.
     fn default() -> Self {
         let entries = vec![
-            RegistryEntry {
-                meta: Some(RuleMeta {
-                    id: "min-wait-loop",
-                    default_severity: Severity::Warning,
-                    evidence: EvidenceClass::StaticIndicator,
-                    summary: "loop body waits at the workshop minimum rate",
-                    rationale: "Avoid sustained maximum-frequency loop execution.",
-                    documentation: concat!(
-                        "A loop whose body contains a `wait` call at the minimum Workshop ",
-                        "duration (~0.016 s) runs at maximum server frequency. Sustained ",
-                        "high-frequency loops can degrade server performance for all players.",
-                    ),
-                    known_limits: concat!(
-                        "Wait durations that are not statically known (computed at runtime) ",
-                        "are treated as not-minimum and do not trigger this rule.",
-                    ),
-                    tags: &["performance", "stability"],
-                }),
-                declarative: None,
-            },
-            RegistryEntry {
-                meta: Some(RuleMeta {
-                    id: "duplicate-condition",
-                    default_severity: Severity::Warning,
-                    evidence: EvidenceClass::Exact,
-                    summary: "condition is evaluated more than once within one rule",
-                    rationale: "Avoid unreachable or redundant conditional branches.",
-                    documentation: concat!(
-                        "The same condition appears in two or more branches of the same rule. ",
-                        "Because Workshop conditions are evaluated sequentially, a later branch ",
-                        "with an identical condition can never be taken.",
-                    ),
-                    known_limits: concat!(
-                        "Detection is structural (not value-flow) and rule-local: two ",
-                        "structurally identical conditions in different rules are not compared.",
-                    ),
-                    tags: &["correctness"],
-                }),
-                declarative: None,
-            },
-            RegistryEntry {
-                meta: Some(RuleMeta {
-                    id: "expensive-loop-check",
-                    default_severity: Severity::Info,
-                    evidence: EvidenceClass::Heuristic,
-                    summary: "geometry predicate evaluated inside a loop body",
-                    rationale: "Surface expensive per-iteration geometry work.",
-                    documentation: concat!(
-                        "A geometry predicate (`distance`, `raycast`, or `isInLoS`) is called ",
-                        "inside a loop body. These predicates may be expensive per evaluation ",
-                        "and can accumulate significant cost at loop frequency.",
-                    ),
-                    known_limits: concat!(
-                        "The expensive-call list is a fixed heuristic. It may miss unusual ",
-                        "predicates or over-flag predicates that have been made cheap by a ",
-                        "Workshop update.",
-                    ),
-                    tags: &["performance"],
-                }),
-                declarative: None,
-            },
-            RegistryEntry {
-                meta: Some(RuleMeta {
-                    id: "ongoing-condition-hot-path",
-                    default_severity: Severity::Info,
-                    evidence: EvidenceClass::Heuristic,
-                    summary: "geometry predicate evaluated in an ongoing-rule condition",
-                    rationale: "Make high-frequency condition evaluation visible.",
-                    documentation: concat!(
-                        "An `Ongoing - Global` or `Ongoing - Each Player` rule evaluates a ",
-                        "geometry predicate (`distance`, `raycast`, or `isInLoS`) in one of ",
-                        "its conditions. Each server tick evaluates conditions in source order ",
-                        "until one short-circuits the rule, so a predicate in a later condition ",
-                        "is reached only after every preceding condition passes. The finding ",
-                        "identifies the condition's position and any later short-circuit gates. ",
-                        "This concerns condition evaluation, not a claim ",
-                        "that the action block executes every tick while conditions remain true. ",
-                        "Real-project evidence: overpy-cronch's `challenge 1 ",
-                        "finished` rule (Zezombye/overpy commit ",
-                        "`eea67adbcf6926c4004e35e25ab4be072624a44e`, GPL-3.0-only) evaluates ",
-                        "`Distance Between` in an ongoing global condition after its cheap ",
-                        "challenge-state gate.",
-                    ),
-                    known_limits: concat!(
-                        "The geometry-predicate list is a fixed heuristic and may miss other ",
-                        "costly operations or over-flag a predicate made cheap by a Workshop ",
-                        "update. The analysis reports canonical event identity, condition order, ",
-                        "and predicate presence; it does not measure runtime CPU cost, assume a ",
-                        "server population, or infer the selectivity of any condition. ",
-                        "Non-ongoing player events and subroutines are deliberately excluded.",
-                    ),
-                    tags: &["performance", "stability"],
-                }),
-                declarative: None,
-            },
-            RegistryEntry {
-                meta: Some(RuleMeta {
-                    id: "repeated-value",
-                    default_severity: Severity::Warning,
-                    evidence: EvidenceClass::Exact,
-                    summary: "identical value expression evaluated more than once in one loop scope",
-                    rationale: "Avoid repeated evaluation of the same loop-local expression.",
-                    documentation: concat!(
-                        "A structurally identical value expression appears more than once within one ",
-                        "loop scope, so it is re-evaluated every iteration even though one ",
-                        "evaluation would suffice. Within a single atomic evaluation the ",
-                        "re-evaluation is redundant for deterministic expressions; the Workshop ",
-                        "ecosystem has an `Evaluate Once` idiom for exactly this cost. One ",
-                        "finding is reported per distinct duplicated shape per loop scope, at ",
-                        "the shape's first occurrence, with the statically known occurrence ",
-                        "count. Real-project evidence: overpy-santa (workshop lines 108-112; ",
-                        "`santa.opy:72-77`) and overpy-parabola (workshop lines 79-80; ",
-                        "`parabola.opy:45-51`), both pinned at `Zezombye/overpy` commit ",
-                        "`eea67adbcf6926c4004e35e25ab4be072624a44e` (GPL-3.0-only, redistributable).",
-                    ),
-                    known_limits: concat!(
-                        "Detection is rule-local and structural (arena-id-independent call name ",
-                        "plus argument shape) with no value-flow analysis: a duplicate across ",
-                        "separate actions proves re-scheduling, not result-equality, because an ",
-                        "intervening action may mutate a read variable. A duplicated expression ",
-                        "is reported once per loop scope at its maximal shape, so nested ",
-                        "duplicates are subsumed; expressions with fewer than two call nodes, ",
-                        "including bare array reads, are never flagged. Sub-expressions ",
-                        "containing non-deterministic values (e.g. `Random Value`/`Random Real`) ",
-                        "are still guaranteed to be re-evaluated, but the finding may not ",
-                        "indicate a defect. `Evaluate Once`-wrapped inner reads reduce but do ",
-                        "not eliminate the outer recomputation. Loop coverage is `While` + ",
-                        "`For Global Variable` only; `For Player Variable` loops are not modeled.",
-                    ),
-                    tags: &["performance", "stability"],
-                }),
-                declarative: None,
-            },
-            RegistryEntry {
-                meta: Some(RuleMeta {
-                    id: "while-without-wait",
-                    default_severity: Severity::Warning,
-                    evidence: EvidenceClass::StaticIndicator,
-                    summary: "while loop body contains no wait call",
-                    rationale: "Ensure a loop can yield to the Workshop scheduler.",
-                    documentation: concat!(
-                        "A `While` loop whose body contains no `wait` call cannot yield to the ",
-                        "server while its condition holds. Each finding carries the loop's ",
-                        "boundedness evidence (`obviously-unbounded`, `statically-bounded`, or ",
-                        "`unknown`), and the severity is derived from that evidence: `info` for ",
-                        "a statically bounded no-yield loop, `warning` for an obviously ",
-                        "unbounded or unknown one. A bounded no-yield loop is explicitly NOT ",
-                        "treated as equivalent to an unbounded one. Real-consumer evidence: ",
-                        "the agent-lab repro `loop-waitless.opy` (wrightkit/agent-lab#68) — ",
-                        "`globalvar loopCount; rule \"waitless loop\": @Condition ",
-                        "getTotalTimeElapsed() > 5; loopCount = 0; while loopCount < 10: ",
-                        "loopCount += 1` — is classified as `statically-bounded` (a finite ",
-                        "10-iteration counter loop), not as an unbounded hazard; the ",
-                        "Workshop Agent analyzer reports the same construct as ",
-                        "`workshop.performance.waitless-loop`, and Wright deliberately does ",
-                        "not copy that severity semantics (issue #103).",
-                    ),
-                    known_limits: concat!(
-                        "Counter-pattern detection is conservative and structural: only ",
-                        "literal-bound comparisons (`<`, `<=`, `>`, `>=`) are recognized. A ",
-                        "loop is bounded only when: (1) its condition compares a variable to a ",
-                        "literal bound, (2) the body unconditionally increments/decrements that ",
-                        "same variable, and (3) the step moves the variable toward the bound. ",
-                        "Arbitrary step expressions, dynamic bounds, multiple counter ",
-                        "mutations, nested condition resets, and loops that yield via `wait` ",
-                        "are outside this classification. An unclassified loop produces `unknown` ",
-                        "evidence; it is NOT assumed to be unbounded (issue #103).",
-                    ),
-                    tags: &["performance", "stability"],
-                }),
-                declarative: None,
-            },
+            RegistryEntry::Native(RuleMeta {
+                id: "min-wait-loop",
+                default_severity: Severity::Warning,
+                evidence: EvidenceClass::StaticIndicator,
+                summary: "loop body waits at the workshop minimum rate",
+                rationale: "Avoid sustained maximum-frequency loop execution.",
+                documentation: concat!(
+                    "A loop whose body contains a `wait` call at the minimum Workshop ",
+                    "duration (~0.016 s) runs at maximum server frequency. Sustained ",
+                    "high-frequency loops can degrade server performance for all players.",
+                ),
+                known_limits: concat!(
+                    "Wait durations that are not statically known (computed at runtime) ",
+                    "are treated as not-minimum and do not trigger this rule.",
+                ),
+                tags: &["performance", "stability"],
+            }),
+            RegistryEntry::Native(RuleMeta {
+                id: "duplicate-condition",
+                default_severity: Severity::Warning,
+                evidence: EvidenceClass::Exact,
+                summary: "condition is evaluated more than once within one rule",
+                rationale: "Avoid unreachable or redundant conditional branches.",
+                documentation: concat!(
+                    "The same condition appears in two or more branches of the same rule. ",
+                    "Because Workshop conditions are evaluated sequentially, a later branch ",
+                    "with an identical condition can never be taken.",
+                ),
+                known_limits: concat!(
+                    "Detection is structural (not value-flow) and rule-local: two ",
+                    "structurally identical conditions in different rules are not compared.",
+                ),
+                tags: &["correctness"],
+            }),
+            RegistryEntry::Native(RuleMeta {
+                id: "expensive-loop-check",
+                default_severity: Severity::Info,
+                evidence: EvidenceClass::Heuristic,
+                summary: "geometry predicate evaluated inside a loop body",
+                rationale: "Surface expensive per-iteration geometry work.",
+                documentation: concat!(
+                    "A geometry predicate (`distance`, `raycast`, or `isInLoS`) is called ",
+                    "inside a loop body. These predicates may be expensive per evaluation ",
+                    "and can accumulate significant cost at loop frequency.",
+                ),
+                known_limits: concat!(
+                    "The expensive-call list is a fixed heuristic. It may miss unusual ",
+                    "predicates or over-flag predicates that have been made cheap by a ",
+                    "Workshop update.",
+                ),
+                tags: &["performance"],
+            }),
+            RegistryEntry::Native(RuleMeta {
+                id: "ongoing-condition-hot-path",
+                default_severity: Severity::Info,
+                evidence: EvidenceClass::Heuristic,
+                summary: "geometry predicate evaluated in an ongoing-rule condition",
+                rationale: "Make high-frequency condition evaluation visible.",
+                documentation: concat!(
+                    "An `Ongoing - Global` or `Ongoing - Each Player` rule evaluates a ",
+                    "geometry predicate (`distance`, `raycast`, or `isInLoS`) in one of ",
+                    "its conditions. Each server tick evaluates conditions in source order ",
+                    "until one short-circuits the rule, so a predicate in a later condition ",
+                    "is reached only after every preceding condition passes. The finding ",
+                    "identifies the condition's position and any later short-circuit gates. ",
+                    "This concerns condition evaluation, not a claim ",
+                    "that the action block executes every tick while conditions remain true. ",
+                    "Real-project evidence: overpy-cronch's `challenge 1 ",
+                    "finished` rule (Zezombye/overpy commit ",
+                    "`eea67adbcf6926c4004e35e25ab4be072624a44e`, GPL-3.0-only) evaluates ",
+                    "`Distance Between` in an ongoing global condition after its cheap ",
+                    "challenge-state gate.",
+                ),
+                known_limits: concat!(
+                    "The geometry-predicate list is a fixed heuristic and may miss other ",
+                    "costly operations or over-flag a predicate made cheap by a Workshop ",
+                    "update. The analysis reports canonical event identity, condition order, ",
+                    "and predicate presence; it does not measure runtime CPU cost, assume a ",
+                    "server population, or infer the selectivity of any condition. ",
+                    "Non-ongoing player events and subroutines are deliberately excluded.",
+                ),
+                tags: &["performance", "stability"],
+            }),
+            RegistryEntry::Native(RuleMeta {
+                id: "repeated-value",
+                default_severity: Severity::Warning,
+                evidence: EvidenceClass::Exact,
+                summary: "identical value expression evaluated more than once in one loop scope",
+                rationale: "Avoid repeated evaluation of the same loop-local expression.",
+                documentation: concat!(
+                    "A structurally identical value expression appears more than once within one ",
+                    "loop scope, so it is re-evaluated every iteration even though one ",
+                    "evaluation would suffice. Within a single atomic evaluation the ",
+                    "re-evaluation is redundant for deterministic expressions; the Workshop ",
+                    "ecosystem has an `Evaluate Once` idiom for exactly this cost. One ",
+                    "finding is reported per distinct duplicated shape per loop scope, at ",
+                    "the shape's first occurrence, with the statically known occurrence ",
+                    "count. Real-project evidence: overpy-santa (workshop lines 108-112; ",
+                    "`santa.opy:72-77`) and overpy-parabola (workshop lines 79-80; ",
+                    "`parabola.opy:45-51`), both pinned at `Zezombye/overpy` commit ",
+                    "`eea67adbcf6926c4004e35e25ab4be072624a44e` (GPL-3.0-only, redistributable).",
+                ),
+                known_limits: concat!(
+                    "Detection is rule-local and structural (arena-id-independent call name ",
+                    "plus argument shape) with no value-flow analysis: a duplicate across ",
+                    "separate actions proves re-scheduling, not result-equality, because an ",
+                    "intervening action may mutate a read variable. A duplicated expression ",
+                    "is reported once per loop scope at its maximal shape, so nested ",
+                    "duplicates are subsumed; expressions with fewer than two call nodes, ",
+                    "including bare array reads, are never flagged. Sub-expressions ",
+                    "containing non-deterministic values (e.g. `Random Value`/`Random Real`) ",
+                    "are still guaranteed to be re-evaluated, but the finding may not ",
+                    "indicate a defect. `Evaluate Once`-wrapped inner reads reduce but do ",
+                    "not eliminate the outer recomputation. Loop coverage is `While` + ",
+                    "`For Global Variable` only; `For Player Variable` loops are not modeled.",
+                ),
+                tags: &["performance", "stability"],
+            }),
+            RegistryEntry::Native(RuleMeta {
+                id: "while-without-wait",
+                default_severity: Severity::Warning,
+                evidence: EvidenceClass::StaticIndicator,
+                summary: "while loop body contains no wait call",
+                rationale: "Ensure a loop can yield to the Workshop scheduler.",
+                documentation: concat!(
+                    "A `While` loop whose body contains no `wait` call cannot yield to the ",
+                    "server while its condition holds. Each finding carries the loop's ",
+                    "boundedness evidence (`obviously-unbounded`, `statically-bounded`, or ",
+                    "`unknown`), and the severity is derived from that evidence: `info` for ",
+                    "a statically bounded no-yield loop, `warning` for an obviously ",
+                    "unbounded or unknown one. A bounded no-yield loop is explicitly NOT ",
+                    "treated as equivalent to an unbounded one. Real-consumer evidence: ",
+                    "the agent-lab repro `loop-waitless.opy` (wrightkit/agent-lab#68) — ",
+                    "`globalvar loopCount; rule \"waitless loop\": @Condition ",
+                    "getTotalTimeElapsed() > 5; loopCount = 0; while loopCount < 10: ",
+                    "loopCount += 1` — is classified as `statically-bounded` (a finite ",
+                    "10-iteration counter loop), not as an unbounded hazard; the ",
+                    "Workshop Agent analyzer reports the same construct as ",
+                    "`workshop.performance.waitless-loop`, and Wright deliberately does ",
+                    "not copy that severity semantics (issue #103).",
+                ),
+                known_limits: concat!(
+                    "Counter-pattern detection is conservative and structural: only ",
+                    "literal-bound comparisons (`<`, `<=`, `>`, `>=`) are recognized. A ",
+                    "loop is bounded only when: (1) its condition compares a variable to a ",
+                    "literal bound, (2) the body unconditionally increments/decrements that ",
+                    "same variable, and (3) the step moves the variable toward the bound. ",
+                    "Arbitrary step expressions, dynamic bounds, multiple counter ",
+                    "mutations, nested condition resets, and loops that yield via `wait` ",
+                    "are outside this classification. An unclassified loop produces `unknown` ",
+                    "evidence; it is NOT assumed to be unbounded (issue #103).",
+                ),
+                tags: &["performance", "stability"],
+            }),
         ];
         Self { entries }
     }
@@ -465,7 +448,10 @@ impl Default for LintRegistry {
 
 impl LintRegistry {
     pub fn rules(&self) -> impl Iterator<Item = &RuleMeta> {
-        self.entries.iter().filter_map(|entry| entry.meta.as_ref())
+        self.entries.iter().filter_map(|entry| match entry {
+            RegistryEntry::Native(meta) => Some(meta),
+            RegistryEntry::Declarative(_) => None,
+        })
     }
 
     /// Load one external declarative rule against the canonical Workshop catalog.
@@ -518,19 +504,11 @@ impl LintRegistry {
 
     fn insert_declarative(&mut self, rule: DeclarativeRule) -> Result<(), RuleRegistryError> {
         let id = rule.id().to_string();
-        if self.entries.iter().any(|entry| {
-            entry.meta.as_ref().is_some_and(|meta| meta.id == id)
-                || entry
-                    .declarative
-                    .as_ref()
-                    .is_some_and(|other| other.id() == id)
-        }) {
+        if self.entries.iter().any(|entry| entry.id() == id) {
             return Err(RuleRegistryError::DuplicateId(id));
         }
-        self.entries.push(RegistryEntry {
-            meta: None,
-            declarative: Some(rule),
-        });
+        self.entries
+            .push(RegistryEntry::Declarative(Box::new(rule)));
         Ok(())
     }
 
@@ -538,26 +516,21 @@ impl LintRegistry {
     pub fn descriptors(&self, config: &LintConfig) -> Vec<RuleDescriptor> {
         self.entries
             .iter()
-            .map(|entry| {
-                if let Some(meta) = &entry.meta {
-                    RuleDescriptor {
-                        id: meta.id.to_string(),
-                        default_severity: meta.default_severity,
-                        effective_severity: config.effective_severity(meta),
-                        enabled: config.is_enabled(meta.id),
-                        summary: meta.summary.to_string(),
-                        rationale: meta.rationale.to_string(),
-                        documentation: meta.documentation.to_string(),
-                        known_limits: meta.known_limits.to_string(),
-                        evidence: meta.evidence,
-                        tags: meta.tags.iter().map(|tag| (*tag).to_string()).collect(),
-                        kind: "native",
-                    }
-                } else {
-                    let rule = entry
-                        .declarative
-                        .as_ref()
-                        .expect("registry entry has a rule");
+            .map(|entry| match entry {
+                RegistryEntry::Native(meta) => RuleDescriptor {
+                    id: meta.id.to_string(),
+                    default_severity: meta.default_severity,
+                    effective_severity: config.effective_severity(meta),
+                    enabled: config.is_enabled(meta.id),
+                    summary: meta.summary.to_string(),
+                    rationale: meta.rationale.to_string(),
+                    documentation: meta.documentation.to_string(),
+                    known_limits: meta.known_limits.to_string(),
+                    evidence: meta.evidence,
+                    tags: meta.tags.iter().map(|tag| (*tag).to_string()).collect(),
+                    kind: "native",
+                },
+                RegistryEntry::Declarative(rule) => {
                     let metadata = rule.metadata();
                     RuleDescriptor {
                         id: rule.id().to_string(),
@@ -599,19 +572,9 @@ impl LintRegistry {
                 continue;
             }
             for entry in &self.entries {
-                let id = entry
-                    .meta
-                    .as_ref()
-                    .map(|meta| meta.id.to_string())
-                    .or_else(|| {
-                        entry
-                            .declarative
-                            .as_ref()
-                            .map(|declarative| declarative.id().to_string())
-                    });
-                if let Some(id) = id.filter(|id| config.is_enabled(id)) {
+                if config.is_enabled(entry.id()) {
                     report.skipped.push(SkippedRule {
-                        id,
+                        id: entry.id().to_string(),
                         rule: rule_id,
                         reason: "canonical CFG unavailable".to_string(),
                     });
@@ -626,18 +589,7 @@ impl LintRegistry {
             .entries
             .iter()
             .enumerate()
-            .filter_map(|(index, entry)| {
-                entry
-                    .meta
-                    .as_ref()
-                    .map(|meta| (meta.id.to_string(), index))
-                    .or_else(|| {
-                        entry
-                            .declarative
-                            .as_ref()
-                            .map(|rule| (rule.id().to_string(), index))
-                    })
-            })
+            .map(|(index, entry)| (entry.id().to_string(), index))
             .collect();
         findings.sort_by_key(|finding| {
             (
@@ -660,7 +612,7 @@ impl LintRegistry {
         let mut findings = Vec::new();
         for rule in 0..program.rules.len() {
             for entry in &self.entries {
-                let Some(declarative) = &entry.declarative else {
+                let RegistryEntry::Declarative(declarative) = entry else {
                     continue;
                 };
                 if !config.is_enabled(declarative.id()) {
