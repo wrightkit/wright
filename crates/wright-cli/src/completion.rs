@@ -63,12 +63,7 @@ pub(crate) fn generate_script(shell: ShellArg) -> Vec<u8> {
 }
 
 pub(crate) fn filename_for(shell: ShellArg) -> &'static str {
-    match shell {
-        ShellArg::Bash => "wright",
-        ShellArg::Zsh => "_wright",
-        ShellArg::Fish => "wright.fish",
-        ShellArg::PowerShell => "_wright.ps1",
-    }
+    shell.metadata().1
 }
 
 fn env_var_non_empty(key: &str) -> Option<String> {
@@ -119,17 +114,13 @@ pub(crate) fn detect_shell() -> Result<ShellArg, CompletionError> {
 fn parse_shell_name(name: &str) -> Option<ShellArg> {
     let lower = name.to_ascii_lowercase();
     let name = lower.trim();
-    if name == "zsh" || name.starts_with("zsh") {
+    if name.starts_with("zsh") {
         Some(ShellArg::Zsh)
-    } else if name == "bash" || name.starts_with("bash") {
+    } else if name.starts_with("bash") {
         Some(ShellArg::Bash)
-    } else if name == "fish" || name.starts_with("fish") {
+    } else if name.starts_with("fish") {
         Some(ShellArg::Fish)
-    } else if name == "pwsh"
-        || name == "powershell"
-        || name.starts_with("pwsh")
-        || name.starts_with("powershell")
-    {
+    } else if name.starts_with("pwsh") || name.starts_with("powershell") {
         Some(ShellArg::PowerShell)
     } else {
         None
@@ -157,6 +148,13 @@ fn xdg_dir(home: &Path, var: &str, default_sub: &str) -> PathBuf {
         .unwrap_or_else(|| home.join(default_sub))
 }
 
+fn completion_override_dir() -> Option<PathBuf> {
+    std::env::var("WRIGHT_COMPLETION_DIR")
+        .ok()
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+}
+
 fn completion_dirs() -> Result<(PathBuf, PathBuf, PathBuf), CompletionError> {
     let home = user_home_dir()?;
     let data_home = xdg_dir(&home, "XDG_DATA_HOME", ".local/share");
@@ -165,10 +163,8 @@ fn completion_dirs() -> Result<(PathBuf, PathBuf, PathBuf), CompletionError> {
 }
 
 pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionError> {
-    if let Ok(override_dir) = std::env::var("WRIGHT_COMPLETION_DIR") {
-        if !override_dir.is_empty() {
-            return Ok(PathBuf::from(override_dir));
-        }
+    if let Some(override_dir) = completion_override_dir() {
+        return Ok(override_dir);
     }
 
     let (home, data_home, config_home) = completion_dirs()?;
@@ -233,10 +229,8 @@ pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionErro
 }
 
 pub(crate) fn candidate_dirs_for(shell: ShellArg) -> Vec<PathBuf> {
-    if let Ok(override_dir) = std::env::var("WRIGHT_COMPLETION_DIR") {
-        if !override_dir.is_empty() {
-            return vec![PathBuf::from(override_dir)];
-        }
+    if let Some(override_dir) = completion_override_dir() {
+        return vec![override_dir];
     }
 
     let Ok((home, data_home, config_home)) = completion_dirs() else {
@@ -398,12 +392,7 @@ fn print_guidance(shell: ShellArg, target_file: &Path) {
 
 pub(crate) fn run_install(args: &CompletionInstallArgs) -> Result<u8, CompletionError> {
     let shells = if args.all {
-        vec![
-            ShellArg::Bash,
-            ShellArg::Zsh,
-            ShellArg::Fish,
-            ShellArg::PowerShell,
-        ]
+        ShellArg::ALL.to_vec()
     } else {
         vec![match args.effective_shell() {
             Some(s) => s,
@@ -419,14 +408,8 @@ pub(crate) fn run_install(args: &CompletionInstallArgs) -> Result<u8, Completion
 }
 
 pub(crate) fn refresh_installed_completions() -> Result<usize, String> {
-    let shells = [
-        ShellArg::Bash,
-        ShellArg::Zsh,
-        ShellArg::Fish,
-        ShellArg::PowerShell,
-    ];
     let mut refreshed = 0;
-    for shell in shells {
+    for shell in ShellArg::ALL {
         let filename = filename_for(shell);
         for dir in candidate_dirs_for(shell) {
             let target_file = dir.join(filename);

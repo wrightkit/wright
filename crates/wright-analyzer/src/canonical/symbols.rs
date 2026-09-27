@@ -25,11 +25,10 @@ impl SymbolId {
 fn append_named_symbols<'a>(
     symbols: &mut Vec<Symbol>,
     program: &Program,
-    kind: SymbolKind,
-    names: impl Iterator<Item = &'a str>,
+    named: impl Iterator<Item = (SymbolKind, &'a str)>,
 ) {
-    let prefix = kind.declaration_prefix();
-    for name in names {
+    for (kind, name) in named {
+        let prefix = kind.declaration_prefix();
         let id = SymbolId::from_index(symbols.len());
         let occurrence = declaration_span(program, prefix, name);
         symbols.push(Symbol {
@@ -152,29 +151,22 @@ impl SemanticIndex {
         append_named_symbols(
             &mut symbols,
             program,
-            SymbolKind::GlobalVariable,
             program
                 .global_variables
                 .iter()
-                .map(|variable| variable.name.as_str()),
-        );
-        append_named_symbols(
-            &mut symbols,
-            program,
-            SymbolKind::PlayerVariable,
-            program
-                .player_variables
-                .iter()
-                .map(|variable| variable.name.as_str()),
-        );
-        append_named_symbols(
-            &mut symbols,
-            program,
-            SymbolKind::Subroutine,
-            program
-                .subroutines
-                .iter()
-                .map(|subroutine| subroutine.name.as_str()),
+                .map(|variable| (SymbolKind::GlobalVariable, variable.name.as_str()))
+                .chain(
+                    program
+                        .player_variables
+                        .iter()
+                        .map(|variable| (SymbolKind::PlayerVariable, variable.name.as_str())),
+                )
+                .chain(
+                    program
+                        .subroutines
+                        .iter()
+                        .map(|subroutine| (SymbolKind::Subroutine, subroutine.name.as_str())),
+                ),
         );
         for (rule, data) in program.rules.iter().enumerate() {
             let id = SymbolId::from_index(symbols.len());
@@ -228,13 +220,13 @@ impl SemanticIndex {
     ) -> Self {
         let mut index = Self::build(program);
         for symbol in &mut index.symbols {
-            let prefixes = match symbol.kind {
-                SymbolKind::GlobalVariable => &["globalvar "][..],
-                SymbolKind::PlayerVariable => &["playervar "][..],
-                SymbolKind::Subroutine => &["subroutine "][..],
-                SymbolKind::Rule => &[][..],
-            };
-            if let Some(span) = declaration_span_in_sources(sources, prefixes, &symbol.name) {
+            if symbol.kind != SymbolKind::Rule
+                && let Some(span) = declaration_span_in_sources(
+                    sources,
+                    &[symbol.kind.declaration_prefix()],
+                    &symbol.name,
+                )
+            {
                 symbol.span = Some(declaration_line_span(sources, span));
                 symbol.occurrence = Some(span);
             }
@@ -380,7 +372,7 @@ impl SemanticIndex {
                     Some(rule),
                     None,
                     None,
-                    action_occurrence(program, program.rule_span(rule), name),
+                    source_occurrence(program, program.rule_span(rule), name, true),
                 );
             }
         }
@@ -422,7 +414,7 @@ impl SemanticIndex {
                     Some(rule),
                     Some(action_id),
                     None,
-                    action_occurrence(program, span, name),
+                    source_occurrence(program, span, name, true),
                 );
                 if reads_old_value {
                     self.push(
@@ -485,7 +477,7 @@ impl SemanticIndex {
                             Some(rule),
                             action,
                             Some(value_id),
-                            value_occurrence(program, span, name).or(span),
+                            source_occurrence(program, span, name, false),
                         );
                     }
                 }
@@ -497,7 +489,7 @@ impl SemanticIndex {
                             Some(rule),
                             action,
                             Some(value_id),
-                            value_occurrence(program, span, variable).or(span),
+                            source_occurrence(program, span, variable, false),
                         );
                     }
                 }
@@ -676,18 +668,17 @@ fn is_code_position(chars: &[char], position: usize) -> bool {
     !quoted
 }
 
-fn action_occurrence(program: &Program, span: Option<Span>, name: &str) -> Option<Span> {
+pub(super) fn source_occurrence(
+    program: &Program,
+    span: Option<Span>,
+    name: &str,
+    before_assignment: bool,
+) -> Option<Span> {
     let span = span?;
     let Some(source_doc) = program.source(span.file) else {
         return Some(span);
     };
-    Some(find_occurrence(source_doc.text(), span, name, true, 0, false).unwrap_or(span))
-}
-
-pub(super) fn value_occurrence(program: &Program, span: Option<Span>, name: &str) -> Option<Span> {
-    let span = span?;
-    let Some(source_doc) = program.source(span.file) else {
-        return Some(span);
-    };
-    Some(find_occurrence(source_doc.text(), span, name, false, 0, false).unwrap_or(span))
+    Some(
+        find_occurrence(source_doc.text(), span, name, before_assignment, 0, false).unwrap_or(span),
+    )
 }

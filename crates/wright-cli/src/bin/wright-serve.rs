@@ -70,35 +70,28 @@ fn main() -> ExitCode {
 }
 
 fn serve_stdio(service: &mut ToolService<'_>) -> ExitCode {
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    for line in std::io::stdin().lock().lines().map_while(Result::ok) {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let resp = dispatch(service, &line);
-        if writeln!(out, "{resp}").is_err() {
-            break;
-        }
-    }
-    ExitCode::SUCCESS
+    serve_lines(|line| Some(dispatch(service, line)))
 }
 
 fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
+    serve_lines(|line| {
+        match serde_json::from_str(line) {
+            Ok(value) => jsonrpc_dispatch(service, value),
+            Err(_) => Some(jsonrpc_error(Value::Null, -32700, "Parse error")),
+        }
+        .map(|response| response.to_string())
+    })
+}
+
+fn serve_lines(mut dispatch: impl FnMut(&str) -> Option<String>) -> ExitCode {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     for line in std::io::stdin().lock().lines().map_while(Result::ok) {
         if line.trim().is_empty() {
             continue;
         }
-        let resp = match serde_json::from_str(&line) {
-            Ok(val) => jsonrpc_dispatch(service, val),
-            Err(_) => Some(jsonrpc_error(Value::Null, -32700, "Parse error")),
-        };
-        if let Some(r) = resp {
-            if writeln!(out, "{r}").is_err() {
-                break;
-            }
+        if dispatch(&line).is_some_and(|response| writeln!(out, "{response}").is_err()) {
+            break;
         }
     }
     ExitCode::SUCCESS

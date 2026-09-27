@@ -305,21 +305,26 @@ pub(crate) enum ShellArg {
 }
 
 impl ShellArg {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub(crate) const ALL: [Self; 4] = [Self::Bash, Self::Zsh, Self::Fish, Self::PowerShell];
+
+    pub(crate) fn metadata(self) -> (&'static str, &'static str, clap_complete::Shell) {
         match self {
-            ShellArg::Bash => "bash",
-            ShellArg::Zsh => "zsh",
-            ShellArg::Fish => "fish",
-            ShellArg::PowerShell => "powershell",
+            Self::Bash => ("bash", "wright", clap_complete::Shell::Bash),
+            Self::Zsh => ("zsh", "_wright", clap_complete::Shell::Zsh),
+            Self::Fish => ("fish", "wright.fish", clap_complete::Shell::Fish),
+            Self::PowerShell => (
+                "powershell",
+                "_wright.ps1",
+                clap_complete::Shell::PowerShell,
+            ),
         }
     }
 
+    pub(crate) fn as_str(&self) -> &'static str {
+        self.metadata().0
+    }
+
     pub(crate) fn to_clap_shell(self) -> clap_complete::Shell {
-        match self {
-            ShellArg::Bash => clap_complete::Shell::Bash,
-            ShellArg::Zsh => clap_complete::Shell::Zsh,
-            ShellArg::Fish => clap_complete::Shell::Fish,
-            ShellArg::PowerShell => clap_complete::Shell::PowerShell,
-        }
+        self.metadata().2
     }
 }

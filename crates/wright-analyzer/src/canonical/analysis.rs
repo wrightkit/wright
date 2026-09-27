@@ -4,7 +4,7 @@ use workshop_rs::source::Span;
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
 use super::cfg::{is_wait, matching_end};
-use super::symbols::{ActionId, RuleId, ValueId, value_identity_map, value_occurrence};
+use super::symbols::{ActionId, RuleId, ValueId, source_occurrence, value_identity_map};
 use super::traversal::{visit_action_roots, visit_value_tree};
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::LintConfig;
@@ -58,10 +58,11 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                             severity: Severity::Info,
                             message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
                                 .into(),
-                            span: value_occurrence(
+                            span: source_occurrence(
                                 program,
                                 program.action_span(rule_id, start + offset),
                                 name,
+                                false,
                             ),
                             rule: rule_id,
                             action: Some(action_id),
@@ -231,7 +232,7 @@ fn ongoing_condition_findings(
                     "geometry predicate in an ongoing-rule condition {} of {condition_count} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
                     index + 1,
                 ),
-                span: value_occurrence(program, span, name).or(span),
+                span: source_occurrence(program, span, name, false),
                 rule: rule_id,
                 action: None,
                 value: value_ids.get(&(value as *const Value as usize)).copied(),
