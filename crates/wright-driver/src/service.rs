@@ -26,6 +26,7 @@ use wright_analyzer::service::{Request, Response};
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 
 /// A tool request: the owned query surface plus agent-oriented operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +34,14 @@ pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum ToolRequest {
     /// Service identity, contract, and supported operations.
     Capabilities,
+    /// Compile the loaded project.
+    Compile,
+    /// Check the loaded project.
+    Check,
+    /// Analyze the loaded project.
+    Analyze,
+    /// Inspect the loaded project.
+    Inspect,
     /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
     /// Every rule.
@@ -144,6 +153,7 @@ pub struct Capabilities {
     pub name: String,
     pub version: String,
     pub contract: String,
+    pub agent_contract: String,
     pub operations: Vec<String>,
     pub languages: Vec<String>,
     pub profiles: Vec<String>,
@@ -184,6 +194,7 @@ impl<'a> ToolService<'a> {
             name: SERVICE_NAME.to_string(),
             version: SERVICE_VERSION.to_string(),
             contract: RESULT_CONTRACT.to_string(),
+            agent_contract: AGENT_CONTRACT.to_string(),
             operations: vec![
                 "capabilities",
                 "project",
@@ -221,11 +232,30 @@ impl<'a> ToolService<'a> {
     }
 
     /// Handle one tool request, returning a structured owned response.
-    pub fn handle(&self, request: &ToolRequest) -> ToolResponse {
+    pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
         match request {
             ToolRequest::Capabilities => ToolResponse::Ok {
                 result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
             },
+            ToolRequest::Compile => {
+                let result =
+                    serde_json::to_value(self.compile()).expect("compile result serializes");
+                ToolResponse::Ok { result }
+            }
+            ToolRequest::Check => {
+                let result = serde_json::to_value(self.check()).expect("check result serializes");
+                ToolResponse::Ok { result }
+            }
+            ToolRequest::Analyze => {
+                let result =
+                    serde_json::to_value(self.analyze()).expect("analyze result serializes");
+                ToolResponse::Ok { result }
+            }
+            ToolRequest::Inspect => {
+                let result =
+                    serde_json::to_value(self.inspect()).expect("inspect result serializes");
+                ToolResponse::Ok { result }
+            }
             ToolRequest::Project => self.ok(self.project()),
             ToolRequest::Rules => self.semantic_query(Request::ListRules),
             ToolRequest::Symbols { kind } => {

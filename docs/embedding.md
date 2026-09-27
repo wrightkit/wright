@@ -11,11 +11,11 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::{CompilerSession, SessionConfig, InputSpec, SourceKind, OutputFormat, Profile}` | **stable** | One driver for compile/check/analyze/inspect/lint; `load()` is idempotent |
 | `wright_driver::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit}` | **stable** | Transport-neutral workflow phase events; no terminal presentation or machine-result mutation |
 | `wright_driver::{Envelope, CompileResult, CheckResult, AnalyzeResult, InspectResult, LintResult, Diagnostic, CompiledOutput}` | **stable** | `wright-result/v1` machine contract ([`docs/cli.md`](cli.md)) |
-| `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool queries (project/rules/symbols/references/usage/CFG/findings/lint/lintRules/callGraph/costEstimate/targetMetadata/capabilities) plus validated mutation (`validateEditTransaction`, `semanticRename`, #130) |
+| `wright_driver::service::{ToolService, ToolRequest, ToolResponse, Capabilities}` | **stable** | Session-aware tool contract `wright-agent/v1` ([`docs/agent-contract.md`](agent-contract.md)); capability discovery, queries, workflows, and validated mutation |
 | `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Source-edit transactions; validated through the correct owner-backed project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
-| `wright-serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService`; MCP not implemented (no agent evidence) |
+| `wright serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
 | `wright-transform` passes | experimental per pass | Only evidence-backed passes ship in `compat`; `aggressive` is an explicit experimental marker |
 
 The Rust packages in this workspace are implementation packages for the Wright
@@ -69,8 +69,11 @@ strings, ANSI, percentages, or fabricated completion estimates.
 
 `ToolService::new(&mut session)` loads the program eagerly and answers typed
 [`ToolRequest`]s with owned [`ToolResponse`]s. `Capabilities` negotiates the
-service version, contract (`wright-result/v1`), operations, languages, and
-profiles. Cost inspection (`costEstimate`) distinguishes exact
+service version, `wright-agent/v1` request/response contract,
+`wright-result/v1` workflow envelope, operations, languages, and profiles.
+The operation schemas, error model, and transport mapping are specified in the
+[Wright Agent Contract](agent-contract.md). Cost inspection (`costEstimate`)
+distinguishes exact
 target-resource counts (emitted bytes, WIR nodes, waits) from static
 findings and from compiler-host performance (measured by `wright-bench`, not
 in-process). Target/catalog metadata enables reasoning about Workshop
@@ -129,20 +132,21 @@ explicit caller responsibility.
 
 ## Transports
 
-`wright-serve` exposes the same operations over stdio JSON-lines and
-JSON-RPC 2.0; both are thin mappings with identical semantics to in-process
-consumers (equivalence tested). JSON-RPC protocol failures use the standard
-top-level `error` member, while a `ToolResponse::Error` remains an application
+`wright serve` exposes the same operations over stdio JSON-lines and JSON-RPC
+2.0; both map to the same `ToolService` results as in-process consumers
+(equivalence tested). The separate `wright-serve` workspace binary remains an
+alias for the same adapter. JSON-RPC protocol failures use the standard
+top-level `error` member, while a service refusal remains an application
 result under the top-level `result` member. Non-empty JSON-RPC arrays are
 handled as batches, with notification responses omitted.
 
 ## Versioning
 
-* `wright-result/v1` and `wright-embedding/v1` are additive within major
-  version 1: new optional fields and new operations are allowed; removed or
-  renamed fields/ops require a major version.
-* Envelope `wright.version` + `wright.contract` identify the producer;
-  `ToolService::capabilities()` identifies the service.
+* `wright-agent/v1`, `wright-result/v1`, and `wright-embedding/v1` are
+  additive within major version 1: new optional fields and operations are
+  allowed; removed or renamed fields/ops require a major version.
+* Envelope `wright.version` + `wright.contract` identify the result producer;
+  `ToolService::capabilities()` identifies the service and agent contract.
 * The release tarball's `version.json` is the authoritative artifact stamp.
 
 ## External consumer evidence

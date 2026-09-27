@@ -2,6 +2,7 @@ mod cli;
 mod completion;
 mod present;
 mod provider;
+mod serve;
 mod update;
 
 use std::io::Read;
@@ -62,6 +63,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Command::SemanticCompare(args)) => run_semantic_compare(args),
+        Some(Command::Serve(args)) => serve::run(args),
         Some(Command::Completion(args)) => match args.subcommand {
             Some(cli::CompletionSubcommand::Install(install_args)) => {
                 match completion::run_install(&install_args) {
@@ -194,6 +196,7 @@ fn run_workflow(command: Command) -> ExitCode {
         Command::Completion(_)
         | Command::Update(_)
         | Command::Provider(_)
+        | Command::Serve(_)
         | Command::Help
         | Command::Version
         | Command::SemanticCompare(_) => {

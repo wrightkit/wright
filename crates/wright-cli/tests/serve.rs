@@ -6,6 +6,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+fn wright() -> &'static str {
+    env!("CARGO_BIN_EXE_wright")
+}
+
 fn wright_serve() -> &'static str {
     env!("CARGO_BIN_EXE_wright-serve")
 }
@@ -22,8 +26,17 @@ fn corpus_workshop(id: &str) -> PathBuf {
 }
 
 fn run_lines(transport: &str, input: &Path, lines: &[&str]) -> Vec<serde_json::Value> {
-    let mut child = Command::new(wright_serve())
-        .args(["--transport", transport])
+    run_lines_with(wright(), &["serve", "--transport", transport], input, lines)
+}
+
+fn run_lines_with(
+    executable: &str,
+    args: &[&str],
+    input: &Path,
+    lines: &[&str],
+) -> Vec<serde_json::Value> {
+    let mut child = Command::new(executable)
+        .args(args)
         .arg(input)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -62,6 +75,7 @@ fn stdio_transport_serves_structured_queries() {
     );
     assert_eq!(responses.len(), 4);
     assert_eq!(responses[0]["result"]["contract"], "wright-result/v1");
+    assert_eq!(responses[0]["result"]["agent_contract"], "wright-agent/v1");
     assert_eq!(responses[1]["result"]["origin"]["kind"], "workshop");
     assert!(responses[2]["result"].as_array().unwrap().is_empty());
     assert!(
@@ -103,6 +117,73 @@ fn jsonrpc_transport_serves_requests_and_workflows() {
         assert!(response.get("result").is_some());
         assert!(response.get("error").is_none());
     }
+}
+
+#[test]
+fn workflows_have_equivalent_results_through_agent_requests_and_legacy_methods() {
+    let input = corpus_workshop("synthetic/control-flow");
+    let stdio = run_lines(
+        "stdio",
+        &input,
+        &[
+            r#"{"op":"compile"}"#,
+            r#"{"op":"check"}"#,
+            r#"{"op":"analyze"}"#,
+            r#"{"op":"inspect"}"#,
+        ],
+    );
+    let jsonrpc_requests = run_lines(
+        "jsonrpc",
+        &input,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"compile"}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"request","params":{"op":"check"}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"request","params":{"op":"analyze"}}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"request","params":{"op":"inspect"}}"#,
+        ],
+    );
+    let jsonrpc_methods = run_lines(
+        "jsonrpc",
+        &input,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"compile"}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"check"}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"analyze"}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"inspect"}"#,
+        ],
+    );
+    for (index, command) in ["compile", "check", "analyze", "inspect"]
+        .iter()
+        .enumerate()
+    {
+        let result = &stdio[index]["result"];
+        assert_eq!(result["command"], *command);
+        assert_eq!(result, &jsonrpc_requests[index]["result"]);
+        assert_eq!(result, &jsonrpc_methods[index]["result"]);
+    }
+}
+
+#[test]
+fn standalone_wright_serve_binary_matches_the_installed_subcommand() {
+    let input = corpus_workshop("synthetic/basic-rule");
+    let cli = run_lines("stdio", &input, &[r#"{"op":"capabilities"}"#]);
+    let standalone = run_lines_with(
+        wright_serve(),
+        &["--transport", "stdio"],
+        &input,
+        &[r#"{"op":"capabilities"}"#],
+    );
+    assert_eq!(cli[0], standalone[0]);
+}
+
+#[test]
+fn serve_reserves_stdin_for_session_requests() {
+    let output = Command::new(wright())
+        .args(["serve", "-"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("reserves stdin for requests"));
 }
 
 #[test]
@@ -252,6 +333,7 @@ fn capability_negotiation_is_preserved() {
             .unwrap()
             .starts_with("wright-result/")
     );
+    assert_eq!(capabilities["agent_contract"], "wright-agent/v1");
 }
 
 #[test]

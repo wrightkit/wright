@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wrightkit.dev/schemas/wright-agent-v1.schema.json",
+  "title": "Wright agent contract v1",
+  "$defs": {
+    "ToolRequest": {
+      "oneOf": [
+        { "$ref": "#/$defs/CapabilitiesRequest" },
+        { "$ref": "#/$defs/CompileRequest" },
+        { "$ref": "#/$defs/CheckRequest" },
+        { "$ref": "#/$defs/AnalyzeRequest" },
+        { "$ref": "#/$defs/InspectRequest" },
+        { "$ref": "#/$defs/ProjectRequest" },
+        { "$ref": "#/$defs/RulesRequest" },
+        { "$ref": "#/$defs/SymbolsRequest" },
+        { "$ref": "#/$defs/ReferencesRequest" },
+        { "$ref": "#/$defs/UsageRequest" },
+        { "$ref": "#/$defs/CfgRequest" },
+        { "$ref": "#/$defs/FindingsRequest" },
+        { "$ref": "#/$defs/PersistentObjectsRequest" },
+        { "$ref": "#/$defs/LintRequest" },
+        { "$ref": "#/$defs/LintRulesRequest" },
+        { "$ref": "#/$defs/CallGraphRequest" },
+        { "$ref": "#/$defs/CostEstimateRequest" },
+        { "$ref": "#/$defs/TargetMetadataRequest" },
+        { "$ref": "#/$defs/ValidateEditTransactionRequest" },
+        { "$ref": "#/$defs/SemanticRenameRequest" },
+        { "$ref": "#/$defs/ProviderSemanticRenameRequest" },
+        { "$ref": "#/$defs/ProviderValidateEditRequest" }
+      ]
+    },
+    "ToolResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["result"],
+          "properties": { "result": {} },
+          "not": { "required": ["error"] },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["error"],
+          "properties": { "error": { "$ref": "#/$defs/ToolErrorInfo" } },
+          "not": { "required": ["result"] },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "ToolErrorInfo": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Capabilities": {
+      "type": "object",
+      "required": ["name", "version", "contract", "agent_contract", "operations", "languages", "profiles"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "contract": { "const": "wright-result/v1" },
+        "agent_contract": { "const": "wright-agent/v1" },
+        "operations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "profiles": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "Sources": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "EditRange": {
+      "type": "object",
+      "required": ["start_line", "start_col", "end_line", "end_col"],
+      "properties": {
+        "start_line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "start_col": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "end_line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "end_col": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      },
+      "additionalProperties": false
+    },
+    "SourceEdit": {
+      "type": "object",
+      "required": ["kind", "source", "source_identity", "range", "new_text"],
+      "properties": {
+        "kind": { "type": "string" },
+        "source": { "type": "string" },
+        "source_identity": { "type": "string" },
+        "range": { "$ref": "#/$defs/EditRange" },
+        "new_text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "EditTransaction": {
+      "type": "object",
+      "required": ["edits"],
+      "properties": {
+        "edits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SourceEdit" } }
+      },
+      "additionalProperties": false
+    },
+    "RenameTarget": {
+      "type": "object",
+      "required": ["source", "line", "col", "to"],
+      "properties": {
+        "source": { "type": "string" },
+        "line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "col": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "to": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Document": {
+      "type": "object",
+      "required": ["uri", "languageId", "version", "text"],
+      "properties": {
+        "uri": { "type": "string" },
+        "languageId": { "type": "string" },
+        "version": { "type": "integer" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "DocumentSet": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Document" }
+    },
+    "Position": {
+      "type": "object",
+      "required": ["line", "character"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "character": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      },
+      "additionalProperties": false
+    },
+    "CapabilitiesRequest": { "type": "object", "properties": { "op": { "const": "capabilities" } }, "required": ["op"], "additionalProperties": false },
+    "CompileRequest": { "type": "object", "properties": { "op": { "const": "compile" } }, "required": ["op"], "additionalProperties": false },
+    "CheckRequest": { "type": "object", "properties": { "op": { "const": "check" } }, "required": ["op"], "additionalProperties": false },
+    "AnalyzeRequest": { "type": "object", "properties": { "op": { "const": "analyze" } }, "required": ["op"], "additionalProperties": false },
+    "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" } }, "required": ["op"], "additionalProperties": false },
+    "ProjectRequest": { "type": "object", "properties": { "op": { "const": "project" } }, "required": ["op"], "additionalProperties": false },
+    "RulesRequest": { "type": "object", "properties": { "op": { "const": "rules" } }, "required": ["op"], "additionalProperties": false },
+    "SymbolsRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "symbols" }, "kind": { "type": ["string", "null"] } },
+      "required": ["op"],
+      "additionalProperties": false
+    },
+    "ReferencesRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "references" }, "symbol": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "required": ["op", "symbol"],
+      "additionalProperties": false
+    },
+    "UsageRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "usage" }, "symbol": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "required": ["op", "symbol"],
+      "additionalProperties": false
+    },
+    "CfgRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "cfg" }, "rule": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "required": ["op", "rule"],
+      "additionalProperties": false
+    },
+    "FindingsRequest": { "type": "object", "properties": { "op": { "const": "findings" } }, "required": ["op"], "additionalProperties": false },
+    "PersistentObjectsRequest": { "type": "object", "properties": { "op": { "const": "persistentObjects" } }, "required": ["op"], "additionalProperties": false },
+    "LintRequest": { "type": "object", "properties": { "op": { "const": "lint" } }, "required": ["op"], "additionalProperties": false },
+    "LintRulesRequest": { "type": "object", "properties": { "op": { "const": "lintRules" } }, "required": ["op"], "additionalProperties": false },
+    "CallGraphRequest": { "type": "object", "properties": { "op": { "const": "callGraph" } }, "required": ["op"], "additionalProperties": false },
+    "CostEstimateRequest": { "type": "object", "properties": { "op": { "const": "costEstimate" } }, "required": ["op"], "additionalProperties": false },
+    "TargetMetadataRequest": { "type": "object", "properties": { "op": { "const": "targetMetadata" } }, "required": ["op"], "additionalProperties": false },
+    "ValidateEditTransactionRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "validateEditTransaction" },
+        "sources": { "$ref": "#/$defs/Sources" },
+        "transaction": { "$ref": "#/$defs/EditTransaction" }
+      },
+      "required": ["op", "sources", "transaction"],
+      "additionalProperties": false
+    },
+    "SemanticRenameRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "semanticRename" },
+        "sources": { "$ref": "#/$defs/Sources" },
+        "target": { "$ref": "#/$defs/RenameTarget" }
+      },
+      "required": ["op", "sources", "target"],
+      "additionalProperties": false
+    },
+    "ProviderSemanticRenameRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "providerSemanticRename" },
+        "language_id": { "type": "string" },
+        "documents": { "$ref": "#/$defs/DocumentSet" },
+        "position_document_uri": { "type": "string" },
+        "position": { "$ref": "#/$defs/Position" },
+        "new_name": { "type": "string" },
+        "project_root": { "type": ["string", "null"] },
+        "sources": { "$ref": "#/$defs/Sources" }
+      },
+      "required": ["op", "language_id", "documents", "position_document_uri", "position", "new_name", "sources"],
+      "additionalProperties": false
+    },
+    "ProviderValidateEditRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "providerValidateEdit" },
+        "language_id": { "type": "string" },
+        "documents": { "$ref": "#/$defs/DocumentSet" },
+        "transaction": { "$ref": "#/$defs/EditTransaction" },
+        "sources": { "$ref": "#/$defs/Sources" },
+        "project_root": { "type": ["string", "null"] }
+      },
+      "required": ["op", "language_id", "documents", "transaction", "sources"],
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/ToolRequest"
+}

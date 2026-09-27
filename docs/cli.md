@@ -44,6 +44,10 @@ See [machine-readable CLI contracts](cli/machine-contract.md).
 
 See [machine-readable CLI contracts](cli/machine-contract.md).
 
+## `wright serve` agent session
+
+See the [versioned Wright Agent Contract](agent-contract.md).
+
 ## Determinism
 
 See [machine-readable CLI contracts](cli/machine-contract.md).
