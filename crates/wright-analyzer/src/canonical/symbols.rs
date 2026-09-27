@@ -209,15 +209,15 @@ impl SemanticIndex {
     ) -> Self {
         let mut index = Self::build(program);
         for symbol in &mut index.symbols {
-            if symbol.kind != SymbolKind::Rule
-                && let Some(span) = declaration_span_in_sources(
+            if symbol.kind != SymbolKind::Rule {
+                if let Some(span) = declaration_span_in_sources(
                     sources,
                     &[symbol.kind.declaration_prefix()],
                     &symbol.name,
-                )
-            {
-                symbol.span = Some(declaration_line_span(sources, span));
-                symbol.occurrence = Some(span);
+                ) {
+                    symbol.span = Some(declaration_line_span(sources, span));
+                    symbol.occurrence = Some(span);
+                }
             }
         }
         index.add_missing_declarations();

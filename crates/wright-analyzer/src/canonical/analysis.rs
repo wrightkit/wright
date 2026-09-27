@@ -246,10 +246,10 @@ fn ongoing_condition_findings(
 
 fn collect_expensive_values<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
     visit_value_tree(value, None, &mut |value, _| {
-        if let Value::Call { name, .. } = value
-            && ["distance", "raycast", "isInLoS"].contains(&name.as_str())
-        {
-            out.push(value);
+        if let Value::Call { name, .. } = value {
+            if ["distance", "raycast", "isInLoS"].contains(&name.as_str()) {
+                out.push(value);
+            }
         }
         0
     });
