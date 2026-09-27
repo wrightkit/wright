@@ -283,10 +283,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
         other => other,
     };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = config
-        .root
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let root = config.root.clone().unwrap_or_else(|| cwd.clone());
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
         kind,

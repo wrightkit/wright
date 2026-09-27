@@ -273,9 +273,6 @@ fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>,
     for diag in &envelope.diagnostics {
         render_diagnostic(diag, color);
     }
-    if envelope.command == "check" {
-        envelope.result.render_check_summary();
-    }
     if !envelope.ok {
         if envelope.diagnostics.is_empty() {
             eprintln!("{}: failed", envelope.command);
@@ -438,7 +435,6 @@ pub(crate) trait ResultPresentation {
         None
     }
     fn render_body(&self);
-    fn render_check_summary(&self) {}
     fn render_github_findings(&self) {}
     fn update_summary_status(&self, _status: &mut SummaryStatus) {}
 }
@@ -745,11 +741,7 @@ fn render_inspect(result: &InspectResult) {
 }
 
 fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
-    let sev = match diagnostic.severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "info",
-    };
+    let sev = diagnostic.severity.as_str();
     let label = if color {
         let code = match diagnostic.severity {
             Severity::Error => "31",

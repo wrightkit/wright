@@ -55,18 +55,6 @@ pub(crate) enum InstallStatus {
     DryRun(PathBuf),
 }
 
-impl InstallStatus {
-    #[allow(dead_code)]
-    pub(crate) fn path(&self) -> &Path {
-        match self {
-            InstallStatus::Created(p)
-            | InstallStatus::Updated(p)
-            | InstallStatus::UpToDate(p)
-            | InstallStatus::DryRun(p) => p,
-        }
-    }
-}
-
 pub(crate) fn generate_script(shell: ShellArg) -> Vec<u8> {
     let mut command = Cli::command();
     let mut buffer = Vec::new();
@@ -161,13 +149,19 @@ fn user_home_dir() -> Result<PathBuf, CompletionError> {
         })
 }
 
-fn xdg_dir(var: &str, default_sub: &str) -> Result<PathBuf, CompletionError> {
-    if let Ok(dir) = std::env::var(var) {
-        if !dir.is_empty() {
-            return Ok(PathBuf::from(dir));
-        }
-    }
-    Ok(user_home_dir()?.join(default_sub))
+fn xdg_dir(home: &Path, var: &str, default_sub: &str) -> PathBuf {
+    std::env::var(var)
+        .ok()
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(default_sub))
+}
+
+fn completion_dirs() -> Result<(PathBuf, PathBuf, PathBuf), CompletionError> {
+    let home = user_home_dir()?;
+    let data_home = xdg_dir(&home, "XDG_DATA_HOME", ".local/share");
+    let config_home = xdg_dir(&home, "XDG_CONFIG_HOME", ".config");
+    Ok((home, data_home, config_home))
 }
 
 pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionError> {
@@ -177,9 +171,7 @@ pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionErro
         }
     }
 
-    let home = user_home_dir()?;
-    let data_home = xdg_dir("XDG_DATA_HOME", ".local/share")?;
-    let config_home = xdg_dir("XDG_CONFIG_HOME", ".config")?;
+    let (home, data_home, config_home) = completion_dirs()?;
 
     match shell {
         ShellArg::Fish => {
@@ -247,13 +239,7 @@ pub(crate) fn candidate_dirs_for(shell: ShellArg) -> Vec<PathBuf> {
         }
     }
 
-    let Ok(home) = user_home_dir() else {
-        return Vec::new();
-    };
-    let Ok(data_home) = xdg_dir("XDG_DATA_HOME", ".local/share") else {
-        return Vec::new();
-    };
-    let Ok(config_home) = xdg_dir("XDG_CONFIG_HOME", ".config") else {
+    let Ok((home, data_home, config_home)) = completion_dirs() else {
         return Vec::new();
     };
 

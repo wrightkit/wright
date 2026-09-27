@@ -147,6 +147,10 @@ impl CompilerSession {
         &self.lint_registry
     }
 
+    pub(crate) fn catalog(&self) -> &workshop_rs::catalog::Catalog {
+        &self.catalog
+    }
+
     fn progress(&self, event: ProgressEvent) {
         if let Some(observer) = &self.progress_observer {
             observer.on_progress(event);
@@ -200,7 +204,7 @@ impl CompilerSession {
             SourceBackend::Provider => true,
             SourceBackend::Auto => resolved.kind == SourceKind::Opy,
         };
-        if provider_backend && resolved.kind == SourceKind::Ostw {
+        if resolved.kind == SourceKind::Ostw {
             return Err(source_provider_unavailable());
         }
         if self.config.source_backend == SourceBackend::Provider && resolved.kind != SourceKind::Opy
@@ -213,9 +217,6 @@ impl CompilerSession {
                     resolved.kind.as_str()
                 ),
             ));
-        }
-        if resolved.kind == SourceKind::Ostw {
-            return Err(source_provider_unavailable());
         }
         if provider_backend {
             return self.load_from_source_provider(&mut resolved, provider_operation);
@@ -1004,7 +1005,8 @@ pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loade
             continue;
         };
         if span.is_object() {
-            span["path"] = serde_json::Value::String(span_path(span, loaded));
+            let file = span.get("file").and_then(serde_json::Value::as_u64);
+            span["path"] = serde_json::Value::String(span_path(file, loaded));
         }
     }
 }
@@ -1017,7 +1019,8 @@ fn resolve_nested_span_paths(value: &mut serde_json::Value, loaded: &Loaded) {
                 .iter()
                 .all(|key| object.contains_key(*key))
             {
-                let path = span_path(&serde_json::Value::Object(object.clone()), loaded);
+                let file = object.get("file").and_then(serde_json::Value::as_u64);
+                let path = span_path(file, loaded);
                 object.insert("path".to_string(), serde_json::Value::String(path));
             } else {
                 object
@@ -1032,18 +1035,17 @@ fn resolve_nested_span_paths(value: &mut serde_json::Value, loaded: &Loaded) {
     }
 }
 
-fn span_path(span: &serde_json::Value, loaded: &Loaded) -> String {
+fn span_path(file: Option<u64>, loaded: &Loaded) -> String {
     if loaded.provenance == Provenance::Unmapped {
         "<provider-artifact>".to_string()
     } else if loaded.provenance == Provenance::Mapped {
         // Every mapped file is an authored source; file 0 is not the input.
-        let file = span.get("file").and_then(serde_json::Value::as_u64);
         match file.and_then(|file| loaded.source_files.get(file as usize)) {
             Some(source) => root_relative(Some(Path::new(source)), &loaded.input.root)
                 .unwrap_or_else(|| source.clone()),
             None => "<provider-artifact>".to_string(),
         }
-    } else if let Some(file) = span.get("file").and_then(serde_json::Value::as_u64) {
+    } else if let Some(file) = file {
         if let Some(source) = loaded.source_files.get(file as usize) {
             let p = if file == 0 {
                 loaded
