@@ -22,7 +22,7 @@ fn tool_service_queries_canonical_workshop() {
         ..SessionConfig::default()
     })
     .unwrap();
-    let service = ToolService::new(&mut session).unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
     for request in [
         ToolRequest::Capabilities,
         ToolRequest::Project,
@@ -64,7 +64,7 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         ..SessionConfig::default()
     })
     .unwrap();
-    let service = ToolService::new(&mut session).unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
 
     let lint_rules = match service.handle(&ToolRequest::LintRules) {
         ToolResponse::Ok { result } => result,
@@ -99,6 +99,32 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         .find(|finding| finding["code"] == "min-wait-loop")
         .expect("the fixture triggers min-wait-loop");
     assert_eq!(default_finding["severity"], "warning");
+}
+
+#[test]
+fn tool_service_routes_workflows_through_the_agent_request_contract() {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let capabilities = service.capabilities();
+    assert_eq!(capabilities.agent_contract, "wright-agent/v1");
+    for (request, command) in [
+        (ToolRequest::Compile, "compile"),
+        (ToolRequest::Check, "check"),
+        (ToolRequest::Analyze, "analyze"),
+        (ToolRequest::Inspect, "inspect"),
+    ] {
+        let ToolResponse::Ok { result } = service.handle(&request) else {
+            panic!("{command} returns its structured envelope");
+        };
+        assert_eq!(result["command"], command);
+        assert_eq!(result["wright"]["contract"], "wright-result/v1");
+    }
 }
 
 #[test]

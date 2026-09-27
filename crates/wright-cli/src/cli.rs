@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::serve::ServeArgs;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// The top-level command model used by parsing, help, and completion.
@@ -25,7 +26,8 @@ pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
 Commands check correctness, summarize semantic hotspots, lint, inspect exhaustive
 facts, compile, or reconstruct source through the typed wright-driver result envelope. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
-wright-result/v1 envelope to stdout.
+wright-result/v1 envelope to stdout. `serve` exposes the versioned
+wright-agent/v1 session contract over stdio or JSON-RPC 2.0.
 
 EXIT CODES:
     0  success
@@ -78,6 +80,8 @@ pub(crate) enum Command {
     Update(UpdateArgs),
     /// Manage first-party language providers.
     Provider(ProviderArgs),
+    /// Serve the versioned agent contract over stdio or JSON-RPC 2.0.
+    Serve(ServeArgs),
     /// Show the top-level help.
     Help,
     /// Show version and result-contract metadata.

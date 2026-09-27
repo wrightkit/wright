@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -19,7 +20,12 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(f"native runtime smoke failed: {message}")
 
 
-def run(label: str, command: list[str], env: dict[str, str] | None = None) -> str:
+def run(
+    label: str,
+    command: list[str],
+    env: dict[str, str] | None = None,
+    input_text: str | None = None,
+) -> str:
     print(f"==> native runtime: {label}")
     try:
         result = subprocess.run(
@@ -29,6 +35,7 @@ def run(label: str, command: list[str], env: dict[str, str] | None = None) -> st
             check=True,
             capture_output=True,
             text=True,
+            input=input_text,
         )
     except FileNotFoundError as error:
         fail(f"{label}: missing executable {error.filename}")
@@ -82,6 +89,22 @@ def main() -> None:
         [str(wright), "compile", str(args.compile), "--profile", "compat"],
     )
     run("check", [str(wright), "check", str(args.check), "--profile", "compat"])
+
+    session = run(
+        "agent session",
+        [str(wright), "serve", "--transport", "stdio", "--kind", "workshop", str(args.check)],
+        input_text='{"op":"capabilities"}\n{"op":"check"}\n',
+    )
+    try:
+        responses = [json.loads(line) for line in session.splitlines()]
+    except json.JSONDecodeError as error:
+        fail(f"agent session returned invalid JSON: {error}")
+    if len(responses) != 2:
+        fail(f"agent session returned {len(responses)} responses, expected 2")
+    if responses[0].get("result", {}).get("agent_contract") != "wright-agent/v1":
+        fail("agent session did not negotiate wright-agent/v1")
+    if responses[1].get("result", {}).get("command") != "check":
+        fail("agent session did not return the structured check result")
 
     if args.provider_bootstrap:
         with tempfile.TemporaryDirectory(prefix="wright-provider-smoke-") as store:
