@@ -6,12 +6,14 @@ use std::time::{Duration, Instant};
 
 use wright_driver::CompilerSession;
 use wright_driver::Profile;
-use wright_driver::config::{SessionConfig, SourceKind};
+use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
+use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 
 const BENCH_CONTRACT: &str = "wright-bench/v1";
 const BENCH_CONFIG: &str = r#"{
   "iterations": 5,
   "warmup": 1,
+  "semanticQueryRepeats": 5,
   "thresholds": {
     "maxMeanLatencyMs": 500.0,
     "maxEmittedBytes": 200000,
@@ -76,7 +78,22 @@ struct Report {
     iterations: usize,
     thresholds: serde_json::Value,
     fixtures: Vec<FixtureReport>,
+    semantic_queries: SemanticQueryReport,
     summary: serde_json::Value,
+}
+
+#[derive(serde::Serialize)]
+struct SemanticQueryFixtureReport {
+    fixture: &'static str,
+    service_initialization_mean_ms: f64,
+    repeated_queries_mean_ms: f64,
+    loaded_service_mean_ms: f64,
+}
+
+#[derive(serde::Serialize)]
+struct SemanticQueryReport {
+    workload: serde_json::Value,
+    fixtures: Vec<SemanticQueryFixtureReport>,
 }
 
 fn run() -> Result<bool, String> {
@@ -140,6 +157,12 @@ fn run() -> Result<bool, String> {
         reports.push(report);
     }
 
+    let semantic_queries = benchmark_semantic_queries(
+        iterations,
+        warmup,
+        config["semanticQueryRepeats"].as_u64().unwrap_or(5) as usize,
+    )?;
+
     let rss_mb = peak_rss_mb();
     if rss_mb
         > config["thresholds"]["maxRssMb"]
@@ -156,6 +179,7 @@ fn run() -> Result<bool, String> {
         iterations,
         thresholds: config["thresholds"].clone(),
         fixtures: reports,
+        semantic_queries,
         summary: serde_json::json!({ "peakRssMb": rss_mb, "regressions": regressions }),
     };
     let out = workspace_root().join("target");
@@ -167,6 +191,122 @@ fn run() -> Result<bool, String> {
     .map_err(|e| e.to_string())?;
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
     Ok(regressions.is_empty())
+}
+
+fn benchmark_semantic_queries(
+    iterations: usize,
+    warmup: usize,
+    repeats: usize,
+) -> Result<SemanticQueryReport, String> {
+    let root = workspace_root().join("tests/fixtures/workshop");
+    let cases = benchmark_cases()
+        .into_iter()
+        .filter(|(id, _)| {
+            matches!(
+                *id,
+                "synthetic/declarations-rules"
+                    | "synthetic/control-flow"
+                    | "real-world/overpy-cake"
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut fixtures = Vec::new();
+
+    for (id, path) in cases {
+        let source = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read semantic benchmark fixture '{id}': {e}"))?;
+        for _ in 0..warmup {
+            semantic_query_trial(&source, id, &root, repeats)?;
+        }
+
+        let mut initialization = Vec::with_capacity(iterations);
+        let mut queries = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            let (service_initialization, repeated_queries) =
+                semantic_query_trial(&source, id, &root, repeats)?;
+            initialization.push(service_initialization);
+            queries.push(repeated_queries);
+        }
+        let initialization_ms = mean(&initialization) * 1000.0;
+        let queries_ms = mean(&queries) * 1000.0;
+        fixtures.push(SemanticQueryFixtureReport {
+            fixture: id,
+            service_initialization_mean_ms: initialization_ms,
+            repeated_queries_mean_ms: queries_ms,
+            loaded_service_mean_ms: initialization_ms + queries_ms,
+        });
+    }
+
+    Ok(SemanticQueryReport {
+        workload: serde_json::json!({
+            "fixtures": fixtures.iter().map(|fixture| fixture.fixture).collect::<Vec<_>>(),
+            "requests": ["rules", "symbols", "references(symbol:0)", "usage(symbol:0)", "cfg(rule:0)", "findings", "persistentObjects", "lint", "lintRules", "inspect"],
+            "repeatsPerFixturePerIteration": repeats,
+            "timing": "CompilerSession::load is completed before timing; initialization measures ToolService::new, repeatedQueries measures the listed request sequence, and loadedService is their sum.",
+        }),
+        fixtures,
+    })
+}
+
+fn semantic_query_trial(
+    source: &str,
+    fixture: &str,
+    root: &Path,
+    repeats: usize,
+) -> Result<(Duration, Duration), String> {
+    let safe_name = fixture.replace('/', "-");
+    let input_dir = workspace_root().join("target/wright-bench-inputs");
+    std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
+    let path = input_dir.join(format!(
+        "wright-bench-{}-semantic-{safe_name}.ws",
+        std::process::id()
+    ));
+    std::fs::write(&path, source).map_err(|e| e.to_string())?;
+    let result = (|| {
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(path.clone()),
+            kind: SourceKind::Workshop,
+            root: Some(root.to_path_buf()),
+            profile: Profile::Compat,
+            ..SessionConfig::default()
+        })
+        .map_err(|e| e.message)?;
+        session.load().map_err(|e| e.message)?;
+
+        let start = Instant::now();
+        let mut service = ToolService::new(&mut session).map_err(|e| e.message)?;
+        let initialization = start.elapsed();
+
+        let requests = [
+            ToolRequest::Rules,
+            ToolRequest::Symbols { kind: None },
+            ToolRequest::References { symbol: 0 },
+            ToolRequest::Usage { symbol: 0 },
+            ToolRequest::Cfg { rule: 0 },
+            ToolRequest::Findings,
+            ToolRequest::PersistentObjects,
+            ToolRequest::Lint,
+            ToolRequest::LintRules,
+        ];
+        let start = Instant::now();
+        for _ in 0..repeats {
+            for request in &requests {
+                if let ToolResponse::Error { error } = service.handle(request) {
+                    return Err(format!("{fixture}: {error:?}"));
+                }
+            }
+            let inspection = service.inspect();
+            if !inspection.ok {
+                return Err(format!(
+                    "{fixture}: inspect failed: {:?}",
+                    inspection.diagnostics
+                ));
+            }
+        }
+        Ok((initialization, start.elapsed()))
+    })();
+    let _ = std::fs::remove_file(&path);
+    result
 }
 
 fn compile(

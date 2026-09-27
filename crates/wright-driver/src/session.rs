@@ -680,6 +680,27 @@ impl CompilerSession {
         )
     }
 
+    pub(crate) fn shared_service_with(
+        &self,
+        loaded: &Loaded,
+        config: LintConfig,
+    ) -> SemanticService<'static> {
+        let origin = ServiceOrigin {
+            kind: if loaded.provenance == Provenance::Unmapped {
+                "provider-artifact".to_string()
+            } else {
+                loaded.origin.kind.clone()
+            },
+            locale: loaded.origin.locale.clone(),
+        };
+        SemanticService::with_shared_program(
+            Arc::clone(&loaded.program),
+            origin,
+            config,
+            Arc::clone(&self.lint_registry),
+        )
+    }
+
     /// Structural validation permits source-preserving Workshop fallbacks.
     /// Surface those nodes as blocking semantic diagnostics before presenting
     /// check/lint output as definitive. The catalog remains owned by

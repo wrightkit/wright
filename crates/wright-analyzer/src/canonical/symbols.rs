@@ -293,6 +293,17 @@ impl SemanticIndex {
             .filter(|reference| reference.symbol == symbol)
             .collect()
     }
+    pub(super) fn references_for_all_symbols(&self) -> Vec<Vec<&Reference>> {
+        let mut grouped = (0..self.symbols.len())
+            .map(|_| Vec::new())
+            .collect::<Vec<_>>();
+        for reference in &self.references {
+            if let Some(references) = grouped.get_mut(reference.symbol.index()) {
+                references.push(reference);
+            }
+        }
+        grouped
+    }
     pub fn usage(&self, symbol: SymbolId) -> UsageSummary {
         let mut usage = UsageSummary::default();
         let mut rules = HashSet::new();

@@ -153,13 +153,24 @@ pub struct Capabilities {
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
     loaded: Loaded,
+    semantic: SemanticService<'static>,
+    lint_semantic: Option<SemanticService<'static>>,
 }
 
 impl<'a> ToolService<'a> {
     /// Build the service over a session, loading the program eagerly.
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         let loaded = session.load()?;
-        Ok(ToolService { session, loaded })
+        let semantic =
+            session.shared_service_with(&loaded, wright_analyzer::registry::LintConfig::default());
+        let lint_semantic = (!session.config.lint.rules.is_empty())
+            .then(|| semantic.with_lint_config(session.config.lint.clone()));
+        Ok(ToolService {
+            session,
+            loaded,
+            semantic,
+            lint_semantic,
+        })
     }
 
     /// The loaded program snapshot (origin, input identity, canonical program).
@@ -230,8 +241,7 @@ impl<'a> ToolService<'a> {
             ToolRequest::Findings => self.findings(),
             ToolRequest::PersistentObjects => self.persistent_objects(),
             ToolRequest::Lint => self.lint(),
-            ToolRequest::LintRules => self
-                .semantic_query_with_config(Request::LintRules, self.session.config.lint.clone()),
+            ToolRequest::LintRules => self.configured_semantic().handle(&Request::LintRules),
             ToolRequest::CallGraph => self.ok(self.call_graph()),
             ToolRequest::CostEstimate => self.ok(self.cost_estimate()),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
@@ -312,7 +322,8 @@ impl<'a> ToolService<'a> {
 
     /// Inspect through the shared session pipeline.
     pub fn inspect(&mut self) -> Envelope<InspectResult> {
-        self.session.inspect()
+        self.session
+            .inspect_loaded(self.loaded.clone(), &self.semantic)
     }
 
     /// Spawn the LPP provider client for `language_id` through the session's
@@ -391,32 +402,18 @@ impl<'a> ToolService<'a> {
 
     /// Run one semantic query over the loaded program.
     fn semantic_query(&self, request: Request) -> ToolResponse {
-        self.semantic_query_with_config(request, wright_analyzer::registry::LintConfig::default())
+        self.semantic.handle(&request)
     }
 
-    /// Run one semantic query over the loaded program with an explicit lint
-    /// configuration.
-    fn semantic_query_with_config(
-        &self,
-        request: Request,
-        config: wright_analyzer::registry::LintConfig,
-    ) -> ToolResponse {
-        self.semantic_service(config).handle(&request)
-    }
-
-    fn semantic_service(
-        &self,
-        config: wright_analyzer::registry::LintConfig,
-    ) -> SemanticService<'_> {
-        self.session.service_with(&self.loaded, config)
+    fn configured_semantic(&self) -> &SemanticService<'static> {
+        self.lint_semantic.as_ref().unwrap_or(&self.semantic)
     }
 
     /// `lint`: rule metadata, effective configuration, and findings over the
     /// loaded program through the same semantic-service path as the CLI
     /// `lint` workflow (no duplicated rule execution, #98).
     fn lint(&self) -> ToolResponse {
-        let config = self.session.config.lint.clone();
-        let service = self.semantic_service(config);
+        let service = self.configured_semantic();
         let lint_rules = match service.handle(&Request::LintRules) {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!({}),
