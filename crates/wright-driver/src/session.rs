@@ -245,15 +245,7 @@ impl CompilerSession {
             }
             SourceKind::Ostw => unreachable!(),
         };
-        if self.config.profile != wright_transform::Profile::Off {
-            wright_transform::run_canonical(&mut program, self.config.profile).map_err(|e| {
-                Diagnostic::error(
-                    "transform-error",
-                    Stage::Internal,
-                    format!("Workshop transformation failed: {e}"),
-                )
-            })?;
-        }
+        apply_profile(&mut program, self.config.profile)?;
         let loaded = Loaded {
             program: Arc::new(program),
             origin: resolved.origin.clone(),
@@ -431,16 +423,8 @@ impl CompilerSession {
         })?;
         if self.config.profile != wright_transform::Profile::Off {
             self.progress(ProgressEvent::new(ProgressPhase::Lowering));
-            wright_transform::run_canonical(&mut program, self.config.profile).map_err(
-                |error| {
-                    Diagnostic::error(
-                        "transform-error",
-                        Stage::Internal,
-                        format!("Workshop transformation failed: {error}"),
-                    )
-                },
-            )?;
         }
+        apply_profile(&mut program, self.config.profile)?;
         resolved.origin.locale = Some(locale.to_string());
         let loaded = Loaded {
             program: Arc::new(program),
@@ -900,6 +884,22 @@ impl CompilerSession {
         };
         self.finish(command, result)
     }
+}
+
+fn apply_profile(
+    program: &mut Program,
+    profile: wright_transform::Profile,
+) -> Result<(), Diagnostic> {
+    if profile != wright_transform::Profile::Off {
+        wright_transform::run_canonical(program, profile).map_err(|error| {
+            Diagnostic::error(
+                "transform-error",
+                Stage::Internal,
+                format!("Workshop transformation failed: {error}"),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// Extract the `result` payload of a semantic-service request as JSON.
