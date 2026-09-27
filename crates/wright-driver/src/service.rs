@@ -382,7 +382,7 @@ impl<'a> ToolService<'a> {
     fn semantic_query_with_resolved_span_paths(&self, request: Request) -> ToolResponse {
         match self.semantic_query(request) {
             ToolResponse::Ok { mut result } => {
-                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
+                crate::session::resolve_span_paths(&mut result, &self.loaded);
                 ToolResponse::Ok { result }
             }
             other => other,
@@ -425,7 +425,7 @@ impl<'a> ToolService<'a> {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!([]),
         };
-        crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
+        crate::session::resolve_span_paths(&mut findings, &self.loaded);
         self.ok(json!({
             "inputIdentity": self.loaded.input.identity,
             "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),

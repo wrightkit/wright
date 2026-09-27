@@ -584,7 +584,7 @@ impl CompilerSession {
                 }
                 let mut facts = semantic_facts(&service);
                 if loaded.provenance == Provenance::Mapped {
-                    resolve_nested_span_paths(&mut facts, &loaded);
+                    resolve_span_paths(&mut facts, &loaded);
                 }
                 AnalyzeResult { program, facts }
             },
@@ -655,7 +655,7 @@ impl CompilerSession {
                     ProgressUnit::Rules,
                 ));
                 let mut findings = service_response(&service, &Request::GetFindings);
-                resolve_finding_span_paths(&mut findings, &loaded);
+                resolve_span_paths(&mut findings, &loaded);
                 let (rules, config, skipped) =
                     if let serde_json::Value::Object(mut object) = lint_rules {
                         (
@@ -985,48 +985,34 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
     })
 }
 
-/// Add the resolved `path` to every finding span.
+/// Add the resolved `path` to every semantic `span` in a JSON result.
 ///
 /// File 0 is the main input and resolves root-relative to the include root
 /// (`--root`, defaulting to the input's directory); other files resolve from
 /// the retained frontend file registry. `<file N>` is the fallback when no
 /// registry entry resolves (matching the [`span_from_json`] convention), and
 /// stdin inputs fall back to their display identity (`<stdin>`).
-pub(crate) fn resolve_finding_span_paths(findings: &mut serde_json::Value, loaded: &Loaded) {
-    let Some(list) = findings.as_array_mut() else {
-        return;
-    };
-    for finding in list {
-        let Some(span) = finding.get_mut("span") else {
-            continue;
-        };
-        if span.is_object() {
-            let file = span.get("file").and_then(serde_json::Value::as_u64);
-            span["path"] = serde_json::Value::String(span_path(file, loaded));
-        }
-    }
-}
-
-/// Add the resolved `path` to every span object nested anywhere in `value`.
-fn resolve_nested_span_paths(value: &mut serde_json::Value, loaded: &Loaded) {
+/// Add the resolved `path` to every `span` object nested anywhere in `value`.
+pub(crate) fn resolve_span_paths(value: &mut serde_json::Value, loaded: &Loaded) {
     match value {
         serde_json::Value::Object(object) => {
-            if ["file", "start", "end"]
-                .iter()
-                .all(|key| object.contains_key(*key))
+            if let Some(span) = object
+                .get_mut("span")
+                .and_then(serde_json::Value::as_object_mut)
             {
-                let file = object.get("file").and_then(serde_json::Value::as_u64);
-                let path = span_path(file, loaded);
-                object.insert("path".to_string(), serde_json::Value::String(path));
-            } else {
-                object
-                    .values_mut()
-                    .for_each(|v| resolve_nested_span_paths(v, loaded));
+                let file = span.get("file").and_then(serde_json::Value::as_u64);
+                span.insert(
+                    "path".to_string(),
+                    serde_json::Value::String(span_path(file, loaded)),
+                );
             }
+            object
+                .values_mut()
+                .for_each(|value| resolve_span_paths(value, loaded));
         }
         serde_json::Value::Array(items) => items
             .iter_mut()
-            .for_each(|v| resolve_nested_span_paths(v, loaded)),
+            .for_each(|value| resolve_span_paths(value, loaded)),
         _ => {}
     }
 }
