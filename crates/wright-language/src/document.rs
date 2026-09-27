@@ -95,21 +95,20 @@ impl DocumentStore {
     }
 
     pub fn text_for_path(&self, path: &PathBuf) -> Option<String> {
-        for doc in self.documents.values() {
-            if uri_to_path(&doc.uri).is_some_and(|p| p == *path) {
-                return Some(doc.text.clone());
-            }
-        }
-        std::fs::read_to_string(path).ok()
+        self.document_for_path(path)
+            .map(|document| document.text.clone())
+            .or_else(|| std::fs::read_to_string(path).ok())
     }
 
     pub fn uri_for_path(&self, path: &PathBuf) -> Option<String> {
-        for doc in self.documents.values() {
-            if uri_to_path(&doc.uri).is_some_and(|p| p == *path) {
-                return Some(doc.uri.clone());
-            }
-        }
-        None
+        self.document_for_path(path)
+            .map(|document| document.uri.clone())
+    }
+
+    fn document_for_path(&self, path: &PathBuf) -> Option<&Document> {
+        self.documents.values().find(|document| {
+            uri_to_path(&document.uri).is_some_and(|document_path| document_path == *path)
+        })
     }
 
     pub fn overlay(&self, root: &PathBuf) -> BTreeMap<String, String> {
