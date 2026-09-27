@@ -333,11 +333,8 @@ fn mapped_provenance(
     let locale = workshop_rs::catalog::Locale::new("en-US");
     let program = workshop_rs::parser::parse_with_context(text, &catalog, &locale, &catalog)
         .expect("fixture parses");
-    let json = workshop_rs::MappedText {
-        text: text.to_string(),
-        map: workshop_rs::SourceMap::extract(&program),
-    }
-    .to_json();
+    let json =
+        workshop_rs::MappedText::new(text, workshop_rs::SourceMap::extract(&program)).to_json();
     let mut artifact: serde_json::Value = serde_json::from_str(&json).expect("mapped JSON");
     artifact["files"] = serde_json::json!([{
         "path": url::Url::from_file_path(authored).expect("file URI").to_string(),

@@ -839,6 +839,7 @@ pub(crate) fn workshop_diag(
         workshop_rs::WorkshopError::MissingMapping { .. } => {
             ("missing-mapping".to_string(), Stage::Frontend, None)
         }
+        _ => ("workshop-error".to_string(), Stage::Internal, None),
     };
     Diagnostic {
         code,
