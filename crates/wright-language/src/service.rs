@@ -149,51 +149,40 @@ impl LanguageService {
 
     pub fn rename(&self, uri: &str, _position: Position, new_name: &str) -> RenameResult {
         if new_name.is_empty() {
-            return RenameResult {
-                document_version: 0,
-                ok: false,
-                edits: Vec::new(),
-                previews: Vec::new(),
-                diagnostics: vec![
-                    "rename-invalid-name: the new name must not be empty".to_string(),
-                ],
-            };
+            return refused_rename(0, "rename-invalid-name: the new name must not be empty");
         }
         let Some(requesting) = self.store.document(uri) else {
-            return RenameResult {
-                document_version: 0,
-                ok: false,
-                edits: Vec::new(),
-                previews: Vec::new(),
-                diagnostics: vec![format!(
+            return refused_rename(
+                0,
+                format!(
                     "rename-unresolved: no open document for '{uri}'; the source identity cannot be established"
-                )],
-            };
+                ),
+            );
         };
         if is_source_document(uri) {
-            return RenameResult {
-                document_version: requesting.version,
-                ok: false,
-                edits: Vec::new(),
-                previews: Vec::new(),
-                diagnostics: vec![
-                    "source-provider-unavailable: OPY language-service capabilities are not currently shipped with the configured provider".to_string(),
-                ],
-            };
+            return refused_rename(
+                requesting.version,
+                "source-provider-unavailable: OPY language-service capabilities are not currently shipped with the configured provider",
+            );
         }
 
-        RenameResult {
-            document_version: requesting.version,
-            ok: false,
-            edits: Vec::new(),
-            previews: Vec::new(),
-            diagnostics: vec![
-                "rename-unresolved: no symbol is resolvable at the requested position".to_string(),
-            ],
-        }
+        refused_rename(
+            requesting.version,
+            "rename-unresolved: no symbol is resolvable at the requested position",
+        )
     }
     pub fn semantic_tokens(&self, _uri: &str) -> Vec<SemanticToken> {
         Vec::new()
+    }
+}
+
+fn refused_rename(document_version: i32, diagnostic: impl Into<String>) -> RenameResult {
+    RenameResult {
+        document_version,
+        ok: false,
+        edits: Vec::new(),
+        previews: Vec::new(),
+        diagnostics: vec![diagnostic.into()],
     }
 }
 

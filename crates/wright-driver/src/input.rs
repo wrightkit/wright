@@ -43,11 +43,7 @@ fn resolve_path(path: &Path, config: &SessionConfig) -> Result<ResolvedInput, Di
             format!("cannot determine the invocation working directory: {e}"),
         )
     })?;
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
+    let path = absolute_from(&cwd, path);
     let metadata = std::fs::metadata(&path).map_err(|e| {
         Diagnostic::error(
             "input-io",
@@ -79,14 +75,15 @@ fn resolve_file(
         SourceKind::Auto => kind_from_extension(path)?,
         other => other,
     };
-    let root = match &config.root {
-        Some(r) if r.is_absolute() => r.clone(),
-        Some(r) => cwd.join(r),
-        None => path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(".")),
-    };
+    let root = config
+        .root
+        .as_deref()
+        .map(|root| absolute_from(&cwd, root))
+        .unwrap_or_else(|| {
+            path.parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+        });
     let display = display_path(path);
     let origin = origin_for(kind, config.locale.as_deref());
     Ok(ResolvedInput {
@@ -109,17 +106,6 @@ fn resolve_directory(
 ) -> Result<ResolvedInput, Diagnostic> {
     let kind = match config.kind {
         SourceKind::Auto => detect_directory_kind(path)?,
-        SourceKind::Workshop => {
-            let files = direct_source_files(path, SourceKind::Workshop);
-            if files.len() != 1 {
-                return Err(directory_source_count_error(
-                    path,
-                    SourceKind::Workshop,
-                    &files,
-                ));
-            }
-            return resolve_file(&files[0], config, cwd);
-        }
         SourceKind::Protocol => {
             return Err(Diagnostic::error(
                 "input-kind-directory-unsupported",
@@ -142,16 +128,6 @@ fn resolve_directory(
             ));
         }
         return resolve_file(&files[0], config, cwd);
-    }
-    if kind == SourceKind::Auto {
-        return Err(Diagnostic::error(
-            "input-kind-unknown",
-            Stage::Discovery,
-            format!(
-                "cannot detect a source owner in directory '{}'; pass `--kind opy|ostw|workshop` or target a file",
-                path.display()
-            ),
-        ));
     }
     let root = config
         .root
@@ -257,10 +233,10 @@ fn directory_source_count_error(path: &Path, kind: SourceKind, files: &[PathBuf]
         "input-kind-ambiguous",
         Stage::Discovery,
         format!(
-            "Workshop directory '{}' must contain exactly one source file; {detail}; pass an explicit file path",
-            path.display()
-        )
-        .replace("Workshop directory", &format!("{} directory", kind.as_str())),
+            "{} directory '{}' must contain exactly one source file; {detail}; pass an explicit file path",
+            kind.as_str(),
+            path.display(),
+        ),
     )
 }
 

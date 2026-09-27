@@ -167,11 +167,7 @@ impl CompilerSession {
             }
             .diagnostic());
         }
-        self.load_with_operation(if self.config.source_backend == SourceBackend::Native {
-            ProviderOperation::Check
-        } else {
-            ProviderOperation::Compile
-        })
+        self.load_with_operation(ProviderOperation::Compile)
     }
 
     fn load_with_operation(
@@ -275,19 +271,7 @@ impl CompilerSession {
         resolved: &mut ResolvedInput,
         operation: ProviderOperation,
     ) -> Result<Loaded, Diagnostic> {
-        let language = match resolved.kind {
-            SourceKind::Opy => SourceLanguage::Opy,
-            other => {
-                return Err(Diagnostic::error(
-                    "source-provider-kind",
-                    Stage::Discovery,
-                    format!(
-                        "the provider backend currently supports only OPY input; got '{}'",
-                        other.as_str()
-                    ),
-                ));
-            }
-        };
+        let language = SourceLanguage::Opy;
         let entry = resolved
             .path
             .clone()
