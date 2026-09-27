@@ -314,19 +314,14 @@ pub(crate) fn install_for_shell(
 
 fn print_status(status: &InstallStatus, shell: ShellArg, guidance: bool) {
     match status {
-        InstallStatus::Created(path) => {
+        InstallStatus::Created(path) | InstallStatus::Updated(path) => {
+            let (verb, destination) = if matches!(status, InstallStatus::Created(_)) {
+                ("installed", "to")
+            } else {
+                ("updated", "in")
+            };
             println!(
-                "==> installed {} completion to {}",
-                shell.as_str(),
-                path.display()
-            );
-            if guidance {
-                print_guidance(shell, path);
-            }
-        }
-        InstallStatus::Updated(path) => {
-            println!(
-                "==> updated {} completion in {}",
+                "==> {verb} {} completion {destination} {}",
                 shell.as_str(),
                 path.display()
             );
