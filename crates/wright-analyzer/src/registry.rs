@@ -54,7 +54,7 @@ pub struct RuleMeta {
 #[serde(deny_unknown_fields)]
 pub struct RuleConfig {
     /// When `false` the rule is skipped entirely and produces no findings.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::declarative::default_true")]
     pub enabled: bool,
     /// When `Some`, replaces the rule's [`RuleMeta::default_severity`] in
     /// every finding produced during this run.
@@ -78,10 +78,6 @@ impl Default for RuleConfig {
             options: RuleOptions::default(),
         }
     }
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// The intentionally small option surface shared by declarative rules.

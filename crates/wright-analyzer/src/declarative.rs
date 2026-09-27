@@ -748,7 +748,7 @@ fn default_locale() -> String {
     DEFAULT_LOCALE.to_string()
 }
 
-fn default_true() -> bool {
+pub(crate) fn default_true() -> bool {
     true
 }
 
