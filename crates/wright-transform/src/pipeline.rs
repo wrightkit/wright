@@ -25,15 +25,6 @@ pub fn run(
     program: &mut workshop_rs::Program,
     profile: Profile,
 ) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
-    run_canonical(program, profile)
-}
-
-/// Run the semantics-preserving transform profile over the canonical public
-/// Workshop program model.
-pub fn run_canonical(
-    program: &mut workshop_rs::Program,
-    profile: Profile,
-) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
     program.validate()?;
     if profile == Profile::Off {
         return Ok(Vec::new());
@@ -77,6 +68,8 @@ pub fn run_canonical(
         },
     }])
 }
+
+pub use self::run as run_canonical;
 
 fn fold_action_once(action: &mut workshop_rs::Action, nodes: &mut usize) -> usize {
     *nodes += 1;

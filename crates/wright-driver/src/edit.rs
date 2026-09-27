@@ -97,7 +97,24 @@ impl EditTransaction {
         &self,
         sources: &BTreeMap<String, String>,
     ) -> Result<Vec<SourcePreview>, Diagnostic> {
-        apply_transaction(sources, self)
+        let mut grouped: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
+        for edit in &self.edits {
+            grouped.entry(&edit.source).or_default().push(edit);
+        }
+        let mut previews = Vec::new();
+        for (source, edits) in grouped {
+            let original = sources.get(source).expect("precondition verified");
+            let mut new_text = original.clone();
+            for edit in edits.iter().rev() {
+                new_text = apply_edit(&new_text, edit)?;
+            }
+            previews.push(SourcePreview {
+                source: source.to_string(),
+                source_identity: crate::input_identity(&new_text),
+                new_text,
+            });
+        }
+        Ok(previews)
     }
 }
 
@@ -172,7 +189,7 @@ pub fn validate_transaction(
         return refusal(diagnostics);
     }
 
-    let previews = match apply_transaction(sources, transaction) {
+    let previews = match transaction.apply(sources) {
         Ok(previews) => previews,
         Err(diagnostic) => {
             diagnostics.push(diagnostic);
@@ -301,30 +318,6 @@ pub(crate) fn source_precondition(
             format!("the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry", edit.source),
         )
     })
-}
-
-fn apply_transaction(
-    sources: &BTreeMap<String, String>,
-    transaction: &EditTransaction,
-) -> Result<Vec<SourcePreview>, Diagnostic> {
-    let mut grouped: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
-    for edit in &transaction.edits {
-        grouped.entry(&edit.source).or_default().push(edit);
-    }
-    let mut previews = Vec::new();
-    for (source, edits) in grouped {
-        let original = sources.get(source).expect("precondition verified");
-        let mut new_text = original.clone();
-        for edit in edits.iter().rev() {
-            new_text = apply_edit(&new_text, edit)?;
-        }
-        previews.push(SourcePreview {
-            source: source.to_string(),
-            source_identity: crate::input_identity(&new_text),
-            new_text,
-        });
-    }
-    Ok(previews)
 }
 
 fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
