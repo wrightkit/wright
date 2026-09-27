@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publish verified stable or nightly archives to immutable R2 objects.
+# Publish verified stable or nightly archives and the stable installer scripts to R2.
 
 set -euo pipefail
 
@@ -15,8 +15,11 @@ set -euo pipefail
 : "${ARTIFACTS_DIR:?ARTIFACTS_DIR is required}"
 
 version="$RELEASE_VERSION"
+installer_public_base_url=
 case "$RELEASE_CHANNEL" in
   stable)
+    : "${R2_INSTALLER_PUBLIC_BASE_URL:?R2_INSTALLER_PUBLIC_BASE_URL is required for stable releases}"
+    installer_public_base_url="$R2_INSTALLER_PUBLIC_BASE_URL"
     object_prefix="wright/releases/$version"
     pointer_key="wright/latest/version"
     pointer_value="$version"
@@ -46,7 +49,8 @@ done
 
 put_immutable() {
   local source="$1" key="$2" cache_control="$3" content_type="$4"
-  local existing="$GITHUB_WORKSPACE/existing-$(basename "$key")"
+  local existing
+  existing="$GITHUB_WORKSPACE/existing-$(basename "$key")"
   if aws s3api head-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
     aws s3api get-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$R2_ENDPOINT" "$existing" >/dev/null
     cmp --silent "$source" "$existing" || {
@@ -62,13 +66,24 @@ put_immutable() {
 }
 
 verify_public() {
-  local key="$1" source="$2" cache_pattern="$3"
-  local downloaded="$GITHUB_WORKSPACE/downloaded-$(basename "$key")"
-  curl --fail --silent --show-error --location --output "$downloaded" "$R2_PUBLIC_BASE_URL/$key"
+  local base_url="$1" key="$2" source="$3" cache_pattern="$4" content_type_pattern="$5"
+  local downloaded
+  downloaded="$GITHUB_WORKSPACE/downloaded-$(basename "$key")"
+  curl --http1.1 --fail --silent --show-error --location --output "$downloaded" "$base_url/$key"
   cmp --silent "$source" "$downloaded"
-  curl --fail --silent --show-error --head "$R2_PUBLIC_BASE_URL/$key" | \
+  curl --http1.1 --fail --silent --show-error --head "$base_url/$key" | \
     grep --ignore-case --extended-regexp "^cache-control:.*$cache_pattern" >/dev/null
+  curl --http1.1 --fail --silent --show-error --head "$base_url/$key" | \
+    grep --ignore-case --extended-regexp "^content-type:.*$content_type_pattern" >/dev/null
   rm -f "$downloaded"
+}
+
+put_mutable() {
+  local source="$1" key="$2" content_type="$3" base_url="$4"
+  aws s3api put-object --bucket "$R2_BUCKET" --key "$key" --body "$source" \
+    --cache-control 'no-store, max-age=0' --content-type "$content_type" \
+    --endpoint-url "$R2_ENDPOINT" >/dev/null
+  verify_public "$base_url" "$key" "$source" 'no-store.*max-age=0' "$content_type"
 }
 
 for archive in "$release_dir"/wright-*.tar.gz "$release_dir"/wright-*.zip; do
@@ -80,13 +95,18 @@ for archive in "$release_dir"/wright-*.tar.gz "$release_dir"/wright-*.zip; do
   name="$(basename "$archive")"
   put_immutable "$archive" "$object_prefix/$name" 'public, max-age=31536000, immutable' 'application/octet-stream'
   put_immutable "$checksum" "$object_prefix/$name.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
-  verify_public "$object_prefix/$name" "$archive" 'max-age=31536000.*immutable'
-  verify_public "$object_prefix/$name.sha256" "$checksum" 'max-age=31536000.*immutable'
+  verify_public "$R2_PUBLIC_BASE_URL" "$object_prefix/$name" "$archive" 'max-age=31536000.*immutable' 'application/octet-stream'
+  verify_public "$R2_PUBLIC_BASE_URL" "$object_prefix/$name.sha256" "$checksum" 'max-age=31536000.*immutable' 'text/plain'
 done
+
+if [[ "$RELEASE_CHANNEL" == stable ]]; then
+  for script in install.sh install.ps1; do
+    source="$GITHUB_WORKSPACE/$script"
+    test -s "$source" || { echo "missing canonical $script" >&2; exit 1; }
+    put_mutable "$source" "wright/$script" 'text/plain; charset=utf-8' "$installer_public_base_url"
+  done
+fi
 
 pointer_file="$GITHUB_WORKSPACE/r2-$RELEASE_CHANNEL-pointer"
 printf '%s\n' "$pointer_value" > "$pointer_file"
-aws s3api put-object --bucket "$R2_BUCKET" --key "$pointer_key" --body "$pointer_file" \
-  --cache-control 'no-store, max-age=0' --content-type 'text/plain; charset=utf-8' \
-  --endpoint-url "$R2_ENDPOINT" >/dev/null
-verify_public "$pointer_key" "$pointer_file" 'no-store'
+put_mutable "$pointer_file" "$pointer_key" 'text/plain; charset=utf-8' "$R2_PUBLIC_BASE_URL"
