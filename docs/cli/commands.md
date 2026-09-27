@@ -35,6 +35,7 @@ result.
 | `wright analyze [INPUT]` | Summarize project structure, ranked CFG hotspots, and cross-cutting state | bounded semantic report with static evidence labels |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
 | `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary |
+| `wright serve [INPUT]` | Serve `wright-agent/v1` over stdio or JSON-RPC 2.0 | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update` | Self-update a standalone installation | update progress (text only) |

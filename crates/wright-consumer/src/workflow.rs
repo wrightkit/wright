@@ -40,11 +40,12 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         lint.result.rules.as_array().unwrap().len()
     );
 
-    let service = ToolService::new(&mut session).map_err(|e| e.message)?;
+    let mut service = ToolService::new(&mut session).map_err(|e| e.message)?;
     let capabilities = service.handle(&ToolRequest::Capabilities);
     match capabilities {
         wright_driver::service::ToolResponse::Ok { result } => {
             assert_eq!(result["contract"], "wright-result/v1");
+            assert_eq!(result["agent_contract"], "wright-agent/v1");
             assert!(result["operations"].as_array().unwrap().len() >= 10);
             println!(
                 "service: {} v{}, {} operations",

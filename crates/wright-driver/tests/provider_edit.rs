@@ -158,7 +158,7 @@ const DOUBLE_POSITION: Position = Position {
     character: 6,
 };
 
-fn handle(service: &ToolService<'_>, request: &ToolRequest) -> ProviderMutation {
+fn handle(service: &mut ToolService<'_>, request: &ToolRequest) -> ProviderMutation {
     match service.handle(request) {
         ToolResponse::Ok { result } => {
             serde_json::from_value(result).expect("provider mutation deserializes")
@@ -176,10 +176,10 @@ fn single_file_rename_routes_through_the_provider() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     let documents = single_document_set();
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(
             documents,
             URI,
@@ -230,10 +230,10 @@ fn multi_file_rename_edits_every_received_document_consistently() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     let documents = two_document_set();
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(
             documents,
             URI,
@@ -282,10 +282,10 @@ fn rename_collision_is_a_structured_atomic_refusal() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     let documents = single_document_set();
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(
             documents,
             URI,
@@ -310,10 +310,10 @@ fn invalid_new_name_is_a_structured_atomic_refusal() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     let documents = single_document_set();
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(
             documents,
             URI,
@@ -336,7 +336,7 @@ fn stale_current_sources_refuse_with_no_partial_edit_set() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     let documents = single_document_set();
     // The caller's current text no longer matches the snapshot the provider
     // computed the rename against: the Wright-owned identity precondition
@@ -344,7 +344,7 @@ fn stale_current_sources_refuse_with_no_partial_edit_set() {
     let mut stale_sources = sources_of(&documents);
     stale_sources.insert(URI.to_string(), format!("{CLEAN_PUZZLE}\n"));
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(documents, URI, DOUBLE_POSITION, "twice", stale_sources),
     );
     assert!(!mutation.ok);
@@ -362,10 +362,10 @@ fn missing_rename_capability_refuses_explicitly() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&["rename"]);
+    let mut service = tool_service(&["rename"]);
     let documents = single_document_set();
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(
             documents,
             URI,
@@ -394,10 +394,10 @@ fn provider_failure_mid_rename_applies_nothing() {
     // is not: the provider computes the rename, then the mandatory semantic
     // gate refuses. The failure happens after edit generation, so this
     // proves nothing partial is ever returned.
-    let service = tool_service(&["editValidation"]);
+    let mut service = tool_service(&["editValidation"]);
     let documents = single_document_set();
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(
             documents,
             URI,
@@ -422,7 +422,7 @@ fn semantic_validation_failure_is_atomic_across_documents() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     // Document 1 declares only `double`; document 2 declares `double` and
     // `plus1`. Renaming `double` to `plus1` in document 1 passes the
     // provider's rename-time collision check (which is scoped to the
@@ -437,7 +437,7 @@ fn semantic_validation_failure_is_atomic_across_documents() {
     );
     let sources = sources_of(&documents);
     let mutation = handle(
-        &service,
+        &mut service,
         &rename_request(documents, URI, DOUBLE_POSITION, "plus1", sources),
     );
     assert!(!mutation.ok);
@@ -518,7 +518,7 @@ fn caller_transaction_validates_through_the_provider() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     let documents = single_document_set();
     let request = ToolRequest::ProviderValidateEdit {
         language_id: DEMO_LANGUAGE_ID.to_string(),
@@ -527,7 +527,7 @@ fn caller_transaction_validates_through_the_provider() {
         sources: sources_of(&single_document_set()),
         project_root: Some("file:///project".to_string()),
     };
-    let mutation = handle(&service, &request);
+    let mutation = handle(&mut service, &request);
     assert!(
         mutation.ok,
         "provider accepts the caller transaction: {:?}",
@@ -543,7 +543,7 @@ fn caller_transaction_that_breaks_the_source_refuses() {
     let Some(_) = mock_provider_path() else {
         return;
     };
-    let service = tool_service(&[]);
+    let mut service = tool_service(&[]);
     let documents = single_document_set();
     // Deleting the target value produces a syntax error; the provider's
     // normative edit validation (apply, then re-parse) catches it.
@@ -567,7 +567,7 @@ fn caller_transaction_that_breaks_the_source_refuses() {
         sources: sources_of(&single_document_set()),
         project_root: None,
     };
-    let mutation = handle(&service, &request);
+    let mutation = handle(&mut service, &request);
     assert!(!mutation.ok);
     assert_eq!(mutation.diagnostics[0].code, "provider-validation-failed");
     assert!(mutation.transaction.is_none());

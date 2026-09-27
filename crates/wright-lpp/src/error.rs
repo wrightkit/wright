@@ -43,16 +43,16 @@ impl LppError {
     }
 
     pub fn capability(&self) -> Option<&str> {
-        if self.kind == LppErrorKind::CapabilityUnavailable {
-            self.details.get("capability").and_then(Value::as_str)
-        } else {
-            None
-        }
+        self.capability_detail("capability")
     }
 
     pub fn method(&self) -> Option<&str> {
+        self.capability_detail("method")
+    }
+
+    fn capability_detail(&self, key: &str) -> Option<&str> {
         if self.kind == LppErrorKind::CapabilityUnavailable {
-            self.details.get("method").and_then(Value::as_str)
+            self.details.get(key).and_then(Value::as_str)
         } else {
             None
         }

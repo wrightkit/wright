@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use flate2::read::GzDecoder;
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 
 const DEFAULT_LATEST_VERSION_URL: &str = "https://releases.wrightkit.dev/opy-rs/latest/version";
@@ -464,7 +465,7 @@ fn verify_checksum(
         )));
     }
     let expected = published;
-    let actual = format!("{:x}", Sha256::digest(archive));
+    let actual = crate::input::sha256_hex(archive);
     if !actual.eq_ignore_ascii_case(expected) {
         return Err(OpyProviderError::integrity(format!(
             "SHA-256 verification failed for {archive_name} (published {expected}, got {actual}); the active provider was not changed"

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::serve::ServeArgs;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// The top-level command model used by parsing, help, and completion.
@@ -25,7 +26,8 @@ pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
 Commands check correctness, summarize semantic hotspots, lint, inspect exhaustive
 facts, compile, or reconstruct source through the typed wright-driver result envelope. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
-wright-result/v1 envelope to stdout.
+wright-result/v1 envelope to stdout. `serve` exposes the versioned
+wright-agent/v1 session contract over stdio or JSON-RPC 2.0.
 
 EXIT CODES:
     0  success
@@ -78,6 +80,8 @@ pub(crate) enum Command {
     Update(UpdateArgs),
     /// Manage first-party language providers.
     Provider(ProviderArgs),
+    /// Serve the versioned agent contract over stdio or JSON-RPC 2.0.
+    Serve(ServeArgs),
     /// Show the top-level help.
     Help,
     /// Show version and result-contract metadata.
@@ -305,21 +309,26 @@ pub(crate) enum ShellArg {
 }
 
 impl ShellArg {
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub(crate) const ALL: [Self; 4] = [Self::Bash, Self::Zsh, Self::Fish, Self::PowerShell];
+
+    pub(crate) fn metadata(self) -> (&'static str, &'static str, clap_complete::Shell) {
         match self {
-            ShellArg::Bash => "bash",
-            ShellArg::Zsh => "zsh",
-            ShellArg::Fish => "fish",
-            ShellArg::PowerShell => "powershell",
+            Self::Bash => ("bash", "wright", clap_complete::Shell::Bash),
+            Self::Zsh => ("zsh", "_wright", clap_complete::Shell::Zsh),
+            Self::Fish => ("fish", "wright.fish", clap_complete::Shell::Fish),
+            Self::PowerShell => (
+                "powershell",
+                "_wright.ps1",
+                clap_complete::Shell::PowerShell,
+            ),
         }
     }
 
+    pub(crate) fn as_str(&self) -> &'static str {
+        self.metadata().0
+    }
+
     pub(crate) fn to_clap_shell(self) -> clap_complete::Shell {
-        match self {
-            ShellArg::Bash => clap_complete::Shell::Bash,
-            ShellArg::Zsh => clap_complete::Shell::Zsh,
-            ShellArg::Fish => clap_complete::Shell::Fish,
-            ShellArg::PowerShell => clap_complete::Shell::PowerShell,
-        }
+        self.metadata().2
     }
 }

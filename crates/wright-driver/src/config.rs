@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use crate::source_provider::SourceBackend;
 pub use wright_analyzer::registry::LintConfig;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SourceKind {
+    #[default]
     Auto,
     Opy,
     Ostw,
@@ -35,8 +36,9 @@ impl SourceKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OutputFormat {
+    #[default]
     Text,
     Json,
 }
@@ -58,9 +60,10 @@ impl OutputFormat {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum InputSpec {
     Path(PathBuf),
+    #[default]
     Stdin,
 }
 
@@ -73,7 +76,7 @@ impl InputSpec {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SessionConfig {
     pub input: InputSpec,
     pub kind: SourceKind,
@@ -87,25 +90,6 @@ pub struct SessionConfig {
     pub lint_rule_paths: Vec<PathBuf>,
     pub providers: wright_lpp::ProviderRegistry,
     pub opy_provider: crate::opy_provider::OpyProviderConfig,
-}
-
-impl Default for SessionConfig {
-    fn default() -> Self {
-        SessionConfig {
-            input: InputSpec::Stdin,
-            kind: SourceKind::Auto,
-            source_backend: SourceBackend::Native,
-            locale: None,
-            root: None,
-            output: None,
-            format: OutputFormat::Text,
-            profile: wright_transform::Profile::Off,
-            lint: LintConfig::default(),
-            lint_rule_paths: Vec::new(),
-            providers: wright_lpp::ProviderRegistry::default(),
-            opy_provider: crate::opy_provider::OpyProviderConfig::default(),
-        }
-    }
 }
 
 impl SessionConfig {

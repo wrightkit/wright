@@ -14,7 +14,8 @@ immutable artifact, and latest-pointer contract is recorded in
 `scripts/release.sh [version]` (default `0.1.0`) produces
 `target/wright-<version>.tar.gz` containing:
 
-* the standalone `wright` and `wright-lsp` release binaries;
+* the standalone `wright` and `wright-lsp` release binaries; `wright serve`
+  is included in the `wright` executable;
 * `version.json` with the version, `wright-result/v1` contract identity, git
   commit, build timestamp, and the runtime-dependency claim
   (`"requires": { "node": false, "overpy": false }`).
@@ -33,8 +34,9 @@ channels.
 3. **Benchmarks**: `wright-bench` with declared regression thresholds
    (`target/wright-bench-report.json`).
 4. **Standalone proof**: the packaged binaries run `compile`/`check` over the
-   retained Wright test inputs with `PATH=/usr/bin:/bin` (Node and OverPy absent), and
-   `wright-lsp --version` reports the release version.
+   retained Wright test inputs with `PATH=/usr/bin:/bin` (Node and OverPy
+   absent), `wright serve` reports the negotiated `wright-agent/v1` contract,
+   and `wright-lsp --version` reports the release version.
 
 Any gate failure aborts the release before the version is stamped.
 
@@ -238,10 +240,11 @@ terminal. It does not require Cargo, npm, or a source checkout.
 Each build leg smoke-tests its **packaged archive** (not workspace binaries):
 it extracts the archive and runs the shared `scripts/smoke-native.py` contract
 against the extracted binaries. The contract checks both version banners,
-representative OPY compile/check paths, and first-party OPY provider bootstrap
-from an empty provider store. The upload job re-verifies that every declared
-target's archive and checksum are present before attaching them to the final
-GitHub Release.
+representative OPY compile/check paths, `wright-agent/v1` capability
+negotiation and a structured check request, and first-party OPY provider
+bootstrap from an empty provider store. The upload job re-verifies that every
+declared target's archive and checksum are present before attaching them to the
+final GitHub Release.
 
 The normal CI distribution validation uses independent channel legs. It stages
 a canonical-shaped local release archive and generated local metadata for

@@ -273,9 +273,6 @@ fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>,
     for diag in &envelope.diagnostics {
         render_diagnostic(diag, color);
     }
-    if envelope.command == "check" {
-        envelope.result.render_check_summary();
-    }
     if !envelope.ok {
         if envelope.diagnostics.is_empty() {
             eprintln!("{}: failed", envelope.command);
@@ -332,11 +329,7 @@ fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T
 }
 
 fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
-    let kind = match diagnostic.severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "notice",
-    };
+    let kind = workflow_severity(diagnostic.severity);
     let mut props = vec![format!(
         "title={}",
         escape_workflow_property(&diagnostic.code)
@@ -368,11 +361,7 @@ fn emit_finding_annotation(finding: &serde_json::Value) {
         .and_then(serde_json::Value::as_str)
         .filter(|path| is_real_source_path(path));
     let Some(path) = path else { return };
-    let kind = match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "notice",
-    };
+    let kind = workflow_severity(severity);
     let line = span_position(span, "start", "line").unwrap_or(1);
     let col = span_position(span, "start", "col").unwrap_or(1);
     let end_line = span_position(span, "end", "line").unwrap_or(line);
@@ -407,6 +396,14 @@ fn emit_workflow_annotation(kind: &str, properties: &[String], message: &str) {
     );
 }
 
+fn workflow_severity(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "notice",
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum SummaryStatus {
     Pass,
@@ -438,7 +435,6 @@ pub(crate) trait ResultPresentation {
         None
     }
     fn render_body(&self);
-    fn render_check_summary(&self) {}
     fn render_github_findings(&self) {}
     fn update_summary_status(&self, _status: &mut SummaryStatus) {}
 }
@@ -745,11 +741,7 @@ fn render_inspect(result: &InspectResult) {
 }
 
 fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
-    let sev = match diagnostic.severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "info",
-    };
+    let sev = diagnostic.severity.as_str();
     let label = if color {
         let code = match diagnostic.severity {
             Severity::Error => "31",

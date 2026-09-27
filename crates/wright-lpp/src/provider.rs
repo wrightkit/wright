@@ -104,9 +104,8 @@ pub trait LanguageProvider {
     /// Initialize with LPP 1.4 for `lpp/compile` artifact format negotiation.
     fn initialize_artifact_negotiation(
         &mut self,
-        client_info: Option<&ClientInfo>,
+        _client_info: Option<&ClientInfo>,
     ) -> Result<InitializeResult, ProviderError> {
-        let _ = client_info;
         Err(ProviderError::ProtocolVersionMismatch {
             supported: Vec::new(),
             message: "the provider client does not support LPP 1.4 artifact negotiation"
@@ -127,31 +126,21 @@ pub trait LanguageProvider {
     /// `lpp/check` over a provider-owned filesystem project entry.
     fn check_entry(
         &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _entry: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        let _ = (entry, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/check" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/check")
     }
 
     /// `lpp/check` over an LPP 1.2 file or directory target.
     fn check_target(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _target: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        let _ = (target, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/check" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/check")
     }
 
     /// `lpp/compile`: compile a document set into one opaque Workshop
@@ -165,48 +154,33 @@ pub trait LanguageProvider {
     /// `lpp/compile` over a provider-owned filesystem project entry.
     fn compile_entry(
         &mut self,
-        entry: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _entry: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        let _ = (entry, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/compile")
     }
 
     /// `lpp/compile` over an LPP 1.2 file or directory target.
     fn compile_target(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
+        _target: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
     ) -> Result<CompileResult, ProviderError> {
-        let _ = (target, project_root, locale);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/compile")
     }
 
     /// `lpp/compile` over a file or directory target in an LPP 1.4 session,
     /// stating the artifact formats the client accepts, most preferred first.
     fn compile_target_accepting(
         &mut self,
-        target: &ProjectEntry,
-        project_root: Option<&str>,
-        locale: Option<&str>,
-        accepted_artifact_formats: &[&str],
+        _target: &ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
+        _accepted_artifact_formats: &[&str],
     ) -> Result<CompileResult, ProviderError> {
-        let _ = (target, project_root, locale, accepted_artifact_formats);
-        Err(ProviderError::lpp(
-            crate::error::LppErrorKind::CapabilityUnavailable,
-            json!({ "capability": "projectLoading", "method": "lpp/compile" }),
-            "capability 'projectLoading' is not available in this provider client",
-        ))
+        capability_unavailable("projectLoading", "lpp/compile")
     }
 
     /// `lpp/reconstruct`: reconstruct source from a provider-owned artifact.
@@ -392,10 +366,10 @@ impl StdioLanguageProvider {
     fn call<T: DeserializeOwned>(
         &mut self,
         cap: Capability,
-        method: &str,
         params: Value,
     ) -> Result<T, ProviderError> {
         self.require_capability(cap)?;
+        let method = cap.method();
         let val = self.request(method, params)?;
         parse_result(val, method)
     }
@@ -451,11 +425,7 @@ impl LanguageProvider for StdioLanguageProvider {
         documents: &DocumentSet,
         project_root: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        self.call(
-            Capability::Check,
-            "lpp/check",
-            documents_params(documents, project_root),
-        )
+        self.call(Capability::Check, documents_params(documents, project_root))
     }
 
     fn check_entry(
@@ -465,11 +435,7 @@ impl LanguageProvider for StdioLanguageProvider {
         locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
         self.require_capability(Capability::ProjectLoading)?;
-        self.call(
-            Capability::Check,
-            "lpp/check",
-            entry_params(entry, project_root, locale),
-        )
+        self.call(Capability::Check, entry_params(entry, project_root, locale))
     }
 
     fn check_target(
@@ -488,7 +454,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<CompileResult, ProviderError> {
         self.call(
             Capability::Compile,
-            "lpp/compile",
             documents_params(documents, project_root),
         )
     }
@@ -502,7 +467,6 @@ impl LanguageProvider for StdioLanguageProvider {
         self.require_capability(Capability::ProjectLoading)?;
         self.call(
             Capability::Compile,
-            "lpp/compile",
             entry_params(entry, project_root, locale),
         )
     }
@@ -533,18 +497,14 @@ impl LanguageProvider for StdioLanguageProvider {
         }
         let mut params = entry_params(target, project_root, locale);
         params["acceptedArtifactFormats"] = json!(accepted_artifact_formats);
-        self.call(Capability::Compile, "lpp/compile", params)
+        self.call(Capability::Compile, params)
     }
 
     fn reconstruct(
         &mut self,
         artifact: &WorkshopArtifact,
     ) -> Result<ReconstructResult, ProviderError> {
-        self.call(
-            Capability::Reconstruct,
-            "lpp/reconstruct",
-            json!({ "artifact": artifact }),
-        )
+        self.call(Capability::Reconstruct, json!({ "artifact": artifact }))
     }
 
     fn symbols(
@@ -554,7 +514,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<SymbolsResult, ProviderError> {
         self.call(
             Capability::Symbols,
-            "lpp/symbols",
             documents_params(documents, project_root),
         )
     }
@@ -566,7 +525,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<LocationsResult, ProviderError> {
         self.call(
             Capability::Definition,
-            "lpp/definition",
             json!({ "document": document, "position": position }),
         )
     }
@@ -579,7 +537,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<LocationsResult, ProviderError> {
         self.call(
             Capability::References,
-            "lpp/references",
             json!({
                 "document": document,
                 "position": position,
@@ -605,7 +562,7 @@ impl LanguageProvider for StdioLanguageProvider {
         if let Some(root) = project_root {
             params["projectRoot"] = json!(root);
         }
-        self.call(Capability::Rename, "lpp/rename", params)
+        self.call(Capability::Rename, params)
     }
 
     fn validate_edits(
@@ -615,7 +572,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<ValidateEditsResult, ProviderError> {
         self.call(
             Capability::EditValidation,
-            "lpp/validateEdits",
             json!({
                 "document": document,
                 "edits": edits,
@@ -658,6 +614,14 @@ fn entry_params(entry: &ProjectEntry, project_root: Option<&str>, locale: Option
         params["locale"] = json!(locale);
     }
     params
+}
+
+fn capability_unavailable<T>(capability: &str, method: &str) -> Result<T, ProviderError> {
+    Err(ProviderError::lpp(
+        crate::error::LppErrorKind::CapabilityUnavailable,
+        json!({ "capability": capability, "method": method }),
+        format!("capability '{capability}' is not available in this provider client"),
+    ))
 }
 
 /// Parse a typed result, converting shape failures into a deterministic

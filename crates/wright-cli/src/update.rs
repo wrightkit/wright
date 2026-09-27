@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 use std::time::Duration;
 
-use sha2::Digest;
+use wright_driver::sha256_hex;
 
 const DEFAULT_BASE_URL: &str = "https://github.com/wrightkit/wright/releases/download";
 const DEFAULT_API_URL: &str = "https://api.github.com/repos/wrightkit/wright/releases/latest";
@@ -67,21 +67,12 @@ enum Provenance {
 }
 
 impl Provenance {
-    fn guidance(self) -> &'static str {
+    fn manager(self) -> Option<(&'static str, &'static str)> {
         match self {
-            Self::Standalone => unreachable!(),
-            Self::Homebrew => "brew upgrade wrightkit/tap/wright",
-            Self::Scoop => "scoop update wright",
-            Self::WinGet => "winget upgrade WrightKit.Wright",
-        }
-    }
-
-    fn channel(self) -> &'static str {
-        match self {
-            Self::Standalone => unreachable!(),
-            Self::Homebrew => "Homebrew",
-            Self::Scoop => "Scoop",
-            Self::WinGet => "WinGet",
+            Self::Standalone => None,
+            Self::Homebrew => Some(("Homebrew", "brew upgrade wrightkit/tap/wright")),
+            Self::Scoop => Some(("Scoop", "scoop update wright")),
+            Self::WinGet => Some(("WinGet", "winget upgrade WrightKit.Wright")),
         }
     }
 }
@@ -91,12 +82,12 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
     let exe = std::env::current_exe()
         .map_err(|e| UpdateError::failed(format!("could not locate the wright binary: {e}")))?;
     let provenance = detect_provenance(&exe);
-    if provenance != Provenance::Standalone {
+    if let Some((channel, guidance)) = provenance.manager() {
         return Err(UpdateError::unsupported(format!(
             "wright appears to be managed by {} (installed at {}); upgrade with `{}` instead of `wright update`",
-            provenance.channel(),
+            channel,
             exe.display(),
-            provenance.guidance()
+            guidance
         )));
     }
 
@@ -333,10 +324,6 @@ fn verify_checksum(
         )));
     }
     Ok(())
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", sha2::Sha256::digest(bytes))
 }
 
 fn ensure_writable(install_dir: &Path) -> Result<(), UpdateError> {

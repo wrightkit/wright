@@ -17,11 +17,16 @@ use crate::diag::Diagnostic;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
 use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
 use wright_analyzer::canonical::{SemanticIndex, SemanticService};
-use wright_analyzer::service::{Origin, Request, Response};
+/// A structured tool error.
+pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
+/// A tool response: a structured owned result or a structured error.
+pub use wright_analyzer::service::Response as ToolResponse;
+use wright_analyzer::service::{Request, Response};
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 
 /// A tool request: the owned query surface plus agent-oriented operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +34,14 @@ pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum ToolRequest {
     /// Service identity, contract, and supported operations.
     Capabilities,
+    /// Compile the loaded project.
+    Compile,
+    /// Check the loaded project.
+    Check,
+    /// Analyze the loaded project.
+    Analyze,
+    /// Inspect the loaded project.
+    Inspect,
     /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
     /// Every rule.
@@ -134,27 +147,13 @@ pub enum ToolRequest {
     },
 }
 
-/// A tool response: a structured owned result or a structured error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ToolResponse {
-    Ok { result: serde_json::Value },
-    Error { error: ToolErrorInfo },
-}
-
-/// A structured tool error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolErrorInfo {
-    pub code: String,
-    pub message: String,
-}
-
 /// The capability/version contract of the service.
 #[derive(Debug, Clone, Serialize)]
 pub struct Capabilities {
     pub name: String,
     pub version: String,
     pub contract: String,
+    pub agent_contract: String,
     pub operations: Vec<String>,
     pub languages: Vec<String>,
     pub profiles: Vec<String>,
@@ -164,13 +163,24 @@ pub struct Capabilities {
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
     loaded: Loaded,
+    semantic: SemanticService<'static>,
+    lint_semantic: Option<SemanticService<'static>>,
 }
 
 impl<'a> ToolService<'a> {
     /// Build the service over a session, loading the program eagerly.
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         let loaded = session.load()?;
-        Ok(ToolService { session, loaded })
+        let semantic =
+            session.shared_service_with(&loaded, wright_analyzer::registry::LintConfig::default());
+        let lint_semantic = (!session.config.lint.rules.is_empty())
+            .then(|| semantic.with_lint_config(session.config.lint.clone()));
+        Ok(ToolService {
+            session,
+            loaded,
+            semantic,
+            lint_semantic,
+        })
     }
 
     /// The loaded program snapshot (origin, input identity, canonical program).
@@ -184,6 +194,7 @@ impl<'a> ToolService<'a> {
             name: SERVICE_NAME.to_string(),
             version: SERVICE_VERSION.to_string(),
             contract: RESULT_CONTRACT.to_string(),
+            agent_contract: AGENT_CONTRACT.to_string(),
             operations: vec![
                 "capabilities",
                 "project",
@@ -221,11 +232,30 @@ impl<'a> ToolService<'a> {
     }
 
     /// Handle one tool request, returning a structured owned response.
-    pub fn handle(&self, request: &ToolRequest) -> ToolResponse {
+    pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
         match request {
             ToolRequest::Capabilities => ToolResponse::Ok {
                 result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
             },
+            ToolRequest::Compile => {
+                let result =
+                    serde_json::to_value(self.compile()).expect("compile result serializes");
+                ToolResponse::Ok { result }
+            }
+            ToolRequest::Check => {
+                let result = serde_json::to_value(self.check()).expect("check result serializes");
+                ToolResponse::Ok { result }
+            }
+            ToolRequest::Analyze => {
+                let result =
+                    serde_json::to_value(self.analyze()).expect("analyze result serializes");
+                ToolResponse::Ok { result }
+            }
+            ToolRequest::Inspect => {
+                let result =
+                    serde_json::to_value(self.inspect()).expect("inspect result serializes");
+                ToolResponse::Ok { result }
+            }
             ToolRequest::Project => self.ok(self.project()),
             ToolRequest::Rules => self.semantic_query(Request::ListRules),
             ToolRequest::Symbols { kind } => {
@@ -241,8 +271,7 @@ impl<'a> ToolService<'a> {
             ToolRequest::Findings => self.findings(),
             ToolRequest::PersistentObjects => self.persistent_objects(),
             ToolRequest::Lint => self.lint(),
-            ToolRequest::LintRules => self
-                .semantic_query_with_config(Request::LintRules, self.session.config.lint.clone()),
+            ToolRequest::LintRules => self.configured_semantic().handle(&Request::LintRules),
             ToolRequest::CallGraph => self.ok(self.call_graph()),
             ToolRequest::CostEstimate => self.ok(self.cost_estimate()),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
@@ -323,7 +352,8 @@ impl<'a> ToolService<'a> {
 
     /// Inspect through the shared session pipeline.
     pub fn inspect(&mut self) -> Envelope<InspectResult> {
-        self.session.inspect()
+        self.session
+            .inspect_loaded(self.loaded.clone(), &self.semantic)
     }
 
     /// Spawn the LPP provider client for `language_id` through the session's
@@ -382,22 +412,18 @@ impl<'a> ToolService<'a> {
     /// `analyze`/`lint` workflows, so one file identity holds per finding
     /// across every surface (#102).
     fn findings(&self) -> ToolResponse {
-        let response = self.semantic_query(Request::GetFindings);
-        match response {
-            ToolResponse::Ok { mut result } => {
-                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
-                ToolResponse::Ok { result }
-            }
-            other => other,
-        }
+        self.semantic_query_with_resolved_span_paths(Request::GetFindings)
     }
 
     /// `persistentObjects`: persistent-object facts with resolved source paths.
     fn persistent_objects(&self) -> ToolResponse {
-        let response = self.semantic_query(Request::GetPersistentObjects);
-        match response {
+        self.semantic_query_with_resolved_span_paths(Request::GetPersistentObjects)
+    }
+
+    fn semantic_query_with_resolved_span_paths(&self, request: Request) -> ToolResponse {
+        match self.semantic_query(request) {
             ToolResponse::Ok { mut result } => {
-                crate::session::resolve_finding_span_paths(&mut result, &self.loaded);
+                crate::session::resolve_span_paths(&mut result, &self.loaded);
                 ToolResponse::Ok { result }
             }
             other => other,
@@ -406,70 +432,34 @@ impl<'a> ToolService<'a> {
 
     /// Run one semantic query over the loaded program.
     fn semantic_query(&self, request: Request) -> ToolResponse {
-        self.semantic_query_with_config(request, wright_analyzer::registry::LintConfig::default())
+        self.semantic.handle(&request)
     }
 
-    /// Run one semantic query over the loaded program with an explicit lint
-    /// configuration.
-    fn semantic_query_with_config(
-        &self,
-        request: Request,
-        config: wright_analyzer::registry::LintConfig,
-    ) -> ToolResponse {
-        let origin = Origin {
-            kind: self.loaded.origin.kind.clone(),
-            locale: self.loaded.origin.locale.clone(),
-        };
-        let service = SemanticService::with_origin_and_config_and_registry(
-            &self.loaded.program,
-            origin,
-            config,
-            std::sync::Arc::clone(self.session.lint_registry()),
-        );
-        match service.handle(&request) {
-            Response::Ok { result } => ToolResponse::Ok { result },
-            Response::Error { error } => ToolResponse::Error {
-                error: ToolErrorInfo {
-                    code: error.code,
-                    message: error.message,
-                },
-            },
-        }
+    fn configured_semantic(&self) -> &SemanticService<'static> {
+        self.lint_semantic.as_ref().unwrap_or(&self.semantic)
     }
 
     /// `lint`: rule metadata, effective configuration, and findings over the
     /// loaded program through the same semantic-service path as the CLI
     /// `lint` workflow (no duplicated rule execution, #98).
     fn lint(&self) -> ToolResponse {
-        let config = self.session.config.lint.clone();
-        let origin = Origin {
-            kind: self.loaded.origin.kind.clone(),
-            locale: self.loaded.origin.locale.clone(),
+        let service = self.configured_semantic();
+        let lint_rules = match service.handle(&Request::LintRules) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!({}),
         };
-        {
-            let service = SemanticService::with_origin_and_config_and_registry(
-                &self.loaded.program,
-                origin,
-                config,
-                std::sync::Arc::clone(self.session.lint_registry()),
-            );
-            let lint_rules = match service.handle(&Request::LintRules) {
-                Response::Ok { result } => result,
-                Response::Error { .. } => serde_json::json!({}),
-            };
-            let mut findings = match service.handle(&Request::GetFindings) {
-                Response::Ok { result } => result,
-                Response::Error { .. } => serde_json::json!([]),
-            };
-            crate::session::resolve_finding_span_paths(&mut findings, &self.loaded);
-            self.ok(json!({
-                "inputIdentity": self.loaded.input.identity,
-                "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
-                "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
-                "findings": findings,
-                "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
-            }))
-        }
+        let mut findings = match service.handle(&Request::GetFindings) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::json!([]),
+        };
+        crate::session::resolve_span_paths(&mut findings, &self.loaded);
+        self.ok(json!({
+            "inputIdentity": self.loaded.input.identity,
+            "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
+            "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
+            "findings": findings,
+            "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
+        }))
     }
 
     /// Program summary with origin and source identity.
@@ -511,16 +501,10 @@ impl<'a> ToolService<'a> {
     }
 
     fn cost_estimate(&self) -> serde_json::Value {
-        let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog loads");
-        let locale = self
-            .loaded
-            .origin
-            .locale
-            .as_deref()
-            .map(workshop_rs::catalog::Locale::new)
-            .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"));
+        let locale = CompilerSession::locale_for(&self.loaded);
         let text =
-            workshop_rs::emitter::emit(&self.loaded.program, &catalog, &locale).unwrap_or_default();
+            workshop_rs::emitter::emit(&self.loaded.program, self.session.catalog(), &locale)
+                .unwrap_or_default();
         let waits = self
             .loaded
             .program
@@ -542,7 +526,7 @@ impl<'a> ToolService<'a> {
             },
             "findings": findings.iter().map(|f| json!({
                 "code": f.code,
-                "severity": severity_name(f.severity),
+                "severity": f.severity.as_str(),
                 "message": f.message,
             })).collect::<Vec<_>>(),
             "kind": {
@@ -554,9 +538,7 @@ impl<'a> ToolService<'a> {
     }
 
     fn target_metadata(&self) -> serde_json::Value {
-        let Ok(catalog) = workshop_rs::catalog::Catalog::builtin() else {
-            return json!({ "error": "catalog load failed" });
-        };
+        let catalog = self.session.catalog();
         json!({
             "catalogVersion": catalog.catalog_version(),
             "locales": catalog.locales().iter().map(|l| l.to_string()).collect::<Vec<_>>(),
@@ -569,14 +551,5 @@ impl<'a> ToolService<'a> {
                 "members": domain.members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
-    }
-}
-
-/// The canonical severity name of a finding.
-fn severity_name(severity: wright_analyzer::analysis::Severity) -> &'static str {
-    match severity {
-        wright_analyzer::analysis::Severity::Error => "error",
-        wright_analyzer::analysis::Severity::Warning => "warning",
-        wright_analyzer::analysis::Severity::Info => "info",
     }
 }

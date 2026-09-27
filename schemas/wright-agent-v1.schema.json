@@ -1,0 +1,758 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wrightkit.dev/schemas/wright-agent-v1.schema.json",
+  "title": "Wright agent contract v1",
+  "$defs": {
+    "ToolRequest": {
+      "oneOf": [
+        { "$ref": "#/$defs/CapabilitiesRequest" },
+        { "$ref": "#/$defs/CompileRequest" },
+        { "$ref": "#/$defs/CheckRequest" },
+        { "$ref": "#/$defs/AnalyzeRequest" },
+        { "$ref": "#/$defs/InspectRequest" },
+        { "$ref": "#/$defs/ProjectRequest" },
+        { "$ref": "#/$defs/RulesRequest" },
+        { "$ref": "#/$defs/SymbolsRequest" },
+        { "$ref": "#/$defs/ReferencesRequest" },
+        { "$ref": "#/$defs/UsageRequest" },
+        { "$ref": "#/$defs/CfgRequest" },
+        { "$ref": "#/$defs/FindingsRequest" },
+        { "$ref": "#/$defs/PersistentObjectsRequest" },
+        { "$ref": "#/$defs/LintRequest" },
+        { "$ref": "#/$defs/LintRulesRequest" },
+        { "$ref": "#/$defs/CallGraphRequest" },
+        { "$ref": "#/$defs/CostEstimateRequest" },
+        { "$ref": "#/$defs/TargetMetadataRequest" },
+        { "$ref": "#/$defs/ValidateEditTransactionRequest" },
+        { "$ref": "#/$defs/SemanticRenameRequest" },
+        { "$ref": "#/$defs/ProviderSemanticRenameRequest" },
+        { "$ref": "#/$defs/ProviderValidateEditRequest" }
+      ]
+    },
+    "ToolResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["result"],
+          "properties": { "result": { "$ref": "#/$defs/AgentResult" } },
+          "not": { "required": ["error"] },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["error"],
+          "properties": { "error": { "$ref": "#/$defs/ToolErrorInfo" } },
+          "not": { "required": ["result"] },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "ToolErrorInfo": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "AgentResult": {
+      "anyOf": [
+        { "$ref": "#/$defs/Capabilities" },
+        { "$ref": "#/$defs/CompileResult" },
+        { "$ref": "#/$defs/CheckResult" },
+        { "$ref": "#/$defs/AnalyzeResult" },
+        { "$ref": "#/$defs/InspectResult" },
+        { "$ref": "#/$defs/ProjectResult" },
+        { "$ref": "#/$defs/RulesResult" },
+        { "$ref": "#/$defs/SymbolsResult" },
+        { "$ref": "#/$defs/ReferencesResult" },
+        { "$ref": "#/$defs/UsageResult" },
+        { "$ref": "#/$defs/CfgResult" },
+        { "$ref": "#/$defs/FindingsResult" },
+        { "$ref": "#/$defs/PersistentObjectsResult" },
+        { "$ref": "#/$defs/LintResult" },
+        { "$ref": "#/$defs/LintRulesResult" },
+        { "$ref": "#/$defs/CallGraphResult" },
+        { "$ref": "#/$defs/CostEstimateResult" },
+        { "$ref": "#/$defs/TargetMetadataResult" },
+        { "$ref": "#/$defs/ValidateEditTransactionResult" },
+        { "$ref": "#/$defs/SemanticRenameResult" },
+        { "$ref": "#/$defs/ProviderSemanticRenameResult" },
+        { "$ref": "#/$defs/ProviderValidateEditResult" }
+      ]
+    },
+    "WorkflowEnvelope": {
+      "type": "object",
+      "required": ["wright", "command", "ok", "exit", "diagnostics", "result"],
+      "properties": {
+        "wright": { "$ref": "#/$defs/ResultContract" },
+        "command": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "exit": { "type": "integer", "minimum": 0 },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } },
+        "result": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "ResultContract": {
+      "type": "object",
+      "required": ["version", "contract"],
+      "properties": {
+        "version": { "type": "string" },
+        "contract": { "const": "wright-result/v1" }
+      },
+      "additionalProperties": true
+    },
+    "Diagnostic": {
+      "type": "object",
+      "required": ["code", "stage", "severity", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "stage": { "enum": ["discovery", "frontend", "lowering", "validation", "emission", "analysis", "reconstruction", "internal"] },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "message": { "type": "string" },
+        "status": { "enum": ["supported", "partial", "unsupported"] },
+        "span": { "$ref": "#/$defs/SourceSpan" },
+        "source": { "$ref": "#/$defs/Origin" }
+      },
+      "additionalProperties": true
+    },
+    "Position1Based": {
+      "type": "object",
+      "required": ["line", "col"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "Origin": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "locale": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "SourceSpan": {
+      "type": "object",
+      "required": ["file", "start", "end"],
+      "properties": {
+        "file": { "type": "integer", "minimum": 0 },
+        "path": { "type": "string" },
+        "start": { "$ref": "#/$defs/Position1Based" },
+        "end": { "$ref": "#/$defs/Position1Based" }
+      },
+      "additionalProperties": true
+    },
+    "Span": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/SourceSpan" }
+      ]
+    },
+    "ProgramSummary": {
+      "type": "object",
+      "required": ["origin", "files", "globalVariables", "playerVariables", "subroutines", "rules", "findings"],
+      "properties": {
+        "origin": { "$ref": "#/$defs/Origin" },
+        "files": { "type": "integer", "minimum": 0 },
+        "globalVariables": { "type": "integer", "minimum": 0 },
+        "playerVariables": { "type": "integer", "minimum": 0 },
+        "subroutines": { "type": "integer", "minimum": 0 },
+        "rules": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "AnalyzedProgramSummary": {
+      "type": "object",
+      "required": ["origin", "files", "globalVariables", "playerVariables", "subroutines", "rules"],
+      "properties": {
+        "origin": { "$ref": "#/$defs/Origin" },
+        "files": { "type": "integer", "minimum": 0 },
+        "globalVariables": { "type": "integer", "minimum": 0 },
+        "playerVariables": { "type": "integer", "minimum": 0 },
+        "subroutines": { "type": "integer", "minimum": 0 },
+        "rules": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "RuleSummary": {
+      "type": "object",
+      "required": ["id", "name", "span"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "span": { "$ref": "#/$defs/Span" }
+      },
+      "additionalProperties": true
+    },
+    "Symbol": {
+      "type": "object",
+      "required": ["id", "kind", "name", "span"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "span": { "$ref": "#/$defs/Span" }
+      },
+      "additionalProperties": true
+    },
+    "Reference": {
+      "type": "object",
+      "required": ["kind", "span", "rule", "action", "value"],
+      "properties": {
+        "kind": { "enum": ["declaration", "definition", "read", "write", "call"] },
+        "span": { "$ref": "#/$defs/Span" },
+        "rule": { "type": ["integer", "null"], "minimum": 0 },
+        "action": { "type": ["integer", "null"], "minimum": 0 },
+        "value": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "Finding": {
+      "type": "object",
+      "required": ["code", "severity", "message", "span", "rule", "action", "value", "evidence", "boundedness"],
+      "properties": {
+        "code": { "type": "string" },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "message": { "type": "string" },
+        "span": { "$ref": "#/$defs/Span" },
+        "rule": { "type": ["integer", "null"], "minimum": 0 },
+        "action": { "type": ["integer", "null"], "minimum": 0 },
+        "value": { "type": ["integer", "null"], "minimum": 0 },
+        "evidence": { "type": "string" },
+        "boundedness": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "LintRule": {
+      "type": "object",
+      "required": ["id", "defaultSeverity", "effectiveSeverity", "enabled", "summary", "rationale", "documentation", "knownLimits", "evidence", "tags", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "defaultSeverity": { "type": "string" },
+        "effectiveSeverity": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "summary": { "type": "string" },
+        "rationale": { "type": "string" },
+        "documentation": { "type": "string" },
+        "knownLimits": { "type": "string" },
+        "evidence": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "kind": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "LintConfiguration": {
+      "type": "object",
+      "required": ["rules"],
+      "properties": {
+        "rules": { "type": "object", "additionalProperties": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "SkippedRule": {
+      "type": "object",
+      "required": ["id", "rule", "reason"],
+      "properties": {
+        "id": { "type": "string" },
+        "rule": { "type": "integer", "minimum": 0 },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "SourceEdit": {
+      "type": "object",
+      "required": ["kind", "source", "source_identity", "range", "new_text"],
+      "properties": {
+        "kind": { "type": "string" },
+        "source": { "type": "string" },
+        "source_identity": { "type": "string" },
+        "range": { "$ref": "#/$defs/EditRange" },
+        "new_text": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "SourcePreview": {
+      "type": "object",
+      "required": ["source", "source_identity", "new_text"],
+      "properties": {
+        "source": { "type": "string" },
+        "source_identity": { "type": "string" },
+        "new_text": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "EditValidationPayload": {
+      "type": "object",
+      "required": ["ok", "exit", "diagnostics"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "exit": { "type": "integer", "minimum": 0 },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } },
+        "preview": { "type": "array", "items": { "$ref": "#/$defs/SourcePreview" } }
+      },
+      "additionalProperties": true
+    },
+    "SemanticRenamePayload": {
+      "type": "object",
+      "required": ["ok", "transaction", "diagnostics"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "transaction": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/EditTransaction" }] },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } },
+        "preview": { "type": "array", "items": { "$ref": "#/$defs/SourcePreview" } }
+      },
+      "additionalProperties": true
+    },
+    "ProviderMutationPayload": {
+      "type": "object",
+      "required": ["ok", "diagnostics"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "transaction": { "$ref": "#/$defs/EditTransaction" },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } },
+        "preview": { "type": "array", "items": { "$ref": "#/$defs/SourcePreview" } },
+        "provider_code": { "type": "string" },
+        "provider_message": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "CapabilitiesResult": { "$ref": "#/$defs/Capabilities" },
+    "CompileResult": {
+      "allOf": [
+        { "$ref": "#/$defs/WorkflowEnvelope" },
+        { "type": "object", "properties": { "command": { "const": "compile" }, "result": { "$ref": "#/$defs/CompilePayload" } } }
+      ]
+    },
+    "CheckResult": {
+      "allOf": [
+        { "$ref": "#/$defs/WorkflowEnvelope" },
+        { "type": "object", "properties": { "command": { "const": "check" }, "result": { "$ref": "#/$defs/CheckPayload" } } }
+      ]
+    },
+    "AnalyzeResult": {
+      "allOf": [
+        { "$ref": "#/$defs/WorkflowEnvelope" },
+        { "type": "object", "properties": { "command": { "const": "analyze" }, "result": { "$ref": "#/$defs/AnalyzePayload" } } }
+      ]
+    },
+    "InspectResult": {
+      "allOf": [
+        { "$ref": "#/$defs/WorkflowEnvelope" },
+        { "type": "object", "properties": { "command": { "const": "inspect" }, "result": { "$ref": "#/$defs/InspectPayload" } } }
+      ]
+    },
+    "ProjectResult": {
+      "type": "object",
+      "required": ["origin", "inputIdentity", "files", "globalVariables", "playerVariables", "subroutines", "rules", "symbols", "findings"],
+      "properties": {
+        "origin": { "$ref": "#/$defs/Origin" },
+        "inputIdentity": { "type": "string" },
+        "files": { "type": "integer", "minimum": 0 },
+        "globalVariables": { "type": "integer", "minimum": 0 },
+        "playerVariables": { "type": "integer", "minimum": 0 },
+        "subroutines": { "type": "integer", "minimum": 0 },
+        "rules": { "type": "integer", "minimum": 0 },
+        "symbols": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "RulesResult": { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
+    "SymbolsResult": { "type": "array", "items": { "$ref": "#/$defs/Symbol" } },
+    "ReferencesResult": { "type": "array", "items": { "$ref": "#/$defs/Reference" } },
+    "UsageResult": {
+      "type": "object",
+      "required": ["symbol", "reads", "writes", "calls", "rules"],
+      "properties": {
+        "symbol": { "type": "string" },
+        "reads": { "type": "integer", "minimum": 0 },
+        "writes": { "type": "integer", "minimum": 0 },
+        "calls": { "type": "integer", "minimum": 0 },
+        "rules": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "CfgResult": {
+      "type": "object",
+      "required": ["entry", "exit", "blocks"],
+      "properties": {
+        "entry": { "type": "integer", "minimum": 0 },
+        "exit": { "type": "integer", "minimum": 0 },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "waits", "calls", "actions", "successors"],
+            "properties": {
+              "id": { "type": "integer", "minimum": 0 },
+              "kind": { "type": "string" },
+              "waits": { "type": "boolean" },
+              "calls": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+              "actions": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+              "successors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["to", "kind"],
+                  "properties": { "to": { "type": "integer", "minimum": 0 }, "kind": { "type": "string" } },
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "FindingsResult": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
+    "PersistentObjectsResult": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "rule", "action", "executionScope", "visibility", "reevaluation", "identityRetained", "sameKindCleanupInRule", "span"],
+        "properties": {
+          "kind": { "type": "string" },
+          "rule": { "type": "integer", "minimum": 0 },
+          "action": { "type": "integer", "minimum": 0 },
+          "executionScope": { "type": "string" },
+          "visibility": { "type": "string" },
+          "reevaluation": { "anyOf": [{ "type": "null" }, { "type": "object", "required": ["domain", "mode"], "properties": { "domain": { "type": "string" }, "mode": { "type": "string" } }, "additionalProperties": true }] },
+          "identityRetained": { "type": "boolean" },
+          "sameKindCleanupInRule": { "type": "boolean" },
+          "span": { "$ref": "#/$defs/Span" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "LintResult": {
+      "type": "object",
+      "required": ["inputIdentity", "rules", "config", "findings", "skipped"],
+      "properties": {
+        "inputIdentity": { "type": "string" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRule" } },
+        "config": { "$ref": "#/$defs/LintConfiguration" },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
+        "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } }
+      },
+      "additionalProperties": true
+    },
+    "LintRulesResult": {
+      "type": "object",
+      "required": ["rules", "config", "skipped"],
+      "properties": {
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRule" } },
+        "config": { "$ref": "#/$defs/LintConfiguration" },
+        "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } }
+      },
+      "additionalProperties": true
+    },
+    "CallGraphResult": {
+      "type": "array",
+      "items": { "type": "object", "required": ["caller", "callee"], "properties": { "caller": { "type": "string" }, "callee": { "type": "string" } }, "additionalProperties": true }
+    },
+    "CostEstimateResult": {
+      "type": "object",
+      "required": ["exact", "findings", "kind"],
+      "properties": {
+        "exact": {
+          "type": "object",
+          "required": ["emittedBytes", "programActions", "programRules", "waitActions"],
+          "properties": {
+            "emittedBytes": { "type": "integer", "minimum": 0 },
+            "programActions": { "type": "integer", "minimum": 0 },
+            "programRules": { "type": "integer", "minimum": 0 },
+            "waitActions": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "findings": { "type": "array", "items": { "type": "object", "required": ["code", "severity", "message"], "properties": { "code": { "type": "string" }, "severity": { "type": "string" }, "message": { "type": "string" } }, "additionalProperties": true } },
+        "kind": { "type": "object", "required": ["exact", "findings", "performance"], "properties": { "exact": { "type": "string" }, "findings": { "type": "string" }, "performance": { "type": "string" } }, "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "TargetMetadataResult": {
+      "type": "object",
+      "required": ["catalogVersion", "locales", "actions", "values", "events", "operators", "enumDomains"],
+      "properties": {
+        "catalogVersion": { "type": "string" },
+        "locales": { "type": "array", "items": { "type": "string" } },
+        "actions": { "type": "integer", "minimum": 0 },
+        "values": { "type": "integer", "minimum": 0 },
+        "events": { "type": "integer", "minimum": 0 },
+        "operators": { "type": "integer", "minimum": 0 },
+        "enumDomains": { "type": "array", "items": { "type": "object", "required": ["domain", "members"], "properties": { "domain": { "type": "string" }, "members": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": true } }
+      },
+      "additionalProperties": true
+    },
+    "ValidateEditTransactionResult": { "$ref": "#/$defs/EditValidationPayload" },
+    "SemanticRenameResult": { "$ref": "#/$defs/SemanticRenamePayload" },
+    "ProviderSemanticRenameResult": { "$ref": "#/$defs/ProviderMutationPayload" },
+    "ProviderValidateEditResult": { "$ref": "#/$defs/ProviderMutationPayload" },
+    "CompilePayload": {
+      "type": "object",
+      "properties": {
+        "output": {
+          "type": "object",
+          "required": ["text", "sha256", "locale", "written_to", "input_identity"],
+          "properties": {
+            "text": { "type": "string" },
+            "sha256": { "type": "string" },
+            "locale": { "type": "string" },
+            "written_to": { "type": "string" },
+            "input_identity": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "CheckPayload": { "type": "object", "additionalProperties": true },
+    "AnalyzePayload": {
+      "type": "object",
+      "required": ["program", "facts"],
+      "properties": {
+        "program": { "$ref": "#/$defs/AnalyzedProgramSummary" },
+        "facts": {
+          "type": "object",
+          "required": ["symbols", "rules"],
+          "properties": {
+            "symbols": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "kind", "name", "span", "usage"],
+                "properties": {
+                  "id": { "type": "integer", "minimum": 0 },
+                  "kind": { "type": "string" },
+                  "name": { "type": "string" },
+                  "span": { "$ref": "#/$defs/Span" },
+                  "usage": { "$ref": "#/$defs/UsageResult" }
+                },
+                "additionalProperties": true
+              }
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "name", "span", "controlFlow"],
+                "properties": {
+                  "id": { "type": "integer", "minimum": 0 },
+                  "name": { "type": "string" },
+                  "span": { "$ref": "#/$defs/Span" },
+                  "controlFlow": {
+                    "type": "object",
+                    "required": ["blocks", "edges", "loopBlocks", "waitBlocks"],
+                    "properties": {
+                      "blocks": { "type": "integer", "minimum": 0 },
+                      "edges": { "type": "integer", "minimum": 0 },
+                      "loopBlocks": { "type": "integer", "minimum": 0 },
+                      "waitBlocks": { "type": "integer", "minimum": 0 }
+                    },
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "InspectPayload": {
+      "type": "object",
+      "required": ["program", "rules", "symbols", "references"],
+      "properties": {
+        "program": { "$ref": "#/$defs/ProgramSummary" },
+        "rules": { "$ref": "#/$defs/RulesResult" },
+        "symbols": { "$ref": "#/$defs/SymbolsResult" },
+        "references": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/Reference" } } }
+      },
+      "additionalProperties": true
+    },
+    "Capabilities": {
+      "type": "object",
+      "required": ["name", "version", "contract", "agent_contract", "operations", "languages", "profiles"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "contract": { "const": "wright-result/v1" },
+        "agent_contract": { "const": "wright-agent/v1" },
+        "operations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "profiles": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "Sources": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "EditRange": {
+      "type": "object",
+      "required": ["start_line", "start_col", "end_line", "end_col"],
+      "properties": {
+        "start_line": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "start_col": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "end_line": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "end_col": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      },
+      "additionalProperties": false
+    },
+    "SourceEdit": {
+      "type": "object",
+      "required": ["kind", "source", "source_identity", "range", "new_text"],
+      "properties": {
+        "kind": { "type": "string" },
+        "source": { "type": "string" },
+        "source_identity": { "type": "string" },
+        "range": { "$ref": "#/$defs/EditRange" },
+        "new_text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "EditTransaction": {
+      "type": "object",
+      "required": ["edits"],
+      "properties": {
+        "edits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SourceEdit" } }
+      },
+      "additionalProperties": false
+    },
+    "RenameTarget": {
+      "type": "object",
+      "required": ["source", "line", "col", "to"],
+      "properties": {
+        "source": { "type": "string" },
+        "line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "col": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "to": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Document": {
+      "type": "object",
+      "required": ["uri", "languageId", "version", "text"],
+      "properties": {
+        "uri": { "type": "string" },
+        "languageId": { "type": "string" },
+        "version": { "type": "integer" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "DocumentSet": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Document" }
+    },
+    "Position": {
+      "type": "object",
+      "required": ["line", "character"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "character": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      },
+      "additionalProperties": false
+    },
+    "CapabilitiesRequest": { "type": "object", "properties": { "op": { "const": "capabilities" } }, "required": ["op"], "additionalProperties": false },
+    "CompileRequest": { "type": "object", "properties": { "op": { "const": "compile" } }, "required": ["op"], "additionalProperties": false },
+    "CheckRequest": { "type": "object", "properties": { "op": { "const": "check" } }, "required": ["op"], "additionalProperties": false },
+    "AnalyzeRequest": { "type": "object", "properties": { "op": { "const": "analyze" } }, "required": ["op"], "additionalProperties": false },
+    "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" } }, "required": ["op"], "additionalProperties": false },
+    "ProjectRequest": { "type": "object", "properties": { "op": { "const": "project" } }, "required": ["op"], "additionalProperties": false },
+    "RulesRequest": { "type": "object", "properties": { "op": { "const": "rules" } }, "required": ["op"], "additionalProperties": false },
+    "SymbolsRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "symbols" }, "kind": { "type": ["string", "null"] } },
+      "required": ["op"],
+      "additionalProperties": false
+    },
+    "ReferencesRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "references" }, "symbol": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "required": ["op", "symbol"],
+      "additionalProperties": false
+    },
+    "UsageRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "usage" }, "symbol": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "required": ["op", "symbol"],
+      "additionalProperties": false
+    },
+    "CfgRequest": {
+      "type": "object",
+      "properties": { "op": { "const": "cfg" }, "rule": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "required": ["op", "rule"],
+      "additionalProperties": false
+    },
+    "FindingsRequest": { "type": "object", "properties": { "op": { "const": "findings" } }, "required": ["op"], "additionalProperties": false },
+    "PersistentObjectsRequest": { "type": "object", "properties": { "op": { "const": "persistentObjects" } }, "required": ["op"], "additionalProperties": false },
+    "LintRequest": { "type": "object", "properties": { "op": { "const": "lint" } }, "required": ["op"], "additionalProperties": false },
+    "LintRulesRequest": { "type": "object", "properties": { "op": { "const": "lintRules" } }, "required": ["op"], "additionalProperties": false },
+    "CallGraphRequest": { "type": "object", "properties": { "op": { "const": "callGraph" } }, "required": ["op"], "additionalProperties": false },
+    "CostEstimateRequest": { "type": "object", "properties": { "op": { "const": "costEstimate" } }, "required": ["op"], "additionalProperties": false },
+    "TargetMetadataRequest": { "type": "object", "properties": { "op": { "const": "targetMetadata" } }, "required": ["op"], "additionalProperties": false },
+    "ValidateEditTransactionRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "validateEditTransaction" },
+        "sources": { "$ref": "#/$defs/Sources" },
+        "transaction": { "$ref": "#/$defs/EditTransaction" }
+      },
+      "required": ["op", "sources", "transaction"],
+      "additionalProperties": false
+    },
+    "SemanticRenameRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "semanticRename" },
+        "sources": { "$ref": "#/$defs/Sources" },
+        "target": { "$ref": "#/$defs/RenameTarget" }
+      },
+      "required": ["op", "sources", "target"],
+      "additionalProperties": false
+    },
+    "ProviderSemanticRenameRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "providerSemanticRename" },
+        "language_id": { "type": "string" },
+        "documents": { "$ref": "#/$defs/DocumentSet" },
+        "position_document_uri": { "type": "string" },
+        "position": { "$ref": "#/$defs/Position" },
+        "new_name": { "type": "string" },
+        "project_root": { "type": ["string", "null"] },
+        "sources": { "$ref": "#/$defs/Sources" }
+      },
+      "required": ["op", "language_id", "documents", "position_document_uri", "position", "new_name", "sources"],
+      "additionalProperties": false
+    },
+    "ProviderValidateEditRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "providerValidateEdit" },
+        "language_id": { "type": "string" },
+        "documents": { "$ref": "#/$defs/DocumentSet" },
+        "transaction": { "$ref": "#/$defs/EditTransaction" },
+        "sources": { "$ref": "#/$defs/Sources" },
+        "project_root": { "type": ["string", "null"] }
+      },
+      "required": ["op", "language_id", "documents", "transaction", "sources"],
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/ToolRequest"
+}

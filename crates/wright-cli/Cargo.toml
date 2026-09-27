@@ -20,7 +20,6 @@ clap_complete = "4.5"
 flate2 = "1"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-sha2.workspace = true
 tar = "0.4"
 reqwest.workspace = true
 wright-driver.workspace = true
@@ -28,5 +27,6 @@ wright-driver.workspace = true
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
 jsonschema = "0.18"
+sha2.workspace = true
 wright-analyzer.workspace = true
 workshop-rs.workspace = true

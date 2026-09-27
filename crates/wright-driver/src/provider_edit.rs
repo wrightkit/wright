@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::diag::{Diagnostic, Stage};
-use crate::edit::{EditRange, EditTransaction, SourceEdit, SourcePreview};
+use crate::edit::{
+    EditRange, EditTransaction, SourceEdit, SourcePreview, char_offset_to_utf16,
+    utf16_offset_to_char,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderMutation {
@@ -142,8 +145,10 @@ fn finish_transaction(
     sources: &BTreeMap<String, String>,
     project_root: Option<&str>,
 ) -> ProviderMutation {
-    if let Err(diag) = check_preconditions(&transaction, sources) {
-        return refusal(vec![diag], None);
+    for edit in &transaction.edits {
+        if let Some(diagnostic) = crate::edit::source_precondition(edit, sources) {
+            return refusal(vec![diagnostic], None);
+        }
     }
     let previews = match transaction.apply(sources) {
         Ok(previews) => previews,
@@ -162,35 +167,6 @@ fn finish_transaction(
         provider_code: None,
         provider_message: None,
     }
-}
-
-fn check_preconditions(
-    transaction: &EditTransaction,
-    sources: &BTreeMap<String, String>,
-) -> Result<(), Diagnostic> {
-    for edit in &transaction.edits {
-        let Some(current) = sources.get(&edit.source) else {
-            return Err(Diagnostic::error(
-                "edit-unknown-source",
-                Stage::Discovery,
-                format!(
-                    "the edit targets '{}' but no current text was provided for it; supply the current source so the version precondition can be verified",
-                    edit.source
-                ),
-            ));
-        };
-        if crate::input_identity(current) != edit.source_identity {
-            return Err(Diagnostic::error(
-                "edit-stale-source",
-                Stage::Discovery,
-                format!(
-                    "the edit for '{}' targets a different source version (identity mismatch); re-fetch the source and retry",
-                    edit.source
-                ),
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn validate_pipeline(
@@ -421,31 +397,13 @@ fn column_to_position(
 }
 
 fn utf16_to_char_column(line: &str, units: u32) -> Option<u32> {
-    let mut acc = 0u32;
-    let mut col = 1u32;
-    for ch in line.chars() {
-        if acc == units {
-            return Some(col);
-        }
-        let len = ch.len_utf16() as u32;
-        if acc + len > units {
-            return None;
-        }
-        acc += len;
-        col += 1;
-    }
-    (acc == units).then_some(col)
+    let offset = utf16_offset_to_char(line, units as usize);
+    (char_offset_to_utf16(line, offset) == units as usize).then_some(offset as u32 + 1)
 }
 
 fn char_column_to_utf16(line: &str, column: u32) -> Option<u32> {
-    let mut acc = 0u32;
-    for (idx, ch) in line.chars().enumerate() {
-        if (idx as u32) + 1 == column {
-            return Some(acc);
-        }
-        acc += ch.len_utf16() as u32;
-    }
-    (column as usize == line.chars().count() + 1).then_some(acc)
+    let offset = column.checked_sub(1)? as usize;
+    (offset <= line.chars().count()).then(|| char_offset_to_utf16(line, offset) as u32)
 }
 
 fn edit_invalid_range(range: wright_lpp::Range) -> Diagnostic {
