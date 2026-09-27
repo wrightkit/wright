@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use serde_json::{Value as JsonValue, json};
 use workshop_rs::source::{FileId, Span};
@@ -7,14 +7,37 @@ use workshop_rs::{Event, Program};
 use super::analysis::Finding;
 use super::cfg::cfg_response;
 use super::facts::persistent_objects;
-use super::symbols::{ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId};
+use super::symbols::{Reference, ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId};
 use crate::analysis::Boundedness;
 use crate::registry::{LintConfig, SkippedRule};
 use crate::service::{ErrorInfo, Origin, Request, Response};
 
+#[derive(Clone)]
+enum ProgramSource<'a> {
+    Borrowed(&'a Program),
+    Shared(Arc<Program>),
+}
+
+impl ProgramSource<'_> {
+    fn as_ref(&self) -> &Program {
+        match self {
+            Self::Borrowed(program) => program,
+            Self::Shared(program) => program,
+        }
+    }
+}
+
+impl Deref for ProgramSource<'_> {
+    type Target = Program;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
+}
+
 pub struct SemanticService<'a> {
-    program: &'a Program,
-    index: SemanticIndex,
+    program: ProgramSource<'a>,
+    index: Arc<SemanticIndex>,
     findings: Vec<Finding>,
     skipped: Vec<SkippedRule>,
     origin: Origin,
@@ -62,8 +85,36 @@ impl<'a> SemanticService<'a> {
         config: LintConfig,
         registry: Arc<crate::registry::LintRegistry>,
     ) -> Self {
-        let index = SemanticIndex::build(program);
-        let report = registry.run_report(program, &config);
+        Self::with_program_and_origin_and_config_and_registry(
+            ProgramSource::Borrowed(program),
+            origin,
+            config,
+            registry,
+        )
+    }
+
+    pub fn with_shared_program(
+        program: Arc<Program>,
+        origin: Origin,
+        config: LintConfig,
+        registry: Arc<crate::registry::LintRegistry>,
+    ) -> SemanticService<'static> {
+        SemanticService::<'static>::with_program_and_origin_and_config_and_registry(
+            ProgramSource::Shared(program),
+            origin,
+            config,
+            registry,
+        )
+    }
+
+    fn with_program_and_origin_and_config_and_registry(
+        program: ProgramSource<'a>,
+        origin: Origin,
+        config: LintConfig,
+        registry: Arc<crate::registry::LintRegistry>,
+    ) -> Self {
+        let index = Arc::new(SemanticIndex::build(program.as_ref()));
+        let report = registry.run_report(program.as_ref(), &config);
         Self {
             program,
             index,
@@ -73,6 +124,36 @@ impl<'a> SemanticService<'a> {
             config,
             registry,
         }
+    }
+
+    pub fn with_lint_config(&self, config: LintConfig) -> Self {
+        let report = self.registry.run_report(self.program.as_ref(), &config);
+        Self {
+            program: self.program.clone(),
+            index: Arc::clone(&self.index),
+            findings: report.findings,
+            skipped: report.skipped,
+            origin: self.origin.clone(),
+            config,
+            registry: Arc::clone(&self.registry),
+        }
+    }
+
+    pub fn references_for_all_symbols(&self) -> JsonValue {
+        JsonValue::Array(
+            self.index
+                .references_for_all_symbols()
+                .into_iter()
+                .map(|references| {
+                    json!(
+                        references
+                            .into_iter()
+                            .map(reference_json)
+                            .collect::<Vec<_>>()
+                    )
+                })
+                .collect(),
+        )
     }
     pub fn handle_json(&self, request_json: &str) -> String {
         let request: Request = match serde_json::from_str(request_json) {
@@ -93,16 +174,16 @@ impl<'a> SemanticService<'a> {
     pub fn handle(&self, request: &Request) -> Response {
         match request {
             Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": env!("CARGO_PKG_VERSION"), "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
-            Request::Program => Response::Ok { result: json!({"origin": self.origin, "files": file_count(self.program), "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
+            Request::Program => Response::Ok { result: json!({"origin": self.origin, "files": file_count(self.program.as_ref()), "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
             Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
             Request::ListSymbols { kind } => Response::Ok { result: json!(self.index.symbols().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol.kind.as_str() == kind)).map(symbol_json).collect::<Vec<_>>()) },
             Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: symbol_json(symbol) }),
-            Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: json!(self.index.references(id).into_iter().map(|reference| json!({"kind": reference_kind_name(reference.kind), "span": span_json(reference.span), "rule": reference.rule, "action": reference.action, "value": reference.value})).collect::<Vec<_>>()) } } }
+            Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: json!(self.index.references(id).into_iter().map(reference_json).collect::<Vec<_>>()) } } }
             Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
-            Request::GetCfg { rule } => cfg_response(self.program, *rule as usize),
+            Request::GetCfg { rule } => cfg_response(self.program.as_ref(), *rule as usize),
             Request::GetFindings => Response::Ok { result: json!(self.findings.iter().map(finding_json).collect::<Vec<_>>()) },
-            Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program)) },
+            Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program.as_ref())) },
             Request::LintRules => Response::Ok {
                 result: lint_rules(&self.registry, &self.config, &self.skipped),
             }
@@ -193,6 +274,16 @@ fn reference_kind_name(kind: ReferenceKind) -> &'static str {
         ReferenceKind::Write => "write",
         ReferenceKind::Call => "call",
     }
+}
+
+fn reference_json(reference: &Reference) -> JsonValue {
+    json!({
+        "kind": reference_kind_name(reference.kind),
+        "span": span_json(reference.span),
+        "rule": reference.rule,
+        "action": reference.action,
+        "value": reference.value,
+    })
 }
 fn event_name(event: &Event) -> String {
     match event {

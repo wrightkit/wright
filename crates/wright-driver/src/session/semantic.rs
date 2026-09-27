@@ -90,6 +90,15 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
     })
 }
 
+fn inspect_result(service: &SemanticService<'_>) -> InspectResult {
+    InspectResult {
+        program: service_response(service, &Request::Program),
+        rules: service_response(service, &Request::ListRules),
+        symbols: service_response(service, &Request::ListSymbols { kind: None }),
+        references: service.references_for_all_symbols(),
+    }
+}
+
 /// Add the resolved `path` to every semantic `span` in a JSON result.
 ///
 /// File 0 is the main input and resolves root-relative to the include root
@@ -182,31 +191,22 @@ impl CompilerSession {
             |session, loaded| {
                 let service = session.service(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                let program = service_response(&service, &Request::Program);
-                let rules = service_response(&service, &Request::ListRules);
-                let symbols = service_response(&service, &Request::ListSymbols { kind: None });
-                let references = serde_json::Value::Array(
-                    symbols
-                        .as_array()
-                        .map(|list| {
-                            list.iter()
-                                .filter_map(|s| s.get("id").and_then(serde_json::Value::as_u64))
-                                .map(|id| {
-                                    service_response(
-                                        &service,
-                                        &Request::FindReferences { symbol: id as u32 },
-                                    )
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                );
-                InspectResult {
-                    program,
-                    rules,
-                    symbols,
-                    references,
-                }
+                inspect_result(&service)
+            },
+        )
+    }
+
+    pub(crate) fn inspect_loaded(
+        &mut self,
+        loaded: Loaded,
+        service: &SemanticService<'_>,
+    ) -> Envelope<InspectResult> {
+        self.with_loaded(
+            "inspect",
+            |_| Ok(loaded),
+            |session, _loaded| {
+                session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
+                inspect_result(service)
             },
         )
     }
