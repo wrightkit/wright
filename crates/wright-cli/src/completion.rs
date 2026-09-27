@@ -285,7 +285,8 @@ pub(crate) fn install_for_shell(
         return Ok(InstallStatus::DryRun(target_file));
     }
 
-    if target_file.is_file() {
+    let updating = target_file.is_file();
+    if updating {
         let existing = std::fs::read(&target_file).map_err(|e| {
             CompletionError::failed(format!(
                 "could not read existing completion file {}: {e}",
@@ -295,28 +296,26 @@ pub(crate) fn install_for_shell(
         if existing == content && !force {
             return Ok(InstallStatus::UpToDate(target_file));
         }
-        std::fs::write(&target_file, &content).map_err(|e| {
+    } else {
+        std::fs::create_dir_all(&target_dir).map_err(|e| {
             CompletionError::failed(format!(
-                "could not update completion file {}: {e}",
-                target_file.display()
+                "could not create completion directory {}: {e}",
+                target_dir.display()
             ))
         })?;
-        return Ok(InstallStatus::Updated(target_file));
     }
-
-    std::fs::create_dir_all(&target_dir).map_err(|e| {
-        CompletionError::failed(format!(
-            "could not create completion directory {}: {e}",
-            target_dir.display()
-        ))
-    })?;
     std::fs::write(&target_file, &content).map_err(|e| {
         CompletionError::failed(format!(
-            "could not write completion file {}: {e}",
+            "could not {} completion file {}: {e}",
+            if updating { "update" } else { "write" },
             target_file.display()
         ))
     })?;
-    Ok(InstallStatus::Created(target_file))
+    Ok(if updating {
+        InstallStatus::Updated(target_file)
+    } else {
+        InstallStatus::Created(target_file)
+    })
 }
 
 fn print_status(status: &InstallStatus, shell: ShellArg, guidance: bool) {
