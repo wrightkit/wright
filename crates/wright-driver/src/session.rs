@@ -757,7 +757,7 @@ impl CompilerSession {
         Ok(result.source)
     }
 
-    fn locale_for(loaded: &Loaded) -> workshop_rs::catalog::Locale {
+    pub(crate) fn locale_for(loaded: &Loaded) -> workshop_rs::catalog::Locale {
         loaded
             .origin
             .locale
