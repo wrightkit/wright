@@ -184,18 +184,7 @@ impl SemanticIndex {
             references: Vec::new(),
             next_value_id: 0,
         };
-        for symbol in index.symbols.clone() {
-            if let Some(span) = symbol.occurrence {
-                index.push(
-                    symbol.id,
-                    ReferenceKind::Declaration,
-                    symbol.rule,
-                    None,
-                    None,
-                    Some(span),
-                );
-            }
-        }
+        index.add_missing_declarations();
         for (rule, data) in program.rules.iter().enumerate() {
             index.walk_event(&data.event, rule, program);
             for (condition, value) in data.conditions.iter().enumerate() {
@@ -231,28 +220,12 @@ impl SemanticIndex {
                 symbol.occurrence = Some(span);
             }
         }
-        for symbol in index.symbols.clone() {
-            if let Some(span) = symbol.occurrence {
-                if !index.references.iter().any(|reference| {
-                    reference.symbol == symbol.id && reference.kind == ReferenceKind::Declaration
-                }) {
-                    index.push(
-                        symbol.id,
-                        ReferenceKind::Declaration,
-                        symbol.rule,
-                        None,
-                        None,
-                        Some(span),
-                    );
-                }
-            }
-        }
-        let symbols = index.symbols.clone();
+        index.add_missing_declarations();
+        let (symbols, references) = (&index.symbols, &mut index.references);
         let mut read_occurrences = HashMap::new();
-        for reference in &mut index.references {
+        for reference in references {
             let symbol = symbols
                 .get(reference.symbol.index())
-                .cloned()
                 .expect("reference symbol exists");
             let span = match reference.kind {
                 ReferenceKind::Declaration => symbol.occurrence,
@@ -356,6 +329,27 @@ impl SemanticIndex {
             action,
             value,
         });
+    }
+    fn add_missing_declarations(&mut self) {
+        let declared = self
+            .references
+            .iter()
+            .filter(|reference| reference.kind == ReferenceKind::Declaration)
+            .map(|reference| reference.symbol)
+            .collect::<HashSet<_>>();
+        self.references
+            .extend(self.symbols.iter().filter_map(|symbol| {
+                let span = symbol.occurrence?;
+                (!declared.contains(&symbol.id)).then_some(Reference {
+                    symbol: symbol.id,
+                    kind: ReferenceKind::Declaration,
+                    span: Some(span),
+                    occurrence: Some(span),
+                    rule: symbol.rule,
+                    action: None,
+                    value: None,
+                })
+            }));
     }
     fn find_symbol(&self, kind: SymbolKind, name: &str) -> Option<SymbolId> {
         self.symbols
