@@ -168,75 +168,59 @@ pub(crate) fn default_dir_for(shell: ShellArg) -> Result<PathBuf, CompletionErro
     }
 
     let (home, data_home, config_home) = completion_dirs()?;
+    let candidates = completion_candidates(shell, &home, &data_home, &config_home);
 
     match shell {
-        ShellArg::Fish => {
-            let config = config_home.join("fish/completions");
-            let vendor = data_home.join("fish/vendor_completions.d");
-            Ok(if vendor.is_dir() && !config.is_dir() {
-                vendor
-            } else {
-                config
-            })
-        }
-        ShellArg::Bash => {
-            let xdg = data_home.join("bash-completion/completions");
-            let legacy = home.join(".bash_completion.d");
-            Ok(if legacy.is_dir() && !xdg.is_dir() {
-                legacy
-            } else {
-                xdg
-            })
-        }
+        ShellArg::Fish | ShellArg::Bash => Ok(candidates
+            .iter()
+            .find(|dir| dir.is_dir())
+            .cloned()
+            .unwrap_or_else(|| candidates[0].clone())),
         ShellArg::Zsh => {
-            if let Ok(custom) = std::env::var("ZSH_CUSTOM") {
-                if !custom.is_empty() {
-                    let custom_path = PathBuf::from(custom);
-                    let completions = custom_path.join("completions");
-                    if completions.is_dir() || custom_path.is_dir() {
-                        return Ok(completions);
-                    }
+            let custom = std::env::var("ZSH_CUSTOM")
+                .ok()
+                .filter(|custom| !custom.is_empty());
+            let custom_index = if let Some(custom) = custom {
+                if candidates[0].is_dir() || PathBuf::from(custom).is_dir() {
+                    return Ok(candidates[0].clone());
                 }
-            }
-            let oh_my_zsh_custom = home.join(".oh-my-zsh/custom/completions");
-            if oh_my_zsh_custom.is_dir() {
-                return Ok(oh_my_zsh_custom);
+                1
+            } else {
+                0
+            };
+            if candidates[custom_index].is_dir() {
+                return Ok(candidates[custom_index].clone());
             }
             if home.join(".oh-my-zsh").is_dir() {
-                return Ok(home.join(".oh-my-zsh/custom/completions"));
+                return Ok(candidates[custom_index].clone());
             }
-            for candidate in [home.join(".zfunc"), home.join(".zsh/completions")] {
-                if candidate.is_dir() {
-                    return Ok(candidate);
-                }
-            }
-            Ok(data_home.join("zsh/site-functions"))
+            Ok(candidates
+                .iter()
+                .skip(custom_index + 1)
+                .find(|dir| dir.is_dir())
+                .cloned()
+                .unwrap_or_else(|| candidates.last().expect("zsh has a fallback").clone()))
         }
         ShellArg::PowerShell => {
             if cfg!(windows) {
-                let ps_docs = home.join("Documents/PowerShell/Scripts");
-                let win_ps_docs = home.join("Documents/WindowsPowerShell/Scripts");
-                Ok(if win_ps_docs.is_dir() && !ps_docs.is_dir() {
-                    win_ps_docs
+                Ok(if candidates[1].is_dir() && !candidates[0].is_dir() {
+                    candidates[1].clone()
                 } else {
-                    ps_docs
+                    candidates[0].clone()
                 })
             } else {
-                Ok(config_home.join("powershell/completions"))
+                Ok(candidates[2].clone())
             }
         }
     }
 }
 
-pub(crate) fn candidate_dirs_for(shell: ShellArg) -> Vec<PathBuf> {
-    if let Some(override_dir) = completion_override_dir() {
-        return vec![override_dir];
-    }
-
-    let Ok((home, data_home, config_home)) = completion_dirs() else {
-        return Vec::new();
-    };
-
+fn completion_candidates(
+    shell: ShellArg,
+    home: &Path,
+    data_home: &Path,
+    config_home: &Path,
+) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     match shell {
         ShellArg::Fish => {
@@ -266,6 +250,16 @@ pub(crate) fn candidate_dirs_for(shell: ShellArg) -> Vec<PathBuf> {
         }
     }
     dirs
+}
+
+pub(crate) fn candidate_dirs_for(shell: ShellArg) -> Vec<PathBuf> {
+    if let Some(override_dir) = completion_override_dir() {
+        return vec![override_dir];
+    }
+    let Ok((home, data_home, config_home)) = completion_dirs() else {
+        return Vec::new();
+    };
+    completion_candidates(shell, &home, &data_home, &config_home)
 }
 
 pub(crate) fn install_for_shell(
