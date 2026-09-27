@@ -21,7 +21,7 @@ use wright_analyzer::canonical::{SemanticIndex, SemanticService};
 pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
 /// A tool response: a structured owned result or a structured error.
 pub use wright_analyzer::service::Response as ToolResponse;
-use wright_analyzer::service::{Origin, Request, Response};
+use wright_analyzer::service::{Request, Response};
 
 /// The tool-service name and version.
 pub const SERVICE_NAME: &str = "wright-tool-service";
@@ -408,16 +408,7 @@ impl<'a> ToolService<'a> {
         &self,
         config: wright_analyzer::registry::LintConfig,
     ) -> SemanticService<'_> {
-        let origin = Origin {
-            kind: self.loaded.origin.kind.clone(),
-            locale: self.loaded.origin.locale.clone(),
-        };
-        SemanticService::with_origin_and_config_and_registry(
-            &self.loaded.program,
-            origin,
-            config,
-            std::sync::Arc::clone(self.session.lint_registry()),
-        )
+        self.session.service_with(&self.loaded, config)
     }
 
     /// `lint`: rule metadata, effective configuration, and findings over the

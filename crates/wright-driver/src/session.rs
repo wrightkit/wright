@@ -143,10 +143,6 @@ impl CompilerSession {
         self.progress_observer = None;
     }
 
-    pub(crate) fn lint_registry(&self) -> &Arc<LintRegistry> {
-        &self.lint_registry
-    }
-
     pub(crate) fn catalog(&self) -> &workshop_rs::catalog::Catalog {
         &self.catalog
     }
@@ -779,7 +775,11 @@ impl CompilerSession {
 
     /// Build the semantic service over a loaded program with an explicit lint
     /// configuration.
-    fn service_with<'a>(&self, loaded: &'a Loaded, config: LintConfig) -> SemanticService<'a> {
+    pub(crate) fn service_with<'a>(
+        &self,
+        loaded: &'a Loaded,
+        config: LintConfig,
+    ) -> SemanticService<'a> {
         let origin = ServiceOrigin {
             kind: if loaded.provenance == Provenance::Unmapped {
                 "provider-artifact".to_string()
