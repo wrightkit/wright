@@ -297,7 +297,7 @@ impl SourceProvider for LppSourceProvider {
     }
 }
 
-fn provider_error(error: wright_lpp::ProviderError) -> SourceProviderError {
+pub(crate) fn provider_error(error: wright_lpp::ProviderError) -> SourceProviderError {
     SourceProviderError::Failed {
         code: error.code().to_string(),
         message: error.to_string(),

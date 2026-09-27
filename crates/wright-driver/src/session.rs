@@ -287,13 +287,7 @@ impl CompilerSession {
             let spawn = |session: &Self| {
                 session
                     .language_provider(opy_provider::OPY_LANGUAGE_ID)
-                    .map_err(|error| {
-                        SourceProviderError::Failed {
-                            code: error.code().to_string(),
-                            message: error.to_string(),
-                        }
-                        .diagnostic()
-                    })
+                    .map_err(|error| crate::source_provider::provider_error(error).diagnostic())
             };
             let mut provider = spawn(self)?;
             let client_info = wright_lpp::ClientInfo {
@@ -318,13 +312,8 @@ impl CompilerSession {
                     }
                 };
             }
-            initialize.map_err(|error| {
-                SourceProviderError::Failed {
-                    code: error.code().to_string(),
-                    message: error.to_string(),
-                }
-                .diagnostic()
-            })?;
+            initialize
+                .map_err(|error| crate::source_provider::provider_error(error).diagnostic())?;
             self.source_provider = Some(Box::new(crate::source_provider::LppSourceProvider::new(
                 provider,
                 self.config.locale.clone(),
