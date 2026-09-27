@@ -76,8 +76,7 @@ fn run() -> Result<(), String> {
             "shutdown" => write_response(&mut writer, id, Value::Null)?,
             "exit" => break,
             "textDocument/didOpen" => {
-                let params: DidOpenTextDocumentParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: DidOpenTextDocumentParams = parse_params(params)?;
                 let uri = params.text_document.uri.to_string();
                 let document = Document::with_version(
                     uri.clone(),
@@ -89,8 +88,7 @@ fn run() -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didChange" => {
-                let params: DidChangeTextDocumentParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: DidChangeTextDocumentParams = parse_params(params)?;
                 let uri = params.text_document.uri.to_string();
                 if let Some(change) = params.content_changes.last() {
                     service
@@ -100,8 +98,7 @@ fn run() -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didClose" => {
-                let params: DidCloseTextDocumentParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: DidCloseTextDocumentParams = parse_params(params)?;
                 let uri = params.text_document.uri.to_string();
                 let owned = ownership.remove(&uri).unwrap_or_default();
                 service.store.close(&uri);
@@ -119,8 +116,7 @@ fn run() -> Result<(), String> {
             }
             "textDocument/didSave" => {}
             "textDocument/hover" => {
-                let params: TextDocumentPositionParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: TextDocumentPositionParams = parse_params(params)?;
                 let position = convert_position(params.position);
                 let result = service
                     .hover(&params.text_document.uri.to_string(), position)
@@ -134,8 +130,7 @@ fn run() -> Result<(), String> {
                 write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
             }
             "textDocument/definition" => {
-                let params: GotoDefinitionParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: GotoDefinitionParams = parse_params(params)?;
                 let position = convert_position(params.text_document_position_params.position);
                 let result = service
                     .definition(
@@ -155,8 +150,7 @@ fn run() -> Result<(), String> {
                 write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
             }
             "textDocument/references" => {
-                let params: ReferenceParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: ReferenceParams = parse_params(params)?;
                 let position = convert_position(params.text_document_position.position);
                 let uri = params.text_document_position.text_document.uri;
                 let result: Vec<Location> = service
@@ -170,8 +164,7 @@ fn run() -> Result<(), String> {
                 write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
             }
             "textDocument/completion" => {
-                let params: CompletionParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: CompletionParams = parse_params(params)?;
                 let position = convert_position(params.text_document_position.position);
                 let uri = params.text_document_position.text_document.uri;
                 let items: Vec<LspCompletionItem> = service
@@ -187,8 +180,7 @@ fn run() -> Result<(), String> {
                 write_response(&mut writer, id, serde_json::to_value(items).unwrap())?;
             }
             "textDocument/rename" => {
-                let params: RenameParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: RenameParams = parse_params(params)?;
                 let position = convert_position(params.text_document_position.position);
                 let uri = params.text_document_position.text_document.uri.to_string();
                 let rename = service.rename(&uri, position, &params.new_name);
@@ -238,8 +230,7 @@ fn run() -> Result<(), String> {
                 }
             }
             "textDocument/semanticTokens/full" => {
-                let params: SemanticTokensParams =
-                    serde_json::from_value(params.unwrap()).map_err(|e| e.to_string())?;
+                let params: SemanticTokensParams = parse_params(params)?;
                 let uri = params.text_document.uri;
                 let tokens = service.semantic_tokens(&uri.to_string());
                 let result = SemanticTokens {
@@ -344,6 +335,10 @@ fn write_response(writer: &mut impl Write, id: Option<Value>, result: Value) -> 
         writer,
         serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
     )
+}
+
+fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, String> {
+    serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())
 }
 
 fn write_error(
