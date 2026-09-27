@@ -157,7 +157,9 @@ pub struct EnumPattern {
 
 #[derive(Debug, Clone)]
 pub struct DeclarativeRule {
-    definition: RuleDefinition,
+    id: String,
+    metadata: RuleMetadata,
+    scope: Scope,
     event: Option<String>,
     conditions: Option<CanonicalNodePattern>,
     actions: Vec<CanonicalActionPattern>,
@@ -210,31 +212,38 @@ impl DeclarativeRule {
         definition: RuleDefinition,
         catalog: &Catalog,
     ) -> Result<Self, RuleError> {
-        validate_identity(&definition.id)?;
-        let locale = Locale::new(&definition.locale);
+        let RuleDefinition {
+            id,
+            locale: locale_name,
+            metadata,
+            matcher,
+        } = definition;
+        validate_identity(&id)?;
+        let locale = Locale::new(&locale_name);
         if !catalog.supports(&locale) {
-            return Err(RuleError::UnsupportedLocale(definition.locale));
+            return Err(RuleError::UnsupportedLocale(locale_name));
         }
-        let event = definition
-            .matcher
-            .event
+        let RuleMatcher {
+            event,
+            scope,
+            conditions,
+            actions,
+        } = matcher;
+        let event = event
             .as_deref()
             .map(|value| resolve(catalog, Kind::Event, &locale, value))
             .transpose()?;
-        let conditions = definition
-            .matcher
-            .conditions
-            .as_ref()
+        let conditions = conditions
             .map(|pattern| canonical_node(pattern, catalog, &locale))
             .transpose()?;
-        let actions = definition
-            .matcher
-            .actions
-            .iter()
+        let actions = actions
+            .into_iter()
             .map(|pattern| canonical_action(pattern, catalog, &locale))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
-            definition,
+            id,
+            metadata,
+            scope,
             event,
             conditions,
             actions,
@@ -242,11 +251,11 @@ impl DeclarativeRule {
     }
 
     pub fn id(&self) -> &str {
-        &self.definition.id
+        &self.id
     }
 
     pub fn metadata(&self) -> &RuleMetadata {
-        &self.definition.metadata
+        &self.metadata
     }
 
     /// Declarative matchers only report exact structural facts from canonical
@@ -289,7 +298,7 @@ impl DeclarativeRule {
         {
             return Vec::new();
         }
-        let scopes = public_scopes(program, rule, rule_data, self.definition.matcher.scope);
+        let scopes = public_scopes(program, rule, rule_data, self.scope);
         let mut findings = Vec::new();
         for (scope_id, actions, values, anchor) in scopes {
             if let Some(pattern) = &self.conditions {
@@ -547,23 +556,30 @@ pub(crate) fn public_event_id(event: &workshop_rs::Event) -> &str {
 }
 
 fn canonical_node(
-    pattern: &NodePattern,
+    pattern: NodePattern,
     catalog: &Catalog,
     locale: &Locale,
 ) -> Result<CanonicalNodePattern, RuleError> {
     Ok(CanonicalNodePattern {
-        value: canonical_value(&pattern.value, catalog, locale)?,
-        count: pattern.count.clone(),
+        value: canonical_value(pattern.value, catalog, locale)?,
+        count: pattern.count,
     })
 }
 
 fn canonical_action(
-    pattern: &ActionPattern,
+    pattern: ActionPattern,
     catalog: &Catalog,
     locale: &Locale,
 ) -> Result<CanonicalActionPattern, RuleError> {
-    let name = pattern
-        .name
+    let ActionPattern {
+        kind,
+        name,
+        args,
+        parameters: named_parameters,
+        count,
+        present,
+    } = pattern;
+    let name = name
         .as_deref()
         .map(|name| resolve(catalog, Kind::Action, locale, name))
         .transpose()?;
@@ -571,30 +587,29 @@ fn canonical_action(
         .as_deref()
         .and_then(|id| catalog.entry(Kind::Action, id));
     let mut parameters = Vec::new();
-    for param in &pattern.parameters {
+    for param in named_parameters {
         let Some(entry) = action_entry else {
             return Err(RuleError::NamedParameterRequiresAction);
         };
         let Some(index) = resolve_parameter(entry, locale, &param.name) else {
             return Err(RuleError::UnknownParameter {
                 action: entry.id.clone(),
-                parameter: param.name.clone(),
+                parameter: param.name,
                 locale: locale.to_string(),
             });
         };
-        parameters.push((index, canonical_value(&param.value, catalog, locale)?));
+        parameters.push((index, canonical_value(param.value, catalog, locale)?));
     }
     Ok(CanonicalActionPattern {
-        kind: pattern.kind,
+        kind,
         name,
-        args: pattern
-            .args
-            .iter()
+        args: args
+            .into_iter()
             .map(|value| canonical_value(value, catalog, locale))
             .collect::<Result<_, _>>()?,
         parameters,
-        count: pattern.count.clone(),
-        present: pattern.present,
+        count,
+        present,
     })
 }
 
@@ -607,7 +622,7 @@ fn resolve_parameter(
 }
 
 fn canonical_value(
-    pattern: &ValuePattern,
+    pattern: ValuePattern,
     catalog: &Catalog,
     locale: &Locale,
 ) -> Result<CanonicalValuePattern, RuleError> {
@@ -623,36 +638,36 @@ fn canonical_value(
     if let Some(number) = pattern.number {
         return Ok(CanonicalValuePattern::Number(number));
     }
-    if let Some(string) = &pattern.string {
-        return Ok(CanonicalValuePattern::String(string.clone()));
+    if let Some(string) = pattern.string {
+        return Ok(CanonicalValuePattern::String(string));
     }
     if let Some(boolean) = pattern.boolean {
         return Ok(CanonicalValuePattern::Boolean(boolean));
     }
-    if let Some(call) = &pattern.call {
+    if let Some(call) = pattern.call {
         return Ok(CanonicalValuePattern::Call {
             name: resolve_value_or_operator(catalog, locale, &call.name)?,
             args: call
                 .args
-                .iter()
+                .into_iter()
                 .map(|value| canonical_value(value, catalog, locale))
                 .collect::<Result<_, _>>()?,
         });
     }
-    if let Some(en) = &pattern.enum_value {
+    if let Some(en) = pattern.enum_value {
         let domain = resolve_enum_domain(catalog, locale, &en.domain)?;
         let member = catalog
             .resolve_enum_member(&domain, locale, &en.member)
             .ok_or_else(|| RuleError::UnknownSpelling {
                 kind: "enum member",
-                spelling: en.member.clone(),
+                spelling: en.member,
                 locale: locale.to_string(),
             })?
             .1;
         return Ok(CanonicalValuePattern::Enum { domain, member });
     }
-    if let Some(comparison) = &pattern.comparison {
-        let value = canonical_value(&comparison.value, catalog, locale)?;
+    if let Some(comparison) = pattern.comparison {
+        let value = canonical_value(*comparison.value, catalog, locale)?;
         if !matches!(value, CanonicalValuePattern::Number(_)) {
             return Err(RuleError::ComparisonNeedsNumber);
         }
