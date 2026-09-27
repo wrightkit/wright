@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 use std::time::Duration;
 
-use sha2::Digest;
+use wright_driver::sha256_hex;
 
 const DEFAULT_BASE_URL: &str = "https://github.com/wrightkit/wright/releases/download";
 const DEFAULT_API_URL: &str = "https://api.github.com/repos/wrightkit/wright/releases/latest";
@@ -333,10 +333,6 @@ fn verify_checksum(
         )));
     }
     Ok(())
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", sha2::Sha256::digest(bytes))
 }
 
 fn ensure_writable(install_dir: &Path) -> Result<(), UpdateError> {
