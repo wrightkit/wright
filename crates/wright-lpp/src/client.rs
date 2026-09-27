@@ -36,6 +36,12 @@ struct Shared {
     exited: Option<ProviderError>,
 }
 
+impl Shared {
+    fn dead_error(&self) -> Option<ProviderError> {
+        self.violation.clone().or_else(|| self.exited.clone())
+    }
+}
+
 pub struct JsonRpcClient {
     writer: Option<Box<dyn Write + Send>>,
     shared: Arc<Mutex<Shared>>,
@@ -75,6 +81,18 @@ impl JsonRpcClient {
         self.timeout
     }
 
+    fn require_ready(&self, method: &str) -> Result<(), ProviderError> {
+        match self.phase {
+            ClientPhase::Fresh => Err(ProviderError::NotInitialized {
+                method: method.to_string(),
+            }),
+            ClientPhase::ShutDown => Err(ProviderError::ShutDown {
+                method: method.to_string(),
+            }),
+            ClientPhase::Ready => Ok(()),
+        }
+    }
+
     pub fn initialize(&mut self, params: Value) -> Result<Value, ProviderError> {
         match self.phase {
             ClientPhase::Fresh => {}
@@ -91,36 +109,12 @@ impl JsonRpcClient {
     }
 
     pub fn request(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
-        match self.phase {
-            ClientPhase::Fresh => {
-                return Err(ProviderError::NotInitialized {
-                    method: method.into(),
-                });
-            }
-            ClientPhase::ShutDown => {
-                return Err(ProviderError::ShutDown {
-                    method: method.into(),
-                });
-            }
-            ClientPhase::Ready => {}
-        }
+        self.require_ready(method)?;
         self.send(method, params)
     }
 
     pub fn shutdown(&mut self) -> Result<(), ProviderError> {
-        match self.phase {
-            ClientPhase::Fresh => {
-                return Err(ProviderError::NotInitialized {
-                    method: "lpp/shutdown".into(),
-                });
-            }
-            ClientPhase::ShutDown => {
-                return Err(ProviderError::ShutDown {
-                    method: "lpp/shutdown".into(),
-                });
-            }
-            ClientPhase::Ready => {}
-        }
+        self.require_ready("lpp/shutdown")?;
         let value = self.send("lpp/shutdown", json!({}))?;
         if !value.is_null() {
             return Err(ProviderError::Malformed {
@@ -144,8 +138,8 @@ impl JsonRpcClient {
     fn send(&mut self, method: &str, params: Value) -> Result<Value, ProviderError> {
         {
             let shared = self.shared.lock().expect("lock poisoned");
-            if let Some(err) = shared.violation.as_ref().or(shared.exited.as_ref()) {
-                return Err(err.clone());
+            if let Some(error) = shared.dead_error() {
+                return Err(error);
             }
         }
 
@@ -154,8 +148,8 @@ impl JsonRpcClient {
         let (tx, rx) = mpsc::channel();
         {
             let mut shared = self.shared.lock().expect("lock poisoned");
-            if let Some(err) = shared.violation.as_ref().or(shared.exited.as_ref()) {
-                return Err(err.clone());
+            if let Some(error) = shared.dead_error() {
+                return Err(error);
             }
             shared.pending.insert(id, tx);
         }
@@ -183,8 +177,8 @@ impl JsonRpcClient {
             }),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let shared = self.shared.lock().expect("lock poisoned");
-                if let Some(err) = shared.violation.as_ref().or(shared.exited.as_ref()) {
-                    return Err(err.clone());
+                if let Some(error) = shared.dead_error() {
+                    return Err(error);
                 }
                 Err(ProviderError::Exited {
                     status: None,

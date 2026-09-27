@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 use workshop_rs::source::Span;
 use workshop_rs::{Action, Event, Program, Value};
 
+use super::traversal::{visit_action_roots, visit_value_tree};
+
 pub type RuleId = usize;
 pub type ActionId = usize;
 pub type ValueId = usize;
@@ -24,9 +26,9 @@ fn append_named_symbols<'a>(
     symbols: &mut Vec<Symbol>,
     program: &Program,
     kind: SymbolKind,
-    prefix: &str,
     names: impl Iterator<Item = &'a str>,
 ) {
+    let prefix = kind.declaration_prefix();
     for name in names {
         let id = SymbolId::from_index(symbols.len());
         let occurrence = declaration_span(program, prefix, name);
@@ -47,6 +49,33 @@ pub enum SymbolKind {
     PlayerVariable,
     Subroutine,
     Rule,
+}
+
+impl SymbolKind {
+    pub const ALL: [Self; 4] = [
+        Self::GlobalVariable,
+        Self::PlayerVariable,
+        Self::Subroutine,
+        Self::Rule,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GlobalVariable => "globalVariable",
+            Self::PlayerVariable => "playerVariable",
+            Self::Subroutine => "subroutine",
+            Self::Rule => "rule",
+        }
+    }
+
+    pub const fn declaration_prefix(self) -> &'static str {
+        match self {
+            Self::GlobalVariable => "globalvar ",
+            Self::PlayerVariable => "playervar ",
+            Self::Subroutine => "subroutine ",
+            Self::Rule => "rule ",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,81 +120,27 @@ pub struct UsageSummary {
 pub struct SemanticIndex {
     symbols: Vec<Symbol>,
     references: Vec<Reference>,
-    value_ids: HashMap<usize, ValueId>,
+    next_value_id: ValueId,
 }
 
 pub(super) fn value_identity_map(program: &Program) -> HashMap<usize, ValueId> {
-    fn visit_value(value: &Value, identities: &mut HashMap<usize, ValueId>) {
-        let id = identities.len();
-        identities.insert((value as *const Value) as usize, id);
-        match value {
-            Value::PlayerVariable { player, .. } => visit_value(player, identities),
-            Value::Array(values) | Value::Call { args: values, .. } => {
-                for value in values {
-                    visit_value(value, identities);
-                }
-            }
-            Value::Vector { x, y, z } => {
-                visit_value(x, identities);
-                visit_value(y, identities);
-                visit_value(z, identities);
-            }
-            _ => {}
-        }
-    }
-
-    fn visit_action(action: &Action, identities: &mut HashMap<usize, ValueId>) {
-        match action {
-            Action::SetGlobalVariable { value, .. }
-            | Action::ModifyGlobalVariable { value, .. } => visit_value(value, identities),
-            Action::SetPlayerVariable { player, value, .. }
-            | Action::ModifyPlayerVariable { player, value, .. } => {
-                visit_value(player, identities);
-                visit_value(value, identities);
-            }
-            Action::AssignMember { target, value, .. } => {
-                visit_value(target, identities);
-                visit_value(value, identities);
-            }
-            Action::If { condition }
-            | Action::ElseIf { condition }
-            | Action::While { condition } => visit_value(condition, identities),
-            Action::ForGlobalVariable {
-                start, stop, step, ..
-            } => {
-                visit_value(start, identities);
-                visit_value(stop, identities);
-                visit_value(step, identities);
-            }
-            Action::ForPlayerVariable {
-                player,
-                start,
-                stop,
-                step,
-                ..
-            } => {
-                visit_value(player, identities);
-                visit_value(start, identities);
-                visit_value(stop, identities);
-                visit_value(step, identities);
-            }
-            Action::Call { args, .. } => {
-                for value in args {
-                    visit_value(value, identities);
-                }
-            }
-            Action::Disabled { action } => visit_action(action, identities),
-            Action::CallSubroutine { .. } | Action::Else | Action::End => {}
-        }
-    }
-
     let mut identities = HashMap::new();
     for rule in &program.rules {
         for condition in &rule.conditions {
-            visit_value(&condition.value, &mut identities);
+            visit_value_tree(&condition.value, None, &mut |value, _| {
+                let id = identities.len();
+                identities.insert((value as *const Value) as usize, id);
+                0
+            });
         }
         for action in &rule.actions {
-            visit_action(action, &mut identities);
+            visit_action_roots(action, &mut |_, root| {
+                visit_value_tree(root, None, &mut |value, _| {
+                    let id = identities.len();
+                    identities.insert((value as *const Value) as usize, id);
+                    0
+                });
+            });
         }
     }
     identities
@@ -178,7 +153,6 @@ impl SemanticIndex {
             &mut symbols,
             program,
             SymbolKind::GlobalVariable,
-            "globalvar ",
             program
                 .global_variables
                 .iter()
@@ -188,7 +162,6 @@ impl SemanticIndex {
             &mut symbols,
             program,
             SymbolKind::PlayerVariable,
-            "playervar ",
             program
                 .player_variables
                 .iter()
@@ -198,7 +171,6 @@ impl SemanticIndex {
             &mut symbols,
             program,
             SymbolKind::Subroutine,
-            "subroutine ",
             program
                 .subroutines
                 .iter()
@@ -218,7 +190,7 @@ impl SemanticIndex {
         let mut index = Self {
             symbols,
             references: Vec::new(),
-            value_ids: value_identity_map(program),
+            next_value_id: 0,
         };
         for symbol in index.symbols.clone() {
             if let Some(span) = symbol.occurrence {
@@ -239,7 +211,6 @@ impl SemanticIndex {
                     &value.value,
                     rule,
                     None,
-                    Some(condition),
                     program.condition_span(rule, condition),
                     program,
                 );
@@ -248,7 +219,6 @@ impl SemanticIndex {
                 index.walk_action(value, rule, action, program);
             }
         }
-        index.value_ids.clear();
         index
     }
 
@@ -424,10 +394,8 @@ impl SemanticIndex {
     ) {
         let span = program.action_span(rule, action_id);
         match action {
-            Action::SetGlobalVariable { variable, value }
-            | Action::ModifyGlobalVariable {
-                variable, value, ..
-            } => {
+            Action::SetGlobalVariable { variable, .. }
+            | Action::ModifyGlobalVariable { variable, .. } => {
                 if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, variable) {
                     self.push(
                         symbol,
@@ -448,26 +416,9 @@ impl SemanticIndex {
                         );
                     }
                 }
-                self.walk_value(
-                    value,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 0),
-                    program,
-                );
             }
-            Action::SetPlayerVariable {
-                player,
-                variable,
-                value,
-            }
-            | Action::ModifyPlayerVariable {
-                player,
-                variable,
-                value,
-                ..
-            } => {
+            Action::SetPlayerVariable { variable, .. }
+            | Action::ModifyPlayerVariable { variable, .. } => {
                 if let Some(symbol) = self.find_symbol(SymbolKind::PlayerVariable, variable) {
                     self.push(
                         symbol,
@@ -488,40 +439,6 @@ impl SemanticIndex {
                         );
                     }
                 }
-                self.walk_value(
-                    player,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 0),
-                    program,
-                );
-                self.walk_value(
-                    value,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 1),
-                    program,
-                );
-            }
-            Action::AssignMember { target, value, .. } => {
-                self.walk_value(
-                    target,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 0),
-                    program,
-                );
-                self.walk_value(
-                    value,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 1),
-                    program,
-                );
             }
             Action::CallSubroutine { subroutine } => {
                 if let Some(symbol) = self.find_symbol(SymbolKind::Subroutine, subroutine) {
@@ -535,22 +452,7 @@ impl SemanticIndex {
                     );
                 }
             }
-            Action::If { condition }
-            | Action::ElseIf { condition }
-            | Action::While { condition } => self.walk_value(
-                condition,
-                rule,
-                Some(action_id),
-                None,
-                program.action_argument_span(rule, action_id, 0),
-                program,
-            ),
-            Action::ForGlobalVariable {
-                variable,
-                start,
-                stop,
-                step,
-            } => {
+            Action::ForGlobalVariable { variable, .. } => {
                 if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, variable) {
                     self.push(
                         symbol,
@@ -561,38 +463,8 @@ impl SemanticIndex {
                         action_occurrence(program, span, variable),
                     );
                 }
-                self.walk_value(
-                    start,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 0),
-                    program,
-                );
-                self.walk_value(
-                    stop,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 1),
-                    program,
-                );
-                self.walk_value(
-                    step,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 2),
-                    program,
-                );
             }
-            Action::ForPlayerVariable {
-                player,
-                variable,
-                start,
-                stop,
-                step,
-            } => {
+            Action::ForPlayerVariable { variable, .. } => {
                 if let Some(symbol) = self.find_symbol(SymbolKind::PlayerVariable, variable) {
                     self.push(
                         symbol,
@@ -603,106 +475,63 @@ impl SemanticIndex {
                         action_occurrence(program, span, variable),
                     );
                 }
-                self.walk_value(
-                    player,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 0),
-                    program,
-                );
-                self.walk_value(
-                    start,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 1),
-                    program,
-                );
-                self.walk_value(
-                    stop,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 2),
-                    program,
-                );
-                self.walk_value(
-                    step,
-                    rule,
-                    Some(action_id),
-                    None,
-                    program.action_argument_span(rule, action_id, 3),
-                    program,
-                );
             }
-            Action::Disabled { action } => self.walk_action(action, rule, action_id, program),
-            Action::Call { args, .. } => {
-                for (argument, value) in args.iter().enumerate() {
-                    self.walk_value(
-                        value,
-                        rule,
-                        Some(action_id),
-                        None,
-                        program.action_argument_span(rule, action_id, argument),
-                        program,
-                    );
-                }
+            Action::Disabled { action } => {
+                self.walk_action(action, rule, action_id, program);
+                return;
             }
-            Action::Else | Action::End => {}
+            _ => {}
         }
+        visit_action_roots(action, &mut |argument, value| {
+            self.walk_value(
+                value,
+                rule,
+                Some(action_id),
+                program.action_argument_span(rule, action_id, argument),
+                program,
+            );
+        });
     }
     fn walk_value(
         &mut self,
         value: &Value,
         rule: RuleId,
         action: Option<ActionId>,
-        _value_id: Option<ValueId>,
         span: Option<Span>,
         program: &Program,
     ) {
-        let value_id = self
-            .value_ids
-            .get(&((value as *const Value) as usize))
-            .copied();
-        match value {
-            Value::GlobalVariable(name) => {
-                if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, name) {
-                    self.push(
-                        symbol,
-                        ReferenceKind::Read,
-                        Some(rule),
-                        action,
-                        value_id,
-                        value_occurrence(program, span, name).or(span),
-                    );
+        visit_value_tree(value, None, &mut |value, _| {
+            let value_id = self.next_value_id;
+            self.next_value_id += 1;
+            match value {
+                Value::GlobalVariable(name) => {
+                    if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, name) {
+                        self.push(
+                            symbol,
+                            ReferenceKind::Read,
+                            Some(rule),
+                            action,
+                            Some(value_id),
+                            value_occurrence(program, span, name).or(span),
+                        );
+                    }
                 }
-            }
-            Value::PlayerVariable { player, variable } => {
-                if let Some(symbol) = self.find_symbol(SymbolKind::PlayerVariable, variable) {
-                    self.push(
-                        symbol,
-                        ReferenceKind::Read,
-                        Some(rule),
-                        action,
-                        value_id,
-                        value_occurrence(program, span, variable).or(span),
-                    );
+                Value::PlayerVariable { variable, .. } => {
+                    if let Some(symbol) = self.find_symbol(SymbolKind::PlayerVariable, variable) {
+                        self.push(
+                            symbol,
+                            ReferenceKind::Read,
+                            Some(rule),
+                            action,
+                            Some(value_id),
+                            value_occurrence(program, span, variable).or(span),
+                        );
+                    }
                 }
-                self.walk_value(player, rule, action, value_id, span, program);
+                _ => {}
             }
-            Value::Array(values) | Value::Call { args: values, .. } => {
-                for value in values {
-                    self.walk_value(value, rule, action, value_id, span, program);
-                }
-            }
-            Value::Vector { x, y, z } => {
-                self.walk_value(x, rule, action, value_id, span, program);
-                self.walk_value(y, rule, action, value_id, span, program);
-                self.walk_value(z, rule, action, value_id, span, program);
-            }
-            _ => {}
-        }
+            value_id
+        });
     }
 }
 

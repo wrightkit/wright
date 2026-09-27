@@ -392,10 +392,10 @@ impl StdioLanguageProvider {
     fn call<T: DeserializeOwned>(
         &mut self,
         cap: Capability,
-        method: &str,
         params: Value,
     ) -> Result<T, ProviderError> {
         self.require_capability(cap)?;
+        let method = cap.method();
         let val = self.request(method, params)?;
         parse_result(val, method)
     }
@@ -451,11 +451,7 @@ impl LanguageProvider for StdioLanguageProvider {
         documents: &DocumentSet,
         project_root: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
-        self.call(
-            Capability::Check,
-            "lpp/check",
-            documents_params(documents, project_root),
-        )
+        self.call(Capability::Check, documents_params(documents, project_root))
     }
 
     fn check_entry(
@@ -465,11 +461,7 @@ impl LanguageProvider for StdioLanguageProvider {
         locale: Option<&str>,
     ) -> Result<CheckResult, ProviderError> {
         self.require_capability(Capability::ProjectLoading)?;
-        self.call(
-            Capability::Check,
-            "lpp/check",
-            entry_params(entry, project_root, locale),
-        )
+        self.call(Capability::Check, entry_params(entry, project_root, locale))
     }
 
     fn check_target(
@@ -488,7 +480,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<CompileResult, ProviderError> {
         self.call(
             Capability::Compile,
-            "lpp/compile",
             documents_params(documents, project_root),
         )
     }
@@ -502,7 +493,6 @@ impl LanguageProvider for StdioLanguageProvider {
         self.require_capability(Capability::ProjectLoading)?;
         self.call(
             Capability::Compile,
-            "lpp/compile",
             entry_params(entry, project_root, locale),
         )
     }
@@ -533,18 +523,14 @@ impl LanguageProvider for StdioLanguageProvider {
         }
         let mut params = entry_params(target, project_root, locale);
         params["acceptedArtifactFormats"] = json!(accepted_artifact_formats);
-        self.call(Capability::Compile, "lpp/compile", params)
+        self.call(Capability::Compile, params)
     }
 
     fn reconstruct(
         &mut self,
         artifact: &WorkshopArtifact,
     ) -> Result<ReconstructResult, ProviderError> {
-        self.call(
-            Capability::Reconstruct,
-            "lpp/reconstruct",
-            json!({ "artifact": artifact }),
-        )
+        self.call(Capability::Reconstruct, json!({ "artifact": artifact }))
     }
 
     fn symbols(
@@ -554,7 +540,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<SymbolsResult, ProviderError> {
         self.call(
             Capability::Symbols,
-            "lpp/symbols",
             documents_params(documents, project_root),
         )
     }
@@ -566,7 +551,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<LocationsResult, ProviderError> {
         self.call(
             Capability::Definition,
-            "lpp/definition",
             json!({ "document": document, "position": position }),
         )
     }
@@ -579,7 +563,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<LocationsResult, ProviderError> {
         self.call(
             Capability::References,
-            "lpp/references",
             json!({
                 "document": document,
                 "position": position,
@@ -605,7 +588,7 @@ impl LanguageProvider for StdioLanguageProvider {
         if let Some(root) = project_root {
             params["projectRoot"] = json!(root);
         }
-        self.call(Capability::Rename, "lpp/rename", params)
+        self.call(Capability::Rename, params)
     }
 
     fn validate_edits(
@@ -615,7 +598,6 @@ impl LanguageProvider for StdioLanguageProvider {
     ) -> Result<ValidateEditsResult, ProviderError> {
         self.call(
             Capability::EditValidation,
-            "lpp/validateEdits",
             json!({
                 "document": document,
                 "edits": edits,

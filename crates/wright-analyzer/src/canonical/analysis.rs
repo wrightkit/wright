@@ -5,6 +5,7 @@ use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
 use super::cfg::{is_wait, matching_end};
 use super::symbols::{ActionId, RuleId, ValueId, value_identity_map, value_occurrence};
+use super::traversal::{visit_action_roots, visit_value_tree};
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::LintConfig;
 
@@ -45,7 +46,9 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             if config.is_enabled("expensive-loop-check") {
                 for (offset, body_action) in body.iter().enumerate() {
                     let mut expensive = Vec::new();
-                    collect_action_expensive_values(body_action, &mut expensive);
+                    visit_action_roots(body_action, &mut |_, value| {
+                        collect_expensive_values(value, &mut expensive)
+                    });
                     for value in expensive {
                         let Value::Call { name, .. } = value else {
                             unreachable!("only expensive calls are collected")
@@ -125,51 +128,6 @@ fn loop_body(rule: &Rule, action: usize) -> Option<(usize, usize)> {
     }
     let end = matching_end(&rule.actions, action)?;
     Some((action + 1, end))
-}
-fn collect_action_expensive_values<'a>(action: &'a Action, out: &mut Vec<&'a Value>) {
-    match action {
-        Action::Call { args, .. } => {
-            for value in args {
-                collect_expensive_values(value, out);
-            }
-        }
-        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
-            collect_expensive_values(value, out)
-        }
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            collect_expensive_values(player, out);
-            collect_expensive_values(value, out);
-        }
-        Action::AssignMember { target, value, .. } => {
-            collect_expensive_values(target, out);
-            collect_expensive_values(value, out);
-        }
-        Action::If { condition } | Action::ElseIf { condition } | Action::While { condition } => {
-            collect_expensive_values(condition, out)
-        }
-        Action::ForGlobalVariable {
-            start, stop, step, ..
-        } => {
-            collect_expensive_values(start, out);
-            collect_expensive_values(stop, out);
-            collect_expensive_values(step, out);
-        }
-        Action::ForPlayerVariable {
-            player,
-            start,
-            stop,
-            step,
-            ..
-        } => {
-            collect_expensive_values(player, out);
-            collect_expensive_values(start, out);
-            collect_expensive_values(stop, out);
-            collect_expensive_values(step, out);
-        }
-        Action::Disabled { action } => collect_action_expensive_values(action, out),
-        Action::CallSubroutine { .. } | Action::Else | Action::End => {}
-    }
 }
 fn values_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
@@ -286,28 +244,14 @@ fn ongoing_condition_findings(
 }
 
 fn collect_expensive_values<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
-    match value {
-        Value::Call { name, args } => {
-            if ["distance", "raycast", "isInLoS"].contains(&name.as_str()) {
-                out.push(value);
-            }
-            for argument in args {
-                collect_expensive_values(argument, out);
-            }
+    visit_value_tree(value, None, &mut |value, _| {
+        if let Value::Call { name, .. } = value
+            && ["distance", "raycast", "isInLoS"].contains(&name.as_str())
+        {
+            out.push(value);
         }
-        Value::Array(values) => {
-            for value in values {
-                collect_expensive_values(value, out);
-            }
-        }
-        Value::Vector { x, y, z } => {
-            collect_expensive_values(x, out);
-            collect_expensive_values(y, out);
-            collect_expensive_values(z, out);
-        }
-        Value::PlayerVariable { player, .. } => collect_expensive_values(player, out),
-        _ => {}
-    }
+        0
+    });
 }
 
 fn duplicate_condition_findings(
@@ -382,16 +326,18 @@ fn repeated_value_findings(
             continue;
         }
         let action_id = body_start + action;
-        visit_action_roots(&body[action], &mut |argument, value| {
-            collect_value_tree(
-                value,
-                None,
-                program.action_argument_span(rule_id, action_id, argument),
-                &mut values,
-                &mut parents,
-                &mut spans,
-            );
-        });
+        if !matches!(body[action], Action::Disabled { .. }) {
+            visit_action_roots(&body[action], &mut |argument, value| {
+                collect_value_tree(
+                    value,
+                    None,
+                    program.action_argument_span(rule_id, action_id, argument),
+                    &mut values,
+                    &mut parents,
+                    &mut spans,
+                );
+            });
+        }
         action += 1;
     }
 
@@ -419,51 +365,6 @@ fn repeated_value_findings(
         .collect()
 }
 
-fn visit_action_roots<'a>(action: &'a Action, visit: &mut impl FnMut(usize, &'a Value)) {
-    match action {
-        Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
-            visit(0, value)
-        }
-        Action::SetPlayerVariable { player, value, .. }
-        | Action::ModifyPlayerVariable { player, value, .. } => {
-            visit(0, player);
-            visit(1, value);
-        }
-        Action::AssignMember { target, value, .. } => {
-            visit(0, target);
-            visit(1, value);
-        }
-        Action::If { condition } | Action::ElseIf { condition } | Action::While { condition } => {
-            visit(0, condition);
-        }
-        Action::ForGlobalVariable {
-            start, stop, step, ..
-        } => {
-            visit(0, start);
-            visit(1, stop);
-            visit(2, step);
-        }
-        Action::ForPlayerVariable {
-            player,
-            start,
-            stop,
-            step,
-            ..
-        } => {
-            visit(0, player);
-            visit(1, start);
-            visit(2, stop);
-            visit(3, step);
-        }
-        Action::Call { args, .. } => {
-            for (index, value) in args.iter().enumerate() {
-                visit(index, value);
-            }
-        }
-        Action::CallSubroutine { .. } | Action::Else | Action::End | Action::Disabled { .. } => {}
-    }
-}
-
 fn collect_value_tree<'a>(
     value: &'a Value,
     parent: Option<usize>,
@@ -472,26 +373,13 @@ fn collect_value_tree<'a>(
     parents: &mut Vec<Option<usize>>,
     spans: &mut Vec<Option<Span>>,
 ) {
-    let index = values.len();
-    values.push(value);
-    parents.push(parent);
-    spans.push(span);
-    match value {
-        Value::Array(children) | Value::Call { args: children, .. } => {
-            for child in children {
-                collect_value_tree(child, Some(index), span, values, parents, spans);
-            }
-        }
-        Value::Vector { x, y, z } => {
-            for child in [x, y, z] {
-                collect_value_tree(child, Some(index), span, values, parents, spans);
-            }
-        }
-        Value::PlayerVariable { player, .. } => {
-            collect_value_tree(player, Some(index), span, values, parents, spans);
-        }
-        _ => {}
-    }
+    visit_value_tree(value, parent, &mut |value, parent| {
+        let index = values.len();
+        values.push(value);
+        parents.push(parent);
+        spans.push(span);
+        index
+    });
 }
 
 fn duplicated_value_families(values: &[&Value], parents: &[Option<usize>]) -> Vec<Vec<usize>> {
@@ -542,15 +430,12 @@ fn duplicated_value_families(values: &[&Value], parents: &[Option<usize>]) -> Ve
 }
 
 fn value_call_count(value: &Value) -> usize {
-    match value {
-        Value::Call { args, .. } => 1 + args.iter().map(value_call_count).sum::<usize>(),
-        Value::Array(values) => values.iter().map(value_call_count).sum(),
-        Value::Vector { x, y, z } => {
-            value_call_count(x) + value_call_count(y) + value_call_count(z)
-        }
-        Value::PlayerVariable { player, .. } => value_call_count(player),
-        _ => 0,
-    }
+    let mut count = 0;
+    visit_value_tree(value, None, &mut |value, _| {
+        count += usize::from(matches!(value, Value::Call { .. }));
+        0
+    });
+    count
 }
 
 fn while_without_wait_message(boundedness: Boundedness) -> String {

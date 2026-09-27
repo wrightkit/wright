@@ -228,46 +228,32 @@ impl Capability {
         Capability::EditValidation,
     ];
 
-    pub fn as_str(self) -> &'static str {
+    fn metadata(self) -> (&'static str, &'static str) {
         match self {
-            Self::Check => "check",
-            Self::Compile => "compile",
-            Self::ProjectLoading => "projectLoading",
-            Self::Reconstruct => "reconstruct",
-            Self::Symbols => "symbols",
-            Self::Definition => "definition",
-            Self::References => "references",
-            Self::Rename => "rename",
-            Self::EditValidation => "editValidation",
+            Self::Check => ("check", "lpp/check"),
+            Self::Compile => ("compile", "lpp/compile"),
+            Self::ProjectLoading => ("projectLoading", "lpp/check"),
+            Self::Reconstruct => ("reconstruct", "lpp/reconstruct"),
+            Self::Symbols => ("symbols", "lpp/symbols"),
+            Self::Definition => ("definition", "lpp/definition"),
+            Self::References => ("references", "lpp/references"),
+            Self::Rename => ("rename", "lpp/rename"),
+            Self::EditValidation => ("editValidation", "lpp/validateEdits"),
         }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.metadata().0
     }
 
     pub fn method(self) -> &'static str {
-        match self {
-            Self::Check | Self::ProjectLoading => "lpp/check",
-            Self::Compile => "lpp/compile",
-            Self::Reconstruct => "lpp/reconstruct",
-            Self::Symbols => "lpp/symbols",
-            Self::Definition => "lpp/definition",
-            Self::References => "lpp/references",
-            Self::Rename => "lpp/rename",
-            Self::EditValidation => "lpp/validateEdits",
-        }
+        self.metadata().1
     }
 
     pub fn parse(name: &str) -> Option<Capability> {
-        Some(match name {
-            "check" => Self::Check,
-            "compile" => Self::Compile,
-            "projectLoading" => Self::ProjectLoading,
-            "reconstruct" => Self::Reconstruct,
-            "symbols" => Self::Symbols,
-            "definition" => Self::Definition,
-            "references" => Self::References,
-            "rename" => Self::Rename,
-            "editValidation" => Self::EditValidation,
-            _ => return None,
-        })
+        Self::ALL
+            .into_iter()
+            .find(|capability| capability.as_str() == name)
     }
 }
 

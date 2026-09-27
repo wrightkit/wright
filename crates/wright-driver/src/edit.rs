@@ -546,12 +546,7 @@ fn declaration_occurrences(
     kind: wright_analyzer::canonical::SymbolKind,
     name: &str,
 ) -> Vec<workshop_rs::source::Span> {
-    let prefix = match kind {
-        wright_analyzer::canonical::SymbolKind::GlobalVariable => "globalvar ",
-        wright_analyzer::canonical::SymbolKind::PlayerVariable => "playervar ",
-        wright_analyzer::canonical::SymbolKind::Subroutine => "subroutine ",
-        wright_analyzer::canonical::SymbolKind::Rule => "rule ",
-    };
+    let prefix = kind.declaration_prefix();
     source
         .lines()
         .enumerate()
@@ -642,21 +637,8 @@ fn declaration_symbol_at(
     source: &str,
 ) -> Option<wright_analyzer::canonical::Symbol> {
     let line_text = source.lines().nth(line.saturating_sub(1) as usize)?;
-    for (prefix, kind) in [
-        (
-            "globalvar ",
-            wright_analyzer::canonical::SymbolKind::GlobalVariable,
-        ),
-        (
-            "playervar ",
-            wright_analyzer::canonical::SymbolKind::PlayerVariable,
-        ),
-        (
-            "subroutine ",
-            wright_analyzer::canonical::SymbolKind::Subroutine,
-        ),
-        ("rule ", wright_analyzer::canonical::SymbolKind::Rule),
-    ] {
+    for kind in wright_analyzer::canonical::SymbolKind::ALL {
+        let prefix = kind.declaration_prefix();
         let Some(name_start) = line_text.strip_prefix(prefix).map(|_| prefix.len()) else {
             continue;
         };

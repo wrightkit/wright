@@ -6,7 +6,7 @@ use workshop_rs::source::Span;
 use workshop_rs::{Action as PublicAction, Program as PublicProgram, Value as PublicValue};
 
 use crate::analysis::{EvidenceClass, Severity};
-use crate::canonical::Finding;
+use crate::canonical::{Finding, matching_end};
 
 const DEFAULT_LOCALE: &str = "en-US";
 
@@ -387,7 +387,7 @@ fn public_scopes<'a>(
         if !matches_scope {
             continue;
         }
-        let Some(close) = public_matching_end(&rule.actions, index) else {
+        let Some(close) = matching_end(&rule.actions, index) else {
             continue;
         };
         let values = match action {
@@ -431,7 +431,7 @@ fn public_if_conditions<'a>(
         match &actions[index] {
             PublicAction::ElseIf { condition } => conditions.push(condition),
             _ => {
-                if let Some(nested_close) = public_matching_end(actions, index) {
+                if let Some(nested_close) = matching_end(actions, index) {
                     index = nested_close + 1;
                     continue;
                 }
@@ -440,33 +440,6 @@ fn public_if_conditions<'a>(
         index += 1;
     }
     conditions
-}
-
-fn public_matching_end(actions: &[PublicAction], start: usize) -> Option<usize> {
-    if !matches!(
-        actions.get(start),
-        Some(
-            PublicAction::If { .. }
-                | PublicAction::While { .. }
-                | PublicAction::ForGlobalVariable { .. }
-                | PublicAction::ForPlayerVariable { .. }
-        )
-    ) {
-        return None;
-    }
-    let mut depth = 0;
-    for (index, action) in actions.iter().enumerate().skip(start + 1) {
-        match action {
-            PublicAction::If { .. }
-            | PublicAction::While { .. }
-            | PublicAction::ForGlobalVariable { .. }
-            | PublicAction::ForPlayerVariable { .. } => depth += 1,
-            PublicAction::End if depth == 0 => return Some(index),
-            PublicAction::End => depth -= 1,
-            _ => {}
-        }
-    }
-    None
 }
 
 fn public_action_matches(action: &PublicAction, pattern: &CanonicalActionPattern) -> bool {

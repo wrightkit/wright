@@ -542,7 +542,7 @@ impl<'a> ToolService<'a> {
             },
             "findings": findings.iter().map(|f| json!({
                 "code": f.code,
-                "severity": severity_name(f.severity),
+                "severity": f.severity.as_str(),
                 "message": f.message,
             })).collect::<Vec<_>>(),
             "kind": {
@@ -569,14 +569,5 @@ impl<'a> ToolService<'a> {
                 "members": domain.members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
-    }
-}
-
-/// The canonical severity name of a finding.
-fn severity_name(severity: wright_analyzer::analysis::Severity) -> &'static str {
-    match severity {
-        wright_analyzer::analysis::Severity::Error => "error",
-        wright_analyzer::analysis::Severity::Warning => "warning",
-        wright_analyzer::analysis::Severity::Info => "info",
     }
 }

@@ -7,8 +7,8 @@ use workshop_rs::{Event, Program};
 use super::analysis::Finding;
 use super::cfg::cfg_response;
 use super::facts::persistent_objects;
-use super::symbols::{ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId, SymbolKind};
-use crate::analysis::{Boundedness, Severity};
+use super::symbols::{ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId};
+use crate::analysis::Boundedness;
 use crate::registry::{LintConfig, SkippedRule};
 use crate::service::{ErrorInfo, Origin, Request, Response};
 
@@ -96,7 +96,7 @@ impl<'a> SemanticService<'a> {
             Request::Program => Response::Ok { result: json!({"origin": self.origin, "files": file_count(self.program), "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
             Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
-            Request::ListSymbols { kind } => Response::Ok { result: json!(self.index.symbols().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol_kind_name(symbol.kind) == kind)).map(symbol_json).collect::<Vec<_>>()) },
+            Request::ListSymbols { kind } => Response::Ok { result: json!(self.index.symbols().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol.kind.as_str() == kind)).map(symbol_json).collect::<Vec<_>>()) },
             Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: symbol_json(symbol) }),
             Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: json!(self.index.references(id).into_iter().map(|reference| json!({"kind": reference_kind_name(reference.kind), "span": span_json(reference.span), "rule": reference.rule, "action": reference.action, "value": reference.value})).collect::<Vec<_>>()) } } }
             Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
@@ -157,7 +157,7 @@ fn lint_rules(
                 rule.id.clone(),
                 json!({
                     "enabled": rule.enabled,
-                    "severity": severity_name(rule.effective_severity),
+                    "severity": rule.effective_severity.as_str(),
                     "options": config.options(&rule.id),
                 }),
             )
@@ -180,18 +180,10 @@ pub(super) fn span_json(span: Option<Span>) -> JsonValue {
     span.map_or(JsonValue::Null, |span| json!({"file": span.file.index(), "start": {"line": span.start.line, "col": span.start.col}, "end": {"line": span.end.line, "col": span.end.col}}))
 }
 fn symbol_json(symbol: &Symbol) -> JsonValue {
-    json!({"id": symbol.id.index(), "kind": symbol_kind_name(symbol.kind), "name": symbol.name, "span": span_json(symbol.span)})
+    json!({"id": symbol.id.index(), "kind": symbol.kind.as_str(), "name": symbol.name, "span": span_json(symbol.span)})
 }
 fn finding_json(finding: &Finding) -> JsonValue {
-    json!({"code": finding.code, "severity": severity_name(finding.severity), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str)})
-}
-fn symbol_kind_name(kind: SymbolKind) -> &'static str {
-    match kind {
-        SymbolKind::GlobalVariable => "globalVariable",
-        SymbolKind::PlayerVariable => "playerVariable",
-        SymbolKind::Subroutine => "subroutine",
-        SymbolKind::Rule => "rule",
-    }
+    json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str)})
 }
 fn reference_kind_name(kind: ReferenceKind) -> &'static str {
     match kind {
@@ -200,13 +192,6 @@ fn reference_kind_name(kind: ReferenceKind) -> &'static str {
         ReferenceKind::Read => "read",
         ReferenceKind::Write => "write",
         ReferenceKind::Call => "call",
-    }
-}
-fn severity_name(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "info",
     }
 }
 fn event_name(event: &Event) -> String {

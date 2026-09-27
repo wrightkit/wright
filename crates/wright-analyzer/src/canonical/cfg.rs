@@ -8,7 +8,7 @@ pub(super) fn is_wait(action: &Action, minimum: bool) -> bool {
     matches!(action, Action::Call { name, args } if name == "wait" && (!minimum || matches!(args.first(), Some(workshop_rs::Value::Number(value)) if *value <= 0.016)))
 }
 
-pub(super) fn matching_end(actions: &[Action], start: usize) -> Option<usize> {
+pub(crate) fn matching_end(actions: &[Action], start: usize) -> Option<usize> {
     if !matches!(
         actions.get(start),
         Some(
