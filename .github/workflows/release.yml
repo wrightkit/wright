@@ -621,7 +621,7 @@ jobs:
           fi
 
   publish-r2:
-    name: Publish ${{ needs.release-identity.outputs.channel }} archives to R2
+    name: Publish ${{ needs.release-identity.outputs.channel }} distribution to R2
     needs:
       - release-identity
       - release-assets
@@ -638,6 +638,7 @@ jobs:
       RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
       R2_BUCKET: wrightkit-release
       R2_PUBLIC_BASE_URL: https://releases.wrightkit.dev
+      R2_INSTALLER_PUBLIC_BASE_URL: https://install.wrightkit.dev
       R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

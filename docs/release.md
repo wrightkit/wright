@@ -70,8 +70,8 @@ Wright has two release channels and one shared native build workflow:
    commits that change directly to `main`, and then builds and smoke-tests the
    native matrix from that post-bump commit. It publishes the versioned GitHub
    Release only after those artifacts and generated package-manager manifests
-   pass validation. The stable R2 objects and pointer are updated only after
-   the GitHub Release is complete.
+   pass validation. The stable R2 objects, installer scripts, and version
+   pointer are updated only after the GitHub Release is complete.
 
 No workspace crate is published to crates.io. Every workspace package
 explicitly sets `publish = false`, so Cargo package publication cannot become
@@ -131,11 +131,32 @@ supported through the channels below.
 
 ### R2 installer distribution
 
-`install.sh` uses the WrightKit R2 custom domain by default. GitHub Releases
-remain the canonical stable release record and package-manager source; R2 is
-the HTTP installer/object-delivery channel and also carries the separate
-nightly channel. The stable R2 objects are exact copies of the archives in the
-completed GitHub Release.
+GitHub Releases remain the canonical stable release record and
+package-manager source; R2 is the HTTP installer/object-delivery channel and
+also carries the separate nightly channel. The stable R2 archive objects are
+exact copies of the archives in the completed GitHub Release.
+
+The canonical `install.sh` and `install.ps1` files in this repository are
+published by the stable release workflow as mutable bootstrap objects:
+
+```text
+https://install.wrightkit.dev/wright/install.sh
+https://install.wrightkit.dev/wright/install.ps1
+```
+
+The publisher takes both files from the exact release commit, uploads them
+after verifying the immutable archive/checksum set, and fetches them back over
+HTTP/1.1 to compare their bytes and check their response headers. Each script
+uses `Cache-Control: no-store, max-age=0` and
+`Content-Type: text/plain; charset=utf-8`. The scripts are verified before the
+stable `latest/version` pointer advances. Nightly publication does not change
+these stable bootstrap objects.
+
+`install.wrightkit.dev` is a Cloudflare R2 custom domain for the existing
+`wrightkit-release` bucket. It exposes the bucket's public objects under that
+host as well; the documented installer entrypoints use the `/wright/` keys.
+The website repository displays these commands but does not copy or publish
+the scripts.
 
 Pinned installs use immutable versioned objects:
 
@@ -146,13 +167,13 @@ https://releases.wrightkit.dev/wright/releases/<version>/wright-<version>-<targe
 
 Latest installs first read `https://releases.wrightkit.dev/wright/latest/version`,
 then download the corresponding version-named archive and checksum from
-`/releases/<version>/`. The release workflow publicly verifies every versioned
-archive/checksum pair before writing that `latest/version` pointer, so the
-installer cannot resolve a new version before its complete artifact set is
-available. `latest/version` uses `Cache-Control: no-store`; all archive and
-checksum paths are version-named and use long-lived immutable caching. This
-avoids stale latest pointers without a separate Worker, API, or GitHub Releases
-API lookup.
+`/wright/releases/<version>/`. The release workflow publicly verifies every
+versioned archive/checksum pair and both stable scripts before writing that
+`latest/version` pointer, so the installer cannot resolve a new version before
+its complete artifact set is available. The version pointer and bootstrap
+scripts use `Cache-Control: no-store, max-age=0`; all archive and checksum
+paths are version-named and use long-lived immutable caching. This avoids stale
+latest pointers without a separate Worker, API, or GitHub Releases API lookup.
 
 Versioned R2 objects are uploaded with `If-None-Match: *`; retries may reuse an
 already-present object only after comparing its bytes to the release artifact.
@@ -197,7 +218,7 @@ Windows x86_64 users can install the canonical release ZIP with the first-party
 PowerShell installer:
 
 ```powershell
-irm https://raw.githubusercontent.com/wrightkit/wright/main/install.ps1 | iex
+irm https://install.wrightkit.dev/wright/install.ps1 | iex
 ```
 
 For a pinned version or custom user-writable directory:
@@ -246,9 +267,10 @@ Configure these optional/required environment secrets:
   uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and
   `R2_SECRET_ACCESS_KEY` grant the release workflow S3 API access to the
-  `wrightkit-release` bucket. The bucket must expose `releases.wrightkit.dev`
-  as its production custom domain before a release; the workflow verifies that
-  public route during publication.
+  `wrightkit-release` bucket. The bucket must expose both
+  `releases.wrightkit.dev` and `install.wrightkit.dev` as production custom
+  domains before stable publication; the workflow verifies the public routes
+  during publication.
 
 ## Supported installation channels
 

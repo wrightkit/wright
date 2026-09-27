@@ -38,4 +38,5 @@ its audit date.
 * [ADR-0016: Current-directory and directory project targets](0016-current-directory-and-directory-project-targets.md)
 * [ADR-0017: Domain-intelligence query contract](0017-domain-intelligence-query-contract.md)
 * [ADR-0018: Tests-first integration verification](0018-tests-first-integration-verification.md)
+* [ADR-0019: Stable installer bootstrap distribution](0019-stable-installer-bootstrap-distribution.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
