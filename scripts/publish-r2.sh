@@ -69,11 +69,11 @@ verify_public() {
   local base_url="$1" key="$2" source="$3" cache_pattern="$4" content_type_pattern="$5"
   local downloaded
   downloaded="$GITHUB_WORKSPACE/downloaded-$(basename "$key")"
-  curl --http1.1 --fail --silent --show-error --location --output "$downloaded" "$base_url/$key"
+  curl --http2 --fail --silent --show-error --location --output "$downloaded" "$base_url/$key"
   cmp --silent "$source" "$downloaded"
-  curl --http1.1 --fail --silent --show-error --head "$base_url/$key" | \
+  curl --http2 --fail --silent --show-error --head "$base_url/$key" | \
     grep --ignore-case --extended-regexp "^cache-control:.*$cache_pattern" >/dev/null
-  curl --http1.1 --fail --silent --show-error --head "$base_url/$key" | \
+  curl --http2 --fail --silent --show-error --head "$base_url/$key" | \
     grep --ignore-case --extended-regexp "^content-type:.*$content_type_pattern" >/dev/null
   rm -f "$downloaded"
 }

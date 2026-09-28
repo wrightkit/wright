@@ -148,7 +148,7 @@ https://install.wrightkit.dev/wright/install.ps1
 
 The publisher takes both files from the exact release commit, uploads them
 after verifying the immutable archive/checksum set, and fetches them back over
-HTTP/1.1 to compare their bytes and check their response headers. Each script
+HTTP/2 to compare their bytes and check their response headers. Each script
 uses `Cache-Control: no-store, max-age=0` and
 `Content-Type: text/plain; charset=utf-8`. The scripts are verified before the
 stable `latest/version` pointer advances. Nightly publication does not change
