@@ -494,6 +494,37 @@ fn lint_rule_flags_control_findings() {
 }
 
 #[test]
+fn lint_lists_a_local_yaml_rule_loaded_with_the_rule_flag() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let rule_file = temp_file(
+        "cli-smoke.yaml",
+        "id: community/cli-smoke\nmetadata:\n  summary: summary\n  rationale: rationale\n  documentation: documentation\n  known-limits: limits\n  tags: []\nmatcher: {}\n",
+    );
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--rule",
+        rule_file.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    let rules = envelope["result"]["rules"].as_array().unwrap();
+    let local = rules
+        .iter()
+        .find(|rule| rule["id"] == "community/cli-smoke")
+        .expect("every registered rule, including a --rule YAML rule, appears");
+    assert_eq!(
+        local,
+        &serde_json::json!({ "id": "community/cli-smoke", "effectiveSeverity": "warning" }),
+        "local rules carry the same compact shape (#431)"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(rule_file.parent().unwrap());
+}
+
+#[test]
 fn lint_flags_are_usage_errors_for_other_commands() {
     for flags in [
         &["check", "--disable-rule", "min-wait-loop"][..],
