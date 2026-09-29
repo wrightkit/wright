@@ -27,10 +27,7 @@ analyzer contracts.
   `textDocument/didChange`, `textDocument/didClose` (`didSave` is an explicit
   no-op under full sync);
 - `textDocument/publishDiagnostics`: versioned, grouped by source identity,
-  with didClose cleanup and per-root publication ownership — a source that
-  disappears from a root analysis is retired with an empty
-  publishDiagnostics unless another open root still owns it, and affected
-  documents are republished on include/overlay changes.
+  with didClose cleanup.
 
 The `initialize` result advertises `textDocumentSync` and the UTF-16 position
 encoding only. It contains no provider entry for hover, definition,
