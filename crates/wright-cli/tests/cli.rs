@@ -364,6 +364,14 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
             .len(),
         rules.len()
     );
+    for rule in rules {
+        assert!(rule["id"].is_string() && rule["effectiveSeverity"].is_string());
+        assert_eq!(
+            rule.as_object().unwrap().len(),
+            2,
+            "lint inlines only id and effectiveSeverity; full metadata is lintRules (#431): {rule}"
+        );
+    }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -454,12 +462,10 @@ fn lint_rule_flags_control_findings() {
             .all(|finding| finding["code"] != "min-wait-loop"),
         "the disabled rule must produce no findings"
     );
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    let min_wait = rules
-        .iter()
-        .find(|rule| rule["id"] == "min-wait-loop")
-        .unwrap();
-    assert_eq!(min_wait["enabled"], false);
+    assert_eq!(
+        envelope["result"]["config"]["rules"]["min-wait-loop"]["enabled"],
+        false
+    );
 
     // --rule-severity overrides the effective severity of a rule. The
     // control-flow fixture produces no expensive-loop-check findings, so
@@ -485,6 +491,37 @@ fn lint_rule_flags_control_findings() {
         .unwrap();
     assert_eq!(exp_loop["effectiveSeverity"], "warning");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_lists_a_local_yaml_rule_loaded_with_the_rule_flag() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let rule_file = temp_file(
+        "cli-smoke.yaml",
+        "id: community/cli-smoke\nmetadata:\n  summary: summary\n  rationale: rationale\n  documentation: documentation\n  known-limits: limits\n  tags: []\nmatcher: {}\n",
+    );
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--rule",
+        rule_file.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    let rules = envelope["result"]["rules"].as_array().unwrap();
+    let local = rules
+        .iter()
+        .find(|rule| rule["id"] == "community/cli-smoke")
+        .expect("every registered rule, including a --rule YAML rule, appears");
+    assert_eq!(
+        local,
+        &serde_json::json!({ "id": "community/cli-smoke", "effectiveSeverity": "warning" }),
+        "local rules carry the same compact shape (#431)"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(rule_file.parent().unwrap());
 }
 
 #[test]

@@ -80,6 +80,25 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         ToolResponse::Error { error } => panic!("lint failed: {error:?}"),
     };
     assert_eq!(lint["config"], lint_rules["config"]);
+    // #431: `lint` inlines only the finding-interpretation fields;
+    // `lintRules` remains the full-metadata surface.
+    let lint_rule = lint["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .expect("lint lists every registered rule");
+    assert_eq!(
+        lint_rule,
+        &serde_json::json!({ "id": "min-wait-loop", "effectiveSeverity": "error" })
+    );
+    let full_rule = lint_rules["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .expect("lintRules lists every registered rule");
+    assert!(full_rule["summary"].is_string());
     let configured_finding = lint["findings"]
         .as_array()
         .unwrap()

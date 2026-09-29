@@ -96,6 +96,29 @@ pub struct LintResult {
     pub skipped: serde_json::Value,
 }
 
+/// `lint` results keep only the per-rule identity needed to interpret a
+/// finding — the stable id and its effective severity (#431). Full rule
+/// metadata (summary, rationale, documentation, known limits, evidence, tags)
+/// is served by the `lintRules` operation instead of being inlined per call.
+pub(crate) fn compact_lint_rules(rules: Option<&serde_json::Value>) -> serde_json::Value {
+    let Some(rules) = rules.and_then(serde_json::Value::as_array) else {
+        return serde_json::json!([]);
+    };
+    serde_json::Value::Array(
+        rules
+            .iter()
+            .filter_map(|rule| {
+                let id = rule.get("id").filter(|v| v.is_string())?;
+                let effective_severity = rule.get("effectiveSeverity").filter(|v| v.is_string())?;
+                Some(serde_json::json!({
+                    "id": id,
+                    "effectiveSeverity": effective_severity,
+                }))
+            })
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConvertTarget {
@@ -132,5 +155,49 @@ pub fn version_info() -> VersionInfo {
     VersionInfo {
         version: DRIVER_VERSION.to_string(),
         contract: RESULT_CONTRACT.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_lint_rules;
+    use serde_json::json;
+
+    #[test]
+    fn compact_lint_rules_keeps_only_id_and_effective_severity() {
+        let rules = json!([
+            {
+                "id": "min-wait-loop",
+                "defaultSeverity": "warning",
+                "effectiveSeverity": "error",
+                "enabled": false,
+                "summary": "loop body waits at the workshop minimum rate",
+                "rationale": "…",
+                "documentation": "…",
+                "knownLimits": "…",
+                "evidence": "static-indicator",
+                "tags": ["stability"],
+                "kind": "builtin"
+            }
+        ]);
+        assert_eq!(
+            compact_lint_rules(Some(&rules)),
+            json!([{ "id": "min-wait-loop", "effectiveSeverity": "error" }])
+        );
+    }
+
+    #[test]
+    fn compact_lint_rules_drops_malformed_entries() {
+        for rules in [
+            json!(null),
+            json!("not-an-array"),
+            json!(["not-an-object"]),
+            json!([{ "id": "min-wait-loop" }]),
+            json!([{ "id": "min-wait-loop", "effectiveSeverity": null }]),
+            json!([{ "id": 3, "effectiveSeverity": "warning" }]),
+        ] {
+            assert_eq!(compact_lint_rules(Some(&rules)), json!([]), "{rules}");
+        }
+        assert_eq!(compact_lint_rules(None), json!([]));
     }
 }
