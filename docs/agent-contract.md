@@ -82,8 +82,8 @@ the successful `result` payload.
 | `cfg` | required `rule` | Control-flow graph for the rule id |
 | `findings` | optional selection | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
 | `persistentObjects` | none | Persistent Workshop object facts |
-| `lint` | optional selection | Lint findings, rule metadata, effective configuration, and `selection` when applied |
-| `lintRules` | none | Registered lint rules and effective configuration |
+| `lint` | optional selection | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied |
+| `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | none | Subroutine call graph |
 | `costEstimate` | optional selection | Exact generated-resource counts, findings, and `selection` when applied |
 | `targetMetadata` | none | Canonical target/catalog metadata |
@@ -148,7 +148,14 @@ operations whose requests remain valid for existing clients. Removing or
 renaming an operation or field, changing a field's type or meaning, or changing
 the response/error model requires a new major contract such as
 `wright-agent/v2`; the v1 schema and its compatibility tests remain in place.
-The CLI result envelope has its independent `wright-result/v1` version.
+The CLI result envelope has its independent `wright-result/v1` version; its
+evolution policy is defined in [`docs/cli/machine-contract.md`](cli/machine-contract.md).
+
+One recorded exception applies to the same rule in both contracts, decided
+before the 1.0 contract freeze (#134): the `lint` result's `rules` member
+lists only each rule's `id` and `effectiveSeverity` (#431). Full rule
+metadata — summary, rationale, documentation, known limits, evidence, tags —
+is served once by `lintRules`.
 
 The optional guide distributed by `wrightkit/skills` teaches clients to
 discover and use these capabilities. It is not required to expose, execute, or

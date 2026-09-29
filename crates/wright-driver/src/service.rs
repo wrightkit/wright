@@ -62,10 +62,12 @@ pub enum ToolRequest {
     Findings(crate::select::FindingSelection),
     /// Persistent Workshop object facts, separate from lint diagnostics.
     PersistentObjects,
-    /// Lint findings plus rule metadata and effective configuration (#98),
-    /// optionally narrowed by an inline selection (#430).
+    /// Lint findings plus per-rule id/effective severity and the effective
+    /// configuration (#98); `lintRules` serves full rule metadata (#431).
+    /// Optionally narrowed by an inline selection (#430).
     Lint(crate::select::FindingSelection),
-    /// The registered lint rules and the effective lint configuration.
+    /// The registered lint rules with full metadata and the effective lint
+    /// configuration.
     LintRules,
     /// The subroutine call graph (caller rules → callee subroutines).
     CallGraph,
@@ -475,11 +477,12 @@ impl<'a> ToolService<'a> {
             })
     }
 
-    /// `lint`: rule metadata, effective configuration, and findings over the
-    /// loaded program through the same semantic-service path as the CLI
-    /// `lint` workflow (no duplicated rule execution, #98). A `selection`
-    /// member records the true total and withheld count when the request
-    /// selected a subset (#430).
+    /// `lint`: per-rule id and effective severity, effective configuration,
+    /// and findings over the loaded program through the same semantic-service
+    /// path as the CLI `lint` workflow (no duplicated rule execution, #98).
+    /// Full rule metadata is served once by `lintRules` rather than inlined
+    /// into every `lint` response (#431). A `selection` member records the
+    /// true total and withheld count when the request selected a subset (#430).
     fn lint(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
         if let Some(error) = self.selection_error(selection) {
             return error;
@@ -501,7 +504,7 @@ impl<'a> ToolService<'a> {
         let (findings, outcome) = selection.apply_findings(findings);
         let mut result = json!({
             "inputIdentity": self.loaded.input.identity,
-            "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
+            "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
             "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
             "findings": findings,
             "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),

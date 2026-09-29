@@ -76,6 +76,20 @@ source-located). Named/keyword argument binding adds `unknown-keyword`,
 `keyword-required`, `keyword-unsupported`, and `invalid-argument`
 (variable-required parameters; #110).
 
+## `wright-result/v1` evolution
+
+The envelope follows the same rule as `wright-agent/v1`: additive optional
+`result` fields are permitted within v1; removing or renaming a field,
+changing a field's type or meaning, or changing the envelope or exit-code
+model requires a new major contract such as `wright-result/v2`.
+
+One recorded exception applies, decided before the 1.0 contract freeze (#134):
+the `lint` result's `rules` member lists only each rule's `id` and
+`effectiveSeverity` (#431). Full rule metadata — summary, rationale,
+documentation, known limits, evidence, tags — is served once by the
+`lintRules` agent operation instead of being inlined into every `lint`
+result.
+
 ## Determinism
 
 For identical inputs and configuration, JSON output is byte-deterministic

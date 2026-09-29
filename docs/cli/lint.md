@@ -55,7 +55,12 @@ any condition.
 
 The `lint` result envelope carries `input_identity` (the SHA-256 source
 identity; the tool/agent API exposes the same value as `inputIdentity`),
-`program`, `rules`, `config`, and `findings`:
+`program`, `rules`, `config`, `findings`, and `skipped`. `rules` lists each
+registered rule's stable `id` and `effectiveSeverity` — enough to interpret a
+finding's `code` and `severity`. Full rule metadata (summary, rationale,
+documentation, known limits, evidence class, tags) is served once by the
+`lintRules` agent operation rather than inlined into every `lint` result
+(#431):
 
 ```json
 {
@@ -68,66 +73,12 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
     "input_identity": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2, "findings": 1 },
     "rules": [
-      {
-        "id": "min-wait-loop",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "loop body waits at the workshop minimum rate",
-        "evidence": "static-indicator",
-        "tags": ["performance", "stability"],
-        "knownLimits": "Wait durations that are not statically known ..."
-      },
-      {
-        "id": "duplicate-condition",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "condition is evaluated more than once within one rule",
-        "evidence": "exact",
-        "tags": ["correctness"],
-        "knownLimits": "Detection is structural (not value-flow) and rule-local ..."
-      },
-      {
-        "id": "expensive-loop-check",
-        "defaultSeverity": "info",
-        "effectiveSeverity": "info",
-        "enabled": true,
-        "summary": "geometry predicate evaluated inside a loop body",
-        "evidence": "heuristic",
-        "tags": ["performance"],
-        "knownLimits": "The expensive-call list is a fixed heuristic ..."
-      },
-      {
-        "id": "ongoing-condition-hot-path",
-        "defaultSeverity": "info",
-        "effectiveSeverity": "info",
-        "enabled": true,
-        "summary": "geometry predicate evaluated in an ongoing-rule condition",
-        "evidence": "heuristic",
-        "tags": ["performance", "stability"],
-        "knownLimits": "The geometry-predicate list is a fixed heuristic; the analysis does not measure runtime cost or infer selectivity ..."
-      },
-      {
-        "id": "repeated-value",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "identical value expression evaluated more than once in one loop scope",
-        "evidence": "exact",
-        "tags": ["performance", "stability"],
-        "knownLimits": "Detection is rule-local and structural ..."
-      },
-      {
-        "id": "while-without-wait",
-        "defaultSeverity": "warning",
-        "effectiveSeverity": "warning",
-        "enabled": true,
-        "summary": "while loop body contains no wait call",
-        "evidence": "static-indicator",
-        "tags": ["stability"],
-        "knownLimits": "Counter-pattern detection is conservative and structural: only literal-bound comparisons (<, <=, >, >=) are recognized. A statically-bounded claim additionally requires every direct child ..."
-      }
+      { "id": "min-wait-loop", "effectiveSeverity": "warning" },
+      { "id": "duplicate-condition", "effectiveSeverity": "warning" },
+      { "id": "expensive-loop-check", "effectiveSeverity": "info" },
+      { "id": "ongoing-condition-hot-path", "effectiveSeverity": "info" },
+      { "id": "repeated-value", "effectiveSeverity": "warning" },
+      { "id": "while-without-wait", "effectiveSeverity": "warning" }
     ],
     "config": { "rules": { "min-wait-loop": { "enabled": true, "severity": "warning" } } },
     "findings": [
@@ -138,7 +89,8 @@ identity; the tool/agent API exposes the same value as `inputIdentity`),
         "message": "loop body waits at the workshop minimum rate; ...",
         "span": { "file": 0, "path": "program.txt", "start": { "line": 28, "col": 9 }, "end": { "line": 31, "col": 13 } }
       }
-    ]
+    ],
+    "skipped": []
   }
 }
 ```
@@ -150,8 +102,8 @@ The core workflows have separate contracts:
   findings such as `duplicate-condition` and `min-wait-loop` are not emitted
   by default.
 * `lint` executes the configurable `LintRegistry` and returns stable rule IDs,
-  severity, evidence class, boundedness where applicable, source spans, rule
-  metadata, and effective configuration.
+  severity, evidence class, boundedness where applicable, source spans,
+  a per-rule id/effective-severity list, and effective configuration.
 * `analyze` returns semantic facts rather than lint findings. Human text output
   is a bounded report with a program overview, aggregate CFG measurements,
   ranked rule hotspots, and ranked cross-cutting variables. The displayed
@@ -161,7 +113,7 @@ The core workflows have separate contracts:
   exhaustive structural/semantic view. These facts can inform future lint
   rules without making analysis a view of the registry.
 
-Analysis findings (`lint` and the tool/agent `getFindings`/`lint` responses)
+Analysis findings (`lint` and the tool/agent `findings`/`lint` responses)
 carry an `evidence` field classifying how strongly the finding is supported
 (`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
 

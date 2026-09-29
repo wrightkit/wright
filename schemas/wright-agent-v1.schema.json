@@ -247,6 +247,15 @@
       },
       "additionalProperties": true
     },
+    "LintRuleSummary": {
+      "type": "object",
+      "required": ["id", "effectiveSeverity"],
+      "properties": {
+        "id": { "type": "string" },
+        "effectiveSeverity": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
     "LintConfiguration": {
       "type": "object",
       "required": ["rules"],
@@ -459,7 +468,7 @@
       "required": ["inputIdentity", "rules", "config", "findings", "skipped"],
       "properties": {
         "inputIdentity": { "type": "string" },
-        "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRule" } },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRuleSummary" } },
         "config": { "$ref": "#/$defs/LintConfiguration" },
         "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
         "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } },

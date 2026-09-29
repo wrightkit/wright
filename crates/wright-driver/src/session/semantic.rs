@@ -211,8 +211,10 @@ impl CompilerSession {
         )
     }
 
-    /// `lint`: load and produce the source identity, program summary, rule
-    /// metadata, effective configuration, and findings (#98).
+    /// `lint`: load and produce the source identity, program summary, per-rule
+    /// id and effective severity, effective configuration, and findings (#98).
+    /// Full rule metadata is served by `lintRules` rather than inlined into
+    /// every `lint` result (#431).
     ///
     /// Lint rule findings are reported in `result.findings`; frontend and
     /// Workshop semantic-completeness diagnostics remain in the envelope.
@@ -247,9 +249,7 @@ impl CompilerSession {
                 let (rules, config, skipped) =
                     if let serde_json::Value::Object(mut object) = lint_rules {
                         (
-                            object
-                                .remove("rules")
-                                .unwrap_or_else(|| serde_json::json!([])),
+                            crate::result::compact_lint_rules(object.remove("rules").as_ref()),
                             object
                                 .remove("config")
                                 .unwrap_or_else(|| serde_json::json!({})),

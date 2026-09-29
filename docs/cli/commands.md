@@ -34,7 +34,7 @@ result.
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT]` | Summarize project structure, ranked CFG hotspots, and cross-cutting state | bounded semantic report with static evidence labels |
-| `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule metadata, and effective-configuration summary |
+| `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration |
 | `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary |
 | `wright serve [INPUT]` | Serve `wright-agent/v1` over stdio or JSON-RPC 2.0 | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
