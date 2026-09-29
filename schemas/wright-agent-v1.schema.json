@@ -442,9 +442,10 @@
     },
     "LintResult": {
       "type": "object",
-      "required": ["inputIdentity", "rules", "config", "findings", "skipped"],
+      "required": ["inputIdentity", "program", "rules", "config", "findings", "skipped"],
       "properties": {
         "inputIdentity": { "type": "string" },
+        "program": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/ProgramSummary" }] },
         "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRuleSummary" } },
         "config": { "$ref": "#/$defs/LintConfiguration" },
         "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },

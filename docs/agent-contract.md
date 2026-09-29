@@ -82,7 +82,7 @@ the successful `result` payload.
 | `cfg` | required `rule` | Control-flow graph for the rule id |
 | `findings` | none | Wright static-analysis findings |
 | `persistentObjects` | none | Persistent Workshop object facts |
-| `lint` | none | Lint findings, per-rule id/effective severity, and effective configuration |
+| `lint` | none | Lint findings, program summary, per-rule id/effective severity, and effective configuration |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | none | Subroutine call graph |
 | `costEstimate` | none | Exact generated-resource counts and separate static findings |

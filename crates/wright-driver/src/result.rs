@@ -107,11 +107,13 @@ pub(crate) fn compact_lint_rules(rules: Option<&serde_json::Value>) -> serde_jso
     serde_json::Value::Array(
         rules
             .iter()
-            .map(|rule| {
-                serde_json::json!({
-                    "id": rule["id"],
-                    "effectiveSeverity": rule["effectiveSeverity"],
-                })
+            .filter_map(|rule| {
+                let id = rule.get("id").filter(|v| v.is_string())?;
+                let effective_severity = rule.get("effectiveSeverity").filter(|v| v.is_string())?;
+                Some(serde_json::json!({
+                    "id": id,
+                    "effectiveSeverity": effective_severity,
+                }))
             })
             .collect(),
     )

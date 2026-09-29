@@ -61,8 +61,9 @@ pub enum ToolRequest {
     Findings,
     /// Persistent Workshop object facts, separate from lint diagnostics.
     PersistentObjects,
-    /// Lint findings plus per-rule id/effective severity and the effective
-    /// configuration (#98); `lintRules` serves full rule metadata (#431).
+    /// Lint findings plus the program summary, per-rule id/effective severity,
+    /// and the effective configuration (#98); `lintRules` serves full rule
+    /// metadata (#431).
     Lint,
     /// The registered lint rules with full metadata and the effective lint
     /// configuration.
@@ -441,9 +442,9 @@ impl<'a> ToolService<'a> {
         self.lint_semantic.as_ref().unwrap_or(&self.semantic)
     }
 
-    /// `lint`: per-rule id and effective severity, effective configuration,
-    /// and findings over the loaded program through the same semantic-service
-    /// path as the CLI `lint` workflow (no duplicated rule execution, #98).
+    /// `lint`: program summary, per-rule id and effective severity, effective
+    /// configuration, and findings over the loaded program through the same
+    /// semantic-service path as the CLI `lint` workflow (#98).
     /// Full rule metadata is served once by `lintRules` rather than inlined
     /// into every `lint` response (#431).
     fn lint(&self) -> ToolResponse {
@@ -452,6 +453,10 @@ impl<'a> ToolService<'a> {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!({}),
         };
+        let program = match service.handle(&Request::Program) {
+            Response::Ok { result } => result,
+            Response::Error { .. } => serde_json::Value::Null,
+        };
         let mut findings = match service.handle(&Request::GetFindings) {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!([]),
@@ -459,6 +464,7 @@ impl<'a> ToolService<'a> {
         crate::session::resolve_span_paths(&mut findings, &self.loaded);
         self.ok(json!({
             "inputIdentity": self.loaded.input.identity,
+            "program": program,
             "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
             "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
             "findings": findings,
