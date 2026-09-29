@@ -69,9 +69,11 @@ fn requests() -> Vec<Value> {
         json!({"op":"project"}),
         json!({"op":"rules"}),
         json!({"op":"symbols","kind":null}),
-        json!({"op":"references","symbol":1}),
-        json!({"op":"usage","symbol":1}),
-        json!({"op":"cfg","rule":1}),
+        // #429: symbol/rule addresses accept the declared name as well as the
+        // numeric id; `service_responses` substitutes discovered ids.
+        json!({"op":"references","symbol":"name"}),
+        json!({"op":"usage","symbol":"name"}),
+        json!({"op":"cfg","rule":"name"}),
         json!({"op":"findings"}),
         json!({"op":"persistentObjects"}),
         json!({"op":"lint"}),
@@ -230,6 +232,33 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
             "invalid request: {request}"
         );
         serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
+    }
+
+    // #429: both address spellings validate and deserialize; other types are
+    // rejected rather than coerced.
+    for request in [
+        json!({"op":"references","symbol":0}),
+        json!({"op":"references","symbol":"counter"}),
+        json!({"op":"usage","symbol":1}),
+        json!({"op":"usage","symbol":"counter"}),
+        json!({"op":"cfg","rule":0}),
+        json!({"op":"cfg","rule":"intro"}),
+    ] {
+        assert!(
+            request_schema.is_valid(&request),
+            "invalid request: {request}"
+        );
+        serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
+    }
+    for request in [
+        json!({"op":"references","symbol":true}),
+        json!({"op":"usage","symbol":1.5}),
+        json!({"op":"cfg","rule":null}),
+    ] {
+        assert!(
+            !request_schema.is_valid(&request),
+            "schema accepted a non-id/name address: {request}"
+        );
     }
 
     let capabilities_response = json!({"result":current});

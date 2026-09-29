@@ -281,9 +281,9 @@ fn semantic_query_trial(
         let requests = [
             ToolRequest::Rules,
             ToolRequest::Symbols { kind: None },
-            ToolRequest::References { symbol: 0 },
-            ToolRequest::Usage { symbol: 0 },
-            ToolRequest::Cfg { rule: 0 },
+            ToolRequest::References { symbol: 0.into() },
+            ToolRequest::Usage { symbol: 0.into() },
+            ToolRequest::Cfg { rule: 0.into() },
             ToolRequest::Findings(FindingSelection::default()),
             ToolRequest::PersistentObjects,
             ToolRequest::Lint(FindingSelection::default()),

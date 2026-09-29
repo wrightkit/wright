@@ -20,6 +20,13 @@ See [architecture, commands, and conversion](cli/commands.md).
 
 See [architecture, commands, and conversion](cli/commands.md).
 
+## Semantic query commands (#429)
+
+See [architecture, commands, and conversion](cli/commands.md): `inspect` owns
+the semantic query surface — `inspect symbols`, `inspect refs`, `inspect
+cfg`, `inspect callgraph`, and `inspect cost` serve the same results as the
+agent operations, and `refs`/`cfg` address symbols and rules by name.
+
 ## `wright convert` and the reconstruction surface (#126)
 
 See [architecture, commands, and conversion](cli/commands.md).

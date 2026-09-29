@@ -197,11 +197,45 @@ fn run_workflow(command: Command) -> ExitCode {
                 wright_driver::CompilerSession::lint,
             )
         }
-        Command::Inspect(args) => run_configured(
-            config_from_common(&args, false),
-            present::Presentation::from_common(&args),
-            wright_driver::CompilerSession::inspect,
-        ),
+        Command::Inspect(args) => match args.query {
+            None => run_configured(
+                config_from_common(&args.common, false),
+                present::Presentation::from_common(&args.common),
+                wright_driver::CompilerSession::inspect,
+            ),
+            Some(cli::InspectQuery::Symbols(query)) => {
+                let kind = query.only.map(|kind| kind.as_str().to_string());
+                run_configured(
+                    config_from_common(&query.common, false),
+                    present::Presentation::from_common(&query.common),
+                    move |session| session.symbols(kind),
+                )
+            }
+            Some(cli::InspectQuery::Refs(query)) => run_configured(
+                config_from_common(&query.common, false),
+                present::Presentation::from_common(&query.common),
+                move |session| session.refs(&query.name),
+            ),
+            Some(cli::InspectQuery::Cfg(query)) => run_configured(
+                config_from_common(&query.common, false),
+                present::Presentation::from_common(&query.common),
+                move |session| session.cfg(&query.rule),
+            ),
+            Some(cli::InspectQuery::Callgraph(query)) => run_configured(
+                config_from_common(&query, false),
+                present::Presentation::from_common(&query),
+                wright_driver::CompilerSession::callgraph,
+            ),
+            Some(cli::InspectQuery::Cost(query)) => {
+                let mut config = config_from_common(&query.common, true);
+                config.selection = selection_from_args(&query.select);
+                run_configured(
+                    config,
+                    present::Presentation::from_common(&query.common),
+                    wright_driver::CompilerSession::cost,
+                )
+            }
+        },
         Command::Completion(_)
         | Command::Update(_)
         | Command::Provider(_)

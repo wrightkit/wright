@@ -52,8 +52,13 @@ they returned before this contract was introduced.
 
 One-shot CLI workflows such as `wright check --format json` continue to return
 their `wright-result/v1` envelope. They use the same `CompilerSession`
-workflows as the session service. The CLI does not add agent-specific semantic
-results. The in-process embedding API can call `ToolService::handle` directly.
+workflows as the session service. The semantic query commands `wright inspect
+symbols`, `wright inspect refs`, `wright inspect cfg`, `wright inspect
+callgraph`, and `wright inspect cost` likewise run through `ToolService`
+operations (`symbols`, `references` + `usage`, `cfg`, `callGraph`,
+`costEstimate`) and report the same result payloads (#429); the CLI adds no
+divergent semantics. The in-process embedding API can call
+`ToolService::handle` directly.
 
 The released `wright` binary includes `serve`, so each supported installation
 channel can use the session contract without a separate runtime. MCP is not a
@@ -77,9 +82,9 @@ the successful `result` payload.
 | `project` | none | Loaded program origin, files, counts, and findings summary |
 | `rules` | none | Canonical Workshop rules |
 | `symbols` | optional `kind` | Symbols, optionally filtered by kind |
-| `references` | required `symbol` | References for the symbol id |
-| `usage` | required `symbol` | Usage counts for the symbol id |
-| `cfg` | required `rule` | Control-flow graph for the rule id |
+| `references` | required `symbol` (id or name) | References for the symbol |
+| `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
+| `cfg` | required `rule` (index or name) | Control-flow graph for the rule |
 | `findings` | optional selection | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
 | `persistentObjects` | none | Persistent Workshop object facts |
 | `lint` | optional selection | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied |
@@ -91,6 +96,23 @@ the successful `result` payload.
 | `semanticRename` | `sources`, `target` | Validated rename transaction or structured refusal |
 | `providerSemanticRename` | `language_id`, `documents`, `position_document_uri`, `position`, `new_name`, optional `project_root`, `sources` | Provider-resolved rename transaction or structured refusal |
 | `providerValidateEdit` | `language_id`, `documents`, `transaction`, `sources`, optional `project_root` | Provider-validated transaction or structured refusal |
+
+### Name addressing (#429)
+
+`references` and `usage` accept `symbol` as either a numeric symbol id or the
+declared symbol name; `cfg` accepts `rule` as either the rule index or the
+declared rule name. Names resolve against the loaded program's semantic index
+in the driver, so a request never has to learn the program's numbering —
+symbol ids and rule indexes are different spaces (a rule's symbol id is not
+its rule index). Numeric ids keep their established meaning, and both
+addressings return the same payload for the same target.
+
+An unmatched name returns a structured `unknown-symbol` or `unknown-rule`
+error; a name shared by more than one symbol — or more than one rule, for
+`cfg` — returns `ambiguous-symbol`/`ambiguous-rule` listing the candidate
+numeric ids. Resolution never guesses or returns an empty success. `usage`
+additionally echoes the resolved `id` and `kind` so a name-addressed caller
+can correlate the result with `symbols`.
 
 ### Finding selection (#430)
 

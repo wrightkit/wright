@@ -28,6 +28,41 @@ pub const SERVICE_NAME: &str = "wright-tool-service";
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 
+/// A semantic query target on the agent contract (#429): a numeric id or a
+/// declared name.
+///
+/// Numeric ids keep their established meaning — the semantic index's symbol
+/// id for `references`/`usage`, the rule index for `cfg` — so existing
+/// numeric requests are unchanged. A name resolves against the loaded
+/// program's semantic index: unmatched or ambiguous names produce a
+/// structured error, never a guess.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Address {
+    /// The numeric id assigned by the loaded program's semantic addressing.
+    Id(u32),
+    /// The declared name (`rule("name")`, variable, or subroutine name).
+    Name(String),
+}
+
+impl From<u32> for Address {
+    fn from(id: u32) -> Self {
+        Self::Id(id)
+    }
+}
+
+impl From<String> for Address {
+    fn from(name: String) -> Self {
+        Self::Name(name)
+    }
+}
+
+impl From<&str> for Address {
+    fn from(name: &str) -> Self {
+        Self::Name(name.to_string())
+    }
+}
+
 /// A tool request: the owned query surface plus agent-oriented operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
@@ -51,12 +86,14 @@ pub enum ToolRequest {
         #[serde(default)]
         kind: Option<String>,
     },
-    /// References to a symbol.
-    References { symbol: u32 },
-    /// Usage counts for a symbol.
-    Usage { symbol: u32 },
-    /// The control-flow graph of one rule.
-    Cfg { rule: u32 },
+    /// References to a symbol, addressed by its numeric id or its name (#429).
+    References { symbol: Address },
+    /// Usage counts for a symbol, addressed by its numeric id or its name
+    /// (#429).
+    Usage { symbol: Address },
+    /// The control-flow graph of one rule, addressed by its numeric index or
+    /// its name (#429).
+    Cfg { rule: Address },
     /// Every static-analysis finding, optionally narrowed by an inline
     /// selection (`severity`, `rule`, `file`, `max`; #430).
     Findings(crate::select::FindingSelection),
@@ -264,15 +301,24 @@ impl<'a> ToolService<'a> {
             ToolRequest::Project => self.ok(self.project()),
             ToolRequest::Rules => self.semantic_query(Request::ListRules),
             ToolRequest::Symbols { kind } => {
-                self.semantic_query(Request::ListSymbols { kind: kind.clone() })
+                self.semantic_query_with_resolved_span_paths(Request::ListSymbols {
+                    kind: kind.clone(),
+                })
             }
-            ToolRequest::References { symbol } => {
-                self.semantic_query(Request::FindReferences { symbol: *symbol })
-            }
-            ToolRequest::Usage { symbol } => {
-                self.semantic_query(Request::GetUsage { symbol: *symbol })
-            }
-            ToolRequest::Cfg { rule } => self.semantic_query(Request::GetCfg { rule: *rule }),
+            ToolRequest::References { symbol } => match self.symbol_address(symbol) {
+                Ok(symbol) => {
+                    self.semantic_query_with_resolved_span_paths(Request::FindReferences { symbol })
+                }
+                Err(error) => ToolResponse::Error { error },
+            },
+            ToolRequest::Usage { symbol } => match self.symbol_address(symbol) {
+                Ok(symbol) => self.semantic_query(Request::GetUsage { symbol }),
+                Err(error) => ToolResponse::Error { error },
+            },
+            ToolRequest::Cfg { rule } => match self.rule_address(rule) {
+                Ok(rule) => self.semantic_query(Request::GetCfg { rule }),
+                Err(error) => ToolResponse::Error { error },
+            },
             ToolRequest::Findings(selection) => self.findings(selection),
             ToolRequest::PersistentObjects => self.persistent_objects(),
             ToolRequest::Lint(selection) => self.lint(selection),
@@ -443,6 +489,27 @@ impl<'a> ToolService<'a> {
     /// `persistentObjects`: persistent-object facts with resolved source paths.
     fn persistent_objects(&self) -> ToolResponse {
         self.semantic_query_with_resolved_span_paths(Request::GetPersistentObjects)
+    }
+
+    /// Resolve a symbol `Address` to its numeric id (#429). A name resolves
+    /// through the shared semantic index; unmatched and ambiguous names are
+    /// the analyzer's structured `unknown-symbol`/`ambiguous-symbol` errors.
+    fn symbol_address(&self, address: &Address) -> Result<u32, ToolErrorInfo> {
+        match address {
+            Address::Id(id) => Ok(*id),
+            Address::Name(name) => self
+                .semantic
+                .resolve_symbol(name)
+                .map(|symbol| symbol.id.index() as u32),
+        }
+    }
+
+    /// Resolve a rule `Address` to its numeric index (#429).
+    fn rule_address(&self, address: &Address) -> Result<u32, ToolErrorInfo> {
+        match address {
+            Address::Id(id) => Ok(*id),
+            Address::Name(name) => self.semantic.resolve_rule(name).map(|rule| rule as u32),
+        }
     }
 
     fn semantic_query_with_resolved_span_paths(&self, request: Request) -> ToolResponse {

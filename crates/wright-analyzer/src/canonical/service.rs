@@ -7,7 +7,9 @@ use workshop_rs::{Event, Program};
 use super::analysis::Finding;
 use super::cfg::cfg_response;
 use super::facts::persistent_objects;
-use super::symbols::{Reference, ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId};
+use super::symbols::{
+    Reference, ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId, SymbolKind,
+};
 use crate::analysis::Boundedness;
 use crate::registry::{LintConfig, SkippedRule};
 use crate::service::{ErrorInfo, Origin, Request, Response};
@@ -155,6 +157,66 @@ impl<'a> SemanticService<'a> {
                 .collect(),
         )
     }
+
+    /// Resolve a symbol by its exact declared name (#429). A name matching no
+    /// symbol is `unknown-symbol`; a name shared by more than one symbol is
+    /// `ambiguous-symbol` with each candidate's kind and numeric id — callers
+    /// may fall back to the numeric form. No match is ever guessed.
+    pub fn resolve_symbol(&self, name: &str) -> Result<&Symbol, ErrorInfo> {
+        let matches: Vec<&Symbol> = self
+            .index
+            .symbols()
+            .filter(|symbol| symbol.name == name)
+            .collect();
+        match matches.as_slice() {
+            [symbol] => Ok(symbol),
+            [] => Err(ErrorInfo {
+                code: "unknown-symbol".to_string(),
+                message: format!("unknown symbol '{name}'"),
+            }),
+            _ => Err(ErrorInfo {
+                code: "ambiguous-symbol".to_string(),
+                message: format!(
+                    "ambiguous symbol '{name}': {}",
+                    matches
+                        .iter()
+                        .map(|symbol| format!("{} {}", symbol.kind.as_str(), symbol.id.index()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }),
+        }
+    }
+
+    /// Resolve a rule by its exact declared name to its rule index (#429).
+    /// Only rule symbols participate: a rule named `x` stays reachable even
+    /// when a variable or subroutine is also named `x`. Unmatched and
+    /// duplicate rule names are `unknown-rule`/`ambiguous-rule`.
+    pub fn resolve_rule(&self, name: &str) -> Result<RuleId, ErrorInfo> {
+        let matches: Vec<&Symbol> = self
+            .index
+            .symbols()
+            .filter(|symbol| symbol.kind == SymbolKind::Rule && symbol.name == name)
+            .collect();
+        match matches.as_slice() {
+            [symbol] => Ok(symbol.rule.expect("rule symbols carry their rule index")),
+            [] => Err(ErrorInfo {
+                code: "unknown-rule".to_string(),
+                message: format!("unknown rule '{name}'"),
+            }),
+            _ => Err(ErrorInfo {
+                code: "ambiguous-rule".to_string(),
+                message: format!(
+                    "ambiguous rule '{name}': {}",
+                    matches
+                        .iter()
+                        .map(|symbol| format!("rule {}", symbol.rule.expect("rule symbol")))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }),
+        }
+    }
     pub fn handle_json(&self, request_json: &str) -> String {
         let request: Request = match serde_json::from_str(request_json) {
             Ok(req) => req,
@@ -180,7 +242,7 @@ impl<'a> SemanticService<'a> {
             Request::ListSymbols { kind } => Response::Ok { result: json!(self.index.symbols().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol.kind.as_str() == kind)).map(symbol_json).collect::<Vec<_>>()) },
             Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: symbol_json(symbol) }),
             Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: json!(self.index.references(id).into_iter().map(reference_json).collect::<Vec<_>>()) } } }
-            Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
+            Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"id": id.index(), "kind": data.kind.as_str(), "symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
             Request::GetCfg { rule } => cfg_response(self.program.as_ref(), *rule as usize),
             Request::GetFindings => Response::Ok { result: json!(self.findings.iter().map(finding_json).collect::<Vec<_>>()) },
             Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program.as_ref())) },

@@ -377,8 +377,10 @@
     "ReferencesResult": { "type": "array", "items": { "$ref": "#/$defs/Reference" } },
     "UsageResult": {
       "type": "object",
-      "required": ["symbol", "reads", "writes", "calls", "rules"],
+      "required": ["id", "kind", "symbol", "reads", "writes", "calls", "rules"],
       "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "kind": { "type": "string" },
         "symbol": { "type": "string" },
         "reads": { "type": "integer", "minimum": 0 },
         "writes": { "type": "integer", "minimum": 0 },
@@ -555,7 +557,7 @@
         "program": { "$ref": "#/$defs/AnalyzedProgramSummary" },
         "facts": {
           "type": "object",
-          "required": ["symbols", "rules"],
+          "required": ["symbols", "rules", "persistentObjects"],
           "properties": {
             "symbols": {
               "type": "array",
@@ -595,7 +597,8 @@
                 },
                 "additionalProperties": true
               }
-            }
+            },
+            "persistentObjects": { "$ref": "#/$defs/PersistentObjectsResult" }
           },
           "additionalProperties": true
         }
@@ -716,19 +719,19 @@
     },
     "ReferencesRequest": {
       "type": "object",
-      "properties": { "op": { "const": "references" }, "symbol": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "properties": { "op": { "const": "references" }, "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295 } },
       "required": ["op", "symbol"],
       "additionalProperties": false
     },
     "UsageRequest": {
       "type": "object",
-      "properties": { "op": { "const": "usage" }, "symbol": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "properties": { "op": { "const": "usage" }, "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295 } },
       "required": ["op", "symbol"],
       "additionalProperties": false
     },
     "CfgRequest": {
       "type": "object",
-      "properties": { "op": { "const": "cfg" }, "rule": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+      "properties": { "op": { "const": "cfg" }, "rule": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295 } },
       "required": ["op", "rule"],
       "additionalProperties": false
     },
