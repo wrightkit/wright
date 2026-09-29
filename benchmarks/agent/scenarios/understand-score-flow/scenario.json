@@ -1,0 +1,14 @@
+{
+  "id": "understand-score-flow",
+  "family": "understanding",
+  "language": "workshop",
+  "entry": "mode.ws",
+  "writable": ["answer.json"],
+  "checks": [
+    {"id": "source-still-valid", "kind": "check", "layer": "workshop-rs"},
+    {"id": "target-score", "kind": "answer", "key": "targetScore", "expected": 5},
+    {"id": "victory-rule", "kind": "answer", "key": "victoryRule", "expected": "declare winner"},
+    {"id": "score-writers", "kind": "answer", "key": "scoreWriters", "expected": ["score on elimination", "streak bonus points"]},
+    {"id": "unused-variables", "kind": "answer", "key": "unusedVariables", "expected": ["bonus"]}
+  ]
+}

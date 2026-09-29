@@ -39,6 +39,8 @@ Issue contract.
 - [Embedding/tool API](embedding.md): programmatic session/query/edit services.
 - [Agent contract](agent-contract.md): versioned session requests, results, and
   transport mappings for coding agents and embedding consumers.
+- [Agent benchmark](agent-benchmark.md): product-level benchmark contract for
+  general coding agents working with Wright.
 - [Language services & LSP](language-services.md): editor-neutral language
   services and LSP framing.
 - [Integration verification](compatibility.md): owner boundaries and

@@ -456,6 +456,12 @@ jobs:
         id: bench
         run: target/debug/wright-bench
 
+      - name: Validate agent benchmark scenarios
+        run: |
+          cargo build --locked -p wright-cli
+          python3 benchmarks/agent/agent_bench.py validate
+          python3 -m unittest discover -s benchmarks/agent
+
       - name: Upload benchmark report
         if: always()
         uses: actions/upload-artifact@v7

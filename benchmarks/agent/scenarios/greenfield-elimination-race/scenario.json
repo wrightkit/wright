@@ -1,0 +1,18 @@
+{
+  "id": "greenfield-elimination-race",
+  "family": "greenfield",
+  "language": "workshop",
+  "entry": "mode.ws",
+  "writable": ["mode.ws"],
+  "runtimeOnly": ["Elimination scoring, the HUD, and the winner declaration behave as intended in a live match."],
+  "checks": [
+    {"id": "valid-project", "kind": "check", "layer": "workshop-rs"},
+    {"id": "tracks-score-per-player", "kind": "symbols", "symbolKind": "playerVariable", "layer": "wright"},
+    {"id": "forces-soldier", "kind": "contains", "file": "mode.ws", "text": "Hero(Soldier: 76)"},
+    {"id": "scores-on-elimination", "kind": "contains", "file": "mode.ws", "text": ["Player Earned Elimination", "Player Dealt Final Blow"]},
+    {"id": "excludes-self-kills", "kind": "contains", "file": "mode.ws", "text": "Attacker != Victim"},
+    {"id": "has-hud", "kind": "contains", "file": "mode.ws", "text": "Create HUD Text"},
+    {"id": "target-is-7", "kind": "contains", "file": "mode.ws", "text": ", 7"},
+    {"id": "declares-winner", "kind": "contains", "file": "mode.ws", "text": ["Declare Player Victory", "Declare Match Draw"]}
+  ]
+}
