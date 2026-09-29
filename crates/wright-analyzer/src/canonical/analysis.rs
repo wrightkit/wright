@@ -261,33 +261,60 @@ fn duplicate_condition_findings(
     rule: &Rule,
     value_ids: &HashMap<usize, ValueId>,
 ) -> Vec<Finding> {
-    let mut seen: Vec<&Value> = Vec::new();
+    // A repeated condition is unreachable only as a later branch of the same
+    // `If`/`Else If` chain, so conditions are compared within the chain that
+    // owns them. Non-`If` blocks still push an entry so their `End` stays
+    // aligned; a `disabled` action is unwrapped only to detect a block opener.
+    enum Block<'a> {
+        IfChain(Vec<&'a Value>),
+        Other,
+    }
+    let mut blocks: Vec<Block> = Vec::new();
     let mut findings = Vec::new();
     for (action_id, action) in rule.actions.iter().enumerate() {
-        let condition = match action {
-            Action::If { condition }
-            | Action::ElseIf { condition }
-            | Action::While { condition } => condition,
-            _ => continue,
-        };
-        if seen
-            .iter()
-            .any(|previous| values_equal(previous, condition))
-        {
-            let span = program.action_argument_span(rule_id, action_id, 0);
-            findings.push(Finding {
-                code: "duplicate-condition".into(),
-                severity: Severity::Warning,
-                message: "condition is evaluated more than once in this rule; a later branch can never be taken".into(),
-                span: span.or_else(|| program.action_span(rule_id, action_id)),
-                rule: rule_id,
-                action: Some(action_id),
-                value: value_ids.get(&(condition as *const Value as usize)).copied(),
-                evidence: EvidenceClass::Exact,
-                boundedness: None,
-            });
-        } else {
-            seen.push(condition);
+        match action {
+            Action::ElseIf { condition } => {
+                let Some(Block::IfChain(seen)) = blocks.last_mut() else {
+                    continue;
+                };
+                if seen
+                    .iter()
+                    .any(|previous| values_equal(previous, condition))
+                {
+                    let span = program.action_argument_span(rule_id, action_id, 0);
+                    findings.push(Finding {
+                        code: "duplicate-condition".into(),
+                        severity: Severity::Warning,
+                        message: "an Else If condition repeats an earlier branch's condition in the same If/Else If chain; that branch can never be taken".into(),
+                        span: span.or_else(|| program.action_span(rule_id, action_id)),
+                        rule: rule_id,
+                        action: Some(action_id),
+                        value: value_ids.get(&(condition as *const Value as usize)).copied(),
+                        evidence: EvidenceClass::Exact,
+                        boundedness: None,
+                    });
+                } else {
+                    seen.push(condition);
+                }
+            }
+            Action::End => {
+                blocks.pop();
+            }
+            _ => {
+                let mut current = action;
+                while let Action::Disabled { action } = current {
+                    current = action;
+                }
+                match current {
+                    Action::If { condition } => {
+                        blocks.push(Block::IfChain(vec![condition]));
+                    }
+                    Action::While { .. }
+                    | Action::ForGlobalVariable { .. }
+                    | Action::ForPlayerVariable { .. } => blocks.push(Block::Other),
+                    _ => {}
+                }
+            }
         }
     }
     findings

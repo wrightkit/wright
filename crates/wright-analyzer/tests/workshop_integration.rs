@@ -193,14 +193,16 @@ rule ("analysis parity") {
                 .unwrap()
                 .contains("condition 2 of 2")
     }));
-    assert!(
-        findings
-            .iter()
-            .filter(|finding| finding["code"] == "duplicate-condition")
-            .count()
-            >= 2,
-        "identical If/ElseIf and If/While control-flow conditions are detected"
+    let duplicates: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "duplicate-condition")
+        .collect();
+    assert_eq!(
+        duplicates.len(),
+        1,
+        "only the in-chain Else If repeats an earlier branch condition"
     );
+    assert_eq!(duplicates[0]["action"], 1);
     let minimum_waits: Vec<_> = findings
         .iter()
         .filter(|finding| finding["code"] == "min-wait-loop")
@@ -298,6 +300,267 @@ rule ("analysis parity") {
                 .any(|descriptor| { descriptor["id"] == id && descriptor["evidence"] == evidence })
         );
     }
+}
+
+fn duplicate_condition_results(source: &str) -> Vec<Value> {
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["code"] == "duplicate-condition")
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn duplicate_condition_ignores_independent_if_blocks() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("two independent ifs") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        End;
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 2);
+        End;
+    }
+}
+"#;
+    assert!(
+        duplicate_condition_results(source).is_empty(),
+        "a second If block is evaluated independently and is reachable"
+    );
+}
+
+#[test]
+fn duplicate_condition_ignores_while_and_if_across_blocks() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("if and while blocks") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, ==, 0));
+            Wait(0.016, Ignore Condition);
+        End;
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        End;
+        While(Compare(Global.index, ==, 0));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    assert!(
+        duplicate_condition_results(source).is_empty(),
+        "While conditions are re-evaluated per iteration and never compared"
+    );
+}
+
+#[test]
+fn duplicate_condition_flags_repeat_within_one_chain() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("repeated else if") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        Else If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 2);
+        End;
+    }
+}
+"#;
+    let findings = duplicate_condition_results(source);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0]["action"], 2);
+    assert_eq!(findings[0]["evidence"], "exact");
+}
+
+#[test]
+fn duplicate_condition_flags_repeat_against_earlier_chain_branch() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("repeat against first branch") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        Else If(Compare(Global.index, ==, 1));
+            Set Global Variable(other, 2);
+        Else If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 3);
+        End;
+    }
+}
+"#;
+    let findings = duplicate_condition_results(source);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0]["action"], 4);
+}
+
+#[test]
+fn duplicate_condition_does_not_compare_across_chains() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("same else if in two chains") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        Else If(Compare(Global.index, ==, 1));
+            Set Global Variable(other, 2);
+        End;
+        If(Compare(Global.index, ==, 2));
+            Set Global Variable(other, 3);
+        Else If(Compare(Global.index, ==, 1));
+            Set Global Variable(other, 4);
+        End;
+    }
+}
+"#;
+    assert!(
+        duplicate_condition_results(source).is_empty(),
+        "identical Else If conditions in different chains are both reachable"
+    );
+}
+
+#[test]
+fn duplicate_condition_scopes_nested_chains() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("nested chains") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            If(Compare(Global.index, ==, 1));
+                Set Global Variable(other, 1);
+            Else If(Compare(Global.index, ==, 0));
+                Set Global Variable(other, 2);
+            End;
+        Else If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 3);
+        End;
+    }
+}
+"#;
+    let findings = duplicate_condition_results(source);
+    assert_eq!(
+        findings.len(),
+        1,
+        "the inner Else If repeats nothing in its own chain; only the outer \
+         Else If repeats the outer If"
+    );
+    assert_eq!(findings[0]["action"], 6);
+}
+
+#[test]
+fn duplicate_condition_chain_continues_past_nested_loop() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("loop inside chain body") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            While(Compare(Global.index, ==, 1));
+                Wait(0.016, Ignore Condition);
+            End;
+        Else If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        End;
+    }
+}
+"#;
+    let findings = duplicate_condition_results(source);
+    assert_eq!(
+        findings.len(),
+        1,
+        "a loop inside the chain body must not close the chain"
+    );
+    assert_eq!(findings[0]["action"], 4);
+}
+
+#[test]
+fn duplicate_condition_tracks_disabled_blocks() {
+    let source = r#"
+variables {
+    global:
+        0: index
+        1: other
+}
+rule ("disabled blocks") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        disabled If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        End;
+        If(Compare(Global.index, ==, 0));
+            disabled While(Compare(Global.index, ==, 1));
+                Wait(0.016, Ignore Condition);
+            End;
+        Else If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 2);
+        End;
+    }
+}
+"#;
+    let findings = duplicate_condition_results(source);
+    assert_eq!(
+        findings.len(),
+        1,
+        "disabled blocks still occupy their `End`; only the enabled chain's \
+         own repeat is reported"
+    );
+    assert_eq!(findings[0]["action"], 7);
 }
 
 #[test]
