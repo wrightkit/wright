@@ -702,6 +702,78 @@ rule ("same-name text") {
 }
 
 #[test]
+fn workshop_subroutine_references_slice_to_the_identifier() {
+    // Declaration (subroutines table), definition (event binding), and call
+    // each slice to `showStatus`.
+    let source = fixture_text("synthetic/declarations-rules");
+    let service = workshop_service("synthetic/declarations-rules");
+    let symbol = id_for(
+        &service,
+        serde_json::json!({"op": "listSymbols"}),
+        "showStatus",
+    );
+    let references = query(
+        &service,
+        serde_json::json!({"op": "findReferences", "symbol": symbol}),
+    );
+    let references = references.as_array().unwrap();
+    for kind in ["declaration", "definition", "call"] {
+        assert_eq!(
+            references
+                .iter()
+                .filter(|reference| reference["kind"] == kind)
+                .count(),
+            1,
+            "one {kind} reference for showStatus: {references:?}"
+        );
+    }
+    for reference in references {
+        assert_eq!(span_text(&source, &reference["span"]), "showStatus");
+    }
+}
+
+#[test]
+fn workshop_player_variable_reads_slice_to_the_identifier() {
+    let source = r#"
+variables {
+    player:
+        0: stamina
+}
+rule ("player reads") {
+    event {
+        Ongoing - Each Player;
+        All;
+        All;
+    }
+    actions {
+        Set Player Variable(Event Player, stamina, Add(Event Player.stamina, 1));
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let symbol = id_for(
+        &service,
+        serde_json::json!({"op": "listSymbols"}),
+        "stamina",
+    );
+    let references = query(
+        &service,
+        serde_json::json!({"op": "findReferences", "symbol": symbol}),
+    );
+    let references = references.as_array().unwrap();
+    // Declaration, the write target, and the nested `Event Player.stamina`
+    // read all slice to `stamina`.
+    assert_eq!(references.len(), 3, "{references:?}");
+    for reference in references {
+        assert_eq!(
+            span_text(source, &reference["span"]),
+            "stamina",
+            "reference span slices to the stamina identifier: {reference:?}"
+        );
+    }
+}
+
+#[test]
 fn workshop_references_without_provenance_are_unmapped() {
     // #433: a reference without recorded provenance reports an unmapped
     // span; it never falls back to an enclosing action or value span.

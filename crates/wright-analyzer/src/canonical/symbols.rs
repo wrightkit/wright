@@ -282,20 +282,9 @@ impl SemanticIndex {
                             .is_some_and(is_modify_action);
                     let current = if implicit_modify { 1 } else { *ordinal };
                     *ordinal += 1;
-                    reference
-                        .span
-                        .or_else(|| {
-                            action_span.or_else(|| {
-                                reference.rule.and_then(|rule| {
-                                    reference
-                                        .value
-                                        .and_then(|value| program.condition_span(rule, value))
-                                })
-                            })
-                        })
-                        .and_then(|span| {
-                            occurrence_in_sources(sources, span, &symbol.name, false, current)
-                        })
+                    reference.span.or(action_span).and_then(|span| {
+                        occurrence_in_sources(sources, span, &symbol.name, false, current)
+                    })
                 }
             };
             reference.span = span;
