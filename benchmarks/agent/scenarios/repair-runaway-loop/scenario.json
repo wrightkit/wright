@@ -1,0 +1,15 @@
+{
+  "id": "repair-runaway-loop",
+  "family": "diagnosis",
+  "language": "workshop",
+  "entry": "mode.ws",
+  "writable": ["mode.ws", "answer.json"],
+  "runtimeOnly": ["The server no longer freezes in a live match."],
+  "checks": [
+    {"id": "valid-project", "kind": "check", "layer": "workshop-rs"},
+    {"id": "no-unbounded-loop", "kind": "lint", "code": "while-without-wait", "layer": "wright"},
+    {"id": "counter-still-counts", "kind": "contains", "file": "mode.ws", "text": "Modify Global Variable(ticks, Add, 1);"},
+    {"id": "countdown-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Modify Global Variable(countdown, Subtract, 1);"},
+    {"id": "root-cause-named", "kind": "answer", "key": "rule", "expected": "tick counter"}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "modify-target-score",
+  "family": "modification",
+  "language": "workshop",
+  "entry": "mode.ws",
+  "writable": ["mode.ws"],
+  "runtimeOnly": ["The HUD text renders as intended in a live match."],
+  "checks": [
+    {"id": "valid-project", "kind": "check", "layer": "workshop-rs"},
+    {"id": "target-is-7", "kind": "contains", "file": "mode.ws", "text": "Set Global Variable(target_score, 7);"},
+    {"id": "old-target-gone", "kind": "absent", "file": "mode.ws", "text": "Set Global Variable(target_score, 5);"},
+    {"id": "hud-added", "kind": "contains", "file": "mode.ws", "text": "Create HUD Text"},
+    {"id": "streak-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Set Player Variable(Event Player, streak, 0);"},
+    {"id": "elimination-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Modify Player Variable(Attacker, streak, Add, 1);"},
+    {"id": "winner-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Declare Player Victory(Event Player);"},
+    {"id": "rule-count-preserved", "kind": "contains", "file": "mode.ws", "text": "rule (", "min": 6, "max": 6}
+  ]
+}

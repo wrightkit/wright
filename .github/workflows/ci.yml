@@ -16,10 +16,12 @@ on:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "!benchmarks/**/*.md"
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "!benchmarks/**/*.md"
 
 permissions:
   contents: read
@@ -58,6 +60,7 @@ jobs:
               - 'crates/**'
               - 'tests/fixtures/**'
               - 'scripts/**'
+              - 'benchmarks/**'
               - '.github/workflows/**'
             dist:
               - 'dist/**'
@@ -455,6 +458,12 @@ jobs:
       - name: Run benchmarks
         id: bench
         run: target/debug/wright-bench
+
+      - name: Validate agent benchmark scenarios
+        run: |
+          cargo build --locked -p wright-cli
+          python3 benchmarks/agent/agent_bench.py validate
+          python3 -m unittest discover -s benchmarks/agent
 
       - name: Upload benchmark report
         if: always()
