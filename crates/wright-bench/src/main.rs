@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use wright_driver::CompilerSession;
+use wright_driver::FindingSelection;
 use wright_driver::Profile;
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
@@ -283,9 +284,9 @@ fn semantic_query_trial(
             ToolRequest::References { symbol: 0 },
             ToolRequest::Usage { symbol: 0 },
             ToolRequest::Cfg { rule: 0 },
-            ToolRequest::Findings,
+            ToolRequest::Findings(FindingSelection::default()),
             ToolRequest::PersistentObjects,
-            ToolRequest::Lint,
+            ToolRequest::Lint(FindingSelection::default()),
             ToolRequest::LintRules,
         ];
         let start = Instant::now();

@@ -80,17 +80,41 @@ the successful `result` payload.
 | `references` | required `symbol` | References for the symbol id |
 | `usage` | required `symbol` | Usage counts for the symbol id |
 | `cfg` | required `rule` | Control-flow graph for the rule id |
-| `findings` | none | Wright static-analysis findings |
+| `findings` | optional selection | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
 | `persistentObjects` | none | Persistent Workshop object facts |
-| `lint` | none | Lint findings, per-rule id/effective severity, and effective configuration |
+| `lint` | optional selection | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | none | Subroutine call graph |
-| `costEstimate` | none | Exact generated-resource counts and separate static findings |
+| `costEstimate` | optional selection | Exact generated-resource counts, findings, and `selection` when applied |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `sources`, `transaction` | Atomic validation status, diagnostics, and previews when valid |
 | `semanticRename` | `sources`, `target` | Validated rename transaction or structured refusal |
 | `providerSemanticRename` | `language_id`, `documents`, `position_document_uri`, `position`, `new_name`, optional `project_root`, `sources` | Provider-resolved rename transaction or structured refusal |
 | `providerValidateEdit` | `language_id`, `documents`, `transaction`, `sources`, optional `project_root` | Provider-validated transaction or structured refusal |
+
+### Finding selection (#430)
+
+`findings`, `lint`, and `costEstimate` accept optional selection fields:
+
+* `severity`: a threshold — `error` reports errors only, `warning` errors and
+  warnings, `info` everything.
+* `rule`: one lint rule id (the finding `code`). An unknown id is a
+  structured `invalid-selection` error, never a silent empty result.
+* `file`: one source file. The reported `span.path` spelling differs per
+  surface, so the argument resolves to the same canonical file — the path as
+  passed, root-relative, or absolute spellings all select it. `costEstimate`
+  findings carry no span, so `file` selects nothing there.
+* `max`: a bound on the reported count, applied after filtering.
+
+The CLI options `--severity`, `--rule-id`, `--file`, and `--max` on `lint`,
+`check`, and `analyze` drive the same `wright-driver` selection, so both
+surfaces return the same selected set for the same input and selection.
+
+When a request applies any selection field, the result reports
+`selection: {"total": <set before selection>, "withheld": <dropped by max>}`:
+`findings` becomes `{"findings": [...], "selection": {...}}`, while `lint`
+and `costEstimate` add a `selection` member to their existing result objects.
+Requests without selection fields receive the previous shapes unchanged.
 
 Edit transactions use source identities and half-open, 1-based line/column
 ranges. Provider positions use 0-based line/character coordinates. Wright

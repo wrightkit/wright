@@ -88,6 +88,10 @@ pub struct SessionConfig {
     pub profile: wright_transform::Profile,
     pub lint: LintConfig,
     pub lint_rule_paths: Vec<PathBuf>,
+    /// Finding/diagnostic selection applied to reported output (#430).
+    /// Selection narrows presentation only; verdicts and exit codes are
+    /// computed on the full set.
+    pub selection: crate::select::FindingSelection,
     pub providers: wright_lpp::ProviderRegistry,
     pub opy_provider: crate::opy_provider::OpyProviderConfig,
 }

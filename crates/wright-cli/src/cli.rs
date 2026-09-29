@@ -54,6 +54,12 @@ LINT OPTIONS:
     --disable-rule <ID>         Disable a lint rule (repeatable)
     --rule-severity <ID>:<SEV>  Override a lint rule severity (repeatable)
 
+FINDING SELECTION (check, analyze, lint):
+    --severity <LEVEL>  Report findings at or above a severity: error|warning|info
+    --rule-id <ID>      Report findings from one lint rule id only
+    --file <PATH>       Report findings in one source file (any spelling that resolves to it)
+    --max <N>           Report at most N findings (withheld counts are shown)
+
 UPDATE OPTIONS:
     --check              Check for an update without modifying the installation
     --version <VERSION>  Install an exact version instead of the latest stable release";
@@ -67,9 +73,9 @@ pub(crate) enum Command {
     /// currently shipped.
     Convert(ConvertArgs),
     /// Check frontend, project, semantic, and validation correctness.
-    Check(CommonArgs),
+    Check(ReportArgs),
     /// Summarize semantic structure, CFG hotspots, and cross-cutting state.
-    Analyze(CommonArgs),
+    Analyze(ReportArgs),
     /// Parse, lower, and report lint findings.
     Lint(LintArgs),
     /// Parse, lower, and show exhaustive structural/semantic facts.
@@ -117,6 +123,39 @@ pub(crate) struct SemanticCompareArgs {
     pub(crate) actual: PathBuf,
 }
 
+/// Arguments of commands that report findings: shared workflow options plus
+/// the finding-selection options (#430).
+#[derive(Debug, Args)]
+pub(crate) struct ReportArgs {
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    #[command(flatten)]
+    pub(crate) select: SelectArgs,
+}
+
+/// Finding-selection options shared by `check`, `analyze`, and `lint`
+/// (`cost` joins with the query surface, #429). Selection narrows reported
+/// output only — verdicts and exit codes always reflect the complete set.
+#[derive(Debug, Args, Default)]
+pub(crate) struct SelectArgs {
+    /// Report findings at or above this severity only.
+    #[arg(long, value_enum, value_name = "LEVEL")]
+    pub(crate) severity: Option<SeverityArg>,
+    /// Report findings produced by this lint rule id only; an unknown id is
+    /// a usage error.
+    #[arg(long, value_name = "ID")]
+    pub(crate) rule_id: Option<String>,
+    /// Report findings located in this source file only; any spelling that
+    /// resolves to the same file (as passed, root-relative, or absolute)
+    /// selects it.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<String>,
+    /// Report at most N findings; withheld findings are reported, never
+    /// silently dropped.
+    #[arg(long, value_name = "N")]
+    pub(crate) max: Option<usize>,
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct CommonArgs {
     /// Input path; `-` reads standard input and an omitted path uses the current directory.
@@ -152,6 +191,8 @@ pub(crate) struct CommonArgs {
 pub(crate) struct LintArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+    #[command(flatten)]
+    pub(crate) select: SelectArgs,
     /// Read project lint configuration YAML.
     #[arg(long = "lint-config", value_name = "PATH")]
     pub(crate) lint_config: Option<PathBuf>,
@@ -297,6 +338,14 @@ pub(crate) enum ColorArg {
     Auto,
     Always,
     Never,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum SeverityArg {
+    Error,
+    #[value(alias = "warn")]
+    Warning,
+    Info,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

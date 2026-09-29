@@ -26,7 +26,12 @@ pub struct Envelope<T: Serialize> {
     pub command: String,
     pub ok: bool,
     pub exit: u8,
+    /// Diagnostics remaining after selection; `ok`/`exit` always reflect the
+    /// full set, never the selected remainder.
     pub diagnostics: Vec<Diagnostic>,
+    /// Present when a finding selection was applied to `diagnostics` (#430).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<crate::select::SelectionOutcome>,
     pub result: T,
 }
 
@@ -92,8 +97,13 @@ pub struct LintResult {
     pub program: serde_json::Value,
     pub rules: serde_json::Value,
     pub config: serde_json::Value,
+    /// Lint findings after selection. The verdict reports the true total via
+    /// `selection`, not this array's length.
     pub findings: serde_json::Value,
     pub skipped: serde_json::Value,
+    /// Present when a finding selection was applied to `findings` (#430).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<crate::select::SelectionOutcome>,
 }
 
 /// `lint` results keep only the per-rule identity needed to interpret a

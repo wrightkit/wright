@@ -540,6 +540,201 @@ fn lint_flags_are_usage_errors_for_other_commands() {
     }
 }
 
+// ── Finding selection (#430) ─────────────────────────────────────────────────
+// `real-world/overpy-cake.ws` produces 10 findings: 9 identical
+// `repeated-value` warnings and 1 `min-wait-loop` warning.
+
+#[test]
+fn lint_selection_filters_findings_and_reports_withheld() {
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let path = path.to_str().unwrap();
+
+    // --rule-id selects one rule; --max truncates and reports the withheld
+    // count in the envelope.
+    let output = run(&[
+        "lint",
+        path,
+        "--rule-id",
+        "repeated-value",
+        "--max",
+        "2",
+        "-f",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    let findings = envelope["result"]["findings"].as_array().unwrap();
+    assert_eq!(findings.len(), 2);
+    assert!(findings.iter().all(|f| f["code"] == "repeated-value"));
+    assert_eq!(envelope["result"]["selection"]["total"], 10);
+    assert_eq!(envelope["result"]["selection"]["withheld"], 7);
+
+    // --severity is a threshold: `error` selects none of the warning findings
+    // while the envelope records the full set.
+    let output = run(&["lint", path, "--severity", "error", "-f", "json"]);
+    assert!(output.status.success());
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(envelope["result"]["selection"]["total"], 10);
+    assert_eq!(envelope["result"]["selection"]["withheld"], 0);
+
+    // --file selects by file identity: the reported span.path is
+    // root-relative, and the absolute input path exactly as passed selects
+    // the same file.
+    let reported_path = parse_json(&run(&["lint", path, "-f", "json"]).stdout)
+        ["result"]["findings"][0]["span"]["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let output = run(&["lint", path, "--file", &reported_path, "-f", "json"]);
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 10);
+    let output = run(&["lint", path, "--file", path, "-f", "json"]);
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(
+        envelope["result"]["findings"].as_array().unwrap().len(),
+        10,
+        "the input path as passed resolves to the reported root-relative span.path"
+    );
+    let output = run(&["lint", path, "--file", "other.ws", "-f", "json"]);
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(envelope["result"]["selection"]["total"], 10);
+
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
+fn omitted_selection_reproduces_the_unfiltered_envelope() {
+    // Omitting every selection option reproduces the current output:
+    // complete findings/diagnostics arrays and no `selection` member (#430).
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&["lint", path.to_str().unwrap(), "-f", "json"]);
+    assert!(output.status.success());
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 10);
+    assert!(envelope["result"].get("selection").is_none());
+    assert!(envelope.get("selection").is_none());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn selection_never_changes_the_verdict_or_exit_code() {
+    // The ablation guard of #430: if exit codes were computed from the
+    // selected set instead of the full set, filtering an error out of view
+    // would flip a failing check to exit 0.
+    let broken = temp_file(
+        "broken.txt",
+        "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
+    );
+    let baseline = run(&["check", broken.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(baseline.status.code(), Some(1));
+    let full = parse_json(&baseline.stdout)["diagnostics"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert!(full > 0);
+
+    let output = run(&[
+        "check",
+        broken.to_str().unwrap(),
+        "--rule-id",
+        "min-wait-loop",
+        "-f",
+        "json",
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "selection must not turn a failing project into exit 0"
+    );
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["exit"], 1);
+    assert!(
+        envelope["diagnostics"].as_array().unwrap().is_empty(),
+        "the error diagnostic is selected out of the report"
+    );
+    assert_eq!(
+        envelope["selection"]["total"].as_u64().unwrap() as usize,
+        full
+    );
+
+    // The lint verdict survives an empty selected set on the warning-only
+    // fixture: severity=error selects nothing, the verdict still says WARN.
+    let cake = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&["lint", cake.to_str().unwrap(), "--severity", "error"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WARN lint"), "{stdout}");
+    assert!(stdout.contains("10 finding(s)"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(broken.parent().unwrap());
+    let _ = std::fs::remove_dir_all(cake.parent().unwrap());
+}
+
+#[test]
+fn lint_max_reports_the_withheld_count_in_text_and_json() {
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&["lint", path.to_str().unwrap(), "--max", "3"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("7 finding(s) withheld"), "{stdout}");
+    assert!(stdout.contains("10 finding(s)"), "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_text_collapses_identical_findings_into_one_entry() {
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&["lint", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The nine identical findings render as one entry listing nine locations;
+    // the verdict still reports the true total.
+    assert!(stdout.contains("10 finding(s)"), "{stdout}");
+    assert_eq!(
+        stdout.matches("[repeated-value]").count(),
+        1,
+        "repeated findings collapse into one entry: {stdout}"
+    );
+    assert_eq!(
+        stdout.matches(" --> ").count(),
+        10,
+        "nine grouped locations plus the single min-wait-loop: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn an_unknown_rule_id_in_a_selection_is_a_usage_error() {
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    for command in ["lint", "check", "analyze"] {
+        let output = run(&[command, path.to_str().unwrap(), "--rule-id", "not-a-rule"]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{command} --rule-id not-a-rule must be a usage error"
+        );
+        assert!(output.stdout.is_empty(), "usage errors write stderr only");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("not-a-rule"),
+            "the message names the unknown id"
+        );
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[test]
 fn stdin_workshop_works_and_legacy_protocol_is_refused() {
     // Workshop text on stdin.

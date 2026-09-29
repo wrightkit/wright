@@ -6,7 +6,7 @@
 mod semantic;
 
 pub(crate) use semantic::resolve_span_paths;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use workshop_rs::Program;
@@ -108,6 +108,13 @@ impl CompilerSession {
             lint_registry.load_path(path).map_err(|error| {
                 Diagnostic::error("lint-rule-error", Stage::Analysis, error.to_string())
             })?;
+        }
+        if let Err(message) = config.selection.validate(&lint_registry) {
+            return Err(Diagnostic::error(
+                "invalid-selection",
+                Stage::Discovery,
+                message,
+            ));
         }
         Ok(CompilerSession {
             config,
@@ -758,15 +765,56 @@ impl CompilerSession {
         }
     }
 
+    /// The lint registry backing this session, for finding-selection
+    /// validation (#430).
+    pub(crate) fn lint_registry(&self) -> &LintRegistry {
+        &self.lint_registry
+    }
+
+    /// The bases under which a `file` selection and reported `span.path`
+    /// spellings resolve (#430): the loaded input's cwd and root, or the
+    /// config-derived equivalents so pre-load diagnostics select the same
+    /// way. Extra bases are safe — they only ever add true file identities.
+    fn selection_file_bases(&self) -> Vec<PathBuf> {
+        if let Some(loaded) = &self.loaded {
+            return crate::select::file_bases(&loaded.input);
+        }
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let absolute = |path: &Path| {
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                cwd.join(path)
+            }
+        };
+        let mut bases = vec![cwd.clone()];
+        if let Some(root) = &self.config.root {
+            bases.push(absolute(root));
+        }
+        if let InputSpec::Path(path) = &self.config.input {
+            let path = absolute(path);
+            bases.push(path.clone());
+            if let Some(parent) = path.parent() {
+                bases.push(parent.to_path_buf());
+            }
+        }
+        bases
+    }
+
     fn finish<T: serde::Serialize>(&mut self, command: &str, result: T) -> Envelope<T> {
         let diagnostics = std::mem::take(&mut self.diagnostics);
         let exit = exit_code_from(&diagnostics);
+        // Selection narrows the reported diagnostics after the exit code is
+        // fixed; filtering must never change the verdict.
+        let bases = self.selection_file_bases();
+        let (diagnostics, selection) = self.config.selection.apply_diagnostics(diagnostics, &bases);
         Envelope {
             wright: version_info(),
             command: command.to_string(),
             ok: exit == crate::result::exit::SUCCESS,
             exit,
             diagnostics,
+            selection,
             result,
         }
     }

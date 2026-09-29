@@ -15,7 +15,8 @@ CompilerSession (wright-driver)
     ├─ emission (Workshop text)
     └─ reconstruction (WIR → canonical OPY source, #126)
             ↓
-   Envelope<T> (typed result + diagnostics + exit code)
+   Envelope<T> (typed result + diagnostics + exit code; finding selection
+   narrows reported sets without touching the verdict, #430)
             ↓
   `wright` CLI: text rendering | JSON serialization
 ```
@@ -64,6 +65,12 @@ inputs continue through their existing owner-backed paths.
 The rationale for current-directory defaults, directory targets, and explicit
 ownership ambiguity is recorded in
 [`ADR-0016`](../adr/0016-current-directory-and-directory-project-targets.md).
+
+Commands that report findings (`check`, `analyze`, `lint`) share the
+finding-selection options `--severity`, `--rule-id`, `--file`, and `--max`,
+which narrow reported diagnostics/findings without changing verdicts or exit
+codes; see [lint configuration and findings](lint.md) and
+[presentation](presentation.md).
 
 ## `wright convert` and the reconstruction surface (#126)
 

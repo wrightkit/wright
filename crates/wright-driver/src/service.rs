@@ -57,20 +57,23 @@ pub enum ToolRequest {
     Usage { symbol: u32 },
     /// The control-flow graph of one rule.
     Cfg { rule: u32 },
-    /// Every static-analysis finding.
-    Findings,
+    /// Every static-analysis finding, optionally narrowed by an inline
+    /// selection (`severity`, `rule`, `file`, `max`; #430).
+    Findings(crate::select::FindingSelection),
     /// Persistent Workshop object facts, separate from lint diagnostics.
     PersistentObjects,
     /// Lint findings plus per-rule id/effective severity and the effective
     /// configuration (#98); `lintRules` serves full rule metadata (#431).
-    Lint,
+    /// Optionally narrowed by an inline selection (#430).
+    Lint(crate::select::FindingSelection),
     /// The registered lint rules with full metadata and the effective lint
     /// configuration.
     LintRules,
     /// The subroutine call graph (caller rules → callee subroutines).
     CallGraph,
-    /// Generated-resource cost estimates (exact counts + findings).
-    CostEstimate,
+    /// Generated-resource cost estimates (exact counts + findings),
+    /// optionally narrowed by an inline selection (#430).
+    CostEstimate(crate::select::FindingSelection),
     /// Target/catalog metadata (actions, values, events, enum domains).
     TargetMetadata,
     /// Validate and preview a caller-supplied source-edit transaction
@@ -270,12 +273,12 @@ impl<'a> ToolService<'a> {
                 self.semantic_query(Request::GetUsage { symbol: *symbol })
             }
             ToolRequest::Cfg { rule } => self.semantic_query(Request::GetCfg { rule: *rule }),
-            ToolRequest::Findings => self.findings(),
+            ToolRequest::Findings(selection) => self.findings(selection),
             ToolRequest::PersistentObjects => self.persistent_objects(),
-            ToolRequest::Lint => self.lint(),
+            ToolRequest::Lint(selection) => self.lint(selection),
             ToolRequest::LintRules => self.configured_semantic().handle(&Request::LintRules),
             ToolRequest::CallGraph => self.ok(self.call_graph()),
-            ToolRequest::CostEstimate => self.ok(self.cost_estimate()),
+            ToolRequest::CostEstimate(selection) => self.cost_estimate(selection),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
             ToolRequest::ValidateEdit {
                 sources,
@@ -412,9 +415,29 @@ impl<'a> ToolService<'a> {
     ///
     /// The tool/agent surface resolves `span.path` exactly like the CLI
     /// `analyze`/`lint` workflows, so one file identity holds per finding
-    /// across every surface (#102).
-    fn findings(&self) -> ToolResponse {
-        self.semantic_query_with_resolved_span_paths(Request::GetFindings)
+    /// across every surface (#102). A selection narrows the reported set
+    /// (#430): without selection fields the result stays the bare finding
+    /// array; with them it becomes `{"findings": [...], "selection": {...}}`
+    /// so truncation is always visible.
+    fn findings(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
+        if let Some(error) = self.selection_error(selection) {
+            return error;
+        }
+        match self.semantic_query_with_resolved_span_paths(Request::GetFindings) {
+            ToolResponse::Ok { result } => {
+                let findings = match result {
+                    serde_json::Value::Array(findings) => findings,
+                    _ => Vec::new(),
+                };
+                let (findings, outcome) = selection
+                    .apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
+                match outcome {
+                    Some(outcome) => self.ok(json!({ "findings": findings, "selection": outcome })),
+                    None => self.ok(serde_json::Value::Array(findings)),
+                }
+            }
+            other => other,
+        }
     }
 
     /// `persistentObjects`: persistent-object facts with resolved source paths.
@@ -441,12 +464,30 @@ impl<'a> ToolService<'a> {
         self.lint_semantic.as_ref().unwrap_or(&self.semantic)
     }
 
+    /// A selection naming an unknown rule id is a usage error, never a
+    /// silent empty result (#430).
+    fn selection_error(&self, selection: &crate::select::FindingSelection) -> Option<ToolResponse> {
+        selection
+            .validate(self.session.lint_registry())
+            .err()
+            .map(|message| ToolResponse::Error {
+                error: ToolErrorInfo {
+                    code: "invalid-selection".to_string(),
+                    message,
+                },
+            })
+    }
+
     /// `lint`: per-rule id and effective severity, effective configuration,
     /// and findings over the loaded program through the same semantic-service
     /// path as the CLI `lint` workflow (no duplicated rule execution, #98).
     /// Full rule metadata is served once by `lintRules` rather than inlined
-    /// into every `lint` response (#431).
-    fn lint(&self) -> ToolResponse {
+    /// into every `lint` response (#431). A `selection` member records the
+    /// true total and withheld count when the request selected a subset (#430).
+    fn lint(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
+        if let Some(error) = self.selection_error(selection) {
+            return error;
+        }
         let service = self.configured_semantic();
         let lint_rules = match service.handle(&Request::LintRules) {
             Response::Ok { result } => result,
@@ -457,13 +498,23 @@ impl<'a> ToolService<'a> {
             Response::Error { .. } => serde_json::json!([]),
         };
         crate::session::resolve_span_paths(&mut findings, &self.loaded);
-        self.ok(json!({
+        let findings = match findings {
+            serde_json::Value::Array(findings) => findings,
+            _ => Vec::new(),
+        };
+        let (findings, outcome) =
+            selection.apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
+        let mut result = json!({
             "inputIdentity": self.loaded.input.identity,
             "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
             "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
             "findings": findings,
             "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),
-        }))
+        });
+        if let Some(outcome) = outcome {
+            result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
+        }
+        self.ok(result)
     }
 
     /// Program summary with origin and source identity.
@@ -504,7 +555,13 @@ impl<'a> ToolService<'a> {
         serde_json::Value::Array(edges)
     }
 
-    fn cost_estimate(&self) -> serde_json::Value {
+    /// `costEstimate`: exact generated-resource counts plus static findings.
+    /// The findings subset honors the shared selection (#430); findings carry
+    /// no span, so a `file` selection matches nothing here.
+    fn cost_estimate(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
+        if let Some(error) = self.selection_error(selection) {
+            return error;
+        }
         let locale = CompilerSession::locale_for(&self.loaded);
         let text =
             workshop_rs::emitter::emit(&self.loaded.program, self.session.catalog(), &locale)
@@ -521,24 +578,36 @@ impl<'a> ToolService<'a> {
             &self.loaded.program,
             &wright_analyzer::registry::LintConfig::default(),
         );
-        json!({
+        let findings = findings
+            .iter()
+            .map(|f| {
+                json!({
+                    "code": f.code,
+                    "severity": f.severity.as_str(),
+                    "message": f.message,
+                })
+            })
+            .collect::<Vec<_>>();
+        let (findings, outcome) =
+            selection.apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
+        let mut result = json!({
             "exact": {
                 "emittedBytes": text.len(),
                 "programActions": self.loaded.program.rules.iter().map(|r| r.actions.len()).sum::<usize>(),
                 "programRules": self.loaded.program.rules.len(),
                 "waitActions": waits,
             },
-            "findings": findings.iter().map(|f| json!({
-                "code": f.code,
-                "severity": f.severity.as_str(),
-                "message": f.message,
-            })).collect::<Vec<_>>(),
+            "findings": findings,
             "kind": {
                 "exact": "exact target-resource counts",
                 "findings": "static/heuristic execution indicators",
                 "performance": "compiler-host performance is measured by wright-bench, not in-process",
             },
-        })
+        });
+        if let Some(outcome) = outcome {
+            result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
+        }
+        self.ok(result)
     }
 
     fn target_metadata(&self) -> serde_json::Value {

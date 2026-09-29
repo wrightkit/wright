@@ -187,6 +187,36 @@ fn serve_reserves_stdin_for_session_requests() {
 }
 
 #[test]
+fn stdio_transport_applies_finding_selection() {
+    // #430: selection fields ride on the wire request and the response
+    // reports the withheld count; an unknown rule id is a structured error.
+    let input = corpus_workshop("real-world/overpy-cake");
+    let responses = run_lines(
+        "stdio",
+        &input,
+        &[
+            r#"{"op":"findings","max":3}"#,
+            r#"{"op":"lint","severity":"error"}"#,
+            r#"{"op":"lint","rule":"not-a-rule"}"#,
+        ],
+    );
+    assert_eq!(
+        responses[0]["result"]["findings"].as_array().unwrap().len(),
+        3
+    );
+    assert_eq!(responses[0]["result"]["selection"]["total"], 10);
+    assert_eq!(responses[0]["result"]["selection"]["withheld"], 7);
+    assert!(
+        responses[1]["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(responses[1]["result"]["selection"]["total"], 10);
+    assert_eq!(responses[2]["error"]["code"], "invalid-selection");
+}
+
+#[test]
 fn transports_match_in_process_semantics() {
     // The same query through both transports yields equivalent results.
     let stdio = run_lines(

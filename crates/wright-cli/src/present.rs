@@ -273,6 +273,14 @@ fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>,
     for diag in &envelope.diagnostics {
         render_diagnostic(diag, color);
     }
+    if let Some(selection) = &envelope.selection {
+        if selection.withheld > 0 {
+            eprintln!(
+                "  ... {} diagnostic(s) withheld (--max)",
+                selection.withheld
+            );
+        }
+    }
     if !envelope.ok {
         if envelope.diagnostics.is_empty() {
             eprintln!("{}: failed", envelope.command);
@@ -296,7 +304,13 @@ fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<
     };
     println!("{label} {}", envelope.command);
     let metadata = match envelope.command.as_str() {
-        "check" => format!("{} diagnostic(s)", envelope.diagnostics.len()),
+        "check" => format!(
+            "{} diagnostic(s)",
+            envelope
+                .selection
+                .as_ref()
+                .map_or(envelope.diagnostics.len(), |selection| selection.total)
+        ),
         _ => envelope.result.metadata().unwrap_or_default(),
     };
     println!("  {}", dim(&metadata, color));
@@ -470,11 +484,21 @@ impl ResultPresentation for AnalyzeResult {
 
 impl ResultPresentation for LintResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!(
+        let total = self
+            .selection
+            .as_ref()
+            .map_or_else(|| array_len(&self.findings), |selection| selection.total);
+        let mut metadata = format!(
             "{} finding(s) across {} rule(s)",
-            array_len(&self.findings),
+            total,
             array_len(&self.rules)
-        ))
+        );
+        if let Some(selection) = &self.selection {
+            if selection.withheld > 0 {
+                metadata.push_str(&format!(", {} withheld", selection.withheld));
+            }
+        }
+        Some(metadata)
     }
     fn render_body(&self) {
         render_lint(self);
@@ -487,10 +511,24 @@ impl ResultPresentation for LintResult {
         }
     }
     fn update_summary_status(&self, status: &mut SummaryStatus) {
-        if let Some(findings) = self.findings.as_array() {
-            for finding in findings {
-                if let Some(sev) = finding.get("severity").and_then(serde_json::Value::as_str) {
-                    *status = (*status).max(SummaryStatus::from_finding_severity(sev));
+        match &self.selection {
+            // Selection narrows the reported list only; the verdict keeps the
+            // full set's highest severity (#430).
+            Some(selection) => {
+                if let Some(severity) = selection.max_severity {
+                    *status =
+                        (*status).max(SummaryStatus::from_finding_severity(severity.as_str()));
+                }
+            }
+            None => {
+                if let Some(findings) = self.findings.as_array() {
+                    for finding in findings {
+                        if let Some(sev) =
+                            finding.get("severity").and_then(serde_json::Value::as_str)
+                        {
+                            *status = (*status).max(SummaryStatus::from_finding_severity(sev));
+                        }
+                    }
                 }
             }
         }
@@ -518,12 +556,27 @@ fn summary_status<T: serde::Serialize + ResultPresentation>(
     } else {
         SummaryStatus::Error
     };
-    for diag in &envelope.diagnostics {
-        status = status.max(match diag.severity {
-            Severity::Error => SummaryStatus::Error,
-            Severity::Warning => SummaryStatus::Warn,
-            Severity::Info => SummaryStatus::Pass,
-        });
+    match &envelope.selection {
+        // The verdict reflects the full diagnostic set, not the selected
+        // remainder (#430).
+        Some(selection) => {
+            if let Some(severity) = selection.max_severity {
+                status = status.max(match severity {
+                    Severity::Error => SummaryStatus::Error,
+                    Severity::Warning => SummaryStatus::Warn,
+                    Severity::Info => SummaryStatus::Pass,
+                });
+            }
+        }
+        None => {
+            for diag in &envelope.diagnostics {
+                status = status.max(match diag.severity {
+                    Severity::Error => SummaryStatus::Error,
+                    Severity::Warning => SummaryStatus::Warn,
+                    Severity::Info => SummaryStatus::Pass,
+                });
+            }
+        }
     }
     envelope.result.update_summary_status(&mut status);
     status.as_str()
@@ -700,17 +753,42 @@ fn render_lint(result: &LintResult) {
     if findings.is_empty() {
         println!("  none");
     }
-    for f in &findings {
-        let code = f["code"].as_str().unwrap_or("finding");
-        let sev = f["severity"].as_str().unwrap_or("info");
-        let ev = f["evidence"].as_str().unwrap_or("exact");
-        let msg = f["message"].as_str().unwrap_or_default();
-        match f.get("boundedness").and_then(serde_json::Value::as_str) {
+    // Consecutive findings sharing a rule id and message collapse into one
+    // entry that lists its locations (#430).
+    let mut index = 0;
+    while index < findings.len() {
+        let first = &findings[index];
+        let mut end = index + 1;
+        while end < findings.len()
+            && findings[end]["code"] == first["code"]
+            && findings[end]["message"] == first["message"]
+        {
+            end += 1;
+        }
+        let code = first["code"].as_str().unwrap_or("finding");
+        let sev = first["severity"].as_str().unwrap_or("info");
+        let ev = first["evidence"].as_str().unwrap_or("exact");
+        let msg = first["message"].as_str().unwrap_or_default();
+        match first.get("boundedness").and_then(serde_json::Value::as_str) {
             Some(v) => println!("  {sev}[{code}] (evidence: {ev}) (boundedness: {v}): {msg}"),
             None => println!("  {sev}[{code}] (evidence: {ev}): {msg}"),
         }
-        if let Some(span) = f.get("span") {
-            print_span(span, "      ");
+        if end == index + 1 {
+            if let Some(span) = first.get("span") {
+                print_span(span, "      ");
+            }
+        } else {
+            for finding in &findings[index..end] {
+                if let Some(span) = finding.get("span") {
+                    print_location(span, "      ");
+                }
+            }
+        }
+        index = end;
+    }
+    if let Some(selection) = &result.selection {
+        if selection.withheld > 0 {
+            println!("  ... {} finding(s) withheld (--max)", selection.withheld);
         }
     }
 }
@@ -762,6 +840,16 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
         eprintln!("  --> {}:{}:{}", span.path, span.start.line, span.start.col);
         render_source_context(&span.path, span.start.line, span.start.col, "  ");
     }
+}
+
+fn print_location(span: &serde_json::Value, indent: &str) {
+    let path = span
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("<span>");
+    let line = span_position(span, "start", "line").unwrap_or(0);
+    let col = span_position(span, "start", "col").unwrap_or(0);
+    println!("{indent}--> {path}:{line}:{col}");
 }
 
 fn print_span(span: &serde_json::Value, indent: &str) {
@@ -957,6 +1045,7 @@ mod tests {
             ok,
             exit: if ok { 0 } else { 1 },
             diagnostics,
+            selection: None,
             result: LintResult {
                 findings,
                 ..LintResult::default()

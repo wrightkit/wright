@@ -76,6 +76,16 @@ Workflow commands accept these CLI-only presentation options:
   precedence over environment detection; GitHub Actions keeps workflow
   command lines free of ANSI even when color is explicitly requested.
 
+`check`, `analyze`, and `lint` also accept the finding-selection options
+`--severity`, `--rule-id`, `--file`, and `--max` (#430), applied by the
+driver to reported diagnostics and lint findings. Selection is a rendering
+concern only: it runs after the verdict and exit code are fixed on the
+complete set, so it can never turn a failing command into `exit 0` or a
+`WARN` verdict into `PASS`. Consecutive lint findings sharing a rule id and
+message render as one entry listing all locations; when `--max` withholds
+findings, text output states the withheld count and the JSON envelope carries
+`selection.total`/`selection.withheld` beside the filtered array.
+
 JSON output is one `wright-result/v1` envelope on stdout with no ANSI, progress,
 or workflow commands. `compile` and `convert` source artifacts remain the only
 stdout payload in text mode, including when GitHub Actions presentation is
