@@ -67,6 +67,26 @@ fn id_for(service: &SemanticService<'_>, request: Value, name: &str) -> u32 {
         .unwrap_or_else(|| panic!("query result has no item named {name}")) as u32
 }
 
+fn span_text(source: &str, span: &Value) -> String {
+    let (start, end) = (&span["start"], &span["end"]);
+    assert_eq!(
+        start["line"], end["line"],
+        "test spans stay on one line: {span}"
+    );
+    let line = source
+        .lines()
+        .nth(start["line"].as_u64().unwrap() as usize - 1)
+        .unwrap();
+    let (start_col, end_col) = (
+        start["col"].as_u64().unwrap() as usize,
+        end["col"].as_u64().unwrap() as usize,
+    );
+    line.chars()
+        .skip(start_col - 1)
+        .take(end_col - start_col)
+        .collect()
+}
+
 #[test]
 fn workshop_input_runs_all_semantic_queries() {
     let service = workshop_service("synthetic/control-flow");
@@ -551,6 +571,175 @@ rule ("argument spans") {
     );
     for (reference, (line, column)) in reads.iter().zip(expected) {
         assert_eq!(reference["span"]["start"]["line"], line);
-        assert_eq!(reference["span"]["start"]["col"], column);
+        // The reported span is the variable identifier, which follows the
+        // `Global.` qualifier in the authored text.
+        assert_eq!(reference["span"]["start"]["col"], column + "Global.".len());
+        assert_eq!(span_text(source, &reference["span"]), "source");
+    }
+}
+
+#[test]
+fn workshop_references_slice_to_the_identifier() {
+    // #433: every declaration, write, and read span reported for a raw
+    // Workshop symbol slices exactly to the authored identifier — including
+    // reads nested inside other values (`Add(First Of(Global.cakePos), …)`)
+    // and `For` targets.
+    let source = fixture_text("real-world/overpy-cake");
+    let service = workshop_service_from_text(&source);
+    for name in ["cakePos", "i2", "candlePos"] {
+        let symbol = id_for(&service, serde_json::json!({"op": "listSymbols"}), name);
+        let references = query(
+            &service,
+            serde_json::json!({"op": "findReferences", "symbol": symbol}),
+        );
+        let references = references.as_array().unwrap();
+        // `Modify Global Variable(name, …)` reports both the write and the
+        // implicit old-value read at the same identifier span.
+        let implicit_modify_reads = source
+            .match_indices(&format!("Modify Global Variable({name}"))
+            .count();
+        assert_eq!(
+            references.len(),
+            source.match_indices(name).count() + implicit_modify_reads,
+            "every authored {name} occurrence is one reference, no more and no fewer"
+        );
+        assert!(
+            references
+                .iter()
+                .any(|reference| reference["kind"] == "declaration"),
+            "{name} references include the declaration: {references:?}"
+        );
+        for reference in references {
+            assert_eq!(
+                span_text(&source, &reference["span"]),
+                name,
+                "reference span slices to the {name} identifier: {reference:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn workshop_symbols_report_their_declaration_identifier() {
+    // #433: `symbols` returns the recorded declaration-name span, not a
+    // null or a search-derived guess.
+    let source = fixture_text("real-world/overpy-cake");
+    let service = workshop_service_from_text(&source);
+    let symbols = query(&service, serde_json::json!({"op": "listSymbols"}));
+    let symbols = symbols.as_array().unwrap();
+    for name in ["cakePos", "i2", "candlePos"] {
+        let symbol = symbols
+            .iter()
+            .find(|symbol| symbol["name"] == name)
+            .unwrap_or_else(|| panic!("listSymbols has {name}"));
+        assert_eq!(symbol["kind"], "globalVariable");
+        assert_eq!(
+            span_text(&source, &symbol["span"]),
+            name,
+            "symbol span slices to the declaration name: {symbol:?}"
+        );
+    }
+}
+
+#[test]
+fn workshop_reference_spans_ignore_same_name_strings_and_comments() {
+    // #433: a variable name spelled inside a string literal or comment in
+    // the same action is not reported as the reference location.
+    let source = r#"
+variables {
+    global:
+        0: needle
+        1: target
+}
+rule ("same-name text") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        // needle in a comment is not a reference
+        Big Message(All Players(All Teams), Custom String("needle {0}", Global.needle));
+        Set Global Variable(target, Global.needle); // needle
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let symbol = id_for(&service, serde_json::json!({"op": "listSymbols"}), "needle");
+    let references = query(
+        &service,
+        serde_json::json!({"op": "findReferences", "symbol": symbol}),
+    );
+    let references = references.as_array().unwrap();
+    // Declaration + the two authored reads; the comment and string
+    // occurrences are never reported.
+    assert_eq!(references.len(), 3, "{references:?}");
+    for reference in references {
+        assert_eq!(
+            span_text(source, &reference["span"]),
+            "needle",
+            "reference must slice the real identifier, not the literal: {reference:?}"
+        );
+    }
+    let (string_line_number, string_line) = source
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("Custom String"))
+        .map(|(index, line)| (index + 1, line))
+        .unwrap();
+    let literal_column = string_line.find("needle").unwrap() + 1;
+    let read_column = string_line.find("Global.needle").unwrap() + "Global.".len() + 1;
+    let nested_read = references
+        .iter()
+        .find(|reference| {
+            reference["kind"] == "read"
+                && reference["span"]["start"]["line"] == string_line_number as u64
+        })
+        .expect("the read nested in Custom String is reported");
+    assert_ne!(
+        nested_read["span"]["start"]["col"], literal_column,
+        "the nested read must not point inside the string literal"
+    );
+    assert_eq!(nested_read["span"]["start"]["col"], read_column);
+}
+
+#[test]
+fn workshop_references_without_provenance_are_unmapped() {
+    // #433: a reference without recorded provenance reports an unmapped
+    // span; it never falls back to an enclosing action or value span.
+    let mut program = Program::new();
+    program.global_variable(Variable::new("unmapped"));
+    program.rule(
+        Rule::new("built", Event::Global).action(Action::SetGlobalVariable {
+            variable: "unmapped".into(),
+            value: WorkshopValue::GlobalVariable("unmapped".into()),
+        }),
+    );
+    let program = Box::leak(Box::new(program));
+    let service = SemanticService::new(program);
+    let symbols = query(&service, serde_json::json!({"op": "listSymbols"}));
+    let symbol = symbols
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|symbol| symbol["name"] == "unmapped")
+        .unwrap();
+    assert!(
+        symbol["span"].is_null(),
+        "no recorded declaration provenance -> unmapped span: {symbol}"
+    );
+    let references = query(
+        &service,
+        serde_json::json!({"op": "findReferences", "symbol": symbol["id"].as_u64().unwrap()}),
+    );
+    let references = references.as_array().unwrap();
+    assert_eq!(
+        references.len(),
+        2,
+        "one write and one read: {references:?}"
+    );
+    for reference in references {
+        assert!(
+            reference["span"].is_null(),
+            "a reference without provenance is unmapped, not the enclosing span: {reference:?}"
+        );
     }
 }

@@ -4,7 +4,7 @@ use workshop_rs::source::Span;
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
 use super::cfg::{is_wait, matching_end};
-use super::symbols::{ActionId, RuleId, ValueId, source_occurrence, value_identity_map};
+use super::symbols::{ActionId, RuleId, ValueId, value_identity_map};
 use super::traversal::{visit_action_roots, visit_value_tree};
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::LintConfig;
@@ -45,24 +45,28 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             }
             if config.is_enabled("expensive-loop-check") {
                 for (offset, body_action) in body.iter().enumerate() {
+                    let body_action_id = start + offset;
                     let mut expensive = Vec::new();
-                    visit_action_roots(body_action, &mut |_, value| {
-                        collect_expensive_values(value, &mut expensive)
+                    visit_action_roots(body_action, &mut |argument, value| {
+                        for (path, value) in collect_expensive_values(value) {
+                            expensive.push((argument, path, value));
+                        }
                     });
-                    for value in expensive {
-                        let Value::Call { name, .. } = value else {
-                            unreachable!("only expensive calls are collected")
-                        };
+                    for (argument, path, value) in expensive {
+                        debug_assert!(
+                            matches!(value, Value::Call { .. }),
+                            "only expensive calls are collected"
+                        );
                         findings.push(Finding {
                             code: "expensive-loop-check".into(),
                             severity: Severity::Info,
                             message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
                                 .into(),
-                            span: source_occurrence(
-                                program,
-                                program.action_span(rule_id, start + offset),
-                                name,
-                                false,
+                            span: program.action_argument_value_span(
+                                rule_id,
+                                body_action_id,
+                                argument,
+                                &path,
                             ),
                             rule: rule_id,
                             action: Some(action_id),
@@ -202,9 +206,8 @@ fn ongoing_condition_findings(
     let condition_count = active_conditions.len();
     let mut findings = Vec::new();
     for (index, &(source_index, condition)) in active_conditions.iter().enumerate() {
-        let mut expensive = Vec::new();
-        collect_expensive_values(&condition.value, &mut expensive);
-        for value in expensive {
+        let expensive = collect_expensive_values(&condition.value);
+        for (path, value) in expensive {
             let preceding = index;
             let later = condition_count - index - 1;
             let evaluation = match preceding {
@@ -220,11 +223,7 @@ fn ongoing_condition_findings(
                     if later == 1 { "" } else { "s" }
                 )
             };
-            let name = match value {
-                Value::Call { name, .. } => name,
-                _ => unreachable!("only expensive call values are collected"),
-            };
-            let span = program.condition_span(rule_id, source_index);
+            let span = program.condition_value_span(rule_id, source_index, &path);
             findings.push(Finding {
                 code: "ongoing-condition-hot-path".into(),
                 severity: Severity::Info,
@@ -232,7 +231,7 @@ fn ongoing_condition_findings(
                     "geometry predicate in an ongoing-rule condition {} of {condition_count} {evaluation}{later_gates}; its cost is heuristic, not measured runtime load",
                     index + 1,
                 ),
-                span: source_occurrence(program, span, name, false),
+                span,
                 rule: rule_id,
                 action: None,
                 value: value_ids.get(&(value as *const Value as usize)).copied(),
@@ -244,15 +243,17 @@ fn ongoing_condition_findings(
     findings
 }
 
-fn collect_expensive_values<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
-    visit_value_tree(value, None, &mut |value, _| {
+fn collect_expensive_values(value: &Value) -> Vec<(Vec<usize>, &Value)> {
+    let mut out = Vec::new();
+    visit_value_tree(value, None, &mut |value, _, path| {
         if let Value::Call { name, .. } = value {
             if ["distance", "raycast", "isInLoS"].contains(&name.as_str()) {
-                out.push(value);
+                out.push((path.to_vec(), value));
             }
         }
         0
     });
+    out
 }
 
 fn duplicate_condition_findings(
@@ -309,7 +310,7 @@ fn repeated_value_findings(
         collect_value_tree(
             condition,
             None,
-            program.action_argument_span(rule_id, loop_action, 0),
+            &mut |path| program.action_argument_value_span(rule_id, loop_action, 0, path),
             &mut values,
             &mut parents,
             &mut spans,
@@ -332,7 +333,9 @@ fn repeated_value_findings(
                 collect_value_tree(
                     value,
                     None,
-                    program.action_argument_span(rule_id, action_id, argument),
+                    &mut |path| {
+                        program.action_argument_value_span(rule_id, action_id, argument, path)
+                    },
                     &mut values,
                     &mut parents,
                     &mut spans,
@@ -369,16 +372,16 @@ fn repeated_value_findings(
 fn collect_value_tree<'a>(
     value: &'a Value,
     parent: Option<usize>,
-    span: Option<Span>,
+    span_at: &mut impl FnMut(&[usize]) -> Option<Span>,
     values: &mut Vec<&'a Value>,
     parents: &mut Vec<Option<usize>>,
     spans: &mut Vec<Option<Span>>,
 ) {
-    visit_value_tree(value, parent, &mut |value, parent| {
+    visit_value_tree(value, parent, &mut |value, parent, path| {
         let index = values.len();
         values.push(value);
         parents.push(parent);
-        spans.push(span);
+        spans.push(span_at(path));
         index
     });
 }
@@ -432,7 +435,7 @@ fn duplicated_value_families(values: &[&Value], parents: &[Option<usize>]) -> Ve
 
 fn value_call_count(value: &Value) -> usize {
     let mut count = 0;
-    visit_value_tree(value, None, &mut |value, _| {
+    visit_value_tree(value, None, &mut |value, _, _| {
         count += usize::from(matches!(value, Value::Call { .. }));
         0
     });
