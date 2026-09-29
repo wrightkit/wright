@@ -4,8 +4,13 @@ use super::{CompilerSession, Loaded, Provenance, ProviderOperation, root_relativ
 use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::service::Request;
 
+use crate::diag::{Diagnostic, Stage};
 use crate::progress::{ProgressEvent, ProgressPhase, ProgressUnit};
-use crate::result::{AnalyzeResult, Envelope, InspectResult, LintResult};
+use crate::result::{
+    AnalyzeResult, CallGraphResult, CfgResult, CostResult, Envelope, InspectResult, LintResult,
+    RefsResult, SymbolsResult,
+};
+use crate::service::{Address, ToolErrorInfo, ToolRequest, ToolResponse, ToolService};
 
 /// Extract the `result` payload of a semantic-service request as JSON.
 fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_json::Value {
@@ -87,6 +92,9 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
     serde_json::json!({
         "symbols": symbols,
         "rules": rules,
+        // Persistent Workshop object facts join the semantic report rather
+        // than living behind a query-only operation (#429).
+        "persistentObjects": service_response(service, &Request::GetPersistentObjects),
     })
 }
 
@@ -96,6 +104,14 @@ fn inspect_result(service: &SemanticService<'_>) -> InspectResult {
         rules: service_response(service, &Request::ListRules),
         symbols: service_response(service, &Request::ListSymbols { kind: None }),
         references: service.references_for_all_symbols(),
+    }
+}
+
+/// Unwrap a [`ToolResponse`] into its result or its structured error.
+fn tool_result(response: ToolResponse) -> Result<serde_json::Value, ToolErrorInfo> {
+    match response {
+        ToolResponse::Ok { result } => Ok(result),
+        ToolResponse::Error { error } => Err(error),
     }
 }
 
@@ -192,6 +208,95 @@ impl CompilerSession {
                 let service = session.service(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 inspect_result(&service)
+            },
+        )
+    }
+
+    /// `symbols` (#429): the `symbols` operation's payload; `kind` narrows to
+    /// one symbol kind.
+    pub fn symbols(&mut self, kind: Option<String>) -> Envelope<SymbolsResult> {
+        self.service_query("symbols", move |service| {
+            tool_result(service.handle(&ToolRequest::Symbols { kind })).map(SymbolsResult)
+        })
+    }
+
+    /// `refs` (#429): the `usage` operation's payload — the header counts —
+    /// plus the `references` operation's payload under `references`, for one
+    /// symbol addressed by name.
+    pub fn refs(&mut self, name: &str) -> Envelope<RefsResult> {
+        let symbol = Address::Name(name.to_string());
+        self.service_query("refs", move |service| {
+            let references = tool_result(service.handle(&ToolRequest::References {
+                symbol: symbol.clone(),
+            }))?;
+            let usage = tool_result(service.handle(&ToolRequest::Usage { symbol }))?;
+            let mut result = usage.as_object().cloned().unwrap_or_default();
+            result.insert("references".to_string(), references);
+            Ok(RefsResult(serde_json::Value::Object(result)))
+        })
+    }
+
+    /// `cfg` (#429): the `cfg` operation's payload for one rule, addressed by
+    /// name.
+    pub fn cfg(&mut self, rule: &str) -> Envelope<CfgResult> {
+        let rule = Address::Name(rule.to_string());
+        self.service_query("cfg", move |service| {
+            tool_result(service.handle(&ToolRequest::Cfg { rule })).map(CfgResult)
+        })
+    }
+
+    /// `callgraph` (#429): the `callGraph` operation's payload.
+    pub fn callgraph(&mut self) -> Envelope<CallGraphResult> {
+        self.service_query("callgraph", |service| {
+            tool_result(service.handle(&ToolRequest::CallGraph)).map(CallGraphResult)
+        })
+    }
+
+    /// `cost` (#429): the `costEstimate` operation's payload; the session's
+    /// finding selection applies exactly as on the agent surface.
+    pub fn cost(&mut self) -> Envelope<CostResult> {
+        let selection = self.config.selection.clone();
+        self.service_query("cost", move |service| {
+            tool_result(service.handle(&ToolRequest::CostEstimate(selection))).map(CostResult)
+        })
+    }
+
+    /// Run one query operation through the session's [`ToolService`] — the
+    /// same dispatch the agent surface uses, so CLI payloads equal the
+    /// operation payloads by construction, including shared name resolution
+    /// (#429). A structured service error becomes an analysis-stage
+    /// diagnostic; a failed envelope carries a `null` result.
+    fn service_query<T>(
+        &mut self,
+        command: &str,
+        run: impl FnOnce(&mut ToolService<'_>) -> Result<T, ToolErrorInfo>,
+    ) -> Envelope<T>
+    where
+        T: Default + serde::Serialize,
+    {
+        self.with_loaded(
+            command,
+            |session| session.load(),
+            |session, _loaded| {
+                session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
+                let mut service = match ToolService::new(session) {
+                    Ok(service) => service,
+                    Err(diagnostic) => {
+                        session.diagnostics.push(diagnostic);
+                        return T::default();
+                    }
+                };
+                match run(&mut service) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        session.diagnostics.push(Diagnostic::error(
+                            error.code,
+                            Stage::Analysis,
+                            error.message,
+                        ));
+                        T::default()
+                    }
+                }
             },
         )
     }

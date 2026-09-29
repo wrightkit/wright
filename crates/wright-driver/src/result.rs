@@ -91,6 +91,37 @@ pub struct InspectResult {
     pub references: serde_json::Value,
 }
 
+/// `symbols` result (#429): the `symbols` agent operation's payload verbatim
+/// — an array of `{id, kind, name, span}` entries.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct SymbolsResult(pub serde_json::Value);
+
+/// `refs` result (#429): the `usage` operation's payload — the resolved
+/// symbol's `id`, `kind`, `symbol` name, and read/write/call counts — plus a
+/// `references` member holding the `references` operation's payload.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct RefsResult(pub serde_json::Value);
+
+/// `cfg` result (#429): the `cfg` operation's payload verbatim —
+/// `{entry, exit, blocks}` for the addressed rule.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct CfgResult(pub serde_json::Value);
+
+/// `callgraph` result (#429): the `callGraph` operation's payload verbatim —
+/// an array of `{caller, callee}` edges.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct CallGraphResult(pub serde_json::Value);
+
+/// `cost` result (#429): the `costEstimate` operation's payload verbatim —
+/// exact generated-resource counts plus static findings.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct CostResult(pub serde_json::Value);
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct LintResult {
     pub input_identity: String,

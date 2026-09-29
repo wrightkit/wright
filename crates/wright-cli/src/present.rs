@@ -12,7 +12,8 @@ use wright_driver::Severity;
 use wright_driver::config::OutputFormat;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::{
-    AnalyzeResult, CheckResult, CompileResult, ConvertResult, Envelope, InspectResult, LintResult,
+    AnalyzeResult, CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult,
+    CostResult, Envelope, InspectResult, LintResult, RefsResult, SymbolsResult,
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
@@ -548,6 +549,182 @@ impl ResultPresentation for InspectResult {
     }
 }
 
+impl ResultPresentation for SymbolsResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!("{} symbol(s)", array_len(&self.0)))
+    }
+    fn render_body(&self) {
+        let symbols = self.0.as_array().map_or(&[][..], Vec::as_slice);
+        println!("\nSymbols");
+        if symbols.is_empty() {
+            println!("  none");
+        }
+        for symbol in symbols {
+            println!(
+                "  {} {}",
+                symbol["kind"].as_str().unwrap_or("symbol"),
+                symbol["name"].as_str().unwrap_or("<unnamed>")
+            );
+            if let Some(span) = symbol.get("span").filter(|span| span.is_object()) {
+                print_location(span, "    ");
+            }
+        }
+    }
+}
+
+impl ResultPresentation for RefsResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!(
+            "{} ({}): {} read(s), {} write(s), {} call(s) across {} rule(s)",
+            self.0["symbol"].as_str().unwrap_or("<unknown>"),
+            self.0["kind"].as_str().unwrap_or("symbol"),
+            count(&self.0, "reads"),
+            count(&self.0, "writes"),
+            count(&self.0, "calls"),
+            count(&self.0, "rules"),
+        ))
+    }
+    fn render_body(&self) {
+        let references = self.0["references"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice);
+        println!(
+            "\nReferences to {}",
+            self.0["symbol"].as_str().unwrap_or("<unknown>")
+        );
+        if references.is_empty() {
+            println!("  none");
+        }
+        for reference in references {
+            // Locations come from the existing reference model; they are not
+            // exact identifier positions until #433 lands.
+            let context = match (reference["rule"].as_u64(), reference["action"].as_u64()) {
+                (Some(rule), Some(action)) => format!(" (rule {rule}, action {action})"),
+                (Some(rule), None) => format!(" (rule {rule})"),
+                _ => String::new(),
+            };
+            println!(
+                "  {}{}",
+                reference["kind"].as_str().unwrap_or("reference"),
+                context
+            );
+            if let Some(span) = reference.get("span").filter(|span| span.is_object()) {
+                print_location(span, "    ");
+            }
+        }
+    }
+}
+
+impl ResultPresentation for CfgResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!("{} block(s)", array_len(&self.0["blocks"])))
+    }
+    fn render_body(&self) {
+        let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
+        println!("\nControl-flow graph");
+        if blocks.is_empty() {
+            println!("  none");
+        }
+        for block in blocks {
+            let mut flags = Vec::new();
+            if block["waits"].as_bool().unwrap_or(false) {
+                flags.push("waits");
+            }
+            if block["calls"].as_bool().unwrap_or(false) {
+                flags.push("calls");
+            }
+            let flags = if flags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", flags.join(" "))
+            };
+            println!(
+                "  block {} ({}): {} action(s){}",
+                block["id"].as_u64().unwrap_or(0),
+                block["kind"].as_str().unwrap_or("block"),
+                array_len(&block["actions"]),
+                flags
+            );
+            if let Some(successors) = block["successors"].as_array()
+                && !successors.is_empty()
+            {
+                let successors = successors
+                    .iter()
+                    .map(|successor| {
+                        format!(
+                            "{} ({})",
+                            successor["to"].as_u64().unwrap_or(0),
+                            successor["kind"].as_str().unwrap_or("edge")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("    -> {successors}");
+            }
+        }
+    }
+}
+
+impl ResultPresentation for CallGraphResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!("{} edge(s)", array_len(&self.0)))
+    }
+    fn render_body(&self) {
+        let edges = self.0.as_array().map_or(&[][..], Vec::as_slice);
+        println!("\nCall graph");
+        if edges.is_empty() {
+            println!("  none");
+        }
+        for edge in edges {
+            println!(
+                "  {} -> {}",
+                edge["caller"].as_str().unwrap_or("<unnamed>"),
+                edge["callee"].as_str().unwrap_or("<unnamed>")
+            );
+        }
+    }
+}
+
+impl ResultPresentation for CostResult {
+    fn metadata(&self) -> Option<String> {
+        let exact = &self.0["exact"];
+        Some(format!(
+            "{} emitted byte(s), {} action(s), {} rule(s), {} wait(s)",
+            count(exact, "emittedBytes"),
+            count(exact, "programActions"),
+            count(exact, "programRules"),
+            count(exact, "waitActions"),
+        ))
+    }
+    fn render_body(&self) {
+        let exact = &self.0["exact"];
+        println!("\nGenerated resources (exact)");
+        println!("  emitted bytes: {}", count(exact, "emittedBytes"));
+        println!("  actions: {}", count(exact, "programActions"));
+        println!("  rules: {}", count(exact, "programRules"));
+        println!("  waits: {}", count(exact, "waitActions"));
+        let findings = self.0["findings"].as_array().map_or(&[][..], Vec::as_slice);
+        println!("\nStatic findings (evidence: static)");
+        if findings.is_empty() {
+            println!("  none");
+        }
+        for finding in findings {
+            println!(
+                "  {}[{}]: {}",
+                finding["severity"].as_str().unwrap_or("info"),
+                finding["code"].as_str().unwrap_or("finding"),
+                finding["message"].as_str().unwrap_or_default()
+            );
+        }
+        if let Some(withheld) = self.0["selection"]["withheld"]
+            .as_u64()
+            .filter(|withheld| *withheld > 0)
+        {
+            println!("  ... {withheld} finding(s) withheld (--max)");
+        }
+    }
+}
+
 fn summary_status<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
 ) -> &'static str {
@@ -668,15 +845,20 @@ fn render_analyze(result: &AnalyzeResult) {
         .get("rules")
         .and_then(serde_json::Value::as_array)
         .map_or(&[][..], Vec::as_slice);
+    let objects = facts
+        .get("persistentObjects")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
 
     println!("\nProgram overview");
     println!(
-        "  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s)",
+        "  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s), {} persistent object(s)",
         count(p, "files"),
         count(p, "rules"),
         count(p, "globalVariables"),
         count(p, "playerVariables"),
         count(p, "subroutines"),
+        objects.len(),
     );
     println!("  evidence: [static] parsed program inventory");
 
@@ -816,6 +998,14 @@ fn render_inspect(result: &InspectResult) {
             s["name"].as_str().unwrap_or("<unnamed>")
         );
     }
+    // The summary stays small; each area names the query command that serves
+    // its full detail (#429).
+    println!("\nDetail commands");
+    println!("  wright symbols [--only KIND]   the full or filtered symbol list");
+    println!("  wright refs <NAME>             references and usage counts for one symbol");
+    println!("  wright cfg <RULE>              the control-flow graph of one rule");
+    println!("  wright callgraph               the subroutine call graph");
+    println!("  wright cost                    generated-resource counts and findings");
 }
 
 fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {

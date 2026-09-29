@@ -817,3 +817,73 @@ rule ("argument spans") {
         assert_eq!(reference["span"]["start"]["col"], column);
     }
 }
+
+// ── Name addressing (#429) ────────────────────────────────────────────────────
+
+const DUPLICATE_NAMES: &str = r#"
+variables {
+    global:
+        0: dup
+        1: solo
+}
+rule ("dup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(dup, 1);
+    }
+}
+rule ("dup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(dup, 2);
+    }
+}
+"#;
+
+#[test]
+fn name_resolution_finds_unique_symbols_and_rules() {
+    let service = workshop_service("synthetic/declarations-rules");
+    let score = service.resolve_symbol("score").unwrap();
+    assert_eq!(score.name, "score");
+    assert_eq!(score.id.index(), 0);
+    // `player starts` is rule index 1 but symbol id 4 — the two spaces are
+    // different, which is why callers address by name.
+    assert_eq!(service.resolve_rule("player starts").unwrap(), 1);
+    assert_eq!(
+        service.resolve_symbol("player starts").unwrap().id.index(),
+        4
+    );
+}
+
+#[test]
+fn name_resolution_rejects_unknown_and_ambiguous_names() {
+    let service = workshop_service_from_text(DUPLICATE_NAMES);
+    let error = service.resolve_symbol("nope").unwrap_err();
+    assert_eq!(error.code, "unknown-symbol");
+    assert!(error.message.contains("nope"));
+    let error = service.resolve_rule("nope").unwrap_err();
+    assert_eq!(error.code, "unknown-rule");
+
+    // A name matching only a non-rule symbol is still unknown as a rule:
+    // the rule space resolves rules only.
+    let error = service.resolve_rule("solo").unwrap_err();
+    assert_eq!(error.code, "unknown-rule");
+    assert!(service.resolve_symbol("solo").is_ok());
+
+    // `dup` names one variable and two rules; both resolutions fail with
+    // the candidate list instead of guessing.
+    let error = service.resolve_symbol("dup").unwrap_err();
+    assert_eq!(error.code, "ambiguous-symbol");
+    for candidate in ["globalVariable 0", "rule 2", "rule 3"] {
+        assert!(error.message.contains(candidate), "{error:?}");
+    }
+    let error = service.resolve_rule("dup").unwrap_err();
+    assert_eq!(error.code, "ambiguous-rule");
+    for candidate in ["rule 0", "rule 1"] {
+        assert!(error.message.contains(candidate), "{error:?}");
+    }
+}

@@ -24,7 +24,8 @@ pub(crate) struct Cli {
 pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
 
 Commands check correctness, summarize semantic hotspots, lint, inspect exhaustive
-facts, compile, or reconstruct source through the typed wright-driver result envelope. `compile` and `convert`
+facts, answer semantic queries (symbols, refs, cfg, callgraph, cost), compile, or
+reconstruct source through the typed wright-driver result envelope. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
 wright-result/v1 envelope to stdout. `serve` exposes the versioned
 wright-agent/v1 session contract over stdio or JSON-RPC 2.0.
@@ -54,7 +55,7 @@ LINT OPTIONS:
     --disable-rule <ID>         Disable a lint rule (repeatable)
     --rule-severity <ID>:<SEV>  Override a lint rule severity (repeatable)
 
-FINDING SELECTION (check, analyze, lint):
+FINDING SELECTION (check, analyze, lint, cost):
     --severity <LEVEL>  Report findings at or above a severity: error|warning|info
     --rule-id <ID>      Report findings from one lint rule id only
     --file <PATH>       Report findings in one source file (any spelling that resolves to it)
@@ -80,6 +81,16 @@ pub(crate) enum Command {
     Lint(LintArgs),
     /// Parse, lower, and show exhaustive structural/semantic facts.
     Inspect(CommonArgs),
+    /// List semantic symbols; `--only` narrows to one symbol kind.
+    Symbols(SymbolsArgs),
+    /// Show the references and usage counts of one symbol, addressed by name.
+    Refs(RefsArgs),
+    /// Show the control-flow graph of one rule, addressed by name.
+    Cfg(CfgArgs),
+    /// Show the subroutine call graph.
+    Callgraph(CommonArgs),
+    /// Report generated-resource counts and static findings.
+    Cost(ReportArgs),
     /// Generate static shell completion from the command model.
     Completion(CompletionArgs),
     /// Update a standalone installation.
@@ -133,9 +144,9 @@ pub(crate) struct ReportArgs {
     pub(crate) select: SelectArgs,
 }
 
-/// Finding-selection options shared by `check`, `analyze`, and `lint`
-/// (`cost` joins with the query surface, #429). Selection narrows reported
-/// output only — verdicts and exit codes always reflect the complete set.
+/// Finding-selection options shared by `check`, `analyze`, `lint`, and
+/// `cost` (#429). Selection narrows reported output only — verdicts and exit
+/// codes always reflect the complete set.
 #[derive(Debug, Args, Default)]
 pub(crate) struct SelectArgs {
     /// Report findings at or above this severity only.
@@ -185,6 +196,38 @@ pub(crate) struct CommonArgs {
     /// ANSI color policy.
     #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
     pub(crate) color: ColorArg,
+}
+
+/// Arguments of `symbols`: shared workflow options plus the symbol-kind
+/// filter. The filter is `--only` rather than `--kind` because `CommonArgs`
+/// already assigns `--kind` to input-frontend selection.
+#[derive(Debug, Args)]
+pub(crate) struct SymbolsArgs {
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    /// Report only symbols of this kind.
+    #[arg(long, value_enum, value_name = "KIND")]
+    pub(crate) only: Option<SymbolKindArg>,
+}
+
+/// Arguments of `refs`: the symbol name, then the shared workflow options.
+#[derive(Debug, Args)]
+pub(crate) struct RefsArgs {
+    /// The declared name of the symbol to look up.
+    #[arg(value_name = "NAME")]
+    pub(crate) name: String,
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+}
+
+/// Arguments of `cfg`: the rule name, then the shared workflow options.
+#[derive(Debug, Args)]
+pub(crate) struct CfgArgs {
+    /// The declared name of the rule to look up.
+    #[arg(value_name = "RULE")]
+    pub(crate) rule: String,
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
 }
 
 #[derive(Debug, Args)]
@@ -338,6 +381,35 @@ pub(crate) enum ColorArg {
     Auto,
     Always,
     Never,
+}
+
+/// Symbol kinds as spelled by the semantic index; `--only` accepts the
+/// canonical names plus kebab-case aliases.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum SymbolKindArg {
+    /// `variables.global` symbols.
+    #[value(name = "globalVariable", alias = "global-variable")]
+    GlobalVariable,
+    /// `variables.player` symbols.
+    #[value(name = "playerVariable", alias = "player-variable")]
+    PlayerVariable,
+    /// Subroutines.
+    #[value(name = "subroutine")]
+    Subroutine,
+    /// Rules.
+    #[value(name = "rule")]
+    Rule,
+}
+
+impl SymbolKindArg {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::GlobalVariable => "globalVariable",
+            Self::PlayerVariable => "playerVariable",
+            Self::Subroutine => "subroutine",
+            Self::Rule => "rule",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

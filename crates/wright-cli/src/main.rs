@@ -202,6 +202,38 @@ fn run_workflow(command: Command) -> ExitCode {
             present::Presentation::from_common(&args),
             wright_driver::CompilerSession::inspect,
         ),
+        Command::Symbols(args) => {
+            let kind = args.only.map(|kind| kind.as_str().to_string());
+            run_configured(
+                config_from_common(&args.common, false),
+                present::Presentation::from_common(&args.common),
+                move |session| session.symbols(kind),
+            )
+        }
+        Command::Refs(args) => run_configured(
+            config_from_common(&args.common, false),
+            present::Presentation::from_common(&args.common),
+            move |session| session.refs(&args.name),
+        ),
+        Command::Cfg(args) => run_configured(
+            config_from_common(&args.common, false),
+            present::Presentation::from_common(&args.common),
+            move |session| session.cfg(&args.rule),
+        ),
+        Command::Callgraph(args) => run_configured(
+            config_from_common(&args, false),
+            present::Presentation::from_common(&args),
+            wright_driver::CompilerSession::callgraph,
+        ),
+        Command::Cost(args) => {
+            let mut config = config_from_common(&args.common, true);
+            config.selection = selection_from_args(&args.select);
+            run_configured(
+                config,
+                present::Presentation::from_common(&args.common),
+                wright_driver::CompilerSession::cost,
+            )
+        }
         Command::Completion(_)
         | Command::Update(_)
         | Command::Provider(_)

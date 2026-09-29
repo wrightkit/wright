@@ -20,6 +20,12 @@ See [architecture, commands, and conversion](cli/commands.md).
 
 See [architecture, commands, and conversion](cli/commands.md).
 
+## Semantic query commands (#429)
+
+See [architecture, commands, and conversion](cli/commands.md): `symbols`,
+`refs`, `cfg`, `callgraph`, and `cost` serve the same semantic results as the
+agent operations, and `refs`/`cfg` address symbols and rules by name.
+
 ## `wright convert` and the reconstruction surface (#126)
 
 See [architecture, commands, and conversion](cli/commands.md).
