@@ -924,7 +924,7 @@ fn explicit_locale_override_is_accepted() {
 
 #[test]
 fn version_and_help_are_documented_contract_surfaces() {
-    let output = run(&["version"]);
+    let output = run(&["--version"]);
     assert!(output.status.success());
     let banner = String::from_utf8_lossy(&output.stdout);
     assert!(banner.starts_with("wright "), "{banner}");
@@ -933,11 +933,6 @@ fn version_and_help_are_documented_contract_surfaces() {
         "banner does not report the implementation version: {banner}"
     );
     assert!(banner.contains("wright-driver"), "{banner}");
-
-    let output = run(&["--version"]);
-    assert!(output.status.success());
-    let flag_banner = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(flag_banner, banner, "--version matches `version`");
 
     let output = run(&["--help"]);
     assert!(output.status.success());
@@ -971,6 +966,17 @@ fn version_and_help_are_documented_contract_surfaces() {
         assert!(help.contains(option), "top-level help documents {option}");
     }
     assert!(help.contains("EXIT CODES"));
+
+    // The consolidated maintenance surface (#439) retires the dedicated
+    // meta/provider commands; `--help` and `--version` are canonical.
+    for removed in ["version", "help", "provider"] {
+        let output = run(&[removed]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{removed} is a usage error now"
+        );
+    }
 }
 
 #[test]

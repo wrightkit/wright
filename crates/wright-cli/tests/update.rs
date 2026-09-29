@@ -1,10 +1,11 @@
-//! End-to-end `wright update` tests (#116) against a mock release server.
+//! End-to-end `wright update` tests (#116, #439) against mock release servers.
 //!
 //! Serves fake release archives and checksums over a local HTTP server (the
 //! same shape `scripts/test-install.sh` uses for `install.sh`) and exercises
-//! the real `wright` binary: version resolution, `--check` without
-//! modification, checksum-verified installs, atomic replacement of both
-//! binaries, and the refusal paths.
+//! the real `wright` binary: the consolidated update surface (`update`,
+//! `update self`, `update provider [opy]`), version resolution, `--check`
+//! without modification, checksum-verified installs, atomic replacement of
+//! both binaries, and the refusal/skip paths.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -20,6 +21,9 @@ use sha2::Digest;
 /// The fake release version served by the mock server.
 const RELEASE: &str = "9.9.9";
 const TRIPLE: &str = "x86_64-unknown-linux-gnu";
+/// The OPY provider versions used by the provider update tests.
+const PROVIDER_OLD: &str = "1.0.0";
+const PROVIDER_RELEASE: &str = "1.4.0";
 
 /// A minimal HTTP/1.1 server serving a fixed path -> body map.
 struct MockServer {
@@ -182,6 +186,94 @@ fn build_archive(version: &str) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
+/// The first-party provider release target for the host running the tests;
+/// `None` when no provider artifacts exist for this platform.
+fn provider_target() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
+        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        ("windows", "x86_64") => Some("x86_64-pc-windows-msvc"),
+        _ => None,
+    }
+}
+
+fn provider_binary() -> &'static str {
+    if provider_target() == Some("x86_64-pc-windows-msvc") {
+        "opy-provider.exe"
+    } else {
+        "opy-provider"
+    }
+}
+
+/// The OPY provider store under the `WRIGHT_PROVIDER_DATA_DIR` each child gets.
+fn provider_store(dir: &Path) -> PathBuf {
+    dir.join("provider-data").join("providers").join("opy")
+}
+
+/// Record an installed provider in the store without exercising install paths.
+fn seed_provider(dir: &Path, version: &str) {
+    let target = provider_target().expect("provider tests need a supported host");
+    let store = provider_store(dir);
+    let executable = store.join(version).join(target).join(provider_binary());
+    std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    std::fs::write(&executable, provider_body(version)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(store.join("active"), format!("{version}\n")).unwrap();
+}
+
+fn provider_body(version: &str) -> Vec<u8> {
+    format!("#!/bin/sh\necho \"fake opy-provider {version}\"\n").into_bytes()
+}
+
+/// Provider release files for the mock server: the version pointer, the
+/// archive, and its checksum under the canonical `opy-rs` routes.
+fn provider_release(version: &str, files: &mut HashMap<String, Vec<u8>>) {
+    let target = provider_target().expect("provider tests need a supported host");
+    let binary = provider_binary();
+    let name = format!("opy-provider-{version}-{target}.tar.gz");
+    let mut builder = tar::Builder::new(Vec::new());
+    let body = provider_body(version);
+    let mut header = tar::Header::new_gnu();
+    header.set_size(body.len() as u64);
+    header.set_mode(0o755);
+    header.set_cksum();
+    builder.append_data(&mut header, binary, &body[..]).unwrap();
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut encoder, &builder.into_inner().unwrap()).unwrap();
+    let archive = encoder.finish().unwrap();
+    files.insert(
+        "/opy-rs/latest/version".to_string(),
+        format!("{version}\n").into_bytes(),
+    );
+    files.insert(
+        format!("/opy-rs/releases/{version}/{name}"),
+        archive.clone(),
+    );
+    files.insert(
+        format!("/opy-rs/releases/{version}/{name}.sha256"),
+        format!("{}  {name}\n", sha256_hex(&archive)).into_bytes(),
+    );
+}
+
+/// Environment overrides that point the child at this server's provider routes.
+fn provider_env(server: &MockServer) -> Vec<(&'static str, String)> {
+    let mut env = server.env();
+    env.push((
+        "WRIGHT_OPY_PROVIDER_LATEST_URL",
+        format!("{}/opy-rs/latest/version", server.base_url()),
+    ));
+    env.push((
+        "WRIGHT_OPY_PROVIDER_BASE_URL",
+        format!("{}/opy-rs/releases", server.base_url()),
+    ));
+    env
+}
+
 /// A fresh install directory holding copies of the real test binary.
 fn install_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("wright-update-it-{}-{tag}", std::process::id()));
@@ -198,7 +290,8 @@ fn run_update(dir: &Path, args: &[&str], env: &[(&'static str, String)]) -> std:
     command
         .args(args)
         .env("WRIGHT_INSTALL_OS", "linux")
-        .env("WRIGHT_INSTALL_ARCH", "x86_64");
+        .env("WRIGHT_INSTALL_ARCH", "x86_64")
+        .env("WRIGHT_PROVIDER_DATA_DIR", dir.join("provider-data"));
     for (key, value) in env {
         command.env(key, value);
     }
@@ -245,11 +338,16 @@ fn check_with_pinned_version_reports_availability_without_network() {
     let before = read(&dir.join("wright"));
     let output = run_update(
         &dir,
-        &["update", "--check", "--version", RELEASE],
+        &["update", "--check", "self", "--version", RELEASE],
         &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
     );
     assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("update available"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("update available"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("wright update self --version {RELEASE}")),
+        "a pinned check names the pinned install command: {stdout}"
+    );
     assert_eq!(read(&dir.join("wright")), before);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -430,7 +528,7 @@ fn downgrade_is_refused() {
     let before = read(&dir.join("wright"));
     let output = run_update(
         &dir,
-        &["update", "--version", "0.0.1"],
+        &["update", "self", "--version", "0.0.1"],
         &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
     );
     assert_eq!(
@@ -440,6 +538,206 @@ fn downgrade_is_refused() {
     );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("refusing to downgrade"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(read(&dir.join("wright")), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_installs_a_named_provider_into_an_empty_store() {
+    if provider_target().is_none() {
+        return;
+    }
+    let dir = install_dir("provider-install");
+    let mut files = HashMap::new();
+    provider_release(PROVIDER_RELEASE, &mut files);
+    let server = MockServer::new(files);
+    let output = run_update(&dir, &["update", "provider", "opy"], &provider_env(&server));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!("installed opy provider {PROVIDER_RELEASE}")),
+        "{stdout}"
+    );
+    let store = provider_store(&dir);
+    assert_eq!(
+        std::fs::read_to_string(store.join("active"))
+            .unwrap()
+            .trim(),
+        PROVIDER_RELEASE
+    );
+    let executable = store
+        .join(PROVIDER_RELEASE)
+        .join(provider_target().unwrap())
+        .join(provider_binary());
+    assert_eq!(read(&executable), provider_body(PROVIDER_RELEASE));
+    // The self target is not part of `update provider <NAME>`.
+    assert!(!stdout.contains("installing wright"), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_upgrades_the_installed_provider_alongside_self() {
+    if provider_target().is_none() {
+        return;
+    }
+    let dir = install_dir("provider-upgrade");
+    seed_provider(&dir, PROVIDER_OLD);
+    let mut files = release(RELEASE).files;
+    provider_release(PROVIDER_RELEASE, &mut files);
+    let server = MockServer::new(files);
+    let output = run_update(&dir, &["update"], &provider_env(&server));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!(
+            "updated opy provider {PROVIDER_OLD} -> {PROVIDER_RELEASE}"
+        )),
+        "{stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(provider_store(&dir).join("active"))
+            .unwrap()
+            .trim(),
+        PROVIDER_RELEASE
+    );
+    assert!(
+        String::from_utf8_lossy(&read(&dir.join("wright")))
+            .contains(&format!("fake wright {RELEASE}")),
+        "the self target still updated"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_does_not_install_an_absent_provider() {
+    let dir = install_dir("provider-absent");
+    let server = MockServer::new(release(RELEASE).files);
+    let output = run_update(&dir, &["update"], &server.env());
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("opy provider is not installed; skipping"),
+        "{stdout}"
+    );
+    assert!(
+        !provider_store(&dir).join("active").exists(),
+        "a bare update must not create a provider installation"
+    );
+    assert!(
+        String::from_utf8_lossy(&read(&dir.join("wright")))
+            .contains(&format!("fake wright {RELEASE}")),
+        "the self target still updated"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_reports_provider_availability_without_modifying_anything() {
+    if provider_target().is_none() {
+        return;
+    }
+    let dir = install_dir("provider-check");
+    seed_provider(&dir, PROVIDER_OLD);
+    let mut files = release(RELEASE).files;
+    provider_release(PROVIDER_RELEASE, &mut files);
+    let server = MockServer::new(files);
+    let before = read(&dir.join("wright"));
+    let output = run_update(&dir, &["update", "--check"], &provider_env(&server));
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!(
+            "update available: opy provider {PROVIDER_OLD} -> {PROVIDER_RELEASE}"
+        )),
+        "{stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(provider_store(&dir).join("active"))
+            .unwrap()
+            .trim(),
+        PROVIDER_OLD,
+        "--check must not touch the active provider"
+    );
+    assert_eq!(read(&dir.join("wright")), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_provider_without_a_name_skips_an_empty_store() {
+    let dir = install_dir("provider-none");
+    let output = run_update(&dir, &["update", "provider"], &[]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("opy provider is not installed; skipping"),
+        "{stdout}"
+    );
+    assert!(!provider_store(&dir).join("active").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn package_managed_wright_skips_self_update_but_updates_providers() {
+    if provider_target().is_none() {
+        return;
+    }
+    // The install directory name makes provenance detection classify the
+    // executable as Homebrew-managed.
+    let dir = install_dir("homebrew-managed");
+    seed_provider(&dir, PROVIDER_OLD);
+    let mut files = HashMap::new();
+    provider_release(PROVIDER_RELEASE, &mut files);
+    let server = MockServer::new(files);
+    let before = read(&dir.join("wright"));
+    let output = run_update(&dir, &["update"], &provider_env(&server));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("skipped wright self-update") && stdout.contains("brew upgrade"),
+        "the skip line carries actionable package-manager guidance: {stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "updated opy provider {PROVIDER_OLD} -> {PROVIDER_RELEASE}"
+        )),
+        "{stdout}"
+    );
+    assert_eq!(read(&dir.join("wright")), before, "self-update was skipped");
+    assert_eq!(
+        std::fs::read_to_string(provider_store(&dir).join("active"))
+            .unwrap()
+            .trim(),
+        PROVIDER_RELEASE
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn explicit_self_update_still_refuses_package_managed_installations() {
+    let dir = install_dir("homebrew-self");
+    let before = read(&dir.join("wright"));
+    let output = run_update(&dir, &["update", "self"], &[]);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("brew upgrade"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

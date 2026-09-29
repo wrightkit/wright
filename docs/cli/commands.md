@@ -44,12 +44,13 @@ result.
 | `wright serve [INPUT]` | Serve `wright-agent/v1` over stdio or JSON-RPC 2.0 | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
-| `wright update` | Self-update a standalone installation | update progress (text only) |
+| `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
 
-`wright version` and `wright --version` print the implementation version
-banner (`wright <version> (wright-driver <version>)`); the version is the
-single authoritative workspace implementation version and is also reported
-inside every `wright-result/v1` envelope.
+`wright --version` prints the implementation version banner
+(`wright <version> (wright-driver <version>)`); the version is the single
+authoritative workspace implementation version and is also reported inside
+every `wright-result/v1` envelope. `wright --help` is the canonical help
+surface.
 
 All commands accept a file path, a project directory, or `-` for stdin. An
 omitted input uses the current directory. Input kind is detected from the

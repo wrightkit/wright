@@ -35,7 +35,7 @@ test -x "$LSP_BIN" || { echo "release LSP binary missing"; exit 1; }
 test -x "$BENCH_BIN" || { echo "release benchmark binary missing"; exit 1; }
 
 echo "==> first-party provider integration (compat profile)"
-"$BIN" provider update opy --version 0.1.38
+"$BIN" update provider opy --version 0.1.38
 "$BIN" compile "$ROOT/tests/fixtures/opy/basic-rule.opy" --profile compat >/dev/null
 
 echo "==> benchmarks"

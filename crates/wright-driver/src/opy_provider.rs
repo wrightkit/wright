@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -37,6 +38,16 @@ impl OpyProviderConfig {
         OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
             .update(version)
     }
+
+    pub fn installed(&self) -> Result<Option<ResolvedOpyProvider>, OpyProviderError> {
+        OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
+            .installed()
+    }
+
+    pub fn latest_version(&self) -> Result<String, OpyProviderError> {
+        OpyProviderResolver::new(self.store_dir.clone().unwrap_or_else(default_store_dir))
+            .latest_version()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,8 +69,10 @@ impl OpyProviderResolver {
         Self {
             store_dir: store_dir.into(),
             target: None,
-            latest_version_url: DEFAULT_LATEST_VERSION_URL.to_string(),
-            base_url: DEFAULT_BASE_URL.to_string(),
+            latest_version_url: std::env::var("WRIGHT_OPY_PROVIDER_LATEST_URL")
+                .unwrap_or_else(|_| DEFAULT_LATEST_VERSION_URL.to_string()),
+            base_url: std::env::var("WRIGHT_OPY_PROVIDER_BASE_URL")
+                .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string()),
         }
     }
 
@@ -101,6 +114,25 @@ impl OpyProviderResolver {
     ) -> Result<ResolvedOpyProvider, OpyProviderError> {
         let target = self.target()?;
         self.install_release(requested_version, &target)
+    }
+
+    /// The provider activated in the store, when one is usable. Purely local:
+    /// it never touches the network and never installs anything.
+    pub fn installed(&self) -> Result<Option<ResolvedOpyProvider>, OpyProviderError> {
+        let target = self.target()?;
+        Ok(self
+            .active_provider(&target)?
+            .map(|(version, executable)| ResolvedOpyProvider {
+                executable,
+                version: Some(version),
+            }))
+    }
+
+    /// The latest published provider version. Fetches the version pointer
+    /// only; nothing is downloaded or installed.
+    pub fn latest_version(&self) -> Result<String, OpyProviderError> {
+        let client = provider_client()?;
+        self.fetch_latest_version(&client)
     }
 
     fn target(&self) -> Result<String, OpyProviderError> {
@@ -157,10 +189,26 @@ impl OpyProviderResolver {
     ) -> Result<ResolvedOpyProvider, OpyProviderError> {
         let requested_version = requested_version.map(normalize_version).transpose()?;
         let client = provider_client()?;
-        let version = match requested_version {
-            Some(v) => v,
+        let version = match &requested_version {
+            Some(v) => v.clone(),
             None => self.fetch_latest_version(&client)?,
         };
+        if let Some((active, executable)) = self.active_provider(target)? {
+            // An explicit `--version` is the only downgrade contract; a bare
+            // update keeps a newer install instead of rolling it back.
+            let already_active = active == version;
+            let implicit_downgrade = requested_version.is_none()
+                && matches!(
+                    (version_tuple(&active), version_tuple(&version)),
+                    (Some(installed), Some(resolved)) if installed.cmp(&resolved) == Ordering::Greater
+                );
+            if already_active || implicit_downgrade {
+                return Ok(ResolvedOpyProvider {
+                    executable,
+                    version: Some(active),
+                });
+            }
+        }
         let archive_name = format!("opy-provider-{version}-{target}.{PROVIDER_ARCHIVE_EXTENSION}");
         let archive_url = format!(
             "{}/{version}/{archive_name}",
@@ -388,6 +436,16 @@ fn normalize_version(version: &str) -> Result<String, OpyProviderError> {
             "invalid OPY provider release version '{core}' (expected X.Y.Z)"
         )))
     }
+}
+
+fn version_tuple(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.split('.');
+    let tuple = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    parts.next().is_none().then_some(tuple)
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -769,6 +827,85 @@ mod tests {
     }
 
     #[test]
+    fn installed_reports_the_active_provider_without_network() {
+        let root = test_root("installed");
+        let target = "x86_64-unknown-linux-gnu";
+        let resolver = OpyProviderResolver::new(&root)
+            .with_target(target)
+            .with_release_urls(
+                "http://127.0.0.1:1/opy-rs/latest/version",
+                "http://127.0.0.1:1/opy-rs/releases",
+            );
+        assert_eq!(resolver.installed().unwrap(), None);
+        let bytes = archive("2.0.0", target, b"cached");
+        resolver.install_archive("2.0.0", target, &bytes).unwrap();
+        let installed = resolver.installed().unwrap().unwrap();
+        assert_eq!(installed.version.as_deref(), Some("2.0.0"));
+        assert_eq!(std::fs::read(installed.executable).unwrap(), b"cached");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn update_to_the_active_version_never_downloads() {
+        let root = test_root("active-update");
+        let target = "x86_64-unknown-linux-gnu";
+        let resolver = OpyProviderResolver::new(&root)
+            .with_target(target)
+            .with_release_urls(
+                "http://127.0.0.1:1/opy-rs/latest/version",
+                "http://127.0.0.1:1/opy-rs/releases",
+            );
+        let bytes = archive("1.2.3", target, b"first");
+        resolver.install_archive("1.2.3", target, &bytes).unwrap();
+        let resolved = resolver.update(Some("1.2.3")).unwrap();
+        assert_eq!(resolved.version.as_deref(), Some("1.2.3"));
+        assert_eq!(std::fs::read(resolved.executable).unwrap(), b"first");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_bare_update_keeps_a_newer_installed_provider() {
+        let root = test_root("newer-installed");
+        let target = "x86_64-unknown-linux-gnu";
+        let bytes = archive("2.0.0", target, b"newer");
+        let resolver = OpyProviderResolver::new(&root).with_target(target);
+        resolver.install_archive("2.0.0", target, &bytes).unwrap();
+        // The release pointer resolves an older version; a bare update must
+        // not downgrade, so no archive or checksum request follows the
+        // version-pointer fetch.
+        let (base_url, requests, server) =
+            test_server_n(1, b"1.0.0".to_vec(), Vec::new(), Vec::new());
+        let resolver = resolver.with_release_urls(
+            format!("{base_url}/opy-rs/latest/version"),
+            format!("{base_url}/opy-rs/releases"),
+        );
+        let resolved = resolver.update(None).unwrap();
+        server.join().unwrap();
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        assert_eq!(resolved.version.as_deref(), Some("2.0.0"));
+        assert_eq!(std::fs::read(resolved.executable).unwrap(), b"newer");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn latest_version_fetches_only_the_release_pointer() {
+        let root = test_root("latest");
+        let (base_url, requests, server) =
+            test_server_n(1, b"4.5.6\n".to_vec(), Vec::new(), Vec::new());
+        let resolver = OpyProviderResolver::new(&root)
+            .with_target("x86_64-unknown-linux-gnu")
+            .with_release_urls(
+                format!("{base_url}/opy-rs/latest/version"),
+                format!("{base_url}/opy-rs/releases"),
+            );
+        assert_eq!(resolver.latest_version().unwrap(), "4.5.6");
+        server.join().unwrap();
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        assert!(!root.join("active").is_file());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn unsupported_target_is_structured() {
         let error = OpyProviderResolver::new(test_root("target"))
             .with_target("mips-unknown-linux-gnu")
@@ -834,12 +971,21 @@ mod tests {
         archive: Vec<u8>,
         checksum: Vec<u8>,
     ) -> (String, Arc<AtomicUsize>, thread::JoinHandle<()>) {
+        test_server_n(3, latest_version, archive, checksum)
+    }
+
+    fn test_server_n(
+        expected_requests: usize,
+        latest_version: Vec<u8>,
+        archive: Vec<u8>,
+        checksum: Vec<u8>,
+    ) -> (String, Arc<AtomicUsize>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let address = listener.local_addr().unwrap();
         let requests = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&requests);
         let server = thread::spawn(move || {
-            for _ in 0..3 {
+            for _ in 0..expected_requests {
                 let (mut stream, _) = listener.accept().unwrap();
                 respond(&mut stream, &latest_version, &archive, &checksum);
                 seen.fetch_add(1, Ordering::Relaxed);

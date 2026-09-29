@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 use std::time::Duration;
 
-use wright_driver::sha256_hex;
+use clap::{Args, Subcommand, ValueEnum};
+use wright_driver::{OpyProviderError, ResolvedOpyProvider, sha256_hex};
 
 const DEFAULT_BASE_URL: &str = "https://github.com/wrightkit/wright/releases/download";
 const DEFAULT_API_URL: &str = "https://api.github.com/repos/wrightkit/wright/releases/latest";
@@ -77,7 +78,191 @@ impl Provenance {
     }
 }
 
-pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateError> {
+#[derive(Debug, Args)]
+pub(crate) struct UpdateArgs {
+    /// Resolve update targets and report available updates without modifying
+    /// the installation.
+    #[arg(long)]
+    pub(crate) check: bool,
+    #[command(subcommand)]
+    pub(crate) command: Option<UpdateCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum UpdateCommand {
+    /// Update the standalone Wright installation only.
+    #[command(name = "self")]
+    SelfUpdate(UpdateSelfArgs),
+    /// Update installed first-party providers, or install/update one provider
+    /// by name.
+    Provider(UpdateProviderArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UpdateSelfArgs {
+    /// Install an exact version instead of the latest stable release.
+    #[arg(long, value_name = "VERSION")]
+    pub(crate) version: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UpdateProviderArgs {
+    /// Provider to install or update; omitted updates installed providers only.
+    pub(crate) provider: Option<ProviderNameArg>,
+    /// Install an exact release instead of the latest stable release.
+    #[arg(long, value_name = "VERSION", requires = "provider")]
+    pub(crate) version: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ProviderNameArg {
+    Opy,
+}
+
+pub(crate) fn run(args: &UpdateArgs) -> Result<u8, UpdateError> {
+    match &args.command {
+        Some(UpdateCommand::SelfUpdate(sub)) => self_update(args.check, sub.version.as_deref()),
+        Some(UpdateCommand::Provider(sub)) => Ok(provider_target(
+            args.check,
+            sub.version.as_deref(),
+            sub.provider.is_some(),
+        )),
+        None => Ok(update_all(args.check)),
+    }
+}
+
+/// Plain `wright update`: every target Wright manages — the standalone
+/// installation plus already-installed first-party providers. A skipped or
+/// failed target never blocks the remaining ones.
+fn update_all(check_only: bool) -> u8 {
+    let mut code = exit::SUCCESS;
+    match self_update(check_only, None) {
+        Ok(_) => {}
+        Err(error @ UpdateError::Unsupported(_)) => {
+            println!("skipped wright self-update: {}", error.message());
+        }
+        Err(error) => {
+            eprintln!("wright: {}", error.message());
+            code = fold(code, error.exit_code());
+        }
+    }
+    fold(code, provider_target(check_only, None, false));
+    code
+}
+
+fn fold(code: u8, next: u8) -> u8 {
+    if code == exit::SUCCESS { next } else { code }
+}
+
+/// The first-party provider update target. `may_install` distinguishes
+/// `update provider <NAME>` (install or update) from the installed-only
+/// enumeration used by `update` and `update provider`.
+fn provider_target(check_only: bool, requested: Option<&str>, may_install: bool) -> u8 {
+    let installed = match crate::provider::installed() {
+        Ok(installed) => installed,
+        // A platform without provider artifacts has no provider target; an
+        // explicit request still reports the refusal as a failure.
+        Err(error @ OpyProviderError::UnsupportedPlatform(_)) if !may_install => {
+            println!("skipped opy provider: {error}");
+            return exit::SUCCESS;
+        }
+        Err(error) => return provider_failure(&error),
+    };
+    if check_only {
+        return provider_check(installed.as_ref(), requested, may_install);
+    }
+    if installed.is_none() && !may_install {
+        println!("opy provider is not installed; skipping");
+        return exit::SUCCESS;
+    }
+    let previous = installed
+        .as_ref()
+        .and_then(|p| p.version.as_deref())
+        .map(str::to_string);
+    match crate::provider::update(requested) {
+        Ok(resolved) => {
+            provider_report(previous.as_deref(), &resolved);
+            exit::SUCCESS
+        }
+        Err(error) => provider_failure(&error),
+    }
+}
+
+fn provider_report(previous: Option<&str>, resolved: &ResolvedOpyProvider) {
+    let Some(version) = resolved.version.as_deref() else {
+        println!(
+            "installed opy provider at {}",
+            resolved.executable.display()
+        );
+        return;
+    };
+    match previous {
+        None => println!(
+            "installed opy provider {version} at {}",
+            resolved.executable.display()
+        ),
+        Some(current) => match compare_versions(current, version) {
+            Ordering::Equal => println!("opy provider {version} is already up to date"),
+            Ordering::Less => println!("updated opy provider {current} -> {version}"),
+            Ordering::Greater => println!("downgraded opy provider {current} -> {version}"),
+        },
+    }
+}
+
+/// `--check` resolution for the provider target: report availability without
+/// downloading or modifying anything.
+fn provider_check(
+    installed: Option<&ResolvedOpyProvider>,
+    requested: Option<&str>,
+    may_install: bool,
+) -> u8 {
+    let current = installed.and_then(|p| p.version.as_deref());
+    // An absent provider is not a target of `update --check`, so it is skipped
+    // without spending a release-pointer fetch on a version nobody would read.
+    if current.is_none() && !may_install {
+        println!("opy provider is not installed; skipping");
+        return exit::SUCCESS;
+    }
+    let target = match requested {
+        Some(version) => match parse_version(version) {
+            Ok(_) => version.trim_start_matches('v').to_string(),
+            Err(error) => {
+                eprintln!("wright: {}", error.message());
+                return error.exit_code();
+            }
+        },
+        None => match crate::provider::latest_version() {
+            Ok(version) => version,
+            Err(error) => return provider_failure(&error),
+        },
+    };
+    let Some(current) = current else {
+        println!(
+            "opy provider is not installed; `wright update provider opy` would install {target}"
+        );
+        return exit::SUCCESS;
+    };
+    match compare_versions(current, &target) {
+        Ordering::Equal => println!("opy provider {current} is already up to date"),
+        Ordering::Less => println!(
+            "update available: opy provider {current} -> {target} (run `wright update provider opy` to install)"
+        ),
+        Ordering::Greater if requested.is_some() => println!(
+            "opy provider {target} is older than the installed {current}; `wright update provider opy --version {target}` would downgrade"
+        ),
+        Ordering::Greater => println!(
+            "installed opy provider {current} is newer than the latest release {target}; keeping {current}"
+        ),
+    }
+    exit::SUCCESS
+}
+
+fn provider_failure(error: &OpyProviderError) -> u8 {
+    eprintln!("wright: {}: {}", error.code(), error);
+    error.exit_code()
+}
+
+fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateError> {
     let platform = detect_platform()?;
     let exe = std::env::current_exe()
         .map_err(|e| UpdateError::failed(format!("could not locate the wright binary: {e}")))?;
@@ -137,9 +322,11 @@ pub(crate) fn run(check_only: bool, requested: Option<&str>) -> Result<u8, Updat
     }
 
     if check_only {
-        println!(
-            "update available: {current} -> {target_version} (run `wright update` to install)"
-        );
+        let hint = match requested {
+            Some(_) => format!("wright update self --version {target_version}"),
+            None => "wright update".to_string(),
+        };
+        println!("update available: {current} -> {target_version} (run `{hint}` to install)");
         return Ok(exit::SUCCESS);
     }
 
@@ -219,7 +406,7 @@ fn resolve_latest(
         ))
     })?;
     let tag = val.get("tag_name").and_then(serde_json::Value::as_str).ok_or_else(|| {
-        UpdateError::failed(format!("could not find the latest release tag in the response from {api_url}; pin a version with `wright update --version`"))
+        UpdateError::failed(format!("could not find the latest release tag in the response from {api_url}; pin a version with `wright update self --version`"))
     })?;
     let version = tag.trim_start_matches('v');
     parse_version(version)?;
@@ -408,7 +595,7 @@ fn fetch_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, U
 }
 
 fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, UpdateError> {
-    let response = client.get(url).send().map_err(|e| UpdateError::failed(format!("could not download {url} ({e}); check the network connection or pin a version with `wright update --version`")))?;
+    let response = client.get(url).send().map_err(|e| UpdateError::failed(format!("could not download {url} ({e}); check the network connection or pin a version with `wright update self --version`")))?;
     if !response.status().is_success() {
         return Err(UpdateError::failed(format!(
             "could not download {url} (HTTP {})",

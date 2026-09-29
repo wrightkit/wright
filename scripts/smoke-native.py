@@ -79,7 +79,7 @@ def main() -> None:
         if not (ROOT / path).is_file():
             fail(f"{name} is missing: {ROOT / path}")
 
-    for name, binary in (("wright version", wright), ("wright-lsp version", lsp)):
+    for name, binary in (("wright --version", wright), ("wright-lsp --version", lsp)):
         output = run(name, [str(binary), "--version"])
         if args.version not in output:
             fail(f"{name} did not report version {args.version}: {output.strip()}")
@@ -112,7 +112,7 @@ def main() -> None:
             env["WRIGHT_PROVIDER_DATA_DIR"] = store
             run(
                 "first-party OPY provider bootstrap from clean state",
-                [str(wright), "provider", "update", "opy"],
+                [str(wright), "update", "provider", "opy"],
                 env,
             )
 

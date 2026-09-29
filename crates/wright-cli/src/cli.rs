@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::serve::ServeArgs;
+use crate::update::UpdateArgs;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// The top-level command model used by parsing, help, and completion.
@@ -63,8 +64,8 @@ FINDING SELECTION (check, analyze, lint, inspect cost):
     --max <N>           Report at most N findings (withheld counts are shown)
 
 UPDATE OPTIONS:
-    --check              Check for an update without modifying the installation
-    --version <VERSION>  Install an exact version instead of the latest stable release";
+    --check              Resolve update targets and report availability without modifying anything
+    --version <VERSION>  Install an exact version (`update self`, `update provider <NAME>`)";
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
@@ -89,16 +90,11 @@ pub(crate) enum Command {
     Inspect(InspectArgs),
     /// Generate static shell completion from the command model.
     Completion(CompletionArgs),
-    /// Update a standalone installation.
+    /// Update Wright-managed components: a standalone installation and
+    /// installed first-party providers.
     Update(UpdateArgs),
-    /// Manage first-party language providers.
-    Provider(ProviderArgs),
     /// Serve the versioned agent contract over stdio or JSON-RPC 2.0.
     Serve(ServeArgs),
-    /// Show the top-level help.
-    Help,
-    /// Show version and result-contract metadata.
-    Version,
     /// Compare two Workshop texts using canonical WIR semantics (internal gate command).
     #[command(name = "semantic-compare", hide = true)]
     SemanticCompare(SemanticCompareArgs),
@@ -322,42 +318,6 @@ impl CompletionInstallArgs {
     pub(crate) fn effective_shell(&self) -> Option<ShellArg> {
         self.shell.or(self.shell_flag)
     }
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct UpdateArgs {
-    /// Check for an update without modifying the installation.
-    #[arg(long)]
-    pub(crate) check: bool,
-    /// Install an exact version instead of the latest stable release.
-    #[arg(long, value_name = "VERSION")]
-    pub(crate) version: Option<String>,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct ProviderArgs {
-    #[command(subcommand)]
-    pub(crate) command: ProviderCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum ProviderCommand {
-    /// Install or update a first-party provider.
-    Update(ProviderUpdateArgs),
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct ProviderUpdateArgs {
-    /// The provider to install.
-    pub(crate) provider: ProviderNameArg,
-    /// Install an exact release instead of the latest stable release.
-    #[arg(long, value_name = "VERSION")]
-    pub(crate) version: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(crate) enum ProviderNameArg {
-    Opy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

@@ -47,8 +47,7 @@ The binaries report the workspace implementation version (one authoritative
 `version.workspace = true`). A stable release accepts only a stable
 `MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. It
 synchronizes that version into `Cargo.lock`, `version.txt`, and the checked-in
-`dist/` manifests before committing the release version on `main`. `wright version` /
-`wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
+`dist/` manifests before committing the release version on `main`. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
 banner, and the LSP `initialize` response carries `serverInfo.version`. Every
 `wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
 release archive's `version.json` is the authoritative stamp for a shipped

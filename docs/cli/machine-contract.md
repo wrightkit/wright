@@ -9,7 +9,7 @@
 | 0 | success | clean check, compiled artifact produced, reconstructed source produced |
 | 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade, non-Workshop `convert` input |
 | 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target` |
-| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation, unsupported platform for `update`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface) |
+| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation for `update self`, unsupported platform for `update self`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface) |
 | 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure |
 
 Exit codes are deterministic for identical inputs and configuration and are
