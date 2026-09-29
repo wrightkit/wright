@@ -2161,12 +2161,9 @@ dependencies = [
 name = "wright-language"
 version = "0.3.0"
 dependencies = [
- "libc",
  "serde",
- "serde_json",
  "url",
  "workshop-rs",
- "wright-analyzer",
  "wright-driver",
 ]
 

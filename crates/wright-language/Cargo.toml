@@ -5,19 +5,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Wright's editor-neutral language services: documents, diagnostics, hover, definition, references, completion, rename, semantic tokens."
+description = "Wright's editor-neutral language services: documents and diagnostics."
 
 [lints]
 workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
 url = "2"
-wright-analyzer.workspace = true
 wright-driver.workspace = true
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
-
-[dev-dependencies]
-libc.workspace = true
