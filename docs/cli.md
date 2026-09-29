@@ -32,9 +32,9 @@ See [lint configuration and findings](cli/lint.md).
 
 See [machine-readable CLI contracts](cli/machine-contract.md).
 
-## `wright update` (self-update)
+## `wright update` (maintenance)
 
-See [self-update](cli/update.md).
+See [update](cli/update.md).
 
 ## stdout / stderr ownership
 
