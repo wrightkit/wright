@@ -365,10 +365,11 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
         rules.len()
     );
     for rule in rules {
-        assert!(rule["effectiveSeverity"].is_string());
-        assert!(
-            rule.get("summary").is_none() && rule.get("knownLimits").is_none(),
-            "lint inlines only id and effectiveSeverity; full metadata is lintRules (#431)"
+        assert!(rule["id"].is_string() && rule["effectiveSeverity"].is_string());
+        assert_eq!(
+            rule.as_object().unwrap().len(),
+            2,
+            "lint inlines only id and effectiveSeverity; full metadata is lintRules (#431): {rule}"
         );
     }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());

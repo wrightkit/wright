@@ -88,9 +88,17 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         .iter()
         .find(|rule| rule["id"] == "min-wait-loop")
         .expect("lint lists every registered rule");
-    assert_eq!(lint_rule["effectiveSeverity"], "error");
-    assert!(lint_rule.get("summary").is_none());
-    assert!(lint_rules["rules"][0]["summary"].is_string());
+    assert_eq!(
+        lint_rule,
+        &serde_json::json!({ "id": "min-wait-loop", "effectiveSeverity": "error" })
+    );
+    let full_rule = lint_rules["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .expect("lintRules lists every registered rule");
+    assert!(full_rule["summary"].is_string());
     let configured_finding = lint["findings"]
         .as_array()
         .unwrap()
