@@ -429,7 +429,8 @@ impl<'a> ToolService<'a> {
                     serde_json::Value::Array(findings) => findings,
                     _ => Vec::new(),
                 };
-                let (findings, outcome) = selection.apply_findings(findings);
+                let (findings, outcome) = selection
+                    .apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
                 match outcome {
                     Some(outcome) => self.ok(json!({ "findings": findings, "selection": outcome })),
                     None => self.ok(serde_json::Value::Array(findings)),
@@ -501,7 +502,8 @@ impl<'a> ToolService<'a> {
             serde_json::Value::Array(findings) => findings,
             _ => Vec::new(),
         };
-        let (findings, outcome) = selection.apply_findings(findings);
+        let (findings, outcome) =
+            selection.apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
         let mut result = json!({
             "inputIdentity": self.loaded.input.identity,
             "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
@@ -586,7 +588,8 @@ impl<'a> ToolService<'a> {
                 })
             })
             .collect::<Vec<_>>();
-        let (findings, outcome) = selection.apply_findings(findings);
+        let (findings, outcome) =
+            selection.apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
         let mut result = json!({
             "exact": {
                 "emittedBytes": text.len(),

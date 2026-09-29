@@ -57,7 +57,7 @@ LINT OPTIONS:
 FINDING SELECTION (check, analyze, lint):
     --severity <LEVEL>  Report findings at or above a severity: error|warning|info
     --rule-id <ID>      Report findings from one lint rule id only
-    --file <PATH>       Report findings in one source file (resolved span.path)
+    --file <PATH>       Report findings in one source file (any spelling that resolves to it)
     --max <N>           Report at most N findings (withheld counts are shown)
 
 UPDATE OPTIONS:
@@ -145,8 +145,9 @@ pub(crate) struct SelectArgs {
     /// a usage error.
     #[arg(long, value_name = "ID")]
     pub(crate) rule_id: Option<String>,
-    /// Report findings located in this source file only (the resolved
-    /// span.path, e.g. `src/main.ws`).
+    /// Report findings located in this source file only; any spelling that
+    /// resolves to the same file (as passed, root-relative, or absolute)
+    /// selects it.
     #[arg(long, value_name = "PATH")]
     pub(crate) file: Option<String>,
     /// Report at most N findings; withheld findings are reported, never

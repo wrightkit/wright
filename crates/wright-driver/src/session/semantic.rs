@@ -245,7 +245,10 @@ impl CompilerSession {
                     serde_json::Value::Array(findings) => findings,
                     _ => Vec::new(),
                 };
-                let (findings, selection) = session.config.selection.apply_findings(findings);
+                let (findings, selection) = session
+                    .config
+                    .selection
+                    .apply_findings(findings, &crate::select::file_bases(&loaded.input));
                 let (rules, config, skipped) =
                     if let serde_json::Value::Object(mut object) = lint_rules {
                         (

@@ -583,7 +583,9 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     assert_eq!(envelope["result"]["selection"]["total"], 10);
     assert_eq!(envelope["result"]["selection"]["withheld"], 0);
 
-    // --file matches the resolved span.path exactly.
+    // --file selects by file identity: the reported span.path is
+    // root-relative, and the absolute input path exactly as passed selects
+    // the same file.
     let reported_path = parse_json(&run(&["lint", path, "-f", "json"]).stdout)
         ["result"]["findings"][0]["span"]["path"]
         .as_str()
@@ -592,6 +594,13 @@ fn lint_selection_filters_findings_and_reports_withheld() {
     let output = run(&["lint", path, "--file", &reported_path, "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 10);
+    let output = run(&["lint", path, "--file", path, "-f", "json"]);
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(
+        envelope["result"]["findings"].as_array().unwrap().len(),
+        10,
+        "the input path as passed resolves to the reported root-relative span.path"
+    );
     let output = run(&["lint", path, "--file", "other.ws", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     assert!(

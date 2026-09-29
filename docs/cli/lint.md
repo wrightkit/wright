@@ -30,8 +30,10 @@ or the exit code, which always reflect the complete set:
   threshold (`error` reports errors only, `info` reports everything).
 * `--rule-id <ID>`: report findings produced by one rule id. An unknown id
   is a usage error (exit 2), never a silent empty result.
-* `--file <PATH>`: report findings located in one source file, matched
-  exactly against the resolved `span.path`.
+* `--file <PATH>`: report findings located in one source file. The reported
+  `span.path` spelling differs per surface (root-relative findings,
+  cwd-relative diagnostics), so any spelling that resolves to the same file —
+  as passed, root-relative, or absolute — selects it.
 * `--max <N>`: report at most N findings.
 
 When `max` drops findings, the result reports how many were withheld: the

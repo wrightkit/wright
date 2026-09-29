@@ -100,8 +100,10 @@ the successful `result` payload.
   warnings, `info` everything.
 * `rule`: one lint rule id (the finding `code`). An unknown id is a
   structured `invalid-selection` error, never a silent empty result.
-* `file`: one source file, matched exactly against the resolved `span.path`.
-  `costEstimate` findings carry no span, so `file` selects nothing there.
+* `file`: one source file. The reported `span.path` spelling differs per
+  surface, so the argument resolves to the same canonical file — the path as
+  passed, root-relative, or absolute spellings all select it. `costEstimate`
+  findings carry no span, so `file` selects nothing there.
 * `max`: a bound on the reported count, applied after filtering.
 
 The CLI options `--severity`, `--rule-id`, `--file`, and `--max` on `lint`,

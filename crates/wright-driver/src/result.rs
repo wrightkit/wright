@@ -29,7 +29,7 @@ pub struct Envelope<T: Serialize> {
     /// Diagnostics remaining after selection; `ok`/`exit` always reflect the
     /// full set, never the selected remainder.
     pub diagnostics: Vec<Diagnostic>,
-    /// Present when a finding selection reduced `diagnostics` (#430).
+    /// Present when a finding selection was applied to `diagnostics` (#430).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<crate::select::SelectionOutcome>,
     pub result: T,
