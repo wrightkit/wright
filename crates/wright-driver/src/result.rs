@@ -157,3 +157,47 @@ pub fn version_info() -> VersionInfo {
         contract: RESULT_CONTRACT.to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::compact_lint_rules;
+    use serde_json::json;
+
+    #[test]
+    fn compact_lint_rules_keeps_only_id_and_effective_severity() {
+        let rules = json!([
+            {
+                "id": "min-wait-loop",
+                "defaultSeverity": "warning",
+                "effectiveSeverity": "error",
+                "enabled": false,
+                "summary": "loop body waits at the workshop minimum rate",
+                "rationale": "…",
+                "documentation": "…",
+                "knownLimits": "…",
+                "evidence": "static-indicator",
+                "tags": ["stability"],
+                "kind": "builtin"
+            }
+        ]);
+        assert_eq!(
+            compact_lint_rules(Some(&rules)),
+            json!([{ "id": "min-wait-loop", "effectiveSeverity": "error" }])
+        );
+    }
+
+    #[test]
+    fn compact_lint_rules_drops_malformed_entries() {
+        for rules in [
+            json!(null),
+            json!("not-an-array"),
+            json!(["not-an-object"]),
+            json!([{ "id": "min-wait-loop" }]),
+            json!([{ "id": "min-wait-loop", "effectiveSeverity": null }]),
+            json!([{ "id": 3, "effectiveSeverity": "warning" }]),
+        ] {
+            assert_eq!(compact_lint_rules(Some(&rules)), json!([]), "{rules}");
+        }
+        assert_eq!(compact_lint_rules(None), json!([]));
+    }
+}
