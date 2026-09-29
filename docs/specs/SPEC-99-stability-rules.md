@@ -194,7 +194,8 @@ indicator). No new `heuristic`-class rules are added in this set.
 
 - **REQ-006** [documentation and evidence labeling]: Each new rule's
   `documentation` and `known_limits` (rendered through the #98 lint surface:
-  the `rules` envelope entries and the tool/agent `lintRules` response) state
+  the tool/agent `lintRules` response; `lint`'s `rules` entries carry only
+  `id`/`effectiveSeverity` after #431) state
   the rationale tied to the evidence case, the evidence classification, and the
   known limitations: loop coverage is `While` + `For Global Variable` only (the
   loop analysis does not model `For Player Variable` loops); `repeated-value`

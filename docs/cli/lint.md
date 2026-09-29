@@ -30,11 +30,12 @@ any condition.
 
 The `lint` result envelope carries `input_identity` (the SHA-256 source
 identity; the tool/agent API exposes the same value as `inputIdentity`),
-`program`, `rules`, `config`, and `findings`. `rules` lists each registered
-rule's stable `id` and `effectiveSeverity` — enough to interpret a finding's
-`code` and `severity`. Full rule metadata (summary, rationale, documentation,
-known limits, evidence class, tags) is served once by the `lintRules` agent
-operation rather than inlined into every `lint` result (#431):
+`program`, `rules`, `config`, `findings`, and `skipped`. `rules` lists each
+registered rule's stable `id` and `effectiveSeverity` — enough to interpret a
+finding's `code` and `severity`. Full rule metadata (summary, rationale,
+documentation, known limits, evidence class, tags) is served once by the
+`lintRules` agent operation rather than inlined into every `lint` result
+(#431):
 
 ```json
 {
@@ -63,7 +64,8 @@ operation rather than inlined into every `lint` result (#431):
         "message": "loop body waits at the workshop minimum rate; ...",
         "span": { "file": 0, "path": "program.txt", "start": { "line": 28, "col": 9 }, "end": { "line": 31, "col": 13 } }
       }
-    ]
+    ],
+    "skipped": []
   }
 }
 ```
@@ -86,7 +88,7 @@ The core workflows have separate contracts:
   exhaustive structural/semantic view. These facts can inform future lint
   rules without making analysis a view of the registry.
 
-Analysis findings (`lint` and the tool/agent `getFindings`/`lint` responses)
+Analysis findings (`lint` and the tool/agent `findings`/`lint` responses)
 carry an `evidence` field classifying how strongly the finding is supported
 (`exact`, `static-indicator`, `heuristic`, `runtime-validated`).
 
