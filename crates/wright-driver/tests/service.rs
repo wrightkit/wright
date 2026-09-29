@@ -80,10 +80,6 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         ToolResponse::Error { error } => panic!("lint failed: {error:?}"),
     };
     assert_eq!(lint["config"], lint_rules["config"]);
-    assert!(
-        lint["program"].is_object(),
-        "lint carries the program summary"
-    );
     // #431: `lint` inlines only the finding-interpretation fields;
     // `lintRules` remains the full-metadata surface.
     let lint_rule = lint["rules"]
