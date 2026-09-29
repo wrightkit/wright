@@ -46,24 +46,43 @@ pub(super) fn visit_action_roots<'a>(action: &'a Action, visit: &mut impl FnMut(
     }
 }
 
+/// Visit a value tree in pre-order. `path` passed to `visit` is the child's
+/// position chain matching `Program::condition_value_span` /
+/// `Program::action_argument_value_span`: `Array`/`Call` children by index,
+/// `Vector` components as 0/1/2, a `PlayerVariable` player at 0.
 pub(super) fn visit_value_tree<'a>(
     value: &'a Value,
     parent: Option<usize>,
-    visit: &mut impl FnMut(&'a Value, Option<usize>) -> usize,
+    visit: &mut impl FnMut(&'a Value, Option<usize>, &[usize]) -> usize,
 ) {
-    let parent = Some(visit(value, parent));
+    let mut path = Vec::new();
+    visit_value_tree_at(value, parent, &mut path, visit);
+}
+
+fn visit_value_tree_at<'a>(
+    value: &'a Value,
+    parent: Option<usize>,
+    path: &mut Vec<usize>,
+    visit: &mut impl FnMut(&'a Value, Option<usize>, &[usize]) -> usize,
+) {
+    let parent = Some(visit(value, parent, path));
+    let mut visit_child = |index: usize, value: &'a Value| {
+        path.push(index);
+        visit_value_tree_at(value, parent, path, visit);
+        path.pop();
+    };
     match value {
         Value::Array(values) | Value::Call { args: values, .. } => {
-            for value in values {
-                visit_value_tree(value, parent, visit);
+            for (index, value) in values.iter().enumerate() {
+                visit_child(index, value);
             }
         }
         Value::Vector { x, y, z } => {
-            for value in [x, y, z] {
-                visit_value_tree(value, parent, visit);
+            for (index, value) in [x, y, z].iter().enumerate() {
+                visit_child(index, value);
             }
         }
-        Value::PlayerVariable { player, .. } => visit_value_tree(player, parent, visit),
+        Value::PlayerVariable { player, .. } => visit_child(0, player),
         _ => {}
     }
 }

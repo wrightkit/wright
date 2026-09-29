@@ -25,12 +25,16 @@ impl SymbolId {
 fn append_named_symbols<'a>(
     symbols: &mut Vec<Symbol>,
     program: &Program,
-    named: impl Iterator<Item = (SymbolKind, &'a str)>,
+    named: impl Iterator<Item = (SymbolKind, &'a str, usize)>,
 ) {
-    for (kind, name) in named {
-        let prefix = kind.declaration_prefix();
+    for (kind, name, index) in named {
+        let occurrence = match kind {
+            SymbolKind::GlobalVariable => program.global_variable_name_span(index),
+            SymbolKind::PlayerVariable => program.player_variable_name_span(index),
+            SymbolKind::Subroutine => program.subroutine_name_span(index),
+            SymbolKind::Rule => None,
+        };
         let id = SymbolId::from_index(symbols.len());
-        let occurrence = declaration_span(program, prefix, name);
         symbols.push(Symbol {
             id,
             kind,
@@ -126,7 +130,7 @@ pub(super) fn value_identity_map(program: &Program) -> HashMap<usize, ValueId> {
     let mut identities = HashMap::new();
     for rule in &program.rules {
         for condition in &rule.conditions {
-            visit_value_tree(&condition.value, None, &mut |value, _| {
+            visit_value_tree(&condition.value, None, &mut |value, _, _| {
                 let id = identities.len();
                 identities.insert((value as *const Value) as usize, id);
                 0
@@ -134,7 +138,7 @@ pub(super) fn value_identity_map(program: &Program) -> HashMap<usize, ValueId> {
         }
         for action in &rule.actions {
             visit_action_roots(action, &mut |_, root| {
-                visit_value_tree(root, None, &mut |value, _| {
+                visit_value_tree(root, None, &mut |value, _, _| {
                     let id = identities.len();
                     identities.insert((value as *const Value) as usize, id);
                     0
@@ -154,18 +158,27 @@ impl SemanticIndex {
             program
                 .global_variables
                 .iter()
-                .map(|variable| (SymbolKind::GlobalVariable, variable.name.as_str()))
+                .enumerate()
+                .map(|(index, variable)| {
+                    (SymbolKind::GlobalVariable, variable.name.as_str(), index)
+                })
                 .chain(
                     program
                         .player_variables
                         .iter()
-                        .map(|variable| (SymbolKind::PlayerVariable, variable.name.as_str())),
+                        .enumerate()
+                        .map(|(index, variable)| {
+                            (SymbolKind::PlayerVariable, variable.name.as_str(), index)
+                        }),
                 )
                 .chain(
                     program
                         .subroutines
                         .iter()
-                        .map(|subroutine| (SymbolKind::Subroutine, subroutine.name.as_str())),
+                        .enumerate()
+                        .map(|(index, subroutine)| {
+                            (SymbolKind::Subroutine, subroutine.name.as_str(), index)
+                        }),
                 ),
         );
         for (rule, data) in program.rules.iter().enumerate() {
@@ -175,7 +188,9 @@ impl SemanticIndex {
                 kind: SymbolKind::Rule,
                 name: data.name.clone(),
                 span: program.rule_span(rule),
-                occurrence: program.rule_span(rule),
+                occurrence: program
+                    .rule_name_span(rule)
+                    .or_else(|| program.rule_span(rule)),
                 rule: Some(rule),
             });
         }
@@ -192,7 +207,7 @@ impl SemanticIndex {
                     &value.value,
                     rule,
                     None,
-                    program.condition_span(rule, condition),
+                    ValueRoot::Condition(condition),
                     program,
                 );
             }
@@ -255,24 +270,21 @@ impl SemanticIndex {
                             .and_then(|action| program.action_span(rule, action))
                     });
                     let implicit_modify = reference.value.is_none()
-                        && reference.span.is_some()
-                        && reference.span == action_span;
+                        && reference
+                            .rule
+                            .zip(reference.action)
+                            .and_then(|(rule, action)| {
+                                program
+                                    .rules
+                                    .get(rule)
+                                    .and_then(|rule| rule.actions.get(action))
+                            })
+                            .is_some_and(is_modify_action);
                     let current = if implicit_modify { 1 } else { *ordinal };
                     *ordinal += 1;
-                    reference
-                        .span
-                        .or_else(|| {
-                            action_span.or_else(|| {
-                                reference.rule.and_then(|rule| {
-                                    reference
-                                        .value
-                                        .and_then(|value| program.condition_span(rule, value))
-                                })
-                            })
-                        })
-                        .and_then(|span| {
-                            occurrence_in_sources(sources, span, &symbol.name, false, current)
-                        })
+                    reference.span.or(action_span).and_then(|span| {
+                        occurrence_in_sources(sources, span, &symbol.name, false, current)
+                    })
                 }
             };
             reference.span = span;
@@ -377,7 +389,7 @@ impl SemanticIndex {
                     Some(rule),
                     None,
                     None,
-                    source_occurrence(program, program.rule_span(rule), name, true),
+                    program.rule_event_name_span(rule),
                 );
             }
         }
@@ -389,7 +401,7 @@ impl SemanticIndex {
         action_id: ActionId,
         program: &Program,
     ) {
-        let span = program.action_span(rule, action_id);
+        let identifier = program.action_identifier_span(rule, action_id);
         let variable = match action {
             Action::SetGlobalVariable { variable, .. } => {
                 Some((SymbolKind::GlobalVariable, variable, false))
@@ -419,7 +431,7 @@ impl SemanticIndex {
                     Some(rule),
                     Some(action_id),
                     None,
-                    source_occurrence(program, span, name, true),
+                    identifier,
                 );
                 if reads_old_value {
                     self.push(
@@ -428,7 +440,7 @@ impl SemanticIndex {
                         Some(rule),
                         Some(action_id),
                         None,
-                        span,
+                        identifier,
                     );
                 }
             }
@@ -442,7 +454,7 @@ impl SemanticIndex {
                         Some(rule),
                         Some(action_id),
                         None,
-                        span,
+                        identifier,
                     );
                 }
             }
@@ -457,7 +469,10 @@ impl SemanticIndex {
                 value,
                 rule,
                 Some(action_id),
-                program.action_argument_span(rule, action_id, argument),
+                ValueRoot::Argument {
+                    action: action_id,
+                    argument,
+                },
                 program,
             );
         });
@@ -467,12 +482,13 @@ impl SemanticIndex {
         value: &Value,
         rule: RuleId,
         action: Option<ActionId>,
-        span: Option<Span>,
+        root: ValueRoot,
         program: &Program,
     ) {
-        visit_value_tree(value, None, &mut |value, _| {
+        visit_value_tree(value, None, &mut |value, _, path| {
             let value_id = self.next_value_id;
             self.next_value_id += 1;
+            let span = root.span(program, rule, path);
             match value {
                 Value::GlobalVariable(name) => {
                     if let Some(symbol) = self.find_symbol(SymbolKind::GlobalVariable, name) {
@@ -482,7 +498,7 @@ impl SemanticIndex {
                             Some(rule),
                             action,
                             Some(value_id),
-                            source_occurrence(program, span, name, false),
+                            span,
                         );
                     }
                 }
@@ -494,7 +510,7 @@ impl SemanticIndex {
                             Some(rule),
                             action,
                             Some(value_id),
-                            source_occurrence(program, span, variable, false),
+                            span,
                         );
                     }
                 }
@@ -505,19 +521,32 @@ impl SemanticIndex {
     }
 }
 
-fn declaration_span(program: &Program, prefix: &str, name: &str) -> Option<Span> {
-    for file_index in 0..64 {
-        let file = workshop_rs::source::FileId::from_index(file_index);
-        let Some(source) = program.source(file) else {
-            continue;
-        };
-        if let Some(span) =
-            declaration_span_in_source(file, source.text(), std::slice::from_ref(&prefix), name)
-        {
-            return Some(span);
+/// The provenance root a value tree hangs from: a rule condition or one action
+/// argument. Paths under it address nested values through
+/// `Program::condition_value_span` / `Program::action_argument_value_span`.
+#[derive(Clone, Copy)]
+enum ValueRoot {
+    Condition(usize),
+    Argument { action: usize, argument: usize },
+}
+
+impl ValueRoot {
+    fn span(self, program: &Program, rule: usize, path: &[usize]) -> Option<Span> {
+        match self {
+            Self::Condition(condition) => program.condition_value_span(rule, condition, path),
+            Self::Argument { action, argument } => {
+                program.action_argument_value_span(rule, action, argument, path)
+            }
         }
     }
-    None
+}
+
+fn is_modify_action(action: &Action) -> bool {
+    match action {
+        Action::ModifyGlobalVariable { .. } | Action::ModifyPlayerVariable { .. } => true,
+        Action::Disabled { action } => is_modify_action(action),
+        _ => false,
+    }
 }
 
 fn declaration_span_in_sources(
@@ -671,19 +700,4 @@ fn is_code_position(chars: &[char], position: usize) -> bool {
         }
     }
     !quoted
-}
-
-pub(super) fn source_occurrence(
-    program: &Program,
-    span: Option<Span>,
-    name: &str,
-    before_assignment: bool,
-) -> Option<Span> {
-    let span = span?;
-    let Some(source_doc) = program.source(span.file) else {
-        return Some(span);
-    };
-    Some(
-        find_occurrence(source_doc.text(), span, name, before_assignment, 0, false).unwrap_or(span),
-    )
 }
