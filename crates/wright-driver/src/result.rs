@@ -96,6 +96,27 @@ pub struct LintResult {
     pub skipped: serde_json::Value,
 }
 
+/// `lint` results keep only the per-rule identity needed to interpret a
+/// finding — the stable id and its effective severity (#431). Full rule
+/// metadata (summary, rationale, documentation, known limits, evidence, tags)
+/// is served by the `lintRules` operation instead of being inlined per call.
+pub(crate) fn compact_lint_rules(rules: Option<&serde_json::Value>) -> serde_json::Value {
+    let Some(rules) = rules.and_then(serde_json::Value::as_array) else {
+        return serde_json::json!([]);
+    };
+    serde_json::Value::Array(
+        rules
+            .iter()
+            .map(|rule| {
+                serde_json::json!({
+                    "id": rule["id"],
+                    "effectiveSeverity": rule["effectiveSeverity"],
+                })
+            })
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConvertTarget {

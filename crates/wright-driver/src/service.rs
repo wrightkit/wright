@@ -61,9 +61,11 @@ pub enum ToolRequest {
     Findings,
     /// Persistent Workshop object facts, separate from lint diagnostics.
     PersistentObjects,
-    /// Lint findings plus rule metadata and effective configuration (#98).
+    /// Lint findings plus per-rule id/effective severity and the effective
+    /// configuration (#98); `lintRules` serves full rule metadata (#431).
     Lint,
-    /// The registered lint rules and the effective lint configuration.
+    /// The registered lint rules with full metadata and the effective lint
+    /// configuration.
     LintRules,
     /// The subroutine call graph (caller rules → callee subroutines).
     CallGraph,
@@ -439,9 +441,11 @@ impl<'a> ToolService<'a> {
         self.lint_semantic.as_ref().unwrap_or(&self.semantic)
     }
 
-    /// `lint`: rule metadata, effective configuration, and findings over the
-    /// loaded program through the same semantic-service path as the CLI
-    /// `lint` workflow (no duplicated rule execution, #98).
+    /// `lint`: per-rule id and effective severity, effective configuration,
+    /// and findings over the loaded program through the same semantic-service
+    /// path as the CLI `lint` workflow (no duplicated rule execution, #98).
+    /// Full rule metadata is served once by `lintRules` rather than inlined
+    /// into every `lint` response (#431).
     fn lint(&self) -> ToolResponse {
         let service = self.configured_semantic();
         let lint_rules = match service.handle(&Request::LintRules) {
@@ -455,7 +459,7 @@ impl<'a> ToolService<'a> {
         crate::session::resolve_span_paths(&mut findings, &self.loaded);
         self.ok(json!({
             "inputIdentity": self.loaded.input.identity,
-            "rules": lint_rules.get("rules").cloned().unwrap_or_else(|| json!([])),
+            "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
             "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
             "findings": findings,
             "skipped": lint_rules.get("skipped").cloned().unwrap_or_else(|| json!([])),

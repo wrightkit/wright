@@ -265,8 +265,9 @@ indicator). No new `heuristic`-class rules are added in this set.
   plugin loading remains out of scope.
 - **#98 lint surface** ([`../cli.md`](../cli.md) "`wright lint` and the lint configuration";
   `CompilerSession::lint`; `ToolRequest::Lint`/`LintRules`): structured findings
-  with `evidence`, rule metadata in the result envelope, deterministic config
-  across CLI and tool/agent paths. Constraint: new rules surface through the
+  with `evidence`, per-rule id/effective severity in the result envelope (#431;
+  full metadata via `lintRules`), deterministic config across CLI and
+  tool/agent paths. Constraint: new rules surface through the
   existing path with no new protocol surface.
 - **EvidenceClass contract** (`../../crates/wright-analyzer/src/analysis.rs`):
   `exact` / `static-indicator` / `heuristic` / `runtime-validated` (reserved).

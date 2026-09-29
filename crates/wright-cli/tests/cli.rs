@@ -364,6 +364,13 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
             .len(),
         rules.len()
     );
+    for rule in rules {
+        assert!(rule["effectiveSeverity"].is_string());
+        assert!(
+            rule.get("summary").is_none() && rule.get("knownLimits").is_none(),
+            "lint inlines only id and effectiveSeverity; full metadata is lintRules (#431)"
+        );
+    }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -454,12 +461,10 @@ fn lint_rule_flags_control_findings() {
             .all(|finding| finding["code"] != "min-wait-loop"),
         "the disabled rule must produce no findings"
     );
-    let rules = envelope["result"]["rules"].as_array().unwrap();
-    let min_wait = rules
-        .iter()
-        .find(|rule| rule["id"] == "min-wait-loop")
-        .unwrap();
-    assert_eq!(min_wait["enabled"], false);
+    assert_eq!(
+        envelope["result"]["config"]["rules"]["min-wait-loop"]["enabled"],
+        false
+    );
 
     // --rule-severity overrides the effective severity of a rule. The
     // control-flow fixture produces no expensive-loop-check findings, so

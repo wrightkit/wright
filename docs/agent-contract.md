@@ -82,8 +82,8 @@ the successful `result` payload.
 | `cfg` | required `rule` | Control-flow graph for the rule id |
 | `findings` | none | Wright static-analysis findings |
 | `persistentObjects` | none | Persistent Workshop object facts |
-| `lint` | none | Lint findings, rule metadata, and effective configuration |
-| `lintRules` | none | Registered lint rules and effective configuration |
+| `lint` | none | Lint findings, per-rule id/effective severity, and effective configuration |
+| `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | none | Subroutine call graph |
 | `costEstimate` | none | Exact generated-resource counts and separate static findings |
 | `targetMetadata` | none | Canonical target/catalog metadata |
@@ -126,7 +126,8 @@ operations whose requests remain valid for existing clients. Removing or
 renaming an operation or field, changing a field's type or meaning, or changing
 the response/error model requires a new major contract such as
 `wright-agent/v2`; the v1 schema and its compatibility tests remain in place.
-The CLI result envelope has its independent `wright-result/v1` version.
+The CLI result envelope has its independent `wright-result/v1` version; its
+evolution policy is defined in [`docs/cli/machine-contract.md`](cli/machine-contract.md).
 
 The optional guide distributed by `wrightkit/skills` teaches clients to
 discover and use these capabilities. It is not required to expose, execute, or
