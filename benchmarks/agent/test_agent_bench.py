@@ -15,6 +15,7 @@ WRIGHT = os.environ.get("WRIGHT_BIN", str(agent_bench.ROOT / "target/debug/wrigh
 @unittest.skipUnless(Path(WRIGHT).is_file(), "build wright first or set WRIGHT_BIN")
 class AgentBenchTest(unittest.TestCase):
     def setUp(self):
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
         self.out = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target"))
         self.addCleanup(shutil.rmtree, self.out, True)
 

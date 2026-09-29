@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -72,7 +73,10 @@ def run_check(check: dict, workspace: Path, entry: Path, wright: str, state: dic
         text = path.read_text() if path.is_file() else ""
         texts = check["text"] if isinstance(check["text"], list) else [check["text"]]
         count = sum(text.count(t) for t in texts)
-        passed = count >= check.get("min", 1) if kind == "contains" else count == 0
+        if kind == "contains":
+            passed = count >= check.get("min", 1) and count <= check.get("max", count)
+        else:
+            passed = count == 0
         return check_result(check, passed, f"{count} occurrence(s) in {check['file']}")
     if kind == "answer":
         path = workspace / "answer.json"
@@ -181,11 +185,22 @@ def run_trial(scenario: dict, condition: str, args: argparse.Namespace, out: Pat
     else:
         env["PATH"] = baseline_path(env["PATH"])
     start = time.monotonic()
+    proc = subprocess.Popen(
+        args.agent_cmd, shell=True, cwd=workspace, env=env, text=True,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
     try:
-        proc = subprocess.run(args.agent_cmd, shell=True, cwd=workspace, env=env, input=prompt, text=True, timeout=args.timeout, capture_output=True)
-        agent_exit, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
+        stdout, stderr = proc.communicate(input=prompt, timeout=args.timeout)
+        agent_exit = proc.returncode
     except subprocess.TimeoutExpired:
-        agent_exit, stdout, stderr = None, "", "timeout"
+        agent_exit = None
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+        stderr = f"{stderr}\ntimeout" if stderr else "timeout"
     seconds = round(time.monotonic() - start, 1)
     (out / "agent.log").write_text(f"exit={agent_exit}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n")
     wright_version = subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip()

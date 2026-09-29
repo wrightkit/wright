@@ -13,6 +13,6 @@
     {"id": "streak-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Set Player Variable(Event Player, streak, 0);"},
     {"id": "elimination-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Modify Player Variable(Attacker, streak, Add, 1);"},
     {"id": "winner-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Declare Player Victory(Event Player);"},
-    {"id": "rule-count-preserved", "kind": "contains", "file": "mode.ws", "text": "rule (", "min": 6}
+    {"id": "rule-count-preserved", "kind": "contains", "file": "mode.ws", "text": "rule (", "min": 6, "max": 6}
   ]
 }

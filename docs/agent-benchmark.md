@@ -47,7 +47,7 @@ to form a passing solution). Families: `greenfield`, `understanding`,
 Check kinds: `check` (`wright check` reports no errors), `lint` (at most `max`
 findings with lint `code`), `symbols` (at least `min` symbols of `symbolKind`
 via `wright serve`), `contains` / `absent` (source text, `text` may be a list
-of alternatives, `min` occurrences), and `answer` (`answer.json` key equals
+of alternatives, `min`/`max` occurrences), and `answer` (`answer.json` key equals
 `expected`). `layer` names what a failure implicates: `agent` for a requirement
 the produced work does not meet, or `workshop-rs` / `opy-rs` / `deltin-rs` /
 `wright` for validity or analysis results owned by that layer.
