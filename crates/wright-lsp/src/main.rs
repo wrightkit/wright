@@ -7,21 +7,16 @@ use std::str::FromStr;
 
 use lsp_types::notification::{Notification, PublishDiagnostics};
 use lsp_types::{
-    CompletionItem as LspCompletionItem, CompletionItemKind, CompletionParams,
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentChanges, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover as LspHover, HoverContents, InitializeParams, InitializeResult,
-    Location, MarkupContent, MarkupKind, OptionalVersionedTextDocumentIdentifier,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
     Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams, Range as LspRange,
-    ReferenceParams, RenameParams, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
-    SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    TextDocumentEdit, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextEdit, Uri, WorkDoneProgressOptions, WorkspaceEdit,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, Uri,
 };
 use serde_json::Value;
 
-use wright_language::document::{Document, Position, Range};
-use wright_language::{LanguageService, SemanticToken as WtToken};
+use wright_language::LanguageService;
+use wright_language::document::{Document, Range};
 
 type PublicationOwnership = BTreeMap<String, BTreeSet<String>>;
 
@@ -115,130 +110,6 @@ fn run() -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didSave" => {}
-            "textDocument/hover" => {
-                let params: TextDocumentPositionParams = parse_params(params)?;
-                let position = convert_position(params.position);
-                let result = service
-                    .hover(&params.text_document.uri.to_string(), position)
-                    .map(|hover| LspHover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: hover.contents,
-                        }),
-                        range: hover.range.map(convert_range),
-                    });
-                write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
-            }
-            "textDocument/definition" => {
-                let params: GotoDefinitionParams = parse_params(params)?;
-                let position = convert_position(params.text_document_position_params.position);
-                let result = service
-                    .definition(
-                        &params
-                            .text_document_position_params
-                            .text_document
-                            .uri
-                            .to_string(),
-                        position,
-                    )
-                    .map(|loc| {
-                        GotoDefinitionResponse::Scalar(Location {
-                            uri: source_to_uri(&loc.source),
-                            range: convert_range(loc.range),
-                        })
-                    });
-                write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
-            }
-            "textDocument/references" => {
-                let params: ReferenceParams = parse_params(params)?;
-                let position = convert_position(params.text_document_position.position);
-                let uri = params.text_document_position.text_document.uri;
-                let result: Vec<Location> = service
-                    .references(&uri.to_string(), position)
-                    .into_iter()
-                    .map(|loc| Location {
-                        uri: source_to_uri(&loc.source),
-                        range: convert_range(loc.range),
-                    })
-                    .collect();
-                write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
-            }
-            "textDocument/completion" => {
-                let params: CompletionParams = parse_params(params)?;
-                let position = convert_position(params.text_document_position.position);
-                let uri = params.text_document_position.text_document.uri;
-                let items: Vec<LspCompletionItem> = service
-                    .completion(&uri.to_string(), position)
-                    .into_iter()
-                    .map(|item| LspCompletionItem {
-                        label: item.label,
-                        kind: Some(completion_kind(&item.kind)),
-                        detail: item.detail,
-                        ..Default::default()
-                    })
-                    .collect();
-                write_response(&mut writer, id, serde_json::to_value(items).unwrap())?;
-            }
-            "textDocument/rename" => {
-                let params: RenameParams = parse_params(params)?;
-                let position = convert_position(params.text_document_position.position);
-                let uri = params.text_document_position.text_document.uri.to_string();
-                let rename = service.rename(&uri, position, &params.new_name);
-                if rename.ok {
-                    let mut by_source: BTreeMap<String, Vec<wright_language::RenameEdit>> =
-                        BTreeMap::new();
-                    for edit in rename.edits {
-                        by_source.entry(edit.source.clone()).or_default().push(edit);
-                    }
-                    let document_changes = DocumentChanges::Edits(
-                        by_source
-                            .into_iter()
-                            .map(|(source, edits)| TextDocumentEdit {
-                                text_document: OptionalVersionedTextDocumentIdentifier {
-                                    uri: source_to_uri(&source),
-                                    version: source_version(&service, &source),
-                                },
-                                edits: edits
-                                    .into_iter()
-                                    .map(|edit| {
-                                        lsp_types::OneOf::Left(TextEdit {
-                                            range: convert_range(edit.range),
-                                            new_text: edit.new_text,
-                                        })
-                                    })
-                                    .collect(),
-                            })
-                            .collect(),
-                    );
-                    let workspace_edit = WorkspaceEdit {
-                        document_changes: Some(document_changes),
-                        ..Default::default()
-                    };
-                    write_response(
-                        &mut writer,
-                        id,
-                        serde_json::to_value(workspace_edit).unwrap(),
-                    )?;
-                } else {
-                    let detail = rename.diagnostics.join("; ");
-                    write_error(
-                        &mut writer,
-                        id,
-                        -32602,
-                        &format!("rename refused: {detail}"),
-                    )?;
-                }
-            }
-            "textDocument/semanticTokens/full" => {
-                let params: SemanticTokensParams = parse_params(params)?;
-                let uri = params.text_document.uri;
-                let tokens = service.semantic_tokens(&uri.to_string());
-                let result = SemanticTokens {
-                    result_id: None,
-                    data: encode_semantic_tokens(&tokens),
-                };
-                write_response(&mut writer, id, serde_json::to_value(result).unwrap())?;
-            }
             _ => {
                 if id.is_some() {
                     write_response(&mut writer, id, Value::Null)?;
@@ -260,39 +131,6 @@ fn initialize_result() -> InitializeResult {
                     ..Default::default()
                 },
             )),
-            hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
-            definition_provider: Some(lsp_types::OneOf::Left(true)),
-            references_provider: Some(lsp_types::OneOf::Left(true)),
-            completion_provider: Some(lsp_types::CompletionOptions {
-                trigger_characters: None,
-                resolve_provider: Some(false),
-                ..Default::default()
-            }),
-            rename_provider: Some(lsp_types::OneOf::Left(true)),
-            semantic_tokens_provider: Some(
-                SemanticTokensServerCapabilities::SemanticTokensOptions(
-                    lsp_types::SemanticTokensOptions {
-                        work_done_progress_options: WorkDoneProgressOptions {
-                            work_done_progress: None,
-                        },
-                        legend: SemanticTokensLegend {
-                            token_types: vec![
-                                "keyword".into(),
-                                "variable".into(),
-                                "identifier".into(),
-                                "string".into(),
-                                "number".into(),
-                                "operator".into(),
-                                "macro".into(),
-                                "attribute".into(),
-                            ],
-                            token_modifiers: vec![],
-                        },
-                        range: Some(false),
-                        full: Some(SemanticTokensFullOptions::Bool(true)),
-                    },
-                ),
-            ),
             ..Default::default()
         },
         server_info: Some(ServerInfo {
@@ -339,18 +177,6 @@ fn write_response(writer: &mut impl Write, id: Option<Value>, result: Value) -> 
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, String> {
     serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())
-}
-
-fn write_error(
-    writer: &mut impl Write,
-    id: Option<Value>,
-    code: i64,
-    message: &str,
-) -> Result<(), String> {
-    write_msg(
-        writer,
-        serde_json::json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }),
-    )
 }
 
 fn publish_affected_diagnostics(
@@ -456,13 +282,6 @@ fn source_version(service: &LanguageService, source: &str) -> Option<i32> {
         .map(|d| d.version)
 }
 
-fn convert_position(position: LspPosition) -> Position {
-    Position {
-        line: position.line,
-        character: position.character,
-    }
-}
-
 #[allow(deprecated)]
 fn initialize_root(params: &InitializeParams) -> Option<PathBuf> {
     if let Some(uri) = &params.root_uri {
@@ -504,50 +323,4 @@ fn convert_range(range: Range) -> LspRange {
             character: range.end.character,
         },
     }
-}
-
-fn completion_kind(kind: &str) -> CompletionItemKind {
-    match kind {
-        "keyword" => CompletionItemKind::KEYWORD,
-        "globalVariable" | "playerVariable" | "variable" => CompletionItemKind::VARIABLE,
-        "subroutine" | "function" => CompletionItemKind::FUNCTION,
-        "rule" => CompletionItemKind::CLASS,
-        _ => CompletionItemKind::TEXT,
-    }
-}
-
-fn encode_semantic_tokens(tokens: &[WtToken]) -> Vec<lsp_types::SemanticToken> {
-    let mut encoded = Vec::new();
-    let mut prev_line = 0u32;
-    let mut prev_char = 0u32;
-
-    for token in tokens {
-        let delta_line = token.line.saturating_sub(prev_line);
-        let delta_start = if delta_line == 0 {
-            token.character.saturating_sub(prev_char)
-        } else {
-            token.character
-        };
-        let token_type_index = match token.token_type.as_str() {
-            "keyword" => 0,
-            "variable" => 1,
-            "identifier" => 2,
-            "string" => 3,
-            "number" => 4,
-            "operator" => 5,
-            "macro" => 6,
-            "attribute" => 7,
-            _ => 2,
-        };
-        encoded.push(lsp_types::SemanticToken {
-            delta_line,
-            delta_start,
-            length: token.length,
-            token_type: token_type_index,
-            token_modifiers_bitset: 0,
-        });
-        prev_line = token.line;
-        prev_char = token.character;
-    }
-    encoded
 }

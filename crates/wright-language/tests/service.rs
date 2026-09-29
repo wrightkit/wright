@@ -1,57 +1,41 @@
 use std::path::PathBuf;
 
 use wright_language::LanguageService;
-use wright_language::document::{Document, Position};
+use wright_language::document::Document;
 
 fn service() -> LanguageService {
     LanguageService::new(PathBuf::from("."))
 }
 
 #[test]
-fn opy_language_service_reports_provider_boundary_without_static_fallback() {
+fn source_documents_report_provider_boundary_without_static_fallback() {
     let mut service = service();
-    let document = Document::new(
-        "file:///workspace/main.opy".to_string(),
-        "globalvar score = 0\n".to_string(),
-        PathBuf::from("."),
-    );
-    service.store.open(document);
-    let diagnostics = service.diagnostics("file:///workspace/main.opy");
-    assert_eq!(diagnostics[0].code, "source-provider-unavailable");
-    assert!(
-        service
-            .completion(
-                "file:///workspace/main.opy",
-                Position {
-                    line: 0,
-                    character: 0
-                }
-            )
-            .is_empty()
-    );
-    assert!(
-        service
-            .semantic_tokens("file:///workspace/main.opy")
-            .is_empty()
-    );
+    for ext in ["opy", "ostw", "del"] {
+        let uri = format!("file:///workspace/main.{ext}");
+        service.store.open(Document::new(
+            uri.clone(),
+            "globalvar score = 0\n".to_string(),
+            PathBuf::from("."),
+        ));
+        let diagnostics = service.diagnostics(&uri);
+        assert_eq!(
+            diagnostics[0].code, "source-provider-unavailable",
+            "{ext} documents surface an explicit provider refusal"
+        );
+    }
 }
 
 #[test]
-fn opy_rename_refuses_without_provider_editor_capability() {
+fn workshop_documents_publish_no_provider_diagnostics() {
     let mut service = service();
+    let uri = "file:///workspace/main.ws";
     service.store.open(Document::new(
-        "file:///workspace/main.opy".to_string(),
-        "globalvar score = 0\n".to_string(),
+        uri.to_string(),
+        "rule(\"demo\") {\n    event {\n        Ongoing - Global;\n    }\n}\n".to_string(),
         PathBuf::from("."),
     ));
-    let result = service.rename(
-        "file:///workspace/main.opy",
-        Position {
-            line: 0,
-            character: 10,
-        },
-        "total",
+    assert!(
+        service.diagnostics(uri).is_empty(),
+        "a raw Workshop document does not require a source provider"
     );
-    assert!(!result.ok);
-    assert!(result.diagnostics[0].starts_with("source-provider-unavailable:"));
 }

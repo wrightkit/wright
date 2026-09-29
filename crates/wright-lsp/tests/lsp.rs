@@ -1,8 +1,9 @@
-//! LSP contract tests after the OPY provider cutover.
+//! LSP contract tests for the currently backed capability set.
 //!
-//! Raw Workshop remains an in-process LSP workflow. OPY language-service
-//! behavior is provider-owned and must surface an explicit refusal instead of
-//! selecting a removed native frontend.
+//! `wright-lsp` advertises document synchronization only; unbacked editor
+//! capabilities are neither advertised nor answered. OPY/DEL/OSTW documents
+//! report an explicit `source-provider-unavailable` diagnostic, while raw
+//! Workshop documents receive no diagnostic at all.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -124,12 +125,37 @@ fn lsp_binary_reports_the_implementation_version_non_interactively() {
 }
 
 #[test]
-fn workshop_lsp_workflow_keeps_protocol_and_lifecycle_contracts() {
+fn initialize_advertises_only_backed_capabilities() {
     let root = workspace_root();
     let mut client = LspClient::spawn(&root);
     let init = initialize(&mut client);
     assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
-    assert!(init["result"]["capabilities"]["hoverProvider"] == true);
+    let capabilities = init["result"]["capabilities"].as_object().unwrap();
+    assert!(capabilities.contains_key("textDocumentSync"));
+    for capability in [
+        "hoverProvider",
+        "definitionProvider",
+        "referencesProvider",
+        "completionProvider",
+        "renameProvider",
+        "semanticTokensProvider",
+    ] {
+        assert!(
+            !capabilities.contains_key(capability),
+            "unbacked capability must not be advertised: {capability}"
+        );
+    }
+    client.notify("initialized", serde_json::json!({}));
+    let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn workshop_lsp_workflow_keeps_protocol_and_lifecycle_contracts() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
     client.notify("initialized", serde_json::json!({}));
 
     let source = "rule(\"demo\") {\n    event {\n        Ongoing - Global;\n    }\n}\n";
@@ -146,9 +172,28 @@ fn workshop_lsp_workflow_keeps_protocol_and_lifecycle_contracts() {
     );
     let published = client.read_notification("textDocument/publishDiagnostics");
     assert_eq!(published["params"]["version"], 1);
-    assert!(published["params"]["diagnostics"].is_array());
+    assert!(
+        published["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a valid raw Workshop document publishes no diagnostics"
+    );
 
-    let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    let hover = client.request(
+        2,
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": { "uri": "file:///workspace/main.ws" },
+            "position": { "line": 0, "character": 1 },
+        }),
+    );
+    assert!(
+        hover["result"].is_null() && hover.get("error").is_none(),
+        "an unadvertised request returns a null result: {hover}"
+    );
+
+    let shutdown = client.request(3, "shutdown", serde_json::json!(null));
     assert!(shutdown["result"].is_null());
     client.notify("exit", serde_json::json!(null));
 }
@@ -182,7 +227,10 @@ fn opy_lsp_workflow_reports_provider_boundary_without_static_fallback() {
             "position": { "line": 0, "character": 0 },
         }),
     );
-    assert!(completion["result"].as_array().unwrap().is_empty());
+    assert!(
+        completion["result"].is_null() && completion.get("error").is_none(),
+        "an unadvertised request returns a null result: {completion}"
+    );
 
     let shutdown = client.request(3, "shutdown", serde_json::json!(null));
     assert!(shutdown["result"].is_null());

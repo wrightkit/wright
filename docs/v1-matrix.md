@@ -8,6 +8,7 @@ Status: current provider-boundary baseline
 | DEL / OSTW source workflows | `deltin-rs` or a future provider | Explicit `source-provider-unavailable` diagnostics |
 | Canonical Workshop text and WIR | `workshop-rs` | `wright-analyzer`, `wright-transform`, and embedding tests |
 | Driver and CLI result contracts | Wright | `wright-driver` and `wright-cli` tests |
+| Language services / LSP | Wright | `wright-lsp` advertises document synchronization only; source-language documents report `source-provider-unavailable` |
 
 Wright does not claim OPY or DEL/OSTW language completeness from a successful
 build. Provider capabilities and source-language semantics remain bounded by

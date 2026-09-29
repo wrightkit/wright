@@ -73,6 +73,12 @@ Workshop → OPY and Workshop → DEL reconstruction are not treated as supporte
 WrightKit capabilities until the owning language implementations provide and
 test those reconstruction paths.
 
+`wright-lsp` currently advertises document synchronization and lifecycle only:
+source-language documents publish an explicit `source-provider-unavailable`
+diagnostic, and editor features such as hover, completion, or rename are not
+advertised until a provider backs them. See
+[`docs/language-services.md`](docs/language-services.md).
+
 Compiled output converges structurally on the established upstream compiler
 (rule order, element identities, control flow, conditions, values, variable
 names and indices, and element cost), compared as canonical Workshop programs

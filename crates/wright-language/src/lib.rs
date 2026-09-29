@@ -2,7 +2,4 @@ pub mod document;
 pub mod service;
 
 pub use document::{Document, DocumentStore, Position, Range};
-pub use service::{
-    CompletionItem, Hover, LanguageService, RenameEdit, SemanticToken, SourceDiagnostic,
-    SourceError, SourceFile, SourceLocation,
-};
+pub use service::{LanguageService, SourceDiagnostic};
