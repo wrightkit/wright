@@ -101,8 +101,8 @@ resolution never guesses.
 
 * `inspect refs` reports the `usage` counts (`reads`, `writes`, `calls`,
   `rules`) as the header of the reference list; there is no separate usage
-  command. Until #433 lands, reference locations come from the existing
-  reference model rather than exact identifier positions.
+  command. The reference list includes the declaration entry alongside
+  reads and writes, with identifier spans reported by the analyzer (#433).
 * `inspect symbols --only <KIND>` narrows the list to `globalVariable`,
   `playerVariable`, `subroutine`, or `rule` (kebab-case aliases work). It is
   spelled `--only` because `--kind` already selects the input frontend.

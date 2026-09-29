@@ -1491,10 +1491,13 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
     assert_eq!(result["calls"], 0);
     assert_eq!(result["rules"], 1);
     let references = result["references"].as_array().unwrap();
+    assert_eq!(references.len(), 18, "16 reads + 1 write + 1 declaration");
     assert_eq!(
-        references.len(),
-        17,
-        "16 reads + 1 write; #433 keeps locations approximate"
+        references
+            .iter()
+            .filter(|r| r["kind"] == "declaration")
+            .count(),
+        1
     );
     for reference in references {
         assert_eq!(reference["span"]["path"], "cake.txt");

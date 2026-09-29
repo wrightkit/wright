@@ -596,8 +596,6 @@ impl ResultPresentation for RefsResult {
             println!("  none");
         }
         for reference in references {
-            // Locations come from the existing reference model; they are not
-            // exact identifier positions until #433 lands.
             let context = match (reference["rule"].as_u64(), reference["action"].as_u64()) {
                 (Some(rule), Some(action)) => format!(" (rule {rule}, action {action})"),
                 (Some(rule), None) => format!(" (rule {rule})"),
