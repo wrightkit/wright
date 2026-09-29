@@ -36,11 +36,11 @@ result.
 | `wright analyze [INPUT]` | Summarize project structure, ranked CFG hotspots, and cross-cutting state | bounded semantic report with static evidence labels |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration |
 | `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area |
-| `wright symbols [INPUT] [--only KIND]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
-| `wright refs <NAME> [INPUT]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
-| `wright cfg <RULE> [INPUT]` | Control-flow graph of one rule, addressed by name | block/edge listing |
-| `wright callgraph [INPUT]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
-| `wright cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
+| `wright inspect symbols [INPUT] [--only KIND]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
+| `wright inspect refs <NAME> [INPUT]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
+| `wright inspect cfg <RULE> [INPUT]` | Control-flow graph of one rule, addressed by name | block/edge listing |
+| `wright inspect callgraph [INPUT]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
+| `wright inspect cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
 | `wright serve [INPUT]` | Serve `wright-agent/v1` over stdio or JSON-RPC 2.0 | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
@@ -71,39 +71,43 @@ The rationale for current-directory defaults, directory targets, and explicit
 ownership ambiguity is recorded in
 [`ADR-0016`](../adr/0016-current-directory-and-directory-project-targets.md).
 
-Commands that report findings (`check`, `analyze`, `lint`, `cost`) share the
-finding-selection options `--severity`, `--rule-id`, `--file`, and `--max`,
-which narrow reported diagnostics/findings without changing verdicts or exit
-codes; see [lint configuration and findings](lint.md) and
+Commands that report findings (`check`, `analyze`, `lint`, `inspect cost`)
+share the finding-selection options `--severity`, `--rule-id`, `--file`, and
+`--max`, which narrow reported diagnostics/findings without changing verdicts
+or exit codes; see [lint configuration and findings](lint.md) and
 [presentation](presentation.md).
 
 ## Semantic query commands (#429)
 
-`symbols`, `refs`, `cfg`, `callgraph`, and `cost` run the same operations the
-agent contract serves — `symbols`, `references` + `usage`, `cfg`,
-`callGraph`, `costEstimate` — through the session's `ToolService`, so a CLI
-`result` payload equals the agent operation's payload for the same input.
-The commands also serve humans: `inspect` remains the summary and names the
-detail command for each area it prints.
+`inspect` owns the semantic query surface: the bare command prints the
+bounded summary, and its five subcommands — `inspect symbols`,
+`inspect refs`, `inspect cfg`, `inspect callgraph`, `inspect cost` — expose
+each detail area. They run the same operations the agent contract serves
+(`symbols`, `references` + `usage`, `cfg`, `callGraph`, `costEstimate`)
+through the session's `ToolService`, so a CLI `result` payload equals the
+agent operation's payload for the same input. Nesting them under `inspect`
+keeps the top-level command surface to distinct user intents (#439); the
+agent request names stay flat operation names, not command paths.
 
-`refs <NAME>` and `cfg <RULE>` address their target by its declared name —
-a `variables`/`subroutines` entry or a `rule("name")` — resolved against the
-loaded program's semantic index inside the driver. Callers never need the
-program's numbering, where symbol ids and rule indexes are different spaces
-(the agent contract keeps accepting numeric ids too). An unmatched name is a
-structured `unknown-symbol`/`unknown-rule` diagnostic with exit 1; a name
-shared by several candidates is `ambiguous-symbol`/`ambiguous-rule` listing
-the numeric ids to fall back to — resolution never guesses.
+`inspect refs <NAME>` and `inspect cfg <RULE>` address their target by its
+declared name — a `variables`/`subroutines` entry or a `rule("name")` —
+resolved against the loaded program's semantic index inside the driver.
+Callers never need the program's numbering, where symbol ids and rule
+indexes are different spaces (the agent contract keeps accepting numeric
+ids too). An unmatched name is a structured `unknown-symbol`/`unknown-rule`
+diagnostic with exit 1; a name shared by several candidates is
+`ambiguous-symbol`/`ambiguous-rule` listing the numeric ids to fall back to —
+resolution never guesses.
 
-* `refs` reports the `usage` counts (`reads`, `writes`, `calls`, `rules`)
-  as the header of the reference list; there is no separate usage command.
-  Until #433 lands, reference locations come from the existing reference
-  model rather than exact identifier positions.
-* `symbols --only <KIND>` narrows the list to `globalVariable`,
+* `inspect refs` reports the `usage` counts (`reads`, `writes`, `calls`,
+  `rules`) as the header of the reference list; there is no separate usage
+  command. Until #433 lands, reference locations come from the existing
+  reference model rather than exact identifier positions.
+* `inspect symbols --only <KIND>` narrows the list to `globalVariable`,
   `playerVariable`, `subroutine`, or `rule` (kebab-case aliases work). It is
   spelled `--only` because `--kind` already selects the input frontend.
-* `cost` accepts the finding-selection options, applied to its findings list
-  exactly as on `costEstimate`.
+* `inspect cost` accepts the finding-selection options, applied to its
+  findings list exactly as on `costEstimate`.
 * `persistentObjects` has no standalone command; `analyze` reports the same
   facts under `result.facts.persistentObjects`.
 

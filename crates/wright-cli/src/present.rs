@@ -998,14 +998,14 @@ fn render_inspect(result: &InspectResult) {
             s["name"].as_str().unwrap_or("<unnamed>")
         );
     }
-    // The summary stays small; each area names the query command that serves
-    // its full detail (#429).
+    // The summary stays small; each area names the query subcommand that
+    // serves its full detail (#429).
     println!("\nDetail commands");
-    println!("  wright symbols [--only KIND]   the full or filtered symbol list");
-    println!("  wright refs <NAME>             references and usage counts for one symbol");
-    println!("  wright cfg <RULE>              the control-flow graph of one rule");
-    println!("  wright callgraph               the subroutine call graph");
-    println!("  wright cost                    generated-resource counts and findings");
+    println!("  wright inspect symbols [--only KIND]   the full or filtered symbol list");
+    println!("  wright inspect refs <NAME>             references and usage counts for one symbol");
+    println!("  wright inspect cfg <RULE>              the control-flow graph of one rule");
+    println!("  wright inspect callgraph               the subroutine call graph");
+    println!("  wright inspect cost                    generated-resource counts and findings");
 }
 
 fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {

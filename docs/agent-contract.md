@@ -52,12 +52,13 @@ they returned before this contract was introduced.
 
 One-shot CLI workflows such as `wright check --format json` continue to return
 their `wright-result/v1` envelope. They use the same `CompilerSession`
-workflows as the session service. The semantic query commands `wright
-symbols`, `wright refs`, `wright cfg`, `wright callgraph`, and `wright cost`
-likewise run through `ToolService` operations (`symbols`, `references` +
-`usage`, `cfg`, `callGraph`, `costEstimate`) and report the same result
-payloads (#429); the CLI adds no divergent semantics. The in-process
-embedding API can call `ToolService::handle` directly.
+workflows as the session service. The semantic query commands `wright inspect
+symbols`, `wright inspect refs`, `wright inspect cfg`, `wright inspect
+callgraph`, and `wright inspect cost` likewise run through `ToolService`
+operations (`symbols`, `references` + `usage`, `cfg`, `callGraph`,
+`costEstimate`) and report the same result payloads (#429); the CLI adds no
+divergent semantics. The in-process embedding API can call
+`ToolService::handle` directly.
 
 The released `wright` binary includes `serve`, so each supported installation
 channel can use the session contract without a separate runtime. MCP is not a

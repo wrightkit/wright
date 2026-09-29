@@ -76,10 +76,11 @@ Workflow commands accept these CLI-only presentation options:
   precedence over environment detection; GitHub Actions keeps workflow
   command lines free of ANSI even when color is explicitly requested.
 
-`check`, `analyze`, `lint`, and `cost` also accept the finding-selection
-options `--severity`, `--rule-id`, `--file`, and `--max` (#430), applied by
-the driver to reported diagnostics and lint findings. Selection is a rendering
-concern only: it runs after the verdict and exit code are fixed on the
+`check`, `analyze`, `lint`, and `inspect cost` also accept the
+finding-selection options `--severity`, `--rule-id`, `--file`, and `--max`
+(#430), applied by the driver to reported diagnostics and lint findings.
+Selection is a rendering concern only: it runs after the verdict and exit
+code are fixed on the
 complete set, so it can never turn a failing command into `exit 0` or a
 `WARN` verdict into `PASS`. Consecutive lint findings sharing a rule id and
 message render as one entry listing all locations; when `--max` withholds
@@ -102,9 +103,9 @@ truthful session phases such as input resolution, parsing, semantic analysis,
 linting, emission, or conversion. A lightweight spinner starts only after a
 short anti-flicker threshold; phase output is transient and is fully cleared
 before the final verdict, diagnostics, report, or source artifact is rendered.
-Completed `check`, `lint`, `analyze`, `inspect`, `symbols`, `refs`, `cfg`,
-`callgraph`, and `cost` commands print a command-specific PASS/WARN/ERROR
-verdict and compact summary before details;
+Completed `check`, `lint`, `analyze`, `inspect`, and the `inspect` query
+subcommands (`symbols`, `refs`, `cfg`, `callgraph`, `cost`) print a
+command-specific PASS/WARN/ERROR verdict and compact summary before details;
 diagnostics and findings include a one-line source context when the reported
 provenance path is readable. The driver exposes typed progress events through
 `ProgressObserver`; no terminal strings, spinner frames, ANSI sequence, or

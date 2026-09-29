@@ -942,20 +942,19 @@ fn version_and_help_are_documented_contract_surfaces() {
     let output = run(&["--help"]);
     assert!(output.status.success());
     let help = String::from_utf8_lossy(&output.stdout);
-    for command in [
-        "compile",
-        "convert",
-        "check",
-        "analyze",
-        "lint",
-        "inspect",
-        "symbols",
-        "refs",
-        "cfg",
-        "callgraph",
-        "cost",
-    ] {
+    for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
         assert!(help.contains(command), "help documents {command}");
+    }
+
+    // #439: semantic queries live under `inspect`, not the top level.
+    let output = run(&["inspect", "--help"]);
+    assert!(output.status.success());
+    let inspect_help = String::from_utf8_lossy(&output.stdout);
+    for subcommand in ["symbols", "refs", "cfg", "callgraph", "cost"] {
+        assert!(
+            inspect_help.contains(subcommand),
+            "inspect help documents {subcommand}"
+        );
     }
     for option in [
         "--kind",
@@ -1424,15 +1423,16 @@ fn convert_rejects_non_workshop_input() {
 }
 
 // ── Semantic query commands (#429) ───────────────────────────────────────────
-// `symbols`, `refs`, `cfg`, `callgraph`, and `cost` run the same operations
-// the agent contract serves; `refs`/`cfg` address their target by name.
+// `inspect symbols`, `inspect refs`, `inspect cfg`, `inspect callgraph`,
+// and `inspect cost` run the same operations the agent contract serves;
+// `refs`/`cfg` address their target by name.
 
 #[test]
 fn symbols_lists_program_symbols_and_filters_by_kind() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
-    let output = run(&["symbols", path]);
+    let output = run(&["inspect", "symbols", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS symbols"), "{stdout}");
@@ -1440,7 +1440,7 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     assert!(stdout.contains("globalVariable cakePos"), "{stdout}");
     assert!(stdout.contains("rule cake"), "{stdout}");
 
-    let output = run(&["symbols", path, "-f", "json"]);
+    let output = run(&["inspect", "symbols", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["command"], "symbols");
@@ -1455,7 +1455,7 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     assert_eq!(rule["span"]["path"], "cake.txt");
 
     // --only narrows to one symbol kind; --kind stays the input frontend.
-    let output = run(&["symbols", path, "--only", "rule", "-f", "json"]);
+    let output = run(&["inspect", "symbols", path, "--only", "rule", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     let symbols = envelope["result"].as_array().unwrap();
     assert_eq!(symbols.len(), 2);
@@ -1470,7 +1470,7 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
-    let output = run(&["refs", "cakePos", path]);
+    let output = run(&["inspect", "refs", "cakePos", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS refs"), "{stdout}");
@@ -1479,7 +1479,7 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
         "the usage header: {stdout}"
     );
 
-    let output = run(&["refs", "cakePos", path, "-f", "json"]);
+    let output = run(&["inspect", "refs", "cakePos", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["command"], "refs");
@@ -1507,13 +1507,13 @@ fn cfg_reports_the_named_rules_control_flow_graph() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
-    let output = run(&["cfg", "cake", path]);
+    let output = run(&["inspect", "cfg", "cake", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS cfg"), "{stdout}");
     assert!(stdout.contains("Control-flow graph"), "{stdout}");
 
-    let output = run(&["cfg", "cake", path, "-f", "json"]);
+    let output = run(&["inspect", "cfg", "cake", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["command"], "cfg");
@@ -1528,7 +1528,7 @@ fn callgraph_reports_subroutine_call_edges() {
     let path = temp_file("decl.txt", &corpus_workshop("synthetic/declarations-rules"));
     let path = path.to_str().unwrap();
 
-    let output = run(&["callgraph", path, "-f", "json"]);
+    let output = run(&["inspect", "callgraph", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["command"], "callgraph");
@@ -1537,7 +1537,7 @@ fn callgraph_reports_subroutine_call_edges() {
         serde_json::json!([{ "caller": "player starts", "callee": "showStatus" }])
     );
 
-    let output = run(&["callgraph", path]);
+    let output = run(&["inspect", "callgraph", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS callgraph"), "{stdout}");
@@ -1550,14 +1550,14 @@ fn cost_reports_exact_counts_and_selected_findings() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
 
-    let output = run(&["cost", path]);
+    let output = run(&["inspect", "cost", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS cost"), "{stdout}");
     assert!(stdout.contains("3960 emitted byte(s)"), "{stdout}");
     assert!(stdout.contains("29 action(s)"), "{stdout}");
 
-    let output = run(&["cost", path, "-f", "json"]);
+    let output = run(&["inspect", "cost", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["command"], "cost");
@@ -1573,7 +1573,7 @@ fn cost_reports_exact_counts_and_selected_findings() {
     );
 
     // The shared finding selection applies exactly as on `costEstimate` (#430).
-    let output = run(&["cost", path, "--max", "2", "-f", "json"]);
+    let output = run(&["inspect", "cost", path, "--max", "2", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     assert_eq!(envelope["result"]["findings"].as_array().unwrap().len(), 2);
     assert_eq!(envelope["result"]["selection"]["total"], 10);
@@ -1586,8 +1586,8 @@ fn query_commands_reject_unknown_and_ambiguous_names() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
     for (command_args, code) in [
-        (&["refs", "nope"][..], "unknown-symbol"),
-        (&["cfg", "nope"][..], "unknown-rule"),
+        (&["inspect", "refs", "nope"][..], "unknown-symbol"),
+        (&["inspect", "cfg", "nope"][..], "unknown-rule"),
     ] {
         let output = run(&[command_args, &[path, "-f", "json"]].concat());
         assert_eq!(
@@ -1634,8 +1634,8 @@ rule ("dup") {
 "#,
     );
     for (command_args, code) in [
-        (&["refs", "dup"][..], "ambiguous-symbol"),
-        (&["cfg", "dup"][..], "ambiguous-rule"),
+        (&["inspect", "refs", "dup"][..], "ambiguous-symbol"),
+        (&["inspect", "cfg", "dup"][..], "ambiguous-rule"),
     ] {
         let output = run(&[command_args, &[dup.to_str().unwrap(), "-f", "json"]].concat());
         assert_eq!(output.status.code(), Some(1), "{command_args:?}");
@@ -1652,7 +1652,7 @@ rule ("dup") {
     }
 
     // Text mode reports the same structured diagnostic on stderr.
-    let output = run(&["refs", "nope", path]);
+    let output = run(&["inspect", "refs", "nope", path]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unknown-symbol"), "{stderr}");
@@ -1669,11 +1669,11 @@ fn inspect_names_the_detail_query_commands() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     for pointer in [
-        "wright symbols",
-        "wright refs <NAME>",
-        "wright cfg <RULE>",
-        "wright callgraph",
-        "wright cost",
+        "wright inspect symbols",
+        "wright inspect refs <NAME>",
+        "wright inspect cfg <RULE>",
+        "wright inspect callgraph",
+        "wright inspect cost",
     ] {
         assert!(stdout.contains(pointer), "{pointer}: {stdout}");
     }
