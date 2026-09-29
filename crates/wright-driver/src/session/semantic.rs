@@ -239,6 +239,11 @@ impl CompilerSession {
                 ));
                 let mut findings = service_response(&service, &Request::GetFindings);
                 resolve_span_paths(&mut findings, &loaded);
+                let findings = match findings {
+                    serde_json::Value::Array(findings) => findings,
+                    _ => Vec::new(),
+                };
+                let (findings, selection) = session.config.selection.apply_findings(findings);
                 let (rules, config, skipped) =
                     if let serde_json::Value::Object(mut object) = lint_rules {
                         (
@@ -264,8 +269,9 @@ impl CompilerSession {
                     program,
                     rules,
                     config,
-                    findings,
+                    findings: serde_json::Value::Array(findings),
                     skipped,
+                    selection,
                 }
             },
         )

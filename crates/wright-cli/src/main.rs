@@ -139,18 +139,27 @@ fn run_workflow(command: Command) -> ExitCode {
                 move |session: &mut wright_driver::CompilerSession| session.convert(target),
             )
         }
-        Command::Check(args) => run_configured(
-            config_from_common(&args, true),
-            present::Presentation::from_common(&args),
-            wright_driver::CompilerSession::check,
-        ),
-        Command::Analyze(args) => run_configured(
-            config_from_common(&args, true),
-            present::Presentation::from_common(&args),
-            wright_driver::CompilerSession::analyze,
-        ),
+        Command::Check(args) => {
+            let mut config = config_from_common(&args.common, true);
+            config.selection = selection_from_args(&args.select);
+            run_configured(
+                config,
+                present::Presentation::from_common(&args.common),
+                wright_driver::CompilerSession::check,
+            )
+        }
+        Command::Analyze(args) => {
+            let mut config = config_from_common(&args.common, true);
+            config.selection = selection_from_args(&args.select);
+            run_configured(
+                config,
+                present::Presentation::from_common(&args.common),
+                wright_driver::CompilerSession::analyze,
+            )
+        }
         Command::Lint(args) => {
             let mut config = config_from_common(&args.common, true);
+            config.selection = selection_from_args(&args.select);
             if let Some(path) = &args.lint_config {
                 config.lint = match LintConfig::from_yaml_path(path) {
                     Ok(config) => config,
@@ -298,6 +307,21 @@ fn config_from_common(common: &CommonArgs, provider_workflow: bool) -> SessionCo
             cli::ProfileArg::Aggressive => wright_driver::Profile::Aggressive,
         },
         ..SessionConfig::default()
+    }
+}
+
+/// Map the CLI finding-selection flags onto the shared driver selection
+/// model; the driver applies it to diagnostics and lint findings alike (#430).
+fn selection_from_args(select: &cli::SelectArgs) -> wright_driver::FindingSelection {
+    wright_driver::FindingSelection {
+        severity: select.severity.map(|severity| match severity {
+            cli::SeverityArg::Error => wright_driver::Severity::Error,
+            cli::SeverityArg::Warning => wright_driver::Severity::Warning,
+            cli::SeverityArg::Info => wright_driver::Severity::Info,
+        }),
+        rule: select.rule_id.clone(),
+        file: select.file.clone(),
+        max: select.max,
     }
 }
 

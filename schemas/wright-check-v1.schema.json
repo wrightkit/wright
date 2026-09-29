@@ -23,6 +23,15 @@
       "type": "array",
       "items": { "$ref": "#/$defs/diagnostic" }
     },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "withheld"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "withheld": { "type": "integer", "minimum": 0 }
+      }
+    },
     "result": { "type": "object" }
   },
   "$defs": {

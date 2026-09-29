@@ -20,6 +20,31 @@ The following lint-only flags configure the registry and are repeatable:
 
 These flags are usage errors on every other command (exit 2).
 
+`lint`, `check`, and `analyze` additionally share the finding-selection
+options (#430). They narrow the *reported* findings/diagnostics through the
+shared `wright-driver` selection — the same model the agent `findings`,
+`lint`, and `costEstimate` operations expose — and never change the verdict
+or the exit code, which always reflect the complete set:
+
+* `--severity <error|warning|info>`: report findings at or above a severity
+  threshold (`error` reports errors only, `info` reports everything).
+* `--rule-id <ID>`: report findings produced by one rule id. An unknown id
+  is a usage error (exit 2), never a silent empty result.
+* `--file <PATH>`: report findings located in one source file, matched
+  exactly against the resolved `span.path`.
+* `--max <N>`: report at most N findings.
+
+When `max` drops findings, the result reports how many were withheld: the
+JSON envelope adds `selection` — `{"total": <findings before selection>,
+"withheld": <dropped by --max>}` — beside the filtered `findings`/`diagnostics`
+arrays, and text output prints a `... N finding(s) withheld` line. The verdict
+metadata keeps reporting the true total (for example `10 finding(s) across
+6 rule(s)`), so a selected result is never presented as complete.
+
+In text mode, consecutive lint findings sharing a rule id and message
+collapse into one entry that lists its locations instead of repeating the
+message and a source-context line per occurrence.
+
 `ongoing-condition-hot-path` is a heuristic about the per-tick evaluation of
 an `Ongoing - Global` or `Ongoing - Each Player` rule's conditions. Each tick
 evaluates conditions in source order until one short-circuits the rule, so a

@@ -1,5 +1,7 @@
 use wright_driver::service::{ToolRequest, ToolService};
-use wright_driver::{CompilerSession, InputSpec, Profile, SessionConfig, SourceKind};
+use wright_driver::{
+    CompilerSession, FindingSelection, InputSpec, Profile, SessionConfig, SourceKind,
+};
 
 pub fn run_consumer(input: &str) -> Result<(), String> {
     let source = std::fs::read_to_string(input).map_err(|e| e.to_string())?;
@@ -61,15 +63,15 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     for request in [
         ToolRequest::Project,
         ToolRequest::Rules,
-        ToolRequest::Findings,
-        ToolRequest::Lint,
+        ToolRequest::Findings(FindingSelection::default()),
+        ToolRequest::Lint(FindingSelection::default()),
         ToolRequest::LintRules,
-        ToolRequest::CostEstimate,
+        ToolRequest::CostEstimate(FindingSelection::default()),
         ToolRequest::TargetMetadata,
     ] {
         match service.handle(&request) {
             wright_driver::service::ToolResponse::Ok { result } => {
-                if matches!(request, ToolRequest::Lint) {
+                if matches!(request, ToolRequest::Lint(_)) {
                     for finding in result["findings"].as_array().unwrap() {
                         assert!(
                             finding.get("evidence").is_some(),

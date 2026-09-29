@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use jsonschema::JSONSchema;
 use serde_json::{Value, json};
 use wright_driver::service::{AGENT_CONTRACT, ToolRequest, ToolResponse, ToolService};
-use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
+use wright_driver::{CompilerSession, FindingSelection, InputSpec, SessionConfig, SourceKind};
 
 const EXPECTED_V1_OPERATIONS: &[&str] = &[
     "capabilities",
@@ -300,4 +300,50 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
             "EditRange accepted 0 for {coordinate}"
         );
     }
+}
+
+#[test]
+fn cli_and_agent_selections_return_the_same_set() {
+    // #430: the CLI flags and the agent request fields drive one driver-side
+    // selection, so both surfaces must return the same selected findings.
+    let input = workspace_root().join("tests/fixtures/workshop/real-world/overpy-cake.ws");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session starts");
+    let mut service = ToolService::new(&mut session).expect("service loads");
+    let agent = match service.handle(&ToolRequest::Lint(FindingSelection {
+        rule: Some("repeated-value".to_string()),
+        max: Some(2),
+        ..FindingSelection::default()
+    })) {
+        ToolResponse::Ok { result } => result,
+        ToolResponse::Error { error } => panic!("lint selection failed: {error:?}"),
+    };
+
+    let output = Command::new(env!("CARGO_BIN_EXE_wright"))
+        .args([
+            "lint",
+            input.to_str().unwrap(),
+            "--rule-id",
+            "repeated-value",
+            "--max",
+            "2",
+            "-f",
+            "json",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("wright lint runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
+    assert_eq!(cli["findings"], agent["findings"], "same selected set");
+    assert_eq!(cli["selection"], agent["selection"], "same truncation");
+    assert_eq!(agent["selection"], json!({"total": 10, "withheld": 7}));
 }

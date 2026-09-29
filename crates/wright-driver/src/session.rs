@@ -109,6 +109,13 @@ impl CompilerSession {
                 Diagnostic::error("lint-rule-error", Stage::Analysis, error.to_string())
             })?;
         }
+        if let Err(message) = config.selection.validate(&lint_registry) {
+            return Err(Diagnostic::error(
+                "invalid-selection",
+                Stage::Discovery,
+                message,
+            ));
+        }
         Ok(CompilerSession {
             config,
             catalog,
@@ -758,15 +765,25 @@ impl CompilerSession {
         }
     }
 
+    /// The lint registry backing this session, for finding-selection
+    /// validation (#430).
+    pub(crate) fn lint_registry(&self) -> &LintRegistry {
+        &self.lint_registry
+    }
+
     fn finish<T: serde::Serialize>(&mut self, command: &str, result: T) -> Envelope<T> {
         let diagnostics = std::mem::take(&mut self.diagnostics);
         let exit = exit_code_from(&diagnostics);
+        // Selection narrows the reported diagnostics after the exit code is
+        // fixed; filtering must never change the verdict.
+        let (diagnostics, selection) = self.config.selection.apply_diagnostics(diagnostics);
         Envelope {
             wright: version_info(),
             command: command.to_string(),
             ok: exit == crate::result::exit::SUCCESS,
             exit,
             diagnostics,
+            selection,
             result,
         }
     }

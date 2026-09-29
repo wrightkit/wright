@@ -12,6 +12,7 @@ pub mod progress;
 pub mod provider;
 pub mod provider_edit;
 pub mod result;
+pub mod select;
 pub mod service;
 pub mod session;
 pub mod source_provider;
@@ -29,6 +30,7 @@ pub use result::{
     AnalyzeResult, CheckResult, CompileResult, CompiledOutput, ConvertResult, ConvertTarget,
     Envelope, InspectResult, LintResult, RESULT_CONTRACT,
 };
+pub use select::{FindingSelection, SelectionOutcome};
 pub use session::{CompilerSession, Loaded, Provenance};
 pub use source_provider::{
     SourceBackend, SourceCompilation, SourceLanguage, SourceProvenance, SourceProvider,
