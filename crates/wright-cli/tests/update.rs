@@ -342,7 +342,12 @@ fn check_with_pinned_version_reports_availability_without_network() {
         &[("WRIGHT_INSTALL_BASE_URL", "http://127.0.0.1:1".to_string())],
     );
     assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("update available"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("update available"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("wright update self --version {RELEASE}")),
+        "a pinned check names the pinned install command: {stdout}"
+    );
     assert_eq!(read(&dir.join("wright")), before);
     let _ = std::fs::remove_dir_all(&dir);
 }

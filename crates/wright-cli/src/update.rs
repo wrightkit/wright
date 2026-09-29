@@ -322,9 +322,11 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
     }
 
     if check_only {
-        println!(
-            "update available: {current} -> {target_version} (run `wright update` to install)"
-        );
+        let hint = match requested {
+            Some(_) => format!("wright update self --version {target_version}"),
+            None => "wright update".to_string(),
+        };
+        println!("update available: {current} -> {target_version} (run `{hint}` to install)");
         return Ok(exit::SUCCESS);
     }
 
