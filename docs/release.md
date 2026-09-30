@@ -65,8 +65,9 @@ Wright has two release channels and one shared native build workflow:
    updates.
 2. Stable releases start from a `vX.Y.Z` tag. `release-please` maintains a
    Release PR that derives the next version from Conventional Commits
-   (`feat` bumps minor, `fix` bumps patch, a breaking change bumps minor
-   while the major version is 0). Merging the Release PR makes
+   (`feat` bumps minor; `fix`, `perf`, `deps`, `refactor`, and `revert` bump
+   patch; a breaking change bumps minor while the major version is 0;
+   `chore`, `docs`, `style`, `test`, `build`, and `ci` alone do not release). Merging the Release PR makes
    `release-please` create the tag and a draft GitHub Release, and the tag
    push starts `.github/workflows/release.yml`. The workflow verifies that
    the tag matches the workspace version, builds and smoke-tests the native
