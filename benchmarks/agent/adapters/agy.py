@@ -32,7 +32,7 @@ def main() -> int:
     deny = ["mcp(*)", "execute_url(*)"]
     if env["BENCH_KNOWLEDGE"] != "web":
         deny.append("read_url(*)")
-    (state / "settings.json").write_text(json.dumps({"allowNonWorkspaceAccess": True, "permissions": {"allow": ["command(*)", "read_file(*)"], "deny": deny}}))
+    (state / "settings.json").write_text(json.dumps({"allowNonWorkspaceAccess": True, "permissions": {"allow": ["command(*)", "read_file(*)", f"write_file({Path.cwd()})"], "deny": deny}}))
     installed = []
     for key in ("BENCH_SKILL_DIR", "BENCH_WIKI_SKILL_DIR"):
         if env.get(key):
@@ -70,6 +70,8 @@ def main() -> int:
     stderr_text = (run / "agy-stderr.log").read_text()
     sys.stderr.write(stderr_text)
     error = str(result.get("error", "")) + stderr_text
+    if "no output produced" in stderr_text and "headless" in stderr_text:
+        return 75
     if code or result.get("status") != "SUCCESS":
         return 75 if any(s in error.lower() for s in ("quota", "rate limit", "429", "temporarily", "503", "credits")) else (code or 1)
     return 0
