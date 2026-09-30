@@ -24,6 +24,9 @@ the environment (network, documentation) and the model.
 - Q3: how do offline, web, and local-wiki conditions change Q1 and Q2?
 - Q4: do the answers hold across models?
 - Q5: which owner (agent, Wright, `opy-rs`, `workshop-rs`, upstream) is responsible for each failure?
+- Q6: what context and tokens does each task consume, where do they go, and does Wright reduce the cost of a usable result?
+
+Hypothesis H1, fixed before the first full run: for scenarios where both conditions reach a usable result, `bin` and `bin+skill` use fewer total tokens and less peak context than `none`, because compile-and-fix iterations and documentation reading shrink. H1 can be falsified: Wright output also enters the context. Report it either way.
 
 Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not conclusions):
 
@@ -76,7 +79,7 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
   exists and ships with a positive and a negative fixture.
 - REQ-011: Reported outcome metrics are: `usable` (L1a passes, all required requirement checks pass, no
   error-severity lint finding), requirement coverage over all runs and over L1a-passing runs, time to first
-  valid snapshot, valid-to-invalid regressions, wall time, tokens, and cost. Runtime-only claims are listed as
+  valid snapshot, valid-to-invalid regressions, wall time, and the context and token metrics of REQ-020 to REQ-024. Runtime-only claims are listed as
   unverified and never counted as passed. A rubric-based judgment, if used, is reported separately from pass/fail.
 
 ### Tool-call analysis
@@ -110,10 +113,33 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
 - REQ-015: Each failing run is attributed to a layer (`agent`, `wright`, `opy-rs`, `workshop-rs`, `upstream`)
   from deterministic evidence, and aggregated into an owner-issue table with reproducers.
 
+### Context and token consumption
+
+- REQ-020: The adapter reports usage per model turn: input, output, cached-read, cached-write, and reasoning
+  tokens as the provider states them, plus the context size at that turn and the model's context limit. The
+  result stores the per-turn series and the totals. Any compaction, truncation, or context-limit event is
+  recorded and marks the run.
+- REQ-021: Context is attributed by source with one common tokenizer estimate so models are comparable: Wright
+  output (per command), file reads, file writes and edits, shell output other than Wright, web fetch and search
+  results, wiki reads, skill and system content, and model text. The attribution states its estimation method
+  and reports the provider-stated total beside it, with the residual.
+- REQ-022: Per run, report total tokens, peak context and its share of the limit, turns, tokens and turns to
+  first valid snapshot (REQ-011), and tokens per usable result across a condition (total tokens of all runs
+  divided by the number of usable runs, so failures count against the condition). Cost is reported separately
+  from tokens because cache pricing differs by provider.
+- REQ-023: Efficiency is compared paired by trial index. For H1, compare tokens and peak context between
+  conditions on scenarios where both reach `usable`, and separately over all runs. Report the direction and size
+  with intervals, per scenario and per model, and whether H1 held. A condition that spends fewer tokens by
+  failing more often is not more efficient.
+- REQ-024: Per Wright command, report the mean output size in tokens, the share of a run's context it
+  occupies, and how often the agent re-reads or repeats it. Commands whose output is large relative to the
+  decisions it drives are candidates for output-shape or selection-default Issues in `wright`. The guide's own
+  token size is reported and counted in the `bin+skill` context.
+
 ### Models and statistics
 
 - REQ-016: Agents run through an adapter that takes model, workspace, prompt, scrubbed environment, tool list,
-  and skill directory, and returns transcript, usage, and exit status. The model list is data. The adapter,
+  and skill directory, and returns transcript, per-turn usage (REQ-020), and exit status. The model list is data. The adapter,
   Wright release and checksum, OPY provider version, guide commit, wiki snapshot hash, and oracle version are
   recorded in a manifest. The contract does not depend on one vendor.
 - REQ-017: Each cell runs at least 5 trials (3 for the largest scenario), in randomized order. Results give counts
@@ -163,3 +189,5 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
 - Q-004 [architecture]: whether the trace analyzer and adapters live in `benchmarks/agent` or a sibling
   directory, given the harness is currently a single script; owner Architect.
 - Q-005 [verification]: the source of the wiki snapshot and its license and pinning method; owner QA.
+- Q-006 [verification]: the common tokenizer used for cross-model attribution (REQ-021) and how its error is
+  reported; owner QA.
