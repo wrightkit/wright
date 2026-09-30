@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily")
+TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits")
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
