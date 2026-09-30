@@ -6,10 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/wrightkit/wright?include_prereleases)](https://github.com/wrightkit/wright/releases)
 
 Wright is the unified developer CLI and language tooling layer for Overwatch
-Workshop development in WrightKit. It provides diagnostics, analysis, code
-editing, and language server support across raw Workshop, OverPy, and
-provider-backed DEL/OSTW projects. DEL/OSTW entrypoints are recognized, but
-DEL/OSTW provider support is not currently shipped with Wright.
+Workshop development in WrightKit. It provides diagnostics, cost and risk
+analysis, semantic queries, validated edits, and an agent session contract
+across raw Workshop and provider-backed OverPy projects. DEL/OSTW entrypoints
+are recognized, but DEL/OSTW provider support is not currently shipped with
+Wright.
 
 Wright delegates source parsing and semantic lowering to dedicated WrightKit
 engines instead of reimplementing them:
@@ -18,7 +19,7 @@ engines instead of reimplementing them:
   semantics, WIR, and catalog;
 - [`opy-rs`](https://github.com/wrightkit/opy-rs): standalone OverPy frontend and
   compiler, consumed by Wright through an LPP provider;
-- [`del-rs`](https://github.com/wrightkit/del-rs): standalone DEL and OSTW
+- [`deltin-rs`](https://github.com/wrightkit/deltin-rs): standalone DEL and OSTW
   frontend, consumed by Wright through a provider boundary.
 
 Wright coordinates these implementations to deliver consistent developer tooling
@@ -45,13 +46,14 @@ across languages.
 Wright prioritizes developer tooling over compiler reimplementation:
 
 - deterministic `check` diagnostics;
-- lint rules and complexity analysis;
-- symbol inspection and semantic queries;
-- safe source rewrites and syntax-preserving refactoring;
-- agent integrations and embedding APIs;
-- machine-readable CI output;
-- server stability checks and complexity analysis;
-- compilation and format conversion when supported by the underlying engine.
+- lint rules, plus `analyze` reports of Workshop cost, complexity hotspots, and
+  server-load risk indicators, each labeled exact, static, or heuristic;
+- symbol, reference, control-flow, call-graph, and cost queries under `inspect`;
+- validated semantic renames that preview a source diff before writing;
+- a versioned agent session contract (`wright serve`) and embedding APIs;
+- machine-readable CI output with GitHub Actions annotations;
+- compilation and Workshop → OPY conversion when supported by the underlying
+  engine.
 
 Compilation remains essential, but Wright does not invent surrogate syntax or
 simulate missing language features. When a language capability is missing, it
@@ -65,13 +67,13 @@ underlying language surface is complete.
 
 | Source form | Owning implementation | Current WrightKit status |
 | --- | --- | --- |
-| Raw Workshop | `workshop-rs` | ✅ Canonical parsing/WIR/validation/emission baseline is available |
-| OverPy (`.opy`) | `opy-rs` through LPP | 🟡 Provider-backed workflows are integrated; language support remains bounded by the provider's published capabilities |
-| DEL / OSTW (`.del`, `.ostw`) | `del-rs` via future provider | ⚪ Recognized by Wright, but provider support is not currently shipped; no static DEL dependency |
+| Raw Workshop | `workshop-rs` | ✅ Canonical parsing, WIR, validation, emission, analysis, and validated rename are available |
+| OverPy (`.opy`) | `opy-rs` through LPP | 🟡 `check`, `compile`, `lint`, and `analyze` are provider-backed; language support remains bounded by the provider's published capabilities |
+| DEL / OSTW (`.del`, `.ostw`) | `deltin-rs` via future provider | ⚪ Recognized by Wright; every workflow fails with `source-provider-unavailable` (exit 4), with no static DEL dependency or fallback |
 
-Workshop → OPY and Workshop → DEL reconstruction are not treated as supported
-WrightKit capabilities until the owning language implementations provide and
-test those reconstruction paths.
+`wright convert` reconstructs validated Workshop input as OPY only when the
+provider advertises that capability. Workshop → DEL/OSTW reconstruction is not
+supported until the owning implementation provides and tests it.
 
 `wright-lsp` currently advertises document synchronization and lifecycle only:
 source-language documents publish an explicit `source-provider-unavailable`
@@ -99,7 +101,7 @@ solves developer workflow needs across formats:
 - coordination across language frontends and canonical Workshop data.
 
 An LPP provider is an integration role that an implementation may expose to
-Wright. Neither `opy-rs` nor `del-rs` depends on Wright internals.
+Wright. Neither `opy-rs` nor `deltin-rs` depends on Wright internals.
 
 ## Installation
 
@@ -110,24 +112,20 @@ brew tap wrightkit/tap
 brew install wrightkit/tap/wright
 ```
 
-or:
+### macOS and Linux
 
 ```sh
-curl -fsSL https://wrightkit.dev/install.sh | bash
+curl -fsSL https://install.wrightkit.dev/wright/install.sh | bash
 ```
 
-### Linux
+### Windows
 
-```sh
-curl -fsSL https://wrightkit.dev/install.sh | bash
-```
+Use the PowerShell installer `https://install.wrightkit.dev/wright/install.ps1`.
 
-### Other distribution paths
-
-Prebuilt release archives and currently supported package-manager channels are
-documented in [`docs/release.md`](docs/release.md). Use the release-specific
-documentation rather than assuming every package-manager submission is already
-published.
+Each archive contains `wright` and `wright-lsp`; no Node or OverPy runtime is
+required. Prebuilt archives (Linux x86_64, macOS x86_64/arm64, Windows x86_64),
+the nightly channel, and package-manager status are documented in
+[`docs/release.md`](docs/release.md).
 
 ### From source
 
@@ -135,27 +133,60 @@ published.
 cargo build --release -p wright-cli -p wright-lsp
 ```
 
-## CLI
+Requires Rust 1.85 or newer.
 
-Core product commands include:
+### Updating
 
 ```sh
-wright check input.opy
-wright lint input.opy
-wright analyze input.opy
-wright inspect input.opy
-wright compile input.opy
+wright update            # standalone install plus installed first-party providers
+wright update --check    # report availability only
+wright update provider opy
 ```
 
-Commands reflect product targets. When a backing engine encounters unsupported
-syntax, Wright reports the missing feature cleanly rather than failing silently
-or falling back to unverified runtimes.
+Package-manager installs are never overwritten; `wright update` points to the
+channel's own upgrade command. See [`docs/cli/update.md`](docs/cli/update.md).
 
-Machine-readable workflows use the documented JSON contracts, for example:
+## CLI
+
+```sh
+wright check [INPUT]        # correctness diagnostics
+wright lint [INPUT]         # lint findings
+wright analyze [INPUT]      # cost, hotspots, and risk indicators
+wright inspect [INPUT]      # semantic summary
+wright inspect symbols|refs|cfg|callgraph|cost
+wright rename OLD NEW [INPUT]   # previews a diff; --write applies it
+wright compile [INPUT]      # emit Workshop text
+wright convert [INPUT] --target opy
+wright serve [INPUT]        # wright-agent/v1 over stdio or JSON-RPC 2.0
+wright update | completion
+```
+
+`INPUT` is a file, a project directory, or `-` for stdin; omitting it uses the
+current directory. `check`, `analyze`, `lint`, and `inspect cost` accept
+finding selection (`--severity`, `--rule-id`, `--file`, `--max`). Exit codes are
+`0` success, `1` source/user error, `2` usage error, `3` recognized but
+unsupported, `4` internal/environment failure.
+
+When a backing engine encounters unsupported syntax, Wright reports the missing
+feature cleanly rather than failing silently or falling back to unverified
+runtimes. The full command contract is in [`docs/cli.md`](docs/cli.md).
+
+### Machine-readable output
+
+`--format json` prints exactly one `wright-result/v1` envelope to stdout:
 
 ```sh
 wright lint input.opy --format json
 ```
+
+`--renderer github-actions` emits CI annotations.
+
+### Agents and editors
+
+`wright serve` exposes the `wright-agent/v1` session contract (capabilities,
+findings, queries, workflows, and validated edits); see
+[`docs/agent-contract.md`](docs/agent-contract.md). `wright-lsp` currently
+provides document synchronization only, as described above.
 
 ## How it works
 
@@ -191,7 +222,7 @@ Real user workflows are the primary evidence. When `wright check`, `lint`, or
 
 1. reproduce the failure;
 2. identify the owning layer;
-3. fix source-language semantics in `opy-rs` / `del-rs`, canonical Workshop
+3. fix source-language semantics in `opy-rs` / `deltin-rs`, canonical Workshop
    semantics in `workshop-rs`, or integration/tooling behavior in Wright;
 4. keep the full-project regression and add a minimized test where practical;
 5. do not substitute architecture cleanup or support-matrix bookkeeping for a
