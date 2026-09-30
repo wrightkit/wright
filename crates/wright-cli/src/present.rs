@@ -977,6 +977,11 @@ impl ResultPresentation for CallGraphResult {
             for (name, n) in most_called.iter().take(MAX_DETAIL_ENTRIES) {
                 println!("    {name}: {n} caller(s)");
             }
+            print_more(
+                "    ",
+                most_called.len().saturating_sub(MAX_DETAIL_ENTRIES),
+                "subroutine(s)",
+            );
         }
         let busiest = notable_callers(&fan_out);
         if !busiest.is_empty() {
@@ -984,6 +989,11 @@ impl ResultPresentation for CallGraphResult {
             for (name, n) in busiest.iter().take(MAX_DETAIL_ENTRIES) {
                 println!("    {name}: calls {n} subroutine(s)");
             }
+            print_more(
+                "    ",
+                busiest.len().saturating_sub(MAX_DETAIL_ENTRIES),
+                "caller(s)",
+            );
         }
         println!("\n  Edges");
         for edge in edges.iter().take(MAX_DETAIL_ENTRIES) {
@@ -1772,8 +1782,12 @@ fn render_inspect(result: &InspectResult) {
         println!("  none");
     }
     for rule in rules.iter().take(MAX_DETAIL_ENTRIES) {
-        let name = rule["name"].as_str().unwrap_or_default();
-        println!("  {}", if name.is_empty() { "<unnamed>" } else { name });
+        match rule["name"].as_str().filter(|name| !name.is_empty()) {
+            Some(name) => println!("  {name}"),
+            // An unnamed rule's only identity is its index — a bare
+            // `<unnamed>` line would repeat indistinguishably.
+            None => println!("  rule {}", rule["id"].as_u64().unwrap_or(0)),
+        }
     }
     print_more(
         "  ",
@@ -2211,6 +2225,7 @@ mod tests {
             },
             elapsed: Duration::from_millis(42),
             source_base: None,
+            subject: None,
         };
         assert_eq!(
             lint_footer_parts(2, 1, &ctx(true)),

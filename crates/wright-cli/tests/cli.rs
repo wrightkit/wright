@@ -1964,6 +1964,43 @@ fn callgraph_ranks_fan_in_and_fan_out_before_the_edge_list() {
 }
 
 #[test]
+fn callgraph_highlight_sections_fold_beyond_the_bound() {
+    // Twelve subroutines each with two callers: the highlight list exceeds
+    // one page and folds with the complete-output pointer like every other
+    // bounded section (#446).
+    let mut source = String::from("subroutines {\n");
+    for i in 0..12 {
+        source.push_str(&format!("    {i}: sub{i}\n"));
+    }
+    source.push_str("}\n");
+    for i in 0..12 {
+        source.push_str(&format!(
+            "rule (\"Subroutine sub{i}\") {{\n    event {{\n        Subroutine;\n        sub{i};\n    }}\n    actions {{\n        Wait(1);\n    }}\n}}\n"
+        ));
+    }
+    let calls: String = (0..12)
+        .map(|i| format!("        Call Subroutine(sub{i});\n"))
+        .collect();
+    for rule in ["a", "b"] {
+        source.push_str(&format!(
+            "rule (\"{rule}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n{calls}    }}\n}}\n"
+        ));
+    }
+    let path = temp_file("fan.ws", &source);
+    let path = path.to_str().unwrap();
+
+    let output = run(&["inspect", "callgraph", path]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("sub0: 2 caller(s)"), "{stdout}");
+    assert!(
+        stdout.contains("... 2 more subroutine(s) (--format json prints the complete result)"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
 fn cost_reports_exact_counts_and_selected_findings() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
@@ -2112,6 +2149,22 @@ fn inspect_names_the_detail_query_commands() {
         stdout.find("Program overview").unwrap() < stdout.find("Detail commands").unwrap(),
         "{stdout}"
     );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn inspect_names_unnamed_rules_by_index() {
+    // An unnamed rule has no name to address it by; the preview must carry
+    // its index instead of repeating indistinguishable `<unnamed>` lines
+    // (#446, real-world rule ("") blocks such as overpy-pixelart).
+    let path = temp_file(
+        "unnamed.ws",
+        "rule (\"\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n    }\n}\n",
+    );
+    let output = run(&["inspect", path.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\n  rule 0\n"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
