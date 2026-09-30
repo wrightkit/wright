@@ -362,11 +362,15 @@ fn run_command<T: serde::Serialize + present::ResultPresentation>(
 ) -> u8 {
     let activity = Arc::new(presentation.activity());
     session.set_progress_observer(activity.clone());
+    let started = std::time::Instant::now();
     let envelope = run(session);
+    let elapsed = started.elapsed();
     session.clear_progress_observer();
+    // The transient activity line is fully cleared before the final result
+    // renders, so progress text never competes with the verdict (#443).
     drop(activity);
     let code = envelope.exit;
-    present::render(&envelope, presentation);
+    present::render(&envelope, presentation, elapsed);
     code
 }
 

@@ -1,4 +1,6 @@
+use std::collections::BTreeSet;
 use std::io::{IsTerminal, Write};
+use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::{
@@ -249,6 +251,7 @@ fn env_truthy(name: &str) -> bool {
 pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     pres: Presentation,
+    elapsed: Duration,
 ) {
     if pres.format == OutputFormat::Json {
         let mut value = serde_json::to_value(envelope).expect("serializes");
@@ -263,16 +266,26 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
     }
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope),
-        Renderer::Terminal | Renderer::Plain => render_text(envelope, pres.color),
+        Renderer::Terminal | Renderer::Plain => render_text(envelope, pres, elapsed),
     }
 }
 
-fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>, color: bool) {
+/// The human-first result hierarchy (#443): the verdict leads, blocking
+/// errors come before non-blocking diagnostics, secondary metadata trails
+/// each diagnostic, and execution metadata (affected files, elapsed) closes
+/// the report.
+fn render_text<T: serde::Serialize + ResultPresentation>(
+    envelope: &Envelope<T>,
+    pres: Presentation,
+    elapsed: Duration,
+) {
     if !matches!(envelope.command.as_str(), "compile" | "convert") {
-        render_verdict(envelope, color);
+        render_verdict(envelope, pres.color);
     }
-    for diag in &envelope.diagnostics {
-        render_diagnostic(diag, color);
+    let mut ordered: Vec<&wright_driver::Diagnostic> = envelope.diagnostics.iter().collect();
+    ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
+    for diagnostic in ordered {
+        render_diagnostic(diagnostic, pres.color);
     }
     if let Some(selection) = &envelope.selection {
         if selection.withheld > 0 {
@@ -286,9 +299,22 @@ fn render_text<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>,
         if envelope.diagnostics.is_empty() {
             eprintln!("{}: failed", envelope.command);
         }
-        return;
+    } else {
+        envelope.result.render_body();
     }
-    envelope.result.render_body();
+    if envelope.command == "check" {
+        render_check_footer(envelope, pres, elapsed);
+    }
+}
+
+/// Diagnostics render in action order — errors first — without changing the
+/// reported set or the driver's production order (#443).
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Error => 0,
+        Severity::Warning => 1,
+        Severity::Info => 2,
+    }
 }
 
 fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>, color: bool) {
@@ -305,16 +331,65 @@ fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<
     };
     println!("{label} {}", envelope.command);
     let metadata = match envelope.command.as_str() {
-        "check" => format!(
-            "{} diagnostic(s)",
-            envelope
-                .selection
-                .as_ref()
-                .map_or(envelope.diagnostics.len(), |selection| selection.total)
-        ),
+        "check" => check_metadata(envelope),
         _ => envelope.result.metadata().unwrap_or_default(),
     };
     println!("  {}", dim(&metadata, color));
+}
+
+/// The check verdict names the blocking error count first, then the
+/// non-blocking severities (#443). Under a finding selection the envelope
+/// keeps only the true total, so the count line falls back to it.
+fn check_metadata<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) -> String {
+    if let Some(selection) = &envelope.selection {
+        return format!("{} diagnostic(s)", selection.total);
+    }
+    let mut counts = [0usize; 3];
+    for diagnostic in &envelope.diagnostics {
+        counts[severity_rank(diagnostic.severity) as usize] += 1;
+    }
+    let mut parts = Vec::new();
+    if counts[0] > 0 {
+        parts.push(format!("{} error(s)", counts[0]));
+    }
+    if counts[1] > 0 {
+        parts.push(format!("{} warning(s)", counts[1]));
+    }
+    if counts[2] > 0 {
+        parts.push(format!("{} info diagnostic(s)", counts[2]));
+    }
+    if parts.is_empty() {
+        "0 diagnostic(s)".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// The closing check summary carries only execution metadata: files the
+/// reported diagnostics point at, plus elapsed time on the interactive
+/// terminal (kept off plain output so it stays deterministic) (#443).
+fn render_check_footer<T: serde::Serialize + ResultPresentation>(
+    envelope: &Envelope<T>,
+    pres: Presentation,
+    elapsed: Duration,
+) {
+    let files: BTreeSet<String> = envelope
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic.span.as_ref())
+        .filter(|span| is_real_source_path(&span.path))
+        .map(|span| display_location_path(&span.path))
+        .collect();
+    let mut parts = Vec::new();
+    if !files.is_empty() {
+        parts.push(format!("{} file(s) affected", files.len()));
+    }
+    if pres.interactive {
+        parts.push(format!("{} ms", elapsed.as_millis()));
+    }
+    if !parts.is_empty() {
+        println!("  {}", dim(&parts.join(" · "), pres.color));
+    }
 }
 
 fn dim(value: &str, color: bool) -> String {
@@ -1018,16 +1093,45 @@ fn render_diagnostic(diagnostic: &wright_driver::Diagnostic, color: bool) {
     } else {
         sev.to_string()
     };
-    eprintln!(
-        "{label}[{}] ({}): {}",
-        diagnostic.code,
-        diagnostic.stage.as_str(),
-        diagnostic.message
-    );
+    eprintln!("{label}[{}]: {}", diagnostic.code, diagnostic.message);
+    // Secondary notes — locations without a mapped source file, the owning
+    // stage, and non-native input origins — render dimmed under the problem
+    // line rather than competing with it (#443).
+    let mut notes = Vec::new();
     if let Some(span) = &diagnostic.span {
-        eprintln!("  --> {}:{}:{}", span.path, span.start.line, span.start.col);
-        render_source_context(&span.path, span.start.line, span.start.col, "  ");
+        if is_real_source_path(&span.path) {
+            eprintln!(
+                "  --> {}:{}:{}",
+                display_location_path(&span.path),
+                span.start.line,
+                span.start.col
+            );
+            // The source frame stays on the diagnostic stream so the context
+            // is emitted directly with the diagnostic it explains (#443).
+            if let Some(context) = source_context(&span.path, span.start.line, span.start.col, "  ")
+            {
+                eprintln!("{context}");
+            }
+        } else {
+            notes.push(format!(
+                "at {}:{}:{} (no source file)",
+                span.path, span.start.line, span.start.col
+            ));
+        }
     }
+    notes.push(diagnostic.stage.as_str().to_string());
+    if let Some(source) = &diagnostic.source {
+        if source.kind != "workshop" {
+            notes.push(format!("{kind} source", kind = source.kind));
+        }
+    }
+    eprintln!("  {}", dim(&format!("= {}", notes.join(" · ")), color));
+}
+
+/// The user-facing spelling of a reported path: cwd-relative when possible so
+/// locations read the same regardless of which stage produced them (#443).
+fn display_location_path(path: &str) -> String {
+    wright_driver::input::display_path(Path::new(path))
 }
 
 fn print_location(span: &serde_json::Value, indent: &str) {
@@ -1048,24 +1152,24 @@ fn print_span(span: &serde_json::Value, indent: &str) {
     let line = span_position(span, "start", "line").unwrap_or(0);
     let col = span_position(span, "start", "col").unwrap_or(0);
     println!("{indent}--> {path}:{line}:{col}");
-    render_source_context(path, line as u32, col as u32, indent);
+    if let Some(context) = source_context(path, line as u32, col as u32, indent) {
+        println!("{context}");
+    }
 }
 
-fn render_source_context(path: &str, line: u32, col: u32, indent: &str) {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let Some(text) = source.lines().nth(line.saturating_sub(1) as usize) else {
-        return;
-    };
+fn source_context(path: &str, line: u32, col: u32, indent: &str) -> Option<String> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let text = source.lines().nth(line.saturating_sub(1) as usize)?;
     let num_w = line.to_string().len();
-    println!("{indent}| {:>num_w$} | {text}", line);
     let prefix = text
         .chars()
         .take(col.saturating_sub(1) as usize)
         .map(|c| if c == '\t' { '\t' } else { ' ' })
         .collect::<String>();
-    println!("{indent}| {:>num_w$} | {prefix}^", "");
+    Some(format!(
+        "{indent}| {:>num_w$} | {text}\n{indent}| {:>num_w$} | {prefix}^",
+        line, ""
+    ))
 }
 
 #[cfg(test)]
@@ -1288,5 +1392,55 @@ mod tests {
             ]),
         );
         assert_eq!(summary_status(&envelope), "ERROR");
+    }
+
+    fn check_envelope(
+        diagnostics: Vec<wright_driver::Diagnostic>,
+        selection: Option<wright_driver::SelectionOutcome>,
+    ) -> Envelope<CheckResult> {
+        Envelope {
+            wright: wright_driver::result::VersionInfo {
+                version: "test".to_string(),
+                contract: "wright-result/v1".to_string(),
+            },
+            command: "check".to_string(),
+            ok: true,
+            exit: 0,
+            diagnostics,
+            selection,
+            result: CheckResult::default(),
+        }
+    }
+
+    #[test]
+    fn check_metadata_counts_errors_first() {
+        let envelope = check_envelope(
+            vec![
+                diagnostic(Severity::Warning),
+                diagnostic(Severity::Error),
+                diagnostic(Severity::Warning),
+                diagnostic(Severity::Info),
+            ],
+            None,
+        );
+        assert_eq!(
+            check_metadata(&envelope),
+            "1 error(s), 2 warning(s), 1 info diagnostic(s)"
+        );
+        let clean = check_envelope(Vec::new(), None);
+        assert_eq!(check_metadata(&clean), "0 diagnostic(s)");
+    }
+
+    #[test]
+    fn check_metadata_under_selection_reports_the_true_total() {
+        let envelope = check_envelope(
+            vec![diagnostic(Severity::Error)],
+            Some(wright_driver::SelectionOutcome {
+                total: 5,
+                withheld: 2,
+                max_severity: Some(Severity::Error),
+            }),
+        );
+        assert_eq!(check_metadata(&envelope), "5 diagnostic(s)");
     }
 }

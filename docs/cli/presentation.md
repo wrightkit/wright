@@ -113,6 +113,22 @@ source context enters the driver envelope or JSON. Plain output,
 redirected/piped output, `TERM=dumb`, CI, GitHub Actions, and explicit JSON
 rendering remain static and deterministic.
 
+The `check` report follows a human-first hierarchy (#443) on the
+terminal/plain text surface only: the verdict line leads with the blocking
+error count before the non-blocking severities, diagnostics render in action
+order (errors before warnings and info notes, stable within a severity), and a
+mapped diagnostic carries its `-->` location plus a one-line source frame on
+the diagnostic stream. Spans whose path is not a readable source file —
+`<stdin>`, `<provider-artifact>`, or a dangling `<file N>` — are never dressed
+up as file locations; the reported position and the pipeline stage trail each
+diagnostic as secondary metadata instead. A compact footer closes the report
+with the count of affected source files and, on an interactive terminal, the
+elapsed workflow time; plain output omits wall-clock values so it stays
+deterministic. Severity ordering, secondary metadata, and the footer are
+presentation-layer concerns: the `wright-result/v1` envelope keeps the
+driver's diagnostic set and production order, and the GitHub Actions
+renderer is unchanged.
+
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,
 stdout/stderr ownership, and the `wright-result/v1` envelope that CI and
