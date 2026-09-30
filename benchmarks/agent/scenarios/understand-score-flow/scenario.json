@@ -2,6 +2,7 @@
   "id": "understand-score-flow",
   "family": "understanding",
   "language": "workshop",
+  "split": "train",
   "entry": "mode.ws",
   "writable": ["answer.json"],
   "checks": [
