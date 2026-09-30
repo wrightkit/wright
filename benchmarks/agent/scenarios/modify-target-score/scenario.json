@@ -2,6 +2,7 @@
   "id": "modify-target-score",
   "family": "modification",
   "language": "workshop",
+  "split": "train",
   "entry": "mode.ws",
   "writable": ["mode.ws"],
   "runtimeOnly": ["The HUD text renders as intended in a live match."],

@@ -77,7 +77,7 @@ to form a passing solution), and optional `negative/<name>/` overlays.
 | `writable` | Files the agent may change; any other change is reported as an unsafe edit |
 | `runtimeOnly` | Claims that only the Overwatch runtime can verify; reported as unverified, never as passed |
 | `stabilityRisk` | `true` when finishing safely needs `lint` or `analyze`, not only `check` (expectation E03) |
-| `split` | Optional `train` or `test`, for reports and guide tuning |
+| `split` | Optional `train` or `test`, for reports and guide tuning. Scenarios that share a requirement or family across languages take the same split, so a held-out scenario is never a translation of a training one |
 | `source`, `referenceNote` | Optional provenance of the requirement and of the reference solution; the reference only calibrates the checks and is never shown to agents |
 | `negatives` | `{name: {"fails": [check ids]}}`; the overlay must fail exactly those checks |
 | `checks` | Deterministic checks, each with `id`, `kind`, and `layer` |
@@ -124,7 +124,7 @@ python3 benchmarks/agent/agent_bench.py matrix matrix.json   # agents x cells x 
 python3 benchmarks/agent/agent_bench.py report target/agent-bench [--regrade]
 ```
 
-`matrix.json` lists `agents` (`{id, cmd}`), `cells`, optional `scenarios`,
+[`matrix.example.json`](../benchmarks/agent/matrix.example.json) is the Tier 1 matrix. `matrix.json` lists `agents` (`{id, cmd}`), `cells`, optional `scenarios`,
 `trials`, `parallel`, `seed` (run order is shuffled by it), and `options`
 (`skill_dir`, `wiki_dir`, `env_pass`, ...). Finished runs are skipped, so an
 interrupted matrix resumes.

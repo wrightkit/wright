@@ -2,6 +2,7 @@
   "id": "greenfield-elimination-race",
   "family": "greenfield",
   "language": "workshop",
+  "split": "test",
   "entry": "mode.ws",
   "writable": ["mode.ws"],
   "runtimeOnly": ["Elimination scoring, the HUD, and the winner declaration behave as intended in a live match."],

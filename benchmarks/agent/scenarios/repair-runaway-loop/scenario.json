@@ -2,6 +2,7 @@
   "id": "repair-runaway-loop",
   "family": "diagnosis",
   "language": "workshop",
+  "split": "test",
   "entry": "mode.ws",
   "stabilityRisk": true,
   "writable": ["mode.ws", "answer.json"],

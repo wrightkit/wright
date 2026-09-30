@@ -1,0 +1,16 @@
+{
+  "agents": [
+    {"id": "example-model", "cmd": "BENCH_MODEL=example-model python3 benchmarks/agent/adapters/claude_code.py"}
+  ],
+  "cells": [
+    {"wright": "none", "knowledge": "none", "network": "off"},
+    {"wright": "bin", "knowledge": "none", "network": "off"},
+    {"wright": "bin+skill", "knowledge": "none", "network": "off"},
+    {"wright": "none", "knowledge": "web", "network": "on"},
+    {"wright": "none", "knowledge": "wiki", "network": "off"}
+  ],
+  "trials": 5,
+  "parallel": 2,
+  "seed": 1,
+  "options": {"skill_dir": "../skills/skills/wright", "wiki_dir": "path/to/pinned/wiki", "env_pass": ["HOME", "ANTHROPIC_API_KEY"]}
+}
