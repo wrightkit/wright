@@ -1,0 +1,158 @@
+{
+  "id": "ana-paintball",
+  "family": "greenfield",
+  "language": "opy",
+  "source": "gamemode idea from `Zezombye/overpy#439`",
+  "entry": "mode.opy",
+  "stabilityRisk": true,
+  "split": "train",
+  "writable": [
+    "mode.opy"
+  ],
+  "runtimeOnly": [
+    "Piercing shots, the sleep-dart and melee interaction, the nuclear strike, and rampage messages behave as described in a live match.",
+    "Instant kills and the 24-score dart-only rule do not interact badly with respawn timing."
+  ],
+  "referenceNote": "Adapted from an agent-generated solution that satisfies the checks; not verified in the game.",
+  "checks": [
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "wright-compiles",
+      "kind": "wright-compile",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "wright-check",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "ana",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "\\bAna\\b"
+      ]
+    },
+    {
+      "id": "maps",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Black Forest",
+        "Guillard",
+        "Eichenwalde",
+        "Kanezaka"
+      ]
+    },
+    {
+      "id": "ffa",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Deathmatch"
+      ]
+    },
+    {
+      "id": "instakill",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "any": [
+        "Kill\\(",
+        "Damage\\(",
+        "Set Damage Dealt"
+      ]
+    },
+    {
+      "id": "target-25",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "\\b25\\b"
+      ]
+    },
+    {
+      "id": "rampage-big-message",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Big Message"
+      ]
+    },
+    {
+      "id": "piercing-via-raycast",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Ray Cast Hit"
+      ]
+    },
+    {
+      "id": "nuke-doomfist",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "any": [
+        "Doomfist",
+        "Meteor Strike"
+      ]
+    },
+    {
+      "id": "sleep-dart",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Asleep"
+      ]
+    },
+    {
+      "id": "melee-handling",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Melee"
+      ]
+    },
+    {
+      "id": "sleep-cooldown-2.5",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Set Ability Cooldown",
+        "2\\.5"
+      ]
+    },
+    {
+      "id": "no-waitless-loop",
+      "kind": "lint",
+      "code": "while-without-wait",
+      "layer": "wright"
+    }
+  ],
+  "negatives": {
+    "no-raycast": {
+      "fails": [
+        "piercing-via-raycast"
+      ]
+    },
+    "upstream-rejects-name": {
+      "fails": [
+        "ana",
+        "ffa",
+        "instakill",
+        "maps",
+        "melee-handling",
+        "nuke-doomfist",
+        "piercing-via-raycast",
+        "rampage-big-message",
+        "sleep-cooldown-2.5",
+        "sleep-dart",
+        "target-25",
+        "upstream-valid"
+      ]
+    }
+  }
+}

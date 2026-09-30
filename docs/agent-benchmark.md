@@ -78,6 +78,7 @@ to form a passing solution), and optional `negative/<name>/` overlays.
 | `runtimeOnly` | Claims that only the Overwatch runtime can verify; reported as unverified, never as passed |
 | `stabilityRisk` | `true` when finishing safely needs `lint` or `analyze`, not only `check` (expectation E03) |
 | `split` | Optional `train` or `test`, for reports and guide tuning |
+| `source`, `referenceNote` | Optional provenance of the requirement and of the reference solution; the reference only calibrates the checks and is never shown to agents |
 | `negatives` | `{name: {"fails": [check ids]}}`; the overlay must fail exactly those checks |
 | `checks` | Deterministic checks, each with `id`, `kind`, and `layer` |
 

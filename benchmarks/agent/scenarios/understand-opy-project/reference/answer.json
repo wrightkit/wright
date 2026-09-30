@@ -1,0 +1,12 @@
+{
+  "targetScore": 5,
+  "victoryRule": "declare winner",
+  "scoreWriters": [
+    "score on elimination",
+    "streak bonus points"
+  ],
+  "unusedVariables": [
+    "bonus",
+    "unusedBanner"
+  ]
+}

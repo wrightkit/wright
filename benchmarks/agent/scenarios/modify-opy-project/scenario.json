@@ -1,0 +1,88 @@
+{
+  "id": "modify-opy-project",
+  "family": "modification",
+  "language": "opy",
+  "entry": "mode.opy",
+  "split": "train",
+  "writable": [
+    "mode.opy"
+  ],
+  "runtimeOnly": [
+    "The HUD text renders as intended in a live match."
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "wright-compiles",
+      "kind": "wright-compile",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "target-is-7",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "score >= 7"
+      ]
+    },
+    {
+      "id": "old-target-gone",
+      "kind": "compiled-absent",
+      "layer": "agent",
+      "all": [
+        ">= 5"
+      ]
+    },
+    {
+      "id": "hud-shows-target",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Create HUD Text\\([^;]*(Custom String\\(\"[^\"]*7|\\b7\\b)"
+      ]
+    },
+    {
+      "id": "rules-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "rule \\(\"reset streak on spawn\"\\)",
+        "rule \\(\"score on elimination\"\\)",
+        "rule \\(\"streak breaker\"\\)",
+        "rule \\(\"declare winner\"\\)",
+        "rule \\(\"score display\"\\)"
+      ]
+    },
+    {
+      "id": "winner-behavior-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Declare Player Victory\\(Event Player\\)"
+      ]
+    }
+  ],
+  "negatives": {
+    "keeps-old-target": {
+      "fails": [
+        "hud-shows-target",
+        "old-target-gone",
+        "target-is-7"
+      ]
+    },
+    "drops-a-rule": {
+      "fails": [
+        "rules-preserved"
+      ]
+    }
+  }
+}

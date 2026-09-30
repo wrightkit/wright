@@ -1,0 +1,64 @@
+{
+  "id": "understand-opy-project",
+  "family": "understanding",
+  "language": "opy",
+  "entry": "mode.opy",
+  "split": "train",
+  "writable": [
+    "answer.json"
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "target-score",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "targetScore",
+      "expected": 5
+    },
+    {
+      "id": "victory-rule",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "victoryRule",
+      "expected": "declare winner"
+    },
+    {
+      "id": "score-writers",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "scoreWriters",
+      "expected": [
+        "score on elimination",
+        "streak bonus points"
+      ]
+    },
+    {
+      "id": "unused-variables",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "unusedVariables",
+      "expected": [
+        "bonus",
+        "unusedBanner"
+      ]
+    }
+  ],
+  "negatives": {
+    "text-search-answers": {
+      "fails": [
+        "score-writers",
+        "unused-variables"
+      ]
+    }
+  }
+}
