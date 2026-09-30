@@ -77,7 +77,8 @@ pub(crate) enum Command {
     Convert(ConvertArgs),
     /// Check frontend, project, semantic, and validation correctness.
     Check(ReportArgs),
-    /// Summarize semantic structure, CFG hotspots, and cross-cutting state.
+    /// Summarize Workshop cost, complexity hotspots, risk indicators, and
+    /// cross-cutting state.
     Analyze(ReportArgs),
     /// Parse, lower, and report lint findings.
     Lint(LintArgs),

@@ -583,3 +583,137 @@ rule ("effect") {
     assert_eq!(objects[0]["visibility"], "all-players");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+/// `facts` carries the #445 layers: canonical element cost, per-rule
+/// attribution with condition trees, performance/stability risk indicators,
+/// and persistent-object facts — all with resolved locations.
+#[test]
+fn analyze_reports_cost_complexity_and_risk_facts() {
+    let source = r#"
+variables {
+    global:
+        0: score
+}
+
+rule ("hot path") {
+    event {
+        Ongoing - Global;
+    }
+    conditions {
+        Global.score == 1;
+        Distance Between(Vector(0, 0, 0), Vector(1, 0, 0)) < 10;
+    }
+    actions {
+        Create Effect(All Players(All Teams), Orb, Red, Vector(0, 0, 0), 1, None);
+    }
+}
+"#;
+    let path = temp_workshop("hot.ws", source);
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let envelope = session.analyze();
+    assert!(envelope.ok, "{:?}", envelope.diagnostics);
+    let facts = &envelope.result.facts;
+
+    let cost = &facts["cost"];
+    let total = cost["elementCount"]
+        .as_u64()
+        .expect("canonical element count (#445)");
+    assert!(total > 0);
+    assert_eq!(cost["counts"]["rules"], 1);
+    assert_eq!(cost["counts"]["conditions"], 2);
+    assert_eq!(cost["counts"]["actions"], 1);
+
+    let rule = &facts["rules"][0];
+    assert_eq!(rule["elements"].as_u64(), Some(total));
+    let conditions = rule["conditions"].as_array().expect("condition trees");
+    assert_eq!(conditions.len(), 2);
+    let condition_elements: u64 = conditions
+        .iter()
+        .map(|condition| condition["elements"].as_u64().expect("condition cost"))
+        .sum();
+    assert_eq!(rule["conditionElements"].as_u64(), Some(condition_elements));
+    // Resolved locations: authored path on the source-parsed input (#445).
+    assert_eq!(rule["span"]["path"], "hot.ws");
+    assert_eq!(conditions[1]["span"]["path"], "hot.ws");
+
+    let risks = facts["risks"].as_array().expect("risk indicators (#445)");
+    assert!(
+        risks.iter().any(|finding| {
+            finding["code"] == "ongoing-condition-hot-path"
+                && finding["evidence"] == "heuristic"
+                && finding["span"]["path"] == "hot.ws"
+        }),
+        "the ongoing-condition hot path is a heuristic risk fact: {risks:?}"
+    );
+    assert!(
+        risks
+            .iter()
+            .all(|finding| finding["code"] != "duplicate-condition"),
+        "correctness findings stay out of the risk frame"
+    );
+
+    let objects = facts["persistentObjects"].as_array().expect("object facts");
+    assert_eq!(objects.len(), 1);
+    assert_eq!(objects[0]["span"]["path"], "hot.ws");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// Correctness findings (e.g. `duplicate-condition`) are not performance or
+/// stability risks, so they remain visible through `lint`/`findings` but do
+/// not enter `facts.risks` (#445, #209).
+#[test]
+fn analyze_risks_exclude_correctness_findings() {
+    let source = r#"
+variables {
+    global:
+        0: index
+}
+
+rule ("dup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(index, 1);
+        Else If(Compare(Global.index, ==, 0));
+            Set Global Variable(index, 2);
+        End;
+    }
+}
+"#;
+    let path = temp_workshop("dup.ws", source);
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let lint = session.lint();
+    assert!(
+        lint.result
+            .findings
+            .as_array()
+            .is_some_and(|findings| findings
+                .iter()
+                .any(|finding| finding["code"] == "duplicate-condition")),
+        "the fixture triggers a correctness finding"
+    );
+    let analyze = session.analyze();
+    assert!(analyze.ok);
+    let risks = analyze.result.facts["risks"]
+        .as_array()
+        .expect("risks array");
+    assert!(
+        risks
+            .iter()
+            .all(|finding| finding["code"] != "duplicate-condition"),
+        "correctness findings are excluded from risks: {risks:?}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

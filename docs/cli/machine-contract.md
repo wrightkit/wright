@@ -39,11 +39,24 @@ infer them from process state alone.
     "program": { "origin": { "kind": "workshop", "locale": "en-us" }, "rules": 2 },
     "facts": {
       "symbols": [{ "id": 0, "kind": "globalVariable", "name": "counter", "usage": { "reads": 1, "writes": 1, "calls": 0, "rules": 1 } }],
-      "rules": [{ "id": 0, "name": "loop", "controlFlow": { "blocks": 4, "edges": 4, "loopBlocks": 1, "waitBlocks": 1 } }]
+      "rules": [{ "id": 0, "name": "loop", "controlFlow": { "blocks": 4, "edges": 4, "loopBlocks": 1, "waitBlocks": 1 }, "elements": 21, "conditionElements": 0, "conditions": [] }],
+      "cost": { "elementCount": 21, "counts": { "rules": 1, "conditions": 0, "actions": 7, "waits": 1 } },
+      "risks": [{ "code": "min-wait-loop", "severity": "warning", "evidence": "static-indicator", "message": "...", "span": { "file": 0, "path": "program.ws", "start": { "line": 11, "col": 9 }, "end": { "line": 11, "col": 20 } } }],
+      "persistentObjects": []
     }
   }
 }
 ```
+
+`analyze` `facts` layers Workshop cost/size over the semantic queries (#445):
+`cost.elementCount` is the canonical `workshop-rs` element count (an exact
+structural size measurement — `null` with `unavailableReason` when the
+counter does not model a construct), `cost.counts` holds always-computable
+structural counts, each `rules` entry adds the rule's `elements` and its
+`conditions` trees (element count + span per condition), `risks` lists the
+registry findings whose rules carry a `performance` or `stability` tag with
+their evidence class, and `persistentObjects` reports the persistent-object
+facts (#429).
 
 Stable contract fields: `wright.contract`, `command`, `ok`, `exit`,
 `diagnostics[].code/stage/severity/span/source`, and each command's

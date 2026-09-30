@@ -106,14 +106,22 @@ The core workflows have separate contracts:
 * `lint` executes the configurable `LintRegistry` and returns stable rule IDs,
   severity, evidence class, boundedness where applicable, source spans,
   a per-rule id/effective-severity list, and effective configuration.
-* `analyze` returns semantic facts rather than lint findings. Human text output
-  is a bounded report with a program overview, aggregate CFG measurements,
-  ranked rule hotspots, and ranked cross-cutting variables. The displayed
-  facts are static; rankings are heuristics based on CFG size or usage
-  coupling. `analyze --format json` retains the complete `result.facts`
-  payload for agents and embedding, while `inspect` is the human-facing
-  exhaustive structural/semantic view. These facts can inform future lint
-  rules without making analysis a view of the registry.
+* `analyze` returns semantic facts rather than lint findings (#445). Human
+  text output is a bounded, layered report: Workshop cost (the canonical
+  element count plus structural counts), ranked rule hotspots attributed by
+  element cost or control-flow size, structural complexity (aggregate CFG
+  measurements and the largest condition trees), performance/stability risk
+  indicators, persistent-object facts, and ranked cross-cutting variables.
+  Labels distinguish exact measurements (`[exact]`), static facts
+  (`[static]`), and heuristic rankings or indicators (`heuristic`) — nothing
+  in the report claims measured runtime cost or behavior. The `risks` facts
+  narrow registry findings to rules that declare a `performance` or
+  `stability` tag, keeping each finding's evidence class; correctness
+  findings stay out of the risk frame and remain available through `lint`.
+  `analyze --format json` retains the complete `result.facts` payload for
+  agents and embedding, while `inspect` is the human-facing exhaustive
+  structural/semantic view. These facts can inform future lint rules without
+  making analysis a view of the registry.
 
 Analysis findings (`lint` and the tool/agent `findings`/`lint` responses)
 carry an `evidence` field classifying how strongly the finding is supported
