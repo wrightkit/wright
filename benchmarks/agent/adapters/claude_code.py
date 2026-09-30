@@ -2,7 +2,7 @@
 """Reference adapter: run Claude Code for one benchmark trial and report per-turn usage.
 
 Reads the prompt on stdin. Honors the BENCH_* contract (docs/agent-benchmark.md): tools follow BENCH_KNOWLEDGE,
-BENCH_SKILL_DIR is installed as a plugin, and BENCH_USAGE / BENCH_TRANSCRIPT / BENCH_CONTEXT are written.
+BENCH_SKILL_DIR and BENCH_WIKI_SKILL_DIR are installed as plugin skills, and BENCH_USAGE / BENCH_TRANSCRIPT / BENCH_CONTEXT are written.
 The agent binary is resolved on BENCH_HOST_PATH because the agent's own PATH hides Wright when the level is `none`.
 The model comes from BENCH_MODEL (default `sonnet`). It removes web tools unless knowledge is `web`, but it does
 not sandbox the network: pair it with the harness --canary-cmd to detect a reachable network under `off`.
@@ -38,14 +38,15 @@ def main() -> int:
     if not web:
         cmd += ["--disallowedTools", *WEB_TOOLS]
     loaded: list[str] = []
-    if env.get("BENCH_SKILL_DIR"):
-        skill = Path(env["BENCH_SKILL_DIR"])
+    skills = [Path(env[k]) for k in ("BENCH_SKILL_DIR", "BENCH_WIKI_SKILL_DIR") if env.get(k)]
+    if skills:
         plugin = Path(tempfile.mkdtemp(dir=env["BENCH_RUN_DIR"]))
         (plugin / ".claude-plugin").mkdir()
-        (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "bench", "version": "0.0.0", "description": "benchmark skill"}))
-        shutil.copytree(skill, plugin / "skills" / skill.name)
+        (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "bench", "version": "0.0.0", "description": "benchmark skills"}))
+        for skill in skills:
+            shutil.copytree(skill, plugin / "skills" / skill.name)
+            loaded.append(skill.name)
         cmd += ["--plugin-dir", str(plugin)]
-        loaded.append(skill.name)
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         env={**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"},
@@ -53,7 +54,7 @@ def main() -> int:
     proc.stdin.write(prompt)
     proc.stdin.close()
     final, errored = "", False
-    with open(env["BENCH_USAGE"], "w") as usage, open(env["BENCH_TRANSCRIPT"], "w") as transcript:
+    with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage
         for line in proc.stdout:
             try:
                 event = json.loads(line)

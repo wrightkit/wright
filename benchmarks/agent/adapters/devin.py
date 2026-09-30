@@ -4,8 +4,8 @@
 Reads the prompt on stdin and honors the BENCH_* contract (docs/agent-benchmark.md). BENCH_MODEL is required
 (for example `swe-2-max`, see `devin models list`). The run uses an isolated HOME that contains only the Devin
 credentials copied from the HOME the harness passed (`--env-pass HOME`), and a config that reads no other tools'
-rules or skills, so the user's global skills, plugins, and instruction files do not load. BENCH_SKILL_DIR is
-installed as a project skill in the workspace. Web tools are denied unless knowledge is `web`; the shell can
+rules or skills, so the user's global skills, plugins, and instruction files do not load. BENCH_SKILL_DIR and
+BENCH_WIKI_SKILL_DIR are installed as project skills in the workspace. Web tools are denied unless knowledge is `web`; the shell can
 still reach the network, so network `off` is not enforced: use the harness --canary-cmd to check it.
 Set BENCH_DEVIN_SANDBOX=1 to add `--sandbox`. Exit 75 marks a provider or infrastructure failure for a retry.
 """
@@ -77,9 +77,10 @@ def main() -> int:
     config, export, prompt = run_dir / "devin-config.json", run_dir / "devin-export.json", run_dir / "devin-prompt.txt"
     config.write_text(json.dumps(isolated_config(json.loads((real_home / ".config/devin/config.json").read_text()), model, env["BENCH_KNOWLEDGE"] == "web")))
     prompt.write_text(sys.stdin.read())
-    if env.get("BENCH_SKILL_DIR"):
-        skill = Path(env["BENCH_SKILL_DIR"])
-        shutil.copytree(skill, workspace / ".agents/skills" / skill.name)
+    for key in ("BENCH_SKILL_DIR", "BENCH_WIKI_SKILL_DIR"):
+        if env.get(key):
+            skill = Path(env[key])
+            shutil.copytree(skill, workspace / ".agents/skills" / skill.name)
     devin = shutil.which("devin", path=env.get("BENCH_HOST_PATH")) or "devin"
     cmd = [devin, "--config", str(config), "--model", model, "--respect-workspace-trust", "false",
            "--permission-mode", "dangerous", "--export", str(export), "--prompt-file", str(prompt), "-p"]

@@ -3,7 +3,7 @@
 
 Reads the prompt on stdin and honors the BENCH_* contract (docs/agent-benchmark.md). BENCH_MODEL is required
 (`provider/id`, see `pi --list-models`); BENCH_THINKING optionally sets `--thinking`. Discovery of context files,
-extensions, prompt templates, themes, and skills is disabled; BENCH_SKILL_DIR is loaded explicitly. A provider that
+extensions, prompt templates, themes, and skills is disabled; BENCH_SKILL_DIR and BENCH_WIKI_SKILL_DIR are loaded explicitly. A provider that
 is registered by an extension (for example Gemini through pi-antigravity) needs BENCH_PI_EXTENSIONS, a comma-separated
 list of extension paths. Web tools come from BENCH_PI_WEB_EXTENSIONS (for example pi-web-access), loaded only when
 knowledge is `web`. Network `off` is not enforced, because the shell can still reach the network: use the harness
@@ -64,8 +64,9 @@ def main() -> int:
     extensions = env.get("BENCH_PI_EXTENSIONS", "").split(",") + (env.get("BENCH_PI_WEB_EXTENSIONS", "").split(",") if env["BENCH_KNOWLEDGE"] == "web" else [])
     for extension in filter(None, extensions):
         cmd += ["-e", extension]
-    if env.get("BENCH_SKILL_DIR"):
-        cmd += ["--skill", env["BENCH_SKILL_DIR"]]
+    for key in ("BENCH_SKILL_DIR", "BENCH_WIKI_SKILL_DIR"):
+        if env.get(key):
+            cmd += ["--skill", env[key]]
     if env.get("BENCH_THINKING"):
         cmd += ["--thinking", env["BENCH_THINKING"]]
     limit = context_limit(pi, model)
@@ -75,7 +76,7 @@ def main() -> int:
     proc.stdin.close()
     loaded: list[str] = []
     final, error = "", ""
-    with open(env["BENCH_USAGE"], "w") as usage, open(env["BENCH_TRANSCRIPT"], "w") as transcript:
+    with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage
         for line in proc.stdout:
             try:
                 event = json.loads(line)

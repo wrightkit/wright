@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,40 +21,73 @@ NOTICE = (
 )
 
 
-def fetch(url: str) -> bytes:
-    """GET through curl: the mirror rejects Python's HTTP client fingerprint with 403."""
-    proc = subprocess.run(["curl", "-fsSL", "-m", "30", "-A", USER_AGENT, url], capture_output=True)
-    if proc.returncode != 0:
-        raise SystemExit(f"fetch failed for {url}: {proc.stderr.decode(errors='replace').strip()}")
-    return proc.stdout
+def fetch(url: str, attempts: int = 4) -> bytes:
+    """GET through curl: the mirror rejects Python's HTTP client fingerprint with 403. Retries slow or failed requests."""
+    error = ""
+    for attempt in range(attempts):
+        proc = subprocess.run(["curl", "-fsSL", "-m", "60", "-A", USER_AGENT, url], capture_output=True)
+        if proc.returncode == 0 and proc.stdout:
+            return proc.stdout
+        error = proc.stderr.decode(errors="replace").strip() or "empty response"
+        time.sleep(2 * (attempt + 1))
+    raise SystemExit(f"fetch failed for {url}: {error}")
 
 
-def snapshot(base: str, out: Path, delay: float = 0.2) -> dict:
-    """Fetch the manifest and every article once, and write the files plus SNAPSHOT.json with content hashes."""
+CATEGORIES = ("actions", "values", "events", "constants", "references")
+FRONT = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+
+
+def front_matter(markdown: bytes) -> dict:
+    match = FRONT.match(markdown.decode(errors="replace"))
+    fields = {}
+    for line in (match.group(1).splitlines() if match else []):
+        key, _, value = line.partition(": ")
+        fields[key.strip()] = value.strip().strip('"')
+    return fields
+
+
+def category_slugs(base: str, category: str) -> list[str]:
+    """Article slugs of one category page. The manifest lists only the first upstream page, so categories are the source."""
+    page = fetch(f"{base}/wiki/categories/{category}").decode()
+    return list(dict.fromkeys(re.findall(r"\]\([^)]*/wiki/articles/([^)]+)\)", page)))
+
+
+def snapshot(base: str, out: Path, categories: tuple[str, ...] = CATEGORIES, delay: float = 0.1, workers: int = 4) -> dict:
+    """Crawl the given categories once and write the files plus SNAPSHOT.json with content hashes."""
     if (out / "SNAPSHOT.json").exists():
         raise SystemExit(f"{out} already holds a snapshot; snapshots are pinned, so choose a new directory")
-    manifest_bytes = fetch(f"{base}/manifest.json")
-    manifest = json.loads(manifest_bytes)
-    if manifest.get("schemaVersion") != 1:
-        raise SystemExit(f"unsupported manifest schemaVersion {manifest.get('schemaVersion')!r}")
     articles = out / "articles"
     articles.mkdir(parents=True, exist_ok=True)
-    documents = []
-    for doc in manifest["documents"]:
-        slug = doc["slug"]
-        if not SLUG.match(slug):
-            raise SystemExit(f"refusing unsafe slug {slug!r}")
-        body = fetch(f"{base}/wiki/articles/{slug}")
-        (articles / f"{slug}.md").write_bytes(body)
-        documents.append({"slug": slug, "title": doc.get("title"), "updatedAt": doc.get("updatedAt"), "sourceUrl": doc.get("sourceUrl"), "sha256": hashlib.sha256(body).hexdigest()})
+    slugs: dict[str, list[str]] = {}
+    for category in categories:
+        listing = category_slugs(base, category)
+        if not listing:
+            raise SystemExit(f"category {category!r} listed no articles")
+        for slug in listing:
+            if not SLUG.match(slug):
+                raise SystemExit(f"refusing unsafe slug {slug!r}")
+            slugs.setdefault(slug, []).append(category)
+
+    def one(item: tuple[str, list[str]]) -> dict:
+        slug, cats = item
+        target = articles / f"{slug}.md"
+        body = target.read_bytes() if target.is_file() and target.stat().st_size else fetch(f"{base}/wiki/articles/{slug}")  # resumes an interrupted crawl
+        target.write_bytes(body)
+        meta = front_matter(body)
         time.sleep(delay)
-    (out / "index.md").write_bytes(fetch(f"{base}/wiki/articles"))
+        return {
+            "slug": slug, "categories": cats, "title": meta.get("title"), "updatedAt": meta.get("updated_at"),
+            "contentHash": meta.get("content_hash"), "sha256": hashlib.sha256(body).hexdigest(),
+        }
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        documents = list(pool.map(one, slugs.items()))
     (out / "NOTICE.txt").write_text(NOTICE)
-    identity = "\n".join(f"{d['slug']} {d['sha256']}" for d in sorted(documents, key=lambda d: d["slug"]))
+    documents.sort(key=lambda d: d["slug"])
+    identity_text = "\n".join(f"{d['slug']} {d['sha256']}" for d in documents)
     record = {
-        "source": base, "fetchedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(), "documents": documents,
-        "snapshotSha256": hashlib.sha256(identity.encode()).hexdigest(),
+        "source": base, "fetchedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "categories": list(categories),
+        "documents": documents, "snapshotSha256": hashlib.sha256(identity_text.encode()).hexdigest(),
     }
     (out / "SNAPSHOT.json").write_text(json.dumps(record, indent=2) + "\n")
     return record

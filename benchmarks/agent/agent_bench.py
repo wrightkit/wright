@@ -22,13 +22,14 @@ import bench_grade
 import bench_report
 import bench_trace
 import bench_wiki
+import wiki_skill
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 SCENARIOS = HERE / "scenarios"
 RESULT_CONTRACT = "wright-agent-bench/v2"
 WRIGHT_LEVELS = ("none", "bin", "bin+skill")
-KNOWLEDGE_LEVELS = ("none", "wiki", "web")
+KNOWLEDGE_LEVELS = ("none", "wiki", "wiki-skill", "web")
 INFRA_EXIT = 75  # EX_TEMPFAIL: the adapter reports a provider or infrastructure failure, not an agent failure
 ENV_KEEP = ("LANG", "LC_ALL", "TERM", "TMPDIR", "USER", "LOGNAME")
 
@@ -98,6 +99,8 @@ def check_cell(cell: dict, args: argparse.Namespace) -> None:
         raise SystemExit("knowledge 'web' requires network 'on'")
     if cell["wright"] == "bin+skill" and not args.skill_dir:
         raise SystemExit("wright level 'bin+skill' requires --skill-dir")
+    if cell["knowledge"] == "wiki-skill" and not (args.wiki_skill_dir and (Path(args.wiki_skill_dir) / "SKILL.md").is_file()):
+        raise SystemExit("knowledge 'wiki-skill' requires --wiki-skill-dir pointing at a built skill (see `agent_bench.py wiki-skill`)")
     if cell["knowledge"] == "wiki" and not (args.wiki_dir and (Path(args.wiki_dir) / "SNAPSHOT.json").is_file()):
         raise SystemExit("knowledge 'wiki' requires --wiki-dir pointing at a snapshot (see `agent_bench.py wiki-snapshot`)")
 
@@ -125,6 +128,8 @@ def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) 
     )
     if cell["wright"] == "bin+skill":
         env["BENCH_SKILL_DIR"] = str(args.skill_dir)
+    if cell["knowledge"] == "wiki-skill":
+        env["BENCH_WIKI_SKILL_DIR"] = str(args.wiki_skill_dir)
     return env
 
 
@@ -170,7 +175,7 @@ def context_report(out: Path, cell: dict) -> dict:
     if not path.is_file():
         return {"reported": False}
     loaded = json.loads(path.read_text()).get("loaded", [])
-    allowed = {"wright"} if cell["wright"] == "bin+skill" else set()
+    allowed = ({"wright"} if cell["wright"] == "bin+skill" else set()) | ({wiki_skill.SKILL_NAME} if cell["knowledge"] == "wiki-skill" else set())
     return {"reported": True, "loaded": loaded, "unexpected": sorted(set(loaded) - allowed)}
 
 
@@ -252,6 +257,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
+            **({"wikiSkill": json.loads((Path(args.wiki_skill_dir) / "BUILD.json").read_text())} if cell["knowledge"] == "wiki-skill" else {}),
         },
     }
 
@@ -289,7 +295,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         out = trial_dir(args.out, scenario_id, agent["id"], cell, trial)
         if (out / "result.json").is_file():
             return
-        options = {k: Path(v) if k in ("skill_dir", "wiki_dir") and v else v for k, v in config.get("options", {}).items()}
+        options = {k: Path(v) if k in ("skill_dir", "wiki_dir", "wiki_skill_dir") and v else v for k, v in config.get("options", {}).items()}
         trial_args = argparse.Namespace(**{**vars(args), "agent_id": agent["id"], "agent_cmd": agent["cmd"], **options})
         result = run_trial(load_scenario(scenario_id), cell, trial_args, out)
         print(f"{scenario_id} {agent['id']} {cell_label(cell)} #{trial}: {'INVALID' if 'invalid' in result else 'PASS' if result['passed'] else 'FAIL'}", flush=True)
@@ -300,8 +306,14 @@ def cmd_matrix(args: argparse.Namespace) -> int:
 
 
 def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
-    record = bench_wiki.snapshot(args.base, args.dir)
+    record = bench_wiki.snapshot(args.base, args.dir, tuple(args.categories))
     print(f"{len(record['documents'])} document(s) from {record['source']} into {args.dir}\nsnapshotSha256 {record['snapshotSha256']}")
+    return 0
+
+
+def cmd_wiki_skill(args: argparse.Namespace) -> int:
+    record = wiki_skill.build(args.snapshot, args.out_dir, json.loads(args.catalog.read_text()), json.loads(args.opy_manifest.read_text()), wiki_skill.upstream_source_text())
+    print(json.dumps(record, indent=2))
     return 0
 
 
@@ -322,6 +334,7 @@ def main() -> int:
         p = sub.choices[name]
         p.add_argument("--skill-dir", type=Path, help="pinned guide directory, exposed to the adapter as BENCH_SKILL_DIR")
         p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked read-only as ./wiki for knowledge 'wiki'")
+        p.add_argument("--wiki-skill-dir", type=Path, help="built workshop-wiki skill, installed through the agent's skill mechanism for knowledge 'wiki-skill'")
         p.add_argument("--env-pass", nargs="*", default=[], help="host variables passed through the environment scrub")
         p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")
         p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
@@ -337,9 +350,15 @@ def main() -> int:
     run.add_argument("--trials", type=int, default=1)
     sub.choices["matrix"].add_argument("config", type=Path, help="JSON: agents[{id,cmd}], cells[{wright,knowledge,network}], scenarios, trials, parallel, seed, options")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
+    skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-wiki skill from a wiki snapshot")
+    skill.add_argument("--snapshot", type=Path, required=True)
+    skill.add_argument("--out-dir", type=Path, required=True, help="new skill directory (not overwritten)")
+    skill.add_argument("--catalog", type=Path, required=True, help="workshop-rs catalog.json, for Workshop names and ids")
+    skill.add_argument("--opy-manifest", type=Path, required=True, help="opy-rs manifest.json, for upstream OverPy spellings")
     wiki = sub.add_parser("wiki-snapshot", help="fetch the Workshop wiki Markdown mirror into a pinned local snapshot")
     wiki.add_argument("--dir", type=Path, default=Path.home() / ".cache/wright-agent-bench-wiki")
     wiki.add_argument("--base", default=bench_wiki.BASE)
+    wiki.add_argument("--categories", nargs="+", default=list(bench_wiki.CATEGORIES), help="wiki categories to crawl (add tutorials for the second tier)")
     report = sub.add_parser("report", help="summarize result.json files")
     report.add_argument("dirs", nargs="+", type=Path)
     report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
@@ -355,6 +374,8 @@ def main() -> int:
         return cmd_setup_oracle(args)
     if args.command == "wiki-snapshot":
         return cmd_wiki_snapshot(args)
+    if args.command == "wiki-skill":
+        return cmd_wiki_skill(args)
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s))
     return cmd_run(args) if args.command == "run" else cmd_matrix(args)
