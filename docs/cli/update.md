@@ -53,5 +53,5 @@ Environment overrides (test/advanced hooks):
 * `WRIGHT_INSTALL_OS` / `WRIGHT_INSTALL_ARCH`: override self-update platform
   detection (matching `install.sh`)
 * `WRIGHT_PROVIDER_DATA_DIR`: provider store root
-* `WRIGHT_OPY_PROVIDER_LATEST_URL` / `WRIGHT_OPY_PROVIDER_BASE_URL`: provider
-  release routes
+* `WRIGHT_OPY_PROVIDER_BASE_URL`: base URL of the provider release
+  distribution (the same `latest/version` + `releases/<version>/` layout)

@@ -272,12 +272,8 @@ fn provider_release(version: &str, files: &mut HashMap<String, Vec<u8>>) {
 fn provider_env(server: &MockServer) -> Vec<(&'static str, String)> {
     let mut env = server.env();
     env.push((
-        "WRIGHT_OPY_PROVIDER_LATEST_URL",
-        format!("{}/opy-rs/latest/version", server.base_url()),
-    ));
-    env.push((
         "WRIGHT_OPY_PROVIDER_BASE_URL",
-        format!("{}/opy-rs/releases", server.base_url()),
+        format!("{}/opy-rs", server.base_url()),
     ));
     env
 }
