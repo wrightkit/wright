@@ -93,7 +93,21 @@ def snapshot(base: str, out: Path, categories: tuple[str, ...] = CATEGORIES, del
     return record
 
 
-def identity(wiki_dir: Path) -> dict:
-    """The pinned identity of a snapshot, recorded in every result that used it."""
+def load_snapshot(wiki_dir: Path) -> dict:
     record = json.loads((wiki_dir / "SNAPSHOT.json").read_text())
+    for doc in record["documents"]:
+        if not SLUG.fullmatch(doc["slug"]):
+            raise SystemExit(f"refusing unsafe slug {doc['slug']!r}")
+        path = wiki_dir / "articles" / f"{doc['slug']}.md"
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != doc["sha256"]:
+            raise SystemExit(f"snapshot content mismatch: {path}")
+    identity_text = "\n".join(f"{d['slug']} {d['sha256']}" for d in sorted(record["documents"], key=lambda d: d["slug"]))
+    if hashlib.sha256(identity_text.encode()).hexdigest() != record["snapshotSha256"]:
+        raise SystemExit(f"snapshot identity mismatch: {wiki_dir}")
+    return record
+
+
+def identity(wiki_dir: Path) -> dict:
+    """The verified identity of a snapshot, recorded in every result that used it."""
+    record = load_snapshot(wiki_dir)
     return {k: record[k] for k in ("source", "fetchedAt", "snapshotSha256")} | {"documents": len(record["documents"])}

@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -10,6 +11,7 @@ import agent_bench
 import bench_grade
 import bench_report
 import bench_trace
+import wiki_skill
 
 WRIGHT = os.environ.get("WRIGHT_BIN", str(agent_bench.ROOT / "target/debug/wright"))
 SCENARIO = "repair-runaway-loop"
@@ -34,13 +36,15 @@ class AgentBenchTest(unittest.TestCase):
         cell = {"wright": wright, "knowledge": knowledge, "network": "off"}
         return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{wright}")
 
-    def test_wiki_snapshot_is_linked_read_only_and_identified(self):
+    def test_wiki_snapshot_is_linked_and_identified(self):
         snapshot = self.out / "snapshot"
         (snapshot / "articles").mkdir(parents=True)
         (snapshot / "articles/wait-until.md").write_text("# Wait Until\n")
-        (snapshot / "SNAPSHOT.json").write_text(json.dumps({"source": "https://mirror.example", "fetchedAt": "2026-09-30T00:00:00+00:00", "snapshotSha256": "ab" * 32, "documents": [{"slug": "wait-until"}]}))
+        article_hash = hashlib.sha256((snapshot / "articles/wait-until.md").read_bytes()).hexdigest()
+        snapshot_hash = hashlib.sha256(f"wait-until {article_hash}".encode()).hexdigest()
+        (snapshot / "SNAPSHOT.json").write_text(json.dumps({"source": "https://mirror.example", "fetchedAt": "2026-09-30T00:00:00+00:00", "snapshotSha256": snapshot_hash, "documents": [{"slug": "wait-until", "sha256": article_hash}]}))
         result = self.trial("ls wiki/articles > listing.txt", knowledge="wiki", wiki_dir=snapshot)
-        self.assertEqual(result["environment"]["wiki"]["snapshotSha256"], "ab" * 32)
+        self.assertEqual(result["environment"]["wiki"]["snapshotSha256"], snapshot_hash)
         self.assertEqual(result["environment"]["wiki"]["documents"], 1)
         self.assertEqual((self.out / f"{SCENARIO}-bin/workspace/listing.txt").read_text().strip(), "wait-until.md")
         self.assertNotIn("wiki", " ".join(result["unsafeEdits"]))
@@ -49,15 +53,19 @@ class AgentBenchTest(unittest.TestCase):
         skill = self.out / "workshop-wiki"
         skill.mkdir()
         (skill / "SKILL.md").write_text("---\nname: workshop-wiki\n---\n")
-        (skill / "BUILD.json").write_text(json.dumps({"name": "workshop-wiki", "skillSha256": "cd" * 32, "articles": 3}))
+        skill_hash = wiki_skill.content_hash(skill)
+        (skill / "BUILD.json").write_text(json.dumps({"name": "workshop-wiki", "skillSha256": skill_hash, "articles": 3}))
         with self.assertRaises(SystemExit):
             self.trial("true", knowledge="wiki-skill")
         expected = self.trial("echo '{\"loaded\": [\"workshop-wiki\"]}' > \"$BENCH_CONTEXT\"; echo \"$BENCH_WIKI_SKILL_DIR\" > dir.txt", knowledge="wiki-skill", wiki_skill_dir=skill)
         self.assertNotIn("invalid", expected)
-        self.assertEqual(expected["environment"]["wikiSkill"]["skillSha256"], "cd" * 32)
+        self.assertEqual(expected["environment"]["wikiSkill"]["skillSha256"], skill_hash)
         self.assertEqual((self.out / f"{SCENARIO}-bin/workspace/dir.txt").read_text().strip(), str(skill))
         stray = self.trial("echo '{\"loaded\": [\"workshop-wiki\", \"other\"]}' > \"$BENCH_CONTEXT\"", knowledge="wiki-skill", wiki_skill_dir=skill)
         self.assertIn("unexpected loaded context", stray["invalid"])
+        (skill / "SKILL.md").write_text("changed")
+        with self.assertRaisesRegex(SystemExit, "wiki skill content mismatch"):
+            self.trial("true", knowledge="wiki-skill", wiki_skill_dir=skill)
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))

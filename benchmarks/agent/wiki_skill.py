@@ -11,11 +11,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 import bench_grade
+import bench_wiki
 
 KIND = {"actions": "action", "values": "value", "events": "event", "constants": "constant", "references": "reference"}
 SKILL_NAME = "workshop-wiki"
@@ -27,10 +27,12 @@ DESCRIPTION = (
 SKILL_MD = f"""---
 name: {SKILL_NAME}
 description: {DESCRIPTION}
-license: AGPL-3.0
 ---
 
 # Workshop wiki notes
+
+Local benchmark material only. The source content remains subject to the Workshop.codes Terms of Service
+(https://workshop.codes/tos); this generated skill grants no redistribution or AI-training permission.
 
 Community-written notes on Workshop actions, values, events, constants, and references, stored as one small file per
 article. They are not exhaustive and may be out of date: check the `updated` date, and prefer a compiler or validator
@@ -111,7 +113,7 @@ def build(snapshot: Path, out: Path, catalog: dict, manifest: dict, upstream_sou
         raise SystemExit(f"the output directory must be named {SKILL_NAME!r} so it installs under that skill name")
     if out.exists():
         raise SystemExit(f"{out} exists; generated skills are not overwritten")
-    record = json.loads((snapshot / "SNAPSHOT.json").read_text())
+    record = bench_wiki.load_snapshot(snapshot)
     by_name, spelling = catalog_index(catalog), upstream_spellings(manifest)
     (out / "references/articles").mkdir(parents=True)
     index: dict[str, list[str]] = {}
@@ -138,10 +140,20 @@ def build(snapshot: Path, out: Path, catalog: dict, manifest: dict, upstream_sou
         (out / f"references/{category}.md").write_text(f"# {category} ({len(lines)})\n\n" + "\n".join(sorted(lines, key=str.lower)) + "\n")
     (out / "references/categories.md").write_text("# Categories\n\n" + "\n".join(f"- [{c}]({c}.md): {len(index[c])} {KIND.get(c, c)} notes" for c in sorted(index)) + "\n")
     (out / "SKILL.md").write_text(SKILL_MD)
-    identity = hashlib.sha256("".join(f"{p.relative_to(out)}{hashlib.sha256(p.read_bytes()).hexdigest()}" for p in sorted(out.rglob("*.md"))).encode()).hexdigest()
-    build_record = {"name": SKILL_NAME, "snapshotSha256": record["snapshotSha256"], "builtAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "skillSha256": identity, **stats}
+    build_record = {"name": SKILL_NAME, "snapshotSha256": record["snapshotSha256"], "builtAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "skillSha256": content_hash(out), **stats}
     (out / "BUILD.json").write_text(json.dumps(build_record, indent=2) + "\n")
     return build_record
+
+
+def content_hash(skill_dir: Path) -> str:
+    return hashlib.sha256("".join(f"{p.relative_to(skill_dir)}{hashlib.sha256(p.read_bytes()).hexdigest()}" for p in sorted(skill_dir.rglob("*.md"))).encode()).hexdigest()
+
+
+def identity(skill_dir: Path) -> dict:
+    record = json.loads((skill_dir / "BUILD.json").read_text())
+    if record["name"] != SKILL_NAME or content_hash(skill_dir) != record["skillSha256"]:
+        raise SystemExit(f"wiki skill content mismatch: {skill_dir}")
+    return record
 
 
 def upstream_source_text() -> str:

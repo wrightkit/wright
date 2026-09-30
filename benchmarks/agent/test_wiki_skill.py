@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import tempfile
@@ -34,9 +35,11 @@ class WikiSkillTest(unittest.TestCase):
         ]
         records = []
         for title, slug, cats, body in docs:
-            (snap / "articles" / f"{slug}.md").write_text(article(title, slug, body))
-            records.append({"slug": slug, "categories": cats, "title": title, "updatedAt": "2026-07-10T18:15:21.022Z", "contentHash": "abc", "sha256": "x"})
-        (snap / "SNAPSHOT.json").write_text(json.dumps({"snapshotSha256": "s" * 64, "documents": records}))
+            raw = article(title, slug, body).encode()
+            (snap / "articles" / f"{slug}.md").write_bytes(raw)
+            records.append({"slug": slug, "categories": cats, "title": title, "updatedAt": "2026-07-10T18:15:21.022Z", "contentHash": "abc", "sha256": hashlib.sha256(raw).hexdigest()})
+        identity_text = "\n".join(f"{d['slug']} {d['sha256']}" for d in sorted(records, key=lambda d: d["slug"]))
+        (snap / "SNAPSHOT.json").write_text(json.dumps({"snapshotSha256": hashlib.sha256(identity_text.encode()).hexdigest(), "documents": records}))
         self.snap, self.out = snap, self.tmp / "workshop-wiki"
 
     def build(self, upstream: str = UPSTREAM) -> dict:
@@ -82,6 +85,25 @@ class WikiSkillTest(unittest.TestCase):
         self.assertEqual(self.build()["skillSha256"], first["skillSha256"])
         with self.assertRaises(SystemExit):
             wiki_skill.build(self.snap, self.tmp / "other-name", CATALOG, MANIFEST, UPSTREAM)
+
+    def test_changed_snapshot_is_refused_before_writing_a_skill(self):
+        (self.snap / "articles/play-effect.md").write_text("changed")
+        with self.assertRaisesRegex(SystemExit, "snapshot content mismatch"):
+            self.build()
+        self.assertFalse(self.out.exists())
+
+    def test_skill_identity_refuses_changed_or_added_content(self):
+        record = self.build()
+        self.assertEqual(wiki_skill.identity(self.out), record)
+        note = self.out / "references/articles/play-effect.md"
+        original = note.read_text()
+        note.write_text("changed")
+        with self.assertRaisesRegex(SystemExit, "wiki skill content mismatch"):
+            wiki_skill.identity(self.out)
+        note.write_text(original)
+        (self.out / "references/extra.md").write_text("extra context")
+        with self.assertRaisesRegex(SystemExit, "wiki skill content mismatch"):
+            wiki_skill.identity(self.out)
 
     def test_summary_takes_the_first_sentence_without_markup(self):
         self.assertEqual(wiki_skill.summary("> Source: https://x\n\nPlays an **effect**. It stops early."), "Plays an effect")

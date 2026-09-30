@@ -99,10 +99,14 @@ def check_cell(cell: dict, args: argparse.Namespace) -> None:
         raise SystemExit("knowledge 'web' requires network 'on'")
     if cell["wright"] == "bin+skill" and not args.skill_dir:
         raise SystemExit("wright level 'bin+skill' requires --skill-dir")
-    if cell["knowledge"] == "wiki-skill" and not (args.wiki_skill_dir and (Path(args.wiki_skill_dir) / "SKILL.md").is_file()):
+    if cell["knowledge"] == "wiki-skill" and not (args.wiki_skill_dir and all((Path(args.wiki_skill_dir) / name).is_file() for name in ("SKILL.md", "BUILD.json"))):
         raise SystemExit("knowledge 'wiki-skill' requires --wiki-skill-dir pointing at a built skill (see `agent_bench.py wiki-skill`)")
     if cell["knowledge"] == "wiki" and not (args.wiki_dir and (Path(args.wiki_dir) / "SNAPSHOT.json").is_file()):
         raise SystemExit("knowledge 'wiki' requires --wiki-dir pointing at a snapshot (see `agent_bench.py wiki-snapshot`)")
+    if cell["knowledge"] == "wiki":
+        bench_wiki.identity(Path(args.wiki_dir))
+    if cell["knowledge"] == "wiki-skill":
+        wiki_skill.identity(Path(args.wiki_skill_dir))
 
 
 def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) -> dict:
@@ -257,7 +261,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
-            **({"wikiSkill": json.loads((Path(args.wiki_skill_dir) / "BUILD.json").read_text())} if cell["knowledge"] == "wiki-skill" else {}),
+            **({"wikiSkill": wiki_skill.identity(Path(args.wiki_skill_dir))} if cell["knowledge"] == "wiki-skill" else {}),
         },
     }
 
@@ -333,7 +337,7 @@ def main() -> int:
     for name in ("run", "matrix"):
         p = sub.choices[name]
         p.add_argument("--skill-dir", type=Path, help="pinned guide directory, exposed to the adapter as BENCH_SKILL_DIR")
-        p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked read-only as ./wiki for knowledge 'wiki'")
+        p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked as ./wiki for knowledge 'wiki'; content hashes are verified")
         p.add_argument("--wiki-skill-dir", type=Path, help="built workshop-wiki skill, installed through the agent's skill mechanism for knowledge 'wiki-skill'")
         p.add_argument("--env-pass", nargs="*", default=[], help="host variables passed through the environment scrub")
         p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")

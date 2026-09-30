@@ -9,10 +9,11 @@
     {"wright": "bin", "knowledge": "none", "network": "off"},
     {"wright": "bin+skill", "knowledge": "none", "network": "off"},
     {"wright": "none", "knowledge": "web", "network": "on"},
-    {"wright": "none", "knowledge": "wiki", "network": "off"}
+    {"wright": "none", "knowledge": "wiki", "network": "off"},
+    {"wright": "none", "knowledge": "wiki-skill", "network": "off"}
   ],
   "trials": 5,
   "parallel": 2,
   "seed": 1,
-  "options": {"skill_dir": "/abs/path/skills/skills/wright", "wiki_dir": "/abs/path/pinned-wiki", "env_pass": ["HOME"]}
+  "options": {"skill_dir": "/abs/path/skills/skills/wright", "wiki_dir": "/abs/path/pinned-wiki", "wiki_skill_dir": "/abs/path/local/workshop-wiki", "env_pass": ["HOME"]}
 }

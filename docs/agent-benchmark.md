@@ -31,20 +31,40 @@ in every cell.
 | Factor | Levels |
 | --- | --- |
 | `wright` | `none`: no directory providing `wright` is on `PATH`. `bin`: `wright` on `PATH` through a tracing shim. `bin+skill`: `bin`, plus the guide directory given by `--skill-dir`, which the adapter installs. |
-| `knowledge` | `none`; `wiki`: a pinned snapshot of the Workshop wiki Markdown mirror, given by `--wiki-dir` and linked as `./wiki` (never counted as an edit); `web`: the adapter enables its web tools. |
+| `knowledge` | `none`; `wiki`: a pinned snapshot given by `--wiki-dir` and linked as `./wiki` (never counted as an edit); `wiki-skill`: the separate community guide given by `--wiki-skill-dir`, installed through the agent's skill mechanism without requiring Wright; `web`: the adapter enables its web tools. |
 | `network` | `off` or `on`; `web` requires `on`. |
 
 `agent_bench.py wiki-snapshot [--dir DIR]` builds the `wiki` snapshot from the
-mirror at `md.wrightkit.dev`: it reads `manifest.json`, fetches every article once
+mirror at `md.wrightkit.dev`: it lists category pages and fetches each distinct article once
 (through `curl`, because the mirror rejects Python's HTTP client with 403), and
-writes `articles/`, `index.md`, `NOTICE.txt`, and `SNAPSHOT.json` with per-document
+writes `articles/`, `NOTICE.txt`, and `SNAPSHOT.json` with per-document
 hashes and a `snapshotSha256`. A snapshot is never overwritten, a run with
-`knowledge` `wiki` refuses a directory without `SNAPSHOT.json`, and the result
-records the snapshot identity in `environment.wiki`. The mirror serves the
-Workshop.codes wiki, whose content follows the Workshop.codes Terms of Service, so
-keep the snapshot local and do not commit it. It is a small set of articles, not a
-complete Workshop reference: the `wiki` and `web` levels measure documentation that
-exists today.
+`knowledge` `wiki` verifies the article hashes and snapshot identity before starting,
+and the result records the verified identity in `environment.wiki`.
+The default categories are actions, values, events, constants, and references;
+add `tutorials` through `--categories` for a separate second-tier experiment.
+The mirror's manifest is incomplete and is not the crawl source.
+
+`wiki-skill` builds a separate `workshop-wiki` skill with a short `SKILL.md`, category
+indexes, and individual articles. It takes a pinned snapshot, the workshop-rs catalog,
+and the opy-rs manifest; OverPy spellings are included only when found in the pinned
+upstream oracle. The generated skill is community guidance, not canonical semantic
+authority. Its content hash is verified before a run and recorded with the snapshot
+hash in `environment.wikiSkill`. Changed or missing pinned content is refused.
+The `./wiki` symlink does not enforce filesystem read-only access; content hashes
+are checked again when producing the result, but this is not a filesystem sandbox.
+
+```sh
+python3 benchmarks/agent/agent_bench.py wiki-skill \
+    --snapshot /abs/path/pinned-wiki --out-dir /abs/path/local/workshop-wiki \
+    --catalog /abs/path/workshop-rs/crates/workshop-rs/src/catalog/data/catalog.json \
+    --opy-manifest /abs/path/opy-rs/crates/opy-rs/src/manifest/data/manifest.json
+```
+
+The output directory must be named `workshop-wiki` and must not exist. Run
+`setup-oracle` first. Snapshots and derived skills are local benchmark material;
+do not commit or distribute them. The [Workshop.codes Terms of Service](https://workshop.codes/tos)
+apply to the source content; generating a skill grants no additional permission.
 
 Each run is scrubbed: a fresh `HOME`, an allowlisted environment (`--env-pass`
 names host variables to keep), and no host instruction files. Two canaries run
@@ -59,7 +79,7 @@ elsewhere on disk, so run `none` in a clean environment when that matters.
 `--agent-cmd` is a shell command run in the workspace with the prompt on stdin.
 The harness describes the cell through environment variables, and the adapter
 enforces it: `BENCH_WRIGHT`, `BENCH_KNOWLEDGE`, `BENCH_NETWORK`,
-`BENCH_SKILL_DIR` (only for `bin+skill`), `BENCH_HOST_PATH` (the unscrubbed
+`BENCH_SKILL_DIR` (only for `bin+skill`), `BENCH_WIKI_SKILL_DIR` (only for `wiki-skill`), `BENCH_HOST_PATH` (the unscrubbed
 `PATH`, for locating the agent binary itself; do not pass it to the agent), and
 `BENCH_RUN_DIR`. The adapter reports, all optional:
 
@@ -67,7 +87,7 @@ enforces it: `BENCH_WRIGHT`, `BENCH_KNOWLEDGE`, `BENCH_NETWORK`,
 | --- | --- |
 | `BENCH_USAGE` | JSONL, one row per model turn: `t` (epoch seconds), `input`, `output`, `cache_read`, `cache_write`, `reasoning`, `context`, `context_limit` |
 | `BENCH_TRANSCRIPT` | normalized JSONL of the agent's events |
-| `BENCH_CONTEXT` | `{"loaded": [...]}`; a loaded item other than the expected guide invalidates the run |
+| `BENCH_CONTEXT` | `{"loaded": [...]}`; a loaded item other than the condition's expected `wright` and/or `workshop-wiki` guide invalidates the run |
 
 Exit code 75 means a provider or infrastructure failure: the harness retries
 the trial (`--infra-retries`) and records the retries. Any other non-zero exit
@@ -164,6 +184,22 @@ python3 benchmarks/agent/agent_bench.py report target/agent-bench [--regrade]
 `trials`, `parallel`, `seed` (run order is shuffled by it), and `options`
 (`skill_dir`, `wiki_dir`, `env_pass`, ...). Finished runs are skipped, so an
 interrupted matrix resumes.
+
+For a local offline-declared pilot, use
+[`matrix.pilot.example.json`](../benchmarks/agent/matrix.pilot.example.json): one
+agent at a time, five cells including `none/wiki-skill/off`, two scenarios with
+different requirement families, three trials, and a 3600-second timeout. Replace
+the absolute path placeholders and choose the adapter/model before running. This
+is 30 trials per agent, not the full-suite evaluation. Start with a single trial
+to check cost, usage, `context.loaded`, and `networkEnforcement`, then use a fresh
+output directory for the randomized matrix. Complete pi GPT before switching to
+pi Gemini and then Devin; Gemini needs its provider extension.
+
+This pilot omits `web`; it does not establish network isolation when enforcement
+is `declared-only`. It measures baseline headroom and variance before guide tuning.
+Skill-retrieval attribution (files and content tokens read), wiki-only scenarios,
+and web URL contamination analysis remain separate follow-up work; a successful
+pilot does not establish those requirements.
 
 ## Result
 

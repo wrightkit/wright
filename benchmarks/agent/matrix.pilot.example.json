@@ -1,0 +1,23 @@
+{
+  "agents": [
+    {"id": "pi-gpt-6-luna", "cmd": "BENCH_MODEL=openai-codex/gpt-6-luna python3 /abs/path/wright/benchmarks/agent/adapters/pi.py"}
+  ],
+  "cells": [
+    {"wright": "none", "knowledge": "none", "network": "off"},
+    {"wright": "bin", "knowledge": "none", "network": "off"},
+    {"wright": "bin+skill", "knowledge": "none", "network": "off"},
+    {"wright": "none", "knowledge": "wiki", "network": "off"},
+    {"wright": "none", "knowledge": "wiki-skill", "network": "off"}
+  ],
+  "scenarios": ["ana-paintball", "widow-headshots"],
+  "trials": 3,
+  "parallel": 1,
+  "seed": 1,
+  "options": {
+    "skill_dir": "/abs/path/skills/skills/wright",
+    "wiki_dir": "/abs/path/pinned-wiki",
+    "wiki_skill_dir": "/abs/path/local/workshop-wiki",
+    "env_pass": ["HOME"],
+    "timeout": 3600
+  }
+}

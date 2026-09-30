@@ -42,9 +42,12 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
 - REQ-001: A run is defined by (Wright level, knowledge level, tool network). Wright level is `none`, `bin`
   (on PATH through the tracing shim), or `bin+skill` (plus the guide from a pinned `wrightkit/skills` commit,
   installed through the agent's own skill mechanism). Knowledge level is `none`, `wiki` (a read-only local
-  snapshot of the Workshop wiki Markdown mirror, pinned by hash, with no added index or tool), or `web`
+  snapshot of the Workshop wiki Markdown mirror, pinned by hash, with no added index or tool), `wiki-skill`
+  (a separately generated local `workshop-wiki` skill with category indexes and article files, pinned by
+  snapshot and skill content hashes, usable without Wright), or `web`
   (standard fetch and search tools). Tool network is `off` or `on`; `web` implies `on`.
-- REQ-002: Tier 1 conditions are `none/none`, `bin/none`, `bin+skill/none`, `none/web`, `none/wiki`. Tier 2 is
+- REQ-002: Tier 1 conditions are `none/none`, `bin/none`, `bin+skill/none`, `none/web`, `none/wiki`,
+  `none/wiki-skill`. The local pilot uses the five non-web cells first. Tier 2 is
   `bin+skill/web`, `bin+skill/wiki`, `bin/wiki`. The task and prompt are identical across conditions.
 - REQ-003: Each run passes a canary before the agent starts, and a failed canary invalidates the run: `none`
   Wright means `command -v wright` fails and no install path is reachable; `off` means an attempted fetch from
@@ -202,6 +205,11 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
 - Q-003 [verification]: rubric-based judgment (REQ-011) in scope for the first version, or deferred; owner QA.
 - Q-004 [architecture]: the harness now lives in `benchmarks/agent` as small modules beside
   `agent_bench.py` (grading, trace, report, adapters); confirm or redirect; owner Architect.
-- Q-005 [verification]: the source of the wiki snapshot and its license and pinning method; owner QA.
+- Q-005 [verification]: wiki snapshots use the mirror's category pages and verified per-article content hashes;
+  derived skills also verify their content hash. Both remain local under the source terms. Any distribution
+  needs explicit source permission and an Architect ownership decision; it is outside this benchmark batch.
 - Q-006 [verification]: the common tokenizer used for cross-model attribution (REQ-021) and how its error is
   reported; owner QA.
+- Q-007 [verification]: skill-retrieval metrics beyond aggregate usage (unique files read, repeated reads,
+  content tokens read, and how to judge which articles were needed) require transcript normalization and a
+  defined estimator. Decide from the baseline pilot before adding requirements or tuning either guide.

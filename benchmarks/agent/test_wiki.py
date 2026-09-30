@@ -40,6 +40,7 @@ class WikiSnapshotTest(unittest.TestCase):
     def setUp(self):
         self.server = HTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.base = f"http://127.0.0.1:{self.server.server_port}"
         self.tmp = Path(tempfile.mkdtemp())
@@ -75,6 +76,22 @@ class WikiSnapshotTest(unittest.TestCase):
             agent_bench.check_cell(cell, argparse.Namespace(skill_dir=None, wiki_dir=self.tmp, wiki_skill_dir=None))
         self.crawl("snap")
         agent_bench.check_cell(cell, argparse.Namespace(skill_dir=None, wiki_dir=self.tmp / "snap", wiki_skill_dir=None))
+
+    def test_pinned_snapshot_refuses_changed_missing_content_and_wrong_identity(self):
+        record = self.crawl("snap")
+        snap = self.tmp / "snap"
+        note = snap / "articles/wait-until.md"
+        for mutation in (lambda: note.write_text("changed"), lambda: note.rename(snap / "moved.md")):
+            with self.subTest(mutation=mutation):
+                note.write_bytes(ARTICLES["wait-until"])
+                mutation()
+                with self.assertRaisesRegex(SystemExit, "snapshot content mismatch"):
+                    bench_wiki.identity(snap)
+        note.write_bytes(ARTICLES["wait-until"])
+        record["snapshotSha256"] = "0" * 64
+        (snap / "SNAPSHOT.json").write_text(json.dumps(record))
+        with self.assertRaisesRegex(SystemExit, "snapshot identity mismatch"):
+            bench_wiki.identity(snap)
 
 
 if __name__ == "__main__":
