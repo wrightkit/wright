@@ -12,7 +12,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ORACLE = HERE / "oracle"
 GRADER_FILES = ("bench_grade.py", "oracle/compile.js", "oracle/package-lock.json")
-UNSAFE_IGNORED = ("wiki",)
+UNSAFE_IGNORED = ("wiki", ".agents", ".devin")  # linked wiki and skills installed through the agent's own mechanism
 
 
 def wright_json(wright: str, args: list[str]) -> tuple[int, dict]:

@@ -29,7 +29,7 @@ class AgentBenchTest(unittest.TestCase):
     def trial(self, agent_cmd: str, wright: str = "bin", scenario: str = SCENARIO, **options) -> dict:
         args = argparse.Namespace(**{
             "wright": str(Path(WRIGHT).resolve()), "agent_id": "fake", "agent_cmd": agent_cmd, "timeout": 60, "infra_retries": 2,
-            "env_pass": [], "canary_cmd": None, "skill_dir": None, "wiki_dir": None, **options,
+            "env_pass": [], "canary_cmd": None, "skill_dir": None, "wiki_dir": None, "check_ancestors": False, **options,
         })
         cell = {"wright": wright, "knowledge": "none", "network": "off"}
         return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{wright}")
@@ -49,10 +49,21 @@ class AgentBenchTest(unittest.TestCase):
 
     def test_canary_rejects_reachable_wright_under_none(self):
         cell = {"wright": "none", "knowledge": "none", "network": "off"}
-        args = argparse.Namespace(canary_cmd=None)
+        args = argparse.Namespace(canary_cmd=None, check_ancestors=False)
         env = {"PATH": str(Path(WRIGHT).resolve().parent)}
         self.assertIn("reachable", agent_bench.canaries(cell, env, self.out, args))
         self.assertIsNone(agent_bench.canaries({**cell, "wright": "bin"}, env, self.out, args))
+
+    def test_canary_rejects_instruction_files_above_the_workspace(self):
+        outside = Path(tempfile.mkdtemp()).resolve()  # outside the repository, whose own AGENTS.md would match
+        self.addCleanup(shutil.rmtree, outside, True)
+        workspace = outside / "repo/runs/w"
+        workspace.mkdir(parents=True)
+        cell = {"wright": "bin", "knowledge": "none", "network": "on"}
+        args = argparse.Namespace(canary_cmd=None, check_ancestors=True)
+        self.assertIsNone(agent_bench.canaries(cell, {"PATH": ""}, workspace, args))
+        (outside / "repo/AGENTS.md").write_text("instructions")
+        self.assertIn("AGENTS.md", agent_bench.canaries(cell, {"PATH": ""}, workspace, args))
 
     def test_network_canary_invalidates_run(self):
         result = self.trial("true", canary_cmd="true")

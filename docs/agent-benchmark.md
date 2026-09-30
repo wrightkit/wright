@@ -60,8 +60,32 @@ enforces it: `BENCH_WRIGHT`, `BENCH_KNOWLEDGE`, `BENCH_NETWORK`,
 Exit code 75 means a provider or infrastructure failure: the harness retries
 the trial (`--infra-retries`) and records the retries. Any other non-zero exit
 is reported as an agent or infrastructure failure in the report diagnostics.
-[`adapters/claude_code.py`](../benchmarks/agent/adapters/claude_code.py) is the
-reference adapter.
+
+The scenario `prompt.md` is the only text the harness gives an agent: it adds no
+system prompt, hint, or Workshop context. Each agent keeps its own default system
+prompt, which is part of what is measured. The adapter, not the harness, must
+keep host configuration out of the run, and it reports what loaded through
+`BENCH_CONTEXT`.
+
+| Adapter | Agent | Notes |
+| --- | --- | --- |
+| [`claude_code.py`](../benchmarks/agent/adapters/claude_code.py) | Claude Code | `BENCH_MODEL` selects the model. Removes web tools unless knowledge is `web`. |
+| [`pi.py`](../benchmarks/agent/adapters/pi.py) | pi | `BENCH_MODEL=provider/id`. Disables context files, extensions, and skill discovery, and loads the guide explicitly. Providers registered by an extension need `BENCH_PI_EXTENSIONS`; web tools come from `BENCH_PI_WEB_EXTENSIONS`. |
+| [`devin.py`](../benchmarks/agent/adapters/devin.py) | Devin CLI | `BENCH_MODEL` (for example `swe-2-max`). Runs with an isolated `HOME` holding only the Devin credentials, a config that reads no other tool's rules or skills, and MCP tools denied. Managed plugin skills are listed apart from `loaded`. |
+
+Set the model in `--agent-cmd` (the environment is scrubbed), and give the
+adapter and skill paths as absolute paths, because the agent runs in the
+workspace: `--agent-cmd "BENCH_MODEL=openai-codex/gpt-6-luna python3 /abs/path/adapters/pi.py"`.
+Pass `--env-pass HOME` when the agent authenticates from the real home directory.
+
+Two checks protect the context. The workspace must not sit below a directory
+that holds instruction files (`AGENTS.md`, `CLAUDE.md`, and similar), because
+agents discover them by walking up; the default `--out` is
+`~/.cache/wright-agent-bench` for that reason, and a violation marks the run
+`invalid` (`--no-ancestor-check` disables it). Network `off` is enforced only
+when `--canary-cmd` is given and fails inside the agent environment; without it
+the result records `networkEnforcement: declared-only`, which is what the shell
+tools of pi and Devin provide today.
 
 ## Scenarios
 
@@ -145,7 +169,7 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | `friction`, `expectations` | Usage errors, unknown subcommands, help lookups, retries, malformed `serve` requests, identical repeats; expectation E01-E12 verdicts |
 | `snapshots` | Strict validity of each snapshot of the entry, first valid index, and valid-to-invalid regressions |
 | `usage`, `context` | Turns, tokens by kind, peak context (and its share of the limit), tokens to first valid; loaded context |
-| `invalid`, `infraRetries` | Present when the run was excluded or retried |
+| `invalid`, `infraRetries`, `networkEnforcement` | Present when the run was excluded or retried; whether network `off` was checked by a canary or only declared |
 
 `wrightUse` is recorded per CLI invocation; `wright serve` sessions are teed
 line by line into the trace. Comparing cells for the same scenario shows what

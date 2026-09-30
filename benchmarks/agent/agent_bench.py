@@ -127,8 +127,18 @@ def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) 
     return env
 
 
+INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".github/copilot-instructions.md", ".windsurf/rules", ".cursor/rules")
+
+
+def ancestor_instructions(workspace: Path) -> list[str]:
+    """Instruction files an agent would discover by walking up from the workspace."""
+    return [str(parent / name) for parent in workspace.resolve().parents for name in INSTRUCTION_FILES if (parent / name).exists()]
+
+
 def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -> str | None:
     """A failed canary invalidates the run. Returns the reason, or None."""
+    if args.check_ancestors and (found := ancestor_instructions(workspace)):
+        return f"instruction files in ancestor directories of the workspace: {found}; use --out outside the repository"
     if cell["wright"] == "none" and shutil.which("wright", path=env["PATH"]):
         return "wright reachable under wright level 'none'"
     if cell["network"] == "off" and args.canary_cmd:
@@ -198,6 +208,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     (out / "agent.log").write_text(f"exit={agent_exit}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n")
     result = base_result(scenario, cell, args, out, seconds, agent_exit)
     result["infraRetries"] = infra_retries
+    result["networkEnforcement"] = "canary-checked" if cell["network"] == "off" and args.canary_cmd else "declared-only"
     context = context_report(out, cell)
     result["context"] = context
     if context.get("unexpected"):
@@ -298,12 +309,13 @@ def main() -> int:
     for name in ("validate", "run", "matrix"):
         p = sub.add_parser(name)
         p.add_argument("--wright", default=str(ROOT / "target/debug/wright"), help="Wright binary under test")
-        p.add_argument("--out", type=Path, default=ROOT / "target/agent-bench")
+        p.add_argument("--out", type=Path, default=Path.home() / ".cache/wright-agent-bench", help="outside any repository, so agents cannot discover its instruction files")
     for name in ("run", "matrix"):
         p = sub.choices[name]
         p.add_argument("--skill-dir", type=Path, help="pinned guide directory, exposed to the adapter as BENCH_SKILL_DIR")
         p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked read-only as ./wiki for knowledge 'wiki'")
         p.add_argument("--env-pass", nargs="*", default=[], help="host variables passed through the environment scrub")
+        p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")
         p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
         p.add_argument("--timeout", type=int, default=1800)
         p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
