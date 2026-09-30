@@ -252,8 +252,10 @@ fn action_subroutine(program: &Program, action: &Action) -> Option<usize> {
         Action::Call { name, .. } => name,
         _ => return None,
     };
+    // Name resolution mirrors workshop-rs: a redeclared name binds to the
+    // last declaration.
     program
         .subroutines
         .iter()
-        .position(|subroutine| subroutine.name == *name)
+        .rposition(|subroutine| subroutine.name == *name)
 }
