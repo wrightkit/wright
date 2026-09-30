@@ -370,7 +370,8 @@ fn run_command<T: serde::Serialize + present::ResultPresentation>(
     // renders, so progress text never competes with the verdict (#443).
     drop(activity);
     let code = envelope.exit;
-    present::render(&envelope, presentation, elapsed);
+    let source_base = session.input_root();
+    present::render(&envelope, presentation, elapsed, source_base.as_deref());
     code
 }
 

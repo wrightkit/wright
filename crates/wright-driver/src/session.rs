@@ -503,6 +503,12 @@ impl CompilerSession {
             .and_then(|loaded| loaded.origin.locale.clone())
     }
 
+    /// The include root the last load resolved against, if any. Reported
+    /// `span.path` spellings on finding surfaces are root-relative to it.
+    pub fn input_root(&self) -> Option<PathBuf> {
+        self.loaded.as_ref().map(|loaded| loaded.input.root.clone())
+    }
+
     fn load_workshop(&mut self, resolved: &ResolvedInput) -> Result<(Program, String), Diagnostic> {
         let override_locale = self
             .config

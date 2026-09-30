@@ -43,9 +43,29 @@ arrays, and text output prints a `... N finding(s) withheld` line. The verdict
 metadata keeps reporting the true total (for example `10 finding(s) across
 6 rule(s)`), so a selected result is never presented as complete.
 
-In text mode, consecutive lint findings sharing a rule id and message
-collapse into one entry that lists its locations instead of repeating the
-message and a source-context line per occurrence.
+On the terminal/plain text surface the lint report follows the human-first
+hierarchy: the verdict leads with finding counts by severity (for
+example `1 error(s), 9 warning(s) across 6 rule(s)`), findings render in
+action order — errors before warnings before informational findings, stable
+within a severity — and each entry leads with severity, rule id, and message,
+then a `--> path:line:col` location, then a one-line source frame when the
+reported path resolves to a readable file. Evidence class and boundedness
+trail dimmed under the entry as secondary metadata. Pseudo-path spans
+(`<stdin>`, `<provider-artifact>`, `<file N>`) render as
+`at <path>:line:col (no source file)` notes instead of file-style locations;
+a real spelling that resolves to no file keeps its reported `-->` location
+without a frame. Reported `span.path` spellings are root-relative; the text
+view resolves them under the input root so subdirectory inputs keep an
+actionable location. A compact footer closes the
+report with the count of affected files and skipped rule evaluations, plus
+elapsed time on interactive terminals only.
+
+Consecutive findings sharing a rule id and message collapse into one entry
+that names its finding count and lists the locations that resolve to source
+files instead of repeating the message and a source-context line per
+occurrence; a group lists at most ten locations and folds the rest into a
+`... N more location(s)` line, while positions on pseudo-paths fold into the
+secondary notes.
 
 `ongoing-condition-hot-path` is a heuristic about the per-tick evaluation of
 an `Ongoing - Global` or `Ongoing - Each Player` rule's conditions. Each tick

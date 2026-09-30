@@ -252,6 +252,7 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     pres: Presentation,
     elapsed: Duration,
+    source_base: Option<&Path>,
 ) {
     if pres.format == OutputFormat::Json {
         let mut value = serde_json::to_value(envelope).expect("serializes");
@@ -266,8 +267,17 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
     }
     match pres.renderer {
         Renderer::GithubActions => render_github(envelope),
-        Renderer::Terminal | Renderer::Plain => render_text(envelope, pres, elapsed),
+        Renderer::Terminal | Renderer::Plain => render_text(envelope, pres, elapsed, source_base),
     }
+}
+
+/// Inputs a result body or footer may need beyond the envelope: display
+/// policy plus the base that root-relative `span.path` spellings resolve
+/// against. The base is absent when the input never loaded.
+pub(crate) struct RenderContext<'a> {
+    pub(crate) presentation: Presentation,
+    pub(crate) elapsed: Duration,
+    pub(crate) source_base: Option<&'a Path>,
 }
 
 /// The human-first result hierarchy (#443): the verdict leads, blocking
@@ -278,7 +288,13 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
     envelope: &Envelope<T>,
     pres: Presentation,
     elapsed: Duration,
+    source_base: Option<&Path>,
 ) {
+    let ctx = RenderContext {
+        presentation: pres,
+        elapsed,
+        source_base,
+    };
     if !matches!(envelope.command.as_str(), "compile" | "convert") {
         render_verdict(envelope, pres.color);
     }
@@ -300,7 +316,7 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
             eprintln!("{}: failed", envelope.command);
         }
     } else {
-        envelope.result.render_body();
+        envelope.result.render_body(&ctx);
     }
     if envelope.command == "check" {
         render_check_footer(envelope, pres, elapsed);
@@ -410,12 +426,28 @@ fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T
         escape_workflow_data(&format!("wright {}", envelope.command))
     );
     if matches!(envelope.command.as_str(), "compile" | "convert") {
-        envelope.result.render_body();
+        envelope.result.render_body(&github_context());
     } else {
         eprintln!("{} {}", summary_status(envelope), envelope.command);
     }
     eprintln!("::endgroup::");
     emit_summary(envelope);
+}
+
+/// The GitHub Actions render path never reaches `render_body` for commands
+/// that consume the context, so a bare placeholder is enough for the
+/// compile/convert artifact bodies it does emit.
+fn github_context() -> RenderContext<'static> {
+    RenderContext {
+        presentation: Presentation {
+            format: OutputFormat::Text,
+            renderer: Renderer::GithubActions,
+            color: false,
+            interactive: false,
+        },
+        elapsed: Duration::ZERO,
+        source_base: None,
+    }
 }
 
 fn emit_diagnostic_annotation(diagnostic: &wright_driver::Diagnostic) {
@@ -524,25 +556,25 @@ pub(crate) trait ResultPresentation {
     fn metadata(&self) -> Option<String> {
         None
     }
-    fn render_body(&self);
+    fn render_body(&self, ctx: &RenderContext<'_>);
     fn render_github_findings(&self) {}
     fn update_summary_status(&self, _status: &mut SummaryStatus) {}
 }
 
 impl ResultPresentation for CompileResult {
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_compile(self);
     }
 }
 
 impl ResultPresentation for ConvertResult {
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_convert(self);
     }
 }
 
 impl ResultPresentation for CheckResult {
-    fn render_body(&self) {}
+    fn render_body(&self, _ctx: &RenderContext<'_>) {}
 }
 
 impl ResultPresentation for AnalyzeResult {
@@ -556,31 +588,48 @@ impl ResultPresentation for AnalyzeResult {
             None => format!("{rules} rule(s), {symbols} symbol(s); ranked semantic report"),
         })
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_analyze(self);
     }
 }
 
 impl ResultPresentation for LintResult {
+    /// The lint verdict leads with finding counts by severity — the counts a
+    /// human needs to judge priority. Under a selection the per-severity
+    /// breakdown of the full set is unknown, so the verdict reports the true
+    /// total instead of counting the selected remainder.
     fn metadata(&self) -> Option<String> {
-        let total = self
-            .selection
-            .as_ref()
-            .map_or_else(|| array_len(&self.findings), |selection| selection.total);
-        let mut metadata = format!(
-            "{} finding(s) across {} rule(s)",
-            total,
-            array_len(&self.rules)
-        );
+        let rules = array_len(&self.rules);
         if let Some(selection) = &self.selection {
-            if selection.withheld > 0 {
-                metadata.push_str(&format!(", {} withheld", selection.withheld));
-            }
+            return Some(format!(
+                "{} finding(s) across {} rule(s)",
+                selection.total, rules
+            ));
         }
+        let mut counts = [0usize; 3];
+        for finding in self.findings.as_array().map_or(&[][..], Vec::as_slice) {
+            counts[finding_severity_rank(finding) as usize] += 1;
+        }
+        let mut parts = Vec::new();
+        if counts[0] > 0 {
+            parts.push(format!("{} error(s)", counts[0]));
+        }
+        if counts[1] > 0 {
+            parts.push(format!("{} warning(s)", counts[1]));
+        }
+        if counts[2] > 0 {
+            parts.push(format!("{} info finding(s)", counts[2]));
+        }
+        let mut metadata = if parts.is_empty() {
+            "0 finding(s)".to_string()
+        } else {
+            parts.join(", ")
+        };
+        metadata.push_str(&format!(" across {rules} rule(s)"));
         Some(metadata)
     }
-    fn render_body(&self) {
-        render_lint(self);
+    fn render_body(&self, ctx: &RenderContext<'_>) {
+        render_lint(self, ctx);
     }
     fn render_github_findings(&self) {
         if let Some(findings) = self.findings.as_array() {
@@ -622,7 +671,7 @@ impl ResultPresentation for InspectResult {
             array_len(&self.symbols)
         ))
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_inspect(self);
     }
 }
@@ -631,7 +680,7 @@ impl ResultPresentation for SymbolsResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} symbol(s)", array_len(&self.0)))
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let symbols = self.0.as_array().map_or(&[][..], Vec::as_slice);
         println!("\nSymbols");
         if symbols.is_empty() {
@@ -662,7 +711,7 @@ impl ResultPresentation for RefsResult {
             count(&self.0, "rules"),
         ))
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let references = self.0["references"]
             .as_array()
             .map_or(&[][..], Vec::as_slice);
@@ -695,7 +744,7 @@ impl ResultPresentation for CfgResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} block(s)", array_len(&self.0["blocks"])))
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
         println!("\nControl-flow graph");
         if blocks.is_empty() {
@@ -745,7 +794,7 @@ impl ResultPresentation for CallGraphResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} edge(s)", array_len(&self.0)))
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let edges = self.0.as_array().map_or(&[][..], Vec::as_slice);
         println!("\nCall graph");
         if edges.is_empty() {
@@ -772,7 +821,7 @@ impl ResultPresentation for CostResult {
             count(exact, "waitActions"),
         ))
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let exact = &self.0["exact"];
         println!("\nGenerated resources (exact)");
         println!("  emitted bytes: {}", count(exact, "emittedBytes"));
@@ -1219,14 +1268,49 @@ fn persistent_object_summary(objects: &[serde_json::Value]) -> String {
     format!("{} [static]", notes.join("; "))
 }
 
-fn render_lint(result: &LintResult) {
-    let findings = result.findings.as_array().cloned().unwrap_or_default();
+/// Location lines a collapsed finding group may list before the rest fold
+/// into a count line — a repeated rule must not dominate the screen.
+const MAX_GROUP_LOCATIONS: usize = 10;
+
+/// The lint footer's metadata parts: affected files, skipped rule
+/// evaluations, and elapsed time — interactive terminals only, so plain
+/// output stays deterministic.
+fn lint_footer_parts(files: usize, skipped: usize, ctx: &RenderContext<'_>) -> Vec<String> {
+    let mut parts = Vec::new();
+    if files > 0 {
+        parts.push(format!("{files} file(s) affected"));
+    }
+    if skipped > 0 {
+        parts.push(format!("{skipped} rule evaluation(s) skipped"));
+    }
+    if ctx.presentation.interactive {
+        parts.push(format!("{} ms", ctx.elapsed.as_millis()));
+    }
+    parts
+}
+
+/// The severity rank a finding sorts by in the human view: errors first,
+/// unknown severities conservatively ordered as warnings, and informational
+/// severities last. The driver's reported set and order are unchanged
+/// — this is a presentation-layer reorder only.
+fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
+    match finding.get("severity").and_then(serde_json::Value::as_str) {
+        Some("error") => 0,
+        Some("info") | Some("notice") => 2,
+        _ => 1,
+    }
+}
+
+fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
+    let mut findings = result.findings.as_array().cloned().unwrap_or_default();
+    findings.sort_by_key(finding_severity_rank);
     println!("\nLint findings");
     if findings.is_empty() {
         println!("  none");
     }
     // Consecutive findings sharing a rule id and message collapse into one
-    // entry that lists its locations (#430).
+    // entry that lists its locations (#430); severity sorting keeps groups
+    // consecutive because one rule id has one effective severity.
     let mut index = 0;
     while index < findings.len() {
         let first = &findings[index];
@@ -1237,31 +1321,215 @@ fn render_lint(result: &LintResult) {
         {
             end += 1;
         }
-        let code = first["code"].as_str().unwrap_or("finding");
-        let sev = first["severity"].as_str().unwrap_or("info");
-        let ev = first["evidence"].as_str().unwrap_or("exact");
-        let msg = first["message"].as_str().unwrap_or_default();
-        match first.get("boundedness").and_then(serde_json::Value::as_str) {
-            Some(v) => println!("  {sev}[{code}] (evidence: {ev}) (boundedness: {v}): {msg}"),
-            None => println!("  {sev}[{code}] (evidence: {ev}): {msg}"),
-        }
-        if end == index + 1 {
-            if let Some(span) = first.get("span") {
-                print_span(span, "      ");
-            }
-        } else {
-            for finding in &findings[index..end] {
-                if let Some(span) = finding.get("span") {
-                    print_location(span, "      ");
-                }
-            }
-        }
+        render_finding_group(&findings[index..end], ctx);
         index = end;
     }
     if let Some(selection) = &result.selection {
         if selection.withheld > 0 {
             println!("  ... {} finding(s) withheld (--max)", selection.withheld);
         }
+    }
+    // The closing summary carries only execution metadata: files the
+    // reported findings point at, rules that could not evaluate, and elapsed
+    // time on interactive terminals.
+    let files: BTreeSet<&str> = findings
+        .iter()
+        .filter_map(|finding| finding.get("span"))
+        .filter_map(|span| span.get("path"))
+        .filter_map(serde_json::Value::as_str)
+        .filter(|path| is_real_source_path(path))
+        .collect();
+    let parts = lint_footer_parts(files.len(), array_len(&result.skipped), ctx);
+    if !parts.is_empty() {
+        println!("  {}", dim(&parts.join(" · "), ctx.presentation.color));
+    }
+}
+
+/// One finding entry: severity, rule id, and message lead; locations and a
+/// source frame follow; evidence metadata trails dimmed so it never
+/// outweighs the message. A repeated group names its finding count — pseudo-path
+/// and spanless members join the group but never render a `-->` line.
+fn render_finding_group(group: &[serde_json::Value], ctx: &RenderContext<'_>) {
+    let first = &group[0];
+    let code = first["code"].as_str().unwrap_or("finding");
+    let msg = first["message"].as_str().unwrap_or_default();
+    let sev = finding_severity_label(first, ctx.presentation.color);
+    if group.len() == 1 {
+        println!("  {sev}[{code}]: {msg}");
+        if let Some(span) = first.get("span").filter(|span| span.is_object()) {
+            render_finding_location(span, ctx, "    ", true);
+        }
+    } else {
+        println!("  {sev}[{code}] ({} findings): {msg}", group.len());
+        let located = renderable_group_spans(group);
+        for span in located.iter().take(MAX_GROUP_LOCATIONS) {
+            render_finding_location(span, ctx, "    ", false);
+        }
+        if located.len() > MAX_GROUP_LOCATIONS {
+            println!(
+                "    ... {} more location(s)",
+                located.len() - MAX_GROUP_LOCATIONS
+            );
+        }
+    }
+    // Secondary notes — the evidence class, boundedness evidence, and spans
+    // that point at no readable source file — render dimmed under the
+    // problem line rather than competing with it.
+    let mut notes = vec![format!(
+        "evidence: {}",
+        first["evidence"].as_str().unwrap_or("exact")
+    )];
+    if let Some(boundedness) = first.get("boundedness").and_then(serde_json::Value::as_str) {
+        notes.push(format!("boundedness: {boundedness}"));
+    }
+    if let Some(note) = unmapped_positions_note(&unmapped_positions(group)) {
+        notes.push(note);
+    }
+    println!(
+        "    {}",
+        dim(&format!("= {}", notes.join(" · ")), ctx.presentation.color)
+    );
+}
+
+/// Object spans in the group that render as `-->` file locations — the basis
+/// for the listed locations and the "more locations" fold.
+fn renderable_group_spans(group: &[serde_json::Value]) -> Vec<&serde_json::Value> {
+    group
+        .iter()
+        .filter_map(|finding| finding.get("span"))
+        .filter(|span| span.is_object())
+        .filter(|span| {
+            span.get("path")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(is_real_source_path)
+        })
+        .collect()
+}
+
+/// A location line plus, for a lone finding, a one-line source frame when
+/// the finding's path resolves to a readable file under the session's bases.
+/// Collapsed groups omit frames so a repeated rule stays bounded.
+fn render_finding_location(
+    span: &serde_json::Value,
+    ctx: &RenderContext<'_>,
+    indent: &str,
+    frame: bool,
+) {
+    let Some((display, readable)) = finding_location(span, ctx.source_base) else {
+        return;
+    };
+    let line = span_position(span, "start", "line").unwrap_or(0);
+    let col = span_position(span, "start", "col").unwrap_or(0);
+    println!("{indent}--> {display}:{line}:{col}");
+    if !frame {
+        return;
+    }
+    if let Some(context) =
+        readable.and_then(|path| source_context(&path, line as u32, col as u32, indent))
+    {
+        println!("{context}");
+    }
+}
+
+/// Resolve the user-facing spelling of a finding's `span.path` and the path
+/// the source frame reads, or `None` for spans without a real path (their
+/// pseudo-path renders as a secondary note instead). Reported paths are
+/// root-relative to the input include root; the display prefers the first
+/// spelling that resolves to a real file — root-relative first, then the
+/// reported spelling itself — so subdirectory inputs keep an actionable
+/// location.
+fn finding_location(
+    span: &serde_json::Value,
+    source_base: Option<&Path>,
+) -> Option<(String, Option<String>)> {
+    let path = span.get("path").and_then(serde_json::Value::as_str)?;
+    if !is_real_source_path(path) {
+        return None;
+    }
+    let reported = Path::new(path);
+    let candidates: Vec<String> = if reported.is_absolute() {
+        vec![path.to_string()]
+    } else {
+        source_base
+            .map(|base| base.join(reported).display().to_string())
+            .into_iter()
+            .chain([path.to_string()])
+            .collect()
+    };
+    for candidate in &candidates {
+        if Path::new(candidate).is_file() {
+            return Some((display_location_path(candidate), Some(candidate.clone())));
+        }
+    }
+    Some((display_location_path(path), None))
+}
+
+/// Every pseudo-path position in the group (`<stdin>`, `<provider-artifact>`,
+/// `<file N>`) as `(path, line, col)`, so an unmapped input still reports
+/// where a repeated rule matched instead of folding positions away.
+fn unmapped_positions(group: &[serde_json::Value]) -> Vec<(String, u64, u64)> {
+    group
+        .iter()
+        .filter_map(|finding| finding.get("span"))
+        .filter(|span| span.is_object())
+        .filter_map(|span| {
+            let path = span.get("path")?.as_str()?;
+            (!is_real_source_path(path)).then(|| {
+                (
+                    path.to_string(),
+                    span_position(span, "start", "line").unwrap_or(0),
+                    span_position(span, "start", "col").unwrap_or(0),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Fold pseudo-path positions into one secondary note matching the
+/// diagnostic treatment: positions are reported but never dressed up as file
+/// locations. Positions sharing one pseudo-path collapse to `path:l:c, l:c`;
+/// the list stays bounded at `MAX_GROUP_LOCATIONS` entries.
+fn unmapped_positions_note(positions: &[(String, u64, u64)]) -> Option<String> {
+    let first_path = &positions.first()?.0;
+    let shared = positions.iter().all(|(path, ..)| path == first_path);
+    let mut text = String::new();
+    for (index, (path, line, col)) in positions.iter().take(MAX_GROUP_LOCATIONS).enumerate() {
+        if index > 0 {
+            text.push_str(", ");
+        }
+        if shared {
+            text.push_str(&format!("{line}:{col}"));
+        } else {
+            text.push_str(&format!("{path}:{line}:{col}"));
+        }
+    }
+    if positions.len() > MAX_GROUP_LOCATIONS {
+        text.push_str(&format!(
+            ", +{} more",
+            positions.len() - MAX_GROUP_LOCATIONS
+        ));
+    }
+    Some(if shared {
+        format!("at {first_path}:{text} (no source file)")
+    } else {
+        format!("at {text} (no source file)")
+    })
+}
+
+fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
+    let severity = finding
+        .get("severity")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("warning");
+    if color {
+        let code = match severity {
+            "error" => "31",
+            "info" | "notice" => "36",
+            _ => "33",
+        };
+        format!("\x1b[{code}m{severity}\x1b[0m")
+    } else {
+        severity.to_string()
     }
 }
 
@@ -1359,19 +1627,6 @@ fn print_location(span: &serde_json::Value, indent: &str) {
     let line = span_position(span, "start", "line").unwrap_or(0);
     let col = span_position(span, "start", "col").unwrap_or(0);
     println!("{indent}--> {path}:{line}:{col}");
-}
-
-fn print_span(span: &serde_json::Value, indent: &str) {
-    let path = span
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("<span>");
-    let line = span_position(span, "start", "line").unwrap_or(0);
-    let col = span_position(span, "start", "col").unwrap_or(0);
-    println!("{indent}--> {path}:{line}:{col}");
-    if let Some(context) = source_context(path, line as u32, col as u32, indent) {
-        println!("{context}");
-    }
 }
 
 fn source_context(path: &str, line: u32, col: u32, indent: &str) -> Option<String> {
@@ -1659,5 +1914,157 @@ mod tests {
             }),
         );
         assert_eq!(check_metadata(&envelope), "5 diagnostic(s)");
+    }
+
+    fn lint_result(
+        findings: serde_json::Value,
+        selection: Option<wright_driver::SelectionOutcome>,
+    ) -> LintResult {
+        LintResult {
+            rules: serde_json::json!([
+                {"id": "a", "effectiveSeverity": "warning"},
+                {"id": "b", "effectiveSeverity": "error"},
+            ]),
+            findings,
+            selection,
+            ..LintResult::default()
+        }
+    }
+
+    #[test]
+    fn lint_metadata_counts_findings_by_severity() {
+        let result = lint_result(
+            serde_json::json!([
+                {"severity": "warning"},
+                {"severity": "error"},
+                {"severity": "warning"},
+                {"severity": "info"},
+            ]),
+            None,
+        );
+        assert_eq!(
+            result.metadata().unwrap(),
+            "1 error(s), 2 warning(s), 1 info finding(s) across 2 rule(s)"
+        );
+        let clean = lint_result(serde_json::json!([]), None);
+        assert_eq!(clean.metadata().unwrap(), "0 finding(s) across 2 rule(s)");
+    }
+
+    #[test]
+    fn lint_metadata_under_selection_reports_the_true_total() {
+        let result = lint_result(
+            serde_json::json!([{"severity": "error"}]),
+            Some(wright_driver::SelectionOutcome {
+                total: 7,
+                withheld: 6,
+                max_severity: Some(Severity::Error),
+            }),
+        );
+        assert_eq!(result.metadata().unwrap(), "7 finding(s) across 2 rule(s)");
+    }
+
+    #[test]
+    fn finding_severity_rank_orders_errors_first_and_unknowns_as_warnings() {
+        let rank = |severity: serde_json::Value| {
+            finding_severity_rank(&serde_json::json!({"severity": severity}))
+        };
+        assert_eq!(rank(serde_json::json!("error")), 0);
+        assert_eq!(rank(serde_json::json!("warning")), 1);
+        assert_eq!(rank(serde_json::json!("unexpected")), 1);
+        assert_eq!(rank(serde_json::json!("info")), 2);
+        assert_eq!(rank(serde_json::json!("notice")), 2);
+        assert_eq!(rank(serde_json::Value::Null), 1);
+    }
+
+    #[test]
+    fn lint_footer_parts_carry_files_skipped_and_interactive_elapsed() {
+        let ctx = |interactive| RenderContext {
+            presentation: Presentation {
+                format: OutputFormat::Text,
+                renderer: Renderer::Terminal,
+                color: false,
+                interactive,
+            },
+            elapsed: Duration::from_millis(42),
+            source_base: None,
+        };
+        assert_eq!(
+            lint_footer_parts(2, 1, &ctx(true)),
+            vec![
+                "2 file(s) affected".to_string(),
+                "1 rule evaluation(s) skipped".to_string(),
+                "42 ms".to_string()
+            ]
+        );
+        // Plain output omits wall-clock values so it stays deterministic.
+        assert_eq!(
+            lint_footer_parts(2, 0, &ctx(false)),
+            vec!["2 file(s) affected".to_string()]
+        );
+        assert!(lint_footer_parts(0, 0, &ctx(false)).is_empty());
+    }
+
+    #[test]
+    fn finding_location_resolves_reported_paths_against_the_source_base() {
+        let root = std::env::temp_dir().join(format!("wright-finding-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let absolute = root.join("sub/f.ws");
+        std::fs::write(&absolute, "x").unwrap();
+        let span = serde_json::json!({"path": "f.ws", "start": {"line": 1, "col": 1}, "end": {"line": 1, "col": 2}});
+        let (display, readable) = finding_location(&span, Some(&root.join("sub"))).unwrap();
+        assert!(
+            readable.is_some_and(|path| Path::new(&path).is_file()),
+            "the root-relative spelling resolves under the source base"
+        );
+        assert!(display.ends_with("sub/f.ws"), "{display}");
+
+        // Pseudo-paths have no file location; they render as notes instead.
+        let pseudo = serde_json::json!({"path": "<stdin>", "start": {"line": 1, "col": 1}});
+        assert!(finding_location(&pseudo, Some(&root)).is_none());
+        let positions = unmapped_positions(&[serde_json::json!({"span": pseudo})]);
+        assert_eq!(
+            unmapped_positions_note(&positions).unwrap(),
+            "at <stdin>:1:1 (no source file)"
+        );
+
+        // A missing file keeps the reported spelling with no frame.
+        let missing = serde_json::json!({"path": "gone.ws", "start": {"line": 1, "col": 1}});
+        let (display, readable) = finding_location(&missing, Some(&root)).unwrap();
+        assert_eq!(display, "gone.ws");
+        assert!(readable.is_none());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn renderable_group_spans_counts_only_real_source_locations() {
+        let real = |path: &str| serde_json::json!({"span": {"path": path, "start": {"line": 1, "col": 1}}});
+        let group = vec![
+            real("a.ws"),
+            real("<stdin>"),
+            serde_json::json!({"span": null}),
+            real("b.ws"),
+        ];
+        assert_eq!(renderable_group_spans(&group).len(), 2);
+    }
+
+    #[test]
+    fn unmapped_positions_note_collapses_a_shared_pseudo_path() {
+        let finding = |line: u64| serde_json::json!({"span": {"path": "<stdin>", "start": {"line": line, "col": 1}}});
+        let group = vec![finding(11), finding(14)];
+        assert_eq!(
+            unmapped_positions_note(&unmapped_positions(&group)).unwrap(),
+            "at <stdin>:11:1, 14:1 (no source file)"
+        );
+    }
+
+    #[test]
+    fn unmapped_positions_note_bounds_the_position_list() {
+        let finding = |line: u64| serde_json::json!({"span": {"path": "<stdin>", "start": {"line": line, "col": 1}}});
+        let group: Vec<_> = (1..=12).map(finding).collect();
+        let note = unmapped_positions_note(&unmapped_positions(&group)).unwrap();
+        assert!(
+            note.contains("+2 more"),
+            "positions beyond the cap fold into a count: {note}"
+        );
     }
 }
