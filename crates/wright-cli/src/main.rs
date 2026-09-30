@@ -140,6 +140,7 @@ fn run_workflow(command: Command) -> ExitCode {
         Command::Rename(args) => run_configured(
             config_from_common(&args.common, false),
             present::Presentation::from_common(&args.common),
+            None,
             move |session| session.rename(&args.name, &args.to, args.write),
         ),
         Command::Lint(args) => {

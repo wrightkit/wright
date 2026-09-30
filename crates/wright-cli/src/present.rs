@@ -607,7 +607,7 @@ impl ResultPresentation for RenameResult {
             format!("{edits} edit(s) applied to {}", self.written.join(", "))
         })
     }
-    fn render_body(&self) {
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_rename(self);
     }
 }
