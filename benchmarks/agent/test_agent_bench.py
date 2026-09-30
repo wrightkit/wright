@@ -26,13 +26,24 @@ class AgentBenchTest(unittest.TestCase):
         self.out = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")).resolve()
         self.addCleanup(shutil.rmtree, self.out, True)
 
-    def trial(self, agent_cmd: str, wright: str = "bin", scenario: str = SCENARIO, **options) -> dict:
+    def trial(self, agent_cmd: str, wright: str = "bin", scenario: str = SCENARIO, knowledge: str = "none", **options) -> dict:
         args = argparse.Namespace(**{
             "wright": str(Path(WRIGHT).resolve()), "agent_id": "fake", "agent_cmd": agent_cmd, "timeout": 60, "infra_retries": 2,
             "env_pass": [], "canary_cmd": None, "skill_dir": None, "wiki_dir": None, "check_ancestors": False, **options,
         })
-        cell = {"wright": wright, "knowledge": "none", "network": "off"}
+        cell = {"wright": wright, "knowledge": knowledge, "network": "off"}
         return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{wright}")
+
+    def test_wiki_snapshot_is_linked_read_only_and_identified(self):
+        snapshot = self.out / "snapshot"
+        (snapshot / "articles").mkdir(parents=True)
+        (snapshot / "articles/wait-until.md").write_text("# Wait Until\n")
+        (snapshot / "SNAPSHOT.json").write_text(json.dumps({"source": "https://mirror.example", "fetchedAt": "2026-09-30T00:00:00+00:00", "snapshotSha256": "ab" * 32, "documents": [{"slug": "wait-until"}]}))
+        result = self.trial("ls wiki/articles > listing.txt", knowledge="wiki", wiki_dir=snapshot)
+        self.assertEqual(result["environment"]["wiki"]["snapshotSha256"], "ab" * 32)
+        self.assertEqual(result["environment"]["wiki"]["documents"], 1)
+        self.assertEqual((self.out / f"{SCENARIO}-bin/workspace/listing.txt").read_text().strip(), "wait-until.md")
+        self.assertNotIn("wiki", " ".join(result["unsafeEdits"]))
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))

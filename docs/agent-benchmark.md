@@ -31,8 +31,20 @@ in every cell.
 | Factor | Levels |
 | --- | --- |
 | `wright` | `none`: no directory providing `wright` is on `PATH`. `bin`: `wright` on `PATH` through a tracing shim. `bin+skill`: `bin`, plus the guide directory given by `--skill-dir`, which the adapter installs. |
-| `knowledge` | `none`; `wiki`: `--wiki-dir` is linked read-only as `./wiki` (never counted as an edit); `web`: the adapter enables its web tools. |
+| `knowledge` | `none`; `wiki`: a pinned snapshot of the Workshop wiki Markdown mirror, given by `--wiki-dir` and linked as `./wiki` (never counted as an edit); `web`: the adapter enables its web tools. |
 | `network` | `off` or `on`; `web` requires `on`. |
+
+`agent_bench.py wiki-snapshot [--dir DIR]` builds the `wiki` snapshot from the
+mirror at `md.wrightkit.dev`: it reads `manifest.json`, fetches every article once
+(through `curl`, because the mirror rejects Python's HTTP client with 403), and
+writes `articles/`, `index.md`, `NOTICE.txt`, and `SNAPSHOT.json` with per-document
+hashes and a `snapshotSha256`. A snapshot is never overwritten, a run with
+`knowledge` `wiki` refuses a directory without `SNAPSHOT.json`, and the result
+records the snapshot identity in `environment.wiki`. The mirror serves the
+Workshop.codes wiki, whose content follows the Workshop.codes Terms of Service, so
+keep the snapshot local and do not commit it. It is a small set of articles, not a
+complete Workshop reference: the `wiki` and `web` levels measure documentation that
+exists today.
 
 Each run is scrubbed: a fresh `HOME`, an allowlisted environment (`--env-pass`
 names host variables to keep), and no host instruction files. Two canaries run

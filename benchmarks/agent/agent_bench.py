@@ -21,6 +21,7 @@ from pathlib import Path
 import bench_grade
 import bench_report
 import bench_trace
+import bench_wiki
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -97,8 +98,8 @@ def check_cell(cell: dict, args: argparse.Namespace) -> None:
         raise SystemExit("knowledge 'web' requires network 'on'")
     if cell["wright"] == "bin+skill" and not args.skill_dir:
         raise SystemExit("wright level 'bin+skill' requires --skill-dir")
-    if cell["knowledge"] == "wiki" and not args.wiki_dir:
-        raise SystemExit("knowledge 'wiki' requires --wiki-dir")
+    if cell["knowledge"] == "wiki" and not (args.wiki_dir and (Path(args.wiki_dir) / "SNAPSHOT.json").is_file()):
+        raise SystemExit("knowledge 'wiki' requires --wiki-dir pointing at a snapshot (see `agent_bench.py wiki-snapshot`)")
 
 
 def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) -> dict:
@@ -250,6 +251,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "os": platform.platform(), "python": platform.python_version(),
             "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
         },
     }
 
@@ -297,6 +299,12 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
+    record = bench_wiki.snapshot(args.base, args.dir)
+    print(f"{len(record['documents'])} document(s) from {record['source']} into {args.dir}\nsnapshotSha256 {record['snapshotSha256']}")
+    return 0
+
+
 def cmd_setup_oracle(_: argparse.Namespace) -> int:
     return subprocess.call(["npm", "ci", "--silent"], cwd=bench_grade.ORACLE)
 
@@ -329,6 +337,9 @@ def main() -> int:
     run.add_argument("--trials", type=int, default=1)
     sub.choices["matrix"].add_argument("config", type=Path, help="JSON: agents[{id,cmd}], cells[{wright,knowledge,network}], scenarios, trials, parallel, seed, options")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
+    wiki = sub.add_parser("wiki-snapshot", help="fetch the Workshop wiki Markdown mirror into a pinned local snapshot")
+    wiki.add_argument("--dir", type=Path, default=Path.home() / ".cache/wright-agent-bench-wiki")
+    wiki.add_argument("--base", default=bench_wiki.BASE)
     report = sub.add_parser("report", help="summarize result.json files")
     report.add_argument("dirs", nargs="+", type=Path)
     report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
@@ -342,6 +353,8 @@ def main() -> int:
         return 0 if validate(args.wright, args.out) else 1
     if args.command == "setup-oracle":
         return cmd_setup_oracle(args)
+    if args.command == "wiki-snapshot":
+        return cmd_wiki_snapshot(args)
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s))
     return cmd_run(args) if args.command == "run" else cmd_matrix(args)
