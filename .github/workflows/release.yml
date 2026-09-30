@@ -1,6 +1,12 @@
 name: Release
 
+# Stable releases start from the vX.Y.Z tag that release-please creates when
+# its Release PR is merged. A manual dispatch re-runs an existing tag or
+# publishes a nightly. Nightlies follow every successful CI run on main.
 on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
       channel:
@@ -11,8 +17,8 @@ on:
         options:
           - stable
           - nightly
-      version:
-        description: Stable MAJOR.MINOR.PATCH override; blank selects the next patch version
+      tag:
+        description: Existing vMAJOR.MINOR.PATCH tag to publish (stable only)
         required: false
         type: string
   workflow_run:
@@ -24,75 +30,16 @@ permissions:
   contents: write
 
 concurrency:
-  group: wright-${{ inputs.channel || 'nightly' }}
-  cancel-in-progress: ${{ inputs.channel != 'stable' }}
+  group: wright-${{ github.event_name == 'push' && github.ref_name || inputs.tag || inputs.channel || 'nightly' }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' || inputs.channel == 'nightly' }}
 
 jobs:
-  resolve-trigger:
-    name: Resolve release trigger
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == github.event.repository.default_branch)
-    runs-on: ubuntu-latest
-    outputs:
-      channel: ${{ steps.trigger.outputs.channel }}
-      commit: ${{ steps.trigger.outputs.commit }}
-      version: ${{ steps.trigger.outputs.version }}
-    steps:
-      - name: Resolve channel and revision
-        id: trigger
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REQUESTED_CHANNEL: ${{ inputs.channel }}
-          REQUESTED_VERSION: ${{ inputs.version }}
-          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          WORKFLOW_RUN_COMMIT: ${{ github.event.workflow_run.head_sha }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [[ "$EVENT_NAME" == workflow_run ]]; then
-            if [[ "$WORKFLOW_RUN_CONCLUSION" != success || "$WORKFLOW_RUN_BRANCH" != "$DEFAULT_BRANCH" ]]; then
-              echo "nightly publication requires successful CI on $DEFAULT_BRANCH" >&2
-              exit 1
-            fi
-            current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
-            if [[ "$current_sha" != "$WORKFLOW_RUN_COMMIT" ]]; then
-              echo "CI completed for $WORKFLOW_RUN_COMMIT, but $DEFAULT_BRANCH is now $current_sha" >&2
-              exit 1
-            fi
-            channel=nightly
-            commit="$WORKFLOW_RUN_COMMIT"
-            version=
-          elif [[ "$EVENT_NAME" == workflow_dispatch ]]; then
-            if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
-              echo "manual releases must be dispatched from $DEFAULT_BRANCH" >&2
-              exit 1
-            fi
-            channel="$REQUESTED_CHANNEL"
-            commit="$GITHUB_SHA"
-            version="$REQUESTED_VERSION"
-          else
-            echo "unsupported release event: $EVENT_NAME" >&2
-            exit 1
-          fi
-
-          case "$channel" in
-            nightly|stable) ;;
-            *) echo "unsupported release channel: $channel" >&2; exit 1 ;;
-          esac
-          {
-            echo "channel=$channel"
-            echo "commit=$commit"
-            echo "version=$version"
-          } >> "$GITHUB_OUTPUT"
-
   release-identity:
-    name: Prepare ${{ needs.resolve-trigger.outputs.channel }} release
-    needs: resolve-trigger
+    name: Resolve release identity
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch)
     runs-on: ubuntu-latest
     outputs:
       channel: ${{ steps.identity.outputs.channel }}
@@ -100,192 +47,88 @@ jobs:
       version: ${{ steps.identity.outputs.version }}
       tag: ${{ steps.identity.outputs.tag }}
     steps:
+      - name: Resolve channel, tag, and revision
+        id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_CHANNEL: ${{ inputs.channel }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          PUSHED_TAG: ${{ github.ref_name }}
+          WORKFLOW_RUN_COMMIT: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          tag=
+          case "$EVENT_NAME" in
+            push)
+              channel=stable
+              tag="$PUSHED_TAG"
+              ;;
+            workflow_dispatch)
+              channel="$REQUESTED_CHANNEL"
+              tag="$REQUESTED_TAG"
+              ;;
+            workflow_run)
+              channel=nightly
+              ;;
+            *)
+              echo "unsupported release event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$channel" == stable ]]; then
+            if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "stable releases need a vMAJOR.MINOR.PATCH tag: '$tag'" >&2
+              exit 1
+            fi
+            commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq '.sha')"
+          else
+            if [[ -n "$tag" ]]; then
+              echo "nightly releases do not accept a tag input" >&2
+              exit 1
+            fi
+            if [[ "$EVENT_NAME" == workflow_run ]]; then
+              commit="$WORKFLOW_RUN_COMMIT"
+            else
+              if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+                echo "nightly releases must be dispatched from $DEFAULT_BRANCH" >&2
+                exit 1
+              fi
+              commit="$GITHUB_SHA"
+            fi
+            current_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$DEFAULT_BRANCH" --jq '.sha')"
+            if [[ "$current_sha" != "$commit" ]]; then
+              echo "nightly commit $commit is stale; $DEFAULT_BRANCH is now $current_sha" >&2
+              exit 1
+            fi
+            tag="nightly-${commit:0:12}"
+          fi
+          {
+            echo "channel=$channel"
+            echo "commit=$commit"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.resolve-trigger.outputs.commit }}
-          fetch-depth: 0
-          token: ${{ secrets.GH_TOKEN }}
-          persist-credentials: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
+          ref: ${{ steps.resolve.outputs.commit }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
 
-      - name: Verify stable dispatch head
-        if: needs.resolve-trigger.outputs.channel == 'stable'
-        env:
-          RELEASE_COMMIT: ${{ needs.resolve-trigger.outputs.commit }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          set -euo pipefail
-          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
-          test "$current_sha" = "$RELEASE_COMMIT"
-          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
-
-      - name: Verify nightly release state
-        if: needs.resolve-trigger.outputs.channel == 'nightly'
-        run: python3 scripts/verify-dist.py
-
-      - name: Bump and commit stable version
-        id: bump
-        if: needs.resolve-trigger.outputs.channel == 'stable'
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          REQUESTED_VERSION: ${{ needs.resolve-trigger.outputs.version }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          export LC_ALL=C
-          stable_version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-          current_version="$(cargo metadata --locked --no-deps --format-version 1 |
-            jq -r '.packages[] | select(.name == "wright-cli") | .version')"
-          if [[ ! "$current_version" =~ $stable_version_pattern ]]; then
-            echo "workspace version must be MAJOR.MINOR.PATCH: $current_version" >&2
-            exit 1
-          fi
-          test "$(tr -d '\r\n' < version.txt)" = "$current_version"
-
-          version_is_newer() {
-            local current="$1"
-            local candidate="$2"
-            local -a current_parts candidate_parts
-            local current_part candidate_part index
-            IFS=. read -r -a current_parts <<< "$current"
-            IFS=. read -r -a candidate_parts <<< "$candidate"
-            for index in 0 1 2; do
-              current_part="${current_parts[$index]}"
-              candidate_part="${candidate_parts[$index]}"
-              if (( ${#candidate_part} != ${#current_part} )); then
-                (( ${#candidate_part} > ${#current_part} ))
-                return
-              fi
-              if [[ "$candidate_part" != "$current_part" ]]; then
-                [[ "$candidate_part" > "$current_part" ]]
-                return
-              fi
-            done
-            return 1
-          }
-
-          increment_decimal() {
-            local value="$1"
-            local carry=1
-            local result=""
-            local digit
-            while [[ -n "$value" ]]; do
-              digit="${value: -1}"
-              value="${value:0:${#value}-1}"
-              if (( carry )); then
-                if [[ "$digit" == 9 ]]; then
-                  digit=0
-                else
-                  digit=$((digit + 1))
-                  carry=0
-                fi
-              fi
-              result="$digit$result"
-            done
-            if (( carry )); then
-              result="1$result"
-            fi
-            printf '%s' "$result"
-          }
-
-          if [[ -n "$REQUESTED_VERSION" ]]; then
-            if [[ ! "$REQUESTED_VERSION" =~ $stable_version_pattern ]]; then
-              echo "stable version must be MAJOR.MINOR.PATCH without prerelease or build metadata: $REQUESTED_VERSION" >&2
-              exit 1
-            fi
-            if ! version_is_newer "$current_version" "$REQUESTED_VERSION"; then
-              echo "stable version must be newer than $current_version: $REQUESTED_VERSION" >&2
-              exit 1
-            fi
-            version="$REQUESTED_VERSION"
-          else
-            IFS=. read -r major minor patch <<< "$current_version"
-            version="$major.$minor.$(increment_decimal "$patch")"
-          fi
-
-          cargo_tmp="Cargo.toml.release-version.tmp"
-          awk -v version="$version" '
-            /^\[workspace\.package\]$/ { in_workspace_package=1 }
-            in_workspace_package && /^version = / {
-              print "version = \"" version "\""
-              in_workspace_package=0
-              next
-            }
-            { print }
-          ' Cargo.toml > "$cargo_tmp"
-          mv "$cargo_tmp" Cargo.toml
-          printf '%s\n' "$version" > version.txt
-          python3 scripts/update-dist-manifests.py --version "$version"
-          cargo check --workspace --all-targets --all-features
-          python3 scripts/verify-dist.py
-          git diff --check
-          test "$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "wright-cli") | .version')" = "$version"
-          git add Cargo.toml Cargo.lock version.txt dist
-          for path in Cargo.toml Cargo.lock version.txt dist; do
-            git diff --cached --quiet -- "$path" && {
-              echo "stable version preparation did not update $path" >&2
-              exit 1
-            }
-          done
-          unexpected="$(git diff --cached --name-only | grep -Ev '^(Cargo.toml|Cargo.lock|version.txt|dist/)' || true)"
-          test -z "$unexpected"
-          git diff --cached --quiet && {
-            echo "stable version preparation produced no changes" >&2
-            exit 1
-          }
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(main): release $version"
-          git push origin "HEAD:$DEFAULT_BRANCH"
-          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for post-bump CI
-        if: needs.resolve-trigger.outputs.channel == 'stable'
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          POST_BUMP_COMMIT: ${{ steps.bump.outputs.commit }}
-        run: |
-          set -euo pipefail
-          ci_run_id=
-          for _ in {1..120}; do
-            ci_run_id="$(gh run list \
-              --repo "$GITHUB_REPOSITORY" \
-              --workflow ci.yml \
-              --commit "$POST_BUMP_COMMIT" \
-              --event push \
-              --json databaseId \
-              --jq '.[0].databaseId // empty' \
-              --limit 1)"
-            if [[ -n "$ci_run_id" ]]; then
-              break
-            fi
-            sleep 15
-          done
-          if [[ -z "$ci_run_id" ]]; then
-            echo "timed out waiting for CI on $POST_BUMP_COMMIT" >&2
-            exit 1
-          fi
-          gh run watch "$ci_run_id" --interval 15 --exit-status
-
-      - name: Verify prepared release identity
+      - name: Verify release identity
         id: identity
         shell: bash
         env:
-          RELEASE_CHANNEL: ${{ needs.resolve-trigger.outputs.channel }}
-          RELEASE_COMMIT: ${{ needs.resolve-trigger.outputs.commit }}
-          REQUESTED_VERSION: ${{ needs.resolve-trigger.outputs.version }}
+          RELEASE_CHANNEL: ${{ steps.resolve.outputs.channel }}
+          RELEASE_COMMIT: ${{ steps.resolve.outputs.commit }}
+          RELEASE_TAG: ${{ steps.resolve.outputs.tag }}
         run: |
           set -euo pipefail
           version="$(cargo metadata --locked --no-deps --format-version 1 |
@@ -299,31 +142,15 @@ jobs:
             echo "version.txt '$checked_in_version' does not match workspace version '$version'" >&2
             exit 1
           fi
-          if [[ "$RELEASE_CHANNEL" == stable ]]; then
-            if [[ -n "$REQUESTED_VERSION" ]]; then
-              if [[ "$REQUESTED_VERSION" != "$version" ]]; then
-                echo "stable input version '$REQUESTED_VERSION' does not match prepared workspace version '$version'" >&2
-                exit 1
-              fi
-            fi
-            if [[ "$(git rev-parse HEAD)" == "$RELEASE_COMMIT" ]]; then
-              echo "stable release did not create a post-bump commit" >&2
-              exit 1
-            fi
-            tag="v$version"
-          else
-            if [[ -n "$REQUESTED_VERSION" ]]; then
-              echo "nightly releases must not accept a stable version input" >&2
-              exit 1
-            fi
-            test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
-            tag="nightly-${RELEASE_COMMIT:0:12}"
+          if [[ "$RELEASE_CHANNEL" == stable && "$RELEASE_TAG" != "v$version" ]]; then
+            echo "tag $RELEASE_TAG does not match workspace version $version" >&2
+            exit 1
           fi
           {
             echo "channel=$RELEASE_CHANNEL"
-            echo "commit=$(git rev-parse HEAD)"
+            echo "commit=$RELEASE_COMMIT"
             echo "version=$version"
-            echo "tag=$tag"
+            echo "tag=$RELEASE_TAG"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -578,18 +405,10 @@ jobs:
           RELEASE_TAG: ${{ needs.release-identity.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.release-identity.outputs.commit }}
         run: |
-          if existing_tag_commit="$(gh api \
-            "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
-            --jq '.sha' 2>/dev/null)"; then
-            if [[ "$existing_tag_commit" != "$RELEASE_COMMIT" ]]; then
-              echo "tag $RELEASE_TAG already points to $existing_tag_commit" >&2
-              exit 1
-            fi
-          else
-            gh api --method POST \
-              "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$RELEASE_TAG" \
-              -f sha="$RELEASE_COMMIT" >/dev/null
+          tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')"
+          if [[ "$tag_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "tag $RELEASE_TAG points to $tag_commit, not $RELEASE_COMMIT" >&2
+            exit 1
           fi
 
           draft="$(gh release view "$RELEASE_TAG" \

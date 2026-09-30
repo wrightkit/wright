@@ -45,9 +45,9 @@ Any gate failure aborts the release before the version is stamped.
 The binaries report the workspace implementation version (one authoritative
 `version = "<release version>"` in `[workspace.package]`; every crate inherits it via
 `version.workspace = true`). A stable release accepts only a stable
-`MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. It
-synchronizes that version into `Cargo.lock`, `version.txt`, and the checked-in
-`dist/` manifests before committing the release version on `main`. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
+`MAJOR.MINOR.PATCH` version; prerelease and build metadata are rejected. The
+Release PR carries that version in `Cargo.toml`, `Cargo.lock`, `version.txt`, and
+`CHANGELOG.md`. `wright --version` prints the CLI banner, `wright-lsp --version` prints the LSP
 banner, and the LSP `initialize` response carries `serverInfo.version`. Every
 `wright-result/v1` envelope carries `wright.version` + `wright.contract`. The
 release archive's `version.json` is the authoritative stamp for a shipped
@@ -63,35 +63,32 @@ Wright has two release channels and one shared native build workflow:
    `wright/nightly/<commit>/` and advances only `wright/nightly/version`.
    Nightlies do not create Git tags, GitHub Releases, or package-manager
    updates.
-2. A maintainer explicitly dispatches `.github/workflows/release.yml` from
-   `main`; `stable` is the default channel. An empty `version` input selects
-   the next patch version, while an explicit input selects a newer stable
-   `MAJOR.MINOR.PATCH`; prerelease and build metadata are rejected. The workflow
-   synchronizes the source and derived version state,
-   commits that change directly to `main`, and then builds and smoke-tests the
-   native matrix from that post-bump commit. It publishes the versioned GitHub
-   Release only after those artifacts and generated package-manager manifests
-   pass validation. The stable R2 objects, installer scripts, and version
-   pointer are updated only after the GitHub Release is complete.
+2. Stable releases start from a `vX.Y.Z` tag. `release-please` maintains a
+   Release PR that derives the next version from Conventional Commits
+   (`feat` bumps minor, `fix` bumps patch, a breaking change bumps minor
+   while the major version is 0). Merging the Release PR makes
+   `release-please` create the tag and a draft GitHub Release, and the tag
+   push starts `.github/workflows/release.yml`. The workflow verifies that
+   the tag matches the workspace version, builds and smoke-tests the native
+   matrix from the tagged commit, and publishes the versioned GitHub Release
+   only after those artifacts and generated package-manager manifests pass
+   validation. The stable R2 objects, installer scripts, and version pointer
+   are updated only after the GitHub Release is complete.
 
 No workspace crate is published to crates.io. Every workspace package
 explicitly sets `publish = false`, so Cargo package publication cannot become
 an accidental release surface. A failed publication can be rerun for the same
-commit: stable tags and releases are checked for exact identity, while R2
-versioned objects are reused only when their bytes match.
+tag: the release commit is checked for exact identity, while R2 versioned
+objects are reused only when their bytes match.
 
 ### Creating a release
 
-The stable release decision is an explicit `workflow_dispatch` of `release.yml`
-from `main`. The workflow does not infer version changes from commits and does
-not turn ordinary merges into stable releases. With the default stable channel,
-an empty `version` input performs exactly the next patch bump; an explicit
-version must be a stable `MAJOR.MINOR.PATCH` newer than the checked-in workspace
-version. The
-workflow commits the resulting `Cargo.toml`, `Cargo.lock`, `version.txt`, and
-`dist/` synchronization directly to `main`, so the operator does not prepare a
-version commit or release PR. `version.txt` remains the product-version input
-used by local distribution fixtures and must match the Cargo workspace version.
+Merge the open Release PR. `release-please` updates it on every push to `main`;
+its `Cargo.lock` is synchronized by a follow-up commit on the PR branch. The
+Release PR title and changelog show the computed version. To publish again
+after a failed run, dispatch `release.yml` with the existing `vX.Y.Z` tag;
+dispatch never bumps a version. A manually pushed `vX.Y.Z` tag also starts the
+workflow when the tagged commit's workspace version matches it.
 
 The nightly path is triggered by completed `CI`, not by a tag or Release event.
 It verifies that the completed CI commit is still the current default-branch
@@ -261,10 +258,11 @@ the stable `publish-release` job is the only job that uses it.
 
 Configure these optional/required environment secrets:
 
-* `GH_TOKEN` is the authorized release token with permission to push the
-  stable version commit to `main`, trigger and read the resulting `CI` run,
-  and write to `wrightkit/homebrew-tap`. The stable workflow uses it for the
-  main push and waits for that post-bump commit's `CI` before publication.
+* `GH_TOKEN` is the authorized release token. `release-please` uses it to
+  maintain the Release PR, push the `Cargo.lock` synchronization commit, and
+  create the release tag; pushes made with the built-in `GITHUB_TOKEN` would
+  not trigger CI on the Release PR or `release.yml` on the tag. The release
+  workflow also uses it to write to `wrightkit/homebrew-tap`.
 * The workflow's built-in `GITHUB_TOKEN` creates the final GitHub Release and
   uploads its verified assets.
 * `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and
@@ -279,10 +277,9 @@ Configure these optional/required environment secrets:
 All channels consume canonical released archives and none of them rebuild
 Wright. `install.sh` and `install.ps1` consume the R2 copies described above;
 the package managers continue to consume GitHub Release archives.
-Metadata lives under [`dist/`](../dist/README.md), generated
-by `scripts/update-dist-manifests.py`, and is regenerated by the release PR
-maintenance step and again by the `package-manifests` job from the published per-target
-checksums, then attached to the Release as
+Manifests are not checked in; the `package-manifests` job generates them
+with `scripts/update-dist-manifests.py` (see [`dist/README.md`](../dist/README.md))
+from the published per-target checksums and attaches them to the Release as
 `wright-<version>.homebrew.rb`, `wright-<version>.winget.zip`, and
 `wright-<version>.scoop.json`. The `publish-tap` job then pushes the generated
 Homebrew formula into `wrightkit/homebrew-tap` automatically; see
@@ -326,11 +323,9 @@ separate R2 route contract and only shares the platform overrides.
 Package-manager availability is not instantaneous: the Homebrew tap is updated
 automatically by the `publish-tap` job, while the Scoop bucket and WinGet
 community-repository publication require their own external steps, and the
-release pipeline does not assume them. Version drift is
-detectable: CI runs `scripts/verify-dist.py`, which regenerates the checked-in
-metadata for the current workspace version and fails on any mismatch, and the
-release workflow generates the attached manifests from the release's own
-checksum files.
+release pipeline does not assume them. The release workflow generates the
+attached manifests from the release's own checksum files, and CI runs
+`scripts/verify-dist.py` to check installer target coverage and packaging.
 
 ### Still deferred
 
