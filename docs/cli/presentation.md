@@ -140,6 +140,35 @@ affected-file and skipped-evaluation counts plus interactive elapsed time.
 The `wright-result/v1` envelope keeps the driver's finding set and order,
 and the GitHub Actions renderer is unchanged.
 
+The `inspect` queries follow the same human-first hierarchy (#446) on the
+terminal/plain text surface. Bare `wright inspect` prints the program
+inventory — file, rule, variable, subroutine, and finding counts — followed
+by a bounded rule-name preview and the detail commands, so the first screen
+answers "what is this" and routes deeper questions to the owning query. Each
+subcommand leads with its subject and summary before its detail:
+
+* `inspect symbols` groups entries under their kind and prints each symbol's
+  name beside its primary `path:line:col` location.
+* `inspect refs` prints the queried symbol's identity and usage counts in the
+  verdict metadata, then the reference list where each entry carries its
+  location, kind, and rule/action index.
+* `inspect cfg` prints the queried rule's name, the graph shape (block, edge,
+  loop-header, wait, and call-site counts; entry and exit blocks), then the
+  block/edge listing.
+* `inspect callgraph` prints the edge shape first, then notable fan-in and
+  fan-out — subroutines with more than one caller and rules calling more
+  than one subroutine — then the edge list.
+* `inspect cost` prints exact generated-resource totals, then static findings
+  ordered by severity with consecutive identical findings collapsed into one
+  counted entry.
+
+Detail lists bound at ten entries per section and close with
+`... N more <item>(s) (--format json prints the complete result)`; JSON
+remains the complete machine-readable answer and is never truncated by the
+presentation bound. When a query fails — an unmatched or ambiguous name —
+the verdict and diagnostics render without result metadata, so a default
+result can never masquerade as an answer.
+
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,
 stdout/stderr ownership, and the `wright-result/v1` envelope that CI and

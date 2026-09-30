@@ -202,7 +202,7 @@ fn terminal_renderer_uses_command_specific_hierarchy() {
         ("check", "PASS check", "diagnostic(s)"),
         ("lint", "WARN lint", "Lint findings"),
         ("analyze", "PASS analyze", "Program overview"),
-        ("inspect", "PASS inspect", "Program structure"),
+        ("inspect", "PASS inspect", "Detail commands"),
     ] {
         let output = run(&[
             command,
@@ -1806,8 +1806,11 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS symbols"), "{stdout}");
     assert!(stdout.contains("5 symbol(s)"), "{stdout}");
-    assert!(stdout.contains("globalVariable cakePos"), "{stdout}");
-    assert!(stdout.contains("rule cake"), "{stdout}");
+    // Symbols group by kind; each entry names its primary location (#446).
+    assert!(stdout.contains("Global variables (3)"), "{stdout}");
+    assert!(stdout.contains("cakePos --> cake.txt:3:14"), "{stdout}");
+    assert!(stdout.contains("Rules (2)"), "{stdout}");
+    assert!(stdout.contains("cake --> cake.txt:8:1"), "{stdout}");
 
     let output = run(&["inspect", "symbols", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -1843,9 +1846,23 @@ fn refs_reports_references_and_usage_for_a_named_symbol() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS refs"), "{stdout}");
+    // Target identity and the usage summary lead the location list (#446).
     assert!(
         stdout.contains("16 read(s), 1 write(s)"),
         "the usage header: {stdout}"
+    );
+    assert!(
+        stdout.contains("References to cakePos (globalVariable)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("declaration --> cake.txt:3:14"),
+        "locations carry source positions: {stdout}"
+    );
+    // 18 references bound to a first page; JSON is the complete path (#446).
+    assert!(
+        stdout.contains("... 8 more reference(s) (--format json prints the complete result)"),
+        "{stdout}"
     );
 
     let output = run(&["inspect", "refs", "cakePos", path, "-f", "json"]);
@@ -1883,7 +1900,15 @@ fn cfg_reports_the_named_rules_control_flow_graph() {
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("PASS cfg"), "{stdout}");
-    assert!(stdout.contains("Control-flow graph"), "{stdout}");
+    // Rule identity and the graph shape lead the block detail (#446).
+    assert!(
+        stdout.contains("Control-flow graph of rule \"cake\""),
+        "{stdout}"
+    );
+    assert!(stdout.contains("block(s), "), "{stdout}");
+    let shape = stdout.find("edge(s):").expect("shape summary");
+    let detail = stdout.find("block 0 (entry)").expect("block detail");
+    assert!(shape < detail, "shape summary before blocks: {stdout}");
 
     let output = run(&["inspect", "cfg", "cake", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -1918,6 +1943,64 @@ fn callgraph_reports_subroutine_call_edges() {
 }
 
 #[test]
+fn callgraph_ranks_fan_in_and_fan_out_before_the_edge_list() {
+    let path = temp_file("subs.txt", &corpus_workshop("synthetic/subroutines"));
+    let path = path.to_str().unwrap();
+
+    let output = run(&["inspect", "callgraph", path]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The shape summary leads, then notable fan-in/fan-out, then edges (#446).
+    assert!(
+        stdout.contains("3 edge(s): 2 calling rule(s), 2 subroutine(s) called"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("shared: 2 caller(s)"), "{stdout}");
+    assert!(stdout.contains("first: calls 2 subroutine(s)"), "{stdout}");
+    let most_called = stdout.find("Most-called subroutines").unwrap();
+    let edges = stdout.find("Edges").unwrap();
+    assert!(most_called < edges, "ranking before edge list: {stdout}");
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
+fn callgraph_highlight_sections_fold_beyond_the_bound() {
+    // Twelve subroutines each with two callers: the highlight list exceeds
+    // one page and folds with the complete-output pointer like every other
+    // bounded section (#446).
+    let mut source = String::from("subroutines {\n");
+    for i in 0..12 {
+        source.push_str(&format!("    {i}: sub{i}\n"));
+    }
+    source.push_str("}\n");
+    for i in 0..12 {
+        source.push_str(&format!(
+            "rule (\"Subroutine sub{i}\") {{\n    event {{\n        Subroutine;\n        sub{i};\n    }}\n    actions {{\n        Wait(1);\n    }}\n}}\n"
+        ));
+    }
+    let calls: String = (0..12)
+        .map(|i| format!("        Call Subroutine(sub{i});\n"))
+        .collect();
+    for rule in ["a", "b"] {
+        source.push_str(&format!(
+            "rule (\"{rule}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n{calls}    }}\n}}\n"
+        ));
+    }
+    let path = temp_file("fan.ws", &source);
+    let path = path.to_str().unwrap();
+
+    let output = run(&["inspect", "callgraph", path]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("sub0: 2 caller(s)"), "{stdout}");
+    assert!(
+        stdout.contains("... 2 more subroutine(s) (--format json prints the complete result)"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
 fn cost_reports_exact_counts_and_selected_findings() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let path = path.to_str().unwrap();
@@ -1928,6 +2011,11 @@ fn cost_reports_exact_counts_and_selected_findings() {
     assert!(stdout.contains("PASS cost"), "{stdout}");
     assert!(stdout.contains("3960 emitted byte(s)"), "{stdout}");
     assert!(stdout.contains("29 action(s)"), "{stdout}");
+    // Repeated identical findings collapse into one counted entry (#446).
+    assert!(
+        stdout.contains("repeated-value] (9 occurrences)"),
+        "{stdout}"
+    );
 
     let output = run(&["inspect", "cost", path, "-f", "json"]);
     assert!(output.status.success(), "{}", command_result(&output));
@@ -2023,12 +2111,19 @@ rule ("dup") {
         );
     }
 
-    // Text mode reports the same structured diagnostic on stderr.
+    // Text mode reports the same structured diagnostic on stderr, and a
+    // failed query shows no fabricated default result (#446).
     let output = run(&["inspect", "refs", "nope", path]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unknown-symbol"), "{stderr}");
     assert!(stderr.contains("unknown symbol 'nope'"), "{stderr}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ERROR refs"), "{stdout}");
+    assert!(
+        !stdout.contains("<unknown>") && !stdout.contains("read(s)"),
+        "a failed query prints no default result metadata: {stdout}"
+    );
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
     let _ = std::fs::remove_dir_all(dup.parent().unwrap());
@@ -2049,5 +2144,65 @@ fn inspect_names_the_detail_query_commands() {
     ] {
         assert!(stdout.contains(pointer), "{pointer}: {stdout}");
     }
+    // The program inventory leads; the detail commands close (#446).
+    assert!(
+        stdout.find("Program overview").unwrap() < stdout.find("Detail commands").unwrap(),
+        "{stdout}"
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn inspect_names_unnamed_rules_by_index() {
+    // An unnamed rule has no name to address it by; the preview must carry
+    // its index instead of repeating indistinguishable `<unnamed>` lines
+    // (#446, real-world rule ("") blocks such as overpy-pixelart).
+    let path = temp_file(
+        "unnamed.ws",
+        "rule (\"\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Wait(1);\n    }\n}\n",
+    );
+    let output = run(&["inspect", path.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\n  rule 0\n"), "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn inspect_overview_and_cfg_bound_large_detail() {
+    // A program larger than one screen: 13 rules, one of them a wide graph.
+    // Text output stays bounded and names the complete-output path (#446).
+    let mut source = String::new();
+    for i in 0..13 {
+        let branches = (0..4)
+            .map(|b| format!("        If(1 == {b});\n            Wait(1);\n        End;\n"))
+            .collect::<String>();
+        source.push_str(&format!(
+            "rule (\"r{i}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n{branches}    }}\n}}\n"
+        ));
+    }
+    let path = temp_file("big.ws", &source);
+    let path = path.to_str().unwrap();
+
+    let output = run(&["inspect", path]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("13 rule(s)"), "{stdout}");
+    assert!(
+        stdout.contains("... 3 more rule(s) (--format json prints the complete result)"),
+        "{stdout}"
+    );
+
+    let output = run(&["inspect", "cfg", "r0", path]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("14 block(s), 17 edge(s)"),
+        "shape summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("... 4 more block(s) (--format json prints the complete result)"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }
