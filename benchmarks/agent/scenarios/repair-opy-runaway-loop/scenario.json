@@ -1,0 +1,72 @@
+{
+  "id": "repair-opy-runaway-loop",
+  "family": "diagnosis",
+  "language": "opy",
+  "entry": "mode.opy",
+  "stabilityRisk": true,
+  "split": "test",
+  "writable": [
+    "mode.opy",
+    "answer.json"
+  ],
+  "runtimeOnly": [
+    "The server no longer freezes in a live match."
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "wright-compiles",
+      "kind": "wright-compile",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "no-unbounded-loop",
+      "kind": "lint",
+      "layer": "wright",
+      "code": "while-without-wait"
+    },
+    {
+      "id": "counter-still-counts",
+      "kind": "contains",
+      "layer": "agent",
+      "file": "mode.opy",
+      "text": "ticks += 1"
+    },
+    {
+      "id": "countdown-rule-preserved",
+      "kind": "contains",
+      "layer": "agent",
+      "file": "mode.opy",
+      "text": "countdown -= 1"
+    },
+    {
+      "id": "root-cause-named",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "rule",
+      "expected": "tick counter"
+    }
+  ],
+  "negatives": {
+    "fixes-wrong-rule": {
+      "fails": [
+        "no-unbounded-loop",
+        "root-cause-named"
+      ]
+    },
+    "deletes-the-counter": {
+      "fails": [
+        "counter-still-counts"
+      ]
+    }
+  }
+}
