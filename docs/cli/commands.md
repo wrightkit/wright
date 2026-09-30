@@ -33,7 +33,7 @@ result.
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
-| `wright analyze [INPUT]` | Summarize project structure, ranked CFG hotspots, and cross-cutting state | bounded semantic report with static evidence labels |
+| `wright analyze [INPUT]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration |
 | `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area |
 | `wright inspect symbols [INPUT] [--only KIND]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{IsTerminal, Write};
 use std::path::Path;
 #[cfg(test)]
@@ -547,11 +547,14 @@ impl ResultPresentation for CheckResult {
 
 impl ResultPresentation for AnalyzeResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!(
-            "{} rule(s), {} symbol(s); ranked semantic report",
-            count(&self.program, "rules"),
-            self.facts.get("symbols").map_or(0, array_len),
-        ))
+        let rules = count(&self.program, "rules");
+        let symbols = self.facts.get("symbols").map_or(0, array_len);
+        Some(match self.facts["cost"]["elementCount"].as_u64() {
+            Some(elements) => format!(
+                "{rules} rule(s), {elements} element(s), {symbols} symbol(s); ranked semantic report"
+            ),
+            None => format!("{rules} rule(s), {symbols} symbol(s); ranked semantic report"),
+        })
     }
     fn render_body(&self) {
         render_analyze(self);
@@ -907,6 +910,11 @@ fn count(value: &serde_json::Value, key: &str) -> usize {
         .unwrap_or(0) as usize
 }
 
+/// The `analyze` human report (#445): a bounded, layered view that leads
+/// with Workshop cost, then structural complexity, stability/performance
+/// risk indicators, and cross-cutting state. Every line marks whether it is
+/// an exact count, a static fact, or a heuristic, and locations use real
+/// resolved paths — unmapped structures stay explicitly unmapped.
 fn render_analyze(result: &AnalyzeResult) {
     let p = &result.program;
     let facts = &result.facts;
@@ -922,6 +930,12 @@ fn render_analyze(result: &AnalyzeResult) {
         .get("persistentObjects")
         .and_then(serde_json::Value::as_array)
         .map_or(&[][..], Vec::as_slice);
+    let risks = facts
+        .get("risks")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    let cost = &facts["cost"];
+    let element_total = cost["elementCount"].as_u64();
 
     println!("\nProgram overview");
     println!(
@@ -935,32 +949,167 @@ fn render_analyze(result: &AnalyzeResult) {
     );
     println!("  evidence: [static] parsed program inventory");
 
-    let (mut b_tot, mut e_tot, mut l_tot, mut w_tot) = (0, 0, 0, 0);
-    let mut hotspots = Vec::new();
-    for r in rules {
-        let f = &r["controlFlow"];
-        let (b, e, l, w) = (
-            count(f, "blocks"),
-            count(f, "edges"),
-            count(f, "loopBlocks"),
-            count(f, "waitBlocks"),
-        );
-        b_tot += b;
-        e_tot += e;
-        l_tot += l;
-        w_tot += w;
-        hotspots.push((b + e, r["name"].as_str().unwrap_or("<unnamed>"), b, e, l, w));
+    println!("\nWorkshop cost");
+    match element_total {
+        Some(total) => println!(
+            "  {total} element(s) [exact] — canonical element count; structural size, not runtime cost"
+        ),
+        None => println!(
+            "  element count unavailable: {}",
+            cost["unavailableReason"]
+                .as_str()
+                .unwrap_or("the program contains constructs the counter does not model")
+        ),
     }
-    hotspots.sort_by(|l, r| r.0.cmp(&l.0).then_with(|| l.1.cmp(r.1)));
-    println!("\nControl-flow summary");
-    println!("  {b_tot} blocks, {e_tot} edges, {l_tot} loop block(s), {w_tot} wait block(s)");
-    println!("  Top rules (heuristic ranking: blocks + edges; facts are [static])");
+    let counts = &cost["counts"];
+    println!(
+        "  {} action(s), {} condition(s), {} wait(s) [static]",
+        count(counts, "actions"),
+        count(counts, "conditions"),
+        count(counts, "waits"),
+    );
+
+    // Hotspots rank rules by element cost when the canonical count exists,
+    // else by control-flow size; each entry keeps its measurements visible.
+    let risk_count = |rule: &serde_json::Value| {
+        risks
+            .iter()
+            .filter(|finding| finding["rule"].as_u64() == rule["id"].as_u64())
+            .count()
+    };
+    let mut hotspots: Vec<&serde_json::Value> = rules.iter().collect();
+    hotspots.sort_by(|left, right| {
+        hotspot_key(right)
+            .cmp(&hotspot_key(left))
+            .then_with(|| rule_name(left).cmp(rule_name(right)))
+    });
+    println!("\nHotspots");
+    println!(
+        "  {}",
+        if element_total.is_some() {
+            "ranked by Workshop element count [exact counts; the ranking itself is a heuristic]"
+        } else {
+            "ranked by control-flow size [heuristic: blocks + edges]"
+        }
+    );
     if hotspots.is_empty() {
         println!("    none");
     } else {
-        for (_, name, b, e, l, w) in hotspots.iter().take(5) {
-            println!("    {name}: {b} blocks, {e} edges, {l} loop block(s), {w} wait block(s)");
+        for rule in hotspots.iter().take(5) {
+            let flow = &rule["controlFlow"];
+            let (b, e) = (count(flow, "blocks"), count(flow, "edges"));
+            let location = location_suffix(rule.get("span"));
+            match rule["elements"].as_u64() {
+                Some(elements) => {
+                    let share = element_total
+                        .filter(|total| *total > 0)
+                        .map(|total| format!(" ({:.1}%)", elements as f64 * 100.0 / total as f64))
+                        .unwrap_or_default();
+                    println!(
+                        "    \"{}\": {} element(s){share}, {b} block(s), {e} edge(s), {} risk(s){location}",
+                        rule_name(rule),
+                        elements,
+                        risk_count(rule),
+                    );
+                }
+                None => println!(
+                    "    \"{}\": {b} block(s), {e} edge(s), {} risk(s){location}",
+                    rule_name(rule),
+                    risk_count(rule),
+                ),
+            }
         }
+    }
+
+    println!("\nComplexity");
+    let (mut b_tot, mut e_tot, mut l_tot, mut w_tot) = (0, 0, 0, 0);
+    for rule in rules {
+        let flow = &rule["controlFlow"];
+        b_tot += count(flow, "blocks");
+        e_tot += count(flow, "edges");
+        l_tot += count(flow, "loopBlocks");
+        w_tot += count(flow, "waitBlocks");
+    }
+    println!(
+        "  {b_tot} block(s), {e_tot} edge(s), {l_tot} loop block(s), {w_tot} wait block(s) [static]"
+    );
+    let mut trees: Vec<(&str, u64, u64, Option<&serde_json::Value>)> = rules
+        .iter()
+        .flat_map(|rule| {
+            let name = rule_name(rule);
+            rule["conditions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(move |condition| {
+                    (
+                        name,
+                        condition["index"].as_u64().unwrap_or(0),
+                        condition["elements"].as_u64().unwrap_or(0),
+                        condition.get("span"),
+                    )
+                })
+        })
+        .collect();
+    trees.sort_by(|l, r| {
+        r.2.cmp(&l.2)
+            .then_with(|| l.0.cmp(r.0))
+            .then_with(|| l.1.cmp(&r.1))
+    });
+    let trees: Vec<_> = trees
+        .into_iter()
+        .filter(|tree| tree.2 > 0)
+        .take(3)
+        .collect();
+    if !trees.is_empty() {
+        println!("  top condition tree(s) by element count [exact]");
+        for (name, index, elements, span) in trees {
+            println!(
+                "    \"{name}\" condition {}: {elements} element(s){}",
+                index + 1,
+                location_suffix(span)
+            );
+        }
+    }
+
+    println!("\nPerformance and stability risks");
+    println!("  heuristic/static indicators — not measured runtime cost or behavior");
+    let mut any_risk = false;
+    let mut ordered: Vec<&serde_json::Value> = risks.iter().collect();
+    ordered.sort_by_key(|finding| match finding["severity"].as_str() {
+        Some("error") => 0,
+        Some("warning") => 1,
+        _ => 2,
+    });
+    for finding in ordered.iter().take(5) {
+        any_risk = true;
+        let severity = finding["severity"].as_str().unwrap_or("info");
+        let code = finding["code"].as_str().unwrap_or("finding");
+        let evidence = finding["evidence"].as_str().unwrap_or("exact");
+        let message = finding["message"].as_str().unwrap_or_default();
+        match finding["boundedness"].as_str() {
+            Some(boundedness) => println!(
+                "  {severity}[{code}] (evidence: {evidence}) (boundedness: {boundedness}): {message}"
+            ),
+            None => println!("  {severity}[{code}] (evidence: {evidence}): {message}"),
+        }
+        if let Some(span) = finding.get("span").filter(|span| span.is_object()) {
+            print_location(span, "      ");
+        }
+    }
+    if ordered.len() > 5 {
+        println!(
+            "  ... {} more — `wright lint` reports every finding",
+            ordered.len() - 5
+        );
+        any_risk = true;
+    }
+    if !objects.is_empty() {
+        any_risk = true;
+        println!("  {}", persistent_object_summary(objects));
+    }
+    if !any_risk {
+        println!("  none");
     }
 
     let mut vars = symbols
@@ -1000,6 +1149,74 @@ fn render_analyze(result: &AnalyzeResult) {
             );
         }
     }
+}
+
+fn hotspot_key(rule: &serde_json::Value) -> usize {
+    rule["elements"].as_u64().map_or_else(
+        || {
+            let flow = &rule["controlFlow"];
+            count(flow, "blocks") + count(flow, "edges")
+        },
+        |elements| elements as usize,
+    )
+}
+
+fn rule_name(rule: &serde_json::Value) -> &str {
+    match rule["name"].as_str() {
+        Some("") | None => "<unnamed>",
+        Some(name) => name,
+    }
+}
+
+/// The inline location for a report entry: a real authored path when the
+/// fact carries one, a verbatim `<…>` marker for provider artifacts, or an
+/// explicit unmapped note when there is no location at all.
+fn location_suffix(span: Option<&serde_json::Value>) -> String {
+    let Some(span) = span.filter(|span| span.is_object()) else {
+        return " (unmapped)".to_string();
+    };
+    let line = span_position(span, "start", "line").unwrap_or(0);
+    let col = span_position(span, "start", "col").unwrap_or(0);
+    match span.get("path").and_then(serde_json::Value::as_str) {
+        Some(path) if is_real_source_path(path) => {
+            format!(" at {}:{line}:{col}", display_location_path(path))
+        }
+        Some(path) if !path.is_empty() => format!(" at {path}:{line}:{col}"),
+        _ => " (unmapped)".to_string(),
+    }
+}
+
+/// A one-line persistent-object summary for the risks section: kind counts,
+/// then the statically knowable fan-out/identity facts (#445). These are
+/// structural facts, not defect claims (#262).
+fn persistent_object_summary(objects: &[serde_json::Value]) -> String {
+    let mut kinds = BTreeMap::<&str, usize>::new();
+    for object in objects {
+        *kinds
+            .entry(object["kind"].as_str().unwrap_or("object"))
+            .or_default() += 1;
+    }
+    let kinds = kinds
+        .iter()
+        .map(|(kind, count)| format!("{count} {kind}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut notes = vec![format!("{} site(s): {}", objects.len(), kinds)];
+    let without_identity = objects
+        .iter()
+        .filter(|object| object["identityRetained"].as_bool() == Some(false))
+        .count();
+    if without_identity > 0 {
+        notes.push(format!("{without_identity} without retained identity"));
+    }
+    let broadly_visible = objects
+        .iter()
+        .filter(|object| object["visibility"].as_str() == Some("all-players"))
+        .count();
+    if broadly_visible > 0 {
+        notes.push(format!("{broadly_visible} visible to all players"));
+    }
+    format!("{} [static]", notes.join("; "))
 }
 
 fn render_lint(result: &LintResult) {

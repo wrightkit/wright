@@ -237,14 +237,47 @@ fn analyze_real_project_report_is_bounded_and_ranked() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Program overview"));
-    assert!(stdout.contains("Control-flow summary"));
-    assert!(stdout.contains("Top rules (heuristic ranking"));
+    assert!(stdout.contains("Workshop cost"));
+    assert!(stdout.contains("element(s) [exact]"));
+    assert!(stdout.contains("Hotspots"));
+    assert!(stdout.contains("Complexity"));
+    assert!(stdout.contains("Performance and stability risks"));
     assert!(stdout.contains("State and coupling"));
     assert!(stdout.contains("[static]"));
     assert!(
         stdout.lines().count() <= 40,
         "report is not bounded:\n{stdout}"
     );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn analyze_low_cost_program_reports_cost_without_risks() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&[
+        "analyze",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Workshop cost"), "{stdout}");
+    assert!(stdout.contains("[exact]"), "{stdout}");
+    assert!(
+        stdout.contains("Performance and stability risks"),
+        "{stdout}"
+    );
+    // A small clean program still prints the bounded frame and an explicit
+    // empty risk section rather than fabricating concerns.
+    let risks = stdout
+        .split("Performance and stability risks")
+        .nth(1)
+        .expect("risks section");
+    let risks = risks.split("State and coupling").next().unwrap();
+    assert!(risks.contains("none"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -461,6 +494,24 @@ fn analyze_over_workshop_input_reports_semantic_facts() {
     assert!(
         envelope["result"]["facts"]["persistentObjects"].is_array(),
         "analyze reports persistent-object facts (#429)"
+    );
+    let cost = &envelope["result"]["facts"]["cost"];
+    assert!(
+        cost["elementCount"].as_u64().is_some_and(|total| total > 0),
+        "analyze reports the canonical element count (#445): {cost}"
+    );
+    assert!(
+        cost["counts"]["actions"].as_u64().is_some(),
+        "analyze reports structural counts (#445): {cost}"
+    );
+    let rule = &envelope["result"]["facts"]["rules"][0];
+    assert!(
+        rule["elements"].as_u64().is_some(),
+        "analyze attributes element cost to rules (#445): {rule}"
+    );
+    assert!(
+        envelope["result"]["facts"]["risks"].is_array(),
+        "analyze reports performance/stability risk facts (#445)"
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

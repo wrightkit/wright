@@ -1,6 +1,10 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::{CompilerSession, Loaded, Provenance, ProviderOperation, root_relative};
+use workshop_rs::actions::ElementNodeKind;
+use workshop_rs::catalog::Catalog;
+use workshop_rs::source::Span;
 use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::service::Request;
 
@@ -20,12 +24,22 @@ fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_j
     }
 }
 
-/// Build the initial `analyze` report from existing semantic query surfaces.
+/// Build the `analyze` report from existing semantic query surfaces plus the
+/// canonical Workshop element count (#445).
 ///
 /// Keeping this composition here makes the product boundary explicit: the
-/// report contains symbol usage and CFG measurements, while lint rules remain
-/// owned by `LintRegistry` and are only exposed by `lint`/`findings` queries.
-fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
+/// report layers Workshop cost/size, structural complexity, and
+/// performance/stability risk indicators over symbol usage and CFG
+/// measurements. The element count is the `workshop-rs`-owned canonical
+/// computation; the risk layer reuses registry findings narrowed to rules
+/// that declare a `performance` or `stability` tag, so correctness findings
+/// stay out of the risk frame. Lint rules remain owned by `LintRegistry` and
+/// are only exposed in full by `lint`/`findings` queries.
+fn semantic_facts(
+    service: &SemanticService<'_>,
+    loaded: &Loaded,
+    catalog: &Catalog,
+) -> serde_json::Value {
     let symbols = service_response(service, &Request::ListSymbols { kind: None })
         .as_array()
         .map(|symbols| {
@@ -49,12 +63,17 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
         })
         .unwrap_or_default();
 
+    // `Ok` carries the per-rule tree used below; `Err` only changes the cost
+    // section — an unavailable count must not erase the rest of the report.
+    let element_count = loaded.program.element_count(catalog);
+
     let rules = service_response(service, &Request::ListRules)
         .as_array()
         .map(|rules| {
             rules
                 .iter()
-                .map(|r| {
+                .enumerate()
+                .map(|(index, r)| {
                     let id = r
                         .get("id")
                         .and_then(serde_json::Value::as_u64)
@@ -73,7 +92,7 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
                         .iter()
                         .filter(|b| matches!(b["kind"].as_str(), Some("while" | "for")))
                         .count();
-                    serde_json::json!({
+                    let mut entry = serde_json::json!({
                         "id": r["id"],
                         "name": r["name"],
                         "span": r.get("span").cloned().unwrap_or(serde_json::Value::Null),
@@ -83,19 +102,134 @@ fn semantic_facts(service: &SemanticService<'_>) -> serde_json::Value {
                             "loopBlocks": loop_blocks,
                             "waitBlocks": wait_blocks,
                         },
-                    })
+                    });
+                    // Report rules keep canonical source/WIR order, so the
+                    // element node at `index` belongs to this rule.
+                    if let Ok(report) = &element_count {
+                        if let Some(node) = report.rules.get(index) {
+                            let mut condition_elements = 0usize;
+                            let mut conditions = Vec::new();
+                            for child in &node.children {
+                                if child.kind != ElementNodeKind::Condition {
+                                    continue;
+                                }
+                                condition_elements += child.count;
+                                conditions.push(serde_json::json!({
+                                    "index": conditions.len(),
+                                    "elements": child.count,
+                                    "span": fact_span_json(child.span),
+                                }));
+                            }
+                            entry["elements"] = serde_json::json!(node.count);
+                            entry["conditionElements"] = serde_json::json!(condition_elements);
+                            entry["conditions"] = serde_json::Value::Array(conditions);
+                        }
+                    }
+                    entry
                 })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
 
+    let cost = cost_facts(&loaded.program, &element_count);
+    let risks = risk_facts(service);
+
     serde_json::json!({
         "symbols": symbols,
         "rules": rules,
+        "cost": cost,
+        "risks": risks,
         // Persistent Workshop object facts join the semantic report rather
         // than living behind a query-only operation (#429).
         "persistentObjects": service_response(service, &Request::GetPersistentObjects),
     })
+}
+
+/// The `{file,start,end}` span shape every other `facts` entry carries, so
+/// `resolve_span_paths` maps element-count locations the same way.
+fn fact_span_json(span: Option<Span>) -> serde_json::Value {
+    span.map_or(serde_json::Value::Null, |span| {
+        serde_json::json!({
+            "file": span.file.index(),
+            "start": {"line": span.start.line, "col": span.start.col},
+            "end": {"line": span.end.line, "col": span.end.col},
+        })
+    })
+}
+
+/// Workshop cost/size facts (#445): the canonical element count where the
+/// program supports it, plus structural counts that are always computable.
+/// The element count is an exact structural measurement — program size —
+/// never a claim about runtime cost.
+fn cost_facts(
+    program: &workshop_rs::Program,
+    element_count: &Result<
+        workshop_rs::actions::ElementCountReport,
+        workshop_rs::actions::ElementCountError,
+    >,
+) -> serde_json::Value {
+    let counts = serde_json::json!({
+        "rules": program.rules.len(),
+        "conditions": program.rules.iter().map(|rule| rule.conditions.len()).sum::<usize>(),
+        "actions": program.rules.iter().map(|rule| rule.actions.len()).sum::<usize>(),
+        "waits": program
+            .rules
+            .iter()
+            .flat_map(|rule| &rule.actions)
+            .filter(|action| matches!(action, workshop_rs::Action::Call { name, .. } if name == "wait"))
+            .count(),
+    });
+    let mut cost = serde_json::json!({ "counts": counts });
+    match element_count {
+        Ok(report) => {
+            cost["elementCount"] = serde_json::json!(report.total);
+        }
+        Err(error) => {
+            cost["elementCount"] = serde_json::Value::Null;
+            cost["unavailableReason"] = serde_json::json!(error.to_string());
+        }
+    }
+    cost
+}
+
+/// Performance/stability risk indicators (#445): registry findings narrowed
+/// to rules that declare a `performance` or `stability` tag. Each finding
+/// keeps its evidence class so consumers can distinguish exact facts,
+/// static indicators, and heuristics; nothing here claims measured runtime
+/// behavior.
+fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
+    let lint_rules = service_response(service, &Request::LintRules);
+    let risk_rule_ids: BTreeSet<&str> = lint_rules
+        .get("rules")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|rule| {
+            rule.get("tags")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|tags| {
+                    tags.iter()
+                        .any(|tag| matches!(tag.as_str(), Some("performance" | "stability")))
+                })
+        })
+        .filter_map(|rule| rule.get("id").and_then(serde_json::Value::as_str))
+        .collect();
+    let risks = service_response(service, &Request::GetFindings)
+        .as_array()
+        .map(|findings| {
+            findings
+                .iter()
+                .filter(|finding| {
+                    finding
+                        .get("code")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|code| risk_rule_ids.contains(code))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    serde_json::Value::Array(risks)
 }
 
 fn inspect_result(service: &SemanticService<'_>) -> InspectResult {
@@ -190,10 +324,12 @@ impl CompilerSession {
                 if let serde_json::Value::Object(object) = &mut program {
                     object.remove("findings");
                 }
-                let mut facts = semantic_facts(&service);
-                if loaded.provenance == Provenance::Mapped {
-                    resolve_span_paths(&mut facts, &loaded);
-                }
+                let mut facts = semantic_facts(&service, &loaded, session.catalog());
+                // Resolve every fact span like `lint` does: mapped or
+                // source-parsed locations become authored paths, while
+                // unmapped provider output resolves to `<provider-artifact>`
+                // instead of a fabricated location (#445).
+                resolve_span_paths(&mut facts, &loaded);
                 AnalyzeResult { program, facts }
             },
         )
