@@ -18,7 +18,7 @@ use workshop_rs::catalog::{Catalog, Locale};
 use wright_analyzer::canonical::{ReferenceKind, SemanticIndex, Symbol, SymbolId, SymbolKind};
 
 use crate::config::{SessionConfig, SourceKind};
-use crate::diag::{Diagnostic, Position, SourceSpan, Stage, source_provider_unavailable};
+use crate::diag::{Diagnostic, Stage, source_provider_unavailable};
 use crate::input::{self, ResolvedInput};
 use crate::result::exit_code_from;
 use crate::service::Address;
@@ -187,6 +187,31 @@ pub fn validate_transaction(
     };
     if let Some(diagnostic) = edit_kind_gate(resolved.kind, "providerValidateEdit") {
         return refuse(vec![diagnostic]);
+    }
+    // A transaction that arrived over the wire carries no structural
+    // guarantee: re-run the constructor's normalization and invariants so
+    // empty, overlapping, or unsorted edit lists meet the same contract as
+    // `EditTransaction::new` callers.
+    let transaction = match EditTransaction::new(transaction.edits.clone()) {
+        Ok(transaction) => transaction,
+        Err(diagnostic) => return refuse(vec![diagnostic]),
+    };
+    // Every edit must target the loaded input itself — applying a caller's
+    // edit to a source that is not part of this program would validate
+    // text the transaction never touched.
+    if let Some(edit) = transaction
+        .edits
+        .iter()
+        .find(|edit| !same_source(&edit.source, &resolved))
+    {
+        return refuse(vec![Diagnostic::error(
+            "edit-unknown-source",
+            Stage::Discovery,
+            format!(
+                "the edit targets '{}' which is not the loaded input '{}'",
+                edit.source, resolved.display
+            ),
+        )]);
     }
     let mut diagnostics: Vec<Diagnostic> = transaction
         .edits
@@ -403,6 +428,13 @@ pub fn semantic_rename(
                 ),
             )]);
         }
+    }
+    if target.to == symbol.name {
+        return refuse(vec![Diagnostic::error(
+            "rename-invalid-name",
+            Stage::Discovery,
+            "the new name already names this symbol",
+        )]);
     }
     // Same-namespace collision: `to` must not already name another symbol of
     // the same kind — global and player variables are separate namespaces,
@@ -1041,21 +1073,6 @@ fn rename_in_line(line: &str, from: &str, to: &str) -> String {
     }
     out.push_str(remaining);
     out
-}
-
-pub fn range_as_span(range: &EditRange) -> SourceSpan {
-    SourceSpan {
-        file: 0,
-        path: "<edit>".to_string(),
-        start: Position {
-            line: range.start_line,
-            col: range.start_col,
-        },
-        end: Position {
-            line: range.end_line,
-            col: range.end_col,
-        },
-    }
 }
 
 #[cfg(test)]
@@ -1743,5 +1760,202 @@ mod tests {
             .map(|edit| edit.range.start_line)
             .collect();
         assert_eq!(positions, vec![2, 3], "edits are ordered by position");
+    }
+
+    #[test]
+    fn semantic_rename_rewrites_start_rule_callee() {
+        // A `Start Rule` subroutine argument is a value-position reference:
+        // its exact identifier span must rewrite with the rename.
+        let source = "subroutines {\n    0: helper\n}\n\nrule (\"sub\") {\n    event {\n        Subroutine;\n        helper;\n    }\n    actions {\n        Call Subroutine(helper);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Start Rule(helper, Restart Rule);\n    }\n}\n";
+        let (dir, mut session) = workshop_session(source);
+        let loaded = session.load().expect("loaded");
+        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
+        let rename = semantic_rename(
+            &loaded,
+            session.catalog(),
+            &sources,
+            &RenameTarget {
+                symbol: Some(Address::Name("helper".to_string())),
+                source: None,
+                line: None,
+                col: None,
+                to: "assist".to_string(),
+            },
+        );
+        assert!(rename.ok, "{:?}", rename.diagnostics);
+        let text = &rename.preview.as_ref().unwrap()[0].new_text;
+        assert!(text.contains("0: assist"), "{text}");
+        assert!(text.contains("Subroutine;\n        assist;"), "{text}");
+        assert!(text.contains("Call Subroutine(assist)"), "{text}");
+        assert!(
+            text.contains("Start Rule(assist, Restart Rule)"),
+            "the Start Rule callee rewrites: {text}"
+        );
+        assert!(!text.contains("helper"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn semantic_rename_binds_redeclared_names_to_the_last_declaration() {
+        // workshop-rs resolves a redeclared name to its last declaration:
+        // every use of `helper` binds #1. Renaming #1 rewrites the uses with
+        // it; renaming #0 touches only its own declaration and leaves the
+        // surviving `helper` bindings intact.
+        let source = "subroutines {\n    0: helper\n    1: helper\n}\n\nrule (\"sub\") {\n    event {\n        Subroutine;\n        helper;\n    }\n    actions {\n        Call Subroutine(helper);\n    }\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Start Rule(helper, Restart Rule);\n    }\n}\n";
+        let (dir, mut session) = workshop_session(source);
+        let loaded = session.load().expect("loaded");
+        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
+        let target = |symbol: Address| RenameTarget {
+            symbol: Some(symbol),
+            source: None,
+            line: None,
+            col: None,
+            to: "assist".to_string(),
+        };
+
+        let last = semantic_rename(
+            &loaded,
+            session.catalog(),
+            &sources,
+            &target(Address::Id(1)),
+        );
+        assert!(last.ok, "{:?}", last.diagnostics);
+        let text = &last.preview.as_ref().unwrap()[0].new_text;
+        assert!(text.contains("0: helper"), "{text}");
+        assert!(text.contains("1: assist"), "{text}");
+        assert!(text.contains("Subroutine;\n        assist;"), "{text}");
+        assert!(text.contains("Call Subroutine(assist)"), "{text}");
+        assert!(text.contains("Start Rule(assist, Restart Rule)"), "{text}");
+        assert_eq!(text.matches("helper").count(), 1, "{text}");
+
+        let first = semantic_rename(
+            &loaded,
+            session.catalog(),
+            &sources,
+            &target(Address::Id(0)),
+        );
+        assert!(first.ok, "{:?}", first.diagnostics);
+        let text = &first.preview.as_ref().unwrap()[0].new_text;
+        assert!(text.contains("0: assist"), "{text}");
+        assert_eq!(
+            text.matches("helper").count(),
+            4,
+            "the surviving declaration keeps every binding: {text}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn wire_transactions_recheck_the_transaction_invariants() {
+        // A transaction deserialized off the wire bypasses
+        // `EditTransaction::new`; validation re-normalizes it so empty or
+        // overlapping edits refuse and unsorted edits still apply in source
+        // order rather than splicing blindly.
+        let (dir, session) = workshop_session(WORKSHOP);
+        let path = dir.join("input.ws");
+        let key = path.to_string_lossy().into_owned();
+        let sources = BTreeMap::from([(key.clone(), WORKSHOP.to_string())]);
+        let identity = crate::input_identity(WORKSHOP);
+        let wire = |edits: serde_json::Value| {
+            serde_json::from_value::<EditTransaction>(serde_json::json!({ "edits": edits }))
+                .expect("deserializes")
+        };
+        let edit = |start_col: u32, end_col: u32, new_text: &str| {
+            serde_json::json!({
+                "kind": "edit",
+                "source": key.clone(),
+                "source_identity": identity.clone(),
+                "range": {
+                    "start_line": 11,
+                    "start_col": start_col,
+                    "end_line": 11,
+                    "end_col": end_col,
+                },
+                "new_text": new_text,
+            })
+        };
+
+        let validation = validate_transaction(
+            &session.config,
+            session.catalog(),
+            &sources,
+            &wire(serde_json::json!([])),
+        );
+        assert!(!validation.ok);
+        assert_eq!(validation.diagnostics[0].code, "edit-empty-transaction");
+
+        // Overlapping ranges on line 11 (`score` and `core,`) refuse.
+        let validation = validate_transaction(
+            &session.config,
+            session.catalog(),
+            &sources,
+            &wire(serde_json::json!([
+                edit(29, 34, "total"),
+                edit(30, 35, "x")
+            ])),
+        );
+        assert!(!validation.ok);
+        assert_eq!(validation.diagnostics[0].code, "edit-overlap");
+
+        // Unsorted disjoint edits normalize: `Add` (cols 36-39) listed before
+        // `score` (cols 29-34) still produces the correctly spliced source.
+        let validation = validate_transaction(
+            &session.config,
+            session.catalog(),
+            &sources,
+            &wire(serde_json::json!([
+                edit(36, 39, "Subtract"),
+                edit(29, 34, "total")
+            ])),
+        );
+        assert!(validation.ok, "{:?}", validation.diagnostics);
+        let text = &validation.preview.as_ref().unwrap()[0].new_text;
+        assert!(
+            text.contains("Set Global Variable(total, Subtract(Global.score, 1))"),
+            "{text}"
+        );
+
+        // An edit targeting a source that is not the loaded input refuses —
+        // validating it would check text the transaction never touched.
+        let mut wider = sources.clone();
+        wider.insert("other.ws".to_string(), WORKSHOP.to_string());
+        let foreign = serde_json::json!({
+            "kind": "edit",
+            "source": "other.ws",
+            "source_identity": identity,
+            "range": {"start_line": 3, "start_col": 12, "end_line": 3, "end_col": 17},
+            "new_text": "total",
+        });
+        let validation = validate_transaction(
+            &session.config,
+            session.catalog(),
+            &wider,
+            &wire(serde_json::json!([foreign])),
+        );
+        assert!(!validation.ok);
+        assert_eq!(validation.diagnostics[0].code, "edit-unknown-source");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn semantic_rename_refuses_an_unchanged_name() {
+        let (dir, mut session) = workshop_session(WORKSHOP);
+        let loaded = session.load().expect("loaded");
+        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
+        let rename = semantic_rename(
+            &loaded,
+            session.catalog(),
+            &sources,
+            &RenameTarget {
+                symbol: Some(Address::Name("score".to_string())),
+                source: None,
+                line: None,
+                col: None,
+                to: "score".to_string(),
+            },
+        );
+        assert!(!rename.ok);
+        assert_eq!(rename.diagnostics[0].code, "rename-invalid-name");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

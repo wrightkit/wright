@@ -598,10 +598,8 @@ impl ResultPresentation for CheckResult {
 
 impl ResultPresentation for RenameResult {
     fn metadata(&self) -> Option<String> {
-        let edits = self
-            .transaction
-            .as_ref()
-            .map_or(0, |transaction| transaction.edits.len());
+        let transaction = self.transaction.as_ref()?;
+        let edits = transaction.edits.len();
         let sources = self.preview.as_ref().map_or(0, Vec::len);
         Some(if self.written.is_empty() {
             format!("{edits} edit(s) across {sources} source(s); preview — pass --write to apply")

@@ -160,7 +160,8 @@ owns the source semantics and Wright orchestrates the transaction:
   `source`/`line`/`col` position inside one identifier occurrence. Global
   variables, player variables, and subroutines rename through the exact
   identifier spans `workshop-rs` records: the declaration, the `Subroutine`
-  event binding, `Call Subroutine` callees, `Set`/`Modify`/`For` variable
+  event binding, `Call Subroutine` callees, `Start Rule` subroutine
+  arguments, `Set`/`Modify`/`For` variable
   arguments, and `Global.name`/`Event Player.name` value references all
   rewrite, while prefixes, comments, strings, and unrelated identifiers stay
   untouched. There is no textual-search fallback — an occurrence whose
