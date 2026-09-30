@@ -284,6 +284,161 @@ fn check_excludes_configurable_lint_findings() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+// ── Check output hierarchy (#443) ────────────────────────────────────────────
+// Two `raw-setting` warnings plus one `unknown-value` error exercise the
+// blocking/non-blocking split and the errors-first ordering at once.
+
+const MIXED_CHECK_SOURCE: &str = r#"settings {
+    customGroup {
+        mySetting: 1
+        otherSetting: 2
+    }
+}
+rule ("x") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(A, 1);
+        Set Global Variable(B, FutureValueThing(2));
+    }
+}
+"#;
+
+#[test]
+fn check_text_leads_with_verdict_and_blocking_count() {
+    let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "plain",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    // The verdict leads stdout: failure status plus the blocking error count
+    // and the non-blocking remainder, then only execution metadata closes it.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines();
+    assert_eq!(lines.next(), Some("ERROR check"), "{stdout}");
+    let counts = lines.next().unwrap_or_default().to_string();
+    assert!(counts.contains("1 error(s)"), "{stdout}");
+    assert!(counts.contains("2 warning(s)"), "{stdout}");
+    assert_eq!(lines.next(), Some("  1 file(s) affected"), "{stdout}");
+    assert!(lines.next().is_none(), "the footer stays compact: {stdout}");
+
+    // Diagnostics render errors before non-blocking diagnostics, each with
+    // its actionable location, source context, and secondary stage metadata.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let error_at = stderr.find("error[").expect("an error diagnostic");
+    let warning_at = stderr.find("warning[").expect("a warning diagnostic");
+    assert!(
+        error_at < warning_at,
+        "blocking errors precede warnings: {stderr}"
+    );
+    assert!(stderr.contains(" --> "), "a mapped location: {stderr}");
+    assert!(
+        stderr.contains("Set Global Variable(B, FutureValueThing(2));"),
+        "the source context sits with the diagnostic: {stderr}"
+    );
+    assert!(
+        stderr.contains("= analysis"),
+        "stage stays secondary: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn check_unmapped_locations_are_not_fabricated() {
+    // `<stdin>` is a pseudo-path: the position is honest metadata, never a
+    // file-style `-->` location.
+    let output = run_with_stdin(
+        &["check", "-", "--renderer", "plain", "--color", "never"],
+        "rule (\"x\") { event { Ongoing - Global; } actions { If(True); }",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("--> <stdin>"), "{stderr}");
+    assert!(
+        stderr.contains("= at <stdin>:1:63"),
+        "the unmapped position stays secondary metadata: {stderr}"
+    );
+}
+
+#[test]
+fn check_success_renders_a_compact_deterministic_summary() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "plain",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout, "PASS check\n  0 diagnostic(s)\n",
+        "a clean check is a two-line summary on the deterministic plain surface"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn check_text_reorder_never_reaches_the_json_envelope() {
+    let path = temp_file("mixed.txt", MIXED_CHECK_SOURCE);
+    let output = run(&["check", path.to_str().unwrap(), "-f", "json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = parse_json(&output.stdout);
+    // JSON preserves the driver's production order and the same diagnostic
+    // set; only the text layer reorders by severity.
+    let severities: Vec<&str> = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|diagnostic| diagnostic["severity"].as_str().unwrap())
+        .collect();
+    assert_eq!(severities, ["warning", "warning", "error"]);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn check_tty_clears_progress_then_renders_verdict_and_elapsed() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let output = run_in_tty(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let mut transcript = output.stdout;
+    transcript.extend_from_slice(&output.stderr);
+    let transcript = String::from_utf8_lossy(&transcript);
+    let verdict = transcript
+        .find("PASS check")
+        .expect("the final verdict renders");
+    assert!(
+        transcript[..verdict].contains("\x1b[2K"),
+        "transient progress is cleared before the verdict: {transcript}"
+    );
+    assert!(
+        !transcript[verdict..].contains("Resolving input"),
+        "progress labels never compete with the verdict: {transcript}"
+    );
+    assert!(
+        transcript[verdict..].contains(" ms"),
+        "the interactive footer carries elapsed time: {transcript}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[test]
 fn analyze_over_workshop_input_reports_semantic_facts() {
     let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
