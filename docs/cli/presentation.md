@@ -129,6 +129,17 @@ presentation-layer concerns: the `wright-result/v1` envelope keeps the
 driver's diagnostic set and production order, and the GitHub Actions
 renderer is unchanged.
 
+The `lint` report applies the same hierarchy to findings: the verdict
+leads with finding counts by severity, findings render in action order, and a
+finding entry leads with severity, rule id, and message before its `-->`
+location and one-line source frame. Evidence class and boundedness trail
+dimmed as secondary metadata; pseudo-path spans degrade to position notes.
+Repeated findings keep the shared collapse — one entry naming its finding
+count, capped at ten listed locations — and the closing footer carries
+affected-file and skipped-evaluation counts plus interactive elapsed time.
+The `wright-result/v1` envelope keeps the driver's finding set and order,
+and the GitHub Actions renderer is unchanged.
+
 This document is the normative contract for the compiler driver and CLI.
 It defines the shared driver model, the command surface, exit codes,
 stdout/stderr ownership, and the `wright-result/v1` envelope that CI and

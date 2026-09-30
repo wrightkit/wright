@@ -911,8 +911,8 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     // The nine identical findings render as one entry listing nine locations;
-    // the verdict still reports the true total.
-    assert!(stdout.contains("10 finding(s)"), "{stdout}");
+    // the verdict still reports the true total by severity.
+    assert!(stdout.contains("10 warning(s)"), "{stdout}");
     assert_eq!(
         stdout.matches("[repeated-value]").count(),
         1,
@@ -923,6 +923,163 @@ fn lint_text_collapses_identical_findings_into_one_entry() {
         10,
         "nine grouped locations plus the single min-wait-loop: {stdout}"
     );
+    assert!(stdout.contains("(9 findings)"), "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_text_leads_with_the_verdict_and_orders_by_action_priority() {
+    // One rule raised to error severity produces a mixed-severity result:
+    // the verdict leads, the error entry renders before warning entries, and
+    // the complete result set is unchanged.
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--rule-severity",
+        "min-wait-loop:error",
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let verdict = stdout.find("ERROR lint").expect("verdict: {stdout}");
+    let counts = stdout
+        .find("1 error(s), 9 warning(s)")
+        .expect("severity counts: {stdout}");
+    let findings = stdout.find("Lint findings").expect("section: {stdout}");
+    let error = stdout
+        .find("error[min-wait-loop]")
+        .expect("error entry: {stdout}");
+    let warning = stdout
+        .find("warning[repeated-value]")
+        .expect("warning entry: {stdout}");
+    assert!(verdict < counts && counts < findings, "{stdout}");
+    assert!(findings < error && error < warning, "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_text_orders_all_severity_bands_by_action_priority() {
+    // An input yielding error, warning, and info findings renders the bands
+    // in action order regardless of the driver's reported order.
+    let path = temp_file(
+        "mixed.txt",
+        "variables {\n\
+         \tglobal:\n\
+         \t\t0: index\n\
+         }\n\
+         rule (\"hot loop\") {\n\
+         \tevent {\n\
+         \t\tOngoing - Global;\n\
+         \t}\n\
+         \tconditions {\n\
+         \t\tDistance Between(Vector(0, 0, 0), Vector(1, 1, 1)) < 100;\n\
+         \t}\n\
+         \tactions {\n\
+         \t\tWhile(Compare(Global.index, <, 10));\n\
+         \t\t\tWait(0.016, Ignore Condition);\n\
+         \t\t\tModify Global Variable(index, Add, 1);\n\
+         \t\tEnd;\n\
+         \t}\n\
+         }\n\
+         rule (\"no wait\") {\n\
+         \tevent {\n\
+         \t\tOngoing - Global;\n\
+         \t}\n\
+         \tactions {\n\
+         \t\tWhile(True);\n\
+         \t\t\tModify Global Variable(index, Add, 1);\n\
+         \t\tEnd;\n\
+         \t}\n\
+         }\n",
+    );
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--rule-severity",
+        "min-wait-loop:error",
+        "--renderer",
+        "terminal",
+        "--color",
+        "never",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("1 error(s), 1 warning(s), 1 info finding(s)"),
+        "{stdout}"
+    );
+    let error = stdout
+        .find("error[min-wait-loop]")
+        .expect("error entry: {stdout}");
+    let warning = stdout
+        .find("warning[while-without-wait]")
+        .expect("warning entry: {stdout}");
+    let info = stdout
+        .find("info[ongoing-condition-hot-path]")
+        .expect("info entry: {stdout}");
+    assert!(error < warning && warning < info, "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_text_presents_a_finding_with_location_context_and_secondary_metadata() {
+    let path = temp_file("flow.txt", &corpus_workshop("synthetic/control-flow"));
+    let output = run(&["lint", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The message leads; the location and source frame follow; the evidence
+    // class trails dimmed as secondary metadata.
+    assert!(stdout.contains("WARN lint"), "{stdout}");
+    assert!(stdout.contains("1 warning(s) across 6 rule(s)"), "{stdout}");
+    let message = stdout
+        .find("warning[min-wait-loop]: loop body waits")
+        .expect("primary line: {stdout}");
+    let location = stdout.find(" --> ").expect("location: {stdout}");
+    let frame = stdout.find(" | 11 | ").expect("source frame: {stdout}");
+    let evidence = stdout
+        .find("= evidence: static-indicator")
+        .expect("notes: {stdout}");
+    assert!(
+        message < location && location < frame && frame < evidence,
+        "{stdout}"
+    );
+    assert!(stdout.contains("1 file(s) affected"), "{stdout}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn lint_text_resolves_locations_under_a_subdirectory_input_root() {
+    // `span.path` is reported root-relative; the human view resolves it under
+    // the input root so a subdirectory input still gets an actionable
+    // location and a source frame instead of a bare file name.
+    let dir = temp_dir();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let path = dir.join("sub").join("flow.txt");
+    std::fs::write(&path, corpus_workshop("synthetic/control-flow")).unwrap();
+    let output = run(&["lint", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!("{}:11:9", path.display())),
+        "the location resolves under the input root: {stdout}"
+    );
+    assert!(stdout.contains(" | 11 | "), "source frame: {stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn lint_text_clean_input_reports_a_pass_verdict_and_no_findings() {
+    let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));
+    let output = run(&["lint", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PASS lint"), "{stdout}");
+    assert!(stdout.contains("0 finding(s)"), "{stdout}");
+    assert!(stdout.contains("Lint findings\n  none"), "{stdout}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
