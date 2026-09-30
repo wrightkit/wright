@@ -3,6 +3,7 @@
   "family": "diagnosis",
   "language": "workshop",
   "entry": "mode.ws",
+  "stabilityRisk": true,
   "writable": ["mode.ws", "answer.json"],
   "runtimeOnly": ["The server no longer freezes in a live match."],
   "checks": [

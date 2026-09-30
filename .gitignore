@@ -30,3 +30,6 @@ target/
 
 .agents/
 .opencode/
+
+# Agent benchmark upstream oracle
+benchmarks/agent/oracle/node_modules/

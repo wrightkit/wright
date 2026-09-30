@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Reference adapter: run Claude Code for one benchmark trial and report per-turn usage.
+
+Reads the prompt on stdin. Honors the BENCH_* contract (docs/agent-benchmark.md): tools follow BENCH_KNOWLEDGE,
+BENCH_SKILL_DIR is installed as a plugin, and BENCH_USAGE / BENCH_TRANSCRIPT / BENCH_CONTEXT are written.
+The agent binary is resolved on BENCH_HOST_PATH because the agent's own PATH hides Wright when the level is `none`.
+The model comes from BENCH_MODEL (default `sonnet`). It removes web tools unless knowledge is `web`, but it does
+not sandbox the network: pair it with the harness --canary-cmd to detect a reachable network under `off`.
+Exit 75 signals a provider or infrastructure failure so the harness retries the trial.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+INFRA_EXIT = 75
+TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+WEB_TOOLS = ["WebFetch", "WebSearch"]
+
+
+def main() -> int:
+    env = os.environ
+    prompt = sys.stdin.read()
+    web = env["BENCH_KNOWLEDGE"] == "web"
+    cmd = [
+        shutil.which("claude", path=env.get("BENCH_HOST_PATH")) or "claude", "-p", "--model", env.get("BENCH_MODEL", "sonnet"),
+        "--output-format", "stream-json", "--verbose", "--setting-sources", "project", "--strict-mcp-config",
+        "--no-session-persistence", "--permission-mode", "acceptEdits",
+        "--allowedTools", *(TOOLS + WEB_TOOLS if web else TOOLS),
+    ]
+    if not web:
+        cmd += ["--disallowedTools", *WEB_TOOLS]
+    loaded: list[str] = []
+    if env.get("BENCH_SKILL_DIR"):
+        skill = Path(env["BENCH_SKILL_DIR"])
+        plugin = Path(tempfile.mkdtemp(dir=env["BENCH_RUN_DIR"]))
+        (plugin / ".claude-plugin").mkdir()
+        (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "bench", "version": "0.0.0", "description": "benchmark skill"}))
+        shutil.copytree(skill, plugin / "skills" / skill.name)
+        cmd += ["--plugin-dir", str(plugin)]
+        loaded.append(skill.name)
+    proc = subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env={**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"},
+    )
+    proc.stdin.write(prompt)
+    proc.stdin.close()
+    final, errored = "", False
+    with open(env["BENCH_USAGE"], "w") as usage, open(env["BENCH_TRANSCRIPT"], "w") as transcript:
+        for line in proc.stdout:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            transcript.write(json.dumps({"t": time.time(), **event}) + "\n")
+            if event.get("type") == "assistant":
+                u = event["message"].get("usage") or {}
+                cached = u.get("cache_read_input_tokens") or 0
+                written = u.get("cache_creation_input_tokens") or 0
+                usage.write(json.dumps({
+                    "t": time.time(), "input": u.get("input_tokens"), "output": u.get("output_tokens"),
+                    "cache_read": cached, "cache_write": written, "reasoning": None,
+                    "context": (u.get("input_tokens") or 0) + cached + written, "context_limit": None,
+                }) + "\n")
+            if event.get("type") == "result":
+                final, errored = event.get("result", ""), bool(event.get("is_error"))
+    stderr = proc.stderr.read()
+    code = proc.wait()
+    Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
+    sys.stdout.write(final)
+    sys.stderr.write(stderr)
+    if errored or code != 0:
+        transient = any(s in stderr.lower() + final.lower() for s in ("overloaded", "rate limit", "529", "timed out"))
+        return INFRA_EXIT if transient else (code or 1)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
