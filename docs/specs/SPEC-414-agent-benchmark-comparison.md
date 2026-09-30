@@ -136,6 +136,20 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
   decisions it drives are candidates for output-shape or selection-default Issues in `wright`. The guide's own
   token size is reported and counted in the `bin+skill` context.
 
+### Eval quality and guide tuning
+
+- REQ-025: The report flags problems with the eval itself: baseline headroom (usable rate at or above 95%,
+  where no gain can show), run-to-run variance, infrastructure failures and timeouts, invalid runs, and a
+  grader that gives different verdicts on the same stored workspace.
+- REQ-026: Scenarios may carry a `split` of `train` or `test`, and reports break results out by split. Hard
+  scenarios are chosen by human judgment of difficulty, not because a current model fails them.
+- REQ-027: A guide-tuning loop over the optional guide changes one surface per round (description or body),
+  scores train and held-out test scenarios under `bin+skill`, keeps the change only when both improve, reverts
+  it otherwise, and analyzes the cause after two or three stalled rounds. Failure transcripts are never pasted
+  into the guide, and reference solutions and answer keys stay outside the agent workspace. Attributable
+  metrics apply: description changes are judged by trigger rate, body changes by the E01-E12 rates and
+  outcome. The noise floor is measured before tuning starts.
+
 ### Models and statistics
 
 - REQ-016: Agents run through an adapter that takes model, workspace, prompt, scrubbed environment, tool list,
@@ -186,8 +200,8 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
 - Q-001 [product]: which models, reasoning settings, and total budget the first full run uses; owner PM.
 - Q-002 [product]: is Tier 2 required for acceptance, or only Tier 1; owner PM.
 - Q-003 [verification]: rubric-based judgment (REQ-011) in scope for the first version, or deferred; owner QA.
-- Q-004 [architecture]: whether the trace analyzer and adapters live in `benchmarks/agent` or a sibling
-  directory, given the harness is currently a single script; owner Architect.
+- Q-004 [architecture]: the harness now lives in `benchmarks/agent` as small modules beside
+  `agent_bench.py` (grading, trace, report, adapters); confirm or redirect; owner Architect.
 - Q-005 [verification]: the source of the wiki snapshot and its license and pinning method; owner QA.
 - Q-006 [verification]: the common tokenizer used for cross-model attribution (REQ-021) and how its error is
   reported; owner QA.

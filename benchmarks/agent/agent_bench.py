@@ -1,25 +1,35 @@
 #!/usr/bin/env python3
-"""Wright agent benchmark harness (#414). Contract: docs/agent-benchmark.md."""
+"""Wright agent benchmark harness (#414). Contract: docs/agent-benchmark.md; design: docs/specs/SPEC-414-agent-benchmark-comparison.md."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
+import random
 import shutil
 import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
+import bench_grade
+import bench_report
+import bench_trace
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 SCENARIOS = HERE / "scenarios"
-RESULT_CONTRACT = "wright-agent-bench/v1"
-SHIM_ENV = ("WRIGHT_BENCH_REAL", "WRIGHT_BENCH_TRACE")
+RESULT_CONTRACT = "wright-agent-bench/v2"
+WRIGHT_LEVELS = ("none", "bin", "bin+skill")
+KNOWLEDGE_LEVELS = ("none", "wiki", "web")
+INFRA_EXIT = 75  # EX_TEMPFAIL: the adapter reports a provider or infrastructure failure, not an agent failure
+ENV_KEEP = ("LANG", "LC_ALL", "TERM", "TMPDIR", "USER", "LOGNAME")
 
 
 def load_scenario(scenario_id: str) -> dict:
@@ -33,86 +43,6 @@ def all_scenario_ids() -> list[str]:
     return sorted(p.name for p in SCENARIOS.iterdir() if (p / "scenario.json").is_file())
 
 
-def wright_json(wright: str, args: list[str]) -> tuple[int, dict]:
-    proc = subprocess.run([wright, *args, "--format", "json"], capture_output=True, text=True)
-    try:
-        return proc.returncode, json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return proc.returncode, {"diagnostics": [{"code": "harness-output", "severity": "error", "message": proc.stderr.strip() or proc.stdout.strip()}]}
-
-
-def serve_request(wright: str, entry: Path, request: dict) -> dict:
-    proc = subprocess.run([wright, "serve", str(entry)], input=json.dumps(request) + "\n", capture_output=True, text=True)
-    try:
-        return json.loads(proc.stdout.splitlines()[0])
-    except (IndexError, json.JSONDecodeError):
-        return {"error": {"code": "harness-output", "message": proc.stderr.strip()}}
-
-
-def check_result(check: dict, passed: bool, detail: str) -> dict:
-    return {"id": check["id"], "kind": check["kind"], "layer": check.get("layer", "agent"), "passed": passed, "detail": detail}
-
-
-def run_check(check: dict, workspace: Path, entry: Path, wright: str, state: dict) -> dict:
-    kind = check["kind"]
-    if kind == "check":
-        code, envelope = wright_json(wright, ["check", str(entry)])
-        state["diagnostics"] = envelope.get("diagnostics", [])
-        errors = [d for d in state["diagnostics"] if d.get("severity") == "error"]
-        return check_result(check, code == 0 and not errors, f"exit {code}, {len(errors)} error diagnostic(s)")
-    if kind == "lint":
-        _, envelope = wright_json(wright, ["lint", str(entry)])
-        findings = [f for f in envelope.get("result", {}).get("findings", []) if f["code"] == check["code"]]
-        return check_result(check, len(findings) <= check.get("max", 0), f"{len(findings)} '{check['code']}' finding(s)")
-    if kind == "symbols":
-        response = serve_request(wright, entry, {"op": "symbols", "kind": check["symbolKind"]})
-        found = len(response.get("result", []))
-        return check_result(check, found >= check.get("min", 1), f"{found} '{check['symbolKind']}' symbol(s)")
-    if kind in ("contains", "absent"):
-        path = workspace / check["file"]
-        text = path.read_text() if path.is_file() else ""
-        texts = check["text"] if isinstance(check["text"], list) else [check["text"]]
-        count = sum(text.count(t) for t in texts)
-        if kind == "contains":
-            passed = count >= check.get("min", 1) and count <= check.get("max", count)
-        else:
-            passed = count == 0
-        return check_result(check, passed, f"{count} occurrence(s) in {check['file']}")
-    if kind == "answer":
-        path = workspace / "answer.json"
-        try:
-            actual = json.loads(path.read_text()).get(check["key"])
-        except (OSError, json.JSONDecodeError, AttributeError):
-            actual = None
-        return check_result(check, actual == check["expected"], f"answer[{check['key']}] = {json.dumps(actual)}")
-    raise SystemExit(f"unknown check kind '{kind}'")
-
-
-def tree(root: Path) -> dict[str, bytes]:
-    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
-
-
-def unsafe_edits(scenario: dict, workspace: Path) -> list[str]:
-    seed = tree(scenario["dir"] / "seed")
-    now = tree(workspace)
-    writable = set(scenario["writable"])
-    return sorted(name for name in seed.keys() | now.keys() if seed.get(name) != now.get(name) and name not in writable)
-
-
-def grade(scenario: dict, workspace: Path, wright: str) -> dict:
-    entry = workspace / scenario["entry"]
-    state: dict = {}
-    checks = [run_check(c, workspace, entry, wright, state) for c in scenario["checks"]]
-    return {
-        "checks": checks,
-        "passed": all(c["passed"] for c in checks),
-        "failedLayers": sorted({c["layer"] for c in checks if not c["passed"]}),
-        "diagnostics": state.get("diagnostics", []),
-        "unsafeEdits": unsafe_edits(scenario, workspace),
-        "unverifiedRuntimeClaims": scenario.get("runtimeOnly", []),
-    }
-
-
 def materialize(scenario: dict, workspace: Path, overlay: str | None = None) -> None:
     shutil.copytree(scenario["dir"] / "seed", workspace)
     if overlay:
@@ -120,21 +50,31 @@ def materialize(scenario: dict, workspace: Path, overlay: str | None = None) -> 
 
 
 def validate(wright: str, out: Path) -> bool:
-    """Each scenario must be solvable by the reference and unsolved by its seed."""
+    """Graders are calibrated: the reference passes, the seed fails, each negative fails exactly its named checks."""
     ok = True
     for scenario_id in all_scenario_ids():
         scenario = load_scenario(scenario_id)
+        runs = [("seed", None), ("reference", "reference")] + [(f"negative-{n}", f"negative/{n}") for n in scenario.get("negatives", {})]
         results = {}
-        for name, overlay in (("seed", None), ("reference", "reference")):
+        for name, overlay in runs:
             workspace = out / scenario_id / name
             shutil.rmtree(workspace, ignore_errors=True)
             materialize(scenario, workspace, overlay)
-            results[name] = grade(scenario, workspace, wright)
-        good = results["reference"]["passed"] and not results["seed"]["passed"] and not results["reference"]["unsafeEdits"]
-        if not good:
+            results[name] = bench_grade.grade(scenario, workspace, wright)
+        problems = []
+        if not results["reference"]["passed"]:
+            problems.append(f"reference failures={[c['id'] for c in results['reference']['checks'] if not c['passed']]}")
+        if results["seed"]["passed"]:
+            problems.append("seed passed")
+        if results["reference"]["unsafeEdits"]:
+            problems.append(f"unsafe={results['reference']['unsafeEdits']}")
+        for name, expected in scenario.get("negatives", {}).items():
+            failed = sorted(c["id"] for c in results[f"negative-{name}"]["checks"] if not c["passed"])
+            if failed != sorted(expected["fails"]):
+                problems.append(f"negative '{name}' failed {failed}, expected {sorted(expected['fails'])}")
+        if problems:
             ok = False
-            failed = [c for c in results["reference"]["checks"] if not c["passed"]]
-            print(f"INVALID {scenario_id}: seed passed={results['seed']['passed']}, reference failures={failed}, unsafe={results['reference']['unsafeEdits']}")
+            print(f"INVALID {scenario_id}: {'; '.join(problems)}")
         else:
             print(f"ok      {scenario_id}")
     return ok
@@ -146,110 +86,253 @@ def baseline_path(path: str) -> str:
     return os.pathsep.join(kept)
 
 
-def shim_main(argv: list[str]) -> int:
-    start = time.monotonic()
-    code = subprocess.call([os.environ["WRIGHT_BENCH_REAL"], *argv])
-    with open(os.environ["WRIGHT_BENCH_TRACE"], "a") as trace:
-        trace.write(json.dumps({"argv": argv, "exit": code, "seconds": round(time.monotonic() - start, 3)}) + "\n")
-    return code
+def cell_label(cell: dict) -> str:
+    return f"{cell['wright']}/{cell['knowledge']}/{cell['network']}"
 
 
-def summarize_trace(trace: Path) -> dict:
-    calls = [json.loads(line) for line in trace.read_text().splitlines()] if trace.is_file() else []
-    commands = [next((a for a in c["argv"] if not a.startswith("-")), "") for c in calls]
-    by_command: dict[str, int] = {}
-    for command in commands:
-        by_command[command] = by_command.get(command, 0) + 1
-    return {
-        "invocations": len(calls),
-        "byCommand": by_command,
-        "failedInvocations": sum(1 for c in calls if c["exit"] != 0),
-        "ownerOrEnvironmentGaps": [c for c in calls if c["exit"] >= 3],
-    }
+def check_cell(cell: dict, args: argparse.Namespace) -> None:
+    if cell["wright"] not in WRIGHT_LEVELS or cell["knowledge"] not in KNOWLEDGE_LEVELS or cell["network"] not in ("off", "on"):
+        raise SystemExit(f"invalid condition {cell_label(cell)}")
+    if cell["knowledge"] == "web" and cell["network"] != "on":
+        raise SystemExit("knowledge 'web' requires network 'on'")
+    if cell["wright"] == "bin+skill" and not args.skill_dir:
+        raise SystemExit("wright level 'bin+skill' requires --skill-dir")
+    if cell["knowledge"] == "wiki" and not args.wiki_dir:
+        raise SystemExit("knowledge 'wiki' requires --wiki-dir")
 
 
-def run_trial(scenario: dict, condition: str, args: argparse.Namespace, out: Path) -> dict:
-    shutil.rmtree(out, ignore_errors=True)
-    workspace = out / "workspace"
-    materialize(scenario, workspace)
-    prompt = (scenario["dir"] / "prompt.md").read_text()
-    trace = out / "wright-trace.jsonl"
-    env = {k: v for k, v in os.environ.items() if k not in SHIM_ENV}
-    if condition == "wright":
+def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) -> dict:
+    """Scrubbed environment: allowlisted host variables, a fresh HOME, and the BENCH_* contract for the adapter."""
+    home = out / "home"
+    home.mkdir(parents=True)
+    env = {k: os.environ[k] for k in (*ENV_KEEP, *args.env_pass) if k in os.environ}
+    env.setdefault("HOME", str(home))
+    path = baseline_path(os.environ["PATH"])
+    if cell["wright"] != "none":
         shim_dir = out / "bin"
-        shim_dir.mkdir(parents=True)
+        shim_dir.mkdir()
         shim = shim_dir / "wright"
         shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{Path(__file__).resolve()}" shim "$@"\n')
         shim.chmod(0o755)
-        env.update(WRIGHT_BENCH_REAL=args.wright, WRIGHT_BENCH_TRACE=str(trace), PATH=f"{shim_dir}{os.pathsep}{baseline_path(env['PATH'])}")
-    else:
-        env["PATH"] = baseline_path(env["PATH"])
-    start = time.monotonic()
+        env.update(WRIGHT_BENCH_REAL=args.wright, WRIGHT_BENCH_TRACE=str(out / "wright-trace.jsonl"), WRIGHT_BENCH_SIDECAR=str(out / "wright-calls"))
+        path = f"{shim_dir}{os.pathsep}{path}"
+    env.update(
+        PATH=path,
+        BENCH_HOST_PATH=os.environ["PATH"], BENCH_WORKSPACE=str(workspace), BENCH_RUN_DIR=str(out), BENCH_AGENT_ID=args.agent_id,
+        BENCH_USAGE=str(out / "usage.jsonl"), BENCH_TRANSCRIPT=str(out / "transcript.jsonl"), BENCH_CONTEXT=str(out / "context.json"),
+        BENCH_KNOWLEDGE=cell["knowledge"], BENCH_NETWORK=cell["network"], BENCH_WRIGHT=cell["wright"],
+    )
+    if cell["wright"] == "bin+skill":
+        env["BENCH_SKILL_DIR"] = str(args.skill_dir)
+    return env
+
+
+def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -> str | None:
+    """A failed canary invalidates the run. Returns the reason, or None."""
+    if cell["wright"] == "none" and shutil.which("wright", path=env["PATH"]):
+        return "wright reachable under wright level 'none'"
+    if cell["network"] == "off" and args.canary_cmd:
+        if subprocess.run(args.canary_cmd, shell=True, cwd=workspace, env=env, capture_output=True).returncode == 0:
+            return "network reachable under network 'off'"
+    return None
+
+
+def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str) -> tuple[int | None, str, str]:
     proc = subprocess.Popen(
         args.agent_cmd, shell=True, cwd=workspace, env=env, text=True,
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        start_new_session=True,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
     )
     try:
         stdout, stderr = proc.communicate(input=prompt, timeout=args.timeout)
-        agent_exit = proc.returncode
+        return proc.returncode, stdout, stderr
     except subprocess.TimeoutExpired:
-        agent_exit = None
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         stdout, stderr = proc.communicate()
-        stderr = f"{stderr}\ntimeout" if stderr else "timeout"
-    seconds = round(time.monotonic() - start, 1)
+        return None, stdout, f"{stderr}\ntimeout" if stderr else "timeout"
+
+
+def context_report(out: Path, cell: dict) -> dict:
+    path = out / "context.json"
+    if not path.is_file():
+        return {"reported": False}
+    loaded = json.loads(path.read_text()).get("loaded", [])
+    allowed = {"wright"} if cell["wright"] == "bin+skill" else set()
+    return {"reported": True, "loaded": loaded, "unexpected": sorted(set(loaded) - allowed)}
+
+
+def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -> dict:
+    check_cell(cell, args)
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    workspace = out / "workspace"
+    prompt = (scenario["dir"] / "prompt.md").read_text()
+    infra_retries = 0
+    while True:
+        shutil.rmtree(workspace, ignore_errors=True)
+        for stale in ("home", "bin", "wright-trace.jsonl", "wright-calls", "usage.jsonl", "transcript.jsonl", "context.json", "snapshots"):
+            target = out / stale
+            shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink(missing_ok=True)
+        materialize(scenario, workspace)
+        if cell["knowledge"] == "wiki":
+            (workspace / "wiki").symlink_to(args.wiki_dir.resolve())
+        env = build_env(cell, args, out, workspace)
+        reason = canaries(cell, env, workspace, args)
+        if reason:
+            result = base_result(scenario, cell, args, out, 0.0, None)
+            result.update(invalid=reason)
+            (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+            return result
+        snapshots = bench_trace.Snapshots(workspace, scenario.get("watch", [scenario["entry"]]), out / "snapshots")
+        snapshots.start()
+        start = time.monotonic()
+        agent_exit, stdout, stderr = run_agent(args, env, workspace, prompt)
+        seconds = round(time.monotonic() - start, 1)
+        snaps = snapshots.finish()
+        if agent_exit == INFRA_EXIT and infra_retries < args.infra_retries:
+            infra_retries += 1
+            continue
+        break
     (out / "agent.log").write_text(f"exit={agent_exit}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n")
-    wright_version = subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip()
-    result = {
-        "contract": RESULT_CONTRACT,
-        "scenario": scenario["id"],
-        "family": scenario["family"],
-        "language": scenario["language"],
-        "condition": condition,
-        "agent": {"id": args.agent_id, "command": args.agent_cmd, "exit": agent_exit, "seconds": seconds},
-        "environment": {"os": platform.platform(), "python": platform.python_version(), "wright": wright_version, "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")},
-        "wrightUse": summarize_trace(trace),
-        **grade(scenario, workspace, args.wright),
-    }
+    result = base_result(scenario, cell, args, out, seconds, agent_exit)
+    result["infraRetries"] = infra_retries
+    context = context_report(out, cell)
+    result["context"] = context
+    if context.get("unexpected"):
+        result["invalid"] = f"unexpected loaded context: {context['unexpected']}"
+    events = bench_trace.read_events(out / "wright-trace.jsonl")
+    result["wrightUse"] = bench_trace.summarize_trace(events)
+    result.update(bench_grade.grade(scenario, workspace, args.wright, out / "grading"))
+    entry = workspace / scenario["entry"]
+    final_sha = hashlib.sha256(entry.read_bytes()).hexdigest() if entry.is_file() else None
+    result["friction"] = bench_trace.friction(events)
+    result["expectations"] = bench_trace.detect_expectations(events, snaps, scenario, final_sha)
+    result["snapshots"] = snapshot_validity(scenario, snaps, args.wright, out)
+    first_valid = next((s["t"] for s in result["snapshots"]["series"] if s["valid"]), None)
+    result["usage"] = bench_trace.usage_summary(out / "usage.jsonl", first_valid)
     (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
 
 
+def snapshot_validity(scenario: dict, snaps: list[dict], wright: str, out: Path) -> dict:
+    """Strict validity of every snapshot of the entry file; regressions are valid -> invalid transitions."""
+    series = []
+    for snap in [s for s in snaps if s["file"] == scenario["entry"]]:
+        valid = bench_grade.strict_valid(wright, Path(snap["path"]), out / "grading" / f"snapshot-{snap['i']:03d}")
+        series.append({"i": snap["i"], "t": snap["t"], "valid": valid})
+    regressions = sum(1 for a, b in zip(series, series[1:]) if a["valid"] and not b["valid"])
+    return {"count": len(series), "firstValidIndex": next((s["i"] for s in series if s["valid"]), None), "regressions": regressions, "series": series}
+
+
+def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path, seconds: float, agent_exit: int | None) -> dict:
+    return {
+        "contract": RESULT_CONTRACT,
+        "scenario": scenario["id"],
+        "family": scenario["family"],
+        "language": scenario["language"],
+        "split": scenario.get("split"),
+        "condition": dict(cell),
+        "agent": {"id": args.agent_id, "command": args.agent_cmd, "exit": agent_exit, "seconds": seconds},
+        "environment": {
+            "os": platform.platform(), "python": platform.python_version(),
+            "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
+    }
+
+
+def trial_dir(base: Path, scenario_id: str, agent_id: str, cell: dict, trial: int) -> Path:
+    return base / scenario_id / agent_id / f"{cell_label(cell).replace('/', '_')}-{trial}"
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     scenario = load_scenario(args.scenario)
+    cell = {"wright": args.wright_level, "knowledge": args.knowledge, "network": args.network}
     ok = True
-    for condition in args.conditions:
-        for trial in range(1, args.trials + 1):
-            result = run_trial(scenario, condition, args, args.out / args.scenario / f"{condition}-{trial}")
-            ok &= result["passed"]
-            print(f"{args.scenario} {condition} trial {trial}: {'PASS' if result['passed'] else 'FAIL'} layers={result['failedLayers']} wright-invocations={result['wrightUse']['invocations']}")
+    for trial in range(1, args.trials + 1):
+        result = run_trial(scenario, cell, args, trial_dir(args.out, args.scenario, args.agent_id, cell, trial))
+        ok &= bool(result.get("passed")) and "invalid" not in result
+        print(f"{args.scenario} {cell_label(cell)} trial {trial}: {'INVALID ' + result['invalid'] if 'invalid' in result else 'PASS' if result['passed'] else 'FAIL'}"
+              f" layers={result.get('failedLayers')} wright-invocations={result.get('wrightUse', {}).get('invocations')}")
     return 0 if ok else 1
+
+
+def cmd_matrix(args: argparse.Namespace) -> int:
+    """Run every (scenario, agent, cell, trial) of a matrix file in randomized order; finished runs are skipped."""
+    config = json.loads(args.config.read_text())
+    jobs = [
+        (s, agent, cell, t)
+        for s in config.get("scenarios") or all_scenario_ids()
+        for agent in config["agents"]
+        for cell in config["cells"]
+        for t in range(1, config.get("trials", 5) + 1)
+    ]
+    random.Random(config.get("seed", 0)).shuffle(jobs)
+
+    def work(job: tuple) -> None:
+        scenario_id, agent, cell, trial = job
+        out = trial_dir(args.out, scenario_id, agent["id"], cell, trial)
+        if (out / "result.json").is_file():
+            return
+        options = {k: Path(v) if k in ("skill_dir", "wiki_dir") and v else v for k, v in config.get("options", {}).items()}
+        trial_args = argparse.Namespace(**{**vars(args), "agent_id": agent["id"], "agent_cmd": agent["cmd"], **options})
+        result = run_trial(load_scenario(scenario_id), cell, trial_args, out)
+        print(f"{scenario_id} {agent['id']} {cell_label(cell)} #{trial}: {'INVALID' if 'invalid' in result else 'PASS' if result['passed'] else 'FAIL'}", flush=True)
+
+    with ThreadPoolExecutor(max_workers=config.get("parallel", 2)) as pool:
+        list(pool.map(work, jobs))
+    return 0
+
+
+def cmd_setup_oracle(_: argparse.Namespace) -> int:
+    return subprocess.call(["npm", "ci", "--silent"], cwd=bench_grade.ORACLE)
 
 
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "shim":
-        return shim_main(sys.argv[2:])
+        return bench_trace.shim_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("validate", "run"):
+    for name in ("validate", "run", "matrix"):
         p = sub.add_parser(name)
         p.add_argument("--wright", default=str(ROOT / "target/debug/wright"), help="Wright binary under test")
         p.add_argument("--out", type=Path, default=ROOT / "target/agent-bench")
-    sub.choices["run"].add_argument("scenario", choices=all_scenario_ids())
-    sub.choices["run"].add_argument("--agent-cmd", required=True, help="shell command; the task prompt arrives on stdin, cwd is the workspace")
-    sub.choices["run"].add_argument("--agent-id", required=True, help="recorded agent/model/version label")
-    sub.choices["run"].add_argument("--conditions", nargs="+", choices=("baseline", "wright"), default=["baseline", "wright"])
-    sub.choices["run"].add_argument("--trials", type=int, default=1)
-    sub.choices["run"].add_argument("--timeout", type=int, default=1800)
+    for name in ("run", "matrix"):
+        p = sub.choices[name]
+        p.add_argument("--skill-dir", type=Path, help="pinned guide directory, exposed to the adapter as BENCH_SKILL_DIR")
+        p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked read-only as ./wiki for knowledge 'wiki'")
+        p.add_argument("--env-pass", nargs="*", default=[], help="host variables passed through the environment scrub")
+        p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
+        p.add_argument("--timeout", type=int, default=1800)
+        p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
+    run = sub.choices["run"]
+    run.add_argument("scenario", choices=all_scenario_ids())
+    run.add_argument("--agent-cmd", required=True, help="shell command; the task prompt arrives on stdin, cwd is the workspace, BENCH_* describes the condition")
+    run.add_argument("--agent-id", required=True, help="recorded agent/model/version label")
+    run.add_argument("--wright-level", choices=WRIGHT_LEVELS, default="bin")
+    run.add_argument("--knowledge", choices=KNOWLEDGE_LEVELS, default="none")
+    run.add_argument("--network", choices=("off", "on"), default="off")
+    run.add_argument("--trials", type=int, default=1)
+    sub.choices["matrix"].add_argument("config", type=Path, help="JSON: agents[{id,cmd}], cells[{wright,knowledge,network}], scenarios, trials, parallel, seed, options")
+    sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
+    report = sub.add_parser("report", help="summarize result.json files")
+    report.add_argument("dirs", nargs="+", type=Path)
+    report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
+    report.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
     args = parser.parse_args()
-    args.wright = str(Path(args.wright).resolve())
+    if hasattr(args, "wright"):
+        args.wright = str(Path(args.wright).resolve())
+    if hasattr(args, "out"):
+        args.out = args.out.resolve()
     if args.command == "validate":
         return 0 if validate(args.wright, args.out) else 1
-    return cmd_run(args)
+    if args.command == "setup-oracle":
+        return cmd_setup_oracle(args)
+    if args.command == "report":
+        return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s))
+    return cmd_run(args) if args.command == "run" else cmd_matrix(args)
 
 
 if __name__ == "__main__":

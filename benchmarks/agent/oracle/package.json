@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "description": "Pinned upstream OverPy oracle for the agent benchmark (docs/agent-benchmark.md).",
+  "dependencies": { "overpy": "9.7.10" }
+}
