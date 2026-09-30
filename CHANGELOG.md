@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.0](https://github.com/wrightkit/wright/compare/v0.3.0...v0.4.0) (2026-09-30)
+
+
+### Features
+
+* **analyzer:** report identifier spans from workshop-rs provenance ([#438](https://github.com/wrightkit/wright/issues/438)) ([2ce4854](https://github.com/wrightkit/wright/commit/2ce485473a9838b2f829b09274176dee6f9e677b))
+* **bench:** add product-level agent benchmark harness ([#428](https://github.com/wrightkit/wright/issues/428)) ([577628b](https://github.com/wrightkit/wright/commit/577628bc4b46fc1a4426c19f831aed87d18cc417)), closes [#414](https://github.com/wrightkit/wright/issues/414)
+* **cli:** add symbols/refs/cfg/callgraph/cost query commands ([#440](https://github.com/wrightkit/wright/issues/440)) ([b8c7433](https://github.com/wrightkit/wright/commit/b8c743398900535928f1b948dbbe56ea55c86c38))
+* **cli:** consolidate maintenance surface under wright update ([#441](https://github.com/wrightkit/wright/issues/441)) ([fae0de9](https://github.com/wrightkit/wright/commit/fae0de9b50c77387c1a7d395d4c3faff1a67840b))
+* **cli:** human-first presentation for inspect queries ([#453](https://github.com/wrightkit/wright/issues/453)) ([c33cad4](https://github.com/wrightkit/wright/commit/c33cad488ef1e1f5f1bfee6c27c250c25466d356))
+* **cli:** render check results in a human-first hierarchy ([#447](https://github.com/wrightkit/wright/issues/447)) ([e9fef5f](https://github.com/wrightkit/wright/commit/e9fef5fa3b80ed9173874dff4718bc3b9402f3fb))
+* **cli:** render lint findings in a human-first hierarchy ([#450](https://github.com/wrightkit/wright/issues/450)) ([011fca2](https://github.com/wrightkit/wright/commit/011fca2d4d5cbdaf7d94c184d8405c228f07bfb6)), closes [#444](https://github.com/wrightkit/wright/issues/444)
+* **cli:** report Workshop cost, hotspots, and risks in analyze ([#451](https://github.com/wrightkit/wright/issues/451)) ([86b1112](https://github.com/wrightkit/wright/commit/86b11120e2f773f30f59de70491d8d3a697146b7)), closes [#445](https://github.com/wrightkit/wright/issues/445)
+* **driver:** serve compact rule metadata in the lint result ([#436](https://github.com/wrightkit/wright/issues/436)) ([db42356](https://github.com/wrightkit/wright/commit/db42356008763309642149993600576dc6c366b8))
+* **driver:** share finding selection across CLI and agent surfaces ([#435](https://github.com/wrightkit/wright/issues/435)) ([efe6e8c](https://github.com/wrightkit/wright/commit/efe6e8c3e73e3e55ae83c19d452248762565ecd6))
+
+
+### Bug Fixes
+
+* **analyzer:** scope duplicate-condition to same If/Else If chain ([#437](https://github.com/wrightkit/wright/issues/437)) ([c547756](https://github.com/wrightkit/wright/commit/c547756e28a49f8c3d73181059ff0363ad6f191d))
+* **lsp:** advertise only backed wright-lsp capabilities ([#427](https://github.com/wrightkit/wright/issues/427)) ([9ad16c2](https://github.com/wrightkit/wright/commit/9ad16c2c34df1baf0f21bf8f0dddadc81ad782af))
+
+
+### Performance Improvements
+
+* **driver:** reuse loaded program for Workshop completeness diagnostics ([#448](https://github.com/wrightkit/wright/issues/448)) ([188166a](https://github.com/wrightkit/wright/commit/188166aaf3a2b89780e2a55653c77460b5a14850))
+
 ## [0.2.32](https://github.com/wrightkit/wright/compare/v0.2.31...v0.2.32) (2026-09-17)
 
 
