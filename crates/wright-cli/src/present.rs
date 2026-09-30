@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use wright_driver::Severity;
 use wright_driver::config::OutputFormat;
+use wright_driver::edit::RenameResult;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::{
     AnalyzeResult, CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult,
@@ -595,6 +596,24 @@ impl ResultPresentation for CheckResult {
     fn render_body(&self, _ctx: &RenderContext<'_>) {}
 }
 
+impl ResultPresentation for RenameResult {
+    fn metadata(&self) -> Option<String> {
+        let edits = self
+            .transaction
+            .as_ref()
+            .map_or(0, |transaction| transaction.edits.len());
+        let sources = self.preview.as_ref().map_or(0, Vec::len);
+        Some(if self.written.is_empty() {
+            format!("{edits} edit(s) across {sources} source(s); preview — pass --write to apply")
+        } else {
+            format!("{edits} edit(s) applied to {}", self.written.join(", "))
+        })
+    }
+    fn render_body(&self) {
+        render_rename(self);
+    }
+}
+
 impl ResultPresentation for AnalyzeResult {
     fn metadata(&self) -> Option<String> {
         let rules = count(&self.program, "rules");
@@ -1173,6 +1192,42 @@ fn render_compile(result: &CompileResult) {
 
 fn render_convert(result: &ConvertResult) {
     print!("{}", result.text);
+}
+
+/// The `rename` human report (#434): per-source, the lines the validated
+/// transaction changes, shown as `-`/`+` pairs with their line numbers —
+/// rename edits only ever rewrite identifier occurrences in place. Written
+/// files are listed after the diff when `--write` applied them.
+fn render_rename(result: &RenameResult) {
+    let Some(previews) = &result.preview else {
+        return;
+    };
+    for preview in previews {
+        println!("\n{}", preview.source);
+        let original = result
+            .originals
+            .get(&preview.source)
+            .map_or("", String::as_str);
+        let original_lines: Vec<&str> = original.split('\n').collect();
+        let edited_lines: Vec<&str> = preview.new_text.split('\n').collect();
+        let rows = original_lines.len().max(edited_lines.len());
+        for index in 0..rows {
+            match (original_lines.get(index), edited_lines.get(index)) {
+                (Some(old), Some(new)) if old == new => {}
+                (old, new) => {
+                    if let Some(old) = old {
+                        println!("  {:>4} - {}", index + 1, old);
+                    }
+                    if let Some(new) = new {
+                        println!("  {:>4} + {}", index + 1, new);
+                    }
+                }
+            }
+        }
+    }
+    for written in &result.written {
+        println!("wrote {written}");
+    }
 }
 
 fn array_len(value: &serde_json::Value) -> usize {

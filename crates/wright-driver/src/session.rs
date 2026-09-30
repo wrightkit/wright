@@ -3,6 +3,7 @@
 //! without changing callers. Every workflow returns a typed [`Envelope`]
 //! whose JSON serialization is the machine-readable CLI contract.
 
+mod edit;
 mod semantic;
 
 pub(crate) use semantic::resolve_span_paths;

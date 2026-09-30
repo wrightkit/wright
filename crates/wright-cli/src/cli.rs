@@ -24,8 +24,9 @@ pub(crate) struct Cli {
 
 pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
 
-Commands check correctness, summarize semantic hotspots, lint, compile, or
-reconstruct source through the typed wright-driver result envelope. `inspect`
+Commands check correctness, summarize semantic hotspots, lint, compile,
+rename Workshop symbols, or reconstruct source through the typed
+wright-driver result envelope. `inspect`
 prints the semantic summary, and its query subcommands (symbols, refs, cfg,
 callgraph, cost) expose each detail area. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
@@ -89,6 +90,9 @@ pub(crate) enum Command {
         subcommand_precedence_over_arg = true
     )]
     Inspect(InspectArgs),
+    /// Rename a Workshop variable or subroutine semantically (#434): previews
+    /// the validated source diff by default; `--write` applies it atomically.
+    Rename(RenameArgs),
     /// Generate static shell completion from the command model.
     Completion(CompletionArgs),
     /// Update Wright-managed components: a standalone installation and
@@ -189,6 +193,26 @@ pub(crate) struct CommonArgs {
     /// ANSI color policy.
     #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
     pub(crate) color: ColorArg,
+}
+
+/// Arguments of `rename` (#434): the declared symbol name and the new
+/// identifier as positionals, then `[INPUT]` through the shared workflow
+/// options. `wright rename` covers raw Workshop input only; source languages
+/// are rename surfaces of their providers.
+#[derive(Debug, Args)]
+pub(crate) struct RenameArgs {
+    /// The declared name of the variable or subroutine to rename.
+    #[arg(value_name = "NAME")]
+    pub(crate) name: String,
+    /// The new identifier.
+    #[arg(value_name = "NEW_NAME")]
+    pub(crate) to: String,
+    /// Apply the validated rename to the input file atomically instead of
+    /// previewing the diff.
+    #[arg(long)]
+    pub(crate) write: bool,
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
 }
 
 /// Arguments of `inspect`: an optional query subcommand naming one detail

@@ -144,6 +144,44 @@ proposes and validates edits; a caller remains responsible for applying them.
 Stale, overlapping, unsupported, or semantically invalid edits return an
 explicit refusal without a partial edit set.
 
+### Validated edits and semantic rename for raw Workshop (#434)
+
+On raw Workshop input both operations are supported directly — `workshop-rs`
+owns the source semantics and Wright orchestrates the transaction:
+
+* `validateEditTransaction` applies the caller's transaction to the supplied
+  current `sources` and reparses/revalidates the edited project through the
+  session's own `workshop-rs` path. A transaction that produces malformed or
+  invalid Workshop refuses with the real parse/validation diagnostics and no
+  partial preview; a valid one returns `ok: true` with a `preview` of each
+  edited source (edited text plus the post-edit identity).
+* `semanticRename` resolves `target` either by `symbol` — a numeric id or a
+  declared name, exactly the addressing `references`/`usage` use — or by a
+  `source`/`line`/`col` position inside one identifier occurrence. Global
+  variables, player variables, and subroutines rename through the exact
+  identifier spans `workshop-rs` records: the declaration, the `Subroutine`
+  event binding, `Call Subroutine` callees, `Set`/`Modify`/`For` variable
+  arguments, and `Global.name`/`Event Player.name` value references all
+  rewrite, while prefixes, comments, strings, and unrelated identifiers stay
+  untouched. There is no textual-search fallback — an occurrence whose
+  recorded span does not cover exactly the identifier refuses with
+  `rename-unmapped-span`.
+  `sources` must carry the current text of the loaded input file; a text
+  that differs from the loaded program's refuses with `edit-stale-source`
+  because provenance spans would no longer index it. A `to` name that
+  already declares a same-kind symbol refuses with `rename-name-collision`,
+  and one that does not survive reparsing refuses with the parse diagnostic;
+  rule names are not rename targets (`rename-unsupported-kind`).
+* Non-Workshop input stays at the provider boundary: OPY refuses with
+  `edit-requires-provider` naming `providerValidateEdit` /
+  `providerSemanticRename`, and kinds without a shipped provider keep their
+  `source-provider-unavailable` refusal.
+
+`wright rename <NAME> <NEW_NAME> [INPUT]` exposes the same semantic rename
+on the CLI: it prints the validated diff by default and applies it
+atomically with `--write`, refusing `edit-stale-source` when the file
+changed since validation.
+
 ## Results, diagnostics, and errors
 
 The service response is either `{ "result": value }` or
