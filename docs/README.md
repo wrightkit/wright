@@ -41,6 +41,8 @@ Issue contract.
   transport mappings for coding agents and embedding consumers.
 - [Agent benchmark](agent-benchmark.md): product-level benchmark contract for
   general coding agents working with Wright.
+- [Agent benchmark comparison spec](specs/SPEC-414-agent-benchmark-comparison.md):
+  proposed multi-condition, multi-model benchmark and tool-call analysis.
 - [Language services & LSP](language-services.md): editor-neutral language
   services and LSP framing.
 - [Integration verification](compatibility.md): owner boundaries and
