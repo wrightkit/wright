@@ -2,10 +2,12 @@
 
 This document describes the package-manager and installer channels that make the
 canonical GitHub Release artifacts installable through
-platform-native channels. Nothing here rebuilds Wright: every manifest and
-package consumes the published `wright-<version>-<target-triple>.<ext>`
+platform-native channels. Nothing here rebuilds Wright: the package-manager
+manifests consume the published `wright-<version>-<target-triple>.<ext>`
 archives and their `.sha256` checksums from
-`https://github.com/wrightkit/wright/releases/download/v<version>/`.
+`https://github.com/wrightkit/wright/releases/download/v<version>/`, while the
+installers and `wright update` consume the byte-identical R2 copies described
+in [`docs/release.md`](../docs/release.md).
 
 | Channel | File(s) | Consumes |
 | --- | --- | --- |
