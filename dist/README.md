@@ -1,8 +1,8 @@
 # Wright Package-Manager Distribution (#108)
 
-This directory holds the package-manager and installer metadata that make the
+This document describes the package-manager and installer channels that make the
 canonical GitHub Release artifacts installable through
-platform-native channels. Nothing in here rebuilds Wright: every manifest and
+platform-native channels. Nothing here rebuilds Wright: every manifest and
 package consumes the published `wright-<version>-<target-triple>.<ext>`
 archives and their `.sha256` checksums from
 `https://github.com/wrightkit/wright/releases/download/v<version>/`.
@@ -11,9 +11,9 @@ archives and their `.sha256` checksums from
 | --- | --- | --- |
 | Unix installer | `../install.sh` (repo root) | Linux/macOS `.tar.gz` + `.sha256`, verified at install time |
 | Windows installer | `../install.ps1` (repo root) | Windows x86_64 `.zip` + `.sha256`, verified at install time |
-| Homebrew | `homebrew/wright.rb` | macOS `.tar.gz` archives (arm64 + x86_64) with per-arch `sha256` |
-| WinGet | `winget/manifests/w/WrightKit/Wright/<version>/` | Windows `.zip` with `InstallerSha256` |
-| Scoop | `scoop/wright.json` | Windows `.zip` with `hash` |
+| Homebrew | generated `wright.rb` | macOS `.tar.gz` archives (arm64 + x86_64) with per-arch `sha256` |
+| WinGet | generated WinGet manifests | Windows `.zip` with `InstallerSha256` |
+| Scoop | generated `wright.json` | Windows `.zip` with `hash` |
 
 Standalone installs (the Unix installer or manual archives) upgrade in place
 with `wright update`, which consumes the same release archives and checksums
@@ -22,28 +22,25 @@ and refuses to overwrite binaries managed by any channel above; see
 
 ## Generated metadata
 
-All manifest files under `dist/` are generated or kept synchronized by
-`scripts/update-dist-manifests.py` and must not be edited by hand:
+Package-manager manifests are not checked in. The release workflow generates
+them from the verified native archives with
+`scripts/generate-release-manifests.py`, which drives
+`scripts/update-dist-manifests.py`:
 
 ```sh
-python3 scripts/update-dist-manifests.py --version 0.1.0 \
+python3 scripts/update-dist-manifests.py --version 0.1.0 --out-dir out \
   --linux-x64-hash <sha256> --darwin-arm64-hash <sha256> \
   --darwin-x64-hash <sha256> --windows-x64-hash <sha256>
 ```
 
-Between releases the checked-in files carry the current workspace version
-with all-zero placeholder hashes. The stable release workflow updates these
-version-only manifests in its post-bump `main` commit; the generated release
-manifests later replace the placeholders with hashes from the verified native
-archives. `scripts/verify-dist.py` (run in CI) fails when the committed
-metadata drifts from the workspace version or when the install script stops
-covering the declared target matrix.
+`scripts/verify-dist.py` (run in CI) checks that the install script covers the
+declared target matrix and that release packaging works on the host.
 
 ## Publication process
 
-The explicit stable workflow first synchronizes the version-only checked-in
-metadata and commits it to `main`. It then builds the native matrix, verifies
-the checksums, and generates the Homebrew, WinGet, and Scoop manifests from
+When the Release PR merges, release-please creates the `vX.Y.Z` tag and
+`release.yml` builds the native matrix, verifies the checksums, and generates
+the Homebrew, WinGet, and Scoop manifests from
 those exact artifacts. It attaches the generated manifests to the GitHub
 Release as:
 
@@ -53,7 +50,7 @@ Release as:
 
 Only stable releases update package-manager metadata. The nightly workflow
 publishes commit-keyed archives to the separate R2 nightly namespace and does
-not update any file under `dist/` or any package-manager channel.
+not update any package-manager channel.
 
 ### Homebrew
 
@@ -108,11 +105,8 @@ not update any file under `dist/` or any package-manager channel.
 
 ## Drift detection
 
-- CI runs `scripts/verify-dist.py` on every commit: it regenerates the
-  checked-in manifests with the workspace version and fails on any mismatch,
-  so a version bump without regenerated metadata is caught before merge.
-- The release workflow consumes the published `.sha256` files when generating
-  the attached manifests, so the attached metadata cannot drift from the
-  actual artifacts of that release.
-- Versioned release assets (`wright-<version>.*`) keep release-to-release
-  comparison and manual publication review simple.
+The release workflow consumes the published `.sha256` files when generating
+the attached manifests, so the attached metadata cannot drift from the
+actual artifacts of that release. Versioned release assets
+(`wright-<version>.*`) keep release-to-release comparison and manual
+publication review simple.

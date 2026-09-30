@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Generate Wright package-manager distribution metadata (#108).
 
-Rewrites dist/ with the Homebrew formula, WinGet manifests, and Scoop manifest
-for a Wright version. All generated manifests
+Writes dist/ under --out-dir with the Homebrew formula, WinGet manifests, and
+Scoop manifest for a Wright version. All generated manifests
 consume the canonical GitHub Release archives (`wright-<version>-<target>.<ext>`
 + `.sha256`) or the canonical release binaries; nothing here rebuilds Wright.
 
 Hashes are supplied per platform; missing or zero hashes are rendered as
-all-zero placeholders (the state dist/ ships in between releases). CI keeps
-the checked-in dist/ in sync via scripts/verify-dist.py.
+all-zero placeholders.
 
 Usage:
   python3 scripts/update-dist-manifests.py --version 0.1.0 \
@@ -25,7 +24,6 @@ import shutil
 from pathlib import Path
 
 RELEASE_BASE = "https://github.com/wrightkit/wright/releases/download"
-REPO_ROOT = Path(__file__).resolve().parent.parent
 PLACEHOLDER_HASH = "0" * 64
 
 # Canonical release matrix; keys match the release workflow target triples.
@@ -247,7 +245,7 @@ def main() -> None:
     parser.add_argument("--version", required=True, help="Wright version to generate metadata for")
     for target in TARGETS:
         parser.add_argument(f"--{target}-hash", default="", help=f"sha256 of the {target} release archive")
-    parser.add_argument("--out-dir", type=Path, default=REPO_ROOT, help="output root (default: repository root)")
+    parser.add_argument("--out-dir", type=Path, required=True, help="output root")
     parser.add_argument(
         "--release-base",
         default=RELEASE_BASE,

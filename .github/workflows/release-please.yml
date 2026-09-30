@@ -1,0 +1,59 @@
+name: Release-please
+
+# release-please maintains the Release PR and, when it merges, creates the
+# vX.Y.Z tag that starts release.yml. It cannot update Cargo.lock, so the
+# lockfile is synchronized on the Release PR branch.
+#
+# Both the tag and the lockfile push use GH_TOKEN: pushes made with the
+# built-in GITHUB_TOKEN do not trigger workflows, so the Release PR would get
+# no CI and the tag would not start release.yml.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Maintain Release PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Check out Release PR branch
+        if: steps.release.outputs.prs_created == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Install Rust
+        if: steps.release.outputs.prs_created == 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Synchronize Cargo.lock
+        if: steps.release.outputs.prs_created == 'true'
+        run: |
+          set -euo pipefail
+          cargo update --workspace
+          if git diff --quiet -- Cargo.lock; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(release): synchronize Cargo.lock" -- Cargo.lock
+          git push
