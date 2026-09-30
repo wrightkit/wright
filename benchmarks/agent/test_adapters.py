@@ -15,6 +15,8 @@ class PiAdapterTest(unittest.TestCase):
         message = {"usage": {"input": 586, "output": 5, "cacheRead": 400, "cacheWrite": 100, "reasoning": 3}}
         row = pi.usage_row(message, 272_000, 1.0)
         self.assertEqual((row["input"], row["cache_read"], row["cache_write"], row["context"], row["context_limit"]), (586, 400, 100, 1086, 272_000))
+        self.assertEqual((row["output"], row["reasoning"]), (2, 3))
+        self.assertEqual(sum(row[key] or 0 for key in ("input", "output", "cache_read", "cache_write", "reasoning")), 1091)
 
     def test_loaded_skills_and_final_text(self):
         system = {"sections": {"skills": "<available_skills><skill><name>wright</name></skill><skill><name>other</name></skill></available_skills>"}}

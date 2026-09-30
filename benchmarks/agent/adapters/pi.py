@@ -48,7 +48,7 @@ def usage_row(message: dict, limit: int | None, now: float) -> dict:
     u = message.get("usage") or {}
     read, write = u.get("cacheRead") or 0, u.get("cacheWrite") or 0
     return {
-        "t": now, "input": u.get("input"), "output": u.get("output"), "cache_read": read, "cache_write": write,
+        "t": now, "input": u.get("input"), "output": max((u.get("output") or 0) - (u.get("reasoning") or 0), 0), "cache_read": read, "cache_write": write,
         "reasoning": u.get("reasoning"), "context": (u.get("input") or 0) + read + write, "context_limit": limit,
     }
 

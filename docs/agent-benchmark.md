@@ -114,7 +114,7 @@ keep host configuration out of the run, and it reports what loaded through
 
 The pi adapter also uses an isolated `HOME` containing only its authentication
 files. Explicit provider extensions remain referenced by path, not copied with
-host settings. Reasoning is counted once: Codex and Antigravity include reasoning
+host settings. Reasoning is counted once: pi, Codex, and Antigravity include reasoning
 in their output counters, so adapters split it out before aggregation. Antigravity
 reports uncached input separately from cached reads; Codex reports inclusive input.
 
