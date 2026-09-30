@@ -158,8 +158,20 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
 
 
 def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str) -> tuple[int | None, str, str]:
+    command = args.agent_cmd
+    if getattr(args, "file_sandbox", False):
+        if sys.platform != "darwin" or not shutil.which("sandbox-exec"):
+            raise SystemExit("--file-sandbox requires macOS sandbox-exec; refusing an unprotected run")
+        run_dir = Path(env["BENCH_RUN_DIR"])
+        temporary = run_dir / "tmp"
+        temporary.mkdir(exist_ok=True)
+        env = {**env, "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1"}
+        profile = run_dir / "agent.sb"
+        profile.write_text('(version 1)\n(allow default)\n(deny file-write*)\n'
+                           f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n')
+        command = ["sandbox-exec", "-f", str(profile), "/bin/sh", "-c", args.agent_cmd]
     proc = subprocess.Popen(
-        args.agent_cmd, shell=True, cwd=workspace, env=env, text=True,
+        command, shell=isinstance(command, str), cwd=workspace, env=env, text=True,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
     )
     try:
@@ -178,9 +190,12 @@ def context_report(out: Path, cell: dict) -> dict:
     path = out / "context.json"
     if not path.is_file():
         return {"reported": False}
-    loaded = json.loads(path.read_text()).get("loaded", [])
+    report = json.loads(path.read_text())
+    if "loaded" not in report:
+        return {"reported": False, **report}
+    loaded = report["loaded"]
     allowed = ({"wright"} if cell["wright"] == "bin+skill" else set()) | ({wiki_skill.SKILL_NAME} if cell["knowledge"] == "wiki-skill" else set())
-    return {"reported": True, "loaded": loaded, "unexpected": sorted(set(loaded) - allowed)}
+    return {**report, "reported": True, "loaded": loaded, "unexpected": sorted(set(loaded) - allowed)}
 
 
 def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -> dict:
@@ -219,6 +234,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     result = base_result(scenario, cell, args, out, seconds, agent_exit)
     result["infraRetries"] = infra_retries
     result["networkEnforcement"] = "canary-checked" if cell["network"] == "off" and args.canary_cmd else "declared-only"
+    result["fileWriteEnforcement"] = "trial-directory-only" if getattr(args, "file_sandbox", False) else "unrestricted"
     context = context_report(out, cell)
     result["context"] = context
     if context.get("unexpected"):
@@ -343,6 +359,7 @@ def main() -> int:
         p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")
         p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
         p.add_argument("--timeout", type=int, default=1800)
+        p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory")
         p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
     run = sub.choices["run"]
     run.add_argument("scenario", choices=all_scenario_ids())

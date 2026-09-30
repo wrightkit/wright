@@ -26,12 +26,15 @@ TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "time
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
-def context_limit(pi: str, model: str) -> int | None:
+def context_limit(pi: str, model: str, env: dict, extensions: list[str]) -> int | None:
     """Context window of the model from `pi --list-models`, or None."""
-    listing = subprocess.run([pi, "--list-models", model.split("/")[-1]], capture_output=True, text=True).stdout
+    command = [pi, "--no-extensions"]
+    for extension in filter(None, extensions):
+        command += ["-e", extension]
+    listing = subprocess.run([*command, "--list-models", model.split("/")[-1]], env=env, capture_output=True, text=True).stdout
     for line in listing.splitlines():
         cols = line.split()
-        if len(cols) > 2 and cols[1] == model.split("/")[-1]:
+        if len(cols) > 2 and cols[0] == model.split("/")[0] and cols[1] == model.split("/")[-1]:
             match = re.fullmatch(r"([\d.]+)([KM])", cols[2])
             return int(float(match.group(1)) * SCALE[match.group(2)]) if match else None
     return None
@@ -59,6 +62,13 @@ def main() -> int:
     prompt = sys.stdin.read()
     pi = shutil.which("pi", path=env.get("BENCH_HOST_PATH")) or "pi"
     model = env.get("BENCH_MODEL") or sys.exit("BENCH_MODEL is required: set it in --agent-cmd, for example BENCH_MODEL=provider/id python3 adapters/pi.py")
+    home = Path(env["BENCH_RUN_DIR"]) / "pi-home"
+    state = home / ".pi/agent"
+    state.mkdir(parents=True, exist_ok=True)
+    for name in ("auth.json", "antigravity-accounts.json"):
+        source = Path(env["HOME"]) / ".pi/agent" / name
+        if source.is_file():
+            shutil.copy(source, state / name)
     cmd = [pi, "-p", "--mode", "json", "--no-session", "--no-context-files", "--no-extensions", "--no-prompt-templates",
            "--no-themes", "--no-skills", "--tools", "read,bash,edit,write", "--model", model]
     extensions = env.get("BENCH_PI_EXTENSIONS", "").split(",") + (env.get("BENCH_PI_WEB_EXTENSIONS", "").split(",") if env["BENCH_KNOWLEDGE"] == "web" else [])
@@ -69,8 +79,8 @@ def main() -> int:
             cmd += ["--skill", env[key]]
     if env.get("BENCH_THINKING"):
         cmd += ["--thinking", env["BENCH_THINKING"]]
-    limit = context_limit(pi, model)
-    child_env = {k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}
+    child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home), "PI_CODING_AGENT_DIR": str(state)}
+    limit = context_limit(pi, model, child_env, extensions)
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=child_env)
     proc.stdin.write(prompt)
     proc.stdin.close()

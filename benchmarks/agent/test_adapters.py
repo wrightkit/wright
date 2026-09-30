@@ -6,6 +6,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "adapters"))
 
 import devin
 import pi
+import codex
+import agy
 
 
 class PiAdapterTest(unittest.TestCase):
@@ -55,6 +57,24 @@ class DevinAdapterTest(unittest.TestCase):
         self.assertNotIn("web_search", opened["permissions"]["deny"])
         self.assertIn("mcp_call_tool", opened["permissions"]["deny"])
         self.assertNotIn("allow", closed["permissions"])
+
+
+class NativeAdapterUsageTest(unittest.TestCase):
+    def test_codex_inclusive_counts_are_split_without_counting_reasoning_twice(self):
+        row = codex.usage_row({"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20, "reasoning_output_tokens": 12}, 1.0, 272000)
+        self.assertEqual((row["input"], row["cache_read"], row["output"], row["reasoning"], row["context"]), (40, 60, 8, 12, 100))
+        self.assertEqual(sum(row[key] or 0 for key in ("input", "cache_read", "cache_write", "output", "reasoning")), 120)
+
+    def test_agy_cache_is_exclusive_and_thinking_is_included_in_output(self):
+        row = agy.usage_row({"input_tokens": 278, "cache_read_tokens": 30214, "output_tokens": 4, "thinking_tokens": 3}, 1.0)
+        self.assertEqual((row["input"], row["cache_read"], row["output"], row["reasoning"], row["context"]), (278, 30214, 1, 3, 30492))
+        self.assertIsNone(row["context_limit"])
+
+    def test_codex_builtin_skills_are_separate_from_observed_project_skills(self):
+        text = ('- `r0` = `/isolated/.codex/skills/.system`\n- `r1` = `/workspace/.agents/skills`\n'
+                '- openai-docs: Builtin. (file: r0/openai-docs/SKILL.md)\n'
+                '- wright: Project. (file: r1/wright/SKILL.md)\n')
+        self.assertEqual(codex.loaded_skills(text), (["wright"], ["openai-docs"]))
 
 
 if __name__ == "__main__":

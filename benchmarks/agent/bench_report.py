@@ -136,9 +136,10 @@ def regrade_notes(runs: list[dict], wright: str, load_scenario) -> list[str]:
 
 def render(results: list[dict], regrade: list[str] | None = None) -> tuple[str, dict]:
     invalid = [r for r in results if "invalid" in r]
-    runs = [r for r in results if "invalid" not in r]
-    out = ["# Agent benchmark report", "", f"{len(runs)} valid run(s), {len(invalid)} invalid.", ""]
-    summary: dict = {"cells": {}}
+    infrastructure = [r for r in results if "invalid" not in r and r["agent"]["exit"] == 75]
+    runs = [r for r in results if "invalid" not in r and r["agent"]["exit"] != 75]
+    out = ["# Agent benchmark report", "", f"{len(runs)} valid run(s), {len(invalid)} invalid, {len(infrastructure)} infrastructure failures excluded.", ""]
+    summary: dict = {"cells": {}, "infrastructureFailures": len(infrastructure)}
     out += ["## Outcome by agent and condition", "", "| agent | condition | runs | usable | passed | used wright | tokens/run | tokens per usable | peak context | s/run |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for agent in sorted({r["agent"]["id"] for r in runs}):
         for cell in sorted({label(r) for r in runs}):
@@ -190,6 +191,13 @@ def render(results: list[dict], regrade: list[str] | None = None) -> tuple[str, 
         out += ["", "## Wright output size per command (estimated tokens per run that used it)", "", "| command | runs | mean | max |", "| --- | --- | --- | --- |"]
         out += [f"| {cmd} | {len(v['tokens'])} | {mean(v['tokens']):.0f} | {max(v['tokens'])} |" for cmd, v in sorted(tok.items())]
     notes = diagnostics(runs, invalid) + (regrade or [])
+    if infrastructure:
+        notes.append(f"INFRASTRUCTURE: {len(infrastructure)} provider/infrastructure failures (exit 75) excluded from outcome metrics.")
+        out += ["", "## Provider/infrastructure failures", "", "| agent | scenario | condition | artifact |", "| --- | --- | --- | --- |"]
+        out += [f"| {r['agent']['id']} | {r['scenario']} | {label(r)} | {r['_dir']} |" for r in infrastructure]
+    missing_context = sum(1 for r in runs if not (r.get("context") or {}).get("reported"))
+    if missing_context:
+        notes.append(f"CONTEXT: {missing_context} run(s) lack observed loaded-context data; installed skills are not proof of loading.")
     out += ["", "## Diagnostics", ""] + ([f"- {n}" for n in notes] or ["- none"])
     summary["diagnostics"] = notes
     summary["stdev"] = {k: pstdev([r["agent"]["seconds"] for r in runs if f"{r['agent']['id']}|{label(r)}" == k]) for k in summary["cells"]} if runs else {}

@@ -89,6 +89,11 @@ enforces it: `BENCH_WRIGHT`, `BENCH_KNOWLEDGE`, `BENCH_NETWORK`,
 | `BENCH_TRANSCRIPT` | normalized JSONL of the agent's events |
 | `BENCH_CONTEXT` | `{"loaded": [...]}`; a loaded item other than the condition's expected `wright` and/or `workshop-wiki` guide invalidates the run |
 
+An adapter that cannot observe loaded context omits `loaded` and reports its
+audit limitation instead. The harness and report mark that field unreported;
+installing a skill is not evidence that the agent loaded it. Built-in skills
+belong to each agent's default context and are recorded separately when observable.
+
 Exit code 75 means a provider or infrastructure failure: the harness retries
 the trial (`--infra-retries`) and records the retries. Any other non-zero exit
 is reported as an agent or infrastructure failure in the report diagnostics.
@@ -104,6 +109,14 @@ keep host configuration out of the run, and it reports what loaded through
 | [`claude_code.py`](../benchmarks/agent/adapters/claude_code.py) | Claude Code | `BENCH_MODEL` selects the model. Removes web tools unless knowledge is `web`. |
 | [`pi.py`](../benchmarks/agent/adapters/pi.py) | pi | `BENCH_MODEL=provider/id`. Disables context files, extensions, and skill discovery, and loads the guide explicitly. Providers registered by an extension need `BENCH_PI_EXTENSIONS`; web tools come from `BENCH_PI_WEB_EXTENSIONS`. |
 | [`devin.py`](../benchmarks/agent/adapters/devin.py) | Devin CLI | `BENCH_MODEL` (for example `swe-2-max`). Runs with an isolated `HOME` holding only the Devin credentials, a config that reads no other tool's rules or skills, and MCP tools denied. Managed plugin skills are listed apart from `loaded`. |
+| [`codex.py`](../benchmarks/agent/adapters/codex.py) | Codex CLI | `BENCH_MODEL` and `BENCH_THINKING`. Isolated `HOME`/`CODEX_HOME`, user config and exec rules ignored, workspace skills installed under `.agents/skills`. Session token events supply per-model-call usage and observed skill context; built-ins are listed apart. Web search is disabled. |
+| [`agy.py`](../benchmarks/agent/adapters/agy.py) | Antigravity CLI | `BENCH_MODEL` (for example `gemini-3.8-flash-high`) and `BENCH_THINKING`. Isolated `HOME` with only authentication files, workspace skills under `.agents/skills`, MCP/browser access denied and URL reads denied outside `web`. Streaming step usage is recorded. The CLI does not export observed loaded skills or context limits; these remain unreported. |
+
+The pi adapter also uses an isolated `HOME` containing only its authentication
+files. Explicit provider extensions remain referenced by path, not copied with
+host settings. Reasoning is counted once: Codex and Antigravity include reasoning
+in their output counters, so adapters split it out before aggregation. Antigravity
+reports uncached input separately from cached reads; Codex reports inclusive input.
 
 Set the model in `--agent-cmd` (the environment is scrubbed), and give the
 adapter and skill paths as absolute paths, because the agent runs in the
@@ -118,6 +131,15 @@ agents discover them by walking up; the default `--out` is
 when `--canary-cmd` is given and fails inside the agent environment; without it
 the result records `networkEnforcement: declared-only`, which is what the shell
 tools of pi and Devin provide today.
+
+On macOS, `--file-sandbox` applies `sandbox-exec` to the adapter and all descendant
+processes: filesystem writes are restricted to that trial's output directory
+(plus device streams), and `TMPDIR` points inside it. Unsupported hosts fail
+instead of silently running without protection. This protects host files; it
+does not enforce network isolation or prevent read access to host files. Model
+account usage, CPU and disk consumption remain shared with the host. Provider
+failures returned as exit 75 are listed separately and excluded from outcome
+metrics.
 
 ## Scenarios
 

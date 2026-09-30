@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -69,6 +70,16 @@ class AgentBenchTest(unittest.TestCase):
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_agent_file_writes_cannot_escape_the_trial_directory(self):
+        code = 'from pathlib import Path; Path("allowed.txt").write_text("ok"); Path("../../escaped.txt").write_text("bad")'
+        import shlex
+        result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True)
+        self.assertNotEqual(result["agent"]["exit"], 0)
+        self.assertFalse((self.out / "escaped.txt").exists())
+        self.assertEqual((self.out / f"{SCENARIO}-bin/workspace/allowed.txt").read_text(), "ok")
+        self.assertEqual(result["fileWriteEnforcement"], "trial-directory-only")
 
     def test_levels_differ_only_in_wright_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
@@ -251,6 +262,15 @@ class ReportTest(unittest.TestCase):
         text, _ = bench_report.render(runs)
         self.assertIn("HEADROOM", text)
         self.assertIn("INVALID: 1 run(s) excluded", text)
+
+    def test_provider_failures_do_not_count_as_agent_failures(self):
+        good = self.result("none/none/off", 1, True, 100)
+        provider_failure = self.result("none/none/off", 2, False, 0)
+        provider_failure["agent"]["exit"] = 75
+        text, summary = bench_report.render([good, provider_failure])
+        self.assertEqual(summary["cells"]["m|none/none/off"]["n"], 1)
+        self.assertEqual(summary["infrastructureFailures"], 1)
+        self.assertIn("excluded from outcome metrics", text)
 
 
 if __name__ == "__main__":
