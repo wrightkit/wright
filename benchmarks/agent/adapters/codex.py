@@ -61,11 +61,13 @@ def main() -> int:
             shutil.copytree(skill, Path.cwd() / ".agents/skills" / skill.name)
     binary = shutil.which("codex", path=env.get("BENCH_HOST_PATH")) or "codex"
     command = [binary, "exec", "--json", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
+               "--disable", "apps", "--disable", "plugins", "--disable", "remote_plugin",
+               "--disable", "skill_mcp_dependency_install",
                "--sandbox", "workspace-write", "-c", 'approval_policy="never"',
                "-c", 'web_search="disabled"', "-c", f'model_reasoning_effort="{effort}"', "-m", model, "-"]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home), "CODEX_HOME": str(state)}
     prompt = sys.stdin.read()
-    final, errors, summary, seen = "", [], None, set()
+    final, errors, summary, seen, servers = "", [], None, set(), set()
     with (run / "codex-stderr.log").open("w") as stderr, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript, open(env["BENCH_USAGE"], "w", buffering=1) as usage:
         process = subprocess.Popen(command, env=child_env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True)
         process.stdin.write(prompt)
@@ -74,6 +76,8 @@ def main() -> int:
             event = json.loads(line)
             transcript.write(json.dumps({"t": time.time(), **event}) + "\n")
             item = event.get("item") or {}
+            if item.get("type") == "mcp_tool_call":
+                servers.add(item.get("server", "unknown"))
             if item.get("type") == "agent_message":
                 final = item.get("text", final)
             if event["type"] in ("error", "turn.failed"):
@@ -105,7 +109,7 @@ def main() -> int:
                     names, builtins = loaded_skills(part.get("text", ""))
                     loaded += names
                     builtin += builtins
-    Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": sorted(set(loaded)), "builtinSkills": sorted(set(builtin))}))
+    Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": sorted(set(loaded) | {f"unexpected-mcp:{server}" for server in servers}), "builtinSkills": sorted(set(builtin))}))
     (run / "adapter.json").write_text(json.dumps({"agent": "codex", "requestedModel": model, "requestedEffort": effort, "observed": observed, "usageSource": "session-token-count" if observed else "turn-summary"}, indent=2))
     sys.stdout.write(final)
     stderr_text = (run / "codex-stderr.log").read_text()

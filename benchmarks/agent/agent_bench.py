@@ -204,6 +204,9 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     out.mkdir(parents=True)
     workspace = out / "workspace"
     prompt = (scenario["dir"] / "prompt.md").read_text()
+    prompt += "\n\nBenchmark environment: Use only files in the current workspace, the supplied skills, and tools available on PATH. Do not read host repositories, caches, or other benchmark runs."
+    if cell["network"] == "off":
+        prompt += " Do not use web search, fetch URLs, download packages, or make network requests. Model-provider communication is handled by the harness."
     infra_retries = 0
     while True:
         shutil.rmtree(workspace, ignore_errors=True)

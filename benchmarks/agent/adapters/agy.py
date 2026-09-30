@@ -43,7 +43,7 @@ def main() -> int:
     command = [binary, "--model", env["BENCH_MODEL"], "--effort", env["BENCH_THINKING"],
                "--output-format", "stream-json", "--print-timeout", "0", "--print", sys.stdin.read()]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home)}
-    seen, result, init = set(), {}, {}
+    seen, result, init, unexpected = set(), {}, {}, set()
     with (run / "agy-stderr.log").open("w") as stderr, open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:
         process = subprocess.Popen(command, env=child_env, stdout=subprocess.PIPE, stderr=stderr, text=True)
         for line in process.stdout:
@@ -53,13 +53,18 @@ def main() -> int:
             if event["event"] == "init":
                 init = event["init"]
             step = event.get("step_update") or {}
+            tool = step.get("tool_name", "")
+            if env["BENCH_NETWORK"] == "off" and tool in {"search_web", "read_url_content", "browser_subagent", "open_browser_url"}:
+                unexpected.add("network-tool:" + tool)
+                process.terminate()
+
             if step.get("state") == "DONE" and step.get("usage") and step["step_index"] not in seen:
                 seen.add(step["step_index"])
                 usage.write(json.dumps(usage_row(step["usage"], now)) + "\n")
             if event["event"] == "result":
                 result = event["result"]
         code = process.wait()
-    Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"installed": installed, "audit": "isolated-home; CLI does not export loaded skill context"}))
+    Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"installed": installed, "audit": "isolated-home; CLI does not export loaded skill context", "unexpected": sorted(unexpected)}))
     (run / "adapter.json").write_text(json.dumps({"agent": "agy", "requestedModel": env["BENCH_MODEL"], "requestedEffort": env["BENCH_THINKING"], "observedModel": init.get("model"), "status": result.get("status"), "usageSource": "stream-step-usage", "providerUsage": result.get("usage")}, indent=2))
     sys.stdout.write(result.get("response", ""))
     stderr_text = (run / "agy-stderr.log").read_text()
