@@ -41,6 +41,33 @@ fn workshop_runs_all_product_workflows() {
 }
 
 #[test]
+fn workshop_check_reports_catalog_residuals() {
+    let path = workshop_fixture("synthetic/raw-settings");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    let result = session.check();
+    assert!(result.ok, "check: {:?}", session.diagnostics());
+    let residual = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "workshop.raw-setting.zzwrightsyntheticunknownkey")
+        .expect("raw setting residual is reported through check");
+    assert_eq!(residual.severity, wright_driver::Severity::Warning);
+    assert_eq!(
+        residual.status,
+        Some(wright_driver::provider::Status::Partial)
+    );
+    assert_eq!(
+        residual.span.as_ref().map(|s| (s.start.line, s.start.col)),
+        Some((6, 9))
+    );
+}
+
+#[test]
 fn workshop_compile_is_deterministic_and_idempotent() {
     let path = workshop_fixture("synthetic/basic-rule");
     let mut session = CompilerSession::new(SessionConfig {

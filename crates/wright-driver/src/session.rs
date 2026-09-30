@@ -14,7 +14,6 @@ use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::registry::{LintConfig, LintRegistry};
 use wright_analyzer::service::Origin as ServiceOrigin;
 
-use crate::WorkshopProvider;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
     Diagnostic, Origin, Position, Severity, SourceSpan, Stage, source_provider_unavailable,
@@ -712,56 +711,40 @@ impl CompilerSession {
     /// Surface those nodes as blocking semantic diagnostics before presenting
     /// check/lint output as definitive. The catalog remains owned by
     /// workshop-rs; this is only the consumer-side diagnostic projection.
+    ///
+    /// The issues are computed from the already loaded canonical `Program`, so
+    /// check/lint do not reparse or revalidate the source (#442).
     fn attach_workshop_completeness(&mut self, loaded: &Loaded) {
         if loaded.input.kind != SourceKind::Workshop {
             return;
         }
-        let provider = match WorkshopProvider::new() {
-            Ok(p) => p,
-            Err(e) => {
-                self.diagnostics.push(Diagnostic::error(
-                    "workshop-provider-init",
-                    Stage::Internal,
-                    e.to_string(),
-                ));
-                return;
-            }
-        };
         let path = loaded
             .input
             .path
             .as_deref()
             .unwrap_or_else(|| Path::new("<stdin>"));
-        match crate::provider::LanguageProvider::check(&provider, &loaded.input.text, path) {
-            Ok(diagnostics) => {
-                for d in diagnostics {
-                    self.diagnostics.push(Diagnostic {
-                        code: d.code,
-                        stage: Stage::Analysis,
-                        severity: d.severity,
-                        message: d.message,
-                        span: Some(SourceSpan {
-                            file: 0,
-                            path: d.span.file.display().to_string(),
-                            start: Position {
-                                line: d.span.start_line,
-                                col: d.span.start_col,
-                            },
-                            end: Position {
-                                line: d.span.end_line,
-                                col: d.span.end_col,
-                            },
-                        }),
-                        status: Some(d.status),
-                        source: Some(loaded.origin.clone()),
-                    });
-                }
-            }
-            Err(e) => self.diagnostics.push(Diagnostic::error(
-                "workshop-provider-check",
-                Stage::Internal,
-                e.to_string(),
-            )),
+        for issue in loaded.program.semantic_issues(&self.catalog) {
+            let d = crate::workshop_provider::map_issue(issue, path);
+            self.diagnostics.push(Diagnostic {
+                code: d.code,
+                stage: Stage::Analysis,
+                severity: d.severity,
+                message: d.message,
+                span: Some(SourceSpan {
+                    file: 0,
+                    path: d.span.file.display().to_string(),
+                    start: Position {
+                        line: d.span.start_line,
+                        col: d.span.start_col,
+                    },
+                    end: Position {
+                        line: d.span.end_line,
+                        col: d.span.end_col,
+                    },
+                }),
+                status: Some(d.status),
+                source: Some(loaded.origin.clone()),
+            });
         }
     }
 

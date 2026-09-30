@@ -37,7 +37,10 @@ impl LanguageProvider for WorkshopProvider {
     }
 }
 
-fn map_issue(issue: workshop_rs::rules::SemanticIssue, path: &Path) -> ProviderDiagnostic {
+pub(crate) fn map_issue(
+    issue: workshop_rs::rules::SemanticIssue,
+    path: &Path,
+) -> ProviderDiagnostic {
     let (kind_code, severity) = match issue.kind {
         workshop_rs::rules::IncompletenessKind::RawSetting => {
             ("raw-setting", ProviderSeverity::Warning)
