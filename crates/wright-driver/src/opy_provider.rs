@@ -8,8 +8,7 @@ use flate2::read::GzDecoder;
 #[cfg(test)]
 use sha2::{Digest, Sha256};
 
-const DEFAULT_LATEST_VERSION_URL: &str = "https://releases.wrightkit.dev/opy-rs/latest/version";
-const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/opy-rs/releases";
+const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/opy-rs";
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 const PROVIDER_ARCHIVE_EXTENSION: &str = "tar.gz";
 
@@ -60,7 +59,6 @@ pub struct ResolvedOpyProvider {
 pub struct OpyProviderResolver {
     store_dir: PathBuf,
     target: Option<String>,
-    latest_version_url: String,
     base_url: String,
 }
 
@@ -69,8 +67,6 @@ impl OpyProviderResolver {
         Self {
             store_dir: store_dir.into(),
             target: None,
-            latest_version_url: std::env::var("WRIGHT_OPY_PROVIDER_LATEST_URL")
-                .unwrap_or_else(|_| DEFAULT_LATEST_VERSION_URL.to_string()),
             base_url: std::env::var("WRIGHT_OPY_PROVIDER_BASE_URL")
                 .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string()),
         }
@@ -81,12 +77,9 @@ impl OpyProviderResolver {
         self
     }
 
-    pub fn with_release_urls(
-        mut self,
-        latest_version_url: impl Into<String>,
-        base_url: impl Into<String>,
-    ) -> Self {
-        self.latest_version_url = latest_version_url.into();
+    /// Override the release-distribution base; the `latest/version` pointer
+    /// and the `releases/<version>/` artifacts live under it.
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
     }
@@ -211,7 +204,7 @@ impl OpyProviderResolver {
         }
         let archive_name = format!("opy-provider-{version}-{target}.{PROVIDER_ARCHIVE_EXTENSION}");
         let archive_url = format!(
-            "{}/{version}/{archive_name}",
+            "{}/releases/{version}/{archive_name}",
             self.base_url.trim_end_matches('/')
         );
         let checksum_url = format!("{archive_url}.sha256");
@@ -229,7 +222,8 @@ impl OpyProviderResolver {
         &self,
         client: &reqwest::blocking::Client,
     ) -> Result<String, OpyProviderError> {
-        let body = fetch_text(client, &self.latest_version_url)?;
+        let url = format!("{}/latest/version", self.base_url.trim_end_matches('/'));
+        let body = fetch_text(client, &url)?;
         normalize_version(body.trim())
     }
 
@@ -751,10 +745,7 @@ mod tests {
         let resolver = OpyProviderResolver::new(&root).with_target(target);
         let bytes = archive("2.0.0", target, b"cached");
         resolver.install_archive("2.0.0", target, &bytes).unwrap();
-        let offline = resolver.with_release_urls(
-            "http://127.0.0.1:1/opy-rs/latest/version",
-            "http://127.0.0.1:1/opy-rs/releases",
-        );
+        let offline = resolver.with_base_url("http://127.0.0.1:1/opy-rs");
         let resolved = offline.resolve(None).unwrap();
         assert_eq!(resolved.version.as_deref(), Some("2.0.0"));
         assert_eq!(std::fs::read(resolved.executable).unwrap(), b"cached");
@@ -772,10 +763,7 @@ mod tests {
             test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
         let resolver = OpyProviderResolver::new(&root)
             .with_target(target)
-            .with_release_urls(
-                format!("{base_url}/opy-rs/latest/version"),
-                format!("{base_url}/opy-rs/releases"),
-            );
+            .with_base_url(format!("{base_url}/opy-rs"));
         let resolved = resolver.resolve(None).unwrap();
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 3);
@@ -832,10 +820,7 @@ mod tests {
         let target = "x86_64-unknown-linux-gnu";
         let resolver = OpyProviderResolver::new(&root)
             .with_target(target)
-            .with_release_urls(
-                "http://127.0.0.1:1/opy-rs/latest/version",
-                "http://127.0.0.1:1/opy-rs/releases",
-            );
+            .with_base_url("http://127.0.0.1:1/opy-rs");
         assert_eq!(resolver.installed().unwrap(), None);
         let bytes = archive("2.0.0", target, b"cached");
         resolver.install_archive("2.0.0", target, &bytes).unwrap();
@@ -851,10 +836,7 @@ mod tests {
         let target = "x86_64-unknown-linux-gnu";
         let resolver = OpyProviderResolver::new(&root)
             .with_target(target)
-            .with_release_urls(
-                "http://127.0.0.1:1/opy-rs/latest/version",
-                "http://127.0.0.1:1/opy-rs/releases",
-            );
+            .with_base_url("http://127.0.0.1:1/opy-rs");
         let bytes = archive("1.2.3", target, b"first");
         resolver.install_archive("1.2.3", target, &bytes).unwrap();
         let resolved = resolver.update(Some("1.2.3")).unwrap();
@@ -875,10 +857,7 @@ mod tests {
         // version-pointer fetch.
         let (base_url, requests, server) =
             test_server_n(1, b"1.0.0".to_vec(), Vec::new(), Vec::new());
-        let resolver = resolver.with_release_urls(
-            format!("{base_url}/opy-rs/latest/version"),
-            format!("{base_url}/opy-rs/releases"),
-        );
+        let resolver = resolver.with_base_url(format!("{base_url}/opy-rs"));
         let resolved = resolver.update(None).unwrap();
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 1);
@@ -894,10 +873,7 @@ mod tests {
             test_server_n(1, b"4.5.6\n".to_vec(), Vec::new(), Vec::new());
         let resolver = OpyProviderResolver::new(&root)
             .with_target("x86_64-unknown-linux-gnu")
-            .with_release_urls(
-                format!("{base_url}/opy-rs/latest/version"),
-                format!("{base_url}/opy-rs/releases"),
-            );
+            .with_base_url(format!("{base_url}/opy-rs"));
         assert_eq!(resolver.latest_version().unwrap(), "4.5.6");
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 1);
@@ -933,10 +909,7 @@ mod tests {
             test_server(version.as_bytes().to_vec(), bytes, checksum.into_bytes());
         let resolver = OpyProviderResolver::new(&root)
             .with_target(&target)
-            .with_release_urls(
-                format!("{base_url}/opy-rs/latest/version"),
-                format!("{base_url}/opy-rs/releases"),
-            );
+            .with_base_url(format!("{base_url}/opy-rs"));
         let updated = resolver.update(None).unwrap();
         server.join().unwrap();
         assert_eq!(requests.load(Ordering::Relaxed), 3);
@@ -946,10 +919,7 @@ mod tests {
             b"windows-provider"
         );
         let resolved = resolver
-            .with_release_urls(
-                "http://127.0.0.1:1/opy-rs/latest/version",
-                "http://127.0.0.1:1/opy-rs/releases",
-            )
+            .with_base_url("http://127.0.0.1:1/opy-rs")
             .resolve(None)
             .unwrap();
         assert_eq!(resolved, updated);
