@@ -1,7 +1,9 @@
-//! End-to-end `wright update` tests (#116, #439) against mock release servers.
+//! End-to-end `wright update` tests (#116, #439, #455) against a mock release
+//! server.
 //!
-//! Serves fake release archives and checksums over a local HTTP server (the
-//! same shape `scripts/test-install.sh` uses for `install.sh`) and exercises
+//! Serves fake R2 release routes — the `latest/version` pointer plus
+//! versioned archives and checksums, the same shape `scripts/test-install.sh`
+//! uses for `install.sh` — and exercises
 //! the real `wright` binary: the consolidated update surface (`update`,
 //! `update self`, `update provider [opy]`), version resolution, `--check`
 //! without modification, checksum-verified installs, atomic replacement of
@@ -12,8 +14,8 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use sha2::Digest;
@@ -25,10 +27,12 @@ const TRIPLE: &str = "x86_64-unknown-linux-gnu";
 const PROVIDER_OLD: &str = "1.0.0";
 const PROVIDER_RELEASE: &str = "1.4.0";
 
-/// A minimal HTTP/1.1 server serving a fixed path -> body map.
+/// A minimal HTTP/1.1 server serving a fixed path -> body map and recording
+/// the paths clients requested.
 struct MockServer {
     addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
+    requests: Arc<Mutex<Vec<String>>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -37,12 +41,14 @@ impl MockServer {
         let listener = TcpListener::bind("127.0.0.1:0").expect("binds an ephemeral port");
         let addr = listener.local_addr().expect("bound address");
         let files = Arc::new(files);
+        let requests = Arc::new(Mutex::new(Vec::new()));
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread_shutdown = shutdown.clone();
+        let thread_requests = requests.clone();
         let thread = std::thread::spawn(move || {
             while !thread_shutdown.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok((stream, _)) => serve(stream, &files),
+                    Ok((stream, _)) => serve(stream, &files, &thread_requests),
                     Err(_) => break,
                 }
             }
@@ -50,6 +56,7 @@ impl MockServer {
         MockServer {
             addr,
             shutdown,
+            requests,
             thread: Some(thread),
         }
     }
@@ -58,15 +65,15 @@ impl MockServer {
         format!("http://127.0.0.1:{}", self.addr.port())
     }
 
-    fn api_url(&self) -> String {
-        format!("{}/repos/wrightkit/wright/releases/latest", self.base_url())
+    /// The request paths the server has served so far, in order.
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
     }
 
     /// Environment overrides that point the child at this server.
     fn env(&self) -> Vec<(&'static str, String)> {
         vec![
             ("WRIGHT_INSTALL_BASE_URL", self.base_url()),
-            ("WRIGHT_API_URL", self.api_url()),
             ("WRIGHT_INSTALL_OS", "linux".to_string()),
             ("WRIGHT_INSTALL_ARCH", "x86_64".to_string()),
         ]
@@ -87,7 +94,7 @@ impl Drop for MockServer {
     }
 }
 
-fn serve(mut stream: TcpStream, files: &HashMap<String, Vec<u8>>) {
+fn serve(mut stream: TcpStream, files: &HashMap<String, Vec<u8>>, requests: &Mutex<Vec<String>>) {
     let mut request = Vec::new();
     let mut buf = [0u8; 1024];
     loop {
@@ -108,6 +115,7 @@ fn serve(mut stream: TcpStream, files: &HashMap<String, Vec<u8>>) {
         .and_then(|line| line.split_whitespace().nth(1))
         .unwrap_or("/");
     let path = path.split('?').next().unwrap_or(path);
+    requests.lock().unwrap().push(path.to_string());
     match files.get(path) {
         Some(body) => {
             let header = format!(
@@ -126,7 +134,8 @@ fn serve(mut stream: TcpStream, files: &HashMap<String, Vec<u8>>) {
     let _ = stream.flush();
 }
 
-/// A release mock: archive + checksum + latest-release metadata.
+/// A release mock in the R2 distribution shape: the plain-text latest pointer
+/// plus the immutable versioned archive and checksum.
 struct Release {
     files: HashMap<String, Vec<u8>>,
 }
@@ -136,13 +145,12 @@ fn release(version: &str) -> Release {
     let name = format!("wright-{version}-{TRIPLE}.tar.gz");
     let mut files = HashMap::new();
     files.insert(
-        "/repos/wrightkit/wright/releases/latest".to_string(),
-        format!("{{\"tag_name\":\"v{version}\",\"draft\":false,\"prerelease\":false}}\n")
-            .into_bytes(),
+        "/latest/version".to_string(),
+        format!("{version}\n").into_bytes(),
     );
-    files.insert(format!("/v{version}/{name}"), archive.clone());
+    files.insert(format!("/releases/{version}/{name}"), archive.clone());
     files.insert(
-        format!("/v{version}/{name}.sha256"),
+        format!("/releases/{version}/{name}.sha256"),
         format!("{}  {name}\n", sha256_hex(&archive)).into_bytes(),
     );
     Release { files }
@@ -403,6 +411,91 @@ fn update_installs_and_replaces_both_binaries() {
         leftovers.is_empty(),
         "staging dirs must be cleaned up: {leftovers:?}"
     );
+
+    // Self-update touches only the R2 distribution contract — the latest
+    // pointer plus the immutable versioned routes — never a release API.
+    let name = format!("wright-{RELEASE}-{TRIPLE}.tar.gz");
+    assert_eq!(
+        server.requests(),
+        vec![
+            "/latest/version".to_string(),
+            format!("/releases/{RELEASE}/{name}"),
+            format!("/releases/{RELEASE}/{name}.sha256"),
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pinned_self_update_uses_only_the_versioned_release_routes() {
+    let server = MockServer::new(release(RELEASE).files);
+    let dir = install_dir("update-pinned");
+    let output = run_update(
+        &dir,
+        &["update", "self", "--version", RELEASE],
+        &server.env(),
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let name = format!("wright-{RELEASE}-{TRIPLE}.tar.gz");
+    assert_eq!(
+        server.requests(),
+        vec![
+            format!("/releases/{RELEASE}/{name}"),
+            format!("/releases/{RELEASE}/{name}.sha256"),
+        ],
+        "a pinned update must not resolve the latest pointer"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn malformed_latest_version_pointer_is_rejected() {
+    // A release-API JSON body is not a valid version pointer: the R2 contract
+    // serves a bare version and anything else must fail without changes.
+    let mut files = HashMap::new();
+    files.insert(
+        "/latest/version".to_string(),
+        b"{\"tag_name\":\"v9.9.9\"}\n".to_vec(),
+    );
+    let server = MockServer::new(files);
+    let dir = install_dir("update-badlatest");
+    let before = read(&dir.join("wright"));
+    let output = run_update(&dir, &["update", "--check"], &server.env());
+    assert_eq!(output.status.code(), Some(4));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not parse the latest release version"),
+        "{stderr}"
+    );
+    assert_eq!(read(&dir.join("wright")), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn missing_release_archive_fails_before_any_change() {
+    // The latest pointer resolves but no archive is published: the download
+    // failure is an environment error and nothing is replaced.
+    let mut files = HashMap::new();
+    files.insert(
+        "/latest/version".to_string(),
+        format!("{RELEASE}\n").into_bytes(),
+    );
+    let server = MockServer::new(files);
+    let dir = install_dir("update-missing-archive");
+    let before = read(&dir.join("wright"));
+    let output = run_update(&dir, &["update"], &server.env());
+    assert_eq!(output.status.code(), Some(4));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not download") && stderr.contains("404"),
+        "{stderr}"
+    );
+    assert_eq!(read(&dir.join("wright")), before);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -460,7 +553,7 @@ fn checksum_mismatch_is_rejected_before_any_change() {
     let mut mock = release(RELEASE);
     let name = format!("wright-{RELEASE}-{TRIPLE}.tar.gz");
     mock.files.insert(
-        format!("/v{RELEASE}/{name}.sha256"),
+        format!("/releases/{RELEASE}/{name}.sha256"),
         format!("{}  {name}\n", sha256_hex(b"not the archive")).into_bytes(),
     );
     let server = MockServer::new(mock.files);

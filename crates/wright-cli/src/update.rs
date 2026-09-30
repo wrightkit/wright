@@ -7,8 +7,7 @@ use std::time::Duration;
 use clap::{Args, Subcommand, ValueEnum};
 use wright_driver::{OpyProviderError, ResolvedOpyProvider, sha256_hex};
 
-const DEFAULT_BASE_URL: &str = "https://github.com/wrightkit/wright/releases/download";
-const DEFAULT_API_URL: &str = "https://api.github.com/repos/wrightkit/wright/releases/latest";
+const DEFAULT_BASE_URL: &str = "https://releases.wrightkit.dev/wright";
 const USER_AGENT: &str = concat!("wright-update/", env!("CARGO_PKG_VERSION"));
 
 mod exit {
@@ -297,7 +296,7 @@ fn self_update(check_only: bool, requested: Option<&str>) -> Result<u8, UpdateEr
         }
         None => {
             let client = update_client()?;
-            let version = resolve_latest(&client, &env_api_url())?;
+            let version = resolve_latest(&client, &env_base_url())?;
             (version, Some(client))
         }
     };
@@ -395,22 +394,27 @@ fn detect_provenance(exe: &Path) -> Provenance {
     }
 }
 
+/// Resolve the latest stable version through the shared R2 distribution
+/// contract: `<base>/latest/version` is a plain-text version pointer, the same
+/// route `install.sh` and `install.ps1` read.
 fn resolve_latest(
     client: &reqwest::blocking::Client,
-    api_url: &str,
+    base_url: &str,
 ) -> Result<String, UpdateError> {
-    let body = fetch_text(client, api_url)?;
-    let val: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+    let url = format!("{}/latest/version", base_url.trim_end_matches('/'));
+    let body = fetch_text(client, &url)?;
+    parse_latest_version(&body).ok_or_else(|| {
         UpdateError::failed(format!(
-            "could not parse the latest-release response from {api_url}: {e}"
+            "could not parse the latest release version from {url} (got '{}'); pin a version with `wright update self --version`",
+            truncate(body.trim())
         ))
-    })?;
-    let tag = val.get("tag_name").and_then(serde_json::Value::as_str).ok_or_else(|| {
-        UpdateError::failed(format!("could not find the latest release tag in the response from {api_url}; pin a version with `wright update self --version`"))
-    })?;
-    let version = tag.trim_start_matches('v');
-    parse_version(version)?;
-    Ok(version.to_string())
+    })
+}
+
+fn parse_latest_version(body: &str) -> Option<String> {
+    let version = body.trim().trim_start_matches('v');
+    parse_version(version).ok()?;
+    Some(version.to_string())
 }
 
 fn install_version(
@@ -421,7 +425,10 @@ fn install_version(
     install_dir: &Path,
 ) -> Result<(), UpdateError> {
     let archive_name = format!("wright-{version}-{}.tar.gz", platform.target);
-    let archive_url = format!("{base_url}/v{version}/{archive_name}");
+    let archive_url = format!(
+        "{}/releases/{version}/{archive_name}",
+        base_url.trim_end_matches('/')
+    );
     let checksum_url = format!("{archive_url}.sha256");
 
     println!("==> downloading {archive_url}");
@@ -650,10 +657,6 @@ fn env_base_url() -> String {
     std::env::var("WRIGHT_INSTALL_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
 }
 
-fn env_api_url() -> String {
-    std::env::var("WRIGHT_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -678,6 +681,18 @@ mod tests {
             "",
         ] {
             assert!(parse_version(bad).is_err(), "{bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn latest_version_pointer_is_plain_text() {
+        assert_eq!(parse_latest_version("9.9.9\n"), Some("9.9.9".to_string()));
+        assert_eq!(
+            parse_latest_version("  v0.2.10 \n"),
+            Some("0.2.10".to_string())
+        );
+        for bad in ["", "latest", "1.2", "{\"tag_name\":\"v9.9.9\"}", "0.1\n0.2"] {
+            assert_eq!(parse_latest_version(bad), None, "{bad:?} must be rejected");
         }
     }
 

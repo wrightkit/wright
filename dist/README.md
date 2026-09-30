@@ -16,8 +16,9 @@ archives and their `.sha256` checksums from
 | Scoop | generated `wright.json` | Windows `.zip` with `hash` |
 
 Standalone installs (the Unix installer or manual archives) upgrade in place
-with `wright update`, which consumes the same release archives and checksums
-and refuses to overwrite binaries managed by any channel above; see
+with `wright update`, which resolves and downloads through the R2 release
+distribution contract in [`docs/release.md`](../docs/release.md) and refuses
+to overwrite binaries managed by any channel above; see
 [`docs/cli.md`](../docs/cli.md).
 
 ## Generated metadata

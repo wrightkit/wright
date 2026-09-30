@@ -16,10 +16,11 @@ workflow, so it is text-only and produces no `wright-result/v1` envelope.
 * `wright update --check`: resolve the same targets and report available
   updates without modifying anything.
 * `wright update self [--version <VERSION>]`: update only the standalone
-  installation, from the canonical GitHub Release artifacts (the same
-  archives and checksums the installer and the package-manager manifests
-  consume). The checksum is verified before anything is replaced, then
-  `wright` and `wright-lsp` are swapped atomically as a matched pair and
+  installation through the R2 release distribution — the same
+  `latest/version` pointer and immutable `releases/<version>/` archive and
+  checksum routes the canonical installers consume (see
+  `docs/release.md`). The checksum is verified before anything is replaced,
+  then `wright` and `wright-lsp` are swapped atomically as a matched pair and
   smoke-checked against the new version. `--version` installs an exact
   version instead of the latest stable release and refuses a downgrade
   (exit 1).
@@ -46,8 +47,9 @@ installation directory, fails the self target with reinstall guidance
 
 Environment overrides (test/advanced hooks):
 
-* `WRIGHT_INSTALL_BASE_URL`: base URL of Wright release artifacts
-* `WRIGHT_API_URL`: URL used to resolve the latest Wright release
+* `WRIGHT_INSTALL_BASE_URL`: base URL of the R2-backed Wright release
+  distribution (the `latest/version` and `releases/<version>/` routes live
+  under it, matching `install.sh` and `install.ps1`)
 * `WRIGHT_INSTALL_OS` / `WRIGHT_INSTALL_ARCH`: override self-update platform
   detection (matching `install.sh`)
 * `WRIGHT_PROVIDER_DATA_DIR`: provider store root

@@ -313,13 +313,15 @@ user `PATH` update instruction. Its functional behavior is covered by
 
 
 Standalone installations are also updatable in place: `wright update`
-continues to consume the canonical GitHub Release artifacts and checksums (no
-`install.sh` re-execution, no second build path), verifies the checksum before
-replacing `wright` and `wright-lsp`, and refuses to overwrite
+consumes the same R2 distribution contract as the installers — it resolves
+the latest stable version from `wright/latest/version` and downloads the
+immutable `wright/releases/<version>/` archive and checksum (no `install.sh`
+re-execution, no second build path, no GitHub API dependency), verifies the
+checksum before replacing `wright` and `wright-lsp`, and refuses to overwrite
 package-manager-managed binaries. See [`docs/cli.md`](cli.md) for the
-command contract and its `WRIGHT_INSTALL_BASE_URL`/`WRIGHT_API_URL`/
-`WRIGHT_INSTALL_OS`/`WRIGHT_INSTALL_ARCH` test overrides. The installer has a
-separate R2 route contract and only shares the platform overrides.
+command contract and its `WRIGHT_INSTALL_BASE_URL`/`WRIGHT_INSTALL_OS`/
+`WRIGHT_INSTALL_ARCH` test overrides. GitHub Release download URLs remain a
+documented manual recovery path, never an automatic runtime fallback.
 
 Package-manager availability is not instantaneous: the Homebrew tap is updated
 automatically by the `publish-tap` job, while the Scoop bucket and WinGet
