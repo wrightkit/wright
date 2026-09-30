@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0](https://github.com/wrightkit/wright/compare/v0.4.0...v0.5.0) (2026-09-30)
+
+
+### Features
+
+* **bench:** add condition matrix, tracing, oracle grading, and report to the agent benchmark ([#460](https://github.com/wrightkit/wright/issues/460)) ([905ee94](https://github.com/wrightkit/wright/commit/905ee94410c9b120152900c8dec1b9379f1c9e7e))
+* **bench:** add OPY scenarios with oracle-graded checks and negatives ([#461](https://github.com/wrightkit/wright/issues/461)) ([a7904f5](https://github.com/wrightkit/wright/commit/a7904f51a628b15da21dfa01f2e4b15ab727bb56))
+* **bench:** add raw Workshop scenarios and a Tier 1 matrix example ([#462](https://github.com/wrightkit/wright/issues/462)) ([833d22e](https://github.com/wrightkit/wright/commit/833d22ed6110a3fa17a26b5a214ef406c59e0ead))
+* **driver:** validate and rename raw Workshop edits through workshop-rs ([#454](https://github.com/wrightkit/wright/issues/454)) ([9dcb427](https://github.com/wrightkit/wright/commit/9dcb42794c0bc5f1d502340869af5de05e04a0a7))
+
+
+### Bug Fixes
+
+* **cli:** resolve wright self-update through the R2 release distribution ([#457](https://github.com/wrightkit/wright/issues/457)) ([25ed555](https://github.com/wrightkit/wright/commit/25ed55559f9f7e3f8f9ec7c413dd83cfd24d3145))
+
+
+### Dependencies
+
+* bump workshop-rs to 1.2.1 ([#458](https://github.com/wrightkit/wright/issues/458)) ([42ff62d](https://github.com/wrightkit/wright/commit/42ff62deb942c2d7b9c2f121f30e0f8995a42424))
+
 ## [0.4.0](https://github.com/wrightkit/wright/compare/v0.3.0...v0.4.0) (2026-09-30)
 
 
