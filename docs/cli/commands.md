@@ -112,6 +112,16 @@ resolution never guesses.
 * `persistentObjects` has no standalone command; `analyze` reports the same
   facts under `result.facts.persistentObjects`.
 
+Text output follows the human-first presentation described in
+[presentation](presentation.md): each query leads with the target identity and
+its summary — the program inventory and a bounded rule preview for bare
+`inspect`, kind-grouped symbols with primary locations for `symbols`, the
+usage counts before the reference list for `refs`, the graph shape before
+block detail for `cfg`, fan-in/fan-out highlights before the edge list for
+`callgraph`, and exact totals before findings for `cost`. Long lists show a
+first page of ten entries followed by the withheld count; `--format json`
+always prints the complete result.
+
 ## `wright convert` and the reconstruction surface (#126)
 
 `wright convert [INPUT] --target opy|ostw` reconstructs **validated Workshop

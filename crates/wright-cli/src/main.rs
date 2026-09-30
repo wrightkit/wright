@@ -101,6 +101,7 @@ fn run_workflow(command: Command) -> ExitCode {
             run_configured(
                 config,
                 present::Presentation::from_common(&args.common),
+                None,
                 wright_driver::CompilerSession::compile,
             )
         }
@@ -112,6 +113,7 @@ fn run_workflow(command: Command) -> ExitCode {
             run_configured(
                 config_from_common(&args.common, false),
                 present::Presentation::from_common(&args.common),
+                None,
                 move |session: &mut wright_driver::CompilerSession| session.convert(target),
             )
         }
@@ -121,6 +123,7 @@ fn run_workflow(command: Command) -> ExitCode {
             run_configured(
                 config,
                 present::Presentation::from_common(&args.common),
+                None,
                 wright_driver::CompilerSession::check,
             )
         }
@@ -130,6 +133,7 @@ fn run_workflow(command: Command) -> ExitCode {
             run_configured(
                 config,
                 present::Presentation::from_common(&args.common),
+                None,
                 wright_driver::CompilerSession::analyze,
             )
         }
@@ -170,6 +174,7 @@ fn run_workflow(command: Command) -> ExitCode {
             run_configured(
                 config,
                 present::Presentation::from_common(&args.common),
+                None,
                 wright_driver::CompilerSession::lint,
             )
         }
@@ -177,6 +182,7 @@ fn run_workflow(command: Command) -> ExitCode {
             None => run_configured(
                 config_from_common(&args.common, false),
                 present::Presentation::from_common(&args.common),
+                None,
                 wright_driver::CompilerSession::inspect,
             ),
             Some(cli::InspectQuery::Symbols(query)) => {
@@ -184,22 +190,31 @@ fn run_workflow(command: Command) -> ExitCode {
                 run_configured(
                     config_from_common(&query.common, false),
                     present::Presentation::from_common(&query.common),
+                    None,
                     move |session| session.symbols(kind),
                 )
             }
             Some(cli::InspectQuery::Refs(query)) => run_configured(
                 config_from_common(&query.common, false),
                 present::Presentation::from_common(&query.common),
+                None,
                 move |session| session.refs(&query.name),
             ),
-            Some(cli::InspectQuery::Cfg(query)) => run_configured(
-                config_from_common(&query.common, false),
-                present::Presentation::from_common(&query.common),
-                move |session| session.cfg(&query.rule),
-            ),
+            Some(cli::InspectQuery::Cfg(query)) => {
+                // The cfg payload carries blocks only; the addressed rule
+                // name is the result's identity in text output (#446).
+                let subject = query.rule.clone();
+                run_configured(
+                    config_from_common(&query.common, false),
+                    present::Presentation::from_common(&query.common),
+                    Some(subject.as_str()),
+                    move |session| session.cfg(&query.rule),
+                )
+            }
             Some(cli::InspectQuery::Callgraph(query)) => run_configured(
                 config_from_common(&query, false),
                 present::Presentation::from_common(&query),
+                None,
                 wright_driver::CompilerSession::callgraph,
             ),
             Some(cli::InspectQuery::Cost(query)) => {
@@ -208,6 +223,7 @@ fn run_workflow(command: Command) -> ExitCode {
                 run_configured(
                     config,
                     present::Presentation::from_common(&query.common),
+                    None,
                     wright_driver::CompilerSession::cost,
                 )
             }
@@ -224,6 +240,7 @@ fn run_workflow(command: Command) -> ExitCode {
 fn run_configured<T: serde::Serialize + present::ResultPresentation>(
     config: SessionConfig,
     presentation: present::Presentation,
+    subject: Option<&str>,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
 ) -> ExitCode {
     let mut session = match wright_driver::CompilerSession::new(config) {
@@ -234,7 +251,7 @@ fn run_configured<T: serde::Serialize + present::ResultPresentation>(
         }
     };
 
-    ExitCode::from(run_command(&mut session, run, presentation))
+    ExitCode::from(run_command(&mut session, run, presentation, subject))
 }
 
 fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {
@@ -359,6 +376,7 @@ fn run_command<T: serde::Serialize + present::ResultPresentation>(
     session: &mut wright_driver::CompilerSession,
     run: impl FnOnce(&mut wright_driver::CompilerSession) -> wright_driver::Envelope<T>,
     presentation: present::Presentation,
+    subject: Option<&str>,
 ) -> u8 {
     let activity = Arc::new(presentation.activity());
     session.set_progress_observer(activity.clone());
@@ -371,7 +389,13 @@ fn run_command<T: serde::Serialize + present::ResultPresentation>(
     drop(activity);
     let code = envelope.exit;
     let source_base = session.input_root();
-    present::render(&envelope, presentation, elapsed, source_base.as_deref());
+    present::render(
+        &envelope,
+        presentation,
+        elapsed,
+        source_base.as_deref(),
+        subject,
+    );
     code
 }
 

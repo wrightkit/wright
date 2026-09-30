@@ -253,6 +253,7 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
     pres: Presentation,
     elapsed: Duration,
     source_base: Option<&Path>,
+    subject: Option<&str>,
 ) {
     if pres.format == OutputFormat::Json {
         let mut value = serde_json::to_value(envelope).expect("serializes");
@@ -266,18 +267,23 @@ pub(crate) fn render<T: serde::Serialize + ResultPresentation>(
         return;
     }
     match pres.renderer {
-        Renderer::GithubActions => render_github(envelope),
-        Renderer::Terminal | Renderer::Plain => render_text(envelope, pres, elapsed, source_base),
+        Renderer::GithubActions => render_github(envelope, subject),
+        Renderer::Terminal | Renderer::Plain => {
+            render_text(envelope, pres, elapsed, source_base, subject)
+        }
     }
 }
 
 /// Inputs a result body or footer may need beyond the envelope: display
-/// policy plus the base that root-relative `span.path` spellings resolve
-/// against. The base is absent when the input never loaded.
+/// policy, the base that root-relative `span.path` spellings resolve
+/// against, and the query target the CLI was asked for (such as the rule
+/// name in `inspect cfg`) when the result payload does not carry it (#446).
+/// The base is absent when the input never loaded.
 pub(crate) struct RenderContext<'a> {
     pub(crate) presentation: Presentation,
     pub(crate) elapsed: Duration,
     pub(crate) source_base: Option<&'a Path>,
+    pub(crate) subject: Option<&'a str>,
 }
 
 /// The human-first result hierarchy (#443): the verdict leads, blocking
@@ -289,11 +295,13 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
     pres: Presentation,
     elapsed: Duration,
     source_base: Option<&Path>,
+    subject: Option<&str>,
 ) {
     let ctx = RenderContext {
         presentation: pres,
         elapsed,
         source_base,
+        subject,
     };
     if !matches!(envelope.command.as_str(), "compile" | "convert") {
         render_verdict(envelope, pres.color);
@@ -346,11 +354,17 @@ fn render_verdict<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<
         status.to_string()
     };
     println!("{label} {}", envelope.command);
+    // A failed command reports its diagnostics, not the default result's
+    // metadata — a default `RefsResult` would print `<unknown>` usage counts
+    // that look like real answers (#446).
     let metadata = match envelope.command.as_str() {
         "check" => check_metadata(envelope),
+        _ if !envelope.ok => String::new(),
         _ => envelope.result.metadata().unwrap_or_default(),
     };
-    println!("  {}", dim(&metadata, color));
+    if !metadata.is_empty() {
+        println!("  {}", dim(&metadata, color));
+    }
 }
 
 /// The check verdict names the blocking error count first, then the
@@ -416,7 +430,10 @@ fn dim(value: &str, color: bool) -> String {
     }
 }
 
-fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T>) {
+fn render_github<T: serde::Serialize + ResultPresentation>(
+    envelope: &Envelope<T>,
+    subject: Option<&str>,
+) {
     for diag in &envelope.diagnostics {
         emit_diagnostic_annotation(diag);
     }
@@ -426,7 +443,7 @@ fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T
         escape_workflow_data(&format!("wright {}", envelope.command))
     );
     if matches!(envelope.command.as_str(), "compile" | "convert") {
-        envelope.result.render_body(&github_context());
+        envelope.result.render_body(&github_context(subject));
     } else {
         eprintln!("{} {}", summary_status(envelope), envelope.command);
     }
@@ -437,7 +454,7 @@ fn render_github<T: serde::Serialize + ResultPresentation>(envelope: &Envelope<T
 /// The GitHub Actions render path never reaches `render_body` for commands
 /// that consume the context, so a bare placeholder is enough for the
 /// compile/convert artifact bodies it does emit.
-fn github_context() -> RenderContext<'static> {
+fn github_context(subject: Option<&str>) -> RenderContext<'_> {
     RenderContext {
         presentation: Presentation {
             format: OutputFormat::Text,
@@ -447,6 +464,7 @@ fn github_context() -> RenderContext<'static> {
         },
         elapsed: Duration::ZERO,
         source_base: None,
+        subject,
     }
 }
 
@@ -676,25 +694,82 @@ impl ResultPresentation for InspectResult {
     }
 }
 
+/// Detail bound for one query answer (#446): a listed or graphed result shows
+/// at most this many entries before the remainder folds into a count, and
+/// `--format json` is always the complete-output path.
+const MAX_DETAIL_ENTRIES: usize = 10;
+
+/// The closing line of a bounded list: the hidden count plus the explicit
+/// complete-output path (#446).
+fn print_more(indent: &str, hidden: usize, noun: &str) {
+    if hidden > 0 {
+        println!("{indent}... {hidden} more {noun} (--format json prints the complete result)");
+    }
+}
+
+/// A reported span as `path:line:col` for inline display, or `None` when the
+/// result carries no resolved path.
+fn inline_location(span: &serde_json::Value) -> Option<String> {
+    let path = span
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .filter(|path| !path.is_empty())?;
+    let line = span_position(span, "start", "line").unwrap_or(0);
+    let col = span_position(span, "start", "col").unwrap_or(0);
+    Some(format!("{}:{line}:{col}", display_location_path(path)))
+}
+
+/// The section heading for one symbol kind. Kinds outside the known set keep
+/// their canonical name so nothing silently renames them.
+fn symbol_kind_heading(kind: &str) -> &str {
+    match kind {
+        "globalVariable" => "Global variables",
+        "playerVariable" => "Player variables",
+        "subroutine" => "Subroutines",
+        "rule" => "Rules",
+        _ => kind,
+    }
+}
+
 impl ResultPresentation for SymbolsResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} symbol(s)", array_len(&self.0)))
     }
+    /// One section per symbol kind, in encounter order, so a mixed list stays
+    /// scannable; each entry is identity plus primary location on one line,
+    /// and a section bounds at `MAX_DETAIL_ENTRIES` (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         let symbols = self.0.as_array().map_or(&[][..], Vec::as_slice);
         println!("\nSymbols");
         if symbols.is_empty() {
             println!("  none");
+            return;
         }
+        let mut groups: Vec<(&str, Vec<&serde_json::Value>)> = Vec::new();
         for symbol in symbols {
-            println!(
-                "  {} {}",
-                symbol["kind"].as_str().unwrap_or("symbol"),
-                symbol["name"].as_str().unwrap_or("<unnamed>")
-            );
-            if let Some(span) = symbol.get("span").filter(|span| span.is_object()) {
-                print_location(span, "    ");
+            let kind = symbol["kind"].as_str().unwrap_or("symbol");
+            match groups.iter_mut().find(|(k, _)| *k == kind) {
+                Some((_, members)) => members.push(symbol),
+                None => groups.push((kind, vec![symbol])),
             }
+        }
+        for (kind, members) in groups {
+            println!("  {} ({})", symbol_kind_heading(kind), members.len());
+            for symbol in members.iter().take(MAX_DETAIL_ENTRIES) {
+                let name = symbol["name"]
+                    .as_str()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("<unnamed>");
+                match symbol.get("span").and_then(inline_location) {
+                    Some(location) => println!("    {name} --> {location}"),
+                    None => println!("    {name}"),
+                }
+            }
+            print_more(
+                "    ",
+                members.len().saturating_sub(MAX_DETAIL_ENTRIES),
+                "symbol(s)",
+            );
         }
     }
 }
@@ -711,51 +786,121 @@ impl ResultPresentation for RefsResult {
             count(&self.0, "rules"),
         ))
     }
+    /// The verdict already reports the usage counts, so the body is the target
+    /// identity plus the bounded location list (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         let references = self.0["references"]
             .as_array()
             .map_or(&[][..], Vec::as_slice);
         println!(
-            "\nReferences to {}",
-            self.0["symbol"].as_str().unwrap_or("<unknown>")
+            "\nReferences to {} ({})",
+            self.0["symbol"].as_str().unwrap_or("<unknown>"),
+            self.0["kind"].as_str().unwrap_or("symbol"),
         );
         if references.is_empty() {
             println!("  none");
+            return;
         }
-        for reference in references {
+        for reference in references.iter().take(MAX_DETAIL_ENTRIES) {
             let context = match (reference["rule"].as_u64(), reference["action"].as_u64()) {
                 (Some(rule), Some(action)) => format!(" (rule {rule}, action {action})"),
                 (Some(rule), None) => format!(" (rule {rule})"),
                 _ => String::new(),
             };
+            let location = reference
+                .get("span")
+                .and_then(inline_location)
+                .map(|location| format!(" --> {location}"))
+                .unwrap_or_default();
             println!(
-                "  {}{}",
+                "  {}{}{}",
                 reference["kind"].as_str().unwrap_or("reference"),
+                location,
                 context
             );
-            if let Some(span) = reference.get("span").filter(|span| span.is_object()) {
-                print_location(span, "    ");
-            }
         }
+        print_more(
+            "  ",
+            references.len().saturating_sub(MAX_DETAIL_ENTRIES),
+            "reference(s)",
+        );
     }
+}
+
+/// Call-graph entries with a count above one, ranked by count then name for
+/// deterministic order (#446).
+fn notable_callers<'a>(
+    counts: &std::collections::BTreeMap<&'a str, usize>,
+) -> Vec<(&'a str, usize)> {
+    let mut ranked: Vec<(&'a str, usize)> = counts.iter().map(|(name, n)| (*name, *n)).collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    ranked.retain(|(_, n)| *n > 1);
+    ranked
+}
+
+fn cfg_edge_count(blocks: &[serde_json::Value]) -> usize {
+    blocks
+        .iter()
+        .map(|block| array_len(&block["successors"]))
+        .sum()
 }
 
 impl ResultPresentation for CfgResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!("{} block(s)", array_len(&self.0["blocks"])))
-    }
-    fn render_body(&self, _ctx: &RenderContext<'_>) {
         let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
-        println!("\nControl-flow graph");
+        Some(format!(
+            "{} block(s), {} edge(s)",
+            blocks.len(),
+            cfg_edge_count(blocks)
+        ))
+    }
+    /// Rule identity and the high-level shape lead; the block/edge detail is
+    /// bounded because a large rule's graph is a reference dump (#446).
+    /// `ctx.subject` is the CLI's queried rule name — the shared result
+    /// payload carries only blocks, so the name comes from the request, not
+    /// a second query.
+    fn render_body(&self, ctx: &RenderContext<'_>) {
+        let blocks = self.0["blocks"].as_array().map_or(&[][..], Vec::as_slice);
+        match ctx.subject {
+            Some(rule) => println!("\nControl-flow graph of rule \"{rule}\""),
+            None => println!("\nControl-flow graph"),
+        }
         if blocks.is_empty() {
             println!("  none");
+            return;
         }
-        for block in blocks {
+        let loops = blocks
+            .iter()
+            .filter(|block| matches!(block["kind"].as_str(), Some("while" | "for")))
+            .count();
+        let waits = blocks
+            .iter()
+            .filter(|block| block["waits"].as_bool().unwrap_or(false))
+            .count();
+        let calls: usize = blocks.iter().map(|block| array_len(&block["calls"])).sum();
+        println!(
+            "  {} block(s), {} edge(s): {} loop header(s), {} wait block(s), {} call site(s)",
+            blocks.len(),
+            cfg_edge_count(blocks),
+            loops,
+            waits,
+            calls
+        );
+        println!(
+            "  entry: block {}, exit: block {}",
+            self.0["entry"].as_u64().unwrap_or(0),
+            self.0["exit"].as_u64().unwrap_or(0)
+        );
+        for block in blocks.iter().take(MAX_DETAIL_ENTRIES) {
             let mut flags = Vec::new();
             if block["waits"].as_bool().unwrap_or(false) {
                 flags.push("waits");
             }
-            if block["calls"].as_bool().unwrap_or(false) {
+            // `calls` is a list of subroutine indices, not a bool.
+            if block["calls"]
+                .as_array()
+                .is_some_and(|calls| !calls.is_empty())
+            {
                 flags.push("calls");
             }
             let flags = if flags.is_empty() {
@@ -787,6 +932,11 @@ impl ResultPresentation for CfgResult {
                 println!("    -> {successors}");
             }
         }
+        print_more(
+            "  ",
+            blocks.len().saturating_sub(MAX_DETAIL_ENTRIES),
+            "block(s)",
+        );
     }
 }
 
@@ -794,19 +944,60 @@ impl ResultPresentation for CallGraphResult {
     fn metadata(&self) -> Option<String> {
         Some(format!("{} edge(s)", array_len(&self.0)))
     }
+    /// The shape summary leads (calling rules are the graph's roots, since
+    /// edges are rule → subroutine), then notable fan-in/fan-out, then the
+    /// bounded edge list (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         let edges = self.0.as_array().map_or(&[][..], Vec::as_slice);
         println!("\nCall graph");
         if edges.is_empty() {
             println!("  none");
+            return;
         }
+        let mut fan_in: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        let mut fan_out: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
         for edge in edges {
+            *fan_in
+                .entry(edge["callee"].as_str().unwrap_or("<unnamed>"))
+                .or_default() += 1;
+            *fan_out
+                .entry(edge["caller"].as_str().unwrap_or("<unnamed>"))
+                .or_default() += 1;
+        }
+        println!(
+            "  {} edge(s): {} calling rule(s), {} subroutine(s) called",
+            edges.len(),
+            fan_out.len(),
+            fan_in.len()
+        );
+        let most_called = notable_callers(&fan_in);
+        if !most_called.is_empty() {
+            println!("\n  Most-called subroutines");
+            for (name, n) in most_called.iter().take(MAX_DETAIL_ENTRIES) {
+                println!("    {name}: {n} caller(s)");
+            }
+        }
+        let busiest = notable_callers(&fan_out);
+        if !busiest.is_empty() {
+            println!("\n  Busiest callers");
+            for (name, n) in busiest.iter().take(MAX_DETAIL_ENTRIES) {
+                println!("    {name}: calls {n} subroutine(s)");
+            }
+        }
+        println!("\n  Edges");
+        for edge in edges.iter().take(MAX_DETAIL_ENTRIES) {
             println!(
-                "  {} -> {}",
+                "    {} -> {}",
                 edge["caller"].as_str().unwrap_or("<unnamed>"),
                 edge["callee"].as_str().unwrap_or("<unnamed>")
             );
         }
+        print_more(
+            "    ",
+            edges.len().saturating_sub(MAX_DETAIL_ENTRIES),
+            "edge(s)",
+        );
     }
 }
 
@@ -821,6 +1012,8 @@ impl ResultPresentation for CostResult {
             count(exact, "waitActions"),
         ))
     }
+    /// Totals lead; findings — the cost-relevant units — sort by severity and
+    /// collapse identical repeats, bounded like the other query lists (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         let exact = &self.0["exact"];
         println!("\nGenerated resources (exact)");
@@ -828,19 +1021,43 @@ impl ResultPresentation for CostResult {
         println!("  actions: {}", count(exact, "programActions"));
         println!("  rules: {}", count(exact, "programRules"));
         println!("  waits: {}", count(exact, "waitActions"));
-        let findings = self.0["findings"].as_array().map_or(&[][..], Vec::as_slice);
+
+        let mut findings = self.0["findings"].as_array().cloned().unwrap_or_default();
+        findings.sort_by_key(|finding| match finding["severity"].as_str() {
+            Some("error") => 0u8,
+            Some("warning") => 1,
+            _ => 2,
+        });
         println!("\nStatic findings (evidence: static)");
         if findings.is_empty() {
             println!("  none");
         }
-        for finding in findings {
-            println!(
-                "  {}[{}]: {}",
-                finding["severity"].as_str().unwrap_or("info"),
-                finding["code"].as_str().unwrap_or("finding"),
-                finding["message"].as_str().unwrap_or_default()
-            );
+        // Consecutive findings sharing a rule id and message collapse into one
+        // entry naming its occurrence count — a hot pattern must not dominate
+        // the screen.
+        let mut index = 0;
+        let mut printed = 0;
+        while index < findings.len() && printed < MAX_DETAIL_ENTRIES {
+            let first = &findings[index];
+            let mut end = index + 1;
+            while end < findings.len()
+                && findings[end]["code"] == first["code"]
+                && findings[end]["message"] == first["message"]
+            {
+                end += 1;
+            }
+            let count = end - index;
+            let severity = first["severity"].as_str().unwrap_or("info");
+            let code = first["code"].as_str().unwrap_or("finding");
+            let message = first["message"].as_str().unwrap_or_default();
+            match count {
+                1 => println!("  {severity}[{code}]: {message}"),
+                _ => println!("  {severity}[{code}] ({count} occurrences): {message}"),
+            }
+            printed += 1;
+            index = end;
         }
+        print_more("  ", findings.len() - index, "finding(s)");
         if let Some(withheld) = self.0["selection"]["withheld"]
             .as_u64()
             .filter(|withheld| *withheld > 0)
@@ -1533,29 +1750,36 @@ fn finding_severity_label(finding: &serde_json::Value, color: bool) -> String {
     }
 }
 
+/// The bare `inspect` overview (#446): the program inventory and a bounded
+/// rule preview answer "what is this", and the detail commands route the
+/// reader to the query that owns each full answer — the overview never dumps
+/// the symbol or reference lists those queries serve.
 fn render_inspect(result: &InspectResult) {
-    let rules = result.rules.as_array().cloned().unwrap_or_default();
-    let symbols = result.symbols.as_array().cloned().unwrap_or_default();
+    let program = &result.program;
+    let rules = result.rules.as_array().map_or(&[][..], Vec::as_slice);
+    println!("\nProgram overview");
     println!(
-        "\nProgram structure\n  {} rule(s), {} symbol(s)",
-        count(&result.program, "rules"),
-        symbols.len()
+        "  {} file(s), {} rule(s), {} global variable(s), {} player variable(s), {} subroutine(s), {} finding(s)",
+        count(program, "files"),
+        count(program, "rules"),
+        count(program, "globalVariables"),
+        count(program, "playerVariables"),
+        count(program, "subroutines"),
+        count(program, "findings"),
     );
-    for r in &rules {
-        println!(
-            "  rule {}: \"{}\"",
-            r.get("id").and_then(serde_json::Value::as_u64).unwrap_or(0),
-            r["name"].as_str().unwrap_or("<unnamed>")
-        );
+    println!("\nRules");
+    if rules.is_empty() {
+        println!("  none");
     }
-    for s in &symbols {
-        println!(
-            "  {} {}: {}",
-            s["kind"].as_str().unwrap_or("symbol"),
-            s.get("id").and_then(serde_json::Value::as_u64).unwrap_or(0),
-            s["name"].as_str().unwrap_or("<unnamed>")
-        );
+    for rule in rules.iter().take(MAX_DETAIL_ENTRIES) {
+        let name = rule["name"].as_str().unwrap_or_default();
+        println!("  {}", if name.is_empty() { "<unnamed>" } else { name });
     }
+    print_more(
+        "  ",
+        rules.len().saturating_sub(MAX_DETAIL_ENTRIES),
+        "rule(s)",
+    );
     // The summary stays small; each area names the query subcommand that
     // serves its full detail (#429).
     println!("\nDetail commands");
