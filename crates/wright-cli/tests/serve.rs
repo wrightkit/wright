@@ -368,31 +368,27 @@ fn capability_negotiation_is_preserved() {
 
 #[test]
 fn stdio_transport_serves_mutation_operations() {
-    // #130: the stdio adapter exposes the shared mutation operations as
+    // #130/#434: the stdio adapter exposes the shared mutation operations as
     // thin mappings — validated edit preview and semantic rename — with the
-    // same structured all-or-nothing results as in-process consumers.
+    // same structured all-or-nothing results as in-process consumers. On raw
+    // Workshop input both validate through `workshop-rs` reparse.
     let input = corpus_workshop("synthetic/control-flow");
     let source = std::fs::read_to_string(&input).unwrap();
     let identity = wright_driver::input_identity(&source);
-    let line_count = source.lines().count().max(1) as u32;
-    let end_col = source
-        .lines()
-        .last()
-        .map(|line| line.chars().count() as u32 + 1)
-        .unwrap_or(1);
+    // A rule-name rewrite stays valid Workshop: `"bounded while"` at 6:8-21.
     let request = serde_json::json!({
         "op": "validateEditTransaction",
         "sources": { input.to_string_lossy().into_owned(): source.clone() },
         "transaction": {
             "edits": [{
-                "kind": "rename",
+                "kind": "edit",
                 "source": input.to_string_lossy().into_owned(),
                 "source_identity": identity,
                 "range": {
-                    "start_line": 1, "start_col": 1,
-                    "end_line": line_count, "end_col": end_col,
+                    "start_line": 6, "start_col": 8,
+                    "end_line": 6, "end_col": 21,
                 },
-                "new_text": source.replace("j", "total")
+                "new_text": "bounded loop"
             }]
         }
     });
@@ -401,33 +397,41 @@ fn stdio_transport_serves_mutation_operations() {
         &input,
         &[&serde_json::to_string(&request).unwrap()],
     );
-    assert_eq!(responses[0]["result"]["ok"], false, "{responses:?}");
+    assert_eq!(responses[0]["result"]["ok"], true, "{responses:?}");
+    assert!(
+        responses[0]["result"]["preview"][0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("\"bounded loop\""),
+        "the preview carries the edited source: {responses:?}"
+    );
 
-    // Semantic rename through the same transport.
+    // Semantic rename through the same transport (#434): the declared name
+    // addresses the symbol; every occurrence rewrites through provenance.
     let rename = serde_json::json!({
         "op": "semanticRename",
-        "sources": {
-            input.to_string_lossy().into_owned():
-                std::fs::read_to_string(&input).unwrap()
-        },
-        "target": { "source": input.to_string_lossy().into_owned(), "line": 1, "col": 11, "to": "total" }
+        "sources": { input.to_string_lossy().into_owned(): source.clone() },
+        "target": { "symbol": "index", "to": "counter" }
     });
     let responses = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
-    assert_eq!(responses[0]["result"]["ok"], false, "{responses:?}");
+    assert_eq!(responses[0]["result"]["ok"], true, "{responses:?}");
+    let preview = responses[0]["result"]["preview"][0]["new_text"]
+        .as_str()
+        .unwrap();
+    assert!(preview.contains("0: counter"), "{preview}");
+    assert!(preview.contains("Global.counter"), "{preview}");
 }
 
 #[test]
 fn transports_are_equivalent_for_mutation_operations() {
-    // #130: stdio and JSON-RPC map the same mutation request to the same
+    // #130/#434: stdio and JSON-RPC map the same mutation request to the same
     // in-process behavior.
     let input = corpus_workshop("synthetic/control-flow");
+    let source = std::fs::read_to_string(&input).unwrap();
     let rename = serde_json::json!({
         "op": "semanticRename",
-        "sources": {
-            input.to_string_lossy().into_owned():
-                std::fs::read_to_string(&input).unwrap()
-        },
-        "target": { "source": input.to_string_lossy().into_owned(), "line": 1, "col": 11, "to": "total" }
+        "sources": { input.to_string_lossy().into_owned(): source },
+        "target": { "symbol": "index", "to": "counter" }
     });
     let stdio = run_lines("stdio", &input, &[&serde_json::to_string(&rename).unwrap()]);
     let jsonrpc_request = serde_json::json!({
@@ -439,4 +443,5 @@ fn transports_are_equivalent_for_mutation_operations() {
         &[&serde_json::to_string(&jsonrpc_request).unwrap()],
     );
     assert_eq!(stdio[0]["result"], jsonrpc[0]["result"]);
+    assert_eq!(stdio[0]["result"]["ok"], true, "{:?}", stdio[0]);
 }

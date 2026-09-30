@@ -116,6 +116,9 @@ pub enum ToolRequest {
     /// Validate and preview a caller-supplied source-edit transaction
     /// against the session's project (#130): atomic all-or-nothing
     /// semantics, structured refusal diagnostics, no filesystem writes.
+    /// Raw Workshop input validates by reparsing the edited sources through
+    /// `workshop-rs` (#434); source languages route to
+    /// `providerValidateEdit`.
     #[serde(rename = "validateEditTransaction")]
     ValidateEdit {
         /// The current text of every source the transaction touches, keyed
@@ -124,9 +127,14 @@ pub enum ToolRequest {
         transaction: crate::edit::EditTransaction,
     },
     /// Request a semantic rename through the shared refactoring contract
-    /// (#129/#130): returns the validated exact-range transaction or
-    /// structured refusal diagnostics. Wright proposes/validates; applying
-    /// edits to disk is an explicit consumer responsibility.
+    /// (#129/#130/#434): returns the validated exact-range transaction or
+    /// structured refusal diagnostics. On raw Workshop input the target is
+    /// a `symbol` (numeric id or declared name, as `references`/`usage`
+    /// address them) or a `source`/`line`/`col` position, and occurrences
+    /// rewrite through `workshop-rs` identifier provenance. Source
+    /// languages route to `providerSemanticRename`. Wright
+    /// proposes/validates; applying edits to disk is an explicit consumer
+    /// responsibility.
     SemanticRename {
         /// The current text of every source the rename may edit, keyed by
         /// the same source identities the target names.
@@ -329,16 +337,14 @@ impl<'a> ToolService<'a> {
             ToolRequest::ValidateEdit {
                 sources,
                 transaction,
-            } => self.ok(serde_json::to_value(crate::edit::validate_transaction(
-                &self.session.config,
-                sources,
-                transaction,
-            ))
-            .expect("serializes")),
-            ToolRequest::SemanticRename { sources, target } => self.ok(serde_json::to_value(
-                crate::edit::semantic_rename(&self.session.config, sources, target),
+            } => self.ok(serde_json::to_value(
+                self.session.validate_edit_transaction(sources, transaction),
             )
             .expect("serializes")),
+            ToolRequest::SemanticRename { sources, target } => {
+                let rename = self.session.semantic_rename(sources, target);
+                self.ok(serde_json::to_value(rename).expect("serializes"))
+            }
             ToolRequest::ProviderSemanticRename {
                 language_id,
                 documents,

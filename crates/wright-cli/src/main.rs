@@ -137,6 +137,12 @@ fn run_workflow(command: Command) -> ExitCode {
                 wright_driver::CompilerSession::analyze,
             )
         }
+        Command::Rename(args) => run_configured(
+            config_from_common(&args.common, false),
+            present::Presentation::from_common(&args.common),
+            None,
+            move |session| session.rename(&args.name, &args.to, args.write),
+        ),
         Command::Lint(args) => {
             let mut config = config_from_common(&args.common, true);
             config.selection = selection_from_args(&args.select);

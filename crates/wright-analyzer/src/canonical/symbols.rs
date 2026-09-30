@@ -374,10 +374,12 @@ impl SemanticIndex {
                 })
             }));
     }
+    /// Name resolution mirrors workshop-rs: a name that declares more than
+    /// once binds its references to the last declaration.
     fn find_symbol(&self, kind: SymbolKind, name: &str) -> Option<SymbolId> {
         self.symbols
             .iter()
-            .find(|symbol| symbol.kind == kind && symbol.name == name)
+            .rfind(|symbol| symbol.kind == kind && symbol.name == name)
             .map(|s| s.id)
     }
     fn walk_event(&mut self, event: &Event, rule: RuleId, program: &Program) {
@@ -507,6 +509,18 @@ impl SemanticIndex {
                         self.push(
                             symbol,
                             ReferenceKind::Read,
+                            Some(rule),
+                            action,
+                            Some(value_id),
+                            span,
+                        );
+                    }
+                }
+                Value::Subroutine(name) => {
+                    if let Some(symbol) = self.find_symbol(SymbolKind::Subroutine, name) {
+                        self.push(
+                            symbol,
+                            ReferenceKind::Call,
                             Some(rule),
                             action,
                             Some(value_id),

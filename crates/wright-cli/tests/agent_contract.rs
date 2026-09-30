@@ -261,6 +261,30 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         );
     }
 
+    // #434: `semanticRename` targets address a symbol by id or name, or by a
+    // position inside one identifier occurrence; both forms validate and
+    // deserialize.
+    for request in [
+        json!({"op":"semanticRename","sources":{},"target":{"symbol":0,"to":"renamed"}}),
+        json!({"op":"semanticRename","sources":{},"target":{"symbol":"score","to":"renamed"}}),
+        json!({"op":"semanticRename","sources":{},"target":{"source":"a.ws","line":1,"col":3,"to":"renamed"}}),
+    ] {
+        assert!(
+            request_schema.is_valid(&request),
+            "invalid request: {request}"
+        );
+        serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
+    }
+    for request in [
+        json!({"op":"semanticRename","sources":{},"target":{"symbol":true,"to":"x"}}),
+        json!({"op":"semanticRename","sources":{},"target":{"to":"x","extra":1}}),
+    ] {
+        assert!(
+            !request_schema.is_valid(&request),
+            "schema accepted an invalid rename target: {request}"
+        );
+    }
+
     let capabilities_response = json!({"result":current});
     assert!(response_schema.is_valid(&capabilities_response));
     assert!(response_schema.is_valid(&json!({

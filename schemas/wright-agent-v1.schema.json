@@ -671,11 +671,17 @@
     },
     "RenameTarget": {
       "type": "object",
-      "required": ["source", "line", "col", "to"],
+      "required": ["to"],
       "properties": {
-        "source": { "type": "string" },
-        "line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
-        "col": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "symbol": {
+          "type": ["integer", "string"],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Symbol addressing (#434): the numeric symbol id or the declared name, exactly as `references`/`usage` address symbols. When present, `source`/`line`/`col` are ignored."
+        },
+        "source": { "type": "string", "description": "Position addressing: the source file the position is interpreted in; requires `line` and `col`." },
+        "line": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Position addressing: the 1-based line of a character inside one identifier occurrence." },
+        "col": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Position addressing: the 1-based column of a character inside one identifier occurrence." },
         "to": { "type": "string" }
       },
       "additionalProperties": false

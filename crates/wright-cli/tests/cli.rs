@@ -2169,6 +2169,42 @@ fn inspect_names_unnamed_rules_by_index() {
 }
 
 #[test]
+fn rename_previews_a_validated_diff_without_writing() {
+    // #434: `wright rename` defaults to a source diff; the file stays
+    // untouched and no temporary file leaks next to it.
+    let original = corpus_workshop("synthetic/declarations-numbers");
+    let path = temp_file("rename.ws", &original);
+    let output = run(&[
+        "rename",
+        "score",
+        "total",
+        path.to_str().unwrap(),
+        "--kind",
+        "workshop",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PASS rename"), "{stdout}");
+    assert!(stdout.contains("-         0: score"), "{stdout}");
+    assert!(stdout.contains("+         0: total"), "{stdout}");
+    assert!(
+        stdout.contains("--write"),
+        "the preview names the apply flag"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    assert_eq!(
+        path.parent().unwrap().read_dir().unwrap().count(),
+        1,
+        "no temporary sibling remains"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn inspect_overview_and_cfg_bound_large_detail() {
     // A program larger than one screen: 13 rules, one of them a wide graph.
     // Text output stays bounded and names the complete-output path (#446).
@@ -2205,4 +2241,129 @@ fn inspect_overview_and_cfg_bound_large_detail() {
         "{stdout}"
     );
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
+fn rename_write_applies_the_validated_change_atomically() {
+    // #434: --write replaces the input; the result reparses cleanly.
+    let path = temp_file(
+        "rename.ws",
+        &corpus_workshop("synthetic/declarations-numbers"),
+    );
+    let path_str = path.to_str().unwrap();
+    let output = run(&[
+        "rename", "score", "total", path_str, "--kind", "workshop", "--write",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&format!("wrote {path_str}")), "{stdout}");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("0: total"), "{text}");
+    assert!(text.contains("Set Global Variable(total, 5)"), "{text}");
+    assert!(!text.contains("score"), "{text}");
+    let check = run(&["check", path_str, "--kind", "workshop"]);
+    assert!(check.status.success(), "{}", command_result(&check));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn rename_reports_the_envelope_in_json_mode() {
+    let path = temp_file(
+        "rename.ws",
+        &corpus_workshop("synthetic/declarations-numbers"),
+    );
+    let output = run(&[
+        "rename",
+        "score",
+        "total",
+        path.to_str().unwrap(),
+        "--kind",
+        "workshop",
+        "-f",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["command"], "rename");
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["wright"]["contract"], "wright-result/v1");
+    assert!(
+        envelope["result"]["transaction"]["edits"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2,
+        "{envelope}"
+    );
+    assert!(
+        envelope["result"]["preview"][0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("0: total"),
+        "{envelope}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn rename_refusals_carry_structured_diagnostics_and_write_nothing() {
+    // #434: unknown names, collisions, and non-Workshop input refuse with the
+    // structured codes; --write still writes nothing.
+    let original = corpus_workshop("synthetic/declarations-numbers");
+    let path = temp_file("rename.ws", &original);
+    for (name, code) in [
+        ("missing", "unknown-symbol"),
+        ("numbers", "rename-unsupported-kind"),
+    ] {
+        let output = run(&[
+            "rename",
+            name,
+            "renamed",
+            path.to_str().unwrap(),
+            "--kind",
+            "workshop",
+            "-f",
+            "json",
+            "--write",
+        ]);
+        assert_eq!(output.status.code(), Some(1), "{name}");
+        let envelope = parse_json(&output.stdout);
+        assert_eq!(envelope["diagnostics"][0]["code"], code, "{envelope}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
+    // OPY input routes to the provider operation rather than renaming
+    // through the Workshop path.
+    let opy = temp_file("program.opy", "rule \"r\":\n    pass\n");
+    let output = run(&[
+        "rename",
+        "r",
+        "renamed",
+        opy.to_str().unwrap(),
+        "--kind",
+        "opy",
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = parse_json(&output.stdout);
+    assert_eq!(envelope["diagnostics"][0]["code"], "edit-requires-provider");
+    assert!(
+        envelope["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("providerSemanticRename"),
+        "{}",
+        envelope["diagnostics"][0]["message"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(&opy).unwrap(),
+        "rule \"r\":\n    pass\n"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(opy.parent().unwrap());
 }

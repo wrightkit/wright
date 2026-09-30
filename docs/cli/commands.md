@@ -41,6 +41,7 @@ result.
 | `wright inspect cfg <RULE> [INPUT]` | Control-flow graph of one rule, addressed by name | block/edge listing |
 | `wright inspect callgraph [INPUT]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
 | `wright inspect cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
+| `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
 | `wright serve [INPUT]` | Serve `wright-agent/v1` over stdio or JSON-RPC 2.0 | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
@@ -121,6 +122,35 @@ block detail for `cfg`, fan-in/fan-out highlights before the edge list for
 `callgraph`, and exact totals before findings for `cost`. Long lists show a
 first page of ten entries followed by the withheld count; `--format json`
 always prints the complete result.
+
+## `wright rename` — semantic rename for raw Workshop (#434)
+
+`wright rename <NAME> <NEW_NAME> [INPUT]` renames a global variable, player
+variable, or subroutine in raw Workshop input. `NAME` is the declared symbol
+name — the same addressing `inspect refs` uses — resolved against the loaded
+program's semantic index; an unmatched name is `unknown-symbol` and a name
+shared by several symbols is `ambiguous-symbol` (exit 1).
+
+The rename is semantic, not textual: every edit rewrites exactly the
+identifier span `workshop-rs` records for one declaration or reference, so
+`Global.score` rewrites `score` and leaves the `Global.` prefix, and comments
+or string literals containing the name stay untouched. The proposed
+transaction is validated by reparsing the edited source through the session's
+own `workshop-rs` path; a name that does not survive reparsing, or one whose
+references no longer bind to the renamed symbol, refuses with
+`rename-mismatch` and no partial edit set.
+
+* Default is **preview only**: text mode prints the diff as `-`/`+` line
+  pairs, and JSON mode returns the validated `transaction` and per-source
+  `preview` inside the `wright-result/v1` envelope — callers (and agents via
+  `semanticRename`) carry the same atomic edit set.
+* `--write` applies the validated transaction to the input file atomically
+  (a sibling temporary file and rename). The write rechecks each source's
+  identity hash first; a file that changed since validation refuses with
+  `edit-stale-source` and writes nothing.
+* Other source kinds are provider surfaces: OPY input refuses with
+  `edit-requires-provider` naming `providerSemanticRename`, and kinds without
+  a shipped provider keep their `source-provider-unavailable` refusal.
 
 ## `wright convert` and the reconstruction surface (#126)
 

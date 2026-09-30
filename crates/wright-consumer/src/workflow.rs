@@ -86,63 +86,63 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         }
     }
 
-    if input.ends_with(".opy") {
-        if let Some(name) = first_global(&source) {
-            let identity = wright_driver::input_identity(&source);
-            let rename = wright_driver::edit::rename_symbol(
-                &source,
-                &wright_driver::edit::RenameRequest {
-                    symbol_kind: "globalVariable".to_string(),
-                    from: name.to_string(),
-                    to: "renamed_by_consumer".to_string(),
-                    source: input.to_string(),
-                    source_identity: identity,
-                },
-            )
-            .map_err(|e| e.message)?;
-            let sources = std::collections::BTreeMap::from([(input.to_string(), source.clone())]);
-            let validation = wright_driver::edit::validate_transaction(
-                &SessionConfig {
-                    input: InputSpec::Path(input.into()),
-                    ..SessionConfig::default()
-                },
-                &sources,
-                &wright_driver::edit::EditTransaction::new(vec![rename]).map_err(|e| e.message)?,
-            );
-            assert!(
-                validation.ok,
-                "rename validates: {:?}",
-                validation.diagnostics
-            );
-            assert!(
-                validation
-                    .preview
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|p| p.new_text.contains("renamed_by_consumer"))
-            );
-            println!("edit: safe rename validated and previewed");
-        } else {
-            println!("edit: no global variable to rename (skipped)");
+    // Raw Workshop semantic rename (#434): address one declared symbol by
+    // name through the service surface, and verify the validated preview
+    // rewrites its occurrences.
+    if input.ends_with(".ws") {
+        let renamed = match service.handle(&ToolRequest::Symbols {
+            kind: Some("globalVariable".to_string()),
+        }) {
+            wright_driver::service::ToolResponse::Ok { result } => result
+                .as_array()
+                .and_then(|symbols| symbols.first())
+                .and_then(|symbol| symbol.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            wright_driver::service::ToolResponse::Error { error } => {
+                panic!("symbols failed: {error:?}")
+            }
+        };
+        match renamed {
+            Some(name) => {
+                let rename = service.handle(&ToolRequest::SemanticRename {
+                    sources: std::collections::BTreeMap::from([(
+                        input.to_string(),
+                        source.clone(),
+                    )]),
+                    target: wright_driver::edit::RenameTarget {
+                        symbol: Some(wright_driver::service::Address::Name(name)),
+                        source: None,
+                        line: None,
+                        col: None,
+                        to: "renamed_by_consumer".to_string(),
+                    },
+                });
+                match rename {
+                    wright_driver::service::ToolResponse::Ok { result } => {
+                        assert!(result["ok"].as_bool().unwrap_or(false), "rename validates");
+                        assert!(
+                            result["preview"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .any(|p| p["new_text"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .contains("renamed_by_consumer")),
+                            "the preview rewrites the identifier"
+                        );
+                        println!("edit: semantic rename validated and previewed");
+                    }
+                    wright_driver::service::ToolResponse::Error { error } => {
+                        panic!("rename failed: {error:?}")
+                    }
+                }
+            }
+            None => println!("edit: no global variable to rename (skipped)"),
         }
     }
 
     println!("consumer: all public-API workflows succeeded");
     Ok(())
-}
-
-fn first_global(source: &str) -> Option<&str> {
-    source
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim_start();
-            trimmed.strip_prefix("globalvar").map(|rest| {
-                rest.trim_start()
-                    .split(|c: char| c.is_whitespace() || c == '=')
-                    .next()
-                    .unwrap_or("")
-            })
-        })
-        .filter(|name| !name.is_empty())
 }
