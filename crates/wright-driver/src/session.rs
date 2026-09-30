@@ -14,7 +14,6 @@ use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::registry::{LintConfig, LintRegistry};
 use wright_analyzer::service::Origin as ServiceOrigin;
 
-use crate::WorkshopProvider;
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
     Diagnostic, Origin, Position, Severity, SourceSpan, Stage, source_provider_unavailable,
@@ -60,6 +59,10 @@ pub struct Loaded {
     pub provenance: Provenance,
     /// Source identities retained by the frontend in canonical file-id order.
     pub(crate) source_files: Arc<Vec<String>>,
+    /// Completeness residuals captured before a transform profile rewrote the
+    /// program, when one ran. `None` when the loaded program is the authored
+    /// parse and `semantic_issues` can run on it directly (#442).
+    pub(crate) completeness_issues: Option<Vec<workshop_rs::rules::SemanticIssue>>,
 }
 
 /// Provenance of the semantic program handed to Wright's analyzer.
@@ -251,6 +254,12 @@ impl CompilerSession {
             }
             SourceKind::Ostw => unreachable!(),
         };
+        // Completeness residuals describe the authored source; profile passes
+        // can fold flagged constructs away, so capture them before transforms
+        // run (#442).
+        let completeness_issues = (resolved.kind == SourceKind::Workshop
+            && self.config.profile != wright_transform::Profile::Off)
+            .then(|| program.semantic_issues(&self.catalog));
         apply_profile(&mut program, self.config.profile)?;
         let loaded = Loaded {
             program: Arc::new(program),
@@ -258,6 +267,7 @@ impl CompilerSession {
             input: resolved,
             provenance: Provenance::Source,
             source_files: Arc::new(source_files),
+            completeness_issues,
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -379,6 +389,7 @@ impl CompilerSession {
                 input: resolved.clone(),
                 provenance: Provenance::Unmapped,
                 source_files: Arc::new(vec![resolved.display.clone()]),
+                completeness_issues: None,
             });
         }
         let Some(workshop_text) = compilation.workshop_text else {
@@ -436,6 +447,7 @@ impl CompilerSession {
             input: resolved.clone(),
             provenance,
             source_files: Arc::new(source_files),
+            completeness_issues: None,
         };
         self.loaded = Some(loaded.clone());
         self.loaded_operation = Some(operation);
@@ -712,56 +724,49 @@ impl CompilerSession {
     /// Surface those nodes as blocking semantic diagnostics before presenting
     /// check/lint output as definitive. The catalog remains owned by
     /// workshop-rs; this is only the consumer-side diagnostic projection.
+    ///
+    /// Residuals come from the loaded canonical `Program` — pre-captured when
+    /// a transform profile ran — so check/lint never reparse or revalidate
+    /// the source (#442).
     fn attach_workshop_completeness(&mut self, loaded: &Loaded) {
         if loaded.input.kind != SourceKind::Workshop {
             return;
         }
-        let provider = match WorkshopProvider::new() {
-            Ok(p) => p,
-            Err(e) => {
-                self.diagnostics.push(Diagnostic::error(
-                    "workshop-provider-init",
-                    Stage::Internal,
-                    e.to_string(),
-                ));
-                return;
-            }
-        };
         let path = loaded
             .input
             .path
             .as_deref()
             .unwrap_or_else(|| Path::new("<stdin>"));
-        match crate::provider::LanguageProvider::check(&provider, &loaded.input.text, path) {
-            Ok(diagnostics) => {
-                for d in diagnostics {
-                    self.diagnostics.push(Diagnostic {
-                        code: d.code,
-                        stage: Stage::Analysis,
-                        severity: d.severity,
-                        message: d.message,
-                        span: Some(SourceSpan {
-                            file: 0,
-                            path: d.span.file.display().to_string(),
-                            start: Position {
-                                line: d.span.start_line,
-                                col: d.span.start_col,
-                            },
-                            end: Position {
-                                line: d.span.end_line,
-                                col: d.span.end_col,
-                            },
-                        }),
-                        status: Some(d.status),
-                        source: Some(loaded.origin.clone()),
-                    });
-                }
+        let computed;
+        let residuals = match &loaded.completeness_issues {
+            Some(residuals) => residuals.as_slice(),
+            None => {
+                computed = loaded.program.semantic_issues(&self.catalog);
+                &computed
             }
-            Err(e) => self.diagnostics.push(Diagnostic::error(
-                "workshop-provider-check",
-                Stage::Internal,
-                e.to_string(),
-            )),
+        };
+        for issue in residuals {
+            let d = crate::workshop_provider::map_issue(issue, path);
+            self.diagnostics.push(Diagnostic {
+                code: d.code,
+                stage: Stage::Analysis,
+                severity: d.severity,
+                message: d.message,
+                span: Some(SourceSpan {
+                    file: 0,
+                    path: d.span.file.display().to_string(),
+                    start: Position {
+                        line: d.span.start_line,
+                        col: d.span.start_col,
+                    },
+                    end: Position {
+                        line: d.span.end_line,
+                        col: d.span.end_col,
+                    },
+                }),
+                status: Some(d.status),
+                source: Some(loaded.origin.clone()),
+            });
         }
     }
 
