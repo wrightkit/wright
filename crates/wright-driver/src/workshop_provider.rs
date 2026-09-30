@@ -32,13 +32,13 @@ impl LanguageProvider for WorkshopProvider {
         Ok(program
             .semantic_issues(&self.catalog)
             .into_iter()
-            .map(|issue| map_issue(issue, path))
+            .map(|issue| map_issue(&issue, path))
             .collect())
     }
 }
 
 pub(crate) fn map_issue(
-    issue: workshop_rs::rules::SemanticIssue,
+    issue: &workshop_rs::rules::SemanticIssue,
     path: &Path,
 ) -> ProviderDiagnostic {
     let (kind_code, severity) = match issue.kind {

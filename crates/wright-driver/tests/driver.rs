@@ -67,6 +67,39 @@ fn workshop_check_reports_catalog_residuals() {
     );
 }
 
+/// `sqrt` is a foldable spelling that the canonical catalog does not model, so
+/// it survives parsing as an unknown-value residual; `fold-constants` would
+/// remove it from the transformed program. Completeness diagnostics describe
+/// the authored source regardless of the profile (#442).
+#[test]
+fn workshop_check_reports_residuals_under_transform_profile() {
+    let path = workshop_fixture("synthetic/foldable-unknown-value");
+    for profile in [wright_driver::Profile::Off, wright_driver::Profile::Compat] {
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(path.clone()),
+            kind: SourceKind::Workshop,
+            profile,
+            ..SessionConfig::default()
+        })
+        .expect("session creates");
+        let result = session.check();
+        let residual = result
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "workshop.unknown-value.sqrt")
+            .unwrap_or_else(|| {
+                panic!(
+                    "unknown-value residual is reported under {profile:?}: {:?}",
+                    result.diagnostics
+                )
+            });
+        assert_eq!(
+            residual.status,
+            Some(wright_driver::provider::Status::Unsupported)
+        );
+    }
+}
+
 #[test]
 fn workshop_compile_is_deterministic_and_idempotent() {
     let path = workshop_fixture("synthetic/basic-rule");

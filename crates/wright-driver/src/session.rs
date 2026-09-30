@@ -59,6 +59,10 @@ pub struct Loaded {
     pub provenance: Provenance,
     /// Source identities retained by the frontend in canonical file-id order.
     pub(crate) source_files: Arc<Vec<String>>,
+    /// Completeness residuals captured before a transform profile rewrote the
+    /// program, when one ran. `None` when the loaded program is the authored
+    /// parse and `semantic_issues` can run on it directly (#442).
+    pub(crate) completeness_issues: Option<Vec<workshop_rs::rules::SemanticIssue>>,
 }
 
 /// Provenance of the semantic program handed to Wright's analyzer.
@@ -250,6 +254,12 @@ impl CompilerSession {
             }
             SourceKind::Ostw => unreachable!(),
         };
+        // Completeness residuals describe the authored source; profile passes
+        // can fold flagged constructs away, so capture them before transforms
+        // run (#442).
+        let completeness_issues = (resolved.kind == SourceKind::Workshop
+            && self.config.profile != wright_transform::Profile::Off)
+            .then(|| program.semantic_issues(&self.catalog));
         apply_profile(&mut program, self.config.profile)?;
         let loaded = Loaded {
             program: Arc::new(program),
@@ -257,6 +267,7 @@ impl CompilerSession {
             input: resolved,
             provenance: Provenance::Source,
             source_files: Arc::new(source_files),
+            completeness_issues,
         };
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -378,6 +389,7 @@ impl CompilerSession {
                 input: resolved.clone(),
                 provenance: Provenance::Unmapped,
                 source_files: Arc::new(vec![resolved.display.clone()]),
+                completeness_issues: None,
             });
         }
         let Some(workshop_text) = compilation.workshop_text else {
@@ -435,6 +447,7 @@ impl CompilerSession {
             input: resolved.clone(),
             provenance,
             source_files: Arc::new(source_files),
+            completeness_issues: None,
         };
         self.loaded = Some(loaded.clone());
         self.loaded_operation = Some(operation);
@@ -712,8 +725,9 @@ impl CompilerSession {
     /// check/lint output as definitive. The catalog remains owned by
     /// workshop-rs; this is only the consumer-side diagnostic projection.
     ///
-    /// The issues are computed from the already loaded canonical `Program`, so
-    /// check/lint do not reparse or revalidate the source (#442).
+    /// Residuals come from the loaded canonical `Program` — pre-captured when
+    /// a transform profile ran — so check/lint never reparse or revalidate
+    /// the source (#442).
     fn attach_workshop_completeness(&mut self, loaded: &Loaded) {
         if loaded.input.kind != SourceKind::Workshop {
             return;
@@ -723,7 +737,15 @@ impl CompilerSession {
             .path
             .as_deref()
             .unwrap_or_else(|| Path::new("<stdin>"));
-        for issue in loaded.program.semantic_issues(&self.catalog) {
+        let computed;
+        let residuals = match &loaded.completeness_issues {
+            Some(residuals) => residuals.as_slice(),
+            None => {
+                computed = loaded.program.semantic_issues(&self.catalog);
+                &computed
+            }
+        };
+        for issue in residuals {
             let d = crate::workshop_provider::map_issue(issue, path);
             self.diagnostics.push(Diagnostic {
                 code: d.code,
