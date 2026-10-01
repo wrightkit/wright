@@ -194,10 +194,10 @@ owns the source semantics and Wright orchestrates the transaction:
 * `validateEditTransaction` applies the caller's transaction to the current
   `sources` and reparses/revalidates the edited project through the
   session's own `workshop-rs` path. `sources` is optional (#472): when
-  omitted, the service reads the current text of the files the transaction
-  names (each `edits[].source`) from disk; when supplied, it remains the
-  precondition text, so an embedder holding unsaved buffers keeps that
-  ability. A transaction that produces malformed or
+  omitted or null, the service reads the current text of the files the
+  transaction names (each `edits[].source`) from disk; when supplied, it
+  remains the precondition text, so an embedder holding unsaved buffers
+  keeps that ability. A transaction that produces malformed or
   invalid Workshop refuses with the real parse/validation diagnostics and no
   partial preview; a valid one returns `ok: true` with a `preview` of each
   edited source (edited text plus the post-edit identity).
@@ -213,9 +213,9 @@ owns the source semantics and Wright orchestrates the transaction:
   untouched. There is no textual-search fallback — an occurrence whose
   recorded span does not cover exactly the identifier refuses with
   `rename-unmapped-span`.
-  `sources` is optional (#472): when omitted, the service reads the loaded
-  input file's current text from disk; when supplied, it must carry the
-  current text of the loaded input file. A text
+  `sources` is optional (#472): when omitted or null, the service reads the
+  loaded input file's current text from disk; when supplied, it must carry
+  the current text of the loaded input file. A text
   that differs from the loaded program's refuses with `edit-stale-source`
   because provenance spans would no longer index it. A `to` name that
   already declares a same-kind symbol refuses with `rename-name-collision`,

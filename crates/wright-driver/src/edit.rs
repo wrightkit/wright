@@ -218,20 +218,32 @@ pub fn validate_transaction(
     }
     // #472: an absent `sources` means the current text of the files the
     // transaction names comes from disk. `input::resolve` already read the
-    // resolved input for this request, so each edit's `source` spelling —
-    // all of which name the loaded input after the check above — binds the
-    // freshly read text. A supplied `sources` is untouched: it stays the
+    // resolved input for this request, and after the check above every
+    // edit names that one input — so the defaulted source binds once under
+    // its display spelling and the edit spellings unify to it. Without the
+    // unification, `apply` would group by the literal spelling and split
+    // one file into divergent previews while overlap checks fell through
+    // across spellings. A supplied `sources` is untouched: it stays the
     // caller-side precondition an embedder with unsaved buffers needs.
     let defaulted_sources;
-    let sources = match sources {
-        Some(sources) => sources,
+    let (transaction, sources) = match sources {
+        Some(sources) => (transaction, sources),
         None => {
-            defaulted_sources = transaction
-                .edits
-                .iter()
-                .map(|edit| (edit.source.clone(), resolved.text.clone()))
-                .collect();
-            &defaulted_sources
+            let transaction = match EditTransaction::new(
+                transaction
+                    .edits
+                    .into_iter()
+                    .map(|mut edit| {
+                        edit.source = resolved.display.clone();
+                        edit
+                    })
+                    .collect(),
+            ) {
+                Ok(transaction) => transaction,
+                Err(diagnostic) => return refuse(vec![diagnostic]),
+            };
+            defaulted_sources = BTreeMap::from([(resolved.display.clone(), resolved.text.clone())]);
+            (transaction, &defaulted_sources)
         }
     };
     let mut diagnostics: Vec<Diagnostic> = transaction

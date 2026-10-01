@@ -812,7 +812,7 @@
       "type": "object",
       "properties": {
         "op": { "const": "validateEditTransaction" },
-        "sources": { "$ref": "#/$defs/Sources" },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }] },
         "transaction": { "$ref": "#/$defs/EditTransaction" }
       },
       "required": ["op", "transaction"],
@@ -822,7 +822,7 @@
       "type": "object",
       "properties": {
         "op": { "const": "semanticRename" },
-        "sources": { "$ref": "#/$defs/Sources" },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }] },
         "target": { "$ref": "#/$defs/RenameTarget" }
       },
       "required": ["op", "target"],

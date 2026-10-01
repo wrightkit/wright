@@ -1524,3 +1524,90 @@ fn edit_operations_keep_supplied_source_and_project_boundaries() {
     assert_eq!(stale["diagnostics"][0]["code"], "unknown-symbol");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+#[test]
+fn unsourced_transaction_unifies_spelling_variants_of_the_input() {
+    let path = temp_workshop("score.ws", RENAMEABLE);
+    let key = path.to_string_lossy().into_owned();
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    let identity = wright_driver::input_identity(&on_disk);
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let edit = |source: &str, range: EditRange, new_text: &str| SourceEdit {
+        edit_kind: "edit".to_string(),
+        source: source.to_string(),
+        source_identity: identity.clone(),
+        range,
+        new_text: new_text.to_string(),
+    };
+    let declaration = EditRange {
+        start_line: 3,
+        start_col: 12,
+        end_line: 3,
+        end_col: 17,
+    };
+    let rule_name = EditRange {
+        start_line: 6,
+        start_col: 8,
+        end_line: 6,
+        end_col: 9,
+    };
+
+    // Two spellings of the same loaded input — a `file://` URI and the
+    // plain path — are one file, not two sources: without `sources` the
+    // transaction still produces a single atomic preview carrying both
+    // edits, identical to the canonical explicit request.
+    let uri = format!("file://{key}");
+    let transaction = |first: &str, second: &str| {
+        EditTransaction::new(vec![
+            edit(first, declaration.clone(), "total"),
+            edit(second, rule_name.clone(), "x"),
+        ])
+        .unwrap()
+    };
+    let defaulted = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: None,
+            transaction: transaction(&uri, &key),
+        },
+    );
+    let explicit = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: Some(BTreeMap::from([(key.clone(), on_disk.clone())])),
+            transaction: transaction(&key, &key),
+        },
+    );
+    assert_eq!(defaulted["ok"], true, "{defaulted:?}");
+    assert_eq!(defaulted, explicit);
+    assert_eq!(defaulted["preview"].as_array().unwrap().len(), 1);
+    let new_text = defaulted["preview"][0]["new_text"].as_str().unwrap();
+    assert!(
+        new_text.contains("0: total") && new_text.contains("rule (\"x\")"),
+        "{new_text}"
+    );
+
+    // Cross-spelling overlaps refuse the same way same-spelling ones do —
+    // they must not slip through as two divergent previews of one file.
+    let refused = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: None,
+            transaction: EditTransaction::new(vec![
+                edit(&uri, declaration.clone(), "total"),
+                edit(&key, declaration.clone(), "other"),
+            ])
+            .unwrap(),
+        },
+    );
+    assert_eq!(refused["ok"], false, "{refused:?}");
+    assert_eq!(refused["diagnostics"][0]["code"], "edit-overlap");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
