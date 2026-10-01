@@ -94,6 +94,18 @@ identical behavior. Neither is an adapter feature.
    the model must remember to call is a failure mode, and the check is a cheap
    fingerprint comparison. A failed reload is a structured refusal, never a
    silent fall back to the old snapshot.
+
+   Numeric symbol ids and rule indexes are positions in the loaded program, so
+   a reload that changes content can shift them without any error. The service
+   tracks whether the ids a client holds are current: a changed reload marks
+   them not current, and a successful `symbols` or `rules` response, or an
+   `ambiguous-*` refusal (which lists candidate ids), marks them current again.
+   A request that carries a numeric id while they are not current is refused
+   with `stale-id`, telling the caller to list symbols again or address by
+   name. Name addressing is never affected. One process serves one client, so
+   this needs no token on the wire; it adds one refusal code, which v1 allows
+   as an addition. Every response that carries ids or rule indexes must count
+   as an issuing point; the freshness Issue enumerates them.
 2. **Edit sources default to disk.** In `validateEditTransaction` and
    `semanticRename`, `sources` becomes optional. When absent, the service reads
    the current text of the files the request names. When present it is still the
@@ -125,7 +137,9 @@ workflow evidence and its own Issue.
   adapter neither swallows nor rewrites them, and asserts that `tools/list` is a
   subset of `capabilities.operations`.
 - **Freshness.** A test edits a project file on disk and requires the next
-  query to reflect it, with and without the MCP adapter in the path.
+  query to reflect it, with and without the MCP adapter in the path. A second
+  test requires the old numeric id to be refused with `stale-id` after the
+  edit, and accepted after `symbols` is called again.
 - **Benchmark.** `wright` gains a level `mcp` beside `bin`, in the same
   condition grid, so scenario, prompt, grader, model, and trial identity stay
   fixed. The adapter registers the server for the agent; the Wright trace
@@ -141,7 +155,8 @@ workflow evidence and its own Issue.
   be dropped or replaced without touching `ToolService`.
 - Edit operations become usable by an agent without resending files, for every
   surface, not only MCP.
-- A long-lived session stays correct across the agent's own edits.
+- A long-lived session stays correct across the agent's own edits, and a
+  stale numeric id is refused instead of silently resolving to another symbol.
 - The tool set is small, so fixed schema context is bounded; the benchmark
   decides growth.
 - A pre-freeze change to `wright-agent/v1` is made rather than avoided.
