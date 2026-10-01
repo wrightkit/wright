@@ -22,6 +22,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from common import cli_version
+
 INFRA_EXIT = 75
 TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "websocket error", "connection error")
 WEB_TOOLS = ["WebFetch", "WebSearch", "webfetch", "web_search"]
@@ -90,7 +92,7 @@ def main() -> int:
     Path(env["BENCH_USAGE"]).write_text("".join(json.dumps(r) + "\n" for r in rows))
     Path(env["BENCH_TRANSCRIPT"]).write_text("".join(json.dumps(s) + "\n" for s in (json.loads(export.read_text())["steps"] if export.is_file() else [])))
     exported = json.loads(export.read_text()) if export.is_file() else {}
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "devin", "model": model, "tools": [t["function"]["name"] for t in exported.get("agent", {}).get("tool_definitions", [])], "denied": MCP_TOOLS + ([] if env["BENCH_KNOWLEDGE"] == "web" else WEB_TOOLS)}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "devin", "version": cli_version(devin), "model": model, "tools": [t["function"]["name"] for t in exported.get("agent", {}).get("tool_definitions", [])], "denied": MCP_TOOLS + ([] if env["BENCH_KNOWLEDGE"] == "web" else WEB_TOOLS)}, indent=2))
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded, "ignoredPluginSkills": plugins}))
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)

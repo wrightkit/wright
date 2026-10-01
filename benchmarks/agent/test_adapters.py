@@ -12,6 +12,8 @@ import pi
 import codex
 import agy
 import direct
+import opencode
+import grok
 import os
 import tempfile
 import threading
@@ -51,6 +53,7 @@ class PiAdapterTest(unittest.TestCase):
                     patch.object(pi.Path, "is_file", return_value=False),
                     patch.object(pi.Path, "write_text"),
                     patch.object(pi, "context_limit", return_value=None),
+                    patch.object(pi, "cli_version", return_value="pi 0"),
                     patch.object(pi.subprocess, "Popen", return_value=proc),
                     patch("builtins.open", side_effect=lambda *a, **kw: io.StringIO()),
                 ):
@@ -115,6 +118,23 @@ class NativeAdapterUsageTest(unittest.TestCase):
                 '- openai-docs: Builtin. (file: r0/openai-docs/SKILL.md)\n'
                 '- wright: Project. (file: r1/wright/SKILL.md)\n')
         self.assertEqual(codex.loaded_skills(text), (["wright"], ["openai-docs"]))
+
+
+class GrokAdapterTest(unittest.TestCase):
+    def test_usage_row_buckets_are_disjoint_and_carry_the_context_limit(self):
+        row = grok.usage_row({"input_tokens": 12908, "output_tokens": 17, "cache_read_input_tokens": 1536, "cache_creation_input_tokens": 0}, 256000, 1.0)
+        self.assertEqual((row["input"], row["cache_read"], row["output"], row["context"], row["context_limit"]), (12908, 1536, 17, 14444, 256000))
+
+
+class OpencodeAdapterTest(unittest.TestCase):
+    def test_usage_row_keeps_cache_apart_from_input(self):
+        row = opencode.usage_row({"total": 6679, "input": 1042, "output": 5, "reasoning": 0, "cache": {"write": 0, "read": 5632}}, 1.0)
+        self.assertEqual((row["input"], row["cache_read"], row["output"], row["context"]), (1042, 5632, 5, 6674))
+
+    def test_builtin_skills_are_not_loaded_context(self):
+        raw = json.dumps([{"name": "customize-opencode", "location": "<built-in>"}, {"name": "wright", "location": "/w/.agents/skills/wright/SKILL.md"}])
+        self.assertEqual(opencode.available_skills(raw), ["wright"])
+        self.assertEqual(opencode.available_skills("not json"), [])
 
 
 class DirectAdapterTest(unittest.TestCase):

@@ -10,6 +10,12 @@ complete realistic Workshop work correctly? It measures Wright's discoverable
 semantic surface; it is not a model leaderboard, and one stochastic run is not
 evidence of correctness (use `--trials`).
 
+A score is a credible reference, not a measure of an agent's ability. It holds for one
+Wright, skill set, suite, agent, model, and protocol, and it is meant to show what
+the prompt, skills, and tools did in that setup. Every report therefore lists, from
+what the adapter observed, the CLI version, model, tools, and loaded skills each
+agent actually had (`Agent setup`).
+
 ## Allowed agent context
 
 - The scenario workspace: the seed project only.
@@ -120,6 +126,9 @@ keep host configuration out of the run, and it reports what loaded through
 | [`devin.py`](../benchmarks/agent/adapters/devin.py) | Devin CLI | `BENCH_MODEL` (for example `swe-2-max`). Runs with an isolated `HOME` holding only the Devin credentials, a config that reads no other tool's rules or skills, and MCP tools denied. Managed plugin skills are listed apart from `loaded`. |
 | [`codex.py`](../benchmarks/agent/adapters/codex.py) | Codex CLI | `BENCH_MODEL` and `BENCH_THINKING`. Isolated `HOME`/`CODEX_HOME`, user config and exec rules ignored, workspace skills installed under `.agents/skills`. Session token events supply per-model-call usage and observed skill context; built-ins are listed apart. Web search, Apps, and plugin discovery are disabled; any observed MCP call invalidates the trial. |
 | [`agy.py`](../benchmarks/agent/adapters/agy.py) | Antigravity CLI | `BENCH_MODEL` (for example `gemini-3.8-flash-high`) and `BENCH_THINKING`. Isolated `HOME` with only authentication files, workspace skills under `.agents/skills`, MCP/browser access denied and URL reads denied outside `web`. Observed built-in web tools under network `off` stop and invalidate the trial; URL permissions do not cover search. Streaming step usage is recorded. The CLI does not export observed loaded skills or context limits; these remain unreported. |
+| [`opencode.py`](../benchmarks/agent/adapters/opencode.py) | opencode | `BENCH_MODEL=provider/model` (as `opencode models` lists it) and `BENCH_THINKING` as the model variant. Isolated `HOME` and XDG directories holding only the credentials; `--pure`; Claude Code instructions and the real home's external skills are disabled by environment variable because opencode reads them regardless of `HOME`; skills installed under `.opencode/skills`; web tools denied outside `web`. Per-step usage comes from `step_finish` events; the tool list is what the agent used. |
+| [`grok.py`](../benchmarks/agent/adapters/grok.py) | Grok CLI | `BENCH_MODEL` (a `grok models` id) and `BENCH_THINKING` as reasoning effort. Isolated `GROK_HOME` holding only the login and the skills; prompt sent `--verbatim`; subagents disabled; web search disabled outside `web`. Tools, skills, and the context window come from the stream's init and result lines. |
+| [`direct.py`](../benchmarks/agent/adapters/direct.py) | none (built-in loop) | See below. |
 
 The pi adapter also uses an isolated `HOME` containing only its authentication
 files. Explicit provider extensions remain referenced by path, not copied with
@@ -300,7 +309,9 @@ adds the baseline, `wright` without the skill, and, for OverPy scenarios, the
 `overpy` controls (cells whose skill has no `--skill-dir` are skipped). It runs the
 same from a terminal or from inside another agent's shell, because isolation comes
 from the harness's scrubbed environment, not from its parent. It runs locally; CI
-does not run it.
+does not run it. Adapters for CLIs that keep credentials in the home directory (devin,
+codex, opencode, grok, agy) need `--env-pass HOME` so they can copy them into their
+isolated home.
 
 `--adapter direct` is the built-in loop (`adapters/direct.py`) that needs no agent
 harness: it calls a model API with one `bash` tool (and `fetch` only for

@@ -444,7 +444,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     return 3 if state["interrupted"] or state["unattempted"] else 1 if state["failed"] else 0
 
 
-ADAPTERS = {"claude-code": "claude_code.py", "pi": "pi.py", "devin": "devin.py", "codex": "codex.py", "agy": "agy.py", "direct": "direct.py"}
+ADAPTERS = {"claude-code": "claude_code.py", "pi": "pi.py", "devin": "devin.py", "codex": "codex.py", "agy": "agy.py", "opencode": "opencode.py", "grok": "grok.py", "direct": "direct.py"}
 CANONICAL_CELL = {"tool": "wright", "skills": ["wright-skill"], "knowledge": "none", "network": "off"}
 CONTROL_CELLS = [
     {"tool": "none", "skills": [], "knowledge": "none", "network": "off"},

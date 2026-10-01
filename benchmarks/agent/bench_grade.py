@@ -13,7 +13,7 @@ HERE = Path(__file__).resolve().parent
 ORACLE = HERE / "oracle"
 GRADER_FILES = ("bench_grade.py", "oracle/compile.js", "oracle/package-lock.json")
 SUITE_VERSION = "v1"
-UNSAFE_IGNORED = ("wiki", ".agents", ".devin")  # linked wiki and skills installed through the agent's own mechanism
+UNSAFE_IGNORED = ("wiki", ".agents", ".devin", ".opencode")  # linked wiki and skills installed through the agent's own mechanism
 
 
 def wright_json(wright: str, args: list[str]) -> tuple[int, dict]:

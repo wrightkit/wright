@@ -11,6 +11,8 @@ import sys
 import time
 from pathlib import Path
 
+from common import cli_version
+
 
 def usage_row(usage: dict, timestamp: float) -> dict:
     cached = usage.get("cache_read_tokens") or 0
@@ -63,7 +65,7 @@ def main() -> int:
                 result = event["result"]
         code = process.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"installed": installed, "audit": "isolated-home; CLI does not export loaded skill context", "unexpected": sorted(unexpected)}))
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "model": env["BENCH_MODEL"], "effort": env["BENCH_THINKING"], "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "version": cli_version(binary), "model": env["BENCH_MODEL"], "effort": env["BENCH_THINKING"], "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))
     (run / "adapter.json").write_text(json.dumps({"agent": "agy", "requestedModel": env["BENCH_MODEL"], "requestedEffort": env["BENCH_THINKING"], "observedModel": init.get("model"), "status": result.get("status"), "usageSource": "stream-step-usage", "providerUsage": result.get("usage")}, indent=2))
     sys.stdout.write(result.get("response", ""))
     stderr_text = (run / "agy-stderr.log").read_text()
