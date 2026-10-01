@@ -423,6 +423,153 @@ fn stdio_transport_serves_mutation_operations() {
 }
 
 #[test]
+fn a_long_lived_session_observes_disk_changes_and_enforces_fresh_ids() {
+    // #471: `wright serve` is long-lived, so an agent mutating the project on
+    // disk between requests must observe the new program — while numeric ids
+    // issued before the reload refuse `stale-id` until the new space is
+    // listed. Stdio `writeln!` flushes per line, so requests and edits can
+    // interleave on one live process.
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!("wright-serve-471-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("session.ws");
+    let v1 = r#"
+variables {
+    global:
+        0: score
+}
+rule ("setup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(score, 1);
+    }
+}
+"#;
+    let v2 = r#"
+variables {
+    global:
+        0: points
+}
+rule ("setup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(points, sqrt(4));
+    }
+}
+rule ("extra") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.points, <, 3));
+            Modify Global Variable(points, Add, 1);
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    std::fs::write(&input, v1).unwrap();
+
+    let mut child = Command::new(wright())
+        .args(["serve", "--transport", "stdio"])
+        .arg(&input)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright serve spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut exchange = |request: &str| -> serde_json::Value {
+        writeln!(stdin, "{request}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        assert_ne!(
+            stdout.read_line(&mut line).unwrap(),
+            0,
+            "the session answered {request}"
+        );
+        serde_json::from_str(&line).expect("JSON response")
+    };
+
+    let names = |response: &serde_json::Value| {
+        response["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|symbol| symbol["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&exchange(r#"{"op":"symbols"}"#)), ["score", "setup"]);
+    // A numeric id issued by the current program works.
+    assert!(
+        exchange(r#"{"op":"references","symbol":0}"#)
+            .get("result")
+            .is_some()
+    );
+
+    std::fs::write(&input, v2).unwrap();
+
+    // The id issued by the earlier program refuses `stale-id`; the name still
+    // resolves against the reloaded program.
+    let stale = exchange(r#"{"op":"references","symbol":0}"#);
+    assert_eq!(stale["error"]["code"], "stale-id", "{stale}");
+    let by_name = exchange(r#"{"op":"references","symbol":"points"}"#);
+    assert!(by_name.get("result").is_some(), "{by_name}");
+    assert_eq!(
+        exchange(r#"{"op":"cfg","rule":1}"#)["error"]["code"],
+        "stale-id"
+    );
+
+    // Listings re-establish their own spaces.
+    assert_eq!(
+        names(&exchange(r#"{"op":"symbols"}"#)),
+        ["points", "setup", "extra"]
+    );
+    assert!(
+        exchange(r#"{"op":"references","symbol":0}"#)
+            .get("result")
+            .is_some()
+    );
+    assert!(exchange(r#"{"op":"rules"}"#).get("result").is_some());
+    assert!(exchange(r#"{"op":"cfg","rule":1}"#).get("result").is_some());
+
+    // The workflow ops observe the same reloaded program.
+    let check = exchange(r#"{"op":"check"}"#);
+    assert_eq!(check["result"]["ok"], false, "{check}");
+    assert!(
+        check["result"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"].as_str().unwrap().contains("sqrt")),
+        "{check}"
+    );
+    let lint = exchange(r#"{"op":"lint"}"#);
+    assert!(
+        lint["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "min-wait-loop"),
+        "{lint}"
+    );
+
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "serve exited: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn transports_are_equivalent_for_mutation_operations() {
     // #130/#434: stdio and JSON-RPC map the same mutation request to the same
     // in-process behavior.

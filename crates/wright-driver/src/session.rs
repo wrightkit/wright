@@ -184,6 +184,16 @@ impl CompilerSession {
         self.load_with_operation(ProviderOperation::Compile)
     }
 
+    /// Drop the cached program and resolve the input from disk again (#471):
+    /// `ToolService` calls this when the input's disk fingerprint changed, so
+    /// a long-lived session reflects the current project. A failed reload
+    /// leaves the cache empty — the next `load` retries the same resolution
+    /// rather than resurrecting the stale program.
+    pub(crate) fn reload(&mut self) -> Result<Loaded, Diagnostic> {
+        self.loaded = None;
+        self.load()
+    }
+
     fn load_with_operation(
         &mut self,
         provider_operation: ProviderOperation,

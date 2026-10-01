@@ -717,3 +717,616 @@ rule ("dup") {
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+// ── Session freshness and stale-id refusal (#471) ───────────────────────────
+
+/// `score` is symbol id 0 and `"setup"` rule index 0.
+const FRESHNESS_V1: &str = r#"
+variables {
+    global:
+        0: score
+}
+rule ("setup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(score, 1);
+    }
+}
+"#;
+
+/// The same input after an edit: `score` was renamed to `points`, `"extra"`
+/// was added as rule index 1, `sqrt` is an unknown value `check` reports,
+/// and the `While`/`Wait(0.016)` loop triggers `min-wait-loop`.
+const FRESHNESS_V2: &str = r#"
+variables {
+    global:
+        0: points
+}
+rule ("setup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(points, sqrt(4));
+    }
+}
+rule ("extra") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.points, <, 3));
+            Modify Global Variable(points, Add, 1);
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+
+/// A second variant with deliberately duplicated names for the
+/// `ambiguous-*` recovery path.
+const FRESHNESS_AMBIGUOUS: &str = r#"
+variables {
+    global:
+        0: dup
+}
+rule ("dup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(dup, 1);
+    }
+}
+rule ("dup") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(dup, 2);
+    }
+}
+"#;
+
+fn freshness_dir(tag: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wright-driver-471-{tag}-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn refusal_code(service: &mut ToolService<'_>, request: &ToolRequest) -> String {
+    match service.handle(request) {
+        ToolResponse::Error { error } => error.code,
+        ToolResponse::Ok { result } => panic!("{request:?} must refuse: {result}"),
+    }
+}
+
+#[test]
+fn a_changed_input_is_reloaded_and_serves_the_new_program() {
+    let dir = freshness_dir("edit");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let names = |result: serde_json::Value| {
+        result
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|symbol| symbol["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    let before = names(result_of(
+        &mut service,
+        &ToolRequest::Symbols { kind: None },
+    ));
+    assert_eq!(before, ["score", "setup"]);
+
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+
+    let after = names(result_of(
+        &mut service,
+        &ToolRequest::Symbols { kind: None },
+    ));
+    assert_eq!(after, ["points", "setup", "extra"]);
+    assert_eq!(service.reload_count(), 1);
+
+    let project = result_of(&mut service, &ToolRequest::Project);
+    assert_eq!(project["rules"], 2);
+    assert_eq!(project["symbols"], 3);
+
+    let check = result_of(&mut service, &ToolRequest::Check);
+    assert_eq!(check["ok"], false);
+    assert!(
+        check["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"].as_str().unwrap().contains("sqrt")),
+        "check reports the new program's residual: {check}"
+    );
+    let lint = result_of(
+        &mut service,
+        &ToolRequest::Lint(FindingSelection::default()),
+    );
+    assert!(
+        lint["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "min-wait-loop"),
+        "lint reports the new program's findings: {lint}"
+    );
+
+    // The reloaded input is stable: repeat requests never reparse.
+    result_of(&mut service, &ToolRequest::Project);
+    result_of(&mut service, &ToolRequest::Rules);
+    assert_eq!(service.reload_count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unchanged_input_is_never_reloaded() {
+    let dir = freshness_dir("stable");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    for request in [
+        ToolRequest::Project,
+        ToolRequest::Rules,
+        ToolRequest::Symbols { kind: None },
+        ToolRequest::Findings(FindingSelection::default()),
+    ] {
+        result_of(&mut service, &request);
+    }
+    assert_eq!(service.reload_count(), 0);
+
+    // Rewriting identical bytes is still the same input.
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    assert_eq!(service.reload_count(), 0);
+
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    assert_eq!(service.reload_count(), 1);
+    result_of(&mut service, &ToolRequest::Project);
+    result_of(&mut service, &ToolRequest::Rules);
+    assert_eq!(service.reload_count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn directory_inputs_observe_added_and_removed_sources() {
+    let dir = freshness_dir("dir");
+    std::fs::write(dir.join("program.ws"), FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(dir.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let rules = |service: &mut ToolService<'_>| {
+        result_of(service, &ToolRequest::Rules)
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    assert_eq!(rules(&mut service), 1);
+
+    // Editing a member file is observed.
+    std::fs::write(dir.join("program.ws"), FRESHNESS_V2).unwrap();
+    assert_eq!(rules(&mut service), 2);
+    assert_eq!(service.reload_count(), 1);
+
+    // An added member changes the fingerprint; the reload surfaces the
+    // resolver's ambiguity refusal rather than serving either file's program.
+    std::fs::write(dir.join("other.ws"), FRESHNESS_V1).unwrap();
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Rules),
+        "input-kind-ambiguous"
+    );
+    // The broken state refuses consistently until the directory heals.
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Project),
+        "input-kind-ambiguous"
+    );
+
+    std::fs::remove_file(dir.join("other.ws")).unwrap();
+    assert_eq!(rules(&mut service), 2);
+    // The failed reload left `fingerprint` at the loaded state, and removing
+    // `other.ws` restored exactly that disk state — no reload is needed
+    // because the loaded program is genuinely current again.
+    assert_eq!(service.reload_count(), 1);
+
+    // Removing the sole member is equally observable.
+    std::fs::remove_file(dir.join("program.ws")).unwrap();
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Project),
+        "input-kind-ambiguous"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_reload_refuses_requests_until_the_input_heals() {
+    let dir = freshness_dir("broken");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    assert_eq!(service.reload_count(), 0);
+
+    // The locale still resolves but the program is malformed: the reload
+    // failure is the parser's own `parse-error` diagnostic.
+    std::fs::write(
+        &input,
+        "variables {\n    global:\n        0: score\n}\nrule (\"setup\") {\n",
+    )
+    .unwrap();
+    // Every program-reading request refuses with the loader's diagnostic;
+    // the stale program is never served. `capabilities` answers regardless.
+    for request in [
+        ToolRequest::Symbols { kind: None },
+        ToolRequest::Rules,
+        ToolRequest::Project,
+        ToolRequest::Check,
+    ] {
+        let code = refusal_code(&mut service, &request);
+        assert_eq!(code, "parse-error", "{request:?}");
+    }
+    assert!(matches!(
+        service.handle(&ToolRequest::Capabilities),
+        ToolResponse::Ok { .. }
+    ));
+
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+    let symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    assert!(
+        symbols
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|symbol| symbol["name"] == "points"),
+        "the healed input serves the new program: {symbols}"
+    );
+    assert_eq!(service.reload_count(), 1);
+
+    // Deleting the input is a reload failure, not a snapshot to serve.
+    std::fs::remove_file(&input).unwrap();
+    let code = refusal_code(&mut service, &ToolRequest::Project);
+    assert_eq!(code, "input-io");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
+    let dir = freshness_dir("stale");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    // Both spaces are current on a fresh service: `score` is symbol id 0.
+    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
+    result_of(&mut service, &ToolRequest::Cfg { rule: 0.into() });
+
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+
+    // Every operation that consumes a numeric program address refuses
+    // `stale-id` after the reload; name addressing stays usable because it
+    // resolves against the new program.
+    for request in [
+        ToolRequest::References { symbol: 0.into() },
+        ToolRequest::Usage { symbol: 0.into() },
+        ToolRequest::SemanticRename {
+            sources: std::collections::BTreeMap::new(),
+            target: wright_driver::edit::RenameTarget {
+                symbol: Some(0.into()),
+                source: None,
+                line: None,
+                col: None,
+                to: "renamed".to_string(),
+            },
+        },
+        ToolRequest::Cfg { rule: 0.into() },
+    ] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "stale-id",
+            "{request:?}"
+        );
+    }
+    let references = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "points".into(),
+        },
+    );
+    assert!(references.as_array().unwrap().len() >= 2, "{references}");
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: "extra".into(),
+        },
+    );
+
+    // `symbols` re-establishes only the symbol space; `rules` the rule space.
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
+    assert_eq!(usage["id"], 0);
+    assert_eq!(usage["symbol"], "points");
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Cfg { rule: 1.into() }),
+        "stale-id"
+    );
+    result_of(&mut service, &ToolRequest::Rules);
+    result_of(&mut service, &ToolRequest::Cfg { rule: 1.into() });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ambiguous_refusals_re_establish_the_current_id_space() {
+    let dir = freshness_dir("ambiguous");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+
+    std::fs::write(&input, FRESHNESS_AMBIGUOUS).unwrap();
+
+    // An ambiguous refusal already names the current candidates, so the
+    // space it resolved against is observed even though it is an error.
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::References {
+                symbol: "dup".into()
+            }
+        ),
+        "ambiguous-symbol"
+    );
+    result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Cfg { rule: 0.into() }),
+        "stale-id",
+        "the rule space is untouched by a symbol-space observation"
+    );
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Cfg { rule: "dup".into() }),
+        "ambiguous-rule"
+    );
+    result_of(&mut service, &ToolRequest::Cfg { rule: 0.into() });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
+    // #471 enumerates the whole request surface: operations consuming a
+    // numeric address refuse `stale-id`; every other program-reading
+    // operation reports the reloaded program, and metadata/provider
+    // operations are unaffected either way.
+    let dir = freshness_dir("enumerate");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    result_of(&mut service, &ToolRequest::Project);
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+
+    // Numeric addresses into the pre-reload spaces refuse `stale-id`.
+    for request in [
+        ToolRequest::References { symbol: 0.into() },
+        ToolRequest::Usage { symbol: 0.into() },
+        ToolRequest::Cfg { rule: 0.into() },
+    ] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "stale-id",
+            "{request:?}"
+        );
+    }
+
+    // Metadata and provider operations answer without consulting the loaded
+    // program; every program-reading operation reports the reloaded program.
+    result_of(&mut service, &ToolRequest::Capabilities);
+    result_of(&mut service, &ToolRequest::TargetMetadata);
+    for (request, command) in [
+        (ToolRequest::Compile, "compile"),
+        (ToolRequest::Check, "check"),
+        (ToolRequest::Analyze, "analyze"),
+        (ToolRequest::Inspect, "inspect"),
+    ] {
+        assert_eq!(result_of(&mut service, &request)["command"], command);
+    }
+    let project = result_of(&mut service, &ToolRequest::Project);
+    assert_eq!(project["rules"], 2);
+    assert_eq!(project["symbols"], 3);
+    let symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    assert!(
+        symbols
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|symbol| symbol["name"] == "points")
+    );
+    // Id-issuing responses carry the new program's numbering: `usage`
+    // resolves the reloaded index, `references`/`findings` point at the new
+    // rule indexes, and `inspect`/`analyze` expose the fresh facts.
+    let usage = result_of(
+        &mut service,
+        &ToolRequest::Usage {
+            symbol: "points".into(),
+        },
+    );
+    assert_eq!(usage["id"], 0);
+    assert_eq!(usage["symbol"], "points");
+    assert_eq!(
+        result_of(&mut service, &ToolRequest::Rules)
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let references = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "points".into(),
+        },
+    );
+    // Rule-internal references carry the new program's rule indexes; the
+    // declaration itself is rule-less (`rule: null`).
+    assert!(
+        references
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["rule"] == 1),
+        "{references}"
+    );
+    let findings = result_of(
+        &mut service,
+        &ToolRequest::Findings(FindingSelection::default()),
+    );
+    assert!(
+        findings
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "min-wait-loop" && finding["rule"].is_number())
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::Lint(FindingSelection::default()),
+    );
+    result_of(&mut service, &ToolRequest::LintRules);
+    result_of(&mut service, &ToolRequest::PersistentObjects);
+    result_of(&mut service, &ToolRequest::CallGraph);
+    let cost = result_of(
+        &mut service,
+        &ToolRequest::CostEstimate(FindingSelection::default()),
+    );
+    assert_eq!(cost["exact"]["programRules"], 2);
+    let inspect = result_of(&mut service, &ToolRequest::Inspect);
+    assert_eq!(inspect["result"]["rules"].as_array().unwrap().len(), 2);
+    let analyze = result_of(&mut service, &ToolRequest::Analyze);
+    assert!(
+        analyze["result"]["facts"]["symbols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|symbol| symbol["name"] == "points" && symbol["id"].is_number())
+    );
+
+    // The edit surfaces serve the caller's sources against the reloaded
+    // program; name addressing resolves "points" in the new program.
+    let source_key = input.to_string_lossy().into_owned();
+    let sources =
+        std::collections::BTreeMap::from([(source_key.clone(), FRESHNESS_V2.to_string())]);
+    let validate = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: sources.clone(),
+            transaction: wright_driver::edit::EditTransaction::new(vec![
+                serde_json::from_value(serde_json::json!({
+                    "kind": "edit",
+                    "source": source_key,
+                    "source_identity": wright_driver::input_identity(FRESHNESS_V2),
+                    "range": {
+                        "start_line": 6, "start_col": 8,
+                        "end_line": 6, "end_col": 13,
+                    },
+                    "new_text": "setup2",
+                }))
+                .unwrap(),
+            ])
+            .unwrap(),
+        },
+    );
+    assert_eq!(validate["ok"], true, "{validate}");
+    let rename = result_of(
+        &mut service,
+        &ToolRequest::SemanticRename {
+            sources,
+            target: wright_driver::edit::RenameTarget {
+                symbol: Some("points".into()),
+                source: None,
+                line: None,
+                col: None,
+                to: "score".to_string(),
+            },
+        },
+    );
+    assert_eq!(rename["ok"], true, "{rename}");
+
+    // Provider operations carry their own documents; an unconfigured
+    // language id is the usual structured provider refusal, not `stale-id`.
+    for request in [
+        ToolRequest::ProviderSemanticRename {
+            language_id: "not-a-language".to_string(),
+            documents: Default::default(),
+            position_document_uri: String::new(),
+            position: wright_lpp::Position {
+                line: 0,
+                character: 0,
+            },
+            new_name: String::new(),
+            project_root: None,
+            sources: Default::default(),
+        },
+        ToolRequest::ProviderValidateEdit {
+            language_id: "not-a-language".to_string(),
+            documents: Default::default(),
+            transaction: wright_driver::edit::EditTransaction { edits: vec![] },
+            sources: Default::default(),
+            project_root: None,
+        },
+    ] {
+        let result = result_of(&mut service, &request);
+        assert_eq!(result["ok"], false, "{request:?}: {result}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

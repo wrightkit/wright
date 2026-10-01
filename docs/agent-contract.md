@@ -97,6 +97,48 @@ the successful `result` payload.
 | `providerSemanticRename` | `language_id`, `documents`, `position_document_uri`, `position`, `new_name`, optional `project_root`, `sources` | Provider-resolved rename transaction or structured refusal |
 | `providerValidateEdit` | `language_id`, `documents`, `transaction`, `sources`, optional `project_root` | Provider-validated transaction or structured refusal |
 
+### Freshness and id validity (#471)
+
+A request that consults the loaded program is served from the project as it
+exists on disk at request time. The service fingerprints the input's
+observable file set — a file input's own content, a directory input's
+resolved members, or every file under a source-language project's entry
+directory — and reloads when it changes, so an edit, an added file, or a
+removed file is reflected in the next `symbols`, `references`, `check`,
+`lint`, or other program-reading request without restarting the session. An
+unchanged input is never reloaded. `capabilities` (service metadata),
+`targetMetadata` (the static catalog), and `provider*` operations
+(caller-supplied documents) do not consult the loaded program and are
+answered regardless of disk state.
+
+A reload that fails — the entry was removed, or the source no longer loads —
+refuses the request with the loader's structured diagnostic code
+(`input-io`, `parse-error`, `input-kind-ambiguous`, a provider diagnostic).
+The session keeps refusing until the input loads again; the previously
+loaded program is never served silently.
+
+Numeric symbol ids and rule indexes are valid only for the program that
+issued them. After a content-changing reload, a request carrying a numeric
+`symbol`, `rule`, or `semanticRename` target id is refused `stale-id` until
+the client observes the new space: a successful `symbols` response
+re-establishes symbol ids, a successful `rules` response re-establishes
+rule indexes, and an `ambiguous-symbol`/`ambiguous-rule` refusal
+re-establishes its own space because it already names the current
+candidates. Name addressing resolves against the current program in both
+states and is never stale.
+
+The responses that issue numeric ids or indexes into the loaded program are
+`symbols` (symbol ids), `rules` (rule indexes), `usage` (the resolved `id`),
+`references`, `findings`, `lint`, `persistentObjects`, `inspect`, `analyze`,
+and the `ambiguous-*` refusal candidates — plus `skipped[].rule` in `lint`
+and `lintRules`. `cfg` block ids are local to that one response and are not
+program addresses; `project`, `callGraph`, `costEstimate`, `targetMetadata`,
+`capabilities`, the `compile`/`check` envelopes, and the edit/provider
+payloads issue no program ids. Positional fields such as `rule`, `action`,
+`value`, and `span.file` inside findings and references are coordinates into
+the current program rather than reusable addresses, but they are always
+computed from the program that was live at request time.
+
 ### Name addressing (#429)
 
 `references` and `usage` accept `symbol` as either a numeric symbol id or the
