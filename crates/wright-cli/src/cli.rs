@@ -31,7 +31,7 @@ prints the semantic summary, and its query subcommands (symbols, refs, cfg,
 callgraph, cost) expose each detail area. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
 wright-result/v1 envelope to stdout. `serve` exposes the versioned
-wright-agent/v1 session contract over stdio or JSON-RPC 2.0.
+wright-agent/v1 session contract over stdio, JSON-RPC 2.0, or MCP.
 
 EXIT CODES:
     0  success
@@ -98,7 +98,7 @@ pub(crate) enum Command {
     /// Update Wright-managed components: a standalone installation and
     /// installed first-party providers.
     Update(UpdateArgs),
-    /// Serve the versioned agent contract over stdio or JSON-RPC 2.0.
+    /// Serve the versioned agent contract over stdio, JSON-RPC 2.0, or MCP.
     Serve(ServeArgs),
     /// Compare two Workshop texts using canonical WIR semantics (internal gate command).
     #[command(name = "semantic-compare", hide = true)]
