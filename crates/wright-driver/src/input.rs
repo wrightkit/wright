@@ -28,6 +28,101 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// The disk state a [`ResolvedInput`] was loaded from (#471).
+///
+/// `ToolService` captures one fingerprint at load time and recomputes it
+/// before each request; a changed digest means a source file the load could
+/// observe was edited, added, or removed, so the program must be reloaded
+/// rather than served stale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DiskFingerprint {
+    /// Stdin input has no disk state; it can never go stale.
+    Detached,
+    /// A digest of every file the input can observe: paths and contents.
+    Digest(String),
+}
+
+/// Fingerprint the disk state `resolved` was resolved from.
+///
+/// A content digest rather than an mtime comparison, so copy/restore and
+/// checkout patterns cannot masquerade as unchanged. Files that cannot be
+/// read contribute a placeholder entry — the digest still changes when they
+/// appear, disappear, or heal, so the next request retries the load and
+/// surfaces the resolver's diagnostic instead of serving the old program.
+pub(crate) fn disk_fingerprint(
+    config: &SessionConfig,
+    resolved: &ResolvedInput,
+) -> DiskFingerprint {
+    let InputSpec::Path(path) = &config.input else {
+        return DiskFingerprint::Detached;
+    };
+    let path = absolute_from(&resolved.cwd, path);
+    if resolved.kind == SourceKind::Opy {
+        // The provider's source closure is opaque to Wright: `#!mainFile`,
+        // `import`, `.po` catalogs, and external settings paths all resolve
+        // inside the entry's directory, so the digest covers every file
+        // under it rather than the entry alone.
+        let root = if path.is_dir() {
+            path
+        } else {
+            path.parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+        };
+        return digest_tree(&root);
+    }
+    if path.is_dir() {
+        // A native directory input resolves to its matching direct children
+        // (exactly one for Workshop); digest the whole matching set so an
+        // added or removed member also changes the fingerprint.
+        return digest_files(direct_source_files(&path, resolved.kind));
+    }
+    digest_files(vec![path])
+}
+
+/// Every regular file under `root`, recursively. Hidden entries (`.git`,
+/// `.DS_Store`, caches) never feed an input, and symlinked directories are
+/// not followed — a symlink cycle would never terminate — so only direct
+/// directory children are walked.
+fn digest_tree(root: &Path) -> DiskFingerprint {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            if kind.is_dir() {
+                stack.push(entry.path());
+            } else if kind.is_file() {
+                files.push(entry.path());
+            }
+        }
+    }
+    files.sort();
+    digest_files(files)
+}
+
+fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
+    let mut hasher = Sha256::new();
+    for path in &files {
+        hasher.update(path.as_os_str().as_encoded_bytes());
+        hasher.update([0]);
+        match std::fs::read(path) {
+            Ok(bytes) => hasher.update(&bytes),
+            Err(_) => hasher.update([0xff]),
+        }
+        hasher.update([0]);
+    }
+    DiskFingerprint::Digest(format!("{:x}", hasher.finalize()))
+}
+
 pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     match &config.input {
         InputSpec::Path(path) => resolve_path(path, config),

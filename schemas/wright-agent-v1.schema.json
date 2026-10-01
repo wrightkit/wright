@@ -51,7 +51,10 @@
       "type": "object",
       "required": ["code", "message"],
       "properties": {
-        "code": { "type": "string" },
+        "code": {
+          "type": "string",
+          "description": "Machine-readable refusal code. `stale-id` reports a numeric symbol id or rule index issued by an earlier program: after the loaded project changed on disk, the id must be re-read from a fresh `symbols`/`rules` listing or replaced by the declared name."
+        },
         "message": { "type": "string" }
       },
       "additionalProperties": true
@@ -677,7 +680,7 @@
           "type": ["integer", "string"],
           "minimum": 0,
           "maximum": 4294967295,
-          "description": "Symbol addressing (#434): the numeric symbol id or the declared name, exactly as `references`/`usage` address symbols. When present, `source`/`line`/`col` are ignored."
+          "description": "Symbol addressing (#434): the numeric symbol id or the declared name, exactly as `references`/`usage` address symbols. When present, `source`/`line`/`col` are ignored. A numeric id issued before a disk reload is refused `stale-id` until a `symbols` listing re-establishes the space."
         },
         "source": { "type": "string", "description": "Position addressing: the source file the position is interpreted in; requires `line` and `col`." },
         "line": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Position addressing: the 1-based line of a character inside one identifier occurrence." },
@@ -725,19 +728,43 @@
     },
     "ReferencesRequest": {
       "type": "object",
-      "properties": { "op": { "const": "references" }, "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295 } },
+      "properties": {
+        "op": { "const": "references" },
+        "symbol": {
+          "type": ["integer", "string"],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current."
+        }
+      },
       "required": ["op", "symbol"],
       "additionalProperties": false
     },
     "UsageRequest": {
       "type": "object",
-      "properties": { "op": { "const": "usage" }, "symbol": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295 } },
+      "properties": {
+        "op": { "const": "usage" },
+        "symbol": {
+          "type": ["integer", "string"],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current."
+        }
+      },
       "required": ["op", "symbol"],
       "additionalProperties": false
     },
     "CfgRequest": {
       "type": "object",
-      "properties": { "op": { "const": "cfg" }, "rule": { "type": ["integer", "string"], "minimum": 0, "maximum": 4294967295 } },
+      "properties": {
+        "op": { "const": "cfg" },
+        "rule": {
+          "type": ["integer", "string"],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Rule index or declared name. A numeric index captured before the project changed on disk is refused `stale-id` until a `rules` listing re-establishes the space; names are always current."
+        }
+      },
       "required": ["op", "rule"],
       "additionalProperties": false
     },

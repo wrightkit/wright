@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::diag::Diagnostic;
+use crate::input;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
 use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
 use wright_analyzer::canonical::{SemanticIndex, SemanticService};
@@ -215,12 +216,27 @@ pub struct ToolService<'a> {
     loaded: Loaded,
     semantic: SemanticService<'static>,
     lint_semantic: Option<SemanticService<'static>>,
+    /// The disk state `loaded` was read from, recomputed before every
+    /// program-reading request so a long-lived session observes edits, file
+    /// additions, and removals (#471).
+    fingerprint: input::DiskFingerprint,
+    /// Whether the symbol ids a client holds were issued by the current
+    /// program (#471): a reload clears it until a `symbols` listing or an
+    /// `ambiguous-symbol` refusal names the current space.
+    symbol_ids_current: bool,
+    /// The rule-index counterpart of `symbol_ids_current`, re-established by
+    /// `rules` and `ambiguous-rule` (#471).
+    rule_ids_current: bool,
+    /// How many times an observed disk change reloaded the program — the
+    /// observable hook for "unchanged inputs are not reloaded" (#471).
+    reloads: usize,
 }
 
 impl<'a> ToolService<'a> {
     /// Build the service over a session, loading the program eagerly.
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         let loaded = session.load()?;
+        let fingerprint = input::disk_fingerprint(&session.config, &loaded.input);
         let semantic =
             session.shared_service_with(&loaded, wright_analyzer::registry::LintConfig::default());
         let lint_semantic = (!session.config.lint.rules.is_empty())
@@ -230,7 +246,18 @@ impl<'a> ToolService<'a> {
             loaded,
             semantic,
             lint_semantic,
+            fingerprint,
+            symbol_ids_current: true,
+            rule_ids_current: true,
+            reloads: 0,
         })
+    }
+
+    /// Reloads caused by observed disk changes (#471). An input whose
+    /// fingerprint has not changed is never reloaded, so a stable value
+    /// across requests proves the session kept serving the same snapshot.
+    pub fn reload_count(&self) -> usize {
+        self.reloads
     }
 
     /// The loaded program snapshot (origin, input identity, canonical program).
@@ -282,28 +309,147 @@ impl<'a> ToolService<'a> {
     }
 
     /// Handle one tool request, returning a structured owned response.
+    ///
+    /// A request that reads the loaded program is checked against the
+    /// input's disk fingerprint first (#471): a changed fingerprint reloads
+    /// the session, so a long-lived session serves the project as it exists
+    /// now, and a failed reload is the request's structured refusal — the
+    /// old snapshot is never served silently. `capabilities` reports service
+    /// metadata, `targetMetadata` the static catalog, and `provider*`
+    /// operations carry their own documents, so none of them consult the
+    /// loaded program.
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
+        if Self::reads_program(request) {
+            if let Err(error) = self.refresh() {
+                return ToolResponse::Error { error };
+            }
+            if let Some(error) = self.stale_id(request) {
+                return ToolResponse::Error { error };
+            }
+        }
+        let response = self.dispatch(request);
+        self.note_id_space(request, &response);
+        response
+    }
+
+    /// Whether the request consults the loaded program (#471).
+    fn reads_program(request: &ToolRequest) -> bool {
+        !matches!(
+            request,
+            ToolRequest::Capabilities
+                | ToolRequest::TargetMetadata
+                | ToolRequest::ProviderSemanticRename { .. }
+                | ToolRequest::ProviderValidateEdit { .. }
+        )
+    }
+
+    /// Reload the program when the input's disk fingerprint changed (#471).
+    /// An unchanged fingerprint leaves the session untouched; a failed
+    /// reload leaves the session's cache empty so the next request retries
+    /// the same resolution instead of resurrecting the stale program.
+    fn refresh(&mut self) -> Result<(), ToolErrorInfo> {
+        let fingerprint = input::disk_fingerprint(&self.session.config, &self.loaded.input);
+        if fingerprint == self.fingerprint {
+            return Ok(());
+        }
+        let loaded = self.session.reload().map_err(|diagnostic| ToolErrorInfo {
+            code: diagnostic.code,
+            message: diagnostic.message,
+        })?;
+        self.adopt(loaded);
+        self.reloads += 1;
+        // The reloaded program's numeric ids are a different space: ids
+        // issued before the reload refuse `stale-id` until a `symbols` or
+        // `rules` listing — or an `ambiguous-*` refusal, which already names
+        // the current candidates — re-establishes them.
+        self.symbol_ids_current = false;
+        self.rule_ids_current = false;
+        Ok(())
+    }
+
+    /// Replace the loaded snapshot and rebuild the semantic services over it.
+    fn adopt(&mut self, loaded: Loaded) {
+        self.semantic = self
+            .session
+            .shared_service_with(&loaded, wright_analyzer::registry::LintConfig::default());
+        self.lint_semantic = (!self.session.config.lint.rules.is_empty()).then(|| {
+            self.semantic
+                .with_lint_config(self.session.config.lint.clone())
+        });
+        self.fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
+        self.loaded = loaded;
+    }
+
+    /// Refuse a numeric id that was issued by an earlier program (#471):
+    /// `stale-id` until the client observes the current space. Name
+    /// addressing resolves against the loaded index and is always fresh.
+    fn stale_id(&self, request: &ToolRequest) -> Option<ToolErrorInfo> {
+        let stale = match request {
+            ToolRequest::References { symbol } | ToolRequest::Usage { symbol } => {
+                matches!(symbol, Address::Id(_)) && !self.symbol_ids_current
+            }
+            ToolRequest::Cfg { rule } => matches!(rule, Address::Id(_)) && !self.rule_ids_current,
+            ToolRequest::SemanticRename { target, .. } => {
+                matches!(target.symbol, Some(Address::Id(_))) && !self.symbol_ids_current
+            }
+            _ => false,
+        };
+        stale.then(|| ToolErrorInfo {
+            code: "stale-id".to_string(),
+            message: "the loaded project changed on disk; numeric symbol ids and rule indexes issued before the reload are no longer valid — list `symbols` or `rules` again, or address by name".to_string(),
+        })
+    }
+
+    /// A request that names the current id space re-establishes it (#471): a
+    /// successful `symbols`/`rules` listing, or an `ambiguous-*` refusal that
+    /// already reports the current candidates. `semanticRename` reports its
+    /// `ambiguous-symbol` as a result diagnostic rather than a refusal.
+    fn note_id_space(&mut self, request: &ToolRequest, response: &ToolResponse) {
+        match response {
+            ToolResponse::Ok { result } => match request {
+                ToolRequest::Symbols { .. } => self.symbol_ids_current = true,
+                ToolRequest::Rules => self.rule_ids_current = true,
+                ToolRequest::SemanticRename { .. }
+                    if diagnostics_list_code(result, "ambiguous-symbol") =>
+                {
+                    self.symbol_ids_current = true;
+                }
+                _ => {}
+            },
+            ToolResponse::Error { error } => match error.code.as_str() {
+                "ambiguous-symbol" => self.symbol_ids_current = true,
+                "ambiguous-rule" => self.rule_ids_current = true,
+                _ => {}
+            },
+        }
+    }
+
+    fn dispatch(&mut self, request: &ToolRequest) -> ToolResponse {
         match request {
             ToolRequest::Capabilities => ToolResponse::Ok {
                 result: serde_json::to_value(self.capabilities()).expect("capabilities serialize"),
             },
             ToolRequest::Compile => {
-                let result =
-                    serde_json::to_value(self.compile()).expect("compile result serializes");
+                let result = serde_json::to_value(self.session.compile())
+                    .expect("compile result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Check => {
-                let result = serde_json::to_value(self.check()).expect("check result serializes");
+                let result =
+                    serde_json::to_value(self.session.check()).expect("check result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Analyze => {
-                let result =
-                    serde_json::to_value(self.analyze()).expect("analyze result serializes");
+                let result = serde_json::to_value(self.session.analyze())
+                    .expect("analyze result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Inspect => {
-                let result =
-                    serde_json::to_value(self.inspect()).expect("inspect result serializes");
+                let result = serde_json::to_value(
+                    self.session
+                        .inspect_loaded(self.loaded.clone(), &self.semantic),
+                )
+                .expect("inspect result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Project => self.ok(self.project()),
@@ -393,22 +539,40 @@ impl<'a> ToolService<'a> {
     }
 
     /// Compile through the shared session pipeline.
+    ///
+    /// A failed refresh emptied the session's cache, so `compile`'s own
+    /// load attempt re-surfaces the reload diagnostic as this envelope's
+    /// refusal; the stale `self.loaded` snapshot is never consulted (#471).
     pub fn compile(&mut self) -> Envelope<CompileResult> {
+        let _ = self.refresh();
         self.session.compile()
     }
 
     /// Check through the shared session pipeline.
+    ///
+    /// The same refresh contract as [`Self::compile`] applies (#471).
     pub fn check(&mut self) -> Envelope<CheckResult> {
+        let _ = self.refresh();
         self.session.check()
     }
 
     /// Analyze through the shared session pipeline.
+    ///
+    /// The same refresh contract as [`Self::compile`] applies (#471).
     pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
+        let _ = self.refresh();
         self.session.analyze()
     }
 
     /// Inspect through the shared session pipeline.
+    ///
+    /// `inspect` renders through `self.semantic`, so a failed refresh cannot
+    /// delegate to the stale snapshot the way `compile` can — the session's
+    /// own load surfaces the same failure as the envelope's refusal (#471).
     pub fn inspect(&mut self) -> Envelope<InspectResult> {
+        if self.refresh().is_err() {
+            return self.session.inspect();
+        }
         self.session
             .inspect_loaded(self.loaded.clone(), &self.semantic)
     }
@@ -698,4 +862,17 @@ impl<'a> ToolService<'a> {
             })).collect::<Vec<_>>(),
         })
     }
+}
+
+/// Whether a result payload's `diagnostics` include `code` (#471): the
+/// `semanticRename` refusal surface embeds `ambiguous-symbol` this way.
+fn diagnostics_list_code(result: &serde_json::Value, code: &str) -> bool {
+    result
+        .get("diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|diagnostics| {
+            diagnostics
+                .iter()
+                .any(|d| d.get("code").and_then(serde_json::Value::as_str) == Some(code))
+        })
 }
