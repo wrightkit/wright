@@ -60,10 +60,12 @@ def main() -> int:
             skill = Path(env[key])
             shutil.copytree(skill, Path.cwd() / ".agents/skills" / skill.name)
     binary = shutil.which("codex", path=env.get("BENCH_HOST_PATH")) or "codex"
+    # Codex's own seatbelt cannot be applied inside the harness --file-sandbox (macOS refuses nested sandboxes), so it is off
+    # here: the harness sandbox is the file-write boundary, and network `off` is declared-only for this adapter.
     command = [binary, "exec", "--json", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
                "--disable", "apps", "--disable", "plugins", "--disable", "remote_plugin",
                "--disable", "skill_mcp_dependency_install",
-               "--sandbox", "workspace-write", "-c", 'approval_policy="never"',
+               "--sandbox", "danger-full-access", "-c", 'approval_policy="never"',
                "-c", 'web_search="disabled"', "-c", f'model_reasoning_effort="{effort}"', "-m", model, "-"]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home), "CODEX_HOME": str(state)}
     prompt = sys.stdin.read()
