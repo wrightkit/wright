@@ -1,3 +1,5 @@
+#[path = "../mcp.rs"]
+mod mcp;
 #[path = "../serve.rs"]
 mod serve;
 

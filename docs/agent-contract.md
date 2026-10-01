@@ -60,10 +60,41 @@ operations (`symbols`, `references` + `usage`, `cfg`, `callGraph`,
 divergent semantics. The in-process embedding API can call
 `ToolService::handle` directly.
 
+Use `wright serve --transport mcp [INPUT]` for MCP over stdio (#473,
+ADR-0020). The adapter speaks newline-delimited JSON-RPC 2.0 and implements
+`initialize` (with protocol-version negotiation), `ping`, `tools/list`, and
+`tools/call`. Each operation in the initial set below is one tool named
+`wright_` plus the operation in snake case:
+
+| Operation | Tool |
+| --- | --- |
+| `project` | `wright_project` |
+| `symbols` | `wright_symbols` |
+| `references` | `wright_references` |
+| `usage` | `wright_usage` |
+| `callGraph` | `wright_call_graph` |
+| `check` | `wright_check` |
+| `lint` | `wright_lint` |
+| `costEstimate` | `wright_cost_estimate` |
+| `semanticRename` | `wright_semantic_rename` |
+| `validateEditTransaction` | `wright_validate_edit_transaction` |
+
+`tools/list` contains a tool only when its operation is in this set and
+advertised by `capabilities.operations`. Each tool's `inputSchema` is derived
+from the operation's request schema with `op` removed (the tool name carries
+it); the edit tools also omit `sources`, which then defaults to the on-disk
+text (#472). `tools/call` arguments are the request fields.
+
+A successful service `result` is returned unchanged as the tool result's JSON
+text content. A service refusal is a tool result with `isError: true` whose
+content carries the same `{code, message}`. Edit operations report their
+outcome inside the result payload (`ok` plus `diagnostics`), which passes
+through as ordinary content — the adapter does not reinterpret it. MCP
+protocol errors (unknown tool or method, malformed arguments) are JSON-RPC
+`error` responses and never become tool results.
+
 The released `wright` binary includes `serve`, so each supported installation
-channel can use the session contract without a separate runtime. MCP is not a
-currently shipped transport. If added later, it must map this contract without
-adding operations or changing their meaning.
+channel can use the session contract without a separate runtime.
 
 ## Operations
 

@@ -80,7 +80,7 @@ Human-authored guidance cannot self-promote to a canonical fact. Provenance must
 
 ## Public service boundary
 
-The shared product operation is `domainIntelligence` on Wright's common query/tooling surface. CLI, embedding, stdio/JSON-RPC, and future agent adapters reuse that operation rather than creating agent-specific semantics.
+The shared product operation is `domainIntelligence` on Wright's common query/tooling surface. CLI, embedding, the stdio/JSON-RPC/MCP transports, and future agent adapters reuse that operation rather than creating agent-specific semantics.
 
 The operation may be exposed through the existing ToolService facade, but canonical selection must not require an eagerly loaded project session. Source selection may use session/provider state because resolving source positions is inherently project- and owner-dependent.
 

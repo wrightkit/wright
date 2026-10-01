@@ -15,7 +15,7 @@ safe source-edit contracts, and the transport adapters
 | `wright_driver::edit::{SourceEdit, EditRange, EditTransaction, SourcePreview, EditValidation, RenameRequest, rename_symbol, validate_transaction}` | **stable** | Source-edit transactions; validated through the correct owner-backed project semantics (#128); `EditTransaction::apply` applies ranges against one original source snapshot |
 | `wright_driver::{input_identity, EMBEDDING_CONTRACT}` | **stable** | `wright-embedding/v1` |
 | Internal HIR/WIR arenas, parser/CST, emitter internals | **internal** | Never part of the public contract |
-| `wright serve` stdio/JSON-RPC adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
+| `wright serve` stdio/JSON-RPC/MCP adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
 | `wright-transform` passes | experimental per pass | Only evidence-backed passes ship in `compat`; `aggressive` is an explicit experimental marker |
 
 The Rust packages in this workspace are implementation packages for the Wright
@@ -103,7 +103,7 @@ diagnostics and never a partially applicable edit set. Wright
 **proposes and validates** edits; applying them to the filesystem is an
 explicit consumer responsibility because the semantic and tooling core never writes
 files. Capability discovery advertises `validateEditTransaction` and
-`semanticRename`; the stdio/JSON-RPC adapters forward the same operations
+`semanticRename`; the `serve` transport adapters forward the same operations
 unchanged (behaviorally equivalent, transport-tested).
 
 ## Safe edits
@@ -134,13 +134,16 @@ explicit caller responsibility.
 
 ## Transports
 
-`wright serve` exposes the same operations over stdio JSON-lines and JSON-RPC
-2.0; both map to the same `ToolService` results as in-process consumers
-(equivalence tested). The separate `wright-serve` workspace binary remains an
-alias for the same adapter. JSON-RPC protocol failures use the standard
-top-level `error` member, while a service refusal remains an application
-result under the top-level `result` member. Non-empty JSON-RPC arrays are
-handled as batches, with notification responses omitted.
+`wright serve` exposes the same operations over stdio JSON-lines, JSON-RPC
+2.0, and MCP (`--transport mcp`); all three map to the same `ToolService`
+results as in-process consumers (equivalence tested). The separate
+`wright-serve` workspace binary remains an alias for the same adapter.
+JSON-RPC protocol failures use the standard top-level `error` member, while a
+service refusal remains an application result under the top-level `result`
+member; the MCP adapter instead carries a refusal as an `isError` tool result
+with the same `{code, message}` ([`docs/agent-contract.md`](agent-contract.md)).
+Non-empty JSON-RPC arrays are handled as batches, with notification responses
+omitted.
 
 ## Versioning
 
