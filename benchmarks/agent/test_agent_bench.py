@@ -395,6 +395,15 @@ class ReportTest(unittest.TestCase):
         self.assertIn("HEADROOM", text)
         self.assertIn("INVALID: 1 run(s) excluded", text)
 
+    def test_report_shows_what_the_agent_was_actually_given(self):
+        run = self.result("wright+wright-skill/none/off", 1, True, 100)
+        run["agentInfo"] = {"version": "tool 1.2", "model": "m-1", "effort": "high", "tools": ["bash", "read"]}
+        run["context"] = {"loaded": ["wright"]}
+        bare = self.result("none/none/off", 1, True, 100)
+        text, _ = bench_report.render([run, bare])
+        self.assertIn("| m | wright+wright-skill/none/off | tool 1.2 | m-1 | high | 2: bash, read | wright |", text)
+        self.assertIn("| m | none/none/off | not recorded | not recorded | not recorded | not recorded | none |", text)
+
     def test_provider_failures_do_not_count_as_agent_failures(self):
         good = self.result("none/none/off", 1, True, 100)
         provider_failure = self.result("none/none/off", 2, False, 0)

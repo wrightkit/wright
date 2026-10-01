@@ -21,6 +21,8 @@ import sys
 import time
 from pathlib import Path
 
+from common import cli_version
+
 INFRA_EXIT = 75
 TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "websocket error", "connection error")
 SCALE = {"K": 1_000, "M": 1_000_000}
@@ -80,7 +82,7 @@ def main() -> int:
         cmd += ["--thinking", env["BENCH_THINKING"]]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home), "PI_CODING_AGENT_DIR": str(state)}
     limit = context_limit(pi, model, child_env, extensions)
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "pi", "model": model, "effort": env.get("BENCH_THINKING"), "tools": ["read", "bash", "edit", "write"], "extensions": [e for e in extensions if e]}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "pi", "version": cli_version(pi), "model": model, "effort": env.get("BENCH_THINKING"), "tools": ["read", "bash", "edit", "write"], "extensions": [e for e in extensions if e]}, indent=2))
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=child_env)
     proc.stdin.write(prompt)
     proc.stdin.close()

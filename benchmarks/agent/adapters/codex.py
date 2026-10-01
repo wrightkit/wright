@@ -13,6 +13,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from common import cli_version
+
 
 def usage_row(usage: dict, timestamp: float, limit: int | None) -> dict:
     cached = usage.get("cached_input_tokens") or 0
@@ -111,7 +113,7 @@ def main() -> int:
                     loaded += names
                     builtin += builtins
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": sorted(set(loaded) | {f"unexpected-mcp:{server}" for server in servers}), "builtinSkills": sorted(set(builtin))}))
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "codex", "model": observed.get("model") or model, "effort": observed.get("effort") or effort, "sandbox": "danger-full-access inside the harness file sandbox", "toolsObserved": sorted(t for t in item_types if t)}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "codex", "version": cli_version(binary), "model": observed.get("model") or model, "effort": observed.get("effort") or effort, "sandbox": "danger-full-access inside the harness file sandbox", "toolsObserved": sorted(t for t in item_types if t)}, indent=2))
     (run / "adapter.json").write_text(json.dumps({"agent": "codex", "requestedModel": model, "requestedEffort": effort, "observed": observed, "usageSource": "session-token-count" if observed else "turn-summary"}, indent=2))
     sys.stdout.write(final)
     stderr_text = (run / "codex-stderr.log").read_text()
