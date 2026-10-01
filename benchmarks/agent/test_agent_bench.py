@@ -32,7 +32,7 @@ class AgentBenchTest(unittest.TestCase):
     def trial(self, agent_cmd: str, tool: str = "wright", skills: tuple = (), knowledge: str = "none", scenario: str = SCENARIO, **options) -> dict:
         args = argparse.Namespace(**{
             "wright": str(Path(WRIGHT).resolve()), "agent_id": "fake", "agent_cmd": agent_cmd, "timeout": 60, "infra_retries": 2,
-            "env_pass": [], "canary_cmd": None, "skill_dirs": {}, "wiki_dir": None, "check_ancestors": False, **options,
+            "env_pass": [], "canary_cmd": None, "skill_dirs": {}, "wiki_dir": None, "check_ancestors": False, "out": self.out, **options,
         })
         cell = agent_bench.normalize_cell({"tool": tool, "skills": list(skills), "knowledge": knowledge, "network": "off"})
         return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{tool}")
@@ -188,6 +188,22 @@ class AgentBenchTest(unittest.TestCase):
         self.assertIn("PermissionError", (self.out / f"{SCENARIO}-wright/agent.log").read_text())
         self.assertEqual(host.read_text(), "host-only instructions")
         self.assertEqual((self.out / f"{SCENARIO}-wright/workspace/AGENTS.md").read_text(), "workspace instructions")
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_agent_cannot_read_answer_keys_other_runs_or_denied_paths(self):
+        import shlex
+        denied = self.out / "checkout"
+        denied.mkdir()
+        (denied / "secret.txt").write_text("sibling repository")
+        answer = agent_bench.SCENARIOS / SCENARIO / "reference" / "mode.ws"
+        probes = {"answer": answer, "denied": denied / "secret.txt"}
+        code = ("from pathlib import Path\nimport json\nout = {}\n"
+                + "".join(f"try:\n    Path({str(p)!r}).read_text(); out[{k!r}] = 'read'\nexcept PermissionError:\n    out[{k!r}] = 'blocked'\n" for k, p in probes.items())
+                + "Path('probe.json').write_text(json.dumps(out))\nPath('own.txt').write_text('ok'); assert Path('own.txt').read_text() == 'ok'\n")
+        result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True, deny_read=[str(denied)])
+        workspace = self.out / f"{SCENARIO}-wright/workspace"
+        self.assertEqual(json.loads((workspace / "probe.json").read_text()), {"answer": "blocked", "denied": "blocked"})
+        self.assertIn(str(denied.resolve()), result["fileReadEnforcement"])
 
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
