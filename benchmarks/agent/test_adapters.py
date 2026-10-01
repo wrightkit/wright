@@ -1,4 +1,7 @@
 import sys
+import io
+import json
+from unittest.mock import patch, MagicMock
 import unittest
 from pathlib import Path
 
@@ -17,6 +20,36 @@ class PiAdapterTest(unittest.TestCase):
         self.assertEqual((row["input"], row["cache_read"], row["cache_write"], row["context"], row["context_limit"]), (586, 400, 100, 1086, 272_000))
         self.assertEqual((row["output"], row["reasoning"]), (2, 3))
         self.assertEqual(sum(row[key] or 0 for key in ("input", "output", "cache_read", "cache_write", "reasoning")), 1091)
+
+    def test_recovered_provider_error_does_not_fail_completed_task(self):
+        outage = {"role": "assistant", "stopReason": "error", "errorMessage": "WebSocket error"}
+        recovered = {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": "done"}]}
+        for messages, expected in (([outage, recovered], 0), ([recovered, outage], 75)):
+            with self.subTest(expected=expected):
+                proc = MagicMock()
+                proc.stdin = io.StringIO()
+                proc.stdout = io.StringIO("".join(json.dumps({"type": "message_end", "message": m}) + "\n" for m in messages))
+                proc.stderr = io.StringIO()
+                proc.wait.return_value = 0
+                env = {
+                    "HOME": "/isolated", "BENCH_MODEL": "provider/model", "BENCH_RUN_DIR": "/run",
+                    "BENCH_KNOWLEDGE": "none", "BENCH_USAGE": "/run/usage",
+                    "BENCH_TRANSCRIPT": "/run/transcript", "BENCH_CONTEXT": "/run/context",
+                }
+                with (
+                    patch.dict(pi.os.environ, env, clear=True),
+                    patch.object(pi.sys, "stdin", io.StringIO("task")),
+                    patch.object(pi.sys, "stdout", io.StringIO()),
+                    patch.object(pi.sys, "stderr", io.StringIO()),
+                    patch.object(pi.shutil, "which", return_value="pi"),
+                    patch.object(pi.Path, "mkdir"),
+                    patch.object(pi.Path, "is_file", return_value=False),
+                    patch.object(pi.Path, "write_text"),
+                    patch.object(pi, "context_limit", return_value=None),
+                    patch.object(pi.subprocess, "Popen", return_value=proc),
+                    patch("builtins.open", side_effect=lambda *a, **kw: io.StringIO()),
+                ):
+                    self.assertEqual(pi.main(), expected)
 
     def test_loaded_skills_and_final_text(self):
         system = {"sections": {"skills": "<available_skills><skill><name>wright</name></skill><skill><name>other</name></skill></available_skills>"}}

@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits")
+TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "websocket error", "connection error")
 WEB_TOOLS = ["WebFetch", "WebSearch", "webfetch", "web_search"]
 MCP_TOOLS = ["mcp_call_tool", "mcp_list_tools", "mcp_list_servers", "mcp_read_resource"]  # org-managed plugins install MCP servers
 NO_TOOL_CONFIG = {"claude": False, "cursor": False, "windsurf": False, "codex": False}

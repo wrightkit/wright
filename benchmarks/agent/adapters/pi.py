@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits")
+TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "websocket error", "connection error")
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
@@ -103,6 +103,8 @@ def main() -> int:
                 final = message_text(message) or final
                 if message.get("stopReason") == "error":
                     error = str(message.get("errorMessage") or message_text(message))
+                else:
+                    error = ""
     stderr = proc.stderr.read()
     code = proc.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
