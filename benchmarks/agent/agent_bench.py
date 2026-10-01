@@ -476,6 +476,44 @@ CONTROL_CELLS = [
 ]
 
 
+ADAPTER_BINARY = {"claude-code": "claude", "pi": "pi", "devin": "devin", "codex": "codex", "agy": "agy", "opencode": "opencode", "grok": "grok"}
+DIRECT_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL")
+CONFIG_PATH = Path(os.environ.get("WRIGHT_BENCH_CONFIG", Path.home() / ".config/wright-agent-bench/config.json"))
+
+
+def user_defaults() -> dict:
+    """Per-user defaults for the long options, so a run is `evaluate --adapter A --model M`: keys wright, out, wiki_dir, env_pass, deny_read, skill_dirs {name: dir}."""
+    if not CONFIG_PATH.is_file():
+        return {}
+    config = json.loads(CONFIG_PATH.read_text())
+    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "skill_dirs"}
+    if unknown:
+        raise SystemExit(f"{CONFIG_PATH}: unknown key(s) {sorted(unknown)}")
+    defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir")}
+    defaults.update({k: Path(v).expanduser() for k, v in config.items() if k in ("out", "wiki_dir")})
+    if "skill_dirs" in config:
+        defaults["skill_dir"] = [f"{name}={Path(d).expanduser()}" for name, d in config["skill_dirs"].items()]
+    return defaults
+
+
+def preflight(args: argparse.Namespace, cells: list[dict]) -> list[str]:
+    """Problems that would waste a run, found before it starts."""
+    problems = []
+    if not Path(args.wright).is_file():
+        problems.append(f"wright binary not found: {args.wright} (pass --wright or put `wright` on PATH)")
+    binary = ADAPTER_BINARY.get(args.adapter)
+    if binary and not shutil.which(binary):
+        problems.append(f"`{binary}` is not on PATH, which adapter '{args.adapter}' needs")
+    if args.adapter == "direct" and not any(os.environ.get(k) for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")):
+        problems.append("adapter 'direct' needs ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment")
+    for name in sorted({s for c in cells for s in c["skills"]}):
+        if not (Path(args.skill_dirs.get(name, "/nonexistent")) / "SKILL.md").is_file():
+            problems.append(f"skill '{name}' needs --skill-dir {name}=DIR (or skill_dirs in {CONFIG_PATH})")
+    if any(c["tool"] == "overpy" for c in cells) and not bench_grade.oracle_available():
+        problems.append("tool 'overpy' needs the pinned oracle: run `agent_bench.py setup-oracle`")
+    return problems
+
+
 def cmd_evaluate(args: argparse.Namespace) -> int:
     """One command from agent and model to data and document: run the matrix, then write report, score cards, and RESULTS.md.
 
@@ -493,7 +531,17 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         print(f"skipped cells without --skill-dir: {', '.join(dropped)}", flush=True)
     if not cells:
         raise SystemExit("no cell can run: pass --skill-dir wright-skill=DIR")
+    args.env_pass = sorted({*args.env_pass, *(DIRECT_ENV if args.adapter == "direct" else ("HOME",))})  # the credentials the adapter copies or reads
+    problems = preflight(args, [normalize_cell(c) for c in cells])
+    if problems:
+        raise SystemExit("cannot start:\n  " + "\n  ".join(problems))
+    if args.file_sandbox and not args.deny_read:
+        print("note: no --deny-read, so the agent can still read the host's repository checkouts (the scenarios are always hidden)", flush=True)
     scenarios = args.scenarios or [s for s in all_scenario_ids() if args.split == "all" or load_scenario(s).get("split") == args.split]
+    runnable = sum(args.trials for s in scenarios for c in cells if applicable(load_scenario(s), normalize_cell(c)))
+    print(f"{args.adapter} {args.model}: {len(scenarios)} scenario(s), cells {', '.join(cell_label(normalize_cell(c)) for c in cells)}, {runnable} trial(s) into {args.out / args.name}", flush=True)
+    if args.dry_run:
+        return 0
     args.out = args.out / args.name
     args.out.mkdir(parents=True, exist_ok=True)
     config = {"agents": [{"id": agent_id, "cmd": cmd}], "cells": cells, "scenarios": scenarios, "trials": args.trials, "parallel": args.parallel, "seed": args.seed,
@@ -571,6 +619,7 @@ def main() -> int:
     ev.add_argument("--trials", type=int, default=3)
     ev.add_argument("--parallel", type=int, default=2)
     ev.add_argument("--seed", type=int, default=1)
+    ev.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
     ev.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox: the agent can then read the scenario answer keys")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
     skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-wiki skill from a wiki snapshot")
@@ -590,6 +639,11 @@ def main() -> int:
     score = sub.add_parser("score", help="compute the Wright Agent Score card of each language track from canonical test runs")
     score.add_argument("dirs", nargs="+", type=Path)
     score.add_argument("--language", choices=("workshop", "opy"), action="append", help="track to score; both when omitted")
+    defaults = user_defaults()
+    for choice in sub.choices.values():
+        known = {a.dest for a in choice._actions}
+        choice.set_defaults(**{k: v for k, v in defaults.items() if k in known})
+    sub.choices["evaluate"].set_defaults(wright=defaults.get("wright") or shutil.which("wright") or str(ROOT / "target/debug/wright"))
     args = parser.parse_args()
     if hasattr(args, "wright"):
         args.wright = str(Path(args.wright).resolve())
