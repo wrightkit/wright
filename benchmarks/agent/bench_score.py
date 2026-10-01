@@ -137,6 +137,30 @@ def render(c: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+COMPARABLE = ("wrightSha256", "skills", "suite")  # what must match for two cards to be read side by side; agent, model, and effort are what is being compared
+
+
+def compare(dirs: list[Path]) -> str:
+    """One table from the score cards of several evaluation runs, with a warning when they were not made against the same Wright, skills, and suite."""
+    rows, identities = [], {}
+    for directory in dirs:
+        for card_ in json.loads((directory / "score.json").read_text())["cards"]:
+            if "refused" in card_:
+                rows.append((card_["track"], directory.name, "no score", card_["refused"]))
+                continue
+            ident = card_["identity"]
+            identities.setdefault(card_["track"], []).append((directory.name, {k: ident[k] for k in COMPARABLE}))
+            label = " ".join(filter(None, (ident["agent"], ident["effort"] and f"effort {ident['effort']}")))
+            note = "provisional: " + "; ".join(card_["provisional"]) if card_["provisional"] else ""
+            rows.append((card_["track"], directory.name, f"{card_['score']} [{card_['ci95'][0]}-{card_['ci95'][1]}]", f"{label}; {card_['trialsPerScenario']} trial(s) x {card_['scenarios']} scenarios; excluded {card_['exclusions'] or 'none'}. {note}".strip()))
+    lines = ["| track | run | score [95% CI] | agent and notes |", "| --- | --- | --- | --- |", *(f"| {t} | {d} | {s} | {n} |" for t, d, s, n in sorted(rows))]
+    for track, entries in identities.items():
+        differing = sorted({k for _, a in entries for _, b in entries for k in COMPARABLE if a[k] != b[k]})
+        if differing:
+            lines.append(f"\nWARNING {track}: runs differ in {', '.join(differing)}, so these scores are not directly comparable.")
+    return "\n".join(lines) + "\n"
+
+
 def main(dirs: list[Path], languages: list[str], expected_by_language: dict[str, list[str]], out: Path | None) -> int:
     from bench_report import load
     results = load(dirs)

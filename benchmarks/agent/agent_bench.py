@@ -636,6 +636,8 @@ def main() -> int:
     report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
     report.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
     report.add_argument("--reference", default=bench_report.BASELINE, help="condition label the paired comparison is made against")
+    compare = sub.add_parser("compare", help="one table from the score.json of several evaluation runs, warning when they are not comparable")
+    compare.add_argument("dirs", nargs="+", type=Path)
     score = sub.add_parser("score", help="compute the Wright Agent Score card of each language track from canonical test runs")
     score.add_argument("dirs", nargs="+", type=Path)
     score.add_argument("--language", choices=("workshop", "opy"), action="append", help="track to score; both when omitted")
@@ -668,6 +670,9 @@ def main() -> int:
         return cmd_wiki_skill(args)
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s), args.reference)
+    if args.command == "compare":
+        print(bench_score.compare(args.dirs))
+        return 0
     if args.command == "score":
         languages = args.language or ["workshop", "opy"]
         expected = {lang: [s for s in all_scenario_ids() if load_scenario(s)["language"] == lang and load_scenario(s).get("split") == "test"] for lang in languages}
