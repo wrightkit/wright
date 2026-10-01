@@ -39,4 +39,5 @@ its audit date.
 * [ADR-0017: Domain-intelligence query contract](0017-domain-intelligence-query-contract.md)
 * [ADR-0018: Tests-first integration verification](0018-tests-first-integration-verification.md)
 * [ADR-0019: Stable installer bootstrap distribution](0019-stable-installer-bootstrap-distribution.md)
+* [ADR-0020: Native coding-agent tools as an MCP adapter over `ToolService`](0020-native-agent-tool-adapter.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
