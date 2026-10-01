@@ -85,6 +85,14 @@ def authorities(wright: str, source: Path, scratch: Path) -> dict:
     return result
 
 
+def missing_entry_authorities(entry: Path) -> dict:
+    """The agent produced no entry file: every authority rejects it, and the oracle is only unavailable when it is not installed."""
+    result: dict = {"wrightCompile": {"status": "error", "error": "entry file missing"}}
+    if entry.suffix == ".opy" and oracle_available():
+        result["oracle"] = {"status": "error", "error": "entry file missing"}
+    return result
+
+
 def compiled_text(state: dict, source: str) -> str | None:
     """Compiled Workshop text from `wright` or the upstream `oracle`, when that authority succeeded."""
     auth = state["authorities"]
@@ -206,7 +214,7 @@ def grade(scenario: dict, workspace: Path, wright: str, scratch: Path | None = N
     entry = workspace / scenario["entry"]
     scratch = scratch or workspace.parent / f"{workspace.name}-grading"
     shutil.rmtree(scratch, ignore_errors=True)
-    state: dict = {"scratch": scratch, "authorities": authorities(wright, entry, scratch) if entry.is_file() else {"wrightCompile": {"status": "error"}}}
+    state: dict = {"scratch": scratch, "authorities": authorities(wright, entry, scratch) if entry.is_file() else missing_entry_authorities(entry)}
     _, lint = wright_json(wright, ["lint", str(entry)])
     state["lint"] = (lint.get("result") or {}).get("findings") or []
     checks = [run_check(c, workspace, entry, wright, state) for c in scenario["checks"]]
