@@ -1,5 +1,6 @@
 mod cli;
 mod completion;
+mod mcp;
 mod present;
 mod provider;
 mod serve;

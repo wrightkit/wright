@@ -60,6 +60,7 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
     match args.transport.as_str() {
         "stdio" => serve_stdio(&mut service),
         "jsonrpc" => serve_jsonrpc(&mut service),
+        "mcp" => crate::mcp::serve_mcp(&mut service),
         other => {
             eprintln!("wright: unknown transport '{other}'");
             ExitCode::from(2)
@@ -81,7 +82,7 @@ fn serve_jsonrpc(service: &mut ToolService<'_>) -> ExitCode {
     })
 }
 
-fn serve_lines(mut dispatch: impl FnMut(&str) -> Option<String>) -> ExitCode {
+pub(crate) fn serve_lines(mut dispatch: impl FnMut(&str) -> Option<String>) -> ExitCode {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     for line in std::io::stdin().lock().lines().map_while(Result::ok) {

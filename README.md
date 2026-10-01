@@ -157,7 +157,7 @@ wright inspect symbols|refs|cfg|callgraph|cost
 wright rename OLD NEW [INPUT]   # previews a diff; --write applies it
 wright compile [INPUT]      # emit Workshop text
 wright convert [INPUT] --target opy
-wright serve [INPUT]        # wright-agent/v1 over stdio or JSON-RPC 2.0
+wright serve [INPUT]        # wright-agent/v1 over stdio, JSON-RPC 2.0, or MCP
 wright update | completion
 ```
 
@@ -184,7 +184,8 @@ wright lint input.opy --format json
 ### Agents and editors
 
 `wright serve` exposes the `wright-agent/v1` session contract (capabilities,
-findings, queries, workflows, and validated edits); see
+findings, queries, workflows, and validated edits); `--transport mcp` serves
+the same contract as native MCP tools to tool-capable harnesses. See
 [`docs/agent-contract.md`](docs/agent-contract.md). `wright-lsp` currently
 provides document synchronization only, as described above.
 
