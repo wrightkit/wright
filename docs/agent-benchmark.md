@@ -155,8 +155,15 @@ processes: filesystem writes are restricted to that trial's output directory
 (plus device streams), and `TMPDIR` points inside it. Unsupported hosts fail
 instead of silently running without protection. This protects host files; it
 blocks reads of `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outside the trial workspace
-to prevent tool-path rule discovery from contaminating context. Other host reads
-remain possible, and network isolation is not enforced. Model
+to prevent tool-path rule discovery from contaminating context. It also hides from
+the agent the scenarios (their reference solutions), every other run under `--out`,
+the wiki snapshot, skills outside the condition, and any `--deny-read PATH`, such as
+the checkouts of the repositories under test. The adapter, harness code, the `wright`
+binary directory, and the condition's skills stay readable. The result lists the
+denied paths in `fileReadEnforcement`. Without this, agents find the answer keys and the
+owner repositories on the host (seen in practice), so `evaluate` turns the sandbox on by
+default (`--no-file-sandbox` disables it). Other host reads remain possible, and
+network isolation is not enforced. Model
 account usage, CPU and disk consumption remain shared with the host. Provider
 failures returned as exit 75 are listed separately and excluded from outcome
 metrics. The harness never edits the task prompt: network `off` and the workspace

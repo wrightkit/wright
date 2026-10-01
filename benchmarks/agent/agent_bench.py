@@ -207,6 +207,21 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
     return None
 
 
+def read_denials(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[Path]]:
+    """Paths the agent must not read, and the paths inside them it still needs.
+
+    Agents read the whole machine: the scenario answer keys, other trials' workspaces, the wiki, skills outside the condition, and
+    sibling checkouts of the repositories under test. Without this the benchmark measures what the agent could find, not what it was given."""
+    run_dir = Path(env["BENCH_RUN_DIR"]).resolve()
+    selected = [name for name in env["BENCH_SKILLS"].split(",") if name]
+    denied = [args.out.resolve(), SCENARIOS, *(Path(p).expanduser().resolve() for p in getattr(args, "deny_read", []) or [])]
+    if getattr(args, "wiki_dir", None):
+        denied.append(Path(args.wiki_dir).resolve())
+    denied += [Path(d).resolve() for name, d in (args.skill_dirs or {}).items() if name not in selected]
+    allowed = [run_dir, HERE, Path(args.wright).resolve().parent, *(Path(args.skill_dirs[name]).resolve() for name in selected)]
+    return denied, allowed
+
+
 def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str) -> tuple[int | None, str, str]:
     command = args.agent_cmd
     if getattr(args, "file_sandbox", False):
@@ -216,11 +231,15 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
         temporary = run_dir / "tmp"
         temporary.mkdir(exist_ok=True)
         env = {**env, "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1"}
+        denied, allowed = read_denials(args, env)
+        rules = "".join(f"(deny file-read-data (subpath {json.dumps(str(p))}))\n" for p in denied)
+        rules += "".join(f"(allow file-read-data (subpath {json.dumps(str(p))}))\n" for p in allowed)
+        rules += f"(deny file-read-data (subpath {json.dumps(str(SCENARIOS))}))\n"  # the answer keys stay hidden even though the harness directory is readable
         profile = run_dir / "agent.sb"
         profile.write_text('(version 1)\n(allow default)\n(deny file-write*)\n'
                            f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n'
                            '(deny file-read-data (require-all (regex "/(AGENTS|CLAUDE|GEMINI)[.]md$") '
-                           f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n')
+                           f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n' + rules)
         command = ["sandbox-exec", "-f", str(profile), "/bin/sh", "-c", args.agent_cmd]
     proc = subprocess.Popen(
         command, shell=isinstance(command, str), cwd=workspace, env=env, text=True,
@@ -290,6 +309,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     result["infraRetries"] = infra_retries
     result["networkEnforcement"] = "canary-checked" if cell["network"] == "off" and args.canary_cmd else "declared-only"
     result["fileWriteEnforcement"] = "trial-directory-only" if getattr(args, "file_sandbox", False) else "unrestricted"
+    result["fileReadEnforcement"] = [str(p) for p in read_denials(args, env)[0]] if getattr(args, "file_sandbox", False) else "unrestricted"
     context = context_report(out, [skill_name(Path(args.skill_dirs[name])) for name in cell["skills"]])
     result["context"] = context
     if context.get("unexpected"):
@@ -461,6 +481,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
     Needs no agent harness around it: isolation comes from the harness's own scrubbed environment, so it runs the same from a
     terminal or from inside another agent's shell."""
+    args.file_sandbox = not args.no_file_sandbox  # evaluation hides the answer keys and the host's checkouts from the agent by default
     script = Path(__file__).parent / "adapters" / ADAPTERS[args.adapter]
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
     agent_id = "-".join(filter(None, (args.adapter, args.model.replace("/", "_"), args.effort)))
@@ -525,7 +546,8 @@ def main() -> int:
         p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")
         p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
         p.add_argument("--timeout", type=int, default=1800)
-        p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory")
+        p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory, and hide the scenarios, other runs, the wiki, unselected skills, and --deny-read paths")
+        p.add_argument("--deny-read", nargs="*", default=[], metavar="PATH", help="directories the agent must not read, such as the checkouts of the repositories under test; needs --file-sandbox")
         p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
         p.add_argument("--infra-backoff", type=int, default=60, help="seconds before the first retry; each further retry waits one more multiple")
     run = sub.choices["run"]
@@ -549,6 +571,7 @@ def main() -> int:
     ev.add_argument("--trials", type=int, default=3)
     ev.add_argument("--parallel", type=int, default=2)
     ev.add_argument("--seed", type=int, default=1)
+    ev.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox: the agent can then read the scenario answer keys")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
     skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-wiki skill from a wiki snapshot")
     skill.add_argument("--snapshot", type=Path, required=True)
@@ -579,6 +602,8 @@ def main() -> int:
             if name not in SKILLS or not directory:
                 raise SystemExit(f"--skill-dir expects NAME=DIR with NAME one of {', '.join(SKILLS)}: {item}")
             args.skill_dirs[name] = Path(directory)
+    if getattr(args, "deny_read", None) and not getattr(args, "file_sandbox", False) and args.command != "evaluate":
+        raise SystemExit("--deny-read needs --file-sandbox")
     if args.command == "validate":
         return 0 if validate(args.wright, args.out) else 1
     if args.command == "setup-oracle":
