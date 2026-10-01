@@ -101,6 +101,22 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(card["cards"][0]["score"], 100.0)
         self.assertEqual(bench_score.main([root], ["workshop"], {"workshop": SCENARIOS}, None), 2)
 
+    def test_compare_tables_runs_and_warns_when_the_environment_differs(self):
+        root = Path(tempfile.mkdtemp(dir=Path(__file__).resolve().parents[2] / "target"))
+        self.addCleanup(shutil.rmtree, root, True)
+        for name, sha, model in (("codex-run", "a" * 64, "luna"), ("pi-run", "d" * 64, "luna2")):
+            directory = root / name
+            directory.mkdir()
+            card = bench_score.card(runs(SCENARIOS[:6], sha=sha, model=model), "opy", SCENARIOS)
+            (directory / "score.json").write_text(json.dumps({"contract": bench_score.CONTRACT, "cards": [card]}))
+        table = bench_score.compare([root / "codex-run", root / "pi-run"])
+        self.assertIn("codex-run", table)
+        self.assertIn("pi-run", table)
+        self.assertIn("effort high", table)
+        self.assertIn("runs differ in wrightSha256", table)
+        same = bench_score.compare([root / "codex-run"])
+        self.assertNotIn("WARNING", same)
+
 
 if __name__ == "__main__":
     unittest.main()

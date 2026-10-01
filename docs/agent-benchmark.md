@@ -350,6 +350,23 @@ recorded in `agentInfo.protocol`. It does not sandbox the network, so pair it wi
 `--canary-cmd`. Scores from `direct` and from product harnesses measure different
 things and are not mixed.
 
+### Running different models at different times
+
+Each `evaluate` writes its own directory and scores only its own runs, so models
+and agents can be run whenever quota allows, in any order. Put the runs side by side
+with
+
+```sh
+python3 benchmarks/agent/agent_bench.py compare ~/.cache/wright-agent-bench/{devin-swe2-stage1,codex-luna-xhigh,pi-luna-xhigh}
+```
+
+which prints one table of scores, intervals, trials, and exclusions, and warns when
+the runs differ in the Wright binary, skill contents, or suite (scenarios, grader,
+oracle lock). Scores are comparable when it prints no warning. Keep the Wright
+binary, skills, and scenarios unchanged between runs; changes to the rest of the
+harness are disclosed in each card's `Harness` line and do not block comparison.
+An interrupted run resumes by repeating the same command with the same `--name`.
+
 ## Cadence
 
 The benchmark does not gate pull requests. Run it manually or on a schedule once
