@@ -1,6 +1,6 @@
 # ADR-0020: Native coding-agent tools as an MCP adapter over `ToolService`
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-01
 - Related: [Issue #470](https://github.com/wrightkit/wright/issues/470), [Agent contract](../agent-contract.md), [ADR-0017](0017-domain-intelligence-query-contract.md), [Agent benchmark](../agent-benchmark.md)
 
