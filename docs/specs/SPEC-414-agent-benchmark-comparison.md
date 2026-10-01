@@ -39,16 +39,19 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
 
 ### Conditions
 
-- REQ-001: A run is defined by (Wright level, knowledge level, tool network). Wright level is `none`, `bin`
-  (on PATH through the tracing shim), or `bin+skill` (plus the guide from a pinned `wrightkit/skills` commit,
-  installed through the agent's own skill mechanism). Knowledge level is `none`, `wiki` (a read-only local
-  snapshot of the Workshop wiki Markdown mirror, pinned by hash, with no added index or tool), `wiki-skill`
-  (a separately generated local `workshop-wiki` skill with category indexes and article files, pinned by
-  snapshot and skill content hashes, usable without Wright), or `web`
-  (standard fetch and search tools). Tool network is `off` or `on`; `web` implies `on`.
-- REQ-002: Tier 1 conditions are `none/none`, `bin/none`, `bin+skill/none`, `none/web`, `none/wiki`,
-  `none/wiki-skill`. The local pilot uses the five non-web cells first. Tier 2 is
-  `bin+skill/web`, `bin+skill/wiki`, `bin/wiki`. The task and prompt are identical across conditions.
+- REQ-001: A run is defined by (tool, skills, knowledge, network), labelled `tool[+skill...]/knowledge/network`.
+  Tool is `none`, `wright` (on PATH through the tracing shim), or `overpy` (the pinned compiler through the
+  same shim; OverPy scenarios only). Skills is any subset of `wright-skill` and `workshop-skill` (the local
+  progressive wiki skill, pinned by snapshot and content hashes, usable without Wright), plus `opy-skill`
+  (OverPy only) and `workshop-format-skill` (Workshop only), each installed through the agent's own skill
+  mechanism. Knowledge is `none`, `wiki` (a local snapshot copied into the workspace, pinned by hash, with no
+  added index or tool), or `web` (standard fetch and search tools). Network is `off` or `on`; `web` implies
+  `on`. Pairs not applicable to a scenario's language are skipped, not failed.
+- REQ-002: Tier 1 cells are `none/none/off`, `wright/none/off`, `wright+wright-skill/none/off`,
+  `none/web/on`, `none/wiki/off`, `workshop-skill/none/off`; OverPy scenarios add `overpy/none/off` and
+  `overpy+opy-skill/none/off` as language-appropriate controls. The canonical score cell is
+  `wright+wright-skill/none/off` (`wright-agent-score/v1`, per language track, defined in
+  `docs/agent-benchmark.md`). The task prompt is the scenario's `prompt.md`, identical across conditions.
 - REQ-003: Each run passes a canary before the agent starts, and a failed canary invalidates the run: `none`
   Wright means `command -v wright` fails and no install path is reachable; `off` means an attempted fetch from
   the agent's tool environment fails while the model channel still works.
