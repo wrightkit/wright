@@ -308,6 +308,25 @@ held-out scenarios, missing scenarios, or unequal trials. The card discloses
 
 ## Evaluating without an agent harness
 
+Quick start. Put your paths in `~/.config/wright-agent-bench/config.json` once
+(`WRIGHT_BENCH_CONFIG` overrides the location):
+
+```json
+{"skill_dirs": {"wright-skill": "~/skills/skills/wright", "opy-skill": "~/skills/skills/overpy"},
+ "deny_read": ["~/Repos", "~/.agents", "~/.claude"],
+ "wiki_dir": "~/.local/share/wright-agent-bench/wiki"}
+```
+
+then run one command per agent. `--dry-run` checks the setup (wright binary, the
+agent CLI, credentials, skill directories, the oracle) and prints the plan without
+running anything; `wright` is taken from `PATH` unless `--wright` or the config says
+otherwise, and the credentials each adapter needs are passed through automatically.
+
+```sh
+python3 benchmarks/agent/agent_bench.py evaluate --adapter devin --model swe-2-max --dry-run
+python3 benchmarks/agent/agent_bench.py evaluate --adapter devin --model swe-2-max
+```
+
 `agent_bench.py evaluate --adapter ADAPTER --model MODEL --skill-dir wright-skill=DIR`
 is the one-command entry: it writes `matrix.json`, runs the cells, then writes
 `report.md`, `summary.json`, `score.json`, `score.txt`, and `RESULTS.md` into

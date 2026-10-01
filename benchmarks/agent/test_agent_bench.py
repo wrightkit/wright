@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import agent_bench
@@ -204,6 +205,23 @@ class AgentBenchTest(unittest.TestCase):
         workspace = self.out / f"{SCENARIO}-wright/workspace"
         self.assertEqual(json.loads((workspace / "probe.json").read_text()), {"answer": "blocked", "denied": "blocked"})
         self.assertIn(str(denied.resolve()), result["fileReadEnforcement"])
+
+    def test_user_defaults_are_read_from_the_config_file(self):
+        config = self.out / "config.json"
+        config.write_text(json.dumps({"skill_dirs": {"wright-skill": "/s/wright"}, "deny_read": ["~/Repos"], "wright": "/bin/wright"}))
+        with patch.object(agent_bench, "CONFIG_PATH", config):
+            defaults = agent_bench.user_defaults()
+        self.assertEqual((defaults["skill_dir"], defaults["deny_read"], defaults["wright"]), (["wright-skill=/s/wright"], ["~/Repos"], "/bin/wright"))
+        config.write_text(json.dumps({"skil_dirs": {}}))
+        with patch.object(agent_bench, "CONFIG_PATH", config), self.assertRaises(SystemExit):
+            agent_bench.user_defaults()
+
+    def test_preflight_names_what_is_missing_before_a_run_starts(self):
+        args = argparse.Namespace(wright=str(self.out / "nope"), adapter="devin", skill_dirs={})
+        with patch.object(agent_bench.shutil, "which", return_value=None):
+            problems = agent_bench.preflight(args, [agent_bench.normalize_cell({"tool": "wright", "skills": ["wright-skill"], "knowledge": "none", "network": "off"})])
+        self.assertEqual(len(problems), 3)
+        self.assertTrue(any("wright binary not found" in p for p in problems) and any("`devin` is not on PATH" in p for p in problems) and any("--skill-dir wright-skill" in p for p in problems))
 
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
