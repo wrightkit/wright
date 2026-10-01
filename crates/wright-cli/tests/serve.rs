@@ -732,25 +732,18 @@ fn mcp_transport_results_match_the_service_contract() {
     ];
     let mut mcp_lines = vec![];
     let mut stdio_lines = vec![];
-    let mut ops = vec![];
     for (id, (tool, arguments)) in cases.iter().enumerate() {
         mcp_lines.push(mcp_call(id as u64 + 1, tool, arguments.clone()));
-        let mut request = arguments.clone();
-        request["op"] = serde_json::json!(tool.trim_start_matches("wright_"));
-        ops.push(match tool.trim_start_matches("wright_") {
+        let op = match tool.trim_start_matches("wright_") {
             "call_graph" => "callGraph",
             "cost_estimate" => "costEstimate",
             "semantic_rename" => "semanticRename",
             "validate_edit_transaction" => "validateEditTransaction",
             other => other,
-        });
-        stdio_lines.push(String::new());
-    }
-    // Build the stdio requests with the resolved op names.
-    for (i, (op, (_, arguments))) in ops.iter().zip(cases.iter()).enumerate() {
+        };
         let mut request = arguments.clone();
         request["op"] = serde_json::json!(op);
-        stdio_lines[i] = serde_json::to_string(&request).unwrap();
+        stdio_lines.push(serde_json::to_string(&request).unwrap());
     }
     let mcp = run_lines(
         "mcp",

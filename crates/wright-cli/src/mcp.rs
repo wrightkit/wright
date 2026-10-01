@@ -231,8 +231,10 @@ fn build_tools(service: &ToolService<'_>) -> (Vec<Tool>, String, String) {
 
 pub(crate) fn serve_mcp(service: &mut ToolService<'_>) -> ExitCode {
     let (tools, name, version) = build_tools(service);
-    let mut dispatch = |line: &str| dispatch_message(service, &tools, &name, &version, line);
-    serve_lines(|line| dispatch(line).map(|response| response.to_string()))
+    serve_lines(|line| {
+        dispatch_message(service, &tools, &name, &version, line)
+            .map(|response| response.to_string())
+    })
 }
 
 fn dispatch_message(
@@ -255,12 +257,14 @@ fn dispatch_message(
     let Some(method) = object.get("method").and_then(Value::as_str) else {
         return Some(error_response(Value::Null, -32600, "Invalid Request"));
     };
-    let id = object.get("id").cloned();
-    let Some(id) = id else {
+    let Some(id) = object.get("id").cloned() else {
         // Notifications (initialized, cancelled, progress) carry no id and
         // get no response.
         return None;
     };
+    if !matches!(id, Value::Null | Value::String(_) | Value::Number(_)) {
+        return Some(error_response(Value::Null, -32600, "Invalid Request"));
+    }
     let params = object.get("params").cloned().unwrap_or(Value::Null);
     let result = match method {
         "initialize" => Ok(json!({
@@ -402,5 +406,48 @@ mod tests {
         let payload: Value =
             serde_json::from_str(ok["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(payload["answer"], 42);
+    }
+
+    #[test]
+    fn initialize_negotiates_versions_and_ids_are_checked() {
+        use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests/fixtures/workshop/synthetic/basic-rule.ws");
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(input),
+            kind: SourceKind::Workshop,
+            ..SessionConfig::default()
+        })
+        .unwrap();
+        let mut service = ToolService::new(&mut session).unwrap();
+        let (tools, name, version) = build_tools(&service);
+
+        // An unknown client version falls back to the newest supported; the
+        // string id is echoed.
+        let response = dispatch_message(
+            &mut service,
+            &tools,
+            &name,
+            &version,
+            r#"{"jsonrpc":"2.0","id":"abc","method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
+        )
+        .unwrap();
+        assert_eq!(response["id"], "abc");
+        assert_eq!(response["result"]["protocolVersion"], "2025-11-25");
+
+        // Object/array ids are not valid JSON-RPC ids, matching the jsonrpc
+        // transport's check.
+        let response = dispatch_message(
+            &mut service,
+            &tools,
+            &name,
+            &version,
+            r#"{"jsonrpc":"2.0","id":{"x":1},"method":"ping"}"#,
+        )
+        .unwrap();
+        assert_eq!(response["id"], Value::Null);
+        assert_eq!(response["error"]["code"], -32600);
     }
 }
