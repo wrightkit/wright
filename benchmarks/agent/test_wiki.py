@@ -71,11 +71,11 @@ class WikiSnapshotTest(unittest.TestCase):
             bench_wiki.snapshot(self.base, self.tmp / "d", categories=("missing",), delay=0)
 
     def test_wiki_level_needs_a_snapshot(self):
-        cell = {"wright": "none", "knowledge": "wiki", "network": "off"}
+        cell = {"tool": "none", "skills": [], "knowledge": "wiki", "network": "off"}
         with self.assertRaises(SystemExit):
-            agent_bench.check_cell(cell, argparse.Namespace(skill_dir=None, wiki_dir=self.tmp, wiki_skill_dir=None))
+            agent_bench.check_cell(cell, argparse.Namespace(skill_dirs={}, wiki_dir=self.tmp))
         self.crawl("snap")
-        agent_bench.check_cell(cell, argparse.Namespace(skill_dir=None, wiki_dir=self.tmp / "snap", wiki_skill_dir=None))
+        agent_bench.check_cell(cell, argparse.Namespace(skill_dirs={}, wiki_dir=self.tmp / "snap"))
 
     def test_pinned_snapshot_refuses_changed_missing_content_and_wrong_identity(self):
         record = self.crawl("snap")

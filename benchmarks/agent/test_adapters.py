@@ -34,7 +34,7 @@ class PiAdapterTest(unittest.TestCase):
                 env = {
                     "HOME": "/isolated", "BENCH_MODEL": "provider/model", "BENCH_RUN_DIR": "/run",
                     "BENCH_KNOWLEDGE": "none", "BENCH_USAGE": "/run/usage",
-                    "BENCH_TRANSCRIPT": "/run/transcript", "BENCH_CONTEXT": "/run/context",
+                    "BENCH_TRANSCRIPT": "/run/transcript", "BENCH_CONTEXT": "/run/context", "BENCH_AGENT_INFO": "/run/agent-info",
                 }
                 with (
                     patch.dict(pi.os.environ, env, clear=True),

@@ -2,7 +2,7 @@
 """Reference adapter: run Claude Code for one benchmark trial and report per-turn usage.
 
 Reads the prompt on stdin. Honors the BENCH_* contract (docs/agent-benchmark.md): tools follow BENCH_KNOWLEDGE,
-BENCH_SKILL_DIR and BENCH_WIKI_SKILL_DIR are installed as plugin skills, and BENCH_USAGE / BENCH_TRANSCRIPT / BENCH_CONTEXT are written.
+BENCH_SKILL_DIRS (one directory per installed skill) are installed as plugin skills, and BENCH_USAGE / BENCH_TRANSCRIPT / BENCH_CONTEXT are written.
 The agent binary is resolved on BENCH_HOST_PATH because the agent's own PATH hides Wright when the level is `none`.
 The model comes from BENCH_MODEL (default `sonnet`). It removes web tools unless knowledge is `web`, but it does
 not sandbox the network: pair it with the harness --canary-cmd to detect a reachable network under `off`.
@@ -38,7 +38,7 @@ def main() -> int:
     if not web:
         cmd += ["--disallowedTools", *WEB_TOOLS]
     loaded: list[str] = []
-    skills = [Path(env[k]) for k in ("BENCH_SKILL_DIR", "BENCH_WIKI_SKILL_DIR") if env.get(k)]
+    skills = [Path(p) for p in env.get("BENCH_SKILL_DIRS", "").split(os.pathsep) if p]
     if skills:
         plugin = Path(tempfile.mkdtemp(dir=env["BENCH_RUN_DIR"]))
         (plugin / ".claude-plugin").mkdir()
@@ -47,6 +47,7 @@ def main() -> int:
             shutil.copytree(skill, plugin / "skills" / skill.name)
             loaded.append(skill.name)
         cmd += ["--plugin-dir", str(plugin)]
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "claude-code", "model": env.get("BENCH_MODEL", "sonnet"), "tools": TOOLS + (WEB_TOOLS if web else [])}, indent=2))
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         env={**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"},

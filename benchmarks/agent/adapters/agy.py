@@ -34,11 +34,9 @@ def main() -> int:
         deny.append("read_url(*)")
     (state / "settings.json").write_text(json.dumps({"allowNonWorkspaceAccess": True, "permissions": {"allow": ["command(*)", "read_file(*)", f"write_file({Path.cwd()})"], "deny": deny}}))
     installed = []
-    for key in ("BENCH_SKILL_DIR", "BENCH_WIKI_SKILL_DIR"):
-        if env.get(key):
-            skill = Path(env[key])
-            shutil.copytree(skill, Path.cwd() / ".agents/skills" / skill.name)
-            installed.append(skill.name)
+    for skill in (Path(p) for p in env.get("BENCH_SKILL_DIRS", "").split(os.pathsep) if p):
+        shutil.copytree(skill, Path.cwd() / ".agents/skills" / skill.name)
+        installed.append(skill.name)
     binary = shutil.which("agy", path=env.get("BENCH_HOST_PATH")) or "agy"
     command = [binary, "--model", env["BENCH_MODEL"], "--effort", env["BENCH_THINKING"],
                "--output-format", "stream-json", "--print-timeout", "0", "--print", sys.stdin.read()]
@@ -65,6 +63,7 @@ def main() -> int:
                 result = event["result"]
         code = process.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"installed": installed, "audit": "isolated-home; CLI does not export loaded skill context", "unexpected": sorted(unexpected)}))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "model": env["BENCH_MODEL"], "effort": env["BENCH_THINKING"], "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))
     (run / "adapter.json").write_text(json.dumps({"agent": "agy", "requestedModel": env["BENCH_MODEL"], "requestedEffort": env["BENCH_THINKING"], "observedModel": init.get("model"), "status": result.get("status"), "usageSource": "stream-step-usage", "providerUsage": result.get("usage")}, indent=2))
     sys.stdout.write(result.get("response", ""))
     stderr_text = (run / "agy-stderr.log").read_text()

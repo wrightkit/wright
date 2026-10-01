@@ -3,7 +3,7 @@
 
 Reads the prompt on stdin and honors the BENCH_* contract (docs/agent-benchmark.md). BENCH_MODEL is required
 (`provider/id`, see `pi --list-models`); BENCH_THINKING optionally sets `--thinking`. Discovery of context files,
-extensions, prompt templates, themes, and skills is disabled; BENCH_SKILL_DIR and BENCH_WIKI_SKILL_DIR are loaded explicitly. A provider that
+extensions, prompt templates, themes, and skills is disabled; BENCH_SKILL_DIRS (one directory per installed skill) are loaded explicitly. A provider that
 is registered by an extension (for example Gemini through pi-antigravity) needs BENCH_PI_EXTENSIONS, a comma-separated
 list of extension paths. Web tools come from BENCH_PI_WEB_EXTENSIONS (for example pi-web-access), loaded only when
 knowledge is `web`. Network `off` is not enforced, because the shell can still reach the network: use the harness
@@ -74,13 +74,13 @@ def main() -> int:
     extensions = env.get("BENCH_PI_EXTENSIONS", "").split(",") + (env.get("BENCH_PI_WEB_EXTENSIONS", "").split(",") if env["BENCH_KNOWLEDGE"] == "web" else [])
     for extension in filter(None, extensions):
         cmd += ["-e", extension]
-    for key in ("BENCH_SKILL_DIR", "BENCH_WIKI_SKILL_DIR"):
-        if env.get(key):
-            cmd += ["--skill", env[key]]
+    for skill in (p for p in env.get("BENCH_SKILL_DIRS", "").split(os.pathsep) if p):
+        cmd += ["--skill", skill]
     if env.get("BENCH_THINKING"):
         cmd += ["--thinking", env["BENCH_THINKING"]]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home), "PI_CODING_AGENT_DIR": str(state)}
     limit = context_limit(pi, model, child_env, extensions)
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "pi", "model": model, "effort": env.get("BENCH_THINKING"), "tools": ["read", "bash", "edit", "write"], "extensions": [e for e in extensions if e]}, indent=2))
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=child_env)
     proc.stdin.write(prompt)
     proc.stdin.close()
