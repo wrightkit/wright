@@ -11,6 +11,11 @@ import devin
 import pi
 import codex
 import agy
+import direct
+import os
+import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class PiAdapterTest(unittest.TestCase):
@@ -110,6 +115,68 @@ class NativeAdapterUsageTest(unittest.TestCase):
                 '- openai-docs: Builtin. (file: r0/openai-docs/SKILL.md)\n'
                 '- wright: Project. (file: r1/wright/SKILL.md)\n')
         self.assertEqual(codex.loaded_skills(text), (["wright"], ["openai-docs"]))
+
+
+class DirectAdapterTest(unittest.TestCase):
+    def serve(self, replies):
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen.append(json.loads(self.rfile.read(int(self.headers["content-length"]))))
+                status, body = replies[min(len(seen), len(replies)) - 1]
+                self.send_response(status)
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}", seen
+
+    def run_direct(self, model, base_var, replies):
+        base, seen = self.serve(replies)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
+            tmp = Path(tmp)
+            skill = tmp / "demo"
+            skill.mkdir()
+            (skill / "SKILL.md").write_text("---\nname: demo\ndescription: A demo skill\n---\nbody\n")
+            env = {"BENCH_MODEL": model, "BENCH_KNOWLEDGE": "none", "BENCH_SKILL_DIRS": str(skill), "ANTHROPIC_API_KEY": "k", "OPENAI_API_KEY": "k", base_var: base,
+                   **{f"BENCH_{n}": str(tmp / n.lower()) for n in ("USAGE", "TRANSCRIPT", "CONTEXT", "AGENT_INFO")}, "PATH": os.environ["PATH"]}
+            cwd = os.getcwd()
+            os.makedirs(tmp / "work")
+            os.chdir(tmp / "work")
+            out = io.StringIO()
+            try:
+                with patch.dict(direct.os.environ, env, clear=True), patch.object(direct.sys, "stdin", io.StringIO("task")), patch.object(direct.sys, "stdout", out):
+                    code = direct.main()
+            finally:
+                os.chdir(cwd)
+            read = lambda n: (tmp / n).read_text()
+            return code, out.getvalue(), seen, [json.loads(l) for l in read("usage").splitlines()], json.loads(read("context")), json.loads(read("agent_info"))
+
+    def test_anthropic_loop_runs_a_tool_and_records_usage(self):
+        use = {"content": [{"type": "tool_use", "id": "t1", "name": "bash", "input": {"command": "echo hi"}}], "usage": {"input_tokens": 10, "output_tokens": 2, "cache_read_input_tokens": 5}}
+        done = {"content": [{"type": "text", "text": "done"}], "usage": {"input_tokens": 20, "output_tokens": 3}}
+        code, final, seen, usage, context, info = self.run_direct("anthropic/m", "ANTHROPIC_BASE_URL", [(200, use), (200, done)])
+        self.assertEqual((code, final, len(seen)), (0, "done", 2))
+        self.assertEqual(seen[1]["messages"][-1]["content"][0]["content"].strip(), "hi")
+        self.assertIn("demo: A demo skill", seen[0]["system"])
+        self.assertEqual((usage[0]["input"], usage[0]["cache_read"], usage[0]["context"]), (10, 5, 15))
+        self.assertEqual((context["loaded"], info["agent"], [t["name"] for t in seen[0]["tools"]]), (["demo"], "direct", ["bash"]))
+
+    def test_openai_usage_splits_cached_and_reasoning_tokens(self):
+        reply = {"choices": [{"message": {"role": "assistant", "content": "ok"}}], "usage": {"prompt_tokens": 100, "completion_tokens": 20, "prompt_tokens_details": {"cached_tokens": 60}, "completion_tokens_details": {"reasoning_tokens": 12}}}
+        code, final, _, usage, _, _ = self.run_direct("openai/m", "OPENAI_BASE_URL", [(200, reply)])
+        self.assertEqual((code, final), (0, "ok"))
+        self.assertEqual((usage[0]["input"], usage[0]["cache_read"], usage[0]["output"], usage[0]["reasoning"]), (40, 60, 8, 12))
+
+    def test_client_error_is_not_an_infrastructure_failure(self):
+        code, *_ = self.run_direct("anthropic/m", "ANTHROPIC_BASE_URL", [(400, {"error": "bad"})])
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

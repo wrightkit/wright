@@ -290,6 +290,29 @@ model, effort, or protocol, and it is marked provisional with fewer than eight
 held-out scenarios, missing scenarios, or unequal trials. The card discloses
 `networkEnforcement` (`declared-only` or `canary-checked`).
 
+## Evaluating without an agent harness
+
+`agent_bench.py evaluate --adapter ADAPTER --model MODEL --skill-dir wright-skill=DIR`
+is the one-command entry: it writes `matrix.json`, runs the cells, then writes
+`report.md`, `summary.json`, `score.json`, `score.txt`, and `RESULTS.md` into
+`<out>/<name>`. `--cells score` runs the canonical cell only; `--cells controls`
+adds the baseline, `wright` without the skill, and, for OverPy scenarios, the
+`overpy` controls (cells whose skill has no `--skill-dir` are skipped). It runs the
+same from a terminal or from inside another agent's shell, because isolation comes
+from the harness's scrubbed environment, not from its parent. It runs locally; CI
+does not run it.
+
+`--adapter direct` is the built-in loop (`adapters/direct.py`) that needs no agent
+harness: it calls a model API with one `bash` tool (and `fetch` only for
+knowledge `web`), lists the installed skills by name and description, and records
+exact usage and a full transcript. `BENCH_MODEL` is `anthropic/<model>`
+(`ANTHROPIC_API_KEY`, optional `ANTHROPIC_BASE_URL`) or `openai/<model>`
+(`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, so OpenAI-compatible endpoints work).
+Pass the key variables with `--env-pass`. Its turn, time, and output limits are
+recorded in `agentInfo.protocol`. It does not sandbox the network, so pair it with
+`--canary-cmd`. Scores from `direct` and from product harnesses measure different
+things and are not mixed.
+
 ## Cadence
 
 The benchmark does not gate pull requests. Run it manually or on a schedule once
