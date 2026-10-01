@@ -85,13 +85,15 @@ Agents and embedding consumers request mutation through two structured
 tool operations over the session's project:
 
 * `validateEditTransaction`: validate and preview a caller-supplied
-  [`EditTransaction`] against the session project. The request carries the
-  current text of every touched source (keyed by source identity); the
+  [`EditTransaction`] against the session project. The request may carry the
+  current text of every touched source (keyed by source identity); when
+  `sources` is omitted the service reads those files from disk (#472). The
   response returns `ok`, structured diagnostics, and per-source previews
   with the edited text and its new SHA-256 identity.
-* `semanticRename`: request a semantic rename at a 1-based
+* `semanticRename`: request a semantic rename by `symbol` or at a 1-based
   position (`source`/`line`/`col`/`to`) through the shared #129 refactoring
-  contract. The response returns the validated exact-range transaction
+  contract, with `sources` optional as for `validateEditTransaction` (#472).
+  The response returns the validated exact-range transaction
   (`ok: true`) or structured refusal diagnostics (`ok: false`, no
   transaction).
 

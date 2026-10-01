@@ -815,7 +815,7 @@
         "sources": { "$ref": "#/$defs/Sources" },
         "transaction": { "$ref": "#/$defs/EditTransaction" }
       },
-      "required": ["op", "sources", "transaction"],
+      "required": ["op", "transaction"],
       "additionalProperties": false
     },
     "SemanticRenameRequest": {
@@ -825,7 +825,7 @@
         "sources": { "$ref": "#/$defs/Sources" },
         "target": { "$ref": "#/$defs/RenameTarget" }
       },
-      "required": ["op", "sources", "target"],
+      "required": ["op", "target"],
       "additionalProperties": false
     },
     "ProviderSemanticRenameRequest": {

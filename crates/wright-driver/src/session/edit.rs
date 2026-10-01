@@ -18,11 +18,14 @@ use crate::service::Address;
 impl CompilerSession {
     /// `validateEditTransaction` (#434): apply `transaction` to the supplied
     /// current sources and, on raw Workshop input, reparse and validate the
-    /// edited result through `workshop-rs`. OPY and other source languages
-    /// refuse with `edit-requires-provider` naming `providerValidateEdit`.
+    /// edited result through `workshop-rs`. When `sources` is absent (#472)
+    /// the current text of the files the transaction names is read from
+    /// disk; when present it stays the caller's precondition text. OPY and
+    /// other source languages refuse with `edit-requires-provider` naming
+    /// `providerValidateEdit`.
     pub fn validate_edit_transaction(
         &self,
-        sources: &BTreeMap<String, String>,
+        sources: Option<&BTreeMap<String, String>>,
         transaction: &EditTransaction,
     ) -> EditValidation {
         crate::edit::validate_transaction(&self.config, &self.catalog, sources, transaction)
@@ -30,12 +33,15 @@ impl CompilerSession {
 
     /// `semanticRename` (#434): resolve `target` against the loaded
     /// program's semantic index and rewrite every identifier occurrence
-    /// through `workshop-rs` provenance — never a textual search. OPY and
-    /// other source languages refuse with `edit-requires-provider` naming
-    /// `providerSemanticRename`, whether or not a provider is configured.
+    /// through `workshop-rs` provenance — never a textual search. When
+    /// `sources` is absent (#472) the loaded input's current text is read
+    /// from disk; when present it stays the caller's precondition text.
+    /// OPY and other source languages refuse with `edit-requires-provider`
+    /// naming `providerSemanticRename`, whether or not a provider is
+    /// configured.
     pub fn semantic_rename(
         &mut self,
-        sources: &BTreeMap<String, String>,
+        sources: Option<&BTreeMap<String, String>>,
         target: &RenameTarget,
     ) -> SemanticRename {
         let refuse = |diagnostics: Vec<Diagnostic>| SemanticRename {
@@ -111,7 +117,7 @@ impl CompilerSession {
         let rename = crate::edit::semantic_rename(
             &loaded,
             &self.catalog,
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name(name.to_string())),
                 source: None,

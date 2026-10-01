@@ -123,8 +123,12 @@ pub enum ToolRequest {
     #[serde(rename = "validateEditTransaction")]
     ValidateEdit {
         /// The current text of every source the transaction touches, keyed
-        /// by the same source identities the edits carry.
-        sources: std::collections::BTreeMap<String, String>,
+        /// by the same source identities the edits carry. Optional (#472):
+        /// when absent the service reads the current text of the files the
+        /// transaction names from disk; when present it stays the
+        /// caller-side precondition text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sources: Option<std::collections::BTreeMap<String, String>>,
         transaction: crate::edit::EditTransaction,
     },
     /// Request a semantic rename through the shared refactoring contract
@@ -138,8 +142,12 @@ pub enum ToolRequest {
     /// responsibility.
     SemanticRename {
         /// The current text of every source the rename may edit, keyed by
-        /// the same source identities the target names.
-        sources: std::collections::BTreeMap<String, String>,
+        /// the same source identities the target names. Optional (#472):
+        /// when absent the service reads the loaded input's current text
+        /// from disk; when present it stays the caller-side precondition
+        /// text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sources: Option<std::collections::BTreeMap<String, String>>,
         target: crate::edit::RenameTarget,
     },
     /// Provider-driven semantic rename (#139): rename target resolution and
@@ -484,11 +492,12 @@ impl<'a> ToolService<'a> {
                 sources,
                 transaction,
             } => self.ok(serde_json::to_value(
-                self.session.validate_edit_transaction(sources, transaction),
+                self.session
+                    .validate_edit_transaction(sources.as_ref(), transaction),
             )
             .expect("serializes")),
             ToolRequest::SemanticRename { sources, target } => {
-                let rename = self.session.semantic_rename(sources, target);
+                let rename = self.session.semantic_rename(sources.as_ref(), target);
                 self.ok(serde_json::to_value(rename).expect("serializes"))
             }
             ToolRequest::ProviderSemanticRename {

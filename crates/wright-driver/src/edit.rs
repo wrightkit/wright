@@ -168,11 +168,14 @@ pub struct EditValidation {
 /// sources; and on raw Workshop input the edited project is reparsed and
 /// validated through the session's own `workshop-rs` path, so an invalid
 /// transaction refuses with the real Workshop diagnostics and no partial
-/// preview. Other source languages route to `providerValidateEdit`.
+/// preview. When `sources` is absent (#472) the current text of the files
+/// the transaction names is read from disk — the resolved input's own
+/// freshly read text, keyed by each edit's `source` spelling. Other source
+/// languages route to `providerValidateEdit`.
 pub fn validate_transaction(
     config: &SessionConfig,
     catalog: &Catalog,
-    sources: &BTreeMap<String, String>,
+    sources: Option<&BTreeMap<String, String>>,
     transaction: &EditTransaction,
 ) -> EditValidation {
     let refuse = |diagnostics: Vec<Diagnostic>| EditValidation {
@@ -213,6 +216,24 @@ pub fn validate_transaction(
             ),
         )]);
     }
+    // #472: an absent `sources` means the current text of the files the
+    // transaction names comes from disk. `input::resolve` already read the
+    // resolved input for this request, so each edit's `source` spelling —
+    // all of which name the loaded input after the check above — binds the
+    // freshly read text. A supplied `sources` is untouched: it stays the
+    // caller-side precondition an embedder with unsaved buffers needs.
+    let defaulted_sources;
+    let sources = match sources {
+        Some(sources) => sources,
+        None => {
+            defaulted_sources = transaction
+                .edits
+                .iter()
+                .map(|edit| (edit.source.clone(), resolved.text.clone()))
+                .collect();
+            &defaulted_sources
+        }
+    };
     let mut diagnostics: Vec<Diagnostic> = transaction
         .edits
         .iter()
@@ -356,13 +377,15 @@ pub struct RenameResult {
 /// against the loaded program's semantic index — the same symbol and
 /// position addressing `references`/`usage` use — and every occurrence is
 /// rewritten through the program's own identifier provenance, never a
-/// textual search. The proposed transaction is validated by reparsing the
-/// edited source; every refusal carries structured diagnostics and no
-/// partial edit set.
+/// textual search. When `sources` is absent (#472) the loaded input's
+/// current text is read from disk; a supplied `sources` stays the
+/// caller-side precondition text. The proposed transaction is validated by
+/// reparsing the edited source; every refusal carries structured
+/// diagnostics and no partial edit set.
 pub fn semantic_rename(
     loaded: &Loaded,
     catalog: &Catalog,
-    sources: &BTreeMap<String, String>,
+    sources: Option<&BTreeMap<String, String>>,
     target: &RenameTarget,
 ) -> SemanticRename {
     let refuse = |diagnostics: Vec<Diagnostic>| SemanticRename {
@@ -383,6 +406,35 @@ pub fn semantic_rename(
     }
     let Some(input_path) = loaded.input.path.clone() else {
         return refuse(vec![edit_stdin_refusal()]);
+    };
+    // #472: an absent `sources` means the current text of the file the
+    // request names comes from disk — the loaded input, keyed by the
+    // `target.source` spelling when position addressing names it, else by
+    // the input's display path, so the produced transaction names the
+    // source as the caller would have.
+    let defaulted_sources;
+    let sources = match sources {
+        Some(sources) => sources,
+        None => {
+            let bytes = match std::fs::read(&input_path) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return refuse(vec![Diagnostic::error(
+                        "input-io",
+                        Stage::Discovery,
+                        format!("cannot read '{}': {error}", input_path.display()),
+                    )]);
+                }
+            };
+            let source = target
+                .source
+                .clone()
+                .filter(|source| same_file(source, &input_path))
+                .unwrap_or_else(|| loaded.input.display.clone());
+            defaulted_sources =
+                BTreeMap::from([(source, String::from_utf8_lossy(&bytes).into_owned())]);
+            &defaulted_sources
+        }
     };
     // The caller supplies the current text of the file being renamed; it
     // must be the text the loaded program was parsed from, so every
@@ -1191,7 +1243,7 @@ mod tests {
                 ..SessionConfig::default()
             },
             &catalog(),
-            &sources,
+            Some(&sources),
             &EditTransaction::new(vec![edit]).unwrap(),
         );
         assert!(!validation.ok);
@@ -1223,7 +1275,7 @@ mod tests {
                 ..SessionConfig::default()
             },
             &catalog(),
-            &BTreeMap::new(),
+            Some(&BTreeMap::new()),
             &EditTransaction::new(vec![edit]).unwrap(),
         );
         assert!(!validation.ok);
@@ -1302,7 +1354,7 @@ mod tests {
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &EditTransaction::new(vec![edit]).unwrap(),
         );
         assert!(validation.ok, "{:?}", validation.diagnostics);
@@ -1333,7 +1385,7 @@ mod tests {
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &EditTransaction::new(vec![edit]).unwrap(),
         );
         assert!(!validation.ok);
@@ -1350,7 +1402,7 @@ mod tests {
         let rename = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("score".to_string())),
                 source: None,
@@ -1391,7 +1443,7 @@ mod tests {
         let by_position = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: None,
                 source: Some(loaded.input.display.clone()),
@@ -1411,7 +1463,7 @@ mod tests {
         let rename = semantic_rename(
             &loaded,
             session.catalog(),
-            &stale,
+            Some(&stale),
             &RenameTarget {
                 symbol: Some(Address::Name("score".to_string())),
                 source: None,
@@ -1446,7 +1498,7 @@ mod tests {
                 "rename-invalid-target",
             ),
         ] {
-            let rename = semantic_rename(&loaded, session.catalog(), &sources, &target);
+            let rename = semantic_rename(&loaded, session.catalog(), Some(&sources), &target);
             assert!(!rename.ok);
             assert_eq!(rename.diagnostics[0].code, code, "{target:?}");
         }
@@ -1462,7 +1514,7 @@ mod tests {
         let collision = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("score".to_string())),
                 source: None,
@@ -1481,7 +1533,7 @@ mod tests {
         let collision = semantic_rename(
             &loaded2,
             session2.catalog(),
-            &sources2,
+            Some(&sources2),
             &RenameTarget {
                 symbol: Some(Address::Name("score".to_string())),
                 source: None,
@@ -1496,7 +1548,7 @@ mod tests {
         let rule = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("r".to_string())),
                 source: None,
@@ -1543,7 +1595,7 @@ mod tests {
         let player = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("streak".to_string())),
                 source: None,
@@ -1564,7 +1616,7 @@ mod tests {
         let subroutine = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("helper".to_string())),
                 source: None,
@@ -1593,7 +1645,7 @@ mod tests {
         let by_position = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: None,
                 source: Some(loaded.input.display.clone()),
@@ -1622,7 +1674,7 @@ mod tests {
         let rename = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("score".to_string())),
                 source: None,
@@ -1700,7 +1752,7 @@ mod tests {
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &EditTransaction::new(vec![edit]).unwrap(),
         );
         assert!(!validation.ok);
@@ -1712,7 +1764,7 @@ mod tests {
             "the refusal names the provider operation"
         );
         let rename = session.semantic_rename(
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("x".to_string())),
                 source: None,
@@ -1773,7 +1825,7 @@ mod tests {
         let rename = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("helper".to_string())),
                 source: None,
@@ -1816,7 +1868,7 @@ mod tests {
         let last = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &target(Address::Id(1)),
         );
         assert!(last.ok, "{:?}", last.diagnostics);
@@ -1831,7 +1883,7 @@ mod tests {
         let first = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &target(Address::Id(0)),
         );
         assert!(first.ok, "{:?}", first.diagnostics);
@@ -1878,7 +1930,7 @@ mod tests {
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &wire(serde_json::json!([])),
         );
         assert!(!validation.ok);
@@ -1888,7 +1940,7 @@ mod tests {
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &wire(serde_json::json!([
                 edit(29, 34, "total"),
                 edit(30, 35, "x")
@@ -1902,7 +1954,7 @@ mod tests {
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &wire(serde_json::json!([
                 edit(36, 39, "Subtract"),
                 edit(29, 34, "total")
@@ -1929,7 +1981,7 @@ mod tests {
         let validation = validate_transaction(
             &session.config,
             session.catalog(),
-            &wider,
+            Some(&wider),
             &wire(serde_json::json!([foreign])),
         );
         assert!(!validation.ok);
@@ -1945,7 +1997,7 @@ mod tests {
         let rename = semantic_rename(
             &loaded,
             session.catalog(),
-            &sources,
+            Some(&sources),
             &RenameTarget {
                 symbol: Some(Address::Name("score".to_string())),
                 source: None,

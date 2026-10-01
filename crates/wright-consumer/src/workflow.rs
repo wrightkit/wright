@@ -106,10 +106,10 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
         match renamed {
             Some(name) => {
                 let rename = service.handle(&ToolRequest::SemanticRename {
-                    sources: std::collections::BTreeMap::from([(
+                    sources: Some(std::collections::BTreeMap::from([(
                         input.to_string(),
                         source.clone(),
-                    )]),
+                    )])),
                     target: wright_driver::edit::RenameTarget {
                         symbol: Some(wright_driver::service::Address::Name(name)),
                         source: None,

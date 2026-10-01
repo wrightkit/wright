@@ -285,6 +285,24 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         );
     }
 
+    // #472: `sources` is optional on the raw edit operations — a request
+    // without it validates and deserializes; the service then reads the
+    // files the request names from disk.
+    for request in [
+        json!({"op":"validateEditTransaction","transaction":{"edits":[{
+            "kind":"edit","source":"a.ws","source_identity":"sha256:x",
+            "range":{"start_line":1,"start_col":1,"end_line":1,"end_col":1},
+            "new_text":"x"}]}}),
+        json!({"op":"semanticRename","target":{"symbol":"score","to":"renamed"}}),
+        json!({"op":"semanticRename","target":{"source":"a.ws","line":1,"col":3,"to":"renamed"}}),
+    ] {
+        assert!(
+            request_schema.is_valid(&request),
+            "invalid request: {request}"
+        );
+        serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
+    }
+
     let capabilities_response = json!({"result":current});
     assert!(response_schema.is_valid(&capabilities_response));
     assert!(response_schema.is_valid(&json!({
