@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/wrightkit/wright/compare/v0.6.2...v0.7.0) (2026-10-01)
+
+
+### Features
+
+* **bench:** v3 conditions, overpy tool, usable contract, and the Wright Agent Score ([f31a188](https://github.com/wrightkit/wright/commit/f31a1881f8dd0b56913d6ec67ac496ba789dc0f5))
+* **bench:** v3 conditions, Wright Agent Score, and agent adapters ([22fbdda](https://github.com/wrightkit/wright/commit/22fbdda434831dc121dd418b8367ee0b07426b7e))
+
 ## [0.6.2](https://github.com/wrightkit/wright/compare/v0.6.1...v0.6.2) (2026-10-01)
 
 
