@@ -83,7 +83,7 @@ def serve_tee(real: str, argv: list[str], started: float) -> int:
 
     def log(direction: str, line: bytes) -> None:
         counts[direction] += 1
-        append_event({"type": "serve", "dir": direction, "t": time.time(), "line": line.decode(errors="replace")[:2000]})
+        append_event({"type": "serve", "dir": direction, "t": time.time(), "line": line.decode(errors="replace")})
 
     def pump() -> None:
         for line in proc.stdout:
@@ -171,13 +171,21 @@ def friction(events: list[dict]) -> dict:
         key = tuple(call["argv"])
         repeats += key in seen
         seen.append(key)
-    serve_responses = [json.loads(e["line"]) for e in events if e["type"] == "serve" and e["dir"] == "res" and e["line"].startswith("{")]
+    serve_responses = []
+    unparsed = 0
+    for event in events:
+        if event["type"] == "serve" and event["dir"] == "res":
+            try:
+                serve_responses.append(json.loads(event["line"]))
+            except json.JSONDecodeError:
+                unparsed += 1
     return {
         "usageErrors": sum(1 for c in calls if c["exit"] == 2),
         "unknownSubcommands": sum(1 for c in calls if "unrecognized subcommand" in c.get("stderrHead", "")),
         "helpLookups": sum(1 for c in calls if any(a in ("--help", "-h", "help") for a in c["argv"])),
         "retriesAfterUnsupported": sum(1 for i, c in enumerate(calls) if c["exit"] >= 3 and tuple(c["argv"]) in [tuple(x["argv"]) for x in calls[i + 1:]]),
         "malformedServeRequests": sum(1 for r in serve_responses if r.get("error", {}).get("code") == "malformed-request"),
+        "unparsedServeResponses": unparsed,
         "identicalRepeats": repeats,
         "callsToFirstSuccess": next((i + 1 for i, c in enumerate(calls) if c["exit"] == 0 and not any(a in ("--help", "-h", "--version") for a in c["argv"])), None),
     }

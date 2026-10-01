@@ -240,7 +240,7 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | `diagnostics`, `lintFindings`, `unsafeEdits` | Remaining `wright check` diagnostics, lint rule codes, files changed outside `writable` |
 | `unverifiedRuntimeClaims` | The scenario's `runtimeOnly` claims |
 | `wrightUse` | Invocations by subcommand, failures, exits of 3 or 4 (candidate owner or environment gaps), and estimated output tokens per command |
-| `friction`, `expectations` | Usage errors, unknown subcommands, help lookups, retries, malformed `serve` requests, identical repeats; expectation E01-E12 verdicts |
+| `friction`, `expectations` | Usage errors, unknown subcommands, help lookups, retries, malformed `serve` requests, unparsed `serve` responses, identical repeats; expectation E01-E12 verdicts |
 | `snapshots` | Strict validity of each snapshot of the entry, first valid index, and valid-to-invalid regressions |
 | `usage`, `context` | Turns, tokens by kind, peak context (and its share of the limit), tokens to first valid; loaded context |
 | `invalid`, `infraRetries`, `networkEnforcement` | Present when the run was excluded or retried; whether network `off` was checked by a canary or only declared |

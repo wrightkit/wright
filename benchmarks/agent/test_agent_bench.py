@@ -243,6 +243,29 @@ class DetectorTest(unittest.TestCase):
         friction = bench_trace.friction(events)
         self.assertEqual((friction["usageErrors"], friction["unknownSubcommands"], friction["identicalRepeats"]), (1, 1, 2))
 
+    def test_friction_reports_unparseable_serve_responses_without_losing_errors(self):
+        responses = ['{"result":"unfinished', '{"error":{"code":"malformed-request"}}', '{"result":{}}']
+        events = [{"type": "serve", "dir": "res", "line": line} for line in responses]
+        result = bench_trace.friction(events)
+        self.assertEqual(result["malformedServeRequests"], 1)
+        self.assertEqual(result["unparsedServeResponses"], 1)
+
+    def test_serve_trace_preserves_large_json_responses(self):
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        response = json.dumps({"result": {"value": "x" * 4096}}) + "\n"
+        process = SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(response.encode()), wait=lambda: 0)
+        output = SimpleNamespace(buffer=io.BytesIO(), flush=lambda: None)
+        with patch.object(bench_trace.subprocess, "Popen", return_value=process), \
+             patch.object(bench_trace.sys, "stdin", SimpleNamespace(buffer=io.BytesIO())), \
+             patch.object(bench_trace.sys, "stdout", output), \
+             patch.object(bench_trace, "append_event", Mock()) as capture:
+            self.assertEqual(bench_trace.serve_tee("wright", ["serve"], 0), 0)
+        recorded = next(call.args[0] for call in capture.call_args_list if call.args[0]["type"] == "serve")
+        self.assertEqual(json.loads(recorded["line"]), json.loads(response))
+        self.assertEqual(output.buffer.getvalue(), response.encode())
+
     def test_unused_wright_is_not_applicable(self):
         result = bench_trace.detect_expectations([], [], {"stabilityRisk": True}, None)
         self.assertEqual(result["E03"]["status"], "na")
