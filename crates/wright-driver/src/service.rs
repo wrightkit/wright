@@ -1,6 +1,6 @@
 //! [`ToolService`] exposes Wright's compile/check/analyze/query workflows and
 //! agent-oriented semantic queries over stable public contracts, reusing the
-//! driver session. It is transport-neutral: the stdio/JSON-RPC adapters
+//! driver session. It is transport-neutral: the `serve` transport adapters
 //! (#60) and the embedding API are thin mappings over the same operations,
 //! so behavior is testable in-process without a transport.
 //!

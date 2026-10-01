@@ -1,6 +1,6 @@
-//! Transport adapter tests (#60): the stdio and JSON-RPC adapters expose the
-//! same operations and structured results as the in-process tool service,
-//! with capability/version negotiation intact.
+//! Transport adapter tests (#60, #473): the stdio, JSON-RPC, and MCP adapters
+//! expose the same operations and structured results as the in-process tool
+//! service, with capability/version negotiation intact.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
