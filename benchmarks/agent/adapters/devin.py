@@ -68,6 +68,12 @@ def parse_export(export: dict) -> tuple[list[dict], list[str], list[str]]:
     return rows, loaded, plugins
 
 
+def transient(text: str) -> bool:
+    """A provider or infrastructure failure. An empty model catalog means the catalog could not be fetched, not that the model is wrong."""
+    lowered = text.lower()
+    return any(s in lowered for s in TRANSIENT) or re.search(r"unknown model.*\navailable:\s*$", lowered.strip(), re.S) is not None
+
+
 def main() -> int:
     env = os.environ
     model = env.get("BENCH_MODEL") or sys.exit("BENCH_MODEL is required: set it in --agent-cmd, for example BENCH_MODEL=swe-2-max python3 adapters/devin.py")
@@ -97,7 +103,7 @@ def main() -> int:
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     if proc.returncode != 0:
-        return INFRA_EXIT if any(s in (proc.stdout + proc.stderr).lower() for s in TRANSIENT) else proc.returncode
+        return INFRA_EXIT if transient(proc.stdout + proc.stderr) else proc.returncode
     return 0
 
 

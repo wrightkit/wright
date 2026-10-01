@@ -102,6 +102,13 @@ class DevinAdapterTest(unittest.TestCase):
         self.assertNotIn("allow", closed["permissions"])
 
 
+class DevinTransientTest(unittest.TestCase):
+    def test_empty_model_catalog_is_a_provider_failure_but_a_wrong_model_is_not(self):
+        self.assertTrue(devin.transient("Error: Unknown model: 'swe-2-max'\nAvailable:\n"))
+        self.assertFalse(devin.transient("Error: Unknown model: 'nope'\nAvailable:\n  swe-2-max\n  swe-2\n"))
+        self.assertTrue(devin.transient("429 rate limit"))
+
+
 class NativeAdapterUsageTest(unittest.TestCase):
     def test_codex_inclusive_counts_are_split_without_counting_reasoning_twice(self):
         row = codex.usage_row({"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20, "reasoning_output_tokens": 12}, 1.0, 272000)

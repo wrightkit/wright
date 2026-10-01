@@ -282,6 +282,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
         snaps = snapshots.finish()
         if agent_exit == INFRA_EXIT and infra_retries < args.infra_retries:
             infra_retries += 1
+            time.sleep(getattr(args, "infra_backoff", 0) * infra_retries)  # an outage lasts longer than an immediate retry
             continue
         break
     (out / "agent.log").write_text(f"exit={agent_exit}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n")
@@ -526,6 +527,7 @@ def main() -> int:
         p.add_argument("--timeout", type=int, default=1800)
         p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory")
         p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
+        p.add_argument("--infra-backoff", type=int, default=60, help="seconds before the first retry; each further retry waits one more multiple")
     run = sub.choices["run"]
     run.add_argument("scenario", choices=all_scenario_ids())
     run.add_argument("--agent-cmd", required=True, help="shell command; the task prompt arrives on stdin, cwd is the workspace, BENCH_* describes the condition")

@@ -308,6 +308,16 @@ class AgentBenchTest(unittest.TestCase):
         self.assertRegex(graded["grader"]["hash"], r"^[0-9a-f]{64}$")
 
     @unittest.skipUnless(bench_grade.oracle_available(), "run `agent_bench.py setup-oracle`")
+    def test_missing_entry_is_an_agent_failure_not_an_unavailable_grader(self):
+        workspace = self.out / "empty"
+        workspace.mkdir()
+        scenario = agent_bench.load_scenario("widow-headshots")
+        graded = bench_grade.grade(scenario, workspace, WRIGHT)
+        self.assertEqual(graded["authorities"]["oracle"]["status"], "error")
+        self.assertNotIn("grader-unavailable", graded["usableReason"])
+        self.assertIn("checks-failed", graded["usableReason"])
+
+    @unittest.skipUnless(bench_grade.oracle_available(), "run `agent_bench.py setup-oracle`")
     def test_oracle_disagreement_is_reported(self):
         source = self.out / "n.opy"
         source.write_text('settings {"main": {"description": "t"}, "gamemodes": {"skirmish": {"enabledMaps": ["workshopIsland"]}}}\n'
