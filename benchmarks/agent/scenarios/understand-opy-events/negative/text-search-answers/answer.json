@@ -1,0 +1,1 @@
+{"deathRules": ["death count", "kill credit"], "subroutineCallers": {"awardPoint": ["kill credit"], "refreshLeader": ["kill credit"], "resetTimer": ["start match"]}, "neverUsed": [], "multiWriterGlobals": []}

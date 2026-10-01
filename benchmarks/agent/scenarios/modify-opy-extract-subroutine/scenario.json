@@ -1,0 +1,95 @@
+{
+  "id": "modify-opy-extract-subroutine",
+  "family": "modification",
+  "language": "opy",
+  "entry": "mode.opy",
+  "split": "test",
+  "writable": [
+    "mode.opy"
+  ],
+  "runtimeOnly": [
+    "The refactored subroutine keeps the same in-game behavior."
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "wright-compiles",
+      "kind": "wright-compile",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "subroutine-defined",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "subroutines\\s*\\{\\s*\\n?\\s*0:"
+      ]
+    },
+    {
+      "id": "called-from-both-rules",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Call Subroutine[\\s\\S]*Call Subroutine"
+      ]
+    },
+    {
+      "id": "duplication-removed",
+      "kind": "compiled-absent",
+      "layer": "agent",
+      "all": [
+        "(Set Ultimate Charge[\\s\\S]*){2}"
+      ]
+    },
+    {
+      "id": "rules-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "rule \\(\"reward on elimination\"\\)",
+        "rule \\(\"reward on assist\"\\)",
+        "rule \\(\"reset streak\"\\)"
+      ]
+    },
+    {
+      "id": "all-four-actions-kept",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Modify Player Variable\\([^;]*streak",
+        "Set Ultimate Charge",
+        "Big Message",
+        "Heal\\("
+      ]
+    }
+  ],
+  "negatives": {
+    "only-one-rule-calls-it": {
+      "fails": [
+        "called-from-both-rules",
+        "duplication-removed"
+      ]
+    },
+    "drops-an-action": {
+      "fails": [
+        "all-four-actions-kept"
+      ]
+    },
+    "unchanged-seed": {
+      "fails": [
+        "called-from-both-rules",
+        "duplication-removed",
+        "subroutine-defined"
+      ]
+    }
+  }
+}

@@ -1,7 +1,9 @@
 import argparse
+import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +12,7 @@ import agent_bench
 import bench_grade
 import bench_report
 import bench_trace
+import wiki_skill
 
 WRIGHT = os.environ.get("WRIGHT_BIN", str(agent_bench.ROOT / "target/debug/wright"))
 SCENARIO = "repair-runaway-loop"
@@ -26,33 +29,193 @@ class AgentBenchTest(unittest.TestCase):
         self.out = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")).resolve()
         self.addCleanup(shutil.rmtree, self.out, True)
 
-    def trial(self, agent_cmd: str, wright: str = "bin", scenario: str = SCENARIO, **options) -> dict:
+    def trial(self, agent_cmd: str, tool: str = "wright", skills: tuple = (), knowledge: str = "none", scenario: str = SCENARIO, **options) -> dict:
         args = argparse.Namespace(**{
             "wright": str(Path(WRIGHT).resolve()), "agent_id": "fake", "agent_cmd": agent_cmd, "timeout": 60, "infra_retries": 2,
-            "env_pass": [], "canary_cmd": None, "skill_dir": None, "wiki_dir": None, **options,
+            "env_pass": [], "canary_cmd": None, "skill_dirs": {}, "wiki_dir": None, "check_ancestors": False, **options,
         })
-        cell = {"wright": wright, "knowledge": "none", "network": "off"}
-        return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{wright}")
+        cell = agent_bench.normalize_cell({"tool": tool, "skills": list(skills), "knowledge": knowledge, "network": "off"})
+        return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{tool}")
+
+    def test_wiki_snapshot_is_copied_and_identified(self):
+        snapshot = self.out / "snapshot"
+        (snapshot / "articles").mkdir(parents=True)
+        (snapshot / "articles/wait-until.md").write_text("# Wait Until\n")
+        article_hash = hashlib.sha256((snapshot / "articles/wait-until.md").read_bytes()).hexdigest()
+        snapshot_hash = hashlib.sha256(f"wait-until {article_hash}".encode()).hexdigest()
+        (snapshot / "SNAPSHOT.json").write_text(json.dumps({"source": "https://mirror.example", "fetchedAt": "2026-09-30T00:00:00+00:00", "snapshotSha256": snapshot_hash, "documents": [{"slug": "wait-until", "sha256": article_hash}]}))
+        result = self.trial("ls wiki/articles > listing.txt", knowledge="wiki", wiki_dir=snapshot)
+        self.assertEqual(result["environment"]["wiki"]["snapshotSha256"], snapshot_hash)
+        self.assertEqual(result["environment"]["wiki"]["documents"], 1)
+        self.assertEqual((self.out / f"{SCENARIO}-wright/workspace/listing.txt").read_text().strip(), "wait-until.md")
+        self.assertNotIn("wiki", " ".join(result["unsafeEdits"]))
+
+    def test_skills_are_installed_identified_and_the_only_ones_expected(self):
+        skill = self.out / "workshop-wiki"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("---\nname: workshop-wiki\n---\n")
+        skill_hash = wiki_skill.content_hash(skill)
+        with self.assertRaisesRegex(SystemExit, "requires --skill"):
+            self.trial("true", skills=("workshop-skill",))
+        expected = self.trial("echo '{\"loaded\": [\"workshop-wiki\"]}' > \"$BENCH_CONTEXT\"; echo \"$BENCH_SKILL_DIRS\" > dirs.txt", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
+        self.assertNotIn("invalid", expected)
+        self.assertEqual(expected["condition"]["label"], "wright+workshop-skill/none/off")
+        self.assertEqual(expected["environment"]["skills"]["workshop-skill"]["sha256"], skill_hash)
+        self.assertEqual((self.out / f"{SCENARIO}-wright/workspace/dirs.txt").read_text().strip(), str(skill.resolve()))
+        stray = self.trial("echo '{\"loaded\": [\"workshop-wiki\", \"other\"]}' > \"$BENCH_CONTEXT\"", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
+        self.assertIn("unexpected loaded context", stray["invalid"])
+        (skill / "BUILD.json").write_text(json.dumps({"name": "workshop-wiki", "skillSha256": "0" * 64}))
+        with self.assertRaisesRegex(SystemExit, "skill content mismatch"):
+            self.trial("true", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
+
+    def test_the_prompt_is_exactly_the_scenario_prompt(self):
+        self.trial('cat > received.txt')
+        received = (self.out / f"{SCENARIO}-wright/workspace/received.txt").read_text()
+        self.assertEqual(received, (agent_bench.SCENARIOS / SCENARIO / "prompt.md").read_text())
+
+    def test_cell_labels_applicability_and_baseline(self):
+        cell = agent_bench.normalize_cell({"tool": "wright", "skills": ["wright-skill"], "knowledge": "none", "network": "off"})
+        self.assertEqual(agent_bench.cell_label(cell), "wright+wright-skill/none/off")
+        base = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "none", "network": "off"})
+        self.assertEqual(agent_bench.cell_label(base), bench_report.BASELINE)
+        opy = agent_bench.normalize_cell({"tool": "overpy", "skills": ["opy-skill"], "knowledge": "none", "network": "off"})
+        self.assertTrue(agent_bench.applicable({"language": "opy"}, opy))
+        self.assertFalse(agent_bench.applicable({"language": "workshop"}, opy))
+        self.assertTrue(agent_bench.applicable({"language": "workshop"}, cell))
+        fmt = agent_bench.normalize_cell({"tool": "none", "skills": ["workshop-format-skill"], "knowledge": "none", "network": "off"})
+        self.assertTrue(agent_bench.applicable({"language": "workshop"}, fmt))
+        self.assertFalse(agent_bench.applicable({"language": "opy"}, fmt))
+
+    @unittest.skipUnless(bench_grade.oracle_available(), "run `agent_bench.py setup-oracle`")
+    def test_overpy_tool_is_traced_and_wright_is_hidden(self):
+        scenario = "repair-opy-runaway-loop"
+        agent = (f"cp {reference(scenario)}/* . && overpy compile -i mode.opy -o out.txt; "
+                 "(command -v wright >/dev/null && echo found || echo hidden) > wright.txt")
+        result = self.trial(agent, tool="overpy", skills=("opy-skill",), scenario=scenario, skill_dirs={"opy-skill": self.skill_dir("overpy")})
+        self.assertEqual(result["toolUse"]["overpy"]["byCommand"], {"compile": 1})
+        self.assertNotIn("wright", result["toolUse"])
+        self.assertEqual((self.out / f"{scenario}-overpy/workspace/wright.txt").read_text().strip(), "hidden")
+        self.assertTrue((self.out / f"{scenario}-overpy/workspace/out.txt").is_file())
+        self.assertEqual(result["condition"]["label"], "overpy+opy-skill/none/off")
+        with self.assertRaisesRegex(SystemExit, "does not apply"):
+            self.trial("true", tool="overpy", scenario=SCENARIO)
+
+    def skill_dir(self, name: str) -> Path:
+        directory = self.out / "skills" / name
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+        return directory
+
+    def test_result_records_protocol_identity_and_status(self):
+        result = self.trial(f"cp {reference()}/* .")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["protocol"], {"timeoutSeconds": 60, "infraRetries": 2})
+        env = result["environment"]
+        self.assertEqual(env["wrightSha256"], hashlib.sha256(Path(WRIGHT).read_bytes()).hexdigest())
+        self.assertEqual((env["suite"]["version"], len(env["suite"]["hash"])), ("v1", 64))
+        self.assertTrue(env["harness"])
+        interrupted = self.trial("exit 75", infra_retries=0)
+        self.assertEqual(interrupted["status"], "provider-interrupted")
+        timeout = self.trial("sleep 5", timeout=1)
+        self.assertEqual((timeout["status"], timeout["agent"]["exit"]), ("timeout", None))
+        self.assertEqual(self.trial("exit 3")["status"], "agent-error")
+        info = self.trial('echo \'{"agent": "fake", "model": "m"}\' > "$BENCH_AGENT_INFO"')
+        self.assertEqual(info["agentInfo"]["model"], "m")
+
+    def test_unsafe_edits_block_usable_even_when_every_check_passes(self):
+        result = self.trial(f"cp {reference()}/* . && echo stray > stray.txt")
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["usable"])
+        self.assertEqual(result["usableReason"], ["unsafe-edits"])
+        clean = self.trial(f"cp {reference()}/* .")
+        self.assertEqual((clean["usable"], clean["usableReason"]), (True, []))
+
+    def test_an_unavailable_required_grader_makes_the_run_invalid_not_a_failure(self):
+        from unittest.mock import patch
+        scenario = "repair-opy-runaway-loop"
+        with patch.object(bench_grade, "oracle_available", return_value=False):
+            result = self.trial(f"cp {reference(scenario)}/* .", scenario=scenario)
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("grader", result["invalid"])
+        self.assertIn("grader-unavailable", result["usableReason"])
+
+    def test_matrix_skips_inapplicable_cells_and_stops_after_repeated_interruptions(self):
+        import contextlib
+        import io
+        config = self.out / "matrix.json"
+        config.write_text(json.dumps({
+            "agents": [{"id": "fake", "cmd": "exit 75"}],
+            "cells": [{"tool": "none", "skills": ["opy-skill"], "knowledge": "none", "network": "off"}],
+            "scenarios": ["repair-runaway-loop", "repair-opy-runaway-loop"], "trials": 4, "parallel": 1, "seed": 1,
+            "options": {"skill_dirs": {"opy-skill": str(self.skill_dir("overpy"))}, "timeout": 30, "infra_retries": 0},
+        }))
+        args = argparse.Namespace(config=config, out=self.out / "m", wright=str(Path(WRIGHT).resolve()), skill_dirs={}, wiki_dir=None, env_pass=[],
+                                  check_ancestors=False, canary_cmd=None, timeout=30, infra_retries=0, file_sandbox=False)
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            code = agent_bench.cmd_matrix(args)
+        self.assertEqual(code, 3)
+        self.assertIn("not applicable: repair-runaway-loop", printed.getvalue())
+        self.assertEqual(len(list((self.out / "m").rglob("result.json"))), 2)  # the third and fourth jobs were left unattempted
+        self.assertIn("left unattempted", printed.getvalue())
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
 
-    def test_levels_differ_only_in_wright_availability(self):
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_agent_file_writes_cannot_escape_the_trial_directory(self):
+        code = 'from pathlib import Path; Path("allowed.txt").write_text("ok"); Path("../../escaped.txt").write_text("bad")'
+        import shlex
+        result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True)
+        self.assertNotEqual(result["agent"]["exit"], 0)
+        self.assertFalse((self.out / "escaped.txt").exists())
+        self.assertEqual((self.out / f"{SCENARIO}-wright/workspace/allowed.txt").read_text(), "ok")
+        self.assertEqual(result["fileWriteEnforcement"], "trial-directory-only")
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_host_instructions_are_unreadable_but_workspace_instructions_are_allowed(self):
+        import shlex
+        host = self.out / "AGENTS.md"
+        host.write_text("host-only instructions")
+        code = (
+            'from pathlib import Path; '
+            'Path("AGENTS.md").write_text("workspace instructions"); '
+            'assert Path("AGENTS.md").read_text() == "workspace instructions"; '
+            f'Path({str(host)!r}).read_text()'
+        )
+        result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True)
+        self.assertNotEqual(result["agent"]["exit"], 0)
+        self.assertIn("PermissionError", (self.out / f"{SCENARIO}-wright/agent.log").read_text())
+        self.assertEqual(host.read_text(), "host-only instructions")
+        self.assertEqual((self.out / f"{SCENARIO}-wright/workspace/AGENTS.md").read_text(), "workspace instructions")
+
+    def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
-        none = self.trial(agent, wright="none")
-        assisted = self.trial(agent, wright="bin")
-        self.assertEqual(none["wrightUse"]["invocations"], 0)
+        none = self.trial(agent, tool="none")
+        assisted = self.trial(agent, tool="wright")
+        self.assertEqual(none["toolUse"], {})
         self.assertIn("missing-wright.txt", none["unsafeEdits"])
-        self.assertEqual(assisted["wrightUse"]["byCommand"], {"check": 1})
+        self.assertEqual(assisted["toolUse"]["wright"]["byCommand"], {"check": 1})
         self.assertTrue(assisted["passed"])
         self.assertEqual(assisted["unsafeEdits"], [])
 
-    def test_canary_rejects_reachable_wright_under_none(self):
-        cell = {"wright": "none", "knowledge": "none", "network": "off"}
-        args = argparse.Namespace(canary_cmd=None)
+    def test_canary_rejects_a_tool_that_is_not_part_of_the_condition(self):
+        cell = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "none", "network": "off"})
+        args = argparse.Namespace(canary_cmd=None, check_ancestors=False)
         env = {"PATH": str(Path(WRIGHT).resolve().parent)}
         self.assertIn("reachable", agent_bench.canaries(cell, env, self.out, args))
-        self.assertIsNone(agent_bench.canaries({**cell, "wright": "bin"}, env, self.out, args))
+        self.assertIsNone(agent_bench.canaries({**cell, "tool": "wright"}, env, self.out, args))
+
+    def test_canary_rejects_instruction_files_above_the_workspace(self):
+        outside = Path(tempfile.mkdtemp()).resolve()  # outside the repository, whose own AGENTS.md would match
+        self.addCleanup(shutil.rmtree, outside, True)
+        workspace = outside / "repo/runs/w"
+        workspace.mkdir(parents=True)
+        cell = agent_bench.normalize_cell({"tool": "wright", "skills": [], "knowledge": "none", "network": "on"})
+        args = argparse.Namespace(canary_cmd=None, check_ancestors=True)
+        self.assertIsNone(agent_bench.canaries(cell, {"PATH": ""}, workspace, args))
+        (outside / "repo/AGENTS.md").write_text("instructions")
+        self.assertIn("AGENTS.md", agent_bench.canaries(cell, {"PATH": ""}, workspace, args))
 
     def test_network_canary_invalidates_run(self):
         result = self.trial("true", canary_cmd="true")
@@ -63,16 +226,16 @@ class AgentBenchTest(unittest.TestCase):
         os.environ["BENCH_LEAK_PROBE"] = "leak"
         self.addCleanup(os.environ.pop, "BENCH_LEAK_PROBE", None)
         self.trial("env > env.txt")
-        env = (self.out / f"{SCENARIO}-bin/workspace/env.txt").read_text()
+        env = (self.out / f"{SCENARIO}-wright/workspace/env.txt").read_text()
         self.assertNotIn("BENCH_LEAK_PROBE", env)
         self.assertIn("BENCH_KNOWLEDGE=none", env)
-        self.assertIn(f"HOME={self.out}/{SCENARIO}-bin/home", env)
+        self.assertIn(f"HOME={self.out}/{SCENARIO}-wright/home", env)
 
     def test_trace_records_envelope_and_serve_sessions(self):
         agent = (f"cp {reference()}/* . && wright lint mode.ws -f json >/dev/null; "
                  "printf '{\"op\":\"capabilities\"}\\n{\"op\":\"lint\"}\\n' | wright serve mode.ws >/dev/null")
         result = self.trial(agent)
-        events = bench_trace.read_events(self.out / f"{SCENARIO}-bin/wright-trace.jsonl")
+        events = bench_trace.read_events(self.out / f"{SCENARIO}-wright/tool-trace.jsonl")
         lint = next(e for e in events if e["type"] == "call" and bench_trace.command_of(e["argv"]) == "lint")
         self.assertEqual(lint["envelope"]["command"], "lint")
         self.assertRegex(lint["envelope"]["inputIdentity"], r"^[0-9a-f]{64}$")
@@ -157,7 +320,7 @@ class AgentBenchTest(unittest.TestCase):
 
 class DetectorTest(unittest.TestCase):
     def call(self, argv, exit_code=0, t=0.0, **extra):
-        return {"type": "call", "t": t, "argv": argv, "exit": exit_code, "seconds": 0.1, "stdoutBytes": 40, "stderrBytes": 0, "stderrHead": "", "envelope": None, **extra}
+        return {"tool": "wright", "type": "call", "t": t, "argv": argv, "exit": exit_code, "seconds": 0.1, "stdoutBytes": 40, "stderrBytes": 0, "stderrHead": "", "envelope": None, **extra}
 
     def test_discovery_and_structured_output(self):
         good = bench_trace.detect_expectations([self.call(["--help"]), self.call(["check", "m.ws", "-f", "json"])], [], {}, None)
@@ -171,6 +334,29 @@ class DetectorTest(unittest.TestCase):
         friction = bench_trace.friction(events)
         self.assertEqual((friction["usageErrors"], friction["unknownSubcommands"], friction["identicalRepeats"]), (1, 1, 2))
 
+    def test_friction_reports_unparseable_serve_responses_without_losing_errors(self):
+        responses = ['{"result":"unfinished', '{"error":{"code":"malformed-request"}}', '{"result":{}}']
+        events = [{"tool": "wright", "type": "serve", "dir": "res", "line": line} for line in responses]
+        result = bench_trace.friction(events)
+        self.assertEqual(result["malformedServeRequests"], 1)
+        self.assertEqual(result["unparsedServeResponses"], 1)
+
+    def test_serve_trace_preserves_large_json_responses(self):
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        response = json.dumps({"result": {"value": "x" * 4096}}) + "\n"
+        process = SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(response.encode()), wait=lambda: 0)
+        output = SimpleNamespace(buffer=io.BytesIO(), flush=lambda: None)
+        with patch.object(bench_trace.subprocess, "Popen", return_value=process), \
+             patch.object(bench_trace.sys, "stdin", SimpleNamespace(buffer=io.BytesIO())), \
+             patch.object(bench_trace.sys, "stdout", output), \
+             patch.object(bench_trace, "append_event", Mock()) as capture:
+            self.assertEqual(bench_trace.serve_tee("wright", ["serve"], 0), 0)
+        recorded = next(call.args[0] for call in capture.call_args_list if call.args[0]["type"] == "serve")
+        self.assertEqual(json.loads(recorded["line"]), json.loads(response))
+        self.assertEqual(output.buffer.getvalue(), response.encode())
+
     def test_unused_wright_is_not_applicable(self):
         result = bench_trace.detect_expectations([], [], {"stabilityRisk": True}, None)
         self.assertEqual(result["E03"]["status"], "na")
@@ -178,12 +364,13 @@ class DetectorTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
-    def result(self, cell, trial, usable, tokens, split=None):
-        wright, knowledge, network = cell.split("/")
+    def result(self, cell, trial, usable, tokens, split=None, scenario="s", language="opy", status="completed"):
+        tool = cell.split("/")[0].split("+")[0]
         return {
-            "contract": "wright-agent-bench/v2", "scenario": "s", "split": split, "_trial": trial, "_dir": Path("d"),
-            "condition": {"wright": wright, "knowledge": knowledge, "network": network}, "agent": {"id": "m", "exit": 0, "seconds": 1.0},
-            "usable": usable, "passed": usable, "usage": {"totalTokens": tokens, "peakContext": tokens // 2}, "wrightUse": {"invocations": 1 if wright != "none" else 0},
+            "contract": "wright-agent-bench/v3", "scenario": scenario, "family": "diagnosis", "language": language, "split": split, "_trial": trial, "_dir": Path("d"),
+            "condition": {"label": cell}, "agent": {"id": "m", "exit": 0, "seconds": 1.0}, "status": status,
+            "usable": usable, "passed": usable, "usage": {"totalTokens": tokens, "peakContext": tokens // 2},
+            "toolUse": {"wright": {"invocations": 1}} if tool == "wright" else {},
         }
 
     def test_wilson_interval(self):
@@ -193,20 +380,30 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(bench_report.wilson(0, 0), (0.0, 0.0))
 
     def test_paired_efficiency_counts_only_both_usable_and_failures_cost(self):
-        runs = [self.result("none/none/off", 1, True, 1000), self.result("bin/none/off", 1, True, 600),
-                self.result("none/none/off", 2, False, 900), self.result("bin/none/off", 2, True, 700)]
+        runs = [self.result("none/none/off", 1, True, 1000), self.result("wright/none/off", 1, True, 600),
+                self.result("none/none/off", 2, False, 900), self.result("wright/none/off", 2, True, 700)]
         text, summary = bench_report.render(runs)
         self.assertIn("+1 / -0", text)
         self.assertIn("+40% tokens (n=1)", text)
-        self.assertEqual(summary["cells"]["m|bin/none/off"]["tokensPerUsable"], 650)
+        self.assertEqual(summary["cells"]["m|wright/none/off"]["tokensPerUsable"], 650)
         self.assertEqual(summary["cells"]["m|none/none/off"]["tokensPerUsable"], 1900)
 
     def test_headroom_and_invalid_runs_are_reported(self):
         runs = [self.result("none/none/off", t, True, 100) for t in range(1, 5)]
-        runs.append({**self.result("bin/none/off", 1, True, 100), "invalid": "canary"})
+        runs.append({**self.result("wright/none/off", 1, True, 100, status="invalid"), "invalid": "canary"})
         text, _ = bench_report.render(runs)
         self.assertIn("HEADROOM", text)
         self.assertIn("INVALID: 1 run(s) excluded", text)
+
+    def test_provider_failures_do_not_count_as_agent_failures(self):
+        good = self.result("none/none/off", 1, True, 100)
+        provider_failure = self.result("none/none/off", 2, False, 0)
+        provider_failure.update(status="provider-interrupted")
+        provider_failure["agent"]["exit"] = 75
+        text, summary = bench_report.render([good, provider_failure])
+        self.assertEqual(summary["cells"]["m|none/none/off"]["n"], 1)
+        self.assertEqual(summary["infrastructureFailures"], 1)
+        self.assertIn("excluded from outcome metrics", text)
 
 
 if __name__ == "__main__":

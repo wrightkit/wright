@@ -1,0 +1,62 @@
+{
+  "agents": [
+    {
+      "id": "pi-gpt-6-luna",
+      "cmd": "BENCH_MODEL=openai-codex/gpt-6-luna python3 /abs/path/wright/benchmarks/agent/adapters/pi.py"
+    }
+  ],
+  "cells": [
+    {
+      "tool": "none",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "wright",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "wright",
+      "skills": [
+        "wright-skill"
+      ],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "none",
+      "skills": [],
+      "knowledge": "wiki",
+      "network": "off"
+    },
+    {
+      "tool": "none",
+      "skills": [
+        "workshop-skill"
+      ],
+      "knowledge": "none",
+      "network": "off"
+    }
+  ],
+  "scenarios": [
+    "ana-paintball",
+    "widow-headshots"
+  ],
+  "trials": 3,
+  "parallel": 1,
+  "seed": 1,
+  "options": {
+    "wiki_dir": "/abs/path/pinned-wiki",
+    "env_pass": [
+      "HOME"
+    ],
+    "timeout": 3600,
+    "skill_dirs": {
+      "wright-skill": "/abs/path/skills/skills/wright",
+      "workshop-skill": "/abs/path/local/workshop-wiki"
+    }
+  }
+}

@@ -12,7 +12,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ORACLE = HERE / "oracle"
 GRADER_FILES = ("bench_grade.py", "oracle/compile.js", "oracle/package-lock.json")
-UNSAFE_IGNORED = ("wiki",)
+SUITE_VERSION = "v1"
+UNSAFE_IGNORED = ("wiki", ".agents", ".devin")  # linked wiki and skills installed through the agent's own mechanism
 
 
 def wright_json(wright: str, args: list[str]) -> tuple[int, dict]:
@@ -174,6 +175,33 @@ def grader_hash(scenario: dict) -> str:
     return digest.hexdigest()
 
 
+def suite_identity(scenarios: Path) -> dict:
+    """Version and content hash of the whole suite: every scenario file, the grader sources, and the oracle lock."""
+    digest = hashlib.sha256()
+    files = sorted(p for p in scenarios.rglob("*") if p.is_file())
+    for path in files:
+        digest.update(str(path.relative_to(scenarios)).encode() + b"\0" + path.read_bytes())
+    for name in GRADER_FILES:
+        path = HERE / name
+        digest.update(name.encode() + b"\0" + (path.read_bytes() if path.is_file() else b""))
+    return {"version": SUITE_VERSION, "hash": digest.hexdigest(), "scenarios": sum(1 for p in scenarios.iterdir() if (p / "scenario.json").is_file())}
+
+
+def usable_verdict(checks: list[dict], lint_errors: int, unsafe: list[str]) -> list[str]:
+    """Blocking conditions of `usable`. Empty means usable: all checks pass, no error-severity lint finding, no edit outside
+    the writable files, and every required grader was available."""
+    blocking = []
+    if not all(c["passed"] for c in checks):
+        blocking.append("checks-failed")
+    if lint_errors:
+        blocking.append("lint-error")
+    if unsafe:
+        blocking.append("unsafe-edits")
+    if any(c.get("unavailable") for c in checks):
+        blocking.append("grader-unavailable")
+    return blocking
+
+
 def grade(scenario: dict, workspace: Path, wright: str, scratch: Path | None = None) -> dict:
     entry = workspace / scenario["entry"]
     scratch = scratch or workspace.parent / f"{workspace.name}-grading"
@@ -184,17 +212,20 @@ def grade(scenario: dict, workspace: Path, wright: str, scratch: Path | None = N
     checks = [run_check(c, workspace, entry, wright, state) for c in scenario["checks"]]
     lint_errors = sum(1 for f in state["lint"] if f.get("severity") == "error")
     passed = all(c["passed"] for c in checks)
+    unsafe = unsafe_edits(scenario, workspace)
+    blocking = usable_verdict(checks, lint_errors, unsafe)
     auth = state["authorities"]
     return {
         "checks": checks,
         "passed": passed,
-        "usable": passed and lint_errors == 0,
+        "usable": not blocking,
+        "usableReason": blocking,
         "failedLayers": sorted({c["layer"] for c in checks if not c["passed"]}),
         "diagnostics": state.get("diagnostics", []),
         "authorities": {k: v for k, v in auth.items() if k != "disagreement"},
         "disagreement": auth.get("disagreement"),
         "lintFindings": sorted({f["code"] for f in state["lint"]}),
-        "unsafeEdits": unsafe_edits(scenario, workspace),
+        "unsafeEdits": unsafe,
         "unverifiedRuntimeClaims": scenario.get("runtimeOnly", []),
         "grader": {"hash": grader_hash(scenario), "oracle": oracle_version()},
     }

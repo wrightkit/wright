@@ -1,0 +1,23 @@
+{
+  "deathRules": [
+    "death count"
+  ],
+  "subroutineCallers": {
+    "awardPoint": [
+      "kill credit"
+    ],
+    "refreshLeader": [
+      "kill credit"
+    ],
+    "resetTimer": [
+      "restart on empty",
+      "start match"
+    ]
+  },
+  "neverUsed": [
+    "spareFlag"
+  ],
+  "multiWriterGlobals": [
+    "roundTimer"
+  ]
+}

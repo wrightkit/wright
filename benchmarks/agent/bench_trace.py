@@ -39,8 +39,8 @@ def envelope_summary(envelope: dict) -> dict:
 
 
 def append_event(event: dict) -> None:
-    with open(os.environ["WRIGHT_BENCH_TRACE"], "a") as trace:
-        trace.write(json.dumps(event) + "\n")
+    with open(os.environ["BENCH_TOOL_TRACE"], "a") as trace:
+        trace.write(json.dumps({"tool": os.environ["BENCH_TOOL_NAME"], **event}) + "\n")
 
 
 def sidecar_name() -> str:
@@ -48,10 +48,12 @@ def sidecar_name() -> str:
 
 
 def shim_main(argv: list[str]) -> int:
-    """Run the real Wright and record the call. `serve` sessions are teed line by line."""
-    real = os.environ["WRIGHT_BENCH_REAL"]
+    """Run the real tool (`wright` or `overpy`, named by argv[0]) and record the call. Wright `serve` sessions are teed line by line."""
+    tool, argv = argv[0], argv[1:]
+    os.environ["BENCH_TOOL_NAME"] = tool
+    real = os.environ[f"BENCH_TOOL_REAL_{tool.upper()}"]
     started = time.time()
-    if command_of(argv) == "serve":
+    if tool == "wright" and command_of(argv) == "serve":
         return serve_tee(real, argv, started)
     proc = subprocess.run([real, *argv], capture_output=True)
     sys.stdout.buffer.write(proc.stdout)
@@ -59,12 +61,12 @@ def shim_main(argv: list[str]) -> int:
     sys.stderr.buffer.write(proc.stderr)
     sys.stderr.flush()
     name = sidecar_name()
-    sidecar = Path(os.environ["WRIGHT_BENCH_SIDECAR"])
+    sidecar = Path(os.environ["BENCH_TOOL_SIDECAR"])
     sidecar.mkdir(parents=True, exist_ok=True)
     (sidecar / f"{name}.out").write_bytes(proc.stdout)
     (sidecar / f"{name}.err").write_bytes(proc.stderr)
     envelope = None
-    if wants_json(argv):
+    if tool == "wright" and wants_json(argv):
         try:
             envelope = envelope_summary(json.loads(proc.stdout))
         except json.JSONDecodeError:
@@ -83,7 +85,7 @@ def serve_tee(real: str, argv: list[str], started: float) -> int:
 
     def log(direction: str, line: bytes) -> None:
         counts[direction] += 1
-        append_event({"type": "serve", "dir": direction, "t": time.time(), "line": line.decode(errors="replace")[:2000]})
+        append_event({"type": "serve", "dir": direction, "t": time.time(), "line": line.decode(errors="replace")})
 
     def pump() -> None:
         for line in proc.stdout:
@@ -146,7 +148,16 @@ class Snapshots(threading.Thread):
         return self.events
 
 
+def tool_events(events: list[dict], tool: str) -> list[dict]:
+    return [e for e in events if e.get("tool") == tool]
+
+
 def summarize_trace(events: list[dict]) -> dict:
+    """Per tool: invocations, failures, and output size, for every tool that was called."""
+    return {tool: summarize_tool(tool_events(events, tool)) for tool in sorted({e["tool"] for e in events if "tool" in e})}
+
+
+def summarize_tool(events: list[dict]) -> dict:
     calls = [e for e in events if e["type"] == "call"]
     by_command: dict[str, int] = {}
     for call in calls:
@@ -164,6 +175,8 @@ def summarize_trace(events: list[dict]) -> dict:
 
 
 def friction(events: list[dict]) -> dict:
+    """Wright friction; other tools are summarized by `summarize_trace` only."""
+    events = tool_events(events, "wright")
     calls = [e for e in events if e["type"] == "call"]
     seen: list[tuple] = []
     repeats = 0
@@ -171,13 +184,21 @@ def friction(events: list[dict]) -> dict:
         key = tuple(call["argv"])
         repeats += key in seen
         seen.append(key)
-    serve_responses = [json.loads(e["line"]) for e in events if e["type"] == "serve" and e["dir"] == "res" and e["line"].startswith("{")]
+    serve_responses = []
+    unparsed = 0
+    for event in events:
+        if event["type"] == "serve" and event["dir"] == "res":
+            try:
+                serve_responses.append(json.loads(event["line"]))
+            except json.JSONDecodeError:
+                unparsed += 1
     return {
         "usageErrors": sum(1 for c in calls if c["exit"] == 2),
         "unknownSubcommands": sum(1 for c in calls if "unrecognized subcommand" in c.get("stderrHead", "")),
         "helpLookups": sum(1 for c in calls if any(a in ("--help", "-h", "help") for a in c["argv"])),
         "retriesAfterUnsupported": sum(1 for i, c in enumerate(calls) if c["exit"] >= 3 and tuple(c["argv"]) in [tuple(x["argv"]) for x in calls[i + 1:]]),
         "malformedServeRequests": sum(1 for r in serve_responses if r.get("error", {}).get("code") == "malformed-request"),
+        "unparsedServeResponses": unparsed,
         "identicalRepeats": repeats,
         "callsToFirstSuccess": next((i + 1 for i, c in enumerate(calls) if c["exit"] == 0 and not any(a in ("--help", "-h", "--version") for a in c["argv"])), None),
     }
@@ -200,6 +221,7 @@ def expectation(status: str, detail: str = "") -> dict:
 
 def detect_expectations(events: list[dict], snapshots: list[dict], scenario: dict, final_sha256: str | None) -> dict:
     """SPEC-414 E01-E12 over the Wright trace. E05, E07, E09, E10 need the agent transcript: `unavailable`."""
+    events = tool_events(events, "wright")
     calls = [e for e in events if e["type"] == "call"]
     ops = serve_ops(events)
     used = bool(calls)

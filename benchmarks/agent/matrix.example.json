@@ -1,16 +1,71 @@
 {
   "agents": [
-    {"id": "example-model", "cmd": "BENCH_MODEL=example-model python3 benchmarks/agent/adapters/claude_code.py"}
+    {
+      "id": "pi-gpt-6-luna",
+      "cmd": "BENCH_MODEL=openai-codex/gpt-6-luna python3 /abs/path/wright/benchmarks/agent/adapters/pi.py"
+    },
+    {
+      "id": "pi-gemini-3.6-flash",
+      "cmd": "BENCH_MODEL=antigravity/gemini-3.6-flash BENCH_PI_EXTENSIONS=/abs/path/pi-antigravity BENCH_PI_WEB_EXTENSIONS=/abs/path/pi-web-access python3 /abs/path/wright/benchmarks/agent/adapters/pi.py"
+    },
+    {
+      "id": "devin-swe-2-max",
+      "cmd": "BENCH_MODEL=swe-2-max python3 /abs/path/wright/benchmarks/agent/adapters/devin.py"
+    }
   ],
   "cells": [
-    {"wright": "none", "knowledge": "none", "network": "off"},
-    {"wright": "bin", "knowledge": "none", "network": "off"},
-    {"wright": "bin+skill", "knowledge": "none", "network": "off"},
-    {"wright": "none", "knowledge": "web", "network": "on"},
-    {"wright": "none", "knowledge": "wiki", "network": "off"}
+    {
+      "tool": "none",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "wright",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "wright",
+      "skills": [
+        "wright-skill"
+      ],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "none",
+      "skills": [],
+      "knowledge": "web",
+      "network": "on"
+    },
+    {
+      "tool": "none",
+      "skills": [],
+      "knowledge": "wiki",
+      "network": "off"
+    },
+    {
+      "tool": "none",
+      "skills": [
+        "workshop-skill"
+      ],
+      "knowledge": "none",
+      "network": "off"
+    }
   ],
   "trials": 5,
   "parallel": 2,
   "seed": 1,
-  "options": {"skill_dir": "../skills/skills/wright", "wiki_dir": "path/to/pinned/wiki", "env_pass": ["HOME", "ANTHROPIC_API_KEY"]}
+  "options": {
+    "wiki_dir": "/abs/path/pinned-wiki",
+    "env_pass": [
+      "HOME"
+    ],
+    "skill_dirs": {
+      "wright-skill": "/abs/path/skills/skills/wright",
+      "workshop-skill": "/abs/path/local/workshop-wiki"
+    }
+  }
 }
