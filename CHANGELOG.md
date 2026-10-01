@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/wrightkit/wright/compare/v0.5.0...v0.6.0) (2026-10-01)
+
+
+### Features
+
+* **agent:** default edit sources to on-disk text ([#476](https://github.com/wrightkit/wright/issues/476)) ([c895fd6](https://github.com/wrightkit/wright/commit/c895fd61e7c5e9302e30fce059a31d0209cca4b4))
+* **driver:** reload ToolService sessions on disk changes and refuse stale ids ([#478](https://github.com/wrightkit/wright/issues/478)) ([0faa614](https://github.com/wrightkit/wright/commit/0faa61409b3cb5790d58df7257d9892ef73e8bc1)), closes [#471](https://github.com/wrightkit/wright/issues/471)
+
+
+### Bug Fixes
+
+* **bench:** recalibrate ana-paintball upstream-rejects-name negative ([#479](https://github.com/wrightkit/wright/issues/479)) ([d4f39e2](https://github.com/wrightkit/wright/commit/d4f39e2973fd295abbd8088b02a51afa9fb0a3ba)), closes [#477](https://github.com/wrightkit/wright/issues/477)
+
 ## [0.5.0](https://github.com/wrightkit/wright/compare/v0.4.0...v0.5.0) (2026-09-30)
 
 
