@@ -30,7 +30,7 @@ result.
 
 | Command | Purpose | Text-mode stdout |
 | --- | --- | --- |
-| `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text | the emitted artifact (or nothing with `-o`) |
+| `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | the emitted artifact (or nothing with `-o`) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
 | `wright analyze [INPUT]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels |
@@ -68,6 +68,16 @@ a static DEL/OSTW adapter. Every DEL/OSTW workflow fails with the structured
 an upstream/static fallback. DEL/OSTW provider support is not currently
 shipped with Wright and is outside this contract. OPY, Workshop, and protocol
 inputs continue through their existing owner-backed paths.
+
+`wright compile` also surfaces known exact Workshop client import
+constraints as warnings without failing compilation (#488): a program whose
+canonical element count exceeds the Overwatch client's 32768-element import
+limit still emits its artifact and exits 0, carrying a
+`target-element-limit` warning that reports the observed count and names the
+largest contributing rule. The distinction is deliberate — `compile` means
+Wright produced valid Workshop text, not that the current client imports it
+under every resource limit. `wright analyze` remains the detailed cost and
+hotspot surface; `check` does not evaluate client importability.
 
 The rationale for current-directory defaults, directory targets, and explicit
 ownership ambiguity is recorded in

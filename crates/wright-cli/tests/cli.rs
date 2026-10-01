@@ -141,6 +141,58 @@ fn compile_over_workshop_file_emits_correct_text() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// A program over the Overwatch client element limit (#488) still emits its
+/// artifact on stdout in text mode, with the import-limit warning on stderr;
+/// in JSON mode the warning rides inside the envelope's diagnostics.
+#[test]
+fn compile_over_element_limit_warns_and_still_emits() {
+    let array = (0..17_000).map(|_| "1").collect::<Vec<_>>().join(", ");
+    let source = format!(
+        "variables {{\n    global:\n        0: values\n}}\n\nrule (\"fill\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(values, Array({array}));\n    }}\n}}\n"
+    );
+    let path = temp_file("over-limit.txt", &source);
+
+    let output = run(&["compile", path.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Set Global Variable"),
+        "the artifact still reaches stdout: {stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning[target-element-limit]"),
+        "the limit warning reaches stderr: {stderr}"
+    );
+    assert!(stderr.contains("32768"), "{stderr}");
+
+    let json = run(&["compile", path.to_str().unwrap(), "-f", "json"]);
+    assert!(json.status.success(), "{}", command_result(&json));
+    assert!(
+        json.stderr.is_empty(),
+        "JSON mode keeps stderr clean: {}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let envelope = parse_json(&json.stdout);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["exit"], 0);
+    assert!(
+        envelope["result"]["output"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Set Global Variable")),
+        "the JSON envelope still carries the artifact"
+    );
+    let warning = envelope["diagnostics"]
+        .as_array()
+        .expect("diagnostics array")
+        .iter()
+        .find(|d| d["code"] == "target-element-limit")
+        .expect("the envelope reports the limit warning");
+    assert_eq!(warning["severity"], "warning");
+    assert_eq!(warning["stage"], "emission");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[test]
 fn compile_writes_output_file_and_reports_envelope() {
     let path = temp_file("basic.txt", &corpus_workshop("synthetic/basic-rule"));

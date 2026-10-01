@@ -13,11 +13,11 @@ use std::sync::Arc;
 use workshop_rs::Program;
 use wright_analyzer::canonical::SemanticService;
 use wright_analyzer::registry::{LintConfig, LintRegistry};
-use wright_analyzer::service::Origin as ServiceOrigin;
 
 use crate::config::{InputSpec, SessionConfig, SourceKind};
 use crate::diag::{
     Diagnostic, Origin, Position, Severity, SourceSpan, Stage, source_provider_unavailable,
+    source_span,
 };
 use crate::input::{self, InputTarget, ResolvedInput};
 use crate::input_identity;
@@ -82,6 +82,29 @@ pub enum Provenance {
 enum ProviderOperation {
     Check,
     Compile,
+}
+
+/// The exact Overwatch client element limit (2^15): above it the client
+/// refuses an otherwise valid Workshop program at import. Evidence: the
+/// pinned upstream OverPy oracle (9.7.10) and current upstream `master` both
+/// declare `ELEMENT_LIMIT = 32768` and warn `w_element_limit` past it while
+/// still emitting output; the Bastion regression project failed client
+/// import over it (`OWBastion/Bastion#263`). `workshop-rs` owns the
+/// canonical count; the budget policy is Wright's consumer policy
+/// (workshop-rs ADR-0010).
+const WORKSHOP_CLIENT_ELEMENT_LIMIT: usize = 32768;
+
+/// The origin reported on diagnostics and services for a loaded program:
+/// an unmapped provider artifact is not presented as authored source.
+fn loaded_origin(loaded: &Loaded) -> Origin {
+    Origin {
+        kind: if loaded.provenance == Provenance::Unmapped {
+            "provider-artifact".to_string()
+        } else {
+            loaded.origin.kind.clone()
+        },
+        locale: loaded.origin.locale.clone(),
+    }
 }
 
 /// One reusable compiler session.
@@ -586,6 +609,7 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
         let text = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
             .map_err(|error| workshop_diag(error, &loaded.input))?;
+        self.attach_target_limits(&loaded);
         let sha256 = input_identity(&text);
         Ok(CompiledOutput {
             text,
@@ -700,17 +724,9 @@ impl CompilerSession {
         loaded: &'a Loaded,
         config: LintConfig,
     ) -> SemanticService<'a> {
-        let origin = ServiceOrigin {
-            kind: if loaded.provenance == Provenance::Unmapped {
-                "provider-artifact".to_string()
-            } else {
-                loaded.origin.kind.clone()
-            },
-            locale: loaded.origin.locale.clone(),
-        };
         SemanticService::with_origin_and_config_and_registry(
             &loaded.program,
-            origin,
+            loaded_origin(loaded),
             config,
             Arc::clone(&self.lint_registry),
         )
@@ -721,20 +737,75 @@ impl CompilerSession {
         loaded: &Loaded,
         config: LintConfig,
     ) -> SemanticService<'static> {
-        let origin = ServiceOrigin {
-            kind: if loaded.provenance == Provenance::Unmapped {
-                "provider-artifact".to_string()
-            } else {
-                loaded.origin.kind.clone()
-            },
-            locale: loaded.origin.locale.clone(),
-        };
         SemanticService::with_shared_program(
             Arc::clone(&loaded.program),
-            origin,
+            loaded_origin(loaded),
             config,
             Arc::clone(&self.lint_registry),
         )
+    }
+
+    /// Known exact Overwatch client import constraints, measured on the
+    /// emitted program during `compile` (#488).
+    ///
+    /// `workshop-rs` owns the canonical measurement; Wright owns the limit
+    /// policy and reports a violated import budget as a warning — a program
+    /// over the budget still emits its artifact, matching upstream
+    /// `w_element_limit`. New exact constraints attach to this path as
+    /// `workshop-rs` exposes them (`wrightkit/workshop-rs#346`), so target
+    /// diagnostics stay free of source-language logic. `check` does not run
+    /// this: it is a source-correctness workflow, not a client-import gate.
+    fn attach_target_limits(&mut self, loaded: &Loaded) {
+        let report = match loaded.program.element_count(&self.catalog) {
+            Ok(report) => report,
+            Err(error) => {
+                // Without the canonical count the budget is unevaluated —
+                // say so rather than let a missing warning read as "within
+                // the limit".
+                self.diagnostics.push(Diagnostic {
+                    code: "element-count-unavailable".to_string(),
+                    stage: Stage::Emission,
+                    severity: Severity::Info,
+                    message: format!(
+                        "the canonical element count is unavailable ({error}); the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit was not evaluated"
+                    ),
+                    status: None,
+                    span: None,
+                    source: Some(loaded_origin(loaded)),
+                });
+                return;
+            }
+        };
+        if report.total <= WORKSHOP_CLIENT_ELEMENT_LIMIT {
+            return;
+        }
+        let total = report.total;
+        let mut diagnostic = Diagnostic {
+            code: "target-element-limit".to_string(),
+            stage: Stage::Emission,
+            severity: Severity::Warning,
+            message: format!(
+                "generated Workshop program uses {total} elements, over the {WORKSHOP_CLIENT_ELEMENT_LIMIT}-element client import limit; the artifact was still emitted but is expected to fail Overwatch client import"
+            ),
+            status: None,
+            span: None,
+            source: Some(loaded_origin(loaded)),
+        };
+        // Point at the largest contributing rule: the concise hotspot that
+        // `analyze` reports in full.
+        if let Some(top) = report.rules.iter().max_by_key(|rule| rule.count) {
+            diagnostic.message.push_str(&format!(
+                "; largest contributor: rule \"{}\" ({} elements)",
+                top.name, top.count
+            ));
+            diagnostic.span = top.span.map(|span| {
+                source_span(
+                    span,
+                    semantic::span_path(Some(span.file.index() as u64), loaded),
+                )
+            });
+        }
+        self.diagnostics.push(diagnostic);
     }
 
     /// Structural validation permits source-preserving Workshop fallbacks.

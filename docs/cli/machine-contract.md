@@ -67,7 +67,9 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `unsupported-construct`, `settings-invalid`, `settings-placement` (frontend),
 `settings-unknown-key`, `settings-unknown-value` (validation), `convert-error`/
 `lower-error` (lowering), `validation-error` (validation), `input-*`/
-`stdin-*` (discovery), `output-io` (emission), analysis findings reuse the
+`stdin-*` (discovery), `output-io` and the compile-time client-import
+diagnostics `target-element-limit` / `element-count-unavailable` (emission),
+analysis findings reuse the
 analyzer's codes — including the name-addressing refusals `unknown-symbol`,
 `ambiguous-symbol`, `unknown-rule`, and `ambiguous-rule` (#429) — and
 `*-internal` / `*-unavailable` (internal).

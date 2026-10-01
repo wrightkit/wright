@@ -120,6 +120,102 @@ fn workshop_compile_is_deterministic_and_idempotent() {
         first.result.output.as_ref().map(|output| &output.text),
         second.result.output.as_ref().map(|output| &output.text)
     );
+    assert!(
+        first
+            .diagnostics
+            .iter()
+            .all(|d| !d.code.starts_with("target-") && d.code != "element-count-unavailable"),
+        "a program under the client element limit gets no target diagnostic: {:?}",
+        first.diagnostics
+    );
+}
+
+/// The smallest Bastion-style case (#488): a program whose canonical element
+/// count exceeds the 32768 client limit still emits its artifact, and the
+/// compile envelope reports the violation as a warning — not a compilation
+/// error. `check` stays a source-correctness workflow and does not evaluate
+/// the client import budget.
+#[test]
+fn compile_warns_over_client_element_limit_but_still_emits() {
+    let elements = (0..17_000).map(|_| "1").collect::<Vec<_>>().join(", ");
+    let source = format!(
+        "variables {{\n    global:\n        0: values\n}}\n\nrule (\"fill\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(values, Array({elements}));\n    }}\n}}\n"
+    );
+    // The warning's numbers come from the canonical owner, not a guess.
+    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog");
+    let locale = workshop_rs::catalog::Locale::new("en-US");
+    let expected_total =
+        workshop_rs::parser::parse_with_context(&source, &catalog, &locale, &catalog)
+            .expect("generated program parses")
+            .element_count(&catalog)
+            .expect("generated program counts")
+            .total;
+    assert!(expected_total > 32768, "fixture is over the client limit");
+
+    let directory = workspace_root()
+        .join("target")
+        .join(format!("wright-driver-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("fixture directory creates");
+    let path = directory.join("over-limit.ws");
+    std::fs::write(&path, source).expect("over-limit fixture writes");
+
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+
+    let result = session.compile();
+    assert!(
+        result.ok,
+        "over-limit compile still succeeds: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.exit, 0);
+    let output = result
+        .result
+        .output
+        .as_ref()
+        .expect("the artifact is still emitted");
+    assert!(output.text.contains("Set Global Variable"));
+    let warning = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "target-element-limit")
+        .expect("the element-limit warning is reported");
+    assert_eq!(warning.severity, wright_driver::Severity::Warning);
+    assert_eq!(warning.stage, wright_driver::Stage::Emission);
+    assert!(
+        warning.message.contains(&expected_total.to_string()),
+        "the warning reports the canonical observed count: {warning:?}"
+    );
+    assert!(warning.message.contains("32768"), "{warning:?}");
+    assert!(
+        warning.message.contains("still emitted"),
+        "the warning must not read as a compilation failure: {warning:?}"
+    );
+    assert!(
+        warning.message.contains("\"fill\""),
+        "the warning names the largest contributing rule: {warning:?}"
+    );
+    let span = warning
+        .span
+        .as_ref()
+        .expect("the largest contributing rule is located");
+    assert!(span.path.ends_with("over-limit.ws"), "{span:?}");
+
+    let check = session.check();
+    assert!(
+        check
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "target-element-limit"),
+        "check does not evaluate client import limits: {:?}",
+        check.diagnostics
+    );
+
+    let _ = std::fs::remove_dir_all(&directory);
 }
 
 #[test]
