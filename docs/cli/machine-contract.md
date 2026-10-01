@@ -69,7 +69,8 @@ Diagnostic codes are stable per stage: `parse-error`, `unknown-*`,
 `lower-error` (lowering), `validation-error` (validation), `input-*`/
 `stdin-*` (discovery), `output-io` and the client-import diagnostics
 `target-element-limit` / `element-count-unavailable` (emission — surfaced by
-`compile`, `lint`, `analyze`, and `inspect`),
+every whole-program command: `compile`, `check`, `lint`, `analyze`,
+`inspect`),
 analysis findings reuse the
 analyzer's codes — including the name-addressing refusals `unknown-symbol`,
 `ambiguous-symbol`, `unknown-rule`, and `ambiguous-rule` (#429) — and

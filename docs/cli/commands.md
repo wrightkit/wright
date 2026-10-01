@@ -74,12 +74,12 @@ without failing the command (#488): a program whose canonical element count
 exceeds the Overwatch client's 32768-element import limit still compiles,
 emits its artifact, and exits 0, carrying a `target-element-limit` warning
 that reports the observed count and names the largest contributing rule. The
-same warning rides the `lint`, `analyze`, and `inspect` envelopes — anywhere
-the whole program is evaluated — while `check` does not evaluate client
-importability and `wright analyze` remains the detailed cost and hotspot
-surface. The distinction is deliberate: `compile` means Wright produced
-valid Workshop text, not that the current client imports it under every
-resource limit.
+same warning rides every whole-program envelope — `compile`, `check`,
+`lint`, `analyze`, and `inspect` — so `check` and `lint` keep identical
+diagnostics and a warning never changes a verdict. `wright analyze` remains
+the detailed cost and hotspot surface. The distinction is deliberate:
+`compile` means Wright produced valid Workshop text, not that the current
+client imports it under every resource limit.
 
 The rationale for current-directory defaults, directory targets, and explicit
 ownership ambiguity is recorded in
