@@ -74,7 +74,7 @@ fn opy_validation_routes_to_the_provider_operation() {
             ..SessionConfig::default()
         },
         &workshop_rs::catalog::Catalog::builtin().expect("catalog"),
-        &sources,
+        Some(&sources),
         &transaction,
     );
     assert!(!result.ok);
@@ -115,7 +115,7 @@ fn workshop_validation_applies_and_reparses() {
             ..SessionConfig::default()
         },
         &workshop_rs::catalog::Catalog::builtin().expect("catalog"),
-        &sources,
+        Some(&sources),
         &transaction,
     );
     assert!(result.ok, "{:?}", result.diagnostics);

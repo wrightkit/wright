@@ -812,20 +812,20 @@
       "type": "object",
       "properties": {
         "op": { "const": "validateEditTransaction" },
-        "sources": { "$ref": "#/$defs/Sources" },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }] },
         "transaction": { "$ref": "#/$defs/EditTransaction" }
       },
-      "required": ["op", "sources", "transaction"],
+      "required": ["op", "transaction"],
       "additionalProperties": false
     },
     "SemanticRenameRequest": {
       "type": "object",
       "properties": {
         "op": { "const": "semanticRename" },
-        "sources": { "$ref": "#/$defs/Sources" },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }] },
         "target": { "$ref": "#/$defs/RenameTarget" }
       },
-      "required": ["op", "sources", "target"],
+      "required": ["op", "target"],
       "additionalProperties": false
     },
     "ProviderSemanticRenameRequest": {

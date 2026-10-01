@@ -1,9 +1,11 @@
 //! ToolService preserves the machine contract over canonical Workshop input
 //! and reports provider-owned OPY gaps as structured refusals.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
+use wright_driver::edit::{EditRange, EditTransaction, RenameTarget, SourceEdit};
+use wright_driver::service::{Address, ToolRequest, ToolResponse, ToolService};
 use wright_driver::{
     CompilerSession, FindingSelection, InputSpec, SessionConfig, Severity, SourceKind,
 };
@@ -1052,7 +1054,7 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
         ToolRequest::References { symbol: 0.into() },
         ToolRequest::Usage { symbol: 0.into() },
         ToolRequest::SemanticRename {
-            sources: std::collections::BTreeMap::new(),
+            sources: Some(std::collections::BTreeMap::new()),
             target: wright_driver::edit::RenameTarget {
                 symbol: Some(0.into()),
                 source: None,
@@ -1269,7 +1271,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     let validate = result_of(
         &mut service,
         &ToolRequest::ValidateEdit {
-            sources: sources.clone(),
+            sources: Some(sources.clone()),
             transaction: wright_driver::edit::EditTransaction::new(vec![
                 serde_json::from_value(serde_json::json!({
                     "kind": "edit",
@@ -1290,7 +1292,7 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     let rename = result_of(
         &mut service,
         &ToolRequest::SemanticRename {
-            sources,
+            sources: Some(sources),
             target: wright_driver::edit::RenameTarget {
                 symbol: Some("points".into()),
                 source: None,
@@ -1329,4 +1331,283 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
         assert_eq!(result["ok"], false, "{request:?}: {result}");
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── #472: `sources` is optional on the raw Workshop edit operations ──────
+
+const RENAMEABLE: &str = "variables {\n    global:\n        0: score\n}\n\nrule (\"r\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(score, Add(Global.score, 1));\n    }\n}\n";
+
+fn rename_target() -> RenameTarget {
+    RenameTarget {
+        symbol: Some(Address::Name("score".to_string())),
+        source: None,
+        line: None,
+        col: None,
+        to: "total".to_string(),
+    }
+}
+
+fn rename_edit_transaction(key: &str, source_identity: String) -> EditTransaction {
+    EditTransaction::new(vec![SourceEdit {
+        edit_kind: "edit".to_string(),
+        source: key.to_string(),
+        source_identity,
+        range: EditRange {
+            start_line: 3,
+            start_col: 12,
+            end_line: 3,
+            end_col: 17,
+        },
+        new_text: "total".to_string(),
+    }])
+    .expect("the transaction is structurally valid")
+}
+
+#[test]
+fn edit_operations_default_sources_to_the_on_disk_text() {
+    let path = temp_workshop("score.ws", RENAMEABLE);
+    let key = path.to_string_lossy().into_owned();
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    // `semanticRename` by symbol name: omitting `sources` returns the same
+    // validated transaction as supplying the on-disk text.
+    let rename = |sources| ToolRequest::SemanticRename {
+        sources,
+        target: rename_target(),
+    };
+    let defaulted = result_of(&mut service, &rename(None));
+    let explicit = result_of(
+        &mut service,
+        &rename(Some(BTreeMap::from([(key.clone(), on_disk.clone())]))),
+    );
+    assert_eq!(defaulted["ok"], true, "{defaulted:?}");
+    assert_eq!(defaulted, explicit);
+    assert!(
+        defaulted["preview"][0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("0: total"),
+        "{defaulted:?}"
+    );
+
+    // `validateEditTransaction`: omitting `sources` validates against the
+    // on-disk text and returns the same result as explicit `sources`.
+    let validate = |sources| ToolRequest::ValidateEdit {
+        sources,
+        transaction: rename_edit_transaction(&key, wright_driver::input_identity(&on_disk)),
+    };
+    let defaulted = result_of(&mut service, &validate(None));
+    let explicit = result_of(
+        &mut service,
+        &validate(Some(BTreeMap::from([(key.clone(), on_disk.clone())]))),
+    );
+    assert_eq!(defaulted["ok"], true, "{defaulted:?}");
+    assert_eq!(defaulted, explicit);
+    assert!(
+        defaulted["preview"][0]["new_text"]
+            .as_str()
+            .unwrap()
+            .contains("0: total"),
+        "{defaulted:?}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn edit_operations_keep_supplied_source_and_project_boundaries() {
+    let path = temp_workshop("score.ws", RENAMEABLE);
+    let key = path.to_string_lossy().into_owned();
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    // A supplied `sources` text that differs from the loaded program still
+    // refuses with `edit-stale-source`.
+    for (op, result) in [
+        (
+            "semanticRename",
+            result_of(
+                &mut service,
+                &ToolRequest::SemanticRename {
+                    sources: Some(BTreeMap::from([(
+                        key.clone(),
+                        on_disk.replacen("score", "other", 1),
+                    )])),
+                    target: rename_target(),
+                },
+            ),
+        ),
+        (
+            "validateEditTransaction",
+            result_of(
+                &mut service,
+                &ToolRequest::ValidateEdit {
+                    sources: Some(BTreeMap::from([(key.clone(), "changed".to_string())])),
+                    transaction: rename_edit_transaction(
+                        &key,
+                        wright_driver::input_identity(&on_disk),
+                    ),
+                },
+            ),
+        ),
+    ] {
+        assert_eq!(result["ok"], false, "{op}: {result:?}");
+        assert_eq!(
+            result["diagnostics"][0]["code"], "edit-stale-source",
+            "{op}: {result:?}"
+        );
+        assert!(result["preview"].is_null(), "{op}: no partial preview");
+    }
+
+    // A transaction naming a file that is not part of the loaded project
+    // refuses with a structured error — with or without `sources`.
+    let foreign = |sources| ToolRequest::ValidateEdit {
+        sources,
+        transaction: rename_edit_transaction("other.ws", wright_driver::input_identity(&on_disk)),
+    };
+    for (op, result) in [
+        ("absent sources", result_of(&mut service, &foreign(None))),
+        (
+            "supplied sources",
+            result_of(
+                &mut service,
+                &foreign(Some(BTreeMap::from([(
+                    "other.ws".to_string(),
+                    on_disk.clone(),
+                )]))),
+            ),
+        ),
+    ] {
+        assert_eq!(result["ok"], false, "{op}: {result:?}");
+        assert_eq!(
+            result["diagnostics"][0]["code"], "edit-unknown-source",
+            "{op}: {result:?}"
+        );
+    }
+
+    // The default reads disk, not a stale snapshot: rewriting the input is
+    // observed by the service's freshness check (#471), so the unsourced
+    // rename resolves against the reloaded program — the new `other`
+    // symbol renames cleanly while the old `score` name is gone.
+    std::fs::write(&path, on_disk.replace("score", "other")).unwrap();
+    let renamed = result_of(
+        &mut service,
+        &ToolRequest::SemanticRename {
+            sources: None,
+            target: RenameTarget {
+                symbol: Some(Address::Name("other".to_string())),
+                ..rename_target()
+            },
+        },
+    );
+    assert_eq!(renamed["ok"], true, "{renamed:?}");
+    let stale = result_of(
+        &mut service,
+        &ToolRequest::SemanticRename {
+            sources: None,
+            target: rename_target(),
+        },
+    );
+    assert_eq!(stale["ok"], false, "{stale:?}");
+    assert_eq!(stale["diagnostics"][0]["code"], "unknown-symbol");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn unsourced_transaction_unifies_spelling_variants_of_the_input() {
+    let path = temp_workshop("score.ws", RENAMEABLE);
+    let key = path.to_string_lossy().into_owned();
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    let identity = wright_driver::input_identity(&on_disk);
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let edit = |source: &str, range: EditRange, new_text: &str| SourceEdit {
+        edit_kind: "edit".to_string(),
+        source: source.to_string(),
+        source_identity: identity.clone(),
+        range,
+        new_text: new_text.to_string(),
+    };
+    let declaration = EditRange {
+        start_line: 3,
+        start_col: 12,
+        end_line: 3,
+        end_col: 17,
+    };
+    let rule_name = EditRange {
+        start_line: 6,
+        start_col: 8,
+        end_line: 6,
+        end_col: 9,
+    };
+
+    // Two spellings of the same loaded input — a `file://` URI and the
+    // plain path — are one file, not two sources: without `sources` the
+    // transaction still produces a single atomic preview carrying both
+    // edits, identical to the canonical explicit request.
+    let uri = format!("file://{key}");
+    let transaction = |first: &str, second: &str| {
+        EditTransaction::new(vec![
+            edit(first, declaration.clone(), "total"),
+            edit(second, rule_name.clone(), "x"),
+        ])
+        .unwrap()
+    };
+    let defaulted = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: None,
+            transaction: transaction(&uri, &key),
+        },
+    );
+    let explicit = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: Some(BTreeMap::from([(key.clone(), on_disk.clone())])),
+            transaction: transaction(&key, &key),
+        },
+    );
+    assert_eq!(defaulted["ok"], true, "{defaulted:?}");
+    assert_eq!(defaulted, explicit);
+    assert_eq!(defaulted["preview"].as_array().unwrap().len(), 1);
+    let new_text = defaulted["preview"][0]["new_text"].as_str().unwrap();
+    assert!(
+        new_text.contains("0: total") && new_text.contains("rule (\"x\")"),
+        "{new_text}"
+    );
+
+    // Cross-spelling overlaps refuse the same way same-spelling ones do —
+    // they must not slip through as two divergent previews of one file.
+    let refused = result_of(
+        &mut service,
+        &ToolRequest::ValidateEdit {
+            sources: None,
+            transaction: EditTransaction::new(vec![
+                edit(&uri, declaration.clone(), "total"),
+                edit(&key, declaration.clone(), "other"),
+            ])
+            .unwrap(),
+        },
+    );
+    assert_eq!(refused["ok"], false, "{refused:?}");
+    assert_eq!(refused["diagnostics"][0]["code"], "edit-overlap");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
