@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/wrightkit/wright/compare/v0.6.1...v0.6.2) (2026-10-01)
+
+
+### Dependencies
+
+* bump workshop-rs to 1.3.2 ([#485](https://github.com/wrightkit/wright/issues/485)) ([8327f74](https://github.com/wrightkit/wright/commit/8327f743491bf28e7cb3e6d1919c493a469936ba))
+
 ## [0.6.1](https://github.com/wrightkit/wright/compare/v0.6.0...v0.6.1) (2026-10-01)
 
 
