@@ -138,7 +138,7 @@
         "piercing-via-raycast"
       ]
     },
-    "upstream-rejects-name": {
+    "hallucinated-name": {
       "fails": [
         "ana",
         "ffa",
@@ -151,7 +151,9 @@
         "sleep-cooldown-2.5",
         "sleep-dart",
         "target-25",
-        "upstream-valid"
+        "upstream-valid",
+        "wright-check",
+        "wright-compiles"
       ]
     }
   }

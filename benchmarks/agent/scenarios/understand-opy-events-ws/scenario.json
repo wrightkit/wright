@@ -1,0 +1,73 @@
+{
+  "id": "understand-opy-events-ws",
+  "family": "understanding",
+  "language": "workshop",
+  "entry": "mode.ws",
+  "split": "test",
+  "writable": [
+    "answer.json"
+  ],
+  "runtimeOnly": [],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "workshop-rs"
+    },
+    {
+      "id": "death-rules",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "deathRules",
+      "expected": [
+        "death count"
+      ]
+    },
+    {
+      "id": "subroutine-callers",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "subroutineCallers",
+      "expected": {
+        "awardPoint": [
+          "kill credit"
+        ],
+        "refreshLeader": [
+          "kill credit"
+        ],
+        "resetTimer": [
+          "restart on empty",
+          "start match"
+        ]
+      }
+    },
+    {
+      "id": "never-used",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "neverUsed",
+      "expected": [
+        "spareFlag"
+      ]
+    },
+    {
+      "id": "multi-writer-globals",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "multiWriterGlobals",
+      "expected": [
+        "roundTimer"
+      ]
+    }
+  ],
+  "negatives": {
+    "text-search-answers": {
+      "fails": [
+        "death-rules",
+        "multi-writer-globals",
+        "never-used",
+        "subroutine-callers"
+      ]
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "id": "repair-opy-self-kill-score-ws",
+  "family": "diagnosis",
+  "language": "workshop",
+  "entry": "mode.ws",
+  "split": "test",
+  "writable": [
+    "mode.ws",
+    "answer.json"
+  ],
+  "runtimeOnly": [
+    "Falling off the map no longer scores in a live match."
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "workshop-rs"
+    },
+    {
+      "id": "wright-compiles",
+      "kind": "wright-compile",
+      "layer": "workshop-rs"
+    },
+    {
+      "id": "self-kills-excluded",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "any": [
+        "Attacker != Victim",
+        "Compare\\(Attacker, !=, Victim\\)",
+        "Player Earned Elimination",
+        "Player Dealt Final Blow"
+      ]
+    },
+    {
+      "id": "still-scores-the-attacker",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Modify Player Variable\\(Attacker, score, Add, 1\\)"
+      ]
+    },
+    {
+      "id": "other-rules-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "rule \\(\"show score\"\\)",
+        "rule \\(\"declare winner\"\\)"
+      ]
+    },
+    {
+      "id": "root-cause-named",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "rule",
+      "expected": "credit killer"
+    }
+  ],
+  "negatives": {
+    "fixes-wrong-rule": {
+      "fails": [
+        "root-cause-named",
+        "self-kills-excluded"
+      ]
+    },
+    "removes-the-scoring": {
+      "fails": [
+        "self-kills-excluded",
+        "still-scores-the-attacker"
+      ]
+    },
+    "fix-without-diagnosis": {
+      "fails": [
+        "root-cause-named"
+      ]
+    }
+  }
+}

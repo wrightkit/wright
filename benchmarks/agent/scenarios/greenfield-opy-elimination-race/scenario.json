@@ -1,0 +1,106 @@
+{
+  "id": "greenfield-opy-elimination-race",
+  "family": "greenfield",
+  "language": "opy",
+  "entry": "mode.opy",
+  "split": "test",
+  "writable": [
+    "mode.opy"
+  ],
+  "runtimeOnly": [
+    "Elimination scoring, the HUD, and the winner declaration behave as intended in a live match."
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "wright-compiles",
+      "kind": "wright-compile",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "tracks-score-per-player",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "player:\\s*\\n\\s*0:"
+      ]
+    },
+    {
+      "id": "forces-soldier",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Hero\\(Soldier: 76\\)"
+      ]
+    },
+    {
+      "id": "scores-on-elimination",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "any": [
+        "Player Earned Elimination",
+        "Player Dealt Final Blow"
+      ]
+    },
+    {
+      "id": "excludes-self-kills",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "any": [
+        "Attacker != Victim",
+        "Compare\\(Attacker, !=, Victim\\)"
+      ]
+    },
+    {
+      "id": "has-hud",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Create HUD Text"
+      ]
+    },
+    {
+      "id": "target-is-7",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "\\b7\\b"
+      ]
+    },
+    {
+      "id": "declares-winner",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Declare Player Victory"
+      ]
+    },
+    {
+      "id": "no-waitless-loop",
+      "kind": "lint",
+      "layer": "wright",
+      "code": "while-without-wait"
+    }
+  ],
+  "negatives": {
+    "forgets-self-kills": {
+      "fails": [
+        "excludes-self-kills"
+      ]
+    },
+    "no-hud": {
+      "fails": [
+        "has-hud"
+      ]
+    }
+  }
+}
