@@ -138,7 +138,9 @@ On macOS, `--file-sandbox` applies `sandbox-exec` to the adapter and all descend
 processes: filesystem writes are restricted to that trial's output directory
 (plus device streams), and `TMPDIR` points inside it. Unsupported hosts fail
 instead of silently running without protection. This protects host files; it
-does not enforce network isolation or prevent read access to host files. Model
+blocks reads of `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outside the trial workspace
+to prevent tool-path rule discovery from contaminating context. Other host reads
+remain possible, and network isolation is not enforced. Model
 account usage, CPU and disk consumption remain shared with the host. Provider
 failures returned as exit 75 are listed separately and excluded from outcome
 metrics.

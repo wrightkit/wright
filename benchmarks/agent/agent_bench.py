@@ -168,7 +168,9 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
         env = {**env, "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1"}
         profile = run_dir / "agent.sb"
         profile.write_text('(version 1)\n(allow default)\n(deny file-write*)\n'
-                           f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n')
+                           f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n'
+                           '(deny file-read-data (require-all (regex "/(AGENTS|CLAUDE|GEMINI)[.]md$") '
+                           f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n')
         command = ["sandbox-exec", "-f", str(profile), "/bin/sh", "-c", args.agent_cmd]
     proc = subprocess.Popen(
         command, shell=isinstance(command, str), cwd=workspace, env=env, text=True,

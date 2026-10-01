@@ -81,6 +81,23 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual((self.out / f"{SCENARIO}-bin/workspace/allowed.txt").read_text(), "ok")
         self.assertEqual(result["fileWriteEnforcement"], "trial-directory-only")
 
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_host_instructions_are_unreadable_but_workspace_instructions_are_allowed(self):
+        import shlex
+        host = self.out / "AGENTS.md"
+        host.write_text("host-only instructions")
+        code = (
+            'from pathlib import Path; '
+            'Path("AGENTS.md").write_text("workspace instructions"); '
+            'assert Path("AGENTS.md").read_text() == "workspace instructions"; '
+            f'Path({str(host)!r}).read_text()'
+        )
+        result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True)
+        self.assertNotEqual(result["agent"]["exit"], 0)
+        self.assertIn("PermissionError", (self.out / f"{SCENARIO}-bin/agent.log").read_text())
+        self.assertEqual(host.read_text(), "host-only instructions")
+        self.assertEqual((self.out / f"{SCENARIO}-bin/workspace/AGENTS.md").read_text(), "workspace instructions")
+
     def test_levels_differ_only_in_wright_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
         none = self.trial(agent, wright="none")

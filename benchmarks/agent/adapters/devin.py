@@ -4,8 +4,8 @@
 Reads the prompt on stdin and honors the BENCH_* contract (docs/agent-benchmark.md). BENCH_MODEL is required
 (for example `swe-2-max`, see `devin models list`). The run uses an isolated HOME that contains only the Devin
 credentials copied from the HOME the harness passed (`--env-pass HOME`), and a config that reads no other tools'
-rules or skills, so the user's global skills, plugins, and instruction files do not load. BENCH_SKILL_DIR and
-BENCH_WIKI_SKILL_DIR are installed as project skills in the workspace. Web tools are denied unless knowledge is `web`; the shell can
+rules or skills. Managed plugin skills are reported separately; --file-sandbox blocks outside-workspace
+instruction files. BENCH_SKILL_DIR and BENCH_WIKI_SKILL_DIR are installed as project skills in the workspace. Web tools are denied unless knowledge is `web`; the shell can
 still reach the network, so network `off` is not enforced: use the harness --canary-cmd to check it.
 Set BENCH_DEVIN_SANDBOX=1 to add `--sandbox`. Exit 75 marks a provider or infrastructure failure for a retry.
 """
