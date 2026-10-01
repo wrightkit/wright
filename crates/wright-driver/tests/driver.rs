@@ -133,7 +133,8 @@ fn workshop_compile_is_deterministic_and_idempotent() {
 /// The smallest Bastion-style case (#488): a program whose canonical element
 /// count exceeds the 32768 client limit still emits its artifact, and the
 /// compile envelope reports the violation as a warning — not a compilation
-/// error. `check` stays a source-correctness workflow and does not evaluate
+/// error. The same target diagnostic rides `lint`, `analyze`, and `inspect`,
+/// while `check` stays a source-correctness workflow and does not evaluate
 /// the client import budget.
 #[test]
 fn compile_warns_over_client_element_limit_but_still_emits() {
@@ -204,6 +205,20 @@ fn compile_warns_over_client_element_limit_but_still_emits() {
         .as_ref()
         .expect("the largest contributing rule is located");
     assert!(span.path.ends_with("over-limit.ws"), "{span:?}");
+
+    // The same target diagnostic rides every whole-program surface — each
+    // envelope drains the session's diagnostics, so every command reports
+    // the constraint independently.
+    for (command, diagnostics) in [
+        ("lint", session.lint().diagnostics),
+        ("analyze", session.analyze().diagnostics),
+        ("inspect", session.inspect().diagnostics),
+    ] {
+        assert!(
+            diagnostics.iter().any(|d| d.code == "target-element-limit"),
+            "{command} reports the client element limit: {diagnostics:?}"
+        );
+    }
 
     let check = session.check();
     assert!(

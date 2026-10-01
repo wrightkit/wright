@@ -746,15 +746,19 @@ impl CompilerSession {
     }
 
     /// Known exact Overwatch client import constraints, measured on the
-    /// emitted program during `compile` (#488).
+    /// loaded canonical program (#488).
     ///
     /// `workshop-rs` owns the canonical measurement; Wright owns the limit
     /// policy and reports a violated import budget as a warning — a program
     /// over the budget still emits its artifact, matching upstream
-    /// `w_element_limit`. New exact constraints attach to this path as
-    /// `workshop-rs` exposes them (`wrightkit/workshop-rs#346`), so target
-    /// diagnostics stay free of source-language logic. `check` does not run
-    /// this: it is a source-correctness workflow, not a client-import gate.
+    /// `w_element_limit`. Every whole-program evaluation surface attaches
+    /// the same diagnostic (`compile`, `lint`, `analyze`, `inspect`), so
+    /// the constraint is visible wherever the program is assessed, not
+    /// only at artifact time. `check` does not run this: it is a
+    /// source-correctness workflow, not a client-import gate. New exact
+    /// constraints attach to this path as `workshop-rs` exposes them
+    /// (`wrightkit/workshop-rs#346`), so target diagnostics stay free of
+    /// source-language logic.
     fn attach_target_limits(&mut self, loaded: &Loaded) {
         let report = match loaded.program.element_count(&self.catalog) {
             Ok(report) => report,

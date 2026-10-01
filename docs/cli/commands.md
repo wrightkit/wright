@@ -69,15 +69,17 @@ an upstream/static fallback. DEL/OSTW provider support is not currently
 shipped with Wright and is outside this contract. OPY, Workshop, and protocol
 inputs continue through their existing owner-backed paths.
 
-`wright compile` also surfaces known exact Workshop client import
-constraints as warnings without failing compilation (#488): a program whose
-canonical element count exceeds the Overwatch client's 32768-element import
-limit still emits its artifact and exits 0, carrying a
-`target-element-limit` warning that reports the observed count and names the
-largest contributing rule. The distinction is deliberate — `compile` means
-Wright produced valid Workshop text, not that the current client imports it
-under every resource limit. `wright analyze` remains the detailed cost and
-hotspot surface; `check` does not evaluate client importability.
+Wright surfaces known exact Workshop client import constraints as warnings
+without failing the command (#488): a program whose canonical element count
+exceeds the Overwatch client's 32768-element import limit still compiles,
+emits its artifact, and exits 0, carrying a `target-element-limit` warning
+that reports the observed count and names the largest contributing rule. The
+same warning rides the `lint`, `analyze`, and `inspect` envelopes — anywhere
+the whole program is evaluated — while `check` does not evaluate client
+importability and `wright analyze` remains the detailed cost and hotspot
+surface. The distinction is deliberate: `compile` means Wright produced
+valid Workshop text, not that the current client imports it under every
+resource limit.
 
 The rationale for current-directory defaults, directory targets, and explicit
 ownership ambiguity is recorded in
