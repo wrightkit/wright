@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import bench_grade
+import bench_leaderboard
 import bench_report
 import bench_score
 import bench_trace
@@ -573,7 +574,7 @@ def user_defaults() -> dict:
     if not CONFIG_PATH.is_file():
         return {}
     config = json.loads(CONFIG_PATH.read_text())
-    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "allow_read", "skill_dirs"}
+    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "allow_read", "skill_dirs", "models"}
     if unknown:
         raise SystemExit(f"{CONFIG_PATH}: unknown key(s) {sorted(unknown)}")
     defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir")}
@@ -650,6 +651,33 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     return status
 
 
+def model_slug(entry: dict) -> str:
+    return "-".join(filter(None, (entry["adapter"], entry["model"].replace("/", "_"), entry.get("effort"))))
+
+
+def cmd_suite(args: argparse.Namespace) -> int:
+    """Evaluate every model of the user's list one after another, then write the publishable results page.
+
+    Safe to repeat: finished runs are skipped, so quota or time limits only postpone the rest. Exit 3 when something is waiting for a rerun."""
+    models = [m for m in (args.models or []) if not args.only or any(f"{m['adapter']}:{m['model']}".startswith(o) for o in args.only)]
+    if not models:
+        raise SystemExit(f'no models: add "models": [{{"adapter": "devin", "model": "swe-2-max"}}, ...] to {CONFIG_PATH}')
+    root = args.out / args.suite_name
+    outcome = {}
+    for entry in models:
+        slug = model_slug(entry)
+        print(f"\n=== {slug}", flush=True)
+        sub = argparse.Namespace(**{**vars(args), "adapter": entry["adapter"], "model": entry["model"], "effort": entry.get("effort"), "name": slug, "out": root})
+        try:
+            outcome[slug] = {0: "done", 3: "waiting: provider limit or outage, rerun later"}.get(cmd_evaluate(sub), "finished with errors")
+        except SystemExit as stop:
+            outcome[slug] = f"skipped: {stop.code}"
+    print("\n" + "\n".join(f"{slug}: {state}" for slug, state in outcome.items()))
+    if not args.dry_run:
+        bench_leaderboard.main(sorted(root.glob("*/")), root / "leaderboard")
+    return 3 if any(state.startswith("waiting") for state in outcome.values()) else 0
+
+
 def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
     record = bench_wiki.snapshot(args.base, args.dir, tuple(args.categories))
     print(f"{len(record['documents'])} document(s) from {record['source']} into {args.dir}\nsnapshotSha256 {record['snapshotSha256']}")
@@ -669,11 +697,12 @@ def cmd_setup_oracle(_: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("validate", "run", "matrix", "evaluate"):
-        p = sub.add_parser(name)
+    sub.add_parser("suite", help="evaluate every model listed in the user config in turn, then write the results page")
+    for name in ("validate", "run", "matrix", "evaluate", "suite"):
+        p = sub.choices[name] if name == "suite" else sub.add_parser(name)
         p.add_argument("--wright", default=str(ROOT / "target/debug/wright"), help="Wright binary under test")
         p.add_argument("--out", type=Path, default=Path.home() / ".cache/wright-agent-bench", help="outside any repository, so agents cannot discover its instruction files")
-    for name in ("run", "matrix", "evaluate"):
+    for name in ("run", "matrix", "evaluate", "suite"):
         p = sub.choices[name]
         p.add_argument("--skill-dir", action="append", default=[], metavar="NAME=DIR", help=f"pinned skill directory for one of {', '.join(SKILLS)}; repeatable")
         p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked as ./wiki for knowledge 'wiki'; content hashes are verified")
@@ -701,6 +730,21 @@ def main() -> int:
     ev.add_argument("--model", required=True, help="BENCH_MODEL, in the form the adapter expects")
     ev.add_argument("--effort", help="BENCH_THINKING, where the adapter supports it")
     ev.add_argument("--name", default=time.strftime("%Y%m%d-%H%M%S"), help="run directory under --out")
+    su = sub.choices["suite"]
+    su.add_argument("--suite-name", default="results", help="directory under --out holding every model's run and the results page")
+    su.add_argument("--only", nargs="*", metavar="ADAPTER[:MODEL]", help="evaluate only these entries of the models list")
+    for shared in (su,):
+        shared.add_argument("--cells", choices=("score", "controls"), default="score")
+        shared.add_argument("--split", choices=("test", "train", "all"), default="test")
+        shared.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
+        shared.add_argument("--trials", type=int, default=3)
+        shared.add_argument("--parallel", type=int, default=1)
+        shared.add_argument("--seed", type=int, default=1)
+        shared.add_argument("--dry-run", action="store_true")
+        shared.add_argument("--no-file-sandbox", action="store_true")
+    lb = sub.add_parser("leaderboard", help="write the publishable results page (Markdown, HTML, JSON) from evaluation run directories")
+    lb.add_argument("dirs", nargs="+", type=Path)
+    lb.add_argument("--page-out", type=Path, help="directory for the page; `leaderboard` inside the first directory's parent by default")
     ev.add_argument("--cells", choices=("score", "controls"), default="score", help="score: the canonical cell only; controls: also baseline and language-appropriate controls")
     ev.add_argument("--split", choices=("test", "train", "all"), default="test")
     ev.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
@@ -733,7 +777,9 @@ def main() -> int:
     for choice in sub.choices.values():
         known = {a.dest for a in choice._actions}
         choice.set_defaults(**{k: v for k, v in defaults.items() if k in known})
-    sub.choices["evaluate"].set_defaults(wright=defaults.get("wright") or shutil.which("wright") or str(ROOT / "target/debug/wright"))
+    for name in ("evaluate", "suite"):
+        sub.choices[name].set_defaults(wright=defaults.get("wright") or shutil.which("wright") or str(ROOT / "target/debug/wright"))
+    sub.choices["suite"].set_defaults(models=defaults.get("models"))
     args = parser.parse_args()
     if hasattr(args, "wright"):
         args.wright = str(Path(args.wright).resolve())
@@ -746,7 +792,7 @@ def main() -> int:
             if name not in SKILLS or not directory:
                 raise SystemExit(f"--skill-dir expects NAME=DIR with NAME one of {', '.join(SKILLS)}: {item}")
             args.skill_dirs[name] = Path(directory)
-    if getattr(args, "deny_read", None) and not getattr(args, "file_sandbox", False) and args.command != "evaluate":
+    if getattr(args, "deny_read", None) and not getattr(args, "file_sandbox", False) and args.command not in ("evaluate", "suite"):
         raise SystemExit("--deny-read needs --file-sandbox")
     if args.command == "validate":
         return 0 if validate(args.wright, args.out) else 1
@@ -758,6 +804,8 @@ def main() -> int:
         return cmd_wiki_skill(args)
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s), args.reference)
+    if args.command == "leaderboard":
+        return bench_leaderboard.main(args.dirs, args.page_out or args.dirs[0].parent / "leaderboard")
     if args.command == "compare":
         print(bench_score.compare(args.dirs))
         return 0
@@ -765,7 +813,7 @@ def main() -> int:
         languages = args.language or ["workshop", "opy"]
         expected = {lang: [s for s in all_scenario_ids() if load_scenario(s)["language"] == lang and load_scenario(s).get("split") == "test"] for lang in languages}
         return bench_score.main(args.dirs, languages, expected, None)
-    return {"run": cmd_run, "matrix": cmd_matrix, "evaluate": cmd_evaluate}[args.command](args)
+    return {"run": cmd_run, "matrix": cmd_matrix, "evaluate": cmd_evaluate, "suite": cmd_suite}[args.command](args)
 
 
 if __name__ == "__main__":
