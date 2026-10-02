@@ -169,7 +169,7 @@ def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) 
         shim_dir = out / "bin"
         shim_dir.mkdir()
         shim = shim_dir / cell["tool"]
-        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{Path(__file__).resolve()}" shim {cell["tool"]} "$@"\n')
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{(HERE / "bench_trace.py").resolve()}" shim {cell["tool"]} "$@"\n')
         shim.chmod(0o755)
         real = args.wright if cell["tool"] == "wright" else str(overpy_launcher(out, os.environ["PATH"]))
         env.update({f"BENCH_TOOL_REAL_{cell['tool'].upper()}": real, "BENCH_TOOL_TRACE": str(out / "tool-trace.jsonl"), "BENCH_TOOL_SIDECAR": str(out / "tool-calls")})
@@ -208,21 +208,101 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
 
 
 DATA_ROOTS = (Path.home() / ".cache/wright-agent-bench", Path.home() / ".local/share/wright-agent-bench")  # other runs, wikis, and pinned skills live here by default
+HIDDEN_ROOTS = (Path("/Users"), Path("/Volumes"), Path.home())  # the host's home directories and external drives are hidden unless listed below
+ADAPTER_READS = {  # what each adapter reads from the real home before the agent starts: credentials, configuration, installation (relative to the home directory)
+    "devin": [".local/share/devin", ".config/devin"], "pi": [".pi"], "codex": [".codex/auth.json"], "agy": [".gemini/antigravity-cli"],
+    "opencode": [".local/share/opencode/auth.json"], "grok": [".grok/auth.json"], "claude-code": [".claude.json", ".claude/.credentials.json"], "direct": [],
+}
 
 
-def read_denials(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[Path]]:
-    """Paths the agent must not read, and the paths inside them it still needs.
+CREDENTIALS = {  # (real file relative to the home directory, its isolated copy relative to the run directory) per adapter
+    "codex": [(".codex/auth.json", "codex-home/.codex/auth.json")],
+    "pi": [(".pi/agent/auth.json", "pi-home/.pi/agent/auth.json"), (".pi/agent/antigravity-accounts.json", "pi-home/.pi/agent/antigravity-accounts.json")],
+    "devin": [(".local/share/devin/credentials.toml", "devin-home/.local/share/devin/credentials.toml")],
+    "agy": [(".gemini/antigravity-cli/antigravity-oauth-token", "agy-home/.gemini/antigravity-cli/antigravity-oauth-token")],
+    "opencode": [(".local/share/opencode/auth.json", "opencode-home/.local/share/opencode/auth.json")],
+    "grok": [(".grok/auth.json", "grok-home/auth.json")],
+}
 
-    Agents read the whole machine: the scenario answer keys, other trials' workspaces, the wiki, skills outside the condition, and
-    sibling checkouts of the repositories under test. Without this the benchmark measures what the agent could find, not what it was given."""
+
+def sync_credentials_back(pairs: list[tuple[str, str]], run_dir: Path, home: Path | None = None) -> list[str]:
+    """Copy a login the agent's CLI refreshed inside its isolated home back to the real one.
+
+    Adapters hand the CLI a copy of the user's OAuth login. Refresh tokens rotate, so a refresh in the copy that is then discarded
+    leaves the user's own login holding a dead token. Only a changed, newer copy is written back, atomically."""
+    home = home or Path.home()
+    updated = []
+    for real_rel, isolated_rel in pairs:
+        real, isolated = home / real_rel, run_dir / isolated_rel
+        if not isolated.is_file() or not real.is_file() or isolated.read_bytes() == real.read_bytes() or isolated.stat().st_mtime <= real.stat().st_mtime:
+            continue
+        temporary = real.with_name(f".{real.name}.bench-sync")
+        temporary.write_bytes(isolated.read_bytes())
+        temporary.chmod(real.stat().st_mode & 0o777)
+        os.replace(temporary, real)
+        updated.append(real_rel)
+    return updated
+
+
+CREDENTIALS = {  # (real file relative to the home directory, its isolated copy relative to the run directory) per adapter
+    "codex": [(".codex/auth.json", "codex-home/.codex/auth.json")],
+    "pi": [(".pi/agent/auth.json", "pi-home/.pi/agent/auth.json"), (".pi/agent/antigravity-accounts.json", "pi-home/.pi/agent/antigravity-accounts.json")],
+    "devin": [(".local/share/devin/credentials.toml", "devin-home/.local/share/devin/credentials.toml")],
+    "agy": [(".gemini/antigravity-cli/antigravity-oauth-token", "agy-home/.gemini/antigravity-cli/antigravity-oauth-token")],
+    "opencode": [(".local/share/opencode/auth.json", "opencode-home/.local/share/opencode/auth.json")],
+    "grok": [(".grok/auth.json", "grok-home/auth.json")],
+}
+
+
+def sync_credentials_back(pairs: list[tuple[str, str]], run_dir: Path, home: Path | None = None) -> list[str]:
+    """Copy a login the agent's CLI refreshed inside its isolated home back to the real one.
+
+    Adapters hand the CLI a copy of the user's OAuth login. Refresh tokens rotate, so a refresh in the copy that is then discarded
+    leaves the user's own login holding a dead token. Only a changed, newer copy is written back, atomically."""
+    home = home or Path.home()
+    updated = []
+    for real_rel, isolated_rel in pairs:
+        real, isolated = home / real_rel, run_dir / isolated_rel
+        if not isolated.is_file() or not real.is_file() or isolated.read_bytes() == real.read_bytes() or isolated.stat().st_mtime <= real.stat().st_mtime:
+            continue
+        temporary = real.with_name(f".{real.name}.bench-sync")
+        temporary.write_bytes(isolated.read_bytes())
+        temporary.chmod(real.stat().st_mode & 0o777)
+        os.replace(temporary, real)
+        updated.append(real_rel)
+    return updated
+
+
+def read_policy(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[Path]]:
+    """What the agent may not read, and the exceptions it needs.
+
+    An allow-list: the host's home directories and drives are hidden, so the agent sees the machine as a clean one holding only its run
+    directory, the condition's skills, the tool and runtime binaries, and what its adapter needs. Agents otherwise read the whole machine:
+    the answer keys, other runs, the grader, installed copies of the OverPy source, and checkouts of the repositories under test, so the
+    benchmark would measure what the agent could find instead of what it was given."""
     run_dir = Path(env["BENCH_RUN_DIR"]).resolve()
     selected = [name for name in env["BENCH_SKILLS"].split(",") if name]
-    denied = [args.out.resolve(), getattr(args, "out_root", args.out).resolve(), *DATA_ROOTS, SCENARIOS, *(Path(p).expanduser().resolve() for p in getattr(args, "deny_read", []) or [])]
+    hidden = [*HIDDEN_ROOTS, args.out, getattr(args, "out_root", args.out), *DATA_ROOTS, HERE, *(Path(p).expanduser() for p in getattr(args, "deny_read", []) or [])]
     if getattr(args, "wiki_dir", None):
-        denied.append(Path(args.wiki_dir).resolve())
-    denied += [Path(d).resolve() for name, d in (args.skill_dirs or {}).items() if name not in selected]
-    allowed = [run_dir, HERE, Path(args.wright).resolve().parent, *(Path(args.skill_dirs[name]).resolve() for name in selected)]
-    return denied, allowed
+        hidden.append(Path(args.wiki_dir))
+    hidden += [Path(d) for name, d in (args.skill_dirs or {}).items() if name not in selected]
+    runtime = [Path(args.wright), Path(sys.executable)]
+    for binary in (shutil.which("node"), shutil.which(ADAPTER_BINARY.get(getattr(args, "adapter", ""), ""))):
+        if binary:
+            runtime.append(Path(binary))
+    allowed = [run_dir, HERE / "adapters", HERE / "bench_trace.py", HERE / "oracle", Path(sys.prefix), Path(sys.base_prefix),
+               *(Path(args.skill_dirs[name]) for name in selected), *(Path(p).expanduser() for p in getattr(args, "allow_read", []) or [])]
+    for binary in runtime:  # the directory of the binary and of the file its symlink resolves to
+        allowed += [binary.parent, binary.resolve().parent]
+    unique = lambda paths: list(dict.fromkeys(p.resolve() for p in paths))
+    return unique(hidden), unique(allowed)
+
+
+def sandbox_read_rules(hidden: list[Path], allowed: list[Path]) -> str:
+    def rule(action: str, path: Path) -> str:
+        return f"({action} file-read-data ({'literal' if path.is_file() else 'subpath'} {json.dumps(str(path))}))\n"
+    # the allow-list overrides the hidden roots, and the answer keys are hidden again whatever else is allowed
+    return "".join(rule("deny", p) for p in hidden) + "".join(rule("allow", p) for p in allowed) + rule("deny", SCENARIOS.resolve())
 
 
 def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str) -> tuple[int | None, str, str]:
@@ -234,10 +314,7 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
         temporary = run_dir / "tmp"
         temporary.mkdir(exist_ok=True)
         env = {**env, "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1"}
-        denied, allowed = read_denials(args, env)
-        rules = "".join(f"(deny file-read-data (subpath {json.dumps(str(p))}))\n" for p in denied)
-        rules += "".join(f"(allow file-read-data (subpath {json.dumps(str(p))}))\n" for p in allowed)
-        rules += f"(deny file-read-data (subpath {json.dumps(str(SCENARIOS))}))\n"  # the answer keys stay hidden even though the harness directory is readable
+        rules = sandbox_read_rules(*read_policy(args, env))
         profile = run_dir / "agent.sb"
         profile.write_text('(version 1)\n(allow default)\n(deny file-write*)\n'
                            f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n'
@@ -301,6 +378,8 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
         snapshots.start()
         start = time.monotonic()
         agent_exit, stdout, stderr = run_agent(args, env, workspace, prompt)
+        sync_credentials_back(getattr(args, "credentials", []), out)
+        sync_credentials_back(getattr(args, "credentials", []), out)
         seconds = round(time.monotonic() - start, 1)
         snaps = snapshots.finish()
         if agent_exit == INFRA_EXIT and infra_retries < args.infra_retries:
@@ -313,7 +392,11 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     result["infraRetries"] = infra_retries
     result["networkEnforcement"] = "canary-checked" if cell["network"] == "off" and args.canary_cmd else "declared-only"
     result["fileWriteEnforcement"] = "trial-directory-only" if getattr(args, "file_sandbox", False) else "unrestricted"
-    result["fileReadEnforcement"] = [str(p) for p in read_denials(args, env)[0]] if getattr(args, "file_sandbox", False) else "unrestricted"
+    if getattr(args, "file_sandbox", False):
+        hidden, allowed = read_policy(args, env)
+        result["fileReadEnforcement"] = {"mode": "allow-list", "hidden": [str(p) for p in hidden], "allowed": [str(p) for p in allowed]}
+    else:
+        result["fileReadEnforcement"] = "unrestricted"
     context = context_report(out, [skill_name(Path(args.skill_dirs[name])) for name in cell["skills"]])
     result["context"] = context
     if context.get("unexpected"):
@@ -490,7 +573,7 @@ def user_defaults() -> dict:
     if not CONFIG_PATH.is_file():
         return {}
     config = json.loads(CONFIG_PATH.read_text())
-    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "skill_dirs"}
+    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "allow_read", "skill_dirs"}
     if unknown:
         raise SystemExit(f"{CONFIG_PATH}: unknown key(s) {sorted(unknown)}")
     defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir")}
@@ -523,7 +606,10 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
     Needs no agent harness around it: isolation comes from the harness's own scrubbed environment, so it runs the same from a
     terminal or from inside another agent's shell."""
-    args.file_sandbox = not args.no_file_sandbox  # evaluation hides the answer keys and the host's checkouts from the agent by default
+    args.file_sandbox = not args.no_file_sandbox  # evaluation hides the answer keys and the rest of the host from the agent by default
+    args.credentials = CREDENTIALS.get(args.adapter, [])
+    args.credentials = CREDENTIALS.get(args.adapter, [])
+    args.allow_read = [*(str(Path.home() / rel) for rel in ADAPTER_READS[args.adapter]), *args.allow_read]
     script = Path(__file__).parent / "adapters" / ADAPTERS[args.adapter]
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
     agent_id = "-".join(filter(None, (args.adapter, args.model.replace("/", "_"), args.effort)))
@@ -539,8 +625,6 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     problems = preflight(args, [normalize_cell(c) for c in cells])
     if problems:
         raise SystemExit("cannot start:\n  " + "\n  ".join(problems))
-    if args.file_sandbox and not args.deny_read:
-        print("note: no --deny-read, so the agent can still read the host's repository checkouts (the scenarios are always hidden)", flush=True)
     scenarios = args.scenarios or [s for s in all_scenario_ids() if args.split == "all" or load_scenario(s).get("split") == args.split]
     runnable = sum(args.trials for s in scenarios for c in cells if applicable(load_scenario(s), normalize_cell(c)))
     print(f"{args.adapter} {args.model}: {len(scenarios)} scenario(s), cells {', '.join(cell_label(normalize_cell(c)) for c in cells)}, {runnable} trial(s) into {args.out / args.name}", flush=True)
@@ -583,8 +667,6 @@ def cmd_setup_oracle(_: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) > 1 and sys.argv[1] == "shim":
-        return bench_trace.shim_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("validate", "run", "matrix", "evaluate"):
@@ -600,7 +682,8 @@ def main() -> int:
         p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
         p.add_argument("--timeout", type=int, default=1800)
         p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory, and hide the scenarios, other runs, the wiki, unselected skills, and --deny-read paths")
-        p.add_argument("--deny-read", nargs="*", default=[], metavar="PATH", help="directories the agent must not read, such as the checkouts of the repositories under test; needs --file-sandbox")
+        p.add_argument("--deny-read", nargs="*", default=[], metavar="PATH", help="extra directories hidden from the agent (the home directories and drives already are); needs --file-sandbox")
+        p.add_argument("--allow-read", nargs="*", default=[], metavar="PATH", help="paths the agent's CLI needs inside the hidden home directories (credentials, installation); `evaluate` adds its adapter's")
         p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
         p.add_argument("--infra-backoff", type=int, default=60, help="seconds before the first retry; each further retry waits one more multiple")
     run = sub.choices["run"]
@@ -622,7 +705,7 @@ def main() -> int:
     ev.add_argument("--split", choices=("test", "train", "all"), default="test")
     ev.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
     ev.add_argument("--trials", type=int, default=3)
-    ev.add_argument("--parallel", type=int, default=2)
+    ev.add_argument("--parallel", type=int, default=1, help="trials at a time; sequential by default so provider limits are not hit, and a run can continue across sessions")
     ev.add_argument("--seed", type=int, default=1)
     ev.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
     ev.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox: the agent can then read the scenario answer keys")

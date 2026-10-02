@@ -112,6 +112,13 @@ class DevinTransientTest(unittest.TestCase):
         self.assertTrue(devin.transient("429 rate limit"))
 
 
+class DevinEffortTest(unittest.TestCase):
+    def test_effort_is_read_from_the_model_id(self):
+        self.assertEqual(devin.split_effort("swe-2-max"), ("swe-2", "max"))
+        self.assertEqual(devin.split_effort("claude-opus-5-5-medium"), ("claude-opus-5-5", "medium"))
+        self.assertEqual(devin.split_effort("swe-2"), ("swe-2", None))
+
+
 class NativeAdapterUsageTest(unittest.TestCase):
     def test_codex_inclusive_counts_are_split_without_counting_reasoning_twice(self):
         row = codex.usage_row({"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20, "reasoning_output_tokens": 12}, 1.0, 272000)
