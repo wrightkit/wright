@@ -324,7 +324,6 @@ impl CompilerSession {
                 if let serde_json::Value::Object(object) = &mut program {
                     object.remove("findings");
                 }
-                session.attach_target_limits(&loaded);
                 let mut facts = semantic_facts(&service, &loaded, session.catalog());
                 // Resolve every fact span like `lint` does: mapped or
                 // source-parsed locations become authored paths, while
@@ -344,7 +343,6 @@ impl CompilerSession {
             |session, loaded| {
                 let service = session.service(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                session.attach_target_limits(&loaded);
                 inspect_result(&service)
             },
         )
@@ -447,9 +445,8 @@ impl CompilerSession {
         self.with_loaded(
             "inspect",
             |_| Ok(loaded),
-            |session, loaded| {
+            |session, _loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                session.attach_target_limits(&loaded);
                 inspect_result(service)
             },
         )
@@ -470,7 +467,6 @@ impl CompilerSession {
             |session| session.load_with_operation(ProviderOperation::Compile),
             |session, loaded| {
                 session.attach_workshop_completeness(&loaded);
-                session.attach_target_limits(&loaded);
                 let service = session.service_with(&loaded, session.config.lint.clone());
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 let program = service_response(&service, &Request::Program);

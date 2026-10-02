@@ -133,10 +133,8 @@ fn workshop_compile_is_deterministic_and_idempotent() {
 /// The smallest Bastion-style case (#488): a program whose canonical element
 /// count exceeds the 32768 client limit still emits its artifact, and the
 /// compile envelope reports the violation as a warning — not a compilation
-/// error. The same target diagnostic rides `check`, `lint`, `analyze`, and
-/// `inspect`; `check`'s verdict stays source-correctness-driven since a
-/// warning never fails it, and `lint` keeps byte-identical envelope
-/// diagnostics to `check` — the invariant the real-project dogfood asserts.
+/// error. `check` stays a source-correctness workflow and does not evaluate
+/// the client import budget.
 #[test]
 fn compile_warns_over_client_element_limit_but_still_emits() {
     let elements = (0..17_000).map(|_| "1").collect::<Vec<_>>().join(", ");
@@ -207,32 +205,14 @@ fn compile_warns_over_client_element_limit_but_still_emits() {
         .expect("the largest contributing rule is located");
     assert!(span.path.ends_with("over-limit.ws"), "{span:?}");
 
-    // The same target diagnostic rides every whole-program surface — each
-    // envelope drains the session's diagnostics, so every command reports
-    // the constraint independently.
     let check = session.check();
-    let lint = session.lint();
-    for (command, diagnostics) in [
-        ("check", &check.diagnostics),
-        ("lint", &lint.diagnostics),
-        ("analyze", &session.analyze().diagnostics),
-        ("inspect", &session.inspect().diagnostics),
-    ] {
-        assert!(
-            diagnostics.iter().any(|d| d.code == "target-element-limit"),
-            "{command} reports the client element limit: {diagnostics:?}"
-        );
-    }
     assert!(
-        check.ok && lint.ok,
-        "the warning never gates check or lint: check={} lint={}",
-        check.exit,
-        lint.exit
-    );
-    // The real-project dogfood asserts check/lint diagnostics are identical.
-    assert_eq!(
-        check.diagnostics, lint.diagnostics,
-        "lint keeps check's envelope diagnostics"
+        check
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "target-element-limit"),
+        "check does not evaluate client import limits: {:?}",
+        check.diagnostics
     );
 
     let _ = std::fs::remove_dir_all(&directory);

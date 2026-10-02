@@ -627,7 +627,6 @@ impl CompilerSession {
             |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 session.attach_workshop_completeness(&loaded);
-                session.attach_target_limits(&loaded);
                 CheckResult {}
             },
         )
@@ -747,20 +746,15 @@ impl CompilerSession {
     }
 
     /// Known exact Overwatch client import constraints, measured on the
-    /// loaded canonical program (#488).
+    /// emitted program during `compile` (#488).
     ///
     /// `workshop-rs` owns the canonical measurement; Wright owns the limit
     /// policy and reports a violated import budget as a warning — a program
     /// over the budget still emits its artifact, matching upstream
-    /// `w_element_limit`. Every whole-program evaluation surface attaches
-    /// the same diagnostic (`compile`, `check`, `lint`, `analyze`,
-    /// `inspect`), so the constraint is visible wherever the program is
-    /// assessed — and `check`/`lint` keep identical envelope diagnostics,
-    /// the invariant the real-project dogfood asserts. A warning never
-    /// gates `check`: the verdict still follows source correctness alone.
-    /// New exact constraints attach to this path as `workshop-rs` exposes
-    /// them (`wrightkit/workshop-rs#346`), so target diagnostics stay free
-    /// of source-language logic.
+    /// `w_element_limit`. New exact constraints attach to this path as
+    /// `workshop-rs` exposes them (`wrightkit/workshop-rs#346`), so target
+    /// diagnostics stay free of source-language logic. `check` does not run
+    /// this: it is a source-correctness workflow, not a client-import gate.
     fn attach_target_limits(&mut self, loaded: &Loaded) {
         let report = match loaded.program.element_count(&self.catalog) {
             Ok(report) => report,

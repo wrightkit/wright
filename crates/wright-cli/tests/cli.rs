@@ -479,16 +479,14 @@ fn check_text_reorder_never_reaches_the_json_envelope() {
     assert_eq!(output.status.code(), Some(1));
     let envelope = parse_json(&output.stdout);
     // JSON preserves the driver's production order and the same diagnostic
-    // set; only the text layer reorders by severity. The trailing `info` is
-    // the element-count-unavailable note (#488): this source produces a
-    // program the canonical counter cannot measure.
+    // set; only the text layer reorders by severity.
     let severities: Vec<&str> = envelope["diagnostics"]
         .as_array()
         .unwrap()
         .iter()
         .map(|diagnostic| diagnostic["severity"].as_str().unwrap())
         .collect();
-    assert_eq!(severities, ["warning", "warning", "error", "info"]);
+    assert_eq!(severities, ["warning", "warning", "error"]);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
