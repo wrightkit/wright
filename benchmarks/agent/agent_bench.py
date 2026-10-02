@@ -207,6 +207,9 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
     return None
 
 
+DATA_ROOTS = (Path.home() / ".cache/wright-agent-bench", Path.home() / ".local/share/wright-agent-bench")  # other runs, wikis, and pinned skills live here by default
+
+
 def read_denials(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[Path]]:
     """Paths the agent must not read, and the paths inside them it still needs.
 
@@ -214,7 +217,7 @@ def read_denials(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[
     sibling checkouts of the repositories under test. Without this the benchmark measures what the agent could find, not what it was given."""
     run_dir = Path(env["BENCH_RUN_DIR"]).resolve()
     selected = [name for name in env["BENCH_SKILLS"].split(",") if name]
-    denied = [args.out.resolve(), SCENARIOS, *(Path(p).expanduser().resolve() for p in getattr(args, "deny_read", []) or [])]
+    denied = [args.out.resolve(), getattr(args, "out_root", args.out).resolve(), *DATA_ROOTS, SCENARIOS, *(Path(p).expanduser().resolve() for p in getattr(args, "deny_read", []) or [])]
     if getattr(args, "wiki_dir", None):
         denied.append(Path(args.wiki_dir).resolve())
     denied += [Path(d).resolve() for name, d in (args.skill_dirs or {}).items() if name not in selected]
@@ -542,6 +545,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     print(f"{args.adapter} {args.model}: {len(scenarios)} scenario(s), cells {', '.join(cell_label(normalize_cell(c)) for c in cells)}, {runnable} trial(s) into {args.out / args.name}", flush=True)
     if args.dry_run:
         return 0
+    args.out_root = args.out  # sibling evaluation runs must stay unreadable too
     args.out = args.out / args.name
     args.out.mkdir(parents=True, exist_ok=True)
     config = {"agents": [{"id": agent_id, "cmd": cmd}], "cells": cells, "scenarios": scenarios, "trials": args.trials, "parallel": args.parallel, "seed": args.seed,
