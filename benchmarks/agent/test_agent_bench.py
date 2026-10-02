@@ -280,6 +280,29 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(agent_bench.sync_credentials_back(pairs, run, home), [])
         self.assertEqual(real.read_text(), "newer-real-token")
 
+    def test_suite_runs_each_model_in_turn_continues_past_a_wait_or_a_skip_and_writes_the_page(self):
+        models = [{"adapter": "devin", "model": "swe-2-max"}, {"adapter": "codex", "model": "gpt-6-luna", "effort": "xhigh"}, {"adapter": "pi", "model": "m"}]
+        args = argparse.Namespace(models=models, only=None, out=self.out, suite_name="s", dry_run=False)
+        calls = []
+
+        def evaluate(sub):
+            calls.append((sub.adapter, sub.name, sub.effort, sub.out))
+            if sub.adapter == "codex":
+                return 3
+            if sub.adapter == "pi":
+                raise SystemExit("cannot start: pi missing")
+            return 0
+
+        with patch.object(agent_bench, "cmd_evaluate", evaluate), patch.object(agent_bench.bench_leaderboard, "main") as page:
+            status = agent_bench.cmd_suite(args)
+        self.assertEqual(status, 3)  # codex is waiting for a rerun
+        self.assertEqual([c[1] for c in calls], ["devin-swe-2-max", "codex-gpt-6-luna-xhigh", "pi-m"])
+        self.assertTrue(all(c[3] == self.out / "s" for c in calls))
+        page.assert_called_once()
+        with patch.object(agent_bench, "cmd_evaluate", evaluate):
+            only = agent_bench.cmd_suite(argparse.Namespace(models=models, only=["devin"], out=self.out, suite_name="s2", dry_run=True))
+        self.assertEqual(only, 0)
+
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
         none = self.trial(agent, tool="none")

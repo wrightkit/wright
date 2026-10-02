@@ -2,6 +2,7 @@
 
 - Contracts: `wright-agent-bench/v3` (a run result) and `wright-agent-score/v1` (a score card)
 - Harness: [`benchmarks/agent/agent_bench.py`](../benchmarks/agent/agent_bench.py)
+- Run it from a shell: [agent-benchmark-howto.md](agent-benchmark-howto.md)
 - Design and requirements: [`SPEC-414`](specs/SPEC-414-agent-benchmark-comparison.md)
 
 The benchmark answers one product question: can a general coding agent, with no
