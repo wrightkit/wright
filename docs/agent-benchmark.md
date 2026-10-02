@@ -145,7 +145,7 @@ Pass `--env-pass HOME` when the agent authenticates from the real home directory
 Two checks protect the context. The workspace must not sit below a directory
 that holds instruction files (`AGENTS.md`, `CLAUDE.md`, and similar), because
 agents discover them by walking up; the default `--out` is
-`~/.cache/wright-agent-bench` for that reason, and a violation marks the run
+`~/.local/share/wright-agent-bench/runs` for that reason, and a violation marks the run
 `invalid` (`--no-ancestor-check` disables it). Network `off` is enforced only
 when `--canary-cmd` is given and fails inside the agent environment; without it
 the result records `networkEnforcement: declared-only`, which is what the shell
@@ -358,7 +358,7 @@ and agents can be run whenever quota allows, in any order. Put the runs side by 
 with
 
 ```sh
-python3 benchmarks/agent/agent_bench.py compare ~/.cache/wright-agent-bench/{devin-swe2-stage1,codex-luna-xhigh,pi-luna-xhigh}
+python3 benchmarks/agent/agent_bench.py compare ~/.local/share/wright-agent-bench/runs/{devin-swe2-stage1,codex-luna-xhigh,pi-luna-xhigh}
 ```
 
 which prints one table of scores, intervals, trials, and exclusions, and warns when
