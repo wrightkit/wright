@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/wrightkit/wright/compare/v0.7.0...v0.8.0) (2026-10-02)
+
+
+### Features
+
+* **cli:** add MCP stdio transport over ToolService ([#481](https://github.com/wrightkit/wright/issues/481)) ([9d46f7d](https://github.com/wrightkit/wright/commit/9d46f7de1da605eb04cf0829a05e8c8667c0260a))
+* **compile:** warn when emitted Workshop exceeds the client element limit ([#489](https://github.com/wrightkit/wright/issues/489)) ([43ad5ca](https://github.com/wrightkit/wright/commit/43ad5cab3ed9f975fdf9bbfb88746c5a8565c33f))
+
 ## [0.7.0](https://github.com/wrightkit/wright/compare/v0.6.2...v0.7.0) (2026-10-01)
 
 
