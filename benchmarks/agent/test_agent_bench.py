@@ -313,6 +313,12 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(result["usage"]["totalTokens"], 6)
         self.assertIn("unexpected loaded context", result["invalid"])
 
+    def test_a_retry_starts_without_the_previous_attempts_adapter_home(self):
+        agent = ('if [ -f "$BENCH_RUN_DIR/tried" ]; then test ! -e "$BENCH_RUN_DIR/devin-home" || exit 1; exit 0; '
+                 'else touch "$BENCH_RUN_DIR/tried"; mkdir -p "$BENCH_RUN_DIR/devin-home/.local"; exit 75; fi')
+        result = self.trial(agent)
+        self.assertEqual((result["agent"]["exit"], result["infraRetries"]), (0, 1))
+
     def test_infrastructure_failures_are_retried(self):
         agent = 'if [ -f "$BENCH_RUN_DIR/tried" ]; then exit 0; else touch "$BENCH_RUN_DIR/tried"; exit 75; fi'
         self.assertEqual(self.trial(agent)["infraRetries"], 1)
