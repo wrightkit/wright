@@ -208,7 +208,8 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
     return None
 
 
-DATA_ROOTS = (Path.home() / ".cache/wright-agent-bench", Path.home() / ".local/share/wright-agent-bench")  # other runs, wikis, and pinned skills live here by default
+BENCH_HOME = Path(os.environ.get("WRIGHT_BENCH_HOME", Path.home() / ".local/share/wright-agent-bench"))  # the one place for runs (`runs/`), wiki snapshots, and pinned skills
+DATA_ROOTS = (BENCH_HOME, Path.home() / ".cache/wright-agent-bench")  # hidden from agents; the second is where earlier versions wrote runs
 HIDDEN_ROOTS = (Path("/Users"), Path("/Volumes"), Path.home())  # the host's home directories and external drives are hidden unless listed below
 ADAPTER_READS = {  # what each adapter reads from the real home before the agent starts: credentials, configuration, installation (relative to the home directory)
     "devin": [".local/share/devin", ".config/devin"], "pi": [".pi"], "codex": [".codex/auth.json"], "agy": [".gemini/antigravity-cli"],
@@ -701,7 +702,7 @@ def main() -> int:
     for name in ("validate", "run", "matrix", "evaluate", "suite"):
         p = sub.choices[name] if name == "suite" else sub.add_parser(name)
         p.add_argument("--wright", default=str(ROOT / "target/debug/wright"), help="Wright binary under test")
-        p.add_argument("--out", type=Path, default=Path.home() / ".cache/wright-agent-bench", help="outside any repository, so agents cannot discover its instruction files")
+        p.add_argument("--out", type=Path, default=BENCH_HOME / "runs", help="outside any repository, so agents cannot discover its instruction files")
     for name in ("run", "matrix", "evaluate", "suite"):
         p = sub.choices[name]
         p.add_argument("--skill-dir", action="append", default=[], metavar="NAME=DIR", help=f"pinned skill directory for one of {', '.join(SKILLS)}; repeatable")
@@ -760,7 +761,7 @@ def main() -> int:
     skill.add_argument("--catalog", type=Path, required=True, help="workshop-rs catalog.json, for Workshop names and ids")
     skill.add_argument("--opy-manifest", type=Path, required=True, help="opy-rs manifest.json, for upstream OverPy spellings")
     wiki = sub.add_parser("wiki-snapshot", help="fetch the Workshop wiki Markdown mirror into a pinned local snapshot")
-    wiki.add_argument("--dir", type=Path, default=Path.home() / ".cache/wright-agent-bench-wiki")
+    wiki.add_argument("--dir", type=Path, default=BENCH_HOME / "wiki")
     wiki.add_argument("--base", default=bench_wiki.BASE)
     wiki.add_argument("--categories", nargs="+", default=list(bench_wiki.CATEGORIES), help="wiki categories to crawl (add tutorials for the second tier)")
     report = sub.add_parser("report", help="summarize result.json files")

@@ -26,6 +26,18 @@ Run it from a shell, one command for every model, and get a results page you can
    ```
    `skill_dirs` points at the `wrightkit/skills` checkout. Keep the Wright binary, the skills, and the scenarios unchanged for as long as you want results to be comparable.
 
+## Where things live
+
+Everything is under one directory, `~/.local/share/wright-agent-bench` (the `WRIGHT_BENCH_HOME` variable moves it):
+
+| Path | Holds |
+| --- | --- |
+| `runs/` | every evaluation run and the results page (`runs/results/leaderboard/`) |
+| `wiki/` | local wiki snapshots (not published) |
+| `skills-*/` | pinned copies of the skills under test |
+
+Runs made by earlier versions are in `~/.cache/wright-agent-bench`; nothing writes there any more.
+
 ## Run everything
 
 ```sh
@@ -35,7 +47,7 @@ python3 benchmarks/agent/agent_bench.py suite
 
 It evaluates the models one after another, each on 16 tasks tried 3 times, one trial at a time so provider limits are not hit. It is safe to stop and repeat: finished trials are skipped, and a model that hits a quota or an outage waits for the next run (the command ends with exit code 3 and says which). Run it again later, on another day if needed, and the same command carries on.
 
-The results are in `~/.cache/wright-agent-bench/results/leaderboard/`:
+The results are in `~/.local/share/wright-agent-bench/runs/results/leaderboard/`:
 
 | File | For |
 | --- | --- |
@@ -54,8 +66,8 @@ python3 benchmarks/agent/agent_bench.py evaluate --adapter codex --model gpt-6-l
 Put several runs side by side, or rebuild the page from chosen runs:
 
 ```sh
-python3 benchmarks/agent/agent_bench.py compare ~/.cache/wright-agent-bench/{run-a,run-b}
-python3 benchmarks/agent/agent_bench.py leaderboard ~/.cache/wright-agent-bench/{run-a,run-b}
+python3 benchmarks/agent/agent_bench.py compare ~/.local/share/wright-agent-bench/runs/{run-a,run-b}
+python3 benchmarks/agent/agent_bench.py leaderboard ~/.local/share/wright-agent-bench/runs/{run-a,run-b}
 ```
 
 Runs made against a different Wright binary, skills, or task suite are listed as not comparable instead of being ranked.
