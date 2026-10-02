@@ -298,3 +298,7 @@ def usage_summary(path: Path, first_valid_t: float | None) -> dict | None:
         "peakContextShare": round(peak["context"] / limit, 4) if limit and peak.get("context") else None,
         "toFirstValid": to_first,
     }
+
+
+if __name__ == "__main__":
+    sys.exit(shim_main(sys.argv[2:]))  # the tool shims run this file directly: `bench_trace.py shim <tool> args...`

@@ -204,7 +204,7 @@ class AgentBenchTest(unittest.TestCase):
         result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True, deny_read=[str(denied)])
         workspace = self.out / f"{SCENARIO}-wright/workspace"
         self.assertEqual(json.loads((workspace / "probe.json").read_text()), {"answer": "blocked", "denied": "blocked"})
-        self.assertIn(str(denied.resolve()), result["fileReadEnforcement"])
+        self.assertIn(str(denied.resolve()), result["fileReadEnforcement"]["hidden"])
 
     def test_user_defaults_are_read_from_the_config_file(self):
         config = self.out / "config.json"
@@ -223,13 +223,62 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(len(problems), 3)
         self.assertTrue(any("wright binary not found" in p for p in problems) and any("`devin` is not on PATH" in p for p in problems) and any("--skill-dir wright-skill" in p for p in problems))
 
-    def test_sibling_runs_and_harness_data_roots_are_unreadable(self):
+    def test_read_policy_hides_the_host_and_allows_only_what_the_run_needs(self):
         root = self.out
-        args = argparse.Namespace(out=root / "run-a", out_root=root, wright=WRIGHT, skill_dirs={}, wiki_dir=None, deny_read=[])
-        denied, allowed = agent_bench.read_denials(args, {"BENCH_RUN_DIR": str(root / "run-a" / "t"), "BENCH_SKILLS": ""})
-        self.assertIn(root.resolve(), denied)
-        self.assertTrue(all(d in denied for d in agent_bench.DATA_ROOTS))
-        self.assertIn((root / "run-a" / "t").resolve(), allowed)
+        skills = {"wright-skill": root / "s1", "opy-skill": root / "s2"}
+        args = argparse.Namespace(out=root / "run-a", out_root=root, wright=WRIGHT, skill_dirs=skills, wiki_dir=None, deny_read=[], allow_read=[str(root / "creds")], adapter="devin")
+        hidden, allowed = agent_bench.read_policy(args, {"BENCH_RUN_DIR": str(root / "run-a" / "t"), "BENCH_SKILLS": "wright-skill"})
+        self.assertTrue(all(p in hidden for p in (Path("/Users"), root.resolve(), agent_bench.HERE, agent_bench.HERE)))
+        self.assertTrue(all(d.resolve() in hidden for d in agent_bench.DATA_ROOTS))
+        self.assertIn(skills["opy-skill"].resolve(), hidden)
+        self.assertNotIn(skills["wright-skill"].resolve(), hidden)
+        for needed in (root / "run-a" / "t", skills["wright-skill"], root / "creds", agent_bench.HERE / "adapters", agent_bench.HERE / "bench_trace.py", agent_bench.HERE / "oracle", Path(WRIGHT).resolve().parent):
+            self.assertIn(needed.resolve(), allowed)
+        self.assertNotIn(agent_bench.HERE / "bench_grade.py", allowed)
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_the_agent_sees_only_its_run_the_allowed_paths_and_the_shim(self):
+        import shlex
+        other = self.out / "elsewhere"
+        other.mkdir()
+        (other / "note.txt").write_text("a file the agent was not given")
+        granted = self.out / "granted"
+        granted.mkdir()
+        (granted / "note.txt").write_text("a file the adapter needs")
+        probes = {"unlisted": other / "note.txt", "granted": granted / "note.txt", "grader": agent_bench.HERE / "bench_grade.py", "shim": agent_bench.HERE / "bench_trace.py",
+                  "answer": agent_bench.SCENARIOS / SCENARIO / "reference" / "mode.ws", "oracle": agent_bench.HERE / "oracle" / "compile.js"}
+        code = ("import json\nfrom pathlib import Path\nout = {}\n"
+                + "".join(f"try:\n    Path({str(p)!r}).read_text(); out[{k!r}] = 'read'\nexcept PermissionError:\n    out[{k!r}] = 'blocked'\n" for k, p in probes.items())
+                + "Path('probe.json').write_text(json.dumps(out))\n")
+        result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True, allow_read=[str(granted)])
+        seen = json.loads((self.out / f"{SCENARIO}-wright/workspace/probe.json").read_text())
+        self.assertEqual(seen, {"unlisted": "blocked", "granted": "read", "grader": "blocked", "shim": "read", "answer": "blocked", "oracle": "read"})
+        self.assertEqual(result["fileReadEnforcement"]["mode"], "allow-list")
+
+    def test_the_tool_shim_runs_without_the_grader(self):
+        shim = (agent_bench.HERE / "bench_trace.py").read_text()
+        self.assertNotIn("import bench_grade", shim)
+        self.assertIn("shim_main(sys.argv[2:])", shim)
+
+    def test_a_refreshed_login_is_written_back_to_the_real_one_only_when_newer(self):
+        home, run = self.out / "home", self.out / "run"
+        (home / ".grok").mkdir(parents=True)
+        run.mkdir()
+        real, isolated = home / ".grok/auth.json", run / "grok-home/auth.json"
+        real.write_text("old-token")
+        os.chmod(real, 0o600)
+        isolated.parent.mkdir()
+        isolated.write_text("old-token")
+        pairs = [(".grok/auth.json", "grok-home/auth.json")]
+        self.assertEqual(agent_bench.sync_credentials_back(pairs, run, home), [])  # unchanged
+        isolated.write_text("refreshed-token")
+        os.utime(isolated, (real.stat().st_mtime + 10, real.stat().st_mtime + 10))
+        self.assertEqual(agent_bench.sync_credentials_back(pairs, run, home), [".grok/auth.json"])
+        self.assertEqual((real.read_text(), oct(real.stat().st_mode & 0o777)), ("refreshed-token", "0o600"))
+        real.write_text("newer-real-token")  # the user logged in again meanwhile: never overwrite a newer real login
+        os.utime(isolated, (real.stat().st_mtime - 10, real.stat().st_mtime - 10))
+        self.assertEqual(agent_bench.sync_credentials_back(pairs, run, home), [])
+        self.assertEqual(real.read_text(), "newer-real-token")
 
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"

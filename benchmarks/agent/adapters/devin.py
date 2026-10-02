@@ -31,6 +31,17 @@ MCP_TOOLS = ["mcp_call_tool", "mcp_list_tools", "mcp_list_servers", "mcp_read_re
 NO_TOOL_CONFIG = {"claude": False, "cursor": False, "windsurf": False, "codex": False}
 
 
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def split_effort(model_id: str) -> tuple[str, str | None]:
+    """Devin names the effort in the model id (`swe-2-max` is model `swe-2` at effort `max`), so the CLI never reports it separately."""
+    for effort in EFFORTS:
+        if model_id.endswith(f"-{effort}"):
+            return model_id[: -len(effort) - 1], effort
+    return model_id, None
+
+
 def isolated_config(user_config: dict, model: str, web: bool) -> dict:
     config = copy.deepcopy(user_config)
     config["read_config_from"] = NO_TOOL_CONFIG
@@ -100,7 +111,7 @@ def main() -> int:
     Path(env["BENCH_USAGE"]).write_text("".join(json.dumps(r) + "\n" for r in rows))
     Path(env["BENCH_TRANSCRIPT"]).write_text("".join(json.dumps(s) + "\n" for s in (json.loads(export.read_text())["steps"] if export.is_file() else [])))
     exported = json.loads(export.read_text()) if export.is_file() else {}
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "devin", "version": cli_version(devin), "model": model, "tools": [t["function"]["name"] for t in exported.get("agent", {}).get("tool_definitions", [])], "denied": MCP_TOOLS + ([] if env["BENCH_KNOWLEDGE"] == "web" else WEB_TOOLS)}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "devin", "version": cli_version(devin), "model": split_effort(model)[0], "effort": split_effort(model)[1], "modelId": model, "tools": [t["function"]["name"] for t in exported.get("agent", {}).get("tool_definitions", [])], "denied": MCP_TOOLS + ([] if env["BENCH_KNOWLEDGE"] == "web" else WEB_TOOLS)}, indent=2))
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded, "ignoredPluginSkills": plugins}))
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
