@@ -35,6 +35,8 @@ def isolated_config(user_config: dict, model: str, web: bool) -> dict:
     config = copy.deepcopy(user_config)
     config["read_config_from"] = NO_TOOL_CONFIG
     config["permissions"] = {"deny": MCP_TOOLS + ([] if web else WEB_TOOLS)}
+    # A denied call ends a headless session, so the tools are also hidden from the agent: it never reaches for what the condition withholds.
+    config["disabled_tools"] = MCP_TOOLS + ([] if web else [t for t in WEB_TOOLS if t.islower()])
     config.setdefault("agent", {})["model"] = model
     return config
 

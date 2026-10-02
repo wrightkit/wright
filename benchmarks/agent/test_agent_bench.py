@@ -223,6 +223,14 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(len(problems), 3)
         self.assertTrue(any("wright binary not found" in p for p in problems) and any("`devin` is not on PATH" in p for p in problems) and any("--skill-dir wright-skill" in p for p in problems))
 
+    def test_sibling_runs_and_harness_data_roots_are_unreadable(self):
+        root = self.out
+        args = argparse.Namespace(out=root / "run-a", out_root=root, wright=WRIGHT, skill_dirs={}, wiki_dir=None, deny_read=[])
+        denied, allowed = agent_bench.read_denials(args, {"BENCH_RUN_DIR": str(root / "run-a" / "t"), "BENCH_SKILLS": ""})
+        self.assertIn(root.resolve(), denied)
+        self.assertTrue(all(d in denied for d in agent_bench.DATA_ROOTS))
+        self.assertIn((root / "run-a" / "t").resolve(), allowed)
+
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
         none = self.trial(agent, tool="none")
