@@ -279,7 +279,7 @@ pub(crate) fn resolve_span_paths(value: &mut serde_json::Value, loaded: &Loaded)
     }
 }
 
-fn span_path(file: Option<u64>, loaded: &Loaded) -> String {
+pub(crate) fn span_path(file: Option<u64>, loaded: &Loaded) -> String {
     if loaded.provenance == Provenance::Unmapped {
         "<provider-artifact>".to_string()
     } else if loaded.provenance == Provenance::Mapped {
