@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 # Publish verified stable or nightly archives and the stable installer scripts to R2.
+#
+# Phases (#293): `objects` uploads and verifies the immutable release objects
+# (and, for stable, the installer scripts); `pointer` advances the channel's
+# version pointer. `all` (default) runs both — the stable workflow separates
+# them so wright/latest/version advances only after the GitHub Release is
+# public; nightly has no GitHub Release and runs both phases in one job.
 
 set -euo pipefail
+
+phase="${1:-all}"
+case "$phase" in
+  objects | pointer | all) ;;
+  *)
+    echo "usage: $0 [objects|pointer|all]" >&2
+    exit 2
+    ;;
+esac
 
 : "${RELEASE_CHANNEL:?RELEASE_CHANNEL is required}"
 : "${RELEASE_VERSION:?RELEASE_VERSION is required}"
@@ -12,7 +27,6 @@ set -euo pipefail
 : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}"
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}"
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
-: "${ARTIFACTS_DIR:?ARTIFACTS_DIR is required}"
 
 version="$RELEASE_VERSION"
 installer_public_base_url=
@@ -35,17 +49,20 @@ case "$RELEASE_CHANNEL" in
     ;;
 esac
 
-release_dir="$GITHUB_WORKSPACE/r2-$RELEASE_CHANNEL"
-mkdir -p "$release_dir"
-for triple in x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
-  ext="tar.gz"
-  [[ "$triple" == "x86_64-pc-windows-msvc" ]] && ext="zip"
-  archive="wright-$version-$triple.$ext"
-  test -f "$ARTIFACTS_DIR/$archive" || { echo "missing $archive" >&2; exit 1; }
-  test -f "$ARTIFACTS_DIR/$archive.sha256" || { echo "missing $archive.sha256" >&2; exit 1; }
-  cp "$ARTIFACTS_DIR/$archive" "$release_dir/"
-  cp "$ARTIFACTS_DIR/$archive.sha256" "$release_dir/"
-done
+if [[ "$phase" != pointer ]]; then
+  : "${ARTIFACTS_DIR:?ARTIFACTS_DIR is required for the objects phase}"
+  release_dir="$GITHUB_WORKSPACE/r2-$RELEASE_CHANNEL"
+  mkdir -p "$release_dir"
+  for triple in x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
+    ext="tar.gz"
+    [[ "$triple" == "x86_64-pc-windows-msvc" ]] && ext="zip"
+    archive="wright-$version-$triple.$ext"
+    test -f "$ARTIFACTS_DIR/$archive" || { echo "missing $archive" >&2; exit 1; }
+    test -f "$ARTIFACTS_DIR/$archive.sha256" || { echo "missing $archive.sha256" >&2; exit 1; }
+    cp "$ARTIFACTS_DIR/$archive" "$release_dir/"
+    cp "$ARTIFACTS_DIR/$archive.sha256" "$release_dir/"
+  done
+fi
 
 put_immutable() {
   local source="$1" key="$2" cache_control="$3" content_type="$4"
@@ -86,27 +103,31 @@ put_mutable() {
   verify_public "$base_url" "$key" "$source" 'no-store.*max-age=0' "$content_type"
 }
 
-for archive in "$release_dir"/wright-*.tar.gz "$release_dir"/wright-*.zip; do
-  [[ -e "$archive" ]] || continue
-  checksum="$archive.sha256"
-  expected_hash="$(awk 'NR == 1 { print $1 }' "$checksum")"
-  actual_hash="$(sha256sum "$archive" | awk 'NR == 1 { print $1 }')"
-  test "$actual_hash" = "$expected_hash"
-  name="$(basename "$archive")"
-  put_immutable "$archive" "$object_prefix/$name" 'public, max-age=31536000, immutable' 'application/octet-stream'
-  put_immutable "$checksum" "$object_prefix/$name.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
-  verify_public "$R2_PUBLIC_BASE_URL" "$object_prefix/$name" "$archive" 'max-age=31536000.*immutable' 'application/octet-stream'
-  verify_public "$R2_PUBLIC_BASE_URL" "$object_prefix/$name.sha256" "$checksum" 'max-age=31536000.*immutable' 'text/plain'
-done
-
-if [[ "$RELEASE_CHANNEL" == stable ]]; then
-  for script in install.sh install.ps1; do
-    source="$GITHUB_WORKSPACE/$script"
-    test -s "$source" || { echo "missing canonical $script" >&2; exit 1; }
-    put_mutable "$source" "wright/$script" 'text/plain; charset=utf-8' "$installer_public_base_url"
+if [[ "$phase" != pointer ]]; then
+  for archive in "$release_dir"/wright-*.tar.gz "$release_dir"/wright-*.zip; do
+    [[ -e "$archive" ]] || continue
+    checksum="$archive.sha256"
+    expected_hash="$(awk 'NR == 1 { print $1 }' "$checksum")"
+    actual_hash="$(sha256sum "$archive" | awk 'NR == 1 { print $1 }')"
+    test "$actual_hash" = "$expected_hash"
+    name="$(basename "$archive")"
+    put_immutable "$archive" "$object_prefix/$name" 'public, max-age=31536000, immutable' 'application/octet-stream'
+    put_immutable "$checksum" "$object_prefix/$name.sha256" 'public, max-age=31536000, immutable' 'text/plain; charset=utf-8'
+    verify_public "$R2_PUBLIC_BASE_URL" "$object_prefix/$name" "$archive" 'max-age=31536000.*immutable' 'application/octet-stream'
+    verify_public "$R2_PUBLIC_BASE_URL" "$object_prefix/$name.sha256" "$checksum" 'max-age=31536000.*immutable' 'text/plain'
   done
+
+  if [[ "$RELEASE_CHANNEL" == stable ]]; then
+    for script in install.sh install.ps1; do
+      source="$GITHUB_WORKSPACE/$script"
+      test -s "$source" || { echo "missing canonical $script" >&2; exit 1; }
+      put_mutable "$source" "wright/$script" 'text/plain; charset=utf-8' "$installer_public_base_url"
+    done
+  fi
 fi
 
-pointer_file="$GITHUB_WORKSPACE/r2-$RELEASE_CHANNEL-pointer"
-printf '%s\n' "$pointer_value" > "$pointer_file"
-put_mutable "$pointer_file" "$pointer_key" 'text/plain; charset=utf-8' "$R2_PUBLIC_BASE_URL"
+if [[ "$phase" != objects ]]; then
+  pointer_file="$GITHUB_WORKSPACE/r2-$RELEASE_CHANNEL-pointer"
+  printf '%s\n' "$pointer_value" > "$pointer_file"
+  put_mutable "$pointer_file" "$pointer_key" 'text/plain; charset=utf-8' "$R2_PUBLIC_BASE_URL"
+fi

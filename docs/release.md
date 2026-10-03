@@ -71,16 +71,23 @@ Wright has two release channels and one shared native build workflow:
    `release-please` create the tag and a draft GitHub Release, and the tag
    push starts `.github/workflows/release.yml`. The workflow verifies that
    the tag matches the workspace version, builds and smoke-tests the native
-   matrix from the tagged commit, and publishes the versioned GitHub Release
-   only after those artifacts and generated package-manager manifests pass
-   validation. The stable R2 objects, installer scripts, and version pointer
-   are updated only after the GitHub Release is complete.
+   matrix from the tagged commit, then publishes and verifies the immutable
+   `wright/releases/<version>/` R2 objects and installer scripts. Only after
+   that staged artifact set is publicly available and checksum-consistent
+   does it make the GitHub Release public with the same verified artifacts
+   and generated package-manager manifests; `wright/latest/version` advances
+   after the canonical release is public, so a failed or partial publication
+   never points at a version lacking one.
 
 No workspace crate is published to crates.io. Every workspace package
 explicitly sets `publish = false`, so Cargo package publication cannot become
 an accidental release surface. A failed publication can be rerun for the same
 tag: the release commit is checked for exact identity, while R2 versioned
-objects are reused only when their bytes match.
+objects are reused only when their bytes match. A publication cancelled after
+R2 staging — for example by a package-manifest or GitHub Release failure —
+can leave those verified immutable objects public; they are inert because the
+version pointer never advanced and nothing references them, and a retry
+byte-checks rather than republishes them.
 
 ### Creating a release
 

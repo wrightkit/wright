@@ -26,10 +26,11 @@ release publication that those scripts use.
   displays these commands; it does not copy or publish the files.
 - These two unversioned bootstrap objects are mutable and use
   `Cache-Control: no-store, max-age=0` and
-  `Content-Type: text/plain; charset=utf-8`. After the completed GitHub Release
-  and verified immutable archive/checksum set, the stable publisher uploads
-  both scripts, fetches them over HTTP/1.1, compares exact bytes, and verifies
-  their cache and content-type headers before advancing `wright/latest/version`.
+  `Content-Type: text/plain; charset=utf-8`. The stable publisher uploads and
+  verifies both scripts with the immutable archive/checksum set, before the
+  GitHub Release becomes public (#293): it fetches them back, compares exact
+  bytes, and verifies their cache and content-type headers, and
+  `wright/latest/version` advances only after the canonical release is public.
 - Nightly publication does not change the stable bootstrap objects. The
   scripts continue to resolve and download release archives from
   `releases.wrightkit.dev`.
