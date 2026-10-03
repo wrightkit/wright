@@ -225,10 +225,10 @@ class AgentBenchTest(unittest.TestCase):
 
     def test_preflight_names_what_is_missing_before_a_run_starts(self):
         args = argparse.Namespace(wright=str(self.out / "nope"), adapter="devin", skill_dirs={})
-        with patch.object(agent_bench.shutil, "which", return_value=None):
+        with patch.object(agent_bench.shutil, "which", return_value=None), patch.dict(agent_bench.CREDENTIALS, {"devin": [(".missing-bench-cred/auth.json", "x")]}):
             problems = agent_bench.preflight(args, [agent_bench.normalize_cell({"tool": "wright", "skills": ["wright-skill"], "knowledge": "none", "network": "off"})])
-        self.assertEqual(len(problems), 3)
-        self.assertTrue(any("wright binary not found" in p for p in problems) and any("`devin` is not on PATH" in p for p in problems) and any("--skill-dir wright-skill" in p for p in problems))
+        self.assertEqual(len(problems), 4)
+        self.assertTrue(any("wright binary not found" in p for p in problems) and any("`devin` is not on PATH" in p for p in problems) and any("--skill-dir wright-skill" in p for p in problems) and any("~/.missing-bench-cred/auth.json" in p for p in problems))
 
     def test_preflight_names_a_missing_adapter_login_and_an_unusable_sandbox(self):
         args = argparse.Namespace(wright=str(Path(WRIGHT).resolve()), adapter="grok", skill_dirs={}, file_sandbox=True, credentials=[])
