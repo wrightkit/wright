@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
 
 
 def usage_row(usage: dict, timestamp: float) -> dict:
@@ -58,17 +58,17 @@ def main() -> int:
             transcript.write(json.dumps({"t": now, **event}) + "\n")
             if event.get("event") == "init":
                 init = event.get("init") or {}
-            step = event.get("step_update") or {}
+            step = as_dict(event.get("step_update"))
             tool = step.get("tool_name", "")
             if env["BENCH_NETWORK"] == "off" and tool in {"search_web", "read_url_content", "browser_subagent", "open_browser_url"}:
                 unexpected.add("network-tool:" + tool)
                 process.terminate()
 
-            if step.get("state") == "DONE" and step.get("usage") and step["step_index"] not in seen:
-                seen.add(step["step_index"])
+            if step.get("state") == "DONE" and step.get("usage") and (index := step.get("step_index")) is not None and index not in seen:
+                seen.add(index)
                 usage.write(json.dumps(usage_row(step["usage"], now)) + "\n")
             if event.get("event") == "result":
-                result = event.get("result") or {}
+                result = as_dict(event.get("result"))
         code = process.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"installed": installed, "audit": "isolated-home; CLI does not export loaded skill context", "unexpected": sorted(unexpected)}))
     Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "version": cli_version(binary), "model": env["BENCH_MODEL"], "effort": effort, "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))

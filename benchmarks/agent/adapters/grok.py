@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
 
 
 def usage_row(usage: dict, limit: int | None, now: float) -> dict:
@@ -62,18 +62,18 @@ def main() -> int:
                 continue
             now = time.time()
             transcript.write(json.dumps({"t": now, **event}) + "\n")
-            message = event.get("message") or {}
+            message = as_dict(event.get("message"))
             if event.get("type") == "system" and event.get("subtype") == "init":
                 init = event
             elif event.get("type") == "assistant":
                 pending.append(message.get("usage") or {})
-                text = "".join(b.get("text", "") for b in message.get("content", []) if b.get("type") == "text")
+                text = "".join(as_dict(b).get("text", "") for b in message.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
                 final = text or final
             elif event.get("type") == "result":
                 final = event.get("result") or final
                 if event.get("is_error"):
                     error = json.dumps(event.get("errors") or "error")  # only the structured error classifies; the result text is the agent's own
-                limit = next((m.get("contextWindow") for m in (event.get("modelUsage") or {}).values()), None)
+                limit = next((m.get("contextWindow") for m in as_dict(event.get("modelUsage")).values()), None)
         for u in pending:  # the context window is only known from the final result line
             usage.write(json.dumps(usage_row(u, limit, time.time())) + "\n")
     stderr = proc.stderr.read()

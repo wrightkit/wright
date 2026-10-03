@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
 WEB_PERMISSIONS = {"webfetch": "deny", "websearch": "deny"}
 
 
@@ -72,7 +72,7 @@ def main() -> int:
                 continue
             if not isinstance(event, dict):
                 continue
-            now, part, etype = time.time(), event.get("part") or {}, event.get("type")
+            now, part, etype = time.time(), as_dict(event.get("part")), event.get("type")
             transcript.write(json.dumps({"t": now, **event}) + "\n")
             if etype == "step_finish" and part.get("tokens"):
                 usage.write(json.dumps(usage_row(part["tokens"], now)) + "\n")

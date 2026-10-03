@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
 
 TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 WEB_TOOLS = ["WebFetch", "WebSearch"]
@@ -71,7 +71,7 @@ def main() -> int:
             if event.get("type") == "system" and event.get("subtype") == "init":
                 init = event
             if event.get("type") == "assistant":
-                u = (event.get("message") or {}).get("usage") or {}
+                u = as_dict(event.get("message")).get("usage") or {}
                 cached = u.get("cache_read_input_tokens") or 0
                 written = u.get("cache_creation_input_tokens") or 0
                 usage.write(json.dumps({
@@ -80,7 +80,8 @@ def main() -> int:
                     "context": (u.get("input_tokens") or 0) + cached + written, "context_limit": None,
                 }) + "\n")
             if event.get("type") == "result":
-                final, errored = event.get("result", ""), bool(event.get("is_error"))
+                result_value = event.get("result")
+                final, errored = (result_value if isinstance(result_value, str) else final), bool(event.get("is_error"))
     stderr = proc.stderr.read()
     code = proc.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))

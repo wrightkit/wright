@@ -343,6 +343,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     while True:
         shutil.rmtree(workspace, ignore_errors=True)
         for stale in ("home", "bin", "real", "tool-trace.jsonl", "tool-calls", "usage.jsonl", "transcript.jsonl", "context.json", "agent-info.json", "snapshots", "tmp",
+                      "devin-export.json",  # devin only writes this on success; a retry that produces none would parse the previous attempt's export
                       *(child.name for child in out.iterdir() if child.name.endswith(("-home", "-user")))):  # adapters keep their isolated homes here; a retry starts from none
             target = out / stale
             shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink(missing_ok=True)
