@@ -310,6 +310,20 @@ class AgentBenchTest(unittest.TestCase):
             only = agent_bench.cmd_suite(argparse.Namespace(models=models, only=["devin"], out=self.out, suite_name="s2", dry_run=True))
         self.assertEqual(only, 0)
 
+    def test_a_repeated_run_refuses_a_different_wright_binary(self):
+        run = self.out / "r"
+        trial = run / "s" / "agent" / "cell-1"
+        trial.mkdir(parents=True)
+        (trial / "result.json").write_text(json.dumps({"environment": {"wright": "wright 0.7.0", "wrightSha256": "a" * 64}}))
+        other = self.out / "wright-other"
+        other.write_text("a different binary")
+        message = agent_bench.wright_mismatch(run, str(other))
+        self.assertIn("wright 0.7.0", message)
+        self.assertIn("--wright", message)
+        self.assertIsNone(agent_bench.wright_mismatch(self.out / "fresh", str(other)))  # a new run has nothing to disagree with
+        (trial / "result.json").write_text(json.dumps({"environment": {"wright": "x", "wrightSha256": agent_bench.file_sha256(other)}}))
+        self.assertIsNone(agent_bench.wright_mismatch(run, str(other)))
+
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
         none = self.trial(agent, tool="none")

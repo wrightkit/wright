@@ -604,6 +604,21 @@ def preflight(args: argparse.Namespace, cells: list[dict]) -> list[str]:
     return problems
 
 
+def wright_mismatch(run_dir: Path, wright: str) -> str | None:
+    """Why a repeated run must not continue with this Wright binary, or None.
+
+    A run is repeated to finish it later, possibly after `wright` on PATH was upgraded. Trials made with two binaries cannot be scored
+    together, so the mismatch is refused up front instead of being found when the score card is refused."""
+    current = file_sha256(Path(wright))
+    for path in sorted(run_dir.glob("*/*/*/result.json")):
+        env = json.loads(path.read_text()).get("environment", {})
+        recorded = env.get("wrightSha256")
+        if recorded and recorded != current:
+            return (f"{run_dir.name} already has trials made with {env.get('wright')} (sha256 {recorded[:12]}), but {wright} is a different binary. "
+                    f"Pass --wright with the binary that made them, or start a new run with --name.")
+    return None
+
+
 def cmd_evaluate(args: argparse.Namespace) -> int:
     """One command from agent and model to data and document: run the matrix, then write report, score cards, and RESULTS.md.
 
@@ -626,6 +641,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         raise SystemExit("no cell can run: pass --skill-dir wright-skill=DIR")
     args.env_pass = sorted({*args.env_pass, *(DIRECT_ENV if args.adapter == "direct" else ("HOME",))})  # the credentials the adapter copies or reads
     problems = preflight(args, [normalize_cell(c) for c in cells])
+    if (problem := wright_mismatch(args.out / args.name, args.wright)):
+        problems.append(problem)
     if problems:
         raise SystemExit("cannot start:\n  " + "\n  ".join(problems))
     scenarios = args.scenarios or [s for s in all_scenario_ids() if args.split == "all" or load_scenario(s).get("split") == args.split]
