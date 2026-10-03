@@ -170,11 +170,12 @@ class DirectAdapterTest(unittest.TestCase):
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
-                seen.append(json.loads(self.rfile.read(int(self.headers["content-length"]))))
+                request = json.loads(self.rfile.read(int(self.headers["content-length"])))
+                seen.append(request)
                 status, body = replies[min(len(seen), len(replies)) - 1]
                 self.send_response(status)
                 self.end_headers()
-                self.wfile.write(json.dumps(body).encode())
+                self.wfile.write(json.dumps(body(request) if callable(body) else body).encode())
 
             def log_message(self, *args):
                 pass
@@ -184,7 +185,7 @@ class DirectAdapterTest(unittest.TestCase):
         self.addCleanup(server.shutdown)
         return f"http://127.0.0.1:{server.server_port}", seen
 
-    def run_direct(self, model, base_var, replies):
+    def run_direct(self, model, base_var, replies, extra_env=None):
         base, seen = self.serve(replies)
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
             tmp = Path(tmp)
@@ -192,7 +193,7 @@ class DirectAdapterTest(unittest.TestCase):
             skill.mkdir()
             (skill / "SKILL.md").write_text("---\nname: demo\ndescription: A demo skill\n---\nbody\n")
             env = {"BENCH_MODEL": model, "BENCH_KNOWLEDGE": "none", "BENCH_SKILL_DIRS": str(skill), "ANTHROPIC_API_KEY": "k", "OPENAI_API_KEY": "k", base_var: base,
-                   **{f"BENCH_{n}": str(tmp / n.lower()) for n in ("USAGE", "TRANSCRIPT", "CONTEXT", "AGENT_INFO")}, "PATH": os.environ["PATH"]}
+                   **{f"BENCH_{n}": str(tmp / n.lower()) for n in ("USAGE", "TRANSCRIPT", "CONTEXT", "AGENT_INFO")}, "PATH": os.environ["PATH"], **(extra_env or {})}
             cwd = os.getcwd()
             os.makedirs(tmp / "work")
             os.chdir(tmp / "work")
@@ -231,6 +232,60 @@ class DirectAdapterTest(unittest.TestCase):
             with self.subTest(model=model):
                 code, *_ = self.run_direct(model, base_var, replies)
                 self.assertEqual(code, 1)
+
+    FAKE_MCP = '''\
+import json, os, sys
+log = open(os.environ["MCP_CALLS"], "a")
+for line in sys.stdin:
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    method = msg.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "0"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "wright_check", "description": "Check the project", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}}}}]}
+    elif method == "tools/call":
+        log.write(msg["params"]["name"] + "\\n")
+        log.flush()
+        result = {"content": [{"type": "text", "text": "{\\"ok\\": true}"}]}
+    else:
+        result = {}
+    if "id" in msg:
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\\n")
+        sys.stdout.flush()
+'''
+
+    def test_mcp_tools_reach_the_model_dispatch_to_the_server_and_bill_schemas(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
+            tmp = Path(tmp)
+            server_py = tmp / "fake_mcp.py"
+            server_py.write_text(self.FAKE_MCP)
+            calls = tmp / "calls.txt"
+            use = {"content": [{"type": "tool_use", "id": "t1", "name": "wright_check", "input": {"file": "mode.ws"}}],
+                   "usage": {"input_tokens": 1, "output_tokens": 1}}
+            billed = lambda request: {"content": [{"type": "text", "text": "done"}],
+                                      "usage": {"input_tokens": len(json.dumps(request["tools"])), "output_tokens": 1}}
+            code, final, seen, usage, context, info = self.run_direct(
+                "anthropic/m", "ANTHROPIC_BASE_URL", [(200, use), (200, billed)],
+                {"BENCH_MCP_CMD": f"{sys.executable} {server_py}", "MCP_CALLS": str(calls), "BENCH_TOOL_LEVEL": "mcp"})
+            self.assertEqual((code, final), (0, "done"))
+            tools = {t["name"]: t for t in seen[0]["tools"]}
+            self.assertEqual([t["name"] for t in seen[0]["tools"]], ["bash", "wright_check"])
+            self.assertEqual(tools["wright_check"]["input_schema"], {"type": "object", "properties": {"file": {"type": "string"}}})
+            self.assertEqual(calls.read_text().strip(), "wright_check")
+            self.assertIn('"ok": true', seen[1]["messages"][-1]["content"][0]["content"])
+            self.assertEqual(info["toolLevel"], "mcp")
+            # fixture: the billed input covers the whole serialized tool list, so the MCP tool schema counts toward mcp input tokens
+            self.assertEqual(usage[1]["input"], len(json.dumps(seen[1]["tools"])))
+
+    def test_mcp_setup_failure_is_not_an_infrastructure_exit(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
+            env = {"BENCH_MODEL": "anthropic/m", "BENCH_KNOWLEDGE": "none", "BENCH_MCP_CMD": "false", "ANTHROPIC_API_KEY": "k",
+                   **{f"BENCH_{n}": str(Path(tmp) / n.lower()) for n in ("USAGE", "TRANSCRIPT", "CONTEXT", "AGENT_INFO")}, "PATH": os.environ["PATH"]}
+            with patch.dict(direct.os.environ, env, clear=True), patch.object(direct.sys, "stdin", io.StringIO("task")), patch.object(direct.sys, "stdout", io.StringIO()):
+                self.assertEqual(direct.main(), 1)
 
 
 class PipeTest(unittest.TestCase):

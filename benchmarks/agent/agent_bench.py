@@ -37,6 +37,7 @@ ROOT = HERE.parent.parent
 SCENARIOS = HERE / "scenarios"
 RESULT_CONTRACT = "wright-agent-bench/v3"
 TOOLS = ("none", "wright", "overpy")
+LEVELS = ("bin", "mcp")  # how a `wright` tool reaches the agent: the CLI shim on PATH, or `wright serve --transport mcp` the adapter registers
 SKILLS = ("wright-skill", "workshop-skill", "opy-skill", "workshop-format-skill")
 SKILL_LANGUAGE = {"opy-skill": "opy", "workshop-format-skill": "workshop"}  # skills that teach one language and apply to its scenarios only
 KNOWLEDGE_LEVELS = ("none", "wiki", "web")
@@ -99,12 +100,13 @@ def baseline_path(path: str) -> str:
 
 
 def normalize_cell(raw: dict) -> dict:
-    return {"tool": raw["tool"], "skills": sorted(raw.get("skills") or []), "knowledge": raw["knowledge"], "network": raw["network"]}
+    return {"tool": raw["tool"], "level": raw.get("level") or "bin", "skills": sorted(raw.get("skills") or []), "knowledge": raw["knowledge"], "network": raw["network"]}
 
 
 def cell_label(cell: dict) -> str:
-    """`tool[+skill...]/knowledge/network`, for example `wright+wright-skill/none/off`; the baseline is `none/none/off`."""
-    return f"{'+'.join([cell['tool'], *cell['skills']])}/{cell['knowledge']}/{cell['network']}"
+    """`tool[+skill...]/knowledge/network`, for example `wright+wright-skill/none/off`; a non-`bin` level suffixes the tool: `wright-mcp+.../none/off`."""
+    tool = cell["tool"] if cell.get("level") in (None, "bin") else f"{cell['tool']}-{cell['level']}"
+    return f"{'+'.join([tool, *cell['skills']])}/{cell['knowledge']}/{cell['network']}"
 
 
 def applicable(scenario: dict, cell: dict) -> bool:
@@ -144,8 +146,11 @@ def overpy_launcher(out: Path, host_path: str) -> Path:
 
 
 def check_cell(cell: dict, args: argparse.Namespace) -> None:
-    if cell["tool"] not in TOOLS or cell["knowledge"] not in KNOWLEDGE_LEVELS or cell["network"] not in ("off", "on") or any(s not in SKILLS for s in cell["skills"]):
+    level = cell.get("level") or "bin"  # `normalize_cell` fills this; a hand-built cell defaults to `bin` the same way
+    if cell["tool"] not in TOOLS or level not in LEVELS or cell["knowledge"] not in KNOWLEDGE_LEVELS or cell["network"] not in ("off", "on") or any(s not in SKILLS for s in cell["skills"]):
         raise SystemExit(f"invalid condition {cell_label(cell)}")
+    if level != "bin" and cell["tool"] != "wright":
+        raise SystemExit(f"invalid condition {cell_label(cell)}: level '{level}' is a `wright` level")
     if cell["knowledge"] == "web" and cell["network"] != "on":
         raise SystemExit("knowledge 'web' requires network 'on'")
     for name in cell["skills"]:
@@ -169,20 +174,24 @@ def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) 
     env.setdefault("HOME", str(home))
     path = baseline_path(os.environ["PATH"])
     if cell["tool"] != "none":
-        shim_dir = out / "bin"
-        shim_dir.mkdir()
-        shim = shim_dir / cell["tool"]
-        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{(HERE / "bench_trace.py").resolve()}" shim {cell["tool"]} "$@"\n')
-        shim.chmod(0o755)
         real = args.wright if cell["tool"] == "wright" else str(overpy_launcher(out, os.environ["PATH"]))
         env.update({f"BENCH_TOOL_REAL_{cell['tool'].upper()}": real, "BENCH_TOOL_TRACE": str(out / "tool-trace.jsonl"), "BENCH_TOOL_SIDECAR": str(out / "tool-calls")})
-        path = f"{shim_dir}{os.pathsep}{path}"
+        if cell["tool"] == "wright" and cell.get("level") == "mcp":
+            # the adapter registers the traced MCP server; the `wright` CLI itself stays off PATH (the canary enforces that)
+            env["BENCH_MCP_CMD"] = shlex.join([sys.executable, str((HERE / "bench_trace.py").resolve()), "shim", "wright", "serve", "--transport", "mcp", str(workspace)])
+        else:
+            shim_dir = out / "bin"
+            shim_dir.mkdir()
+            shim = shim_dir / cell["tool"]
+            shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{(HERE / "bench_trace.py").resolve()}" shim {cell["tool"]} "$@"\n')
+            shim.chmod(0o755)
+            path = f"{shim_dir}{os.pathsep}{path}"
     env.update(
         PATH=path,
         BENCH_HOST_PATH=os.environ["PATH"], BENCH_WORKSPACE=str(workspace), BENCH_RUN_DIR=str(out), BENCH_AGENT_ID=args.agent_id,
         BENCH_USAGE=str(out / "usage.jsonl"), BENCH_TRANSCRIPT=str(out / "transcript.jsonl"), BENCH_CONTEXT=str(out / "context.json"),
         BENCH_AGENT_INFO=str(out / "agent-info.json"),
-        BENCH_KNOWLEDGE=cell["knowledge"], BENCH_NETWORK=cell["network"], BENCH_TOOL=cell["tool"], BENCH_SKILLS=",".join(cell["skills"]),
+        BENCH_KNOWLEDGE=cell["knowledge"], BENCH_NETWORK=cell["network"], BENCH_TOOL=cell["tool"], BENCH_TOOL_LEVEL=cell.get("level") or "bin", BENCH_SKILLS=",".join(cell["skills"]),
     )
     if cell["skills"]:
         env["BENCH_SKILL_DIRS"] = os.pathsep.join(str(Path(args.skill_dirs[name]).resolve()) for name in cell["skills"])
@@ -202,8 +211,9 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
     if args.check_ancestors and (found := ancestor_instructions(workspace)):
         return f"instruction files in ancestor directories of the workspace: {found}; use --out outside the repository"
     for tool in ("wright", "overpy"):
-        if cell["tool"] != tool and shutil.which(tool, path=env["PATH"]):
-            return f"{tool} reachable although the tool is '{cell['tool']}'"
+        shimmed = cell["tool"] == tool and cell.get("level", "bin") == "bin"  # level `mcp` keeps the CLI off PATH on purpose
+        if not shimmed and shutil.which(tool, path=env["PATH"]):
+            return f"{tool} reachable although the tool is '{cell['tool']}' at level '{cell.get('level', 'bin')}'"
     if cell["network"] == "off" and args.canary_cmd:
         if subprocess.run(args.canary_cmd, shell=True, cwd=workspace, env=env, capture_output=True).returncode == 0:
             return "network reachable under network 'off'"
@@ -426,15 +436,22 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
         result["fileReadEnforcement"] = "unrestricted"
     context = context_report(out, [skill_name(Path(args.skill_dirs[name])) for name in cell["skills"]])
     result["context"] = context
+    reasons = []
     if context.get("unexpected"):
-        result["invalid"] = f"unexpected loaded context: {context['unexpected']}"
+        reasons.append(f"unexpected loaded context: {context['unexpected']}")
     if (out / "agent-info.json").is_file():
         result["agentInfo"] = json.loads((out / "agent-info.json").read_text())
     events = bench_trace.read_events(out / "tool-trace.jsonl")
     result["toolUse"] = bench_trace.summarize_trace(events)
+    if cell.get("level") == "mcp" and agent_exit != INFRA_EXIT and not any(e.get("type") == "serve" for e in bench_trace.tool_events(events, "wright")):
+        reasons.append("level 'mcp' but the adapter never started the wright MCP server (BENCH_MCP_CMD)")
+    if calls := bench_trace.call_counts(out / "transcript.jsonl"):
+        result["toolCalls"] = calls
     result.update(bench_grade.grade(scenario, workspace, args.wright, out / "grading"))
     if any(c.get("unavailable") for c in result["checks"]):
-        result["invalid"] = "a required grader was unavailable"
+        reasons.append("a required grader was unavailable")
+    if reasons:
+        result["invalid"] = "; ".join(reasons)
     entry = workspace / scenario["entry"]
     final_sha = hashlib.sha256(entry.read_bytes()).hexdigest() if entry.is_file() else None
     result["friction"] = bench_trace.friction(events)
@@ -520,7 +537,7 @@ def verdict_word(result: dict) -> str:
 
 def cmd_run(args: argparse.Namespace) -> int:
     scenario = load_scenario(args.scenario)
-    cell = normalize_cell({"tool": args.tool, "skills": args.skills, "knowledge": args.knowledge, "network": args.network})
+    cell = normalize_cell({"tool": args.tool, "level": args.level, "skills": args.skills, "knowledge": args.knowledge, "network": args.network})
     code = 0
     for trial in range(1, args.trials + 1):
         result = run_trial(scenario, cell, args, trial_dir(args.out, args.scenario, args.agent_id, cell, trial))
@@ -822,11 +839,12 @@ def main() -> int:
     run.add_argument("--agent-cmd", required=True, help="shell command; the task prompt arrives on stdin, cwd is the workspace, BENCH_* describes the condition")
     run.add_argument("--agent-id", required=True, help="recorded agent/model/version label")
     run.add_argument("--tool", choices=TOOLS, default="wright")
+    run.add_argument("--level", choices=LEVELS, default="bin", help="how a `wright` tool reaches the agent: `bin` puts the CLI shim on PATH; `mcp` gives the adapter BENCH_MCP_CMD to register `wright serve --transport mcp`")
     run.add_argument("--skills", nargs="*", choices=SKILLS, default=[], help="skills installed in this condition")
     run.add_argument("--knowledge", choices=KNOWLEDGE_LEVELS, default="none")
     run.add_argument("--network", choices=("off", "on"), default="off")
     run.add_argument("--trials", type=int, default=1)
-    sub.choices["matrix"].add_argument("config", type=Path, help="JSON: agents[{id,cmd}], cells[{tool,skills,knowledge,network}], scenarios, trials, parallel, seed, options")
+    sub.choices["matrix"].add_argument("config", type=Path, help="JSON: agents[{id,cmd}], cells[{tool,level,skills,knowledge,network}], scenarios, trials, parallel, seed, options")
     ev = sub.choices["evaluate"]
     ev.add_argument("--adapter", choices=sorted(ADAPTERS), required=True, help="agent adapter; `direct` is the built-in loop that needs no agent harness")
     ev.add_argument("--model", required=True, help="BENCH_MODEL, in the form the adapter expects")
