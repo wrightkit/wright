@@ -56,7 +56,7 @@
     "timeout": 3600,
     "skill_dirs": {
       "wright-skill": "/abs/path/skills/skills/wright",
-      "workshop-skill": "/abs/path/local/workshop-wiki"
+      "workshop-skill": "/abs/path/local/workshop-skill"
     }
   }
 }

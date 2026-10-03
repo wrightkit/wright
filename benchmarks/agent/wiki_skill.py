@@ -1,4 +1,4 @@
-"""Generate the `workshop-wiki` skill from a pinned wiki snapshot (#414, SPEC-414).
+"""Generate the `workshop-skill` skill from a pinned wiki snapshot (#414, SPEC-414).
 
 The skill is community knowledge that works without Wright: a short SKILL.md, one index per category, and one file
 per article. It is built deterministically from `SNAPSHOT.json`; nothing is written by hand except SKILL.md. Spellings
@@ -18,7 +18,7 @@ import bench_grade
 import bench_wiki
 
 KIND = {"actions": "action", "values": "value", "events": "event", "constants": "constant", "references": "reference"}
-SKILL_NAME = "workshop-wiki"
+SKILL_NAME = "workshop-skill"
 DESCRIPTION = (
     "Use when you are unsure of the exact name, parameters, or behavior of an Overwatch Workshop action, value, event, "
     "or constant, in raw Workshop script or OverPy, or hit a Workshop quirk such as timing, event semantics, or a HUD or "
