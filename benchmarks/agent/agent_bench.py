@@ -532,7 +532,8 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     def work(job: tuple) -> None:
         scenario_id, agent, cell, trial = job
         out = trial_dir(args.out, scenario_id, agent["id"], cell, trial)
-        if (out / "result.json").is_file():
+        finished = out / "result.json"
+        if finished.is_file() and json.loads(finished.read_text()).get("status") != "provider-interrupted":  # an interrupted trial is retried on the next run
             return
         with lock:
             if state["streak"] >= STOP_AFTER_INTERRUPTIONS:

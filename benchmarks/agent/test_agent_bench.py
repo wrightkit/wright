@@ -159,6 +159,13 @@ class AgentBenchTest(unittest.TestCase):
         self.assertIn("not applicable: repair-runaway-loop", printed.getvalue())
         self.assertEqual(len(list((self.out / "m").rglob("result.json"))), 2)  # the third and fourth jobs were left unattempted
         self.assertIn("left unattempted", printed.getvalue())
+        interrupted = {p for p in (self.out / "m").rglob("result.json") if json.loads(p.read_text())["status"] == "provider-interrupted"}
+        self.assertEqual(len(interrupted), 2)
+        config.write_text(config.read_text().replace('"cmd": "exit 75"', '"cmd": "exit 0"'))  # the provider is back
+        with contextlib.redirect_stdout(io.StringIO()):
+            agent_bench.cmd_matrix(args)
+        self.assertTrue(all(json.loads(p.read_text())["status"] != "provider-interrupted" for p in (self.out / "m").rglob("result.json")))
+        self.assertEqual(len(list((self.out / "m").rglob("result.json"))), 4)  # the interrupted two were rerun and the rest ran
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
