@@ -336,6 +336,10 @@ class AgentBenchTest(unittest.TestCase):
         (trial / "result.json").write_text(json.dumps({"environment": {"wright": "x", "wrightSha256": agent_bench.file_sha256(other)}}))
         self.assertIsNone(agent_bench.wright_mismatch(run, str(other)))
 
+    def test_an_effort_the_model_id_already_names_is_not_repeated_in_the_run_name(self):
+        self.assertEqual(agent_bench.model_slug({"adapter": "agy", "model": "gemini-3.8-flash-high", "effort": "high"}), "agy-gemini-3.8-flash-high")
+        self.assertEqual(agent_bench.model_slug({"adapter": "codex", "model": "gpt-6-luna", "effort": "xhigh"}), "codex-gpt-6-luna-xhigh")
+
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
         none = self.trial(agent, tool="none")

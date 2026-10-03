@@ -115,6 +115,13 @@ class DevinTransientTest(unittest.TestCase):
         self.assertFalse(devin.transient("I could not finish: my test run timed out and the quota for retries is used up", ""))
 
 
+class AgyTransientTest(unittest.TestCase):
+    def test_a_dropped_connection_is_a_provider_failure_even_with_an_answer_written(self):
+        self.assertTrue(agy.transient('API error (attempt 1): request failed: Post "https://x/v1internal:streamGenerateContent": EOF'))
+        self.assertTrue(agy.transient("quota exceeded"))
+        self.assertFalse(agy.transient("the agent wrote an invalid file"))
+
+
 class DevinEffortTest(unittest.TestCase):
     def test_effort_is_read_from_the_model_id(self):
         self.assertEqual(devin.split_effort("swe-2-max"), ("swe-2", "max"))

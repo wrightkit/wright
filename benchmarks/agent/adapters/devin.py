@@ -22,21 +22,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from common import cli_version, INFRA_EXIT, TRANSIENT
+from common import cli_version, split_effort, INFRA_EXIT, TRANSIENT
 WEB_TOOLS = ["WebFetch", "WebSearch", "webfetch", "web_search"]
 MCP_TOOLS = ["mcp_call_tool", "mcp_list_tools", "mcp_list_servers", "mcp_read_resource"]  # org-managed plugins install MCP servers
 NO_TOOL_CONFIG = {"claude": False, "cursor": False, "windsurf": False, "codex": False}
-
-
-EFFORTS = ("low", "medium", "high", "xhigh", "max")
-
-
-def split_effort(model_id: str) -> tuple[str, str | None]:
-    """Devin names the effort in the model id (`swe-2-max` is model `swe-2` at effort `max`), so the CLI never reports it separately."""
-    for effort in EFFORTS:
-        if model_id.endswith(f"-{effort}"):
-            return model_id[: -len(effort) - 1], effort
-    return model_id, None
 
 
 def isolated_config(user_config: dict, model: str, web: bool) -> dict:
