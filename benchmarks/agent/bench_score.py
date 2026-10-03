@@ -52,7 +52,7 @@ def identity_of(run: dict) -> dict:
 
 def card(results: list[dict], language: str, expected: list[str]) -> dict:
     """The score card of one language track, or a refusal when the runs are not one comparable environment."""
-    track = [r for r in results if r["language"] == language and r["condition"]["label"] == CANONICAL and r.get("split") == "test"]
+    track = [r for r in results if r.get("language") == language and (r.get("condition") or {}).get("label") == CANONICAL and r.get("split") == "test"]
     excluded = defaultdict(list)
     valid = []
     for run in track:
@@ -99,8 +99,8 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
         "identity": identity,
         "suite": (valid[0]["environment"].get("suite") or {}),
         "harness": sorted({r["environment"].get("harness") for r in valid if r["environment"].get("harness")}),
-        "networkEnforcement": sorted({r.get("networkEnforcement") for r in valid}),
-        "fileWriteEnforcement": sorted({r.get("fileWriteEnforcement") for r in valid}),
+        "networkEnforcement": sorted({r.get("networkEnforcement") or "not recorded" for r in valid}),
+        "fileWriteEnforcement": sorted({r.get("fileWriteEnforcement") or "not recorded" for r in valid}),
         "exclusions": {status: len(runs) for status, runs in sorted(excluded.items())},
         "perScenario": [{"scenario": s, "usable": sum(v), "valid": len(v), "rate": round(rates[s], 3)} for s, v in sorted(per.items())],
         "byFamily": {f: round(100 * sum(v) / len(v), 1) for f, v in sorted(families.items())},

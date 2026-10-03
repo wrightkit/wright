@@ -78,10 +78,10 @@ def parse_export(export: dict) -> tuple[list[dict], list[str], list[str]]:
     return rows, loaded, plugins
 
 
-def transient(text: str) -> bool:
-    """A provider or infrastructure failure. An empty model catalog means the catalog could not be fetched, not that the model is wrong."""
-    lowered = text.lower()
-    return any(s in lowered for s in TRANSIENT) or re.search(r"unknown model.*\navailable:\s*$", lowered.strip(), re.S) is not None
+def transient(stdout: str, stderr: str) -> bool:
+    """A provider or infrastructure failure. The agent's own text on stdout can mimic provider wording, so only stderr and the
+    CLI's anchored model-catalog error count. An empty catalog means the catalog could not be fetched, not that the model is wrong."""
+    return any(s in stderr.lower() for s in TRANSIENT) or re.search(r"unknown model.*\navailable:\s*$", (stdout + stderr).lower().strip(), re.S) is not None
 
 
 def main() -> int:
@@ -113,7 +113,7 @@ def main() -> int:
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     if proc.returncode != 0:
-        return INFRA_EXIT if transient(proc.stdout + proc.stderr) else proc.returncode
+        return INFRA_EXIT if transient(proc.stdout, proc.stderr) else proc.returncode
     return 0
 
 

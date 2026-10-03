@@ -216,13 +216,18 @@ ADAPTER_READS = {  # what each adapter reads from the real home before the agent
 }
 
 
-CREDENTIALS = {  # (real file relative to the home directory, its isolated copy relative to the run directory) per adapter
+CREDENTIALS = {  # (real file relative to the home directory, its isolated copy relative to the run directory) per adapter; preflight requires every one
     "codex": [(".codex/auth.json", "codex-home/.codex/auth.json")],
-    "pi": [(".pi/agent/auth.json", "pi-home/.pi/agent/auth.json"), (".pi/agent/antigravity-accounts.json", "pi-home/.pi/agent/antigravity-accounts.json")],
-    "devin": [(".local/share/devin/credentials.toml", "devin-home/.local/share/devin/credentials.toml")],
-    "agy": [(".gemini/antigravity-cli/antigravity-oauth-token", "agy-home/.gemini/antigravity-cli/antigravity-oauth-token")],
+    "pi": [(".pi/agent/auth.json", "pi-home/.pi/agent/auth.json")],
+    "devin": [(".local/share/devin/credentials.toml", "devin-home/.local/share/devin/credentials.toml"),
+             (".config/devin/config.json", "devin-home/.config/devin/config.json")],
+    "agy": [(".gemini/antigravity-cli/antigravity-oauth-token", "agy-home/.gemini/antigravity-cli/antigravity-oauth-token"),
+            (".gemini/antigravity-cli/installation_id", "agy-home/.gemini/antigravity-cli/installation_id")],
     "opencode": [(".local/share/opencode/auth.json", "opencode-home/.local/share/opencode/auth.json")],
     "grok": [(".grok/auth.json", "grok-home/auth.json")],
+}
+OPTIONAL_CREDENTIALS = {  # synced back when present, but not every install needs them (pi's antigravity login)
+    "pi": [(".pi/agent/antigravity-accounts.json", "pi-home/.pi/agent/antigravity-accounts.json")],
 }
 
 
@@ -429,10 +434,6 @@ def file_sha256(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def suite_identity(scenarios: str) -> tuple:
-    """Recomputed per call: the suite may change between trials of a long-running suite."""
-    return tuple(bench_grade.suite_identity(Path(scenarios)).items())
-
 
 def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path, seconds: float, agent_exit: int | None) -> dict:
     return {
@@ -449,7 +450,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
             "wrightSha256": file_sha256(args.wright),
             "harness": harness_commit(),
-            "suite": dict(suite_identity(str(SCENARIOS))),
+            "suite": bench_grade.suite_identity(Path(SCENARIOS)),  # recomputed per trial: the suite may change during a days-long run
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "skills": {name: skill_identity(name, Path(args.skill_dirs[name])) for name in cell["skills"]},
             **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
@@ -501,6 +502,10 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         print(f"not applicable: {scenario_id} {label}", flush=True)
     state = {"streak": 0, "interrupted": 0, "unattempted": 0, "failed": 0}
     lock = threading.Lock()
+    options = {k: ({n: Path(v) for n, v in val.items()} if k == "skill_dirs" else Path(val) if k == "wiki_dir" and val else val) for k, val in config.get("options", {}).items()}
+    merged = {**vars(args), **options}
+    if merged.get("deny_read") and not merged.get("file_sandbox"):
+        raise SystemExit("config options: deny_read does nothing without file_sandbox")
 
     def work(job: tuple) -> None:
         scenario_id, agent, cell, trial = job
@@ -512,8 +517,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
             if state["streak"] >= STOP_AFTER_INTERRUPTIONS:
                 state["unattempted"] += 1
                 return
-        options = {k: ({n: Path(v) for n, v in val.items()} if k == "skill_dirs" else Path(val) if k == "wiki_dir" and val else val) for k, val in config.get("options", {}).items()}
-        trial_args = argparse.Namespace(**{**vars(args), "agent_id": agent["id"], "agent_cmd": agent["cmd"], **options})
+        trial_args = argparse.Namespace(**{**merged, "agent_id": agent["id"], "agent_cmd": agent["cmd"]})
         result = run_trial(load_scenario(scenario_id), cell, trial_args, out)
         with lock:
             state["streak"] = state["streak"] + 1 if result["status"] == "provider-interrupted" else 0
@@ -553,7 +557,7 @@ def user_defaults() -> dict:
     if unknown:
         raise SystemExit(f"{CONFIG_PATH}: unknown key(s) {sorted(unknown)}")
     for i, entry in enumerate(config.get("models", [])):
-        if entry.get("adapter") not in ADAPTERS or not entry.get("model"):
+        if not isinstance(entry, dict) or entry.get("adapter") not in ADAPTERS or not entry.get("model"):
             raise SystemExit(f"{CONFIG_PATH}: models[{i}] needs an adapter in {sorted(ADAPTERS)} and a model")
     defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir")}
     defaults.update({k: Path(v).expanduser() for k, v in config.items() if k in ("out", "wiki_dir")})
@@ -579,8 +583,9 @@ def preflight(args: argparse.Namespace, cells: list[dict]) -> list[str]:
         problems.append("tool 'overpy' needs the pinned oracle: run `agent_bench.py setup-oracle`")
     if getattr(args, "file_sandbox", False) and (sys.platform != "darwin" or not shutil.which("sandbox-exec")):
         problems.append("the file sandbox needs macOS sandbox-exec; pass --no-file-sandbox for an unprotected run")
-    if (credentials := getattr(args, "credentials", [])) and not (Path.home() / credentials[0][0]).is_file():
-        problems.append(f"adapter '{args.adapter}' needs its login at ~/{credentials[0][0]} (sign in with that program first)")
+    for real_rel, _ in CREDENTIALS.get(getattr(args, "adapter", ""), []):
+        if not (Path.home() / real_rel).is_file():
+            problems.append(f"adapter '{args.adapter}' needs ~/{real_rel} (sign in with that program first)")
     return problems
 
 
@@ -607,7 +612,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     args.file_sandbox = not args.no_file_sandbox  # evaluation hides the answer keys and the rest of the host from the agent by default
     if args.deny_read and not args.file_sandbox:
         raise SystemExit("--deny-read does nothing without the file sandbox")
-    args.credentials = CREDENTIALS.get(args.adapter, [])
+    args.credentials = CREDENTIALS.get(args.adapter, []) + OPTIONAL_CREDENTIALS.get(args.adapter, [])
     args.allow_read = [*(str(Path.home() / rel) for rel in ADAPTER_READS[args.adapter]), *args.allow_read]
     script = Path(__file__).parent / "adapters" / ADAPTERS[args.adapter]
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""

@@ -231,13 +231,13 @@ class AgentBenchTest(unittest.TestCase):
         self.assertTrue(any("wright binary not found" in p for p in problems) and any("`devin` is not on PATH" in p for p in problems) and any("--skill-dir wright-skill" in p for p in problems))
 
     def test_preflight_names_a_missing_adapter_login_and_an_unusable_sandbox(self):
-        args = argparse.Namespace(wright=str(Path(WRIGHT).resolve()), adapter="devin", skill_dirs={}, file_sandbox=True,
-                                  credentials=[(".missing-bench-cred/auth.json", "x"), (".also-missing/secondary.json", "y")])
-        with patch.object(agent_bench.shutil, "which", side_effect=lambda b: f"/bin/{b}" if b != "sandbox-exec" else None):
+        args = argparse.Namespace(wright=str(Path(WRIGHT).resolve()), adapter="grok", skill_dirs={}, file_sandbox=True, credentials=[])
+        creds = {"grok": [(".missing-bench-cred/auth.json", "x"), (".missing-bench-cred/secondary", "y")]}
+        with patch.object(agent_bench.shutil, "which", side_effect=lambda b: f"/bin/{b}" if b != "sandbox-exec" else None), patch.dict(agent_bench.CREDENTIALS, creds, clear=True):
             problems = agent_bench.preflight(args, [agent_bench.normalize_cell({"tool": "wright", "skills": [], "knowledge": "none", "network": "off"})])
         self.assertTrue(any("sandbox-exec" in p for p in problems))
         self.assertTrue(any("~/.missing-bench-cred/auth.json" in p for p in problems))
-        self.assertFalse(any("secondary.json" in p for p in problems))  # only the primary login is required
+        self.assertTrue(any("~/.missing-bench-cred/secondary" in p for p in problems))  # every file the adapter needs is named
 
     def test_read_policy_hides_the_host_and_allows_only_what_the_run_needs(self):
         root = self.out

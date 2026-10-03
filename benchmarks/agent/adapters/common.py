@@ -6,8 +6,8 @@ import subprocess
 
 INFRA_EXIT = 75  # EX_TEMPFAIL: a provider or infrastructure failure, not an agent failure; the harness retries the trial later
 # Error text that means the provider, not the agent, failed. Shared so the classification cannot drift between adapters.
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota",
-             "credits", "fetch failed", "websocket error", "connection error", "econnreset", "unavailable")
+TRANSIENT = ("rate limit", "overloaded", "429", "502", "503", "529", "bad gateway", "timed out", "timeout", "temporarily",
+             "usage limit", "quota", "credits", "fetch failed", "websocket error", "connection error", "econnreset", "unavailable")
 
 
 def cli_version(binary: str, env: dict | None = None) -> str | None:

@@ -70,15 +70,17 @@ def main() -> int:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            now, part = time.time(), event.get("part") or {}
+            if not isinstance(event, dict):
+                continue
+            now, part, etype = time.time(), event.get("part") or {}, event.get("type")
             transcript.write(json.dumps({"t": now, **event}) + "\n")
-            if event["type"] == "step_finish" and part.get("tokens"):
+            if etype == "step_finish" and part.get("tokens"):
                 usage.write(json.dumps(usage_row(part["tokens"], now)) + "\n")
-            elif event["type"] == "text":
+            elif etype == "text":
                 final = part.get("text") or final
-            elif event["type"] == "tool_use" and part.get("tool"):
+            elif etype == "tool_use" and part.get("tool"):
                 tools.add(part["tool"])
-            elif event["type"] == "error":
+            elif etype == "error":
                 error = json.dumps(event.get("error"))
     stderr = proc.stderr.read()
     code = proc.wait()

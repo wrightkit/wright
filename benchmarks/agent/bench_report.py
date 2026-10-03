@@ -32,7 +32,7 @@ def load(dirs: list[Path]) -> list[dict]:
     for base in dirs:
         for path in sorted(base.rglob("result.json")):
             result = json.loads(path.read_text())
-            if str(result.get("contract", "")).startswith("wright-agent-bench/"):
+            if str(result.get("contract", "")).startswith("wright-agent-bench/") and all(k in result for k in ("status", "language", "condition", "scenario", "agent", "environment")):
                 result["_dir"] = path.parent
                 match = re.search(r"-(\d+)$", path.parent.name)
                 result["_trial"] = int(match.group(1)) if match else 0

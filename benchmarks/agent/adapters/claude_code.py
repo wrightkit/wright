@@ -17,7 +17,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -42,8 +41,9 @@ def main() -> int:
     loaded: list[str] = []
     skills = [Path(p) for p in env.get("BENCH_SKILL_DIRS", "").split(os.pathsep) if p]
     if skills:
-        plugin = Path(tempfile.mkdtemp(dir=env["BENCH_RUN_DIR"]))
-        (plugin / ".claude-plugin").mkdir()
+        plugin = Path(env["BENCH_RUN_DIR"]) / "claude-plugin"  # a fixed name: an infra retry would else orphan a mkdtemp dir
+        shutil.rmtree(plugin, ignore_errors=True)
+        (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "bench", "version": "0.0.0", "description": "benchmark skills"}))
         for skill in skills:
             shutil.copytree(skill, plugin / "skills" / skill.name)
@@ -65,11 +65,13 @@ def main() -> int:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
             transcript.write(json.dumps({"t": time.time(), **event}) + "\n")
             if event.get("type") == "system" and event.get("subtype") == "init":
                 init = event
             if event.get("type") == "assistant":
-                u = event["message"].get("usage") or {}
+                u = (event.get("message") or {}).get("usage") or {}
                 cached = u.get("cache_read_input_tokens") or 0
                 written = u.get("cache_creation_input_tokens") or 0
                 usage.write(json.dumps({
@@ -86,7 +88,7 @@ def main() -> int:
     sys.stdout.write(final)
     sys.stderr.write(stderr)
     if errored or code != 0:
-        return INFRA_EXIT if any(s in stderr.lower() + final.lower() for s in TRANSIENT) else (code or 1)
+        return INFRA_EXIT if any(s in stderr.lower() for s in TRANSIENT) else (code or 1)  # `final` is the agent's own text; only provider channels classify
     return 0
 
 
