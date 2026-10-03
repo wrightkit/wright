@@ -12,16 +12,35 @@ from pathlib import Path
 import bench_report
 
 TRACKS = (("workshop", "Workshop"), ("opy", "OverPy"))
-READING = (
-    "The score is the share of tasks an agent completed with a valid, safe result, averaged over 8 realistic Workshop tasks per language, each tried 3 times.",
-    "The bar shows the score; the range in brackets is the 95% confidence interval. With 8 tasks the range is wide: agents marked **tied with top** cannot be told apart from the first row.",
-    "It is a reference for how an agent behaves with Wright and its guide, not a measure of general ability, and a model's score depends on the agent program that runs it.",
-)
-LIMITS = (
-    "Network access was switched off by instruction only; the harness did not block it.",
-    "A run that hit the time limit counts as a failure. Runs cut off by provider outages are retried, not counted.",
-    "The suite has 8 test tasks per language, so differences of a few points mean nothing.",
-)
+
+
+def suite_shape(data: dict) -> tuple[int | None, int | None]:
+    """(scenarios per language, trials per scenario) when every run used the same suite shape, else (None, None)."""
+    counts = {(t["scenarios"], t["trials"]) for e in data["entries"] for t in e["tracks"].values()}
+    return next(iter(counts)) if len(counts) == 1 else (None, None)
+
+
+def reading(data: dict) -> list[str]:
+    scenarios, trials = suite_shape(data)
+    tasks = f"{scenarios} realistic Workshop tasks" if scenarios else "the held-out tasks"
+    times = f"{trials} times" if trials else "a fixed number of times"
+    return [
+        f"The score is the share of tasks an agent completed with a valid, safe result, averaged over {tasks} per language, each tried {times}.",
+        f"The bar shows the score; the range in brackets is the 95% confidence interval. With {scenarios or 'few'} tasks the range is wide: agents marked **tied with top** cannot be told apart from the first row.",
+        "It is a reference for how an agent behaves with Wright and its guide, not a measure of general ability, and a model's score depends on the agent program that runs it.",
+    ]
+
+
+def limits(data: dict) -> list[str]:
+    scenarios, _ = suite_shape(data)
+    networks = {n for e in data["entries"] for n in e["network"]}
+    network = ("The harness verified that the network was unreachable on every run." if networks == {"canary-checked"}
+               else "Network access was switched off by instruction only for at least some runs; the harness did not block it.")
+    return [
+        network,
+        "A run that hit the time limit counts as a failure. Runs cut off by provider outages are retried, not counted.",
+        f"The suite has {scenarios or 'few'} test tasks per language, so differences of a few points mean nothing.",
+    ]
 
 
 def load_entries(dirs: list[Path]) -> list[dict]:
@@ -69,12 +88,15 @@ def build(dirs: list[Path]) -> dict:
     entries = load_entries(dirs)
     if not entries:
         return {"entries": [], "excluded": [], "environment": None, "date": date.today().isoformat()}
+    coverage = max(len(e["tracks"]) for e in entries)
+    covered, partial = [e for e in entries if len(e["tracks"]) == coverage], [e for e in entries if len(e["tracks"]) < coverage]
     key = lambda e: json.dumps(e["environment"], sort_keys=True)
-    main_key = Counter(key(e) for e in entries).most_common(1)[0][0]
-    ranked = sorted([e for e in entries if key(e) == main_key], key=mean_score, reverse=True)
+    main_key = Counter(key(e) for e in covered).most_common(1)[0][0]
+    ranked = sorted([e for e in covered if key(e) == main_key], key=mean_score, reverse=True)
     for entry in ranked:
         entry["standing"] = standing(entry, ranked[0])
-    other = [{"run": e["run"], "reason": "made against a different Wright binary, skills, or task suite"} for e in entries if key(e) != main_key]
+    other = [{"run": e["run"], "reason": "made against a different Wright binary, skills, or task suite"} for e in covered if key(e) != main_key]
+    other += [{"run": e["run"], "reason": f"covers {len(e['tracks'])} of {coverage} language tracks"} for e in partial]
     return {"entries": ranked, "excluded": other, "environment": ranked[0]["environment"], "date": date.today().isoformat()}
 
 
@@ -94,18 +116,19 @@ def markdown(data: dict) -> str:
     if not data["entries"]:
         return "\n".join(lines + ["No results yet.", ""])
     lines += ["| # | Agent | Model | Effort | " + " | ".join(f"{n} score" for _, n in TRACKS) + " | Against the top |", "| --- | --- | --- | --- | " + " | ".join("---" for _ in TRACKS) + " | --- |"]
+    cell = lambda s: str(s if s is not None else "not recorded").replace("|", "\\|")  # a raw | would break the table row
     for rank, e in enumerate(data["entries"], 1):
         cells = []
         for lang, _ in TRACKS:
             t = e["tracks"].get(lang)
             cells.append(f"`{bar(t['score'])}` **{t['score']:.0f}** ({t['ci'][0]:.0f}–{t['ci'][1]:.0f})" + (" ⚠️" if t["provisional"] else "") if t else "n/a")
-        lines.append(f"| {rank} | {label(e)} | {e['model']} | {e['effort'] or 'default'} | " + " | ".join(cells) + f" | {e['standing']} |")
-    lines += ["", "## How to read this", "", *(f"- {s}" for s in READING), "", "## Limits", "", *(f"- {s}" for s in LIMITS)]
+        lines.append(f"| {rank} | {cell(label(e))} | {cell(e['model'])} | {cell(e['effort'] or 'default')} | " + " | ".join(cells) + f" | {e['standing']} |")
+    lines += ["", "## How to read this", "", *(f"- {s}" for s in reading(data)), "", "## Limits", "", *(f"- {s}" for s in limits(data))]
     if any(t["provisional"] for e in data["entries"] for t in e["tracks"].values()):
         lines.append("- ⚠️ marks a score that is provisional because the run did not cover every task or had unequal trials.")
-    skills = ", ".join(f"{k} `{v[:8]}`" for k, v in env["skills"].items()) or "none"
+    skills = ", ".join(f"{k} `{v[:8]}`" for k, v in (env["skills"] or {}).items()) or "none"
     commits = ", ".join(f"`{c[:8]}`" for c in sorted({c for e in data["entries"] for c in e["harnessCommit"]})) or "not recorded"
-    lines += ["", "## What was run", "", f"- Wright: {env['wright']} (sha256 `{env['wrightSha256'][:12]}`)", f"- Skills: {skills}", f"- Task suite: `{env['suite'][:12]}`",
+    lines += ["", "## What was run", "", f"- Wright: {env['wright'] or 'not recorded'} (sha256 `{(env['wrightSha256'] or 'not recorded')[:12]}`)", f"- Skills: {skills}", f"- Task suite: `{(env['suite'] or 'not recorded')[:12]}`",
               f"- Harness commit: {commits}", "- Scores come from the benchmark in `benchmarks/agent`; the run directories hold every result.json."]
     if data["excluded"]:
         lines += ["", "## Not comparable", "", *(f"- `{o['run']}`: {o['reason']}." for o in data["excluded"])]
@@ -125,13 +148,14 @@ def page(data: dict) -> str:
             lo, hi = t["ci"]
             cells.append(f'<td><div class="bar"><span class="fill" style="width:{t["score"]:.1f}%"></span><span class="ci" style="left:{lo:.1f}%;width:{max(hi - lo, 0.5):.1f}%"></span></div>'
                          f'<b>{t["score"]:.0f}</b> <small>{lo:.0f}–{hi:.0f}</small>{" ⚠️" if t["provisional"] else ""}</td>')
-        rows.append(f'<tr class="{esc(e["standing"].split()[0])}"><td>{rank}</td><td><b>{esc(label(e))}</b></td><td>{esc(str(e["model"]))}</td><td>{esc(e["effort"] or "default")}</td>{"".join(cells)}<td>{esc(e["standing"])}</td></tr>')
+        rows.append(f'<tr class="{esc(e["standing"].split()[0])}"><td>{rank}</td><td><b>{esc(label(e))}</b></td><td>{esc(str(e["model"] or "not recorded"))}</td><td>{esc(e["effort"] or "default")}</td>{"".join(cells)}<td>{esc(e["standing"])}</td></tr>')
     env = data["environment"] or {}
     skills = ", ".join(f"{k} {v[:8]}" for k, v in (env.get("skills") or {}).items()) or "none"
     head = "".join(f"<th>{n} score</th>" for _, n in TRACKS)
     body = (f"<table><thead><tr><th>#</th><th>Agent</th><th>Model</th><th>Effort</th>{head}<th>Against the top</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
             if rows else "<p>No results yet.</p>")
     li = lambda items: "".join(f"<li>{esc(s.replace('**', ''))}</li>" for s in items)
+    sha12 = lambda v: esc(str(v or "not recorded")[:12])
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Wright Agent Score</title>
 <style>
@@ -146,9 +170,9 @@ tr.top td:first-child{{font-weight:700}}small,.muted{{color:var(--muted)}}sectio
 </style></head><body><main>
 <h1>Wright Agent Score</h1><p class="sub">How well coding agents work on real Overwatch Workshop projects with Wright. Results of {esc(data.get("date", ""))}.</p>
 {body}
-<section><h2>How to read this</h2><ul>{li(READING)}</ul></section>
-<section><h2>Limits</h2><ul>{li(LIMITS)}</ul></section>
-<section><h2>What was run</h2><p class="muted">Wright {esc(str(env.get("wright", "")))} · sha256 <code>{esc(str(env.get("wrightSha256", ""))[:12])}</code> · skills {esc(skills)} · task suite <code>{esc(str(env.get("suite", ""))[:12])}</code></p></section>
+<section><h2>How to read this</h2><ul>{li(reading(data))}</ul></section>
+<section><h2>Limits</h2><ul>{li(limits(data))}</ul></section>
+<section><h2>What was run</h2><p class="muted">Wright {esc(str(env.get("wright") or "not recorded"))} · sha256 <code>{sha12(env.get("wrightSha256"))}</code> · skills {esc(skills)} · task suite <code>{sha12(env.get("suite"))}</code></p></section>
 </main></body></html>
 """
 

@@ -336,9 +336,9 @@ adds the baseline, `wright` without the skill, and, for OverPy scenarios, the
 `overpy` controls (cells whose skill has no `--skill-dir` are skipped). It runs the
 same from a terminal or from inside another agent's shell, because isolation comes
 from the harness's scrubbed environment, not from its parent. It runs locally; CI
-does not run it. Adapters for CLIs that keep credentials in the home directory (devin,
-codex, opencode, grok, agy) need `--env-pass HOME` so they can copy them into their
-isolated home.
+does not run it. `evaluate` passes `HOME` through and the adapter copies the
+credentials it needs into an isolated home; preflight names the missing login when
+one is absent.
 
 `--adapter direct` is the built-in loop (`adapters/direct.py`) that needs no agent
 harness: it calls a model API with one `bash` tool (and `fetch` only for

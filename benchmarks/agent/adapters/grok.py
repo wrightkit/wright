@@ -18,10 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version
-
-INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "connection error", "unavailable")
+from common import cli_version, INFRA_EXIT, TRANSIENT
 
 
 def usage_row(usage: dict, limit: int | None, now: float) -> dict:

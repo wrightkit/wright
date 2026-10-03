@@ -5,7 +5,7 @@ Honors the BENCH_* contract (docs/agent-benchmark.md). BENCH_MODEL is `anthropic
 ANTHROPIC_BASE_URL) or `openai/<model>` (OPENAI_API_KEY, optional OPENAI_BASE_URL, so any OpenAI-compatible endpoint works).
 The model gets one `bash` tool that runs in the workspace on the shimmed PATH, plus `fetch` only when knowledge is `web`.
 The system prompt lists the installed skills by name and description, and the model reads their files itself.
-The loop, its limits, and the tool set are fixed here so every model faces the same protocol; they are part of the result identity.
+The loop, its limits, and the tool set are fixed here so every model faces the same protocol; the recorded harness commit identifies them.
 It does not sandbox the network: pair it with the harness --canary-cmd. Exit 75 marks a provider or infrastructure failure.
 """
 
@@ -22,7 +22,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-INFRA_EXIT = 75
+from common import INFRA_EXIT
+
 MAX_TURNS = 60
 COMMAND_SECONDS = 120
 OUTPUT_CHARS = 20_000

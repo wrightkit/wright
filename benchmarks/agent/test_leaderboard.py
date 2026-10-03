@@ -36,6 +36,12 @@ class LeaderboardTest(unittest.TestCase):
         self.assertEqual([o["run"] for o in data["excluded"]], ["other"])
         self.assertIn("Not comparable", bench_leaderboard.markdown(data))
 
+    def test_a_run_covering_fewer_tracks_is_not_ranked(self):
+        data = bench_leaderboard.build([self.write("full", 5), self.write("half", 8, tracks=("workshop",))])
+        self.assertEqual([e["run"] for e in data["entries"]], ["full"])
+        self.assertEqual([o["run"] for o in data["excluded"]], ["half"])
+        self.assertIn("1 of 2 language tracks", bench_leaderboard.markdown(data))
+
     def test_markdown_and_page_give_the_headline_a_reader_needs(self):
         data = bench_leaderboard.build([self.write("only", 6)])
         text, page = bench_leaderboard.markdown(data), bench_leaderboard.page(data)

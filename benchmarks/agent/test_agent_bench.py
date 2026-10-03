@@ -230,12 +230,21 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(len(problems), 3)
         self.assertTrue(any("wright binary not found" in p for p in problems) and any("`devin` is not on PATH" in p for p in problems) and any("--skill-dir wright-skill" in p for p in problems))
 
+    def test_preflight_names_a_missing_adapter_login_and_an_unusable_sandbox(self):
+        args = argparse.Namespace(wright=str(Path(WRIGHT).resolve()), adapter="devin", skill_dirs={}, file_sandbox=True,
+                                  credentials=[(".missing-bench-cred/auth.json", "x"), (".also-missing/secondary.json", "y")])
+        with patch.object(agent_bench.shutil, "which", side_effect=lambda b: f"/bin/{b}" if b != "sandbox-exec" else None):
+            problems = agent_bench.preflight(args, [agent_bench.normalize_cell({"tool": "wright", "skills": [], "knowledge": "none", "network": "off"})])
+        self.assertTrue(any("sandbox-exec" in p for p in problems))
+        self.assertTrue(any("~/.missing-bench-cred/auth.json" in p for p in problems))
+        self.assertFalse(any("secondary.json" in p for p in problems))  # only the primary login is required
+
     def test_read_policy_hides_the_host_and_allows_only_what_the_run_needs(self):
         root = self.out
         skills = {"wright-skill": root / "s1", "opy-skill": root / "s2"}
         args = argparse.Namespace(out=root / "run-a", out_root=root, wright=WRIGHT, skill_dirs=skills, wiki_dir=None, deny_read=[], allow_read=[str(root / "creds")], adapter="devin")
         hidden, allowed = agent_bench.read_policy(args, {"BENCH_RUN_DIR": str(root / "run-a" / "t"), "BENCH_SKILLS": "wright-skill"})
-        self.assertTrue(all(p in hidden for p in (Path("/Users"), root.resolve(), agent_bench.HERE, agent_bench.HERE)))
+        self.assertTrue(all(p in hidden for p in (Path("/Users"), root.resolve(), agent_bench.HERE)))
         self.assertTrue(all(d.resolve() in hidden for d in agent_bench.DATA_ROOTS))
         self.assertIn(skills["opy-skill"].resolve(), hidden)
         self.assertNotIn(skills["wright-skill"].resolve(), hidden)
@@ -309,6 +318,9 @@ class AgentBenchTest(unittest.TestCase):
         with patch.object(agent_bench, "cmd_evaluate", evaluate):
             only = agent_bench.cmd_suite(argparse.Namespace(models=models, only=["devin"], out=self.out, suite_name="s2", dry_run=True))
         self.assertEqual(only, 0)
+        with patch.object(agent_bench, "cmd_evaluate", return_value=1):
+            failed = agent_bench.cmd_suite(argparse.Namespace(models=[{"adapter": "devin", "model": "m"}], only=None, out=self.out, suite_name="s3", dry_run=True))
+        self.assertEqual(failed, 1)  # a model that finished with errors fails the suite, it does not pass silently
 
     def test_a_repeated_run_refuses_a_different_wright_binary(self):
         run = self.out / "r"

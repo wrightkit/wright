@@ -102,4 +102,4 @@ The agent program runs the model, so the same model scores differently under dif
 | An agent exits at once with an auth error | its login expired; sign in again with that program |
 | An agent cannot start under the file sandbox | add the paths it needs: `--allow-read PATH` or `allow_read` in the config |
 
-The agent only sees its own run directory, the condition's skills, the tool binaries, and what its program needs to start; everything else on the machine is hidden from it, so it cannot find the answers or other runs.
+The agent only sees its own run directory, the condition's skills, the tool binaries, and what its program needs to start; the home directories, drives, and benchmark data are hidden from it, so it cannot find the answers or other runs.
