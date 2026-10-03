@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from common import cli_version
+from common import cli_version, INFRA_EXIT, TRANSIENT
 
 
 def usage_row(usage: dict, timestamp: float, limit: int | None) -> dict:
@@ -51,7 +51,7 @@ def session_usage(state: Path):
 def main() -> int:
     env = os.environ
     model = env["BENCH_MODEL"]
-    effort = env["BENCH_THINKING"]
+    effort = env.get("BENCH_THINKING")
     run = Path(env["BENCH_RUN_DIR"])
     home = run / "codex-home"
     state = home / ".codex"
@@ -66,7 +66,7 @@ def main() -> int:
                "--disable", "apps", "--disable", "plugins", "--disable", "remote_plugin",
                "--disable", "skill_mcp_dependency_install",
                "--sandbox", "danger-full-access", "-c", 'approval_policy="never"',
-               "-c", 'web_search="disabled"', "-c", f'model_reasoning_effort="{effort}"', "-m", model, "-"]
+               "-c", 'web_search="disabled"', *(["-c", f'model_reasoning_effort="{effort}"'] if effort else []), "-m", model, "-"]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home), "CODEX_HOME": str(state)}
     prompt = sys.stdin.read()
     final, errors, summary, seen, servers, item_types = "", [], None, set(), set(), set()
@@ -75,7 +75,10 @@ def main() -> int:
         process.stdin.write(prompt)
         process.stdin.close()
         for line in process.stdout:
-            event = json.loads(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
             transcript.write(json.dumps({"t": time.time(), **event}) + "\n")
             item = event.get("item") or {}
             item_types.add(item.get("type"))
@@ -103,7 +106,10 @@ def main() -> int:
     loaded, builtin, observed = [], [], {}
     for path in state.glob("sessions/**/*.jsonl"):
         for line in path.read_text().splitlines():
-            event = json.loads(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
             payload = event.get("payload") or {}
             if event["type"] == "turn_context":
                 observed = {k: payload.get(k) for k in ("model", "effort")}
@@ -120,7 +126,7 @@ def main() -> int:
     sys.stderr.write(stderr_text)
     failure = " ".join(errors) + stderr_text
     if code or errors:
-        return 75 if any(s in failure.lower() for s in ("rate limit", "usage limit", "429", "quota", "temporarily", "503")) else (code or 1)
+        return INFRA_EXIT if any(s in failure.lower() for s in TRANSIENT) else (code or 1)
     return 0
 
 

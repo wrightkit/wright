@@ -18,10 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version
-
-INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "connection error", "econnreset")
+from common import cli_version, INFRA_EXIT, TRANSIENT
 WEB_PERMISSIONS = {"webfetch": "deny", "websearch": "deny"}
 
 
@@ -79,8 +76,8 @@ def main() -> int:
                 usage.write(json.dumps(usage_row(part["tokens"], now)) + "\n")
             elif event["type"] == "text":
                 final = part.get("text") or final
-            elif event["type"] == "tool_use":
-                tools.add(part.get("tool"))
+            elif event["type"] == "tool_use" and part.get("tool"):
+                tools.add(part["tool"])
             elif event["type"] == "error":
                 error = json.dumps(event.get("error"))
     stderr = proc.stderr.read()

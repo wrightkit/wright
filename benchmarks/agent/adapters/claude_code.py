@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,9 +21,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from common import cli_version
+from common import cli_version, INFRA_EXIT, TRANSIENT
 
-INFRA_EXIT = 75
 TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 WEB_TOOLS = ["WebFetch", "WebSearch"]
 
@@ -47,7 +47,8 @@ def main() -> int:
         (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "bench", "version": "0.0.0", "description": "benchmark skills"}))
         for skill in skills:
             shutil.copytree(skill, plugin / "skills" / skill.name)
-            loaded.append(skill.name)
+            match = re.search(r"^name:\s*(\S+)", (skill / "SKILL.md").read_text(), re.M)  # the name the harness checks, not the directory name
+            loaded.append(match.group(1) if match else skill.name)
         cmd += ["--plugin-dir", str(plugin)]
     claude = cmd[0]
     init: dict = {}
@@ -85,8 +86,7 @@ def main() -> int:
     sys.stdout.write(final)
     sys.stderr.write(stderr)
     if errored or code != 0:
-        transient = any(s in stderr.lower() + final.lower() for s in ("overloaded", "rate limit", "529", "timed out"))
-        return INFRA_EXIT if transient else (code or 1)
+        return INFRA_EXIT if any(s in stderr.lower() + final.lower() for s in TRANSIENT) else (code or 1)
     return 0
 
 

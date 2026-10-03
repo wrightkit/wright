@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import functools
 import hashlib
 import json
 import os
@@ -246,35 +245,6 @@ def sync_credentials_back(pairs: list[tuple[str, str]], run_dir: Path, home: Pat
     return updated
 
 
-CREDENTIALS = {  # (real file relative to the home directory, its isolated copy relative to the run directory) per adapter
-    "codex": [(".codex/auth.json", "codex-home/.codex/auth.json")],
-    "pi": [(".pi/agent/auth.json", "pi-home/.pi/agent/auth.json"), (".pi/agent/antigravity-accounts.json", "pi-home/.pi/agent/antigravity-accounts.json")],
-    "devin": [(".local/share/devin/credentials.toml", "devin-home/.local/share/devin/credentials.toml")],
-    "agy": [(".gemini/antigravity-cli/antigravity-oauth-token", "agy-home/.gemini/antigravity-cli/antigravity-oauth-token")],
-    "opencode": [(".local/share/opencode/auth.json", "opencode-home/.local/share/opencode/auth.json")],
-    "grok": [(".grok/auth.json", "grok-home/auth.json")],
-}
-
-
-def sync_credentials_back(pairs: list[tuple[str, str]], run_dir: Path, home: Path | None = None) -> list[str]:
-    """Copy a login the agent's CLI refreshed inside its isolated home back to the real one.
-
-    Adapters hand the CLI a copy of the user's OAuth login. Refresh tokens rotate, so a refresh in the copy that is then discarded
-    leaves the user's own login holding a dead token. Only a changed, newer copy is written back, atomically."""
-    home = home or Path.home()
-    updated = []
-    for real_rel, isolated_rel in pairs:
-        real, isolated = home / real_rel, run_dir / isolated_rel
-        if not isolated.is_file() or not real.is_file() or isolated.read_bytes() == real.read_bytes() or isolated.stat().st_mtime <= real.stat().st_mtime:
-            continue
-        temporary = real.with_name(f".{real.name}.bench-sync")
-        temporary.write_bytes(isolated.read_bytes())
-        temporary.chmod(real.stat().st_mode & 0o777)
-        os.replace(temporary, real)
-        updated.append(real_rel)
-    return updated
-
-
 def read_policy(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[Path]]:
     """What the agent may not read, and the exceptions it needs.
 
@@ -335,7 +305,12 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        stdout, stderr = proc.communicate()
+        try:
+            stdout, stderr = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:  # a detached grandchild still holds the pipes; the adapter's own transcript has the record
+            proc.stdout.close()
+            proc.stderr.close()
+            stdout, stderr = "", ""
         return None, stdout, f"{stderr}\ntimeout" if stderr else "timeout"
 
 
@@ -380,7 +355,6 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
         snapshots.start()
         start = time.monotonic()
         agent_exit, stdout, stderr = run_agent(args, env, workspace, prompt)
-        sync_credentials_back(getattr(args, "credentials", []), out)
         sync_credentials_back(getattr(args, "credentials", []), out)
         seconds = round(time.monotonic() - start, 1)
         snaps = snapshots.finish()
@@ -444,20 +418,19 @@ def snapshot_validity(scenario: dict, snaps: list[dict], wright: str, out: Path)
     return {"count": len(series), "firstValidIndex": next((s["i"] for s in series if s["valid"]), None), "regressions": regressions, "series": series}
 
 
-@functools.lru_cache(maxsize=None)
 def harness_commit() -> str:
     proc = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"], capture_output=True, text=True)
     dirty = subprocess.run(["git", "-C", str(HERE), "status", "--porcelain", "--", "."], capture_output=True, text=True).stdout.strip()
     return proc.stdout.strip() + ("+dirty" if dirty else "")
 
 
-@functools.lru_cache(maxsize=None)
 def file_sha256(path: str) -> str:
+    """Re-hashed per call: a suite resumes for days in one process and the binary may be rebuilt between trials."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-@functools.lru_cache(maxsize=None)
-def cached_suite(scenarios: str) -> tuple:
+def suite_identity(scenarios: str) -> tuple:
+    """Recomputed per call: the suite may change between trials of a long-running suite."""
     return tuple(bench_grade.suite_identity(Path(scenarios)).items())
 
 
@@ -476,7 +449,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
             "wrightSha256": file_sha256(args.wright),
             "harness": harness_commit(),
-            "suite": dict(cached_suite(str(SCENARIOS))),
+            "suite": dict(suite_identity(str(SCENARIOS))),
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "skills": {name: skill_identity(name, Path(args.skill_dirs[name])) for name in cell["skills"]},
             **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
@@ -579,6 +552,9 @@ def user_defaults() -> dict:
     unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "allow_read", "skill_dirs", "models"}
     if unknown:
         raise SystemExit(f"{CONFIG_PATH}: unknown key(s) {sorted(unknown)}")
+    for i, entry in enumerate(config.get("models", [])):
+        if entry.get("adapter") not in ADAPTERS or not entry.get("model"):
+            raise SystemExit(f"{CONFIG_PATH}: models[{i}] needs an adapter in {sorted(ADAPTERS)} and a model")
     defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir")}
     defaults.update({k: Path(v).expanduser() for k, v in config.items() if k in ("out", "wiki_dir")})
     if "skill_dirs" in config:
@@ -601,6 +577,10 @@ def preflight(args: argparse.Namespace, cells: list[dict]) -> list[str]:
             problems.append(f"skill '{name}' needs --skill-dir {name}=DIR (or skill_dirs in {CONFIG_PATH})")
     if any(c["tool"] == "overpy" for c in cells) and not bench_grade.oracle_available():
         problems.append("tool 'overpy' needs the pinned oracle: run `agent_bench.py setup-oracle`")
+    if getattr(args, "file_sandbox", False) and (sys.platform != "darwin" or not shutil.which("sandbox-exec")):
+        problems.append("the file sandbox needs macOS sandbox-exec; pass --no-file-sandbox for an unprotected run")
+    if (credentials := getattr(args, "credentials", [])) and not (Path.home() / credentials[0][0]).is_file():
+        problems.append(f"adapter '{args.adapter}' needs its login at ~/{credentials[0][0]} (sign in with that program first)")
     return problems
 
 
@@ -625,12 +605,13 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     Needs no agent harness around it: isolation comes from the harness's own scrubbed environment, so it runs the same from a
     terminal or from inside another agent's shell."""
     args.file_sandbox = not args.no_file_sandbox  # evaluation hides the answer keys and the rest of the host from the agent by default
-    args.credentials = CREDENTIALS.get(args.adapter, [])
+    if args.deny_read and not args.file_sandbox:
+        raise SystemExit("--deny-read does nothing without the file sandbox")
     args.credentials = CREDENTIALS.get(args.adapter, [])
     args.allow_read = [*(str(Path.home() / rel) for rel in ADAPTER_READS[args.adapter]), *args.allow_read]
     script = Path(__file__).parent / "adapters" / ADAPTERS[args.adapter]
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
-    agent_id = "-".join(filter(None, (args.adapter, args.model.replace("/", "_"), args.effort)))
+    agent_id = model_slug({"adapter": args.adapter, "model": args.model, "effort": args.effort})
     cmd = f"BENCH_MODEL={shlex.quote(args.model)} {effort}{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
     wanted = [CANONICAL_CELL] if args.cells == "score" else CONTROL_CELLS
     cells = [c for c in wanted if all(s in args.skill_dirs for s in c["skills"])]
@@ -694,7 +675,9 @@ def cmd_suite(args: argparse.Namespace) -> int:
     print("\n" + "\n".join(f"{slug}: {state}" for slug, state in outcome.items()))
     if not args.dry_run:
         bench_leaderboard.main(sorted(root.glob("*/")), root / "leaderboard")
-    return 3 if any(state.startswith("waiting") for state in outcome.values()) else 0
+    if any(state.startswith("waiting") for state in outcome.values()):
+        return 3
+    return 0 if all(state == "done" for state in outcome.values()) else 1
 
 
 def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
@@ -729,11 +712,12 @@ def main() -> int:
         p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")
         p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
         p.add_argument("--timeout", type=int, default=1800)
-        p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory, and hide the scenarios, other runs, the wiki, unselected skills, and --deny-read paths")
-        p.add_argument("--deny-read", nargs="*", default=[], metavar="PATH", help="extra directories hidden from the agent (the home directories and drives already are); needs --file-sandbox")
+        p.add_argument("--deny-read", nargs="*", default=[], metavar="PATH", help="extra directories hidden from the agent (the home directories and drives already are); needs the file sandbox")
         p.add_argument("--allow-read", nargs="*", default=[], metavar="PATH", help="paths the agent's CLI needs inside the hidden home directories (credentials, installation); `evaluate` adds its adapter's")
         p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
         p.add_argument("--infra-backoff", type=int, default=60, help="seconds before the first retry; each further retry waits one more multiple")
+    for p in (sub.choices["run"], sub.choices["matrix"]):
+        p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory, and hide the scenarios, other runs, the wiki, unselected skills, and --deny-read paths")
     run = sub.choices["run"]
     run.add_argument("scenario", choices=all_scenario_ids())
     run.add_argument("--agent-cmd", required=True, help="shell command; the task prompt arrives on stdin, cwd is the workspace, BENCH_* describes the condition")

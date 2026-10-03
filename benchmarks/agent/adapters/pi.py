@@ -21,10 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version
-
-INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "websocket error", "connection error")
+from common import cli_version, INFRA_EXIT, TRANSIENT
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
@@ -33,7 +30,10 @@ def context_limit(pi: str, model: str, env: dict, extensions: list[str]) -> int 
     command = [pi, "--no-extensions"]
     for extension in filter(None, extensions):
         command += ["-e", extension]
-    listing = subprocess.run([*command, "--list-models", model.split("/")[-1]], env=env, capture_output=True, text=True).stdout
+    try:
+        listing = subprocess.run([*command, "--list-models", model.split("/")[-1]], env=env, capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     for line in listing.splitlines():
         cols = line.split()
         if len(cols) > 2 and cols[0] == model.split("/")[0] and cols[1] == model.split("/")[-1]:

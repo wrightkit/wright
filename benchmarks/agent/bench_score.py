@@ -14,7 +14,7 @@ MIN_SCENARIOS = 8
 BOOTSTRAP_DRAWS = 10_000
 BOOTSTRAP_SEED = 467
 METHOD = f"two-stage percentile bootstrap (scenarios, then trials within a scenario), {BOOTSTRAP_DRAWS} draws, seed {BOOTSTRAP_SEED}"
-EXCLUDED = ("provider-interrupted", "invalid", "agent-error")  # reported separately; a timeout is the agent's own outcome and counts
+VALID = ("completed", "timeout")  # a timeout is the agent's own outcome and counts; every other status is excluded and reported separately
 TRACKS = {"workshop": "Wright Workshop Agent Score", "opy": "Wright OPY Agent Score"}
 
 
@@ -56,7 +56,7 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
     excluded = defaultdict(list)
     valid = []
     for run in track:
-        (excluded[run["status"]] if run["status"] in EXCLUDED else valid).append(run)
+        (valid if run.get("status") in VALID else excluded[run.get("status") or "missing-status"]).append(run)
     if not valid:
         return {"contract": CONTRACT, "track": TRACKS[language], "refused": "no valid canonical test runs for this language"}
     identities = {json.dumps(identity_of(r), sort_keys=True) for r in valid}
@@ -144,7 +144,11 @@ def compare(dirs: list[Path]) -> str:
     """One table from the score cards of several evaluation runs, with a warning when they were not made against the same Wright, skills, and suite."""
     rows, identities = [], {}
     for directory in dirs:
-        for card_ in json.loads((directory / "score.json").read_text())["cards"]:
+        path = directory / "score.json"
+        if not path.is_file():
+            rows.append(("", directory.name, "no score", "no score.json in this directory"))
+            continue
+        for card_ in json.loads(path.read_text())["cards"]:
             if "refused" in card_:
                 rows.append((card_["track"], directory.name, "no score", card_["refused"]))
                 continue
