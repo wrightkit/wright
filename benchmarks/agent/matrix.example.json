@@ -28,6 +28,13 @@
     },
     {
       "tool": "wright",
+      "level": "mcp",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "wright",
       "skills": [
         "wright-skill"
       ],
