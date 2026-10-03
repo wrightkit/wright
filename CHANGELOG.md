@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/wrightkit/wright/compare/v0.8.0...v0.9.0) (2026-10-03)
+
+
+### Features
+
+* **cli:** add wright agent install for the canonical agent guide ([e2950d0](https://github.com/wrightkit/wright/commit/e2950d0c0da0bd1cc8e4778f6cc6cfeb74cb5096)), closes [#415](https://github.com/wrightkit/wright/issues/415)
+
+
+### Bug Fixes
+
+* **cli:** harden agent install ownership and refresh semantics ([e216dd4](https://github.com/wrightkit/wright/commit/e216dd430b70f25a4533ac53d896681a9b93b98a)), closes [#415](https://github.com/wrightkit/wright/issues/415)
+* **release:** publish the GitHub Release only after verified R2 staging ([#497](https://github.com/wrightkit/wright/issues/497)) ([60d8bfa](https://github.com/wrightkit/wright/commit/60d8bfaee13a1d19a88b7ce93ce1e5448f93c0c4))
+
 ## [0.8.0](https://github.com/wrightkit/wright/compare/v0.7.0...v0.8.0) (2026-10-02)
 
 
