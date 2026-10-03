@@ -83,7 +83,11 @@ No workspace crate is published to crates.io. Every workspace package
 explicitly sets `publish = false`, so Cargo package publication cannot become
 an accidental release surface. A failed publication can be rerun for the same
 tag: the release commit is checked for exact identity, while R2 versioned
-objects are reused only when their bytes match.
+objects are reused only when their bytes match. A publication cancelled after
+R2 staging — for example by a package-manifest or GitHub Release failure —
+can leave those verified immutable objects public; they are inert because the
+version pointer never advanced and nothing references them, and a retry
+byte-checks rather than republishes them.
 
 ### Creating a release
 

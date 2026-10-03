@@ -32,7 +32,8 @@ version="$RELEASE_VERSION"
 installer_public_base_url=
 case "$RELEASE_CHANNEL" in
   stable)
-    installer_public_base_url="${R2_INSTALLER_PUBLIC_BASE_URL:-}"
+    : "${R2_INSTALLER_PUBLIC_BASE_URL:?R2_INSTALLER_PUBLIC_BASE_URL is required for stable releases}"
+    installer_public_base_url="$R2_INSTALLER_PUBLIC_BASE_URL"
     object_prefix="wright/releases/$version"
     pointer_key="wright/latest/version"
     pointer_value="$version"
@@ -117,7 +118,6 @@ if [[ "$phase" != pointer ]]; then
   done
 
   if [[ "$RELEASE_CHANNEL" == stable ]]; then
-    : "${installer_public_base_url:?R2_INSTALLER_PUBLIC_BASE_URL is required for stable releases}"
     for script in install.sh install.ps1; do
       source="$GITHUB_WORKSPACE/$script"
       test -s "$source" || { echo "missing canonical $script" >&2; exit 1; }
