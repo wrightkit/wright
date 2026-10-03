@@ -843,7 +843,7 @@ def main() -> int:
     ev.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
     ev.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox: the agent can then read the scenario answer keys")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
-    skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-wiki skill from a wiki snapshot")
+    skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-skill from a wiki snapshot")
     skill.add_argument("--snapshot", type=Path, required=True)
     skill.add_argument("--out-dir", type=Path, required=True, help="new skill directory (not overwritten)")
     skill.add_argument("--catalog", type=Path, required=True, help="workshop-rs catalog.json, for Workshop names and ids")

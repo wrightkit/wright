@@ -52,20 +52,20 @@ class AgentBenchTest(unittest.TestCase):
         self.assertNotIn("wiki", " ".join(result["unsafeEdits"]))
 
     def test_skills_are_installed_identified_and_the_only_ones_expected(self):
-        skill = self.out / "workshop-wiki"
+        skill = self.out / "workshop-skill"
         skill.mkdir()
-        (skill / "SKILL.md").write_text("---\nname: workshop-wiki\n---\n")
+        (skill / "SKILL.md").write_text("---\nname: workshop-skill\n---\n")
         skill_hash = wiki_skill.content_hash(skill)
         with self.assertRaisesRegex(SystemExit, "requires --skill"):
             self.trial("true", skills=("workshop-skill",))
-        expected = self.trial("echo '{\"loaded\": [\"workshop-wiki\"]}' > \"$BENCH_CONTEXT\"; echo \"$BENCH_SKILL_DIRS\" > dirs.txt", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
+        expected = self.trial("echo '{\"loaded\": [\"workshop-skill\"]}' > \"$BENCH_CONTEXT\"; echo \"$BENCH_SKILL_DIRS\" > dirs.txt", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
         self.assertNotIn("invalid", expected)
         self.assertEqual(expected["condition"]["label"], "wright+workshop-skill/none/off")
         self.assertEqual(expected["environment"]["skills"]["workshop-skill"]["sha256"], skill_hash)
         self.assertEqual((self.out / f"{SCENARIO}-wright/workspace/dirs.txt").read_text().strip(), str(skill.resolve()))
-        stray = self.trial("echo '{\"loaded\": [\"workshop-wiki\", \"other\"]}' > \"$BENCH_CONTEXT\"", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
+        stray = self.trial("echo '{\"loaded\": [\"workshop-skill\", \"other\"]}' > \"$BENCH_CONTEXT\"", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
         self.assertIn("unexpected loaded context", stray["invalid"])
-        (skill / "BUILD.json").write_text(json.dumps({"name": "workshop-wiki", "skillSha256": "0" * 64}))
+        (skill / "BUILD.json").write_text(json.dumps({"name": "workshop-skill", "skillSha256": "0" * 64}))
         with self.assertRaisesRegex(SystemExit, "skill content mismatch"):
             self.trial("true", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
 

@@ -61,7 +61,7 @@ The default categories are actions, values, events, constants, and references;
 add `tutorials` through `--categories` for a separate second-tier experiment.
 The mirror's manifest is incomplete and is not the crawl source.
 
-The `workshop-skill` is built by `agent_bench.py wiki-skill`. It is a separate skill (generated name `workshop-wiki`) with a short `SKILL.md`, category
+The `workshop-skill` is built by `agent_bench.py wiki-skill`. It is a separate skill (generated name `workshop-skill`) with a short `SKILL.md`, category
 indexes, and individual articles. It takes a pinned snapshot, the workshop-rs catalog,
 and the opy-rs manifest; OverPy spellings are included only when found in the pinned
 upstream oracle. The generated skill is community guidance, not canonical semantic
@@ -71,12 +71,12 @@ is not counted as an edit, so edits there are not detected.
 
 ```sh
 python3 benchmarks/agent/agent_bench.py wiki-skill \
-    --snapshot /abs/path/pinned-wiki --out-dir /abs/path/local/workshop-wiki \
+    --snapshot /abs/path/pinned-wiki --out-dir /abs/path/local/workshop-skill \
     --catalog /abs/path/workshop-rs/crates/workshop-rs/src/catalog/data/catalog.json \
     --opy-manifest /abs/path/opy-rs/crates/opy-rs/src/manifest/data/manifest.json
 ```
 
-The output directory must be named `workshop-wiki` and must not exist. Run
+The output directory must be named `workshop-skill` and must not exist. Run
 `setup-oracle` first. Snapshots and derived skills are local benchmark material;
 do not commit or distribute them. The [Workshop.codes Terms of Service](https://workshop.codes/tos)
 apply to the source content; generating a skill grants no additional permission.
