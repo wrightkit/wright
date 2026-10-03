@@ -1,6 +1,7 @@
 # Wright Language Services and LSP
 
-Status: current scope — document synchronization and diagnostics only
+Status: current scope — document synchronization, diagnostics, and
+provider-backed rename
 Scope: editor-neutral language services (`wright-language`) and the thin LSP
 adapter (`wright-lsp`)
 
@@ -29,10 +30,10 @@ analyzer contracts.
 - `textDocument/publishDiagnostics`: versioned, grouped by source identity,
   with didClose cleanup.
 
-The `initialize` result advertises `textDocumentSync` and the UTF-16 position
-encoding only. It contains no provider entry for hover, definition,
-references, completion, rename, or semantic tokens: those capabilities have
-no backing implementation and are never advertised. A request for an
+The `initialize` result advertises `textDocumentSync`, the UTF-16 position
+encoding, and `renameProvider`. It contains no provider entry for hover,
+definition, references, completion, or semantic tokens: those capabilities
+have no backing implementation and are never advertised. A request for an
 unadvertised or unknown method receives a `result: null` response and the
 server keeps running.
 
@@ -41,9 +42,22 @@ publishes an explicit `source-provider-unavailable` error while no provider
 language-service capability is negotiated. A raw Workshop document (or any
 document without a source language) publishes no diagnostics.
 
-Provider-backed editor capabilities — hover, definition, references,
-completion, rename, and semantic tokens — are future work tracked under #156
-and the owning implementations (for example `opy-rs` language-service
+`textDocument/rename` on a source-language document routes through the same
+provider-owned mutation path as the CLI and agent surfaces (#156): the
+provider computes edits over the open document set, Wright verifies document
+versions and source preconditions, asks the provider to validate the
+transaction, and rechecks the edited project before returning a
+`WorkspaceEdit`. Unsupported documents (`rename-unsupported-document`),
+unopen documents (`rename-unknown-document`), unconfigured providers, and
+provider or validation refusals answer with a `RequestFailed` error whose
+`error.data.code` carries the structured refusal code — there is no textual
+search/replace fallback. `--opy-provider <PATH>` points the session at an
+explicit OPY provider executable; by default the resolver locates or
+downloads the released provider like the CLI does.
+
+Provider-backed editor capabilities beyond rename — hover, definition,
+references, completion, and semantic tokens — are future work tracked under
+#156 and the owning implementations (for example `opy-rs` language-service
 capabilities). They arrive through provider capability negotiation, not
 through Wright-side reimplementation or static fallbacks.
 

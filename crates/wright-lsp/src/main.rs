@@ -9,34 +9,56 @@ use lsp_types::notification::{Notification, PublishDiagnostics};
 use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams, Range as LspRange,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, Uri,
+    OneOf, Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams,
+    Range as LspRange, RenameParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Uri, WorkspaceEdit,
 };
 use serde_json::Value;
 
-use wright_language::LanguageService;
-use wright_language::document::{Document, Range};
+use wright_language::document::{Document, Position, Range};
+use wright_language::service::RenameOutcome;
+use wright_language::{LanguageService, OpyProviderConfig, SessionConfig};
 
 type PublicationOwnership = BTreeMap<String, BTreeSet<String>>;
 
 fn main() {
-    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
-        println!("wright-lsp {}", env!("CARGO_PKG_VERSION"));
-        return;
+    let mut args = std::env::args().skip(1);
+    let mut opy_provider: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--version" | "-V" => {
+                println!("wright-lsp {}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
+            "--opy-provider" => {
+                let Some(path) = args.next() else {
+                    eprintln!("wright-lsp: --opy-provider requires a PATH value");
+                    std::process::exit(2);
+                };
+                opy_provider = Some(PathBuf::from(path));
+            }
+            _ => {}
+        }
     }
-    if let Err(message) = run() {
+    if let Err(message) = run(opy_provider) {
         eprintln!("wright-lsp: {message}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), String> {
+fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
     let mut reader = std::io::stdin().lock();
     let mut writer = std::io::stdout().lock();
 
+    let config = SessionConfig {
+        opy_provider: OpyProviderConfig {
+            executable: opy_provider,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let mut root = std::env::current_dir().map_err(|e| e.to_string())?;
-    let mut service = LanguageService::new(root.clone());
+    let mut service = LanguageService::with_config(root.clone(), config.clone());
     let mut ownership: PublicationOwnership = BTreeMap::new();
 
     loop {
@@ -56,7 +78,7 @@ fn run() -> Result<(), String> {
                     if let Ok(init) = serde_json::from_value::<InitializeParams>(params) {
                         if let Some(resolved) = initialize_root(&init) {
                             root = resolved;
-                            service = LanguageService::new(root.clone());
+                            service = LanguageService::with_config(root.clone(), config.clone());
                             ownership.clear();
                         }
                     }
@@ -110,6 +132,64 @@ fn run() -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didSave" => {}
+            "textDocument/rename" => {
+                let params: RenameParams = parse_params(params)?;
+                let outcome = service.rename(
+                    params.text_document_position.text_document.uri.as_str(),
+                    Position {
+                        line: params.text_document_position.position.line,
+                        character: params.text_document_position.position.character,
+                    },
+                    &params.new_name,
+                );
+                match outcome {
+                    RenameOutcome::Applied(edits) => {
+                        // `WorkspaceEdit.changes` keys on `Uri`, whose cached
+                        // parse trips mutable-key-type; the key is hashed by
+                        // its string form only. A dropped edit would apply a
+                        // partial rename, so an unparseable URI is an error.
+                        #[allow(clippy::mutable_key_type)]
+                        let mut changes: std::collections::HashMap<
+                            Uri,
+                            Vec<TextEdit>,
+                        > = std::collections::HashMap::new();
+                        let mut malformed = None;
+                        for edit in edits {
+                            match Uri::from_str(&edit.uri) {
+                                Ok(uri) => changes.entry(uri).or_default().push(TextEdit {
+                                    range: convert_range(edit.range),
+                                    new_text: edit.new_text,
+                                }),
+                                Err(_) => malformed = Some(edit.uri),
+                            }
+                        }
+                        if let Some(uri) = malformed {
+                            write_error(
+                                &mut writer,
+                                id,
+                                -32803,
+                                &format!(
+                                    "the provider produced an edit against an unparseable URI {uri}"
+                                ),
+                                "rename-edit-malformed-uri",
+                            )?;
+                        } else {
+                            write_response(
+                                &mut writer,
+                                id,
+                                serde_json::to_value(WorkspaceEdit {
+                                    changes: Some(changes),
+                                    ..Default::default()
+                                })
+                                .unwrap(),
+                            )?;
+                        }
+                    }
+                    RenameOutcome::Refused { code, message } => {
+                        write_error(&mut writer, id, -32803, &message, &code)?;
+                    }
+                }
+            }
             _ => {
                 if id.is_some() {
                     write_response(&mut writer, id, Value::Null)?;
@@ -131,6 +211,7 @@ fn initialize_result() -> InitializeResult {
                     ..Default::default()
                 },
             )),
+            rename_provider: Some(OneOf::Left(true)),
             ..Default::default()
         },
         server_info: Some(ServerInfo {
@@ -172,6 +253,26 @@ fn write_response(writer: &mut impl Write, id: Option<Value>, result: Value) -> 
     write_msg(
         writer,
         serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+    )
+}
+
+/// A JSON-RPC error response that preserves the refusal's structured code in
+/// `error.data.code` so clients can distinguish refusals without parsing the
+/// message.
+fn write_error(
+    writer: &mut impl Write,
+    id: Option<Value>,
+    code: i64,
+    message: &str,
+    refusal_code: &str,
+) -> Result<(), String> {
+    write_msg(
+        writer,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": code, "message": message, "data": { "code": refusal_code } },
+        }),
     )
 }
 
