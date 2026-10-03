@@ -303,6 +303,6 @@ ADR-0020 records a second pre-freeze exception (#472): `sources` is optional
 on `validateEditTransaction` and `semanticRename` rather than required, so
 agent callers stop resending whole files.
 
-The optional guide distributed by `wrightkit/skills` teaches clients to
-discover and use these capabilities. It is not required to expose, execute, or
-validate any semantic operation.
+The optional guide installed by `wright agent install` (and distributed by
+`wrightkit/skills`) teaches clients to discover and use these capabilities. It
+is not required to expose, execute, or validate any semantic operation.

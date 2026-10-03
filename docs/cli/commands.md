@@ -46,6 +46,7 @@ result.
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
+| `wright agent install` | Install the canonical Wright agent guide into the project's agent skills directory | installation progress and guidance |
 
 `wright --version` prints the implementation version banner
 (`wright <version> (wright-driver <version>)`); the version is the single
@@ -82,6 +83,33 @@ hotspot surface; `check` does not evaluate client importability.
 The rationale for current-directory defaults, directory targets, and explicit
 ownership ambiguity is recorded in
 [`ADR-0016`](../adr/0016-current-directory-and-directory-project-targets.md).
+
+## `wright agent install` — the agent guide (#415)
+
+`wright agent install` writes the canonical Wright agent guide — the `wright`
+skill from `wrightkit/skills`, vendored into the binary so the command needs
+no Node tooling and no network — into the project's agent skills directory,
+default `./.agents/skills/wright/` (`--dest DIR` selects another skills
+directory and installs under `DIR/wright/`; `--dry-run` reports the
+destination without writing). The installed content is a `SKILL.md` plus its
+`references/` and a `BUILD.json` that records the Wright version, the
+upstream skill pin, and the guide's content hash; it contains no executable
+semantic or tool implementation.
+
+The guide teaches an agent to prefer Wright's structured surfaces —
+capability discovery, `check`/`lint`/`analyze`/`inspect`, `serve`, and
+validated edits — over textual guessing, to re-validate after edits, and to
+surface refused or unsupported capabilities rather than work around them.
+Manual installation of the same guide stays possible and unchanged: copy
+`skills/wright/` from the `wrightkit/skills` repository into
+`.agents/skills/` (or run `npx skills add wrightkit/skills`).
+
+Re-running `install` refreshes the guide in place: an identical install
+reports already-up-to-date, an older or edited Wright-installed guide is
+replaced with the current copy, and a directory that was not installed by
+`wright agent install` is refused unless `--force` is passed. Removing the
+directory uninstalls the guide; nothing outside the skills directory is
+touched.
 
 Commands that report findings (`check`, `analyze`, `lint`, `inspect cost`)
 share the finding-selection options `--severity`, `--rule-id`, `--file`, and
