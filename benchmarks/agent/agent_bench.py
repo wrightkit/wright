@@ -658,7 +658,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
 
 def model_slug(entry: dict) -> str:
-    return "-".join(filter(None, (entry["adapter"], entry["model"].replace("/", "_"), entry.get("effort"))))
+    effort = entry.get("effort")
+    return "-".join(filter(None, (entry["adapter"], entry["model"].replace("/", "_"), None if effort and entry["model"].endswith(f"-{effort}") else effort)))  # an effort the model id names is not repeated
 
 
 def cmd_suite(args: argparse.Namespace) -> int:

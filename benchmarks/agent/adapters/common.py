@@ -22,3 +22,14 @@ def cli_version(binary: str, env: dict | None = None) -> str | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     return (done.stdout or done.stderr).strip().splitlines()[0] if (done.stdout or done.stderr).strip() else None
+
+
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def split_effort(model_id: str) -> tuple[str, str | None]:
+    """Some CLIs name the effort in the model id (`swe-2-max`, `gemini-3.8-flash-high`) and never report it separately."""
+    for effort in EFFORTS:
+        if model_id.endswith(f"-{effort}"):
+            return model_id[: -len(effort) - 1], effort
+    return model_id, None

@@ -11,7 +11,13 @@ import sys
 import time
 from pathlib import Path
 
-from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, split_effort, INFRA_EXIT, TRANSIENT
+
+
+def transient(error: str) -> bool:
+    """A provider failure. The CLI reports a dropped connection as `API error (attempt N): request failed: ... EOF`, even after the answer was written."""
+    lowered = error.lower()
+    return any(s in lowered for s in TRANSIENT) or "api error (attempt" in lowered or "request failed" in lowered
 
 
 def usage_row(usage: dict, timestamp: float) -> dict:
@@ -71,7 +77,7 @@ def main() -> int:
                 result = as_dict(event.get("result"))
         code = process.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"installed": installed, "audit": "isolated-home; CLI does not export loaded skill context", "unexpected": sorted(unexpected)}))
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "version": cli_version(binary), "model": env["BENCH_MODEL"], "effort": effort, "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "version": cli_version(binary), "model": split_effort(env["BENCH_MODEL"])[0], "modelId": env["BENCH_MODEL"], "effort": effort or split_effort(env["BENCH_MODEL"])[1], "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))
     (run / "adapter.json").write_text(json.dumps({"agent": "agy", "requestedModel": env["BENCH_MODEL"], "requestedEffort": effort, "observedModel": init.get("model"), "status": result.get("status"), "usageSource": "stream-step-usage", "providerUsage": result.get("usage")}, indent=2))
     sys.stdout.write(result.get("response", ""))
     stderr_text = (run / "agy-stderr.log").read_text()
@@ -80,7 +86,7 @@ def main() -> int:
     if "no output produced" in stderr_text and "headless" in stderr_text:
         return INFRA_EXIT
     if code or result.get("status") != "SUCCESS":
-        return INFRA_EXIT if any(s in error.lower() for s in TRANSIENT) else (code or 1)
+        return INFRA_EXIT if transient(error) else (code or 1)
     return 0
 
 
