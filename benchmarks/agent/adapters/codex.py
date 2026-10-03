@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from common import cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
 
 
 def usage_row(usage: dict, timestamp: float, limit: int | None) -> dict:
@@ -44,8 +44,8 @@ def session_usage(state: Path):
                 continue
             if not isinstance(event, dict):
                 continue
-            payload = event.get("payload") or {}
-            info = payload.get("info") or {}
+            payload = as_dict(event.get("payload"))
+            info = as_dict(payload.get("info"))
             if payload.get("type") == "token_count" and info.get("total_token_usage") and info.get("last_token_usage"):
                 try:
                     stamp = datetime.fromisoformat(event.get("timestamp") or "").timestamp()
@@ -88,7 +88,7 @@ def main() -> int:
             if not isinstance(event, dict):
                 continue
             transcript.write(json.dumps({"t": time.time(), **event}) + "\n")
-            item, etype = event.get("item") or {}, event.get("type")
+            item, etype = as_dict(event.get("item")), event.get("type")
             item_types.add(item.get("type"))
             if item.get("type") == "mcp_tool_call":
                 servers.add(item.get("server", "unknown"))
@@ -127,7 +127,7 @@ def main() -> int:
                 observed = {k: payload.get(k) for k in ("model", "effort")}
             if event.get("type") == "response_item" and payload.get("role") == "developer":
                 for part in payload.get("content", []):
-                    names, builtins = loaded_skills(part.get("text", ""))
+                    names, builtins = loaded_skills(as_dict(part).get("text", ""))
                     loaded += names
                     builtin += builtins
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": sorted(set(loaded) | {f"unexpected-mcp:{server}" for server in servers}), "builtinSkills": sorted(set(builtin))}))

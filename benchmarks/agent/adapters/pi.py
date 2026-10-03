@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
@@ -97,7 +97,7 @@ def main() -> int:
             if not isinstance(event, dict):
                 continue
             now = time.time()
-            message, etype = event.get("message") or {}, event.get("type")
+            message, etype = as_dict(event.get("message")), event.get("type")
             if etype != "message_update":
                 transcript.write(json.dumps({"t": now, **event}) + "\n")
             if etype == "message_start" and message.get("role") == "system":

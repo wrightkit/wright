@@ -81,7 +81,9 @@ def parse_export(export: dict) -> tuple[list[dict], list[str], list[str]]:
 def transient(stdout: str, stderr: str) -> bool:
     """A provider or infrastructure failure. The agent's own text on stdout can mimic provider wording, so only stderr and the
     CLI's anchored model-catalog error count. An empty catalog means the catalog could not be fetched, not that the model is wrong."""
-    return any(s in stderr.lower() for s in TRANSIENT) or re.search(r"unknown model.*\navailable:\s*$", (stdout + stderr).lower().strip(), re.S) is not None
+    catalog = r"unknown model[^\n]*\n\s*available:\s*$"
+    return (any(s in stderr.lower() for s in TRANSIENT)
+            or re.search(catalog, stdout.lower().strip()) is not None or re.search(catalog, stderr.lower().strip()) is not None)
 
 
 def main() -> int:

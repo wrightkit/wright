@@ -10,6 +10,11 @@ TRANSIENT = ("rate limit", "overloaded", "429", "502", "503", "529", "bad gatewa
              "usage limit", "quota", "credits", "fetch failed", "websocket error", "connection error", "econnreset", "unavailable")
 
 
+def as_dict(value) -> dict:
+    """value when it is a dict, else {} — `or {}` alone does not guard a truthy non-dict from a malformed stream line."""
+    return value if isinstance(value, dict) else {}
+
+
 def cli_version(binary: str, env: dict | None = None) -> str | None:
     """First line of `<binary> --version`, or None when the CLI does not answer."""
     try:
