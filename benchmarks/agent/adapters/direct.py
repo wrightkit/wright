@@ -138,7 +138,7 @@ def skill_listing(skills: list[Path]) -> tuple[str, list[str]]:
         target = Path(".agents/skills") / skill.name
         shutil.copytree(skill, target)
         text = (target / "SKILL.md").read_text()
-        name = re.search(r"^name:\s*(.+)$", text, re.M)
+        name = re.search(r"^name:\s*(\S+)", text, re.M)  # same first-word rule as the harness's skill_name check
         description = re.search(r"^description:\s*(.+)$", text, re.M)
         names.append(name.group(1).strip() if name else skill.name)
         lines.append(f"- {names[-1]}: {description.group(1).strip() if description else ''} (read {target}/SKILL.md when relevant)")

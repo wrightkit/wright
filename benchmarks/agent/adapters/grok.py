@@ -58,18 +58,21 @@ def main() -> int:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
             now = time.time()
             transcript.write(json.dumps({"t": now, **event}) + "\n")
-            if event["type"] == "system" and event.get("subtype") == "init":
+            message = event.get("message") or {}
+            if event.get("type") == "system" and event.get("subtype") == "init":
                 init = event
-            elif event["type"] == "assistant":
-                pending.append(event["message"].get("usage") or {})
-                text = "".join(b.get("text", "") for b in event["message"].get("content", []) if b.get("type") == "text")
+            elif event.get("type") == "assistant":
+                pending.append(message.get("usage") or {})
+                text = "".join(b.get("text", "") for b in message.get("content", []) if b.get("type") == "text")
                 final = text or final
-            elif event["type"] == "result":
+            elif event.get("type") == "result":
                 final = event.get("result") or final
                 if event.get("is_error"):
-                    error = json.dumps(event.get("errors") or event.get("result") or "error")
+                    error = json.dumps(event.get("errors") or "error")  # only the structured error classifies; the result text is the agent's own
                 limit = next((m.get("contextWindow") for m in (event.get("modelUsage") or {}).values()), None)
         for u in pending:  # the context window is only known from the final result line
             usage.write(json.dumps(usage_row(u, limit, time.time())) + "\n")

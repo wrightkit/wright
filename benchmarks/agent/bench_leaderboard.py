@@ -155,6 +155,8 @@ def page(data: dict) -> str:
     body = (f"<table><thead><tr><th>#</th><th>Agent</th><th>Model</th><th>Effort</th>{head}<th>Against the top</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
             if rows else "<p>No results yet.</p>")
     li = lambda items: "".join(f"<li>{esc(s.replace('**', ''))}</li>" for s in items)
+    excluded = ("<section><h2>Not comparable</h2><ul>" + "".join(f"<li><code>{esc(o['run'])}</code>: {esc(o['reason'])}</li>" for o in data["excluded"]) + "</ul></section>" if data["excluded"] else "")
+    prose = (f"<section><h2>How to read this</h2><ul>{li(reading(data))}</ul></section><section><h2>Limits</h2><ul>{li(limits(data))}</ul></section>" if data["entries"] else "")
     sha12 = lambda v: esc(str(v or "not recorded")[:12])
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Wright Agent Score</title>
@@ -170,8 +172,7 @@ tr.top td:first-child{{font-weight:700}}small,.muted{{color:var(--muted)}}sectio
 </style></head><body><main>
 <h1>Wright Agent Score</h1><p class="sub">How well coding agents work on real Overwatch Workshop projects with Wright. Results of {esc(data.get("date", ""))}.</p>
 {body}
-<section><h2>How to read this</h2><ul>{li(reading(data))}</ul></section>
-<section><h2>Limits</h2><ul>{li(limits(data))}</ul></section>
+{prose}{excluded}
 <section><h2>What was run</h2><p class="muted">Wright {esc(str(env.get("wright") or "not recorded"))} · sha256 <code>{sha12(env.get("wrightSha256"))}</code> · skills {esc(skills)} · task suite <code>{sha12(env.get("suite"))}</code></p></section>
 </main></body></html>
 """

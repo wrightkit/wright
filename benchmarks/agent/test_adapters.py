@@ -107,9 +107,12 @@ class DevinAdapterTest(unittest.TestCase):
 
 class DevinTransientTest(unittest.TestCase):
     def test_empty_model_catalog_is_a_provider_failure_but_a_wrong_model_is_not(self):
-        self.assertTrue(devin.transient("Error: Unknown model: 'swe-2-max'\nAvailable:\n"))
-        self.assertFalse(devin.transient("Error: Unknown model: 'nope'\nAvailable:\n  swe-2-max\n  swe-2\n"))
-        self.assertTrue(devin.transient("429 rate limit"))
+        self.assertTrue(devin.transient("Error: Unknown model: 'swe-2-max'\nAvailable:\n", ""))
+        self.assertFalse(devin.transient("Error: Unknown model: 'nope'\nAvailable:\n  swe-2-max\n  swe-2\n", ""))
+        self.assertTrue(devin.transient("", "429 rate limit"))
+
+    def test_agent_text_on_stdout_does_not_classify_as_a_provider_failure(self):
+        self.assertFalse(devin.transient("I could not finish: my test run timed out and the quota for retries is used up", ""))
 
 
 class DevinEffortTest(unittest.TestCase):

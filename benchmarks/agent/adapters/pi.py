@@ -94,17 +94,19 @@ def main() -> int:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
             now = time.time()
-            message = event.get("message") or {}
-            if event["type"] != "message_update":
+            message, etype = event.get("message") or {}, event.get("type")
+            if etype != "message_update":
                 transcript.write(json.dumps({"t": now, **event}) + "\n")
-            if event["type"] == "message_start" and message.get("role") == "system":
+            if etype == "message_start" and message.get("role") == "system":
                 loaded = skill_names(message)
-            if event["type"] == "message_end" and message.get("role") == "assistant":
+            if etype == "message_end" and message.get("role") == "assistant":
                 usage.write(json.dumps(usage_row(message, limit, now)) + "\n")
                 final = message_text(message) or final
                 if message.get("stopReason") == "error":
-                    error = str(message.get("errorMessage") or message_text(message))
+                    error = str(message.get("errorMessage") or "error")  # only the structured error classifies; message text is the agent's own
                 else:
                     error = ""
     stderr = proc.stderr.read()
