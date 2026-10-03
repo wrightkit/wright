@@ -337,8 +337,8 @@ pub(crate) struct AgentInstallArgs {
     #[arg(long, value_name = "DIR")]
     pub(crate) dest: Option<PathBuf>,
 
-    /// Replace an existing guide directory not installed by `wright agent
-    /// install`.
+    /// Replace whatever already occupies the guide path when it was not
+    /// installed by `wright agent install`.
     #[arg(long)]
     pub(crate) force: bool,
 

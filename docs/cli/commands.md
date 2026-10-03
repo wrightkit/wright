@@ -91,7 +91,8 @@ skill from `wrightkit/skills`, vendored into the binary so the command needs
 no Node tooling and no network — into the project's agent skills directory,
 default `./.agents/skills/wright/` (`--dest DIR` selects another skills
 directory and installs under `DIR/wright/`; `--dry-run` reports the
-destination without writing). The installed content is a `SKILL.md` plus its
+destination without writing, though the foreign-path refusal below still
+applies). The installed content is a `SKILL.md` plus its
 `references/` and a `BUILD.json` that records the Wright version, the
 upstream skill pin, and the guide's content hash; it contains no executable
 semantic or tool implementation.
@@ -105,11 +106,12 @@ Manual installation of the same guide stays possible and unchanged: copy
 `.agents/skills/` (or run `npx skills add wrightkit/skills`).
 
 Re-running `install` refreshes the guide in place: an identical install
-reports already-up-to-date, an older or edited Wright-installed guide is
-replaced with the current copy, and a directory that was not installed by
-`wright agent install` is refused unless `--force` is passed. Removing the
-directory uninstalls the guide; nothing outside the skills directory is
-touched.
+reports already-up-to-date, while an older or edited Wright-installed guide
+is replaced with the current copy — the directory is recreated, so files
+dropped inside it are removed. A path that was not installed by `wright
+agent install` (directory, file, or link) is refused unless `--force` is
+passed. Removing the directory uninstalls the guide; nothing outside the
+skills directory is touched.
 
 Commands that report findings (`check`, `analyze`, `lint`, `inspect cost`)
 share the finding-selection options `--severity`, `--rule-id`, `--file`, and

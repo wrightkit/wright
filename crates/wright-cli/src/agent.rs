@@ -157,7 +157,11 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
         .unwrap_or_else(|| PathBuf::from(DEFAULT_DEST))
         .join(SKILL_NAME);
     let record = wright_record(&target);
-    if target.exists() && record.is_none() && !args.force {
+    // `symlink_metadata` so a dangling symlink at the destination still counts
+    // as occupied (foreign refusal / force removal) instead of falling through
+    // to a confusing `create_dir_all` failure.
+    let present = target.symlink_metadata().is_ok();
+    if present && record.is_none() && !args.force {
         return Err(AgentError::Rejected(format!(
             "{} exists and was not installed by `{INSTALLED_BY}`; remove it or pass --force to replace it",
             target.display()
@@ -171,7 +175,7 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
     if args.dry_run {
         return Ok(InstallStatus::DryRun(target));
     }
-    let updating = target.exists();
+    let updating = present;
     if updating {
         let cleared = if target.is_dir() {
             std::fs::remove_dir_all(&target)
@@ -182,7 +186,11 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
             AgentError::Failed(format!("could not clear {}: {error}", target.display()))
         })?;
     }
-    write_files(&target)?;
+    std::fs::create_dir_all(&target).map_err(|error| {
+        AgentError::Failed(format!("could not create {}: {error}", target.display()))
+    })?;
+    // The record lands first so any partial state still counts as ours and the
+    // next run refreshes instead of refusing as foreign.
     let record_path = target.join("BUILD.json");
     std::fs::write(
         &record_path,
@@ -194,6 +202,7 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
             record_path.display()
         ))
     })?;
+    write_files(&target)?;
     Ok(if updating {
         InstallStatus::Updated(target)
     } else {
