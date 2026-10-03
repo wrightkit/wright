@@ -55,6 +55,12 @@ See [machine-readable CLI contracts](cli/machine-contract.md).
 
 See the [versioned Wright Agent Contract](agent-contract.md).
 
+## `wright agent install`
+
+See [architecture, commands, and conversion](cli/commands.md): `agent`
+installs the canonical Wright agent guide into a project's agent skills
+directory.
+
 ## Determinism
 
 See [machine-readable CLI contracts](cli/machine-contract.md).

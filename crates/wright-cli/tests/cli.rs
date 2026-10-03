@@ -1352,7 +1352,9 @@ fn version_and_help_are_documented_contract_surfaces() {
     let output = run(&["--help"]);
     assert!(output.status.success());
     let help = String::from_utf8_lossy(&output.stdout);
-    for command in ["compile", "convert", "check", "analyze", "lint", "inspect"] {
+    for command in [
+        "compile", "convert", "check", "analyze", "lint", "inspect", "agent",
+    ] {
         assert!(help.contains(command), "help documents {command}");
     }
 

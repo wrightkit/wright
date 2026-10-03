@@ -32,6 +32,8 @@ callgraph, cost) expose each detail area. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
 wright-result/v1 envelope to stdout. `serve` exposes the versioned
 wright-agent/v1 session contract over stdio, JSON-RPC 2.0, or MCP.
+`agent install` writes the canonical Wright agent guide into a project's
+agent skills directory.
 
 EXIT CODES:
     0  success
@@ -98,6 +100,9 @@ pub(crate) enum Command {
     /// Update Wright-managed components: a standalone installation and
     /// installed first-party providers.
     Update(UpdateArgs),
+    /// Install the canonical Wright agent guide into a project so coding
+    /// agents discover and prefer Wright's semantic surfaces (#415).
+    Agent(AgentArgs),
     /// Serve the versioned agent contract over stdio, JSON-RPC 2.0, or MCP.
     Serve(ServeArgs),
     /// Compare two Workshop texts using canonical WIR semantics (internal gate command).
@@ -310,6 +315,36 @@ pub(crate) struct CompletionArgs {
 pub(crate) enum CompletionSubcommand {
     /// Install generated shell completions into standard user-local directories.
     Install(CompletionInstallArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentArgs {
+    #[command(subcommand)]
+    pub(crate) subcommand: Option<AgentSubcommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentSubcommand {
+    /// Install the canonical Wright agent guide as an agent skill in the
+    /// project; re-running refreshes it in place.
+    Install(AgentInstallArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentInstallArgs {
+    /// Destination skills directory; the guide installs under DIR/wright
+    /// (default: .agents/skills in the current project).
+    #[arg(long, value_name = "DIR")]
+    pub(crate) dest: Option<PathBuf>,
+
+    /// Replace an existing guide directory not installed by `wright agent
+    /// install`.
+    #[arg(long)]
+    pub(crate) force: bool,
+
+    /// Report the destination without writing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Debug, Args, Clone)]

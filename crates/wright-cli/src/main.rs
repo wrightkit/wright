@@ -1,3 +1,4 @@
+mod agent;
 mod cli;
 mod completion;
 mod mcp;
@@ -84,6 +85,13 @@ fn main() -> ExitCode {
             },
         },
         Some(Command::Update(args)) => match update::run(&args) {
+            Ok(code) => ExitCode::from(code),
+            Err(error) => {
+                eprintln!("wright: {}", error.message());
+                ExitCode::from(error.exit_code())
+            }
+        },
+        Some(Command::Agent(args)) => match agent::run(&args) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
                 eprintln!("wright: {}", error.message());
@@ -237,6 +245,7 @@ fn run_workflow(command: Command) -> ExitCode {
         },
         Command::Completion(_)
         | Command::Update(_)
+        | Command::Agent(_)
         | Command::Serve(_)
         | Command::SemanticCompare(_) => {
             unreachable!("non-workflow command handled before run_workflow")
