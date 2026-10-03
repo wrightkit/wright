@@ -1469,6 +1469,50 @@ fn completion_install_explicit_shell_and_dir() {
 }
 
 #[test]
+fn agent_install_writes_the_guide_and_refreshes_it() {
+    let dir = temp_dir();
+    let target = dir.join("wright");
+    let install = |extra: &[&str]| {
+        let mut argv = vec!["agent", "install", "--dest", dir.to_str().unwrap()];
+        argv.extend_from_slice(extra);
+        run(&argv)
+    };
+
+    let output = install(&[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("installed"));
+    assert!(target.join("SKILL.md").is_file());
+    assert!(target.join("references/language-notes.md").is_file());
+    let record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(target.join("BUILD.json")).unwrap()).unwrap();
+    assert_eq!(record["installedBy"], "wright agent install");
+
+    let output = install(&[]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("up to date"));
+
+    // A foreign directory refuses (exit 1) unless --force replaces it.
+    std::fs::write(target.join("BUILD.json"), "{}").unwrap();
+    let output = install(&[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--force"));
+    assert!(install(&["--force"]).status.success());
+
+    // --dry-run reports the destination and writes nothing.
+    let _ = std::fs::remove_dir_all(&dir);
+    let output = install(&["--dry-run"]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("would install"));
+    assert!(!target.exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn completion_install_dry_run() {
     let dir = temp_dir();
     let output = run(&[
