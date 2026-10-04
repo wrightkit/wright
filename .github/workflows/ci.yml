@@ -357,6 +357,17 @@ jobs:
         run: cargo build --locked -p opy-provider
         working-directory: opy-rs
 
+      # The source-built provider carries its own workshop-rs: re-running the
+      # compile smoke against it keeps the emit -> re-parse artifact seam
+      # (session.rs `parse_with_context`) covered for the pinned revision, so
+      # a `deps:` bump that changes emitted Workshop text fails here rather
+      # than one provider release later.
+      - name: Compile OPY via source-built provider
+        run: >-
+          target/debug/wright compile tests/fixtures/opy/basic-rule.opy
+          --profile compat
+          --opy-provider ${{ github.workspace }}/opy-rs/target/debug/opy-provider
+
       - name: Run provider-backed language tests
         env:
           WRIGHT_OPY_PROVIDER: ${{ github.workspace }}/opy-rs/target/debug/opy-provider
