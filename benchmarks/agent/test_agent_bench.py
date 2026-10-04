@@ -314,10 +314,15 @@ class AgentBenchTest(unittest.TestCase):
                   "profile": self.out / f"{SCENARIO}-wright" / "agent.sb"}  # the sandbox profile itself, which lists the hidden paths
         code = ("import json\nfrom pathlib import Path\nout = {}\n"
                 + "".join(f"try:\n    Path({str(p)!r}).read_text(); out[{k!r}] = 'read'\nexcept PermissionError:\n    out[{k!r}] = 'blocked'\n" for k, p in probes.items())
+                # a read deny on the profile's own path is not enough: inside the writable run dir the agent can move or
+                # link the file to a name the deny does not cover, so the probes must try the rename and link themselves
+                + f"try:\n    moved = Path('agent-moved.sb')\n    Path({str(probes['profile'])!r}).rename(moved)\n    moved.read_text(); out['profile-renamed'] = 'read'\nexcept PermissionError:\n    out['profile-renamed'] = 'blocked'\n"
+                + f"try:\n    linked = Path('agent-linked.sb')\n    linked.hardlink_to({str(probes['profile'])!r})\n    linked.read_text(); out['profile-linked'] = 'read'\nexcept PermissionError:\n    out['profile-linked'] = 'blocked'\n"
                 + "Path('probe.json').write_text(json.dumps(out))\n")
         result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True, allow_read=[str(granted)])
         seen = json.loads((self.out / f"{SCENARIO}-wright/workspace/probe.json").read_text())
-        self.assertEqual(seen, {"unlisted": "blocked", "granted": "read", "grader": "blocked", "shim": "read", "answer": "blocked", "oracle": "blocked", "profile": "blocked"})  # wright cells must not read the grading authority, and no cell reads its own sandbox profile
+        self.assertEqual(seen, {"unlisted": "blocked", "granted": "read", "grader": "blocked", "shim": "read", "answer": "blocked", "oracle": "blocked",
+                                "profile": "blocked", "profile-renamed": "blocked", "profile-linked": "blocked"})  # wright cells must not read the grading authority, and no cell reads its own sandbox profile
         self.assertEqual(result["fileReadEnforcement"]["mode"], "allow-list")
 
     def test_the_tool_shim_runs_without_the_grader(self):
