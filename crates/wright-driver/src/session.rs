@@ -115,9 +115,24 @@ pub struct CompilerSession {
     lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
     loaded_operation: Option<ProviderOperation>,
+    /// The semantic service shared by every semantic workflow over the
+    /// current `loaded` snapshot (#513).
+    semantic: Option<SessionSemantic>,
+    /// Full semantic-service constructions — the observable hook proving an
+    /// unchanged loaded snapshot is not rebuilt (#513).
+    semantic_builds: usize,
     diagnostics: Vec<Diagnostic>,
     progress_observer: Option<Arc<dyn ProgressObserver>>,
     source_provider: Option<Box<dyn SourceProvider>>,
+}
+
+/// The default-config semantic service built over one loaded program.
+/// `program` is the `Arc` identity reuse is keyed on: a reload or a
+/// provider re-resolution produces a fresh `Arc`, so the pointer check can
+/// never serve a stale index.
+struct SessionSemantic {
+    program: Arc<Program>,
+    service: Arc<SemanticService<'static>>,
 }
 
 impl CompilerSession {
@@ -149,6 +164,8 @@ impl CompilerSession {
             lint_registry: Arc::new(lint_registry),
             loaded: None,
             loaded_operation: None,
+            semantic: None,
+            semantic_builds: 0,
             diagnostics: Vec::new(),
             progress_observer: None,
             source_provider: None,
@@ -214,6 +231,7 @@ impl CompilerSession {
     /// rather than resurrecting the stale program.
     pub(crate) fn reload(&mut self) -> Result<Loaded, Diagnostic> {
         self.loaded = None;
+        self.semantic = None;
         self.load()
     }
 
@@ -755,32 +773,44 @@ impl CompilerSession {
             .unwrap_or_else(|| workshop_rs::catalog::Locale::new("en-US"))
     }
 
-    /// Build the semantic service over a loaded program.
-    fn service<'a>(&self, loaded: &'a Loaded) -> SemanticService<'a> {
-        self.service_with(loaded, LintConfig::default())
-    }
-
-    /// Build the semantic service over a loaded program with an explicit lint
-    /// configuration.
-    pub(crate) fn service_with<'a>(
-        &self,
-        loaded: &'a Loaded,
-        config: LintConfig,
-    ) -> SemanticService<'a> {
-        SemanticService::with_origin_and_config_and_registry(
-            &loaded.program,
-            loaded_origin(loaded),
-            config,
-            Arc::clone(&self.lint_registry),
+    /// The semantic service over `loaded`, shared by every semantic workflow
+    /// serving that snapshot (#513): the index and default lint pass are
+    /// built once per loaded program rather than per request. Reuse is
+    /// keyed on the program's `Arc` identity — a reload or a provider
+    /// re-resolution produces a fresh `Arc`, which rebuilds instead of
+    /// serving a stale index. Configured consumers derive their view through
+    /// [`SemanticService::with_lint_config`], which shares the same index.
+    pub(crate) fn shared_semantic(&mut self, loaded: &Loaded) -> Arc<SemanticService<'static>> {
+        if self
+            .semantic
+            .as_ref()
+            .is_none_or(|cached| !Arc::ptr_eq(&cached.program, &loaded.program))
+        {
+            self.semantic_builds += 1;
+            self.semantic = Some(SessionSemantic {
+                program: Arc::clone(&loaded.program),
+                service: Arc::new(self.shared_service_with(loaded, LintConfig::default())),
+            });
+        }
+        Arc::clone(
+            &self
+                .semantic
+                .as_ref()
+                .expect("semantic is populated")
+                .service,
         )
     }
 
+    /// How many full semantic services this session has built (#513):
+    /// repeated semantic workflows over an unchanged loaded snapshot share
+    /// one build — a stable count across requests proves reuse, and each
+    /// reload adds exactly one.
+    pub fn semantic_build_count(&self) -> usize {
+        self.semantic_builds
+    }
+
     #[hotpath::measure]
-    pub(crate) fn shared_service_with(
-        &self,
-        loaded: &Loaded,
-        config: LintConfig,
-    ) -> SemanticService<'static> {
+    fn shared_service_with(&self, loaded: &Loaded, config: LintConfig) -> SemanticService<'static> {
         SemanticService::with_shared_program(
             Arc::clone(&loaded.program),
             loaded_origin(loaded),
