@@ -367,6 +367,13 @@ class AgentBenchTest(unittest.TestCase):
         with patch.object(agent_bench, "cmd_evaluate", evaluate):
             only = agent_bench.cmd_suite(argparse.Namespace(models=models, only=["devin"], out=self.out, suite_name="s2", dry_run=True))
         self.assertEqual(only, 0)
+        calls.clear()  # --only matches the adapter alone or adapter:model exactly — a prefix must not pick another model
+        with patch.object(agent_bench, "cmd_evaluate", evaluate):
+            only = agent_bench.cmd_suite(argparse.Namespace(models=models, only=["codex:gpt-6-luna"], out=self.out, suite_name="s4", dry_run=True))
+        self.assertEqual(only, 3)  # only codex ran, and it is waiting for a rerun
+        self.assertEqual([c[1] for c in calls], ["codex-gpt-6-luna-xhigh"])
+        with self.assertRaisesRegex(SystemExit, "no models"):
+            agent_bench.cmd_suite(argparse.Namespace(models=models, only=["codex:gpt-6"], out=self.out, suite_name="s5", dry_run=True))
         with patch.object(agent_bench, "cmd_evaluate", return_value=1):
             failed = agent_bench.cmd_suite(argparse.Namespace(models=[{"adapter": "devin", "model": "m"}], only=None, out=self.out, suite_name="s3", dry_run=True))
         self.assertEqual(failed, 1)  # a model that finished with errors fails the suite, it does not pass silently
