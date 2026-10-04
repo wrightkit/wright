@@ -15,7 +15,7 @@ from pathlib import Path
 TOKEN_BYTES = 4  # estimation only: bytes per token for Wright output attribution
 DECISION_COMMANDS = ("check", "lint", "analyze", "inspect")
 JSONRPC_METHODS = ("compile", "check", "analyze", "inspect")  # serve.rs's direct methods — `lint` exists only as a CLI command
-VALIDATING = ("check", "lint", "analyze", "compile")
+VALIDATING = {"wright": ("check", "lint", "analyze", "compile"), "overpy": ("compile",)}  # ops whose exit 1 means "ran fine, found problems"
 OUTPUT_FORMAT_FLAGS = ("--format", "-f")
 
 
@@ -222,6 +222,58 @@ def serve_ops(events: list[dict]) -> list[str]:
     return [request["op"] for _, request, _ in serve_pairs(events) if request["op"]]
 
 
+def serve_result_payload(response: dict | None) -> dict | None:
+    """The op's result payload from a serve response, unwrapped across transports.
+
+    stdio and jsonrpc put the payload in `result`; an MCP tool result carries the same payload as JSON text
+    inside `result.content[]`. Service-level errors carry `error` instead and yield None."""
+    if response is None:
+        return None
+    try:
+        message = json.loads(response["line"])
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return None
+    result = message.get("result") if isinstance(message, dict) else None
+    if isinstance(result, dict) and isinstance(result.get("content"), list):  # an MCP tool result
+        text = "".join(
+            block.get("text") or "" for block in result["content"] if isinstance(block, dict) and block.get("type") == "text"
+        )
+        try:
+            result = json.loads(text) if text else None
+        except json.JSONDecodeError:
+            return None
+    return result if isinstance(result, dict) else None
+
+
+def correction_rounds(events: list[dict], snapshots: list[dict]) -> int:
+    """`failed validation -> edit` rounds (#466): a validating call or serve op that reported problems
+    (`exit` 1) followed by a workspace edit. Only clean exits mark a verdict: usage errors, refusals,
+    crashes, and protocol errors are all neutral — they neither count nor clear a pending failure.
+    The condition's tool sets the ops that count (`overpy compile` under the `opy` cell).
+
+    Consecutive failures before one edit count as one round; an edit after a passing validation does not.
+    Edit markers use the poller's detection time, so ordering inside one poll interval may merge rounds."""
+    markers = [(s["t"], "edit") for s in snapshots]
+    for call in (e for e in events if e["type"] == "call"):
+        if command_of(call["argv"]) in VALIDATING.get(call.get("tool"), ()) and call["exit"] in (0, 1):
+            markers.append((call["t"] + call.get("seconds", 0), call["exit"] == 1))
+    for _event, request, response in serve_pairs(tool_events(events, "wright")):
+        if request["op"] in VALIDATING["wright"]:
+            payload = serve_result_payload(response)
+            exit_code = payload.get("exit") if payload else None  # an MCP refusal payload has `code`, no `exit`
+            if exit_code in (0, 1):
+                markers.append((response["t"], exit_code == 1))
+    rounds, pending = 0, False
+    for _t, kind in sorted(markers, key=lambda m: m[0]):
+        if kind == "edit":
+            if pending:
+                rounds += 1
+                pending = False
+        else:
+            pending = kind
+    return rounds
+
+
 def transcript_events(path: Path):
     """Parsed transcript events (dicts only); empty when the transcript does not exist."""
     if not path.is_file():
@@ -412,8 +464,8 @@ def detect_expectations(events: list[dict], snapshots: list[dict], scenario: dic
     if last_edit is None:
         result["E04"] = expectation("na", "no edits observed")
     else:
-        after = [c for c in calls if command_of(c["argv"]) in VALIDATING and c["t"] + c["seconds"] >= last_edit]
-        after += [e for e, request in ((e, p) for e, p, _ in pairs) if request["op"] in VALIDATING and e["t"] >= last_edit]
+        after = [c for c in calls if command_of(c["argv"]) in VALIDATING["wright"] and c["t"] + c["seconds"] >= last_edit]
+        after += [e for e, request in ((e, p) for e, p, _ in pairs) if request["op"] in VALIDATING["wright"] and e["t"] >= last_edit]
         matched = [c for c in after if c.get("envelope") and c["envelope"].get("inputIdentity") == final_sha256]
         result["E04"] = expectation("pass" if after else "fail", f"{len(after)} validation(s) after last edit; {len(matched)} match the final content")
     withheld = [c for c in calls if ((c.get("envelope") or {}).get("selection") or {}).get("withheld")]

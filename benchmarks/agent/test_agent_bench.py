@@ -54,20 +54,20 @@ class AgentBenchTest(unittest.TestCase):
         self.assertNotIn("wiki", " ".join(result["unsafeEdits"]))
 
     def test_skills_are_installed_identified_and_the_only_ones_expected(self):
-        skill = self.out / "workshop-wiki"
+        skill = self.out / "workshop-skill"
         skill.mkdir()
-        (skill / "SKILL.md").write_text("---\nname: workshop-wiki\n---\n")
+        (skill / "SKILL.md").write_text("---\nname: workshop-skill\n---\n")
         skill_hash = wiki_skill.content_hash(skill)
         with self.assertRaisesRegex(SystemExit, "requires --skill"):
             self.trial("true", skills=("workshop-skill",))
-        expected = self.trial("echo '{\"loaded\": [\"workshop-wiki\"]}' > \"$BENCH_CONTEXT\"; echo \"$BENCH_SKILL_DIRS\" > dirs.txt", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
+        expected = self.trial("echo '{\"loaded\": [\"workshop-skill\"]}' > \"$BENCH_CONTEXT\"; echo \"$BENCH_SKILL_DIRS\" > dirs.txt", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
         self.assertNotIn("invalid", expected)
         self.assertEqual(expected["condition"]["label"], "wright+workshop-skill/none/off")
         self.assertEqual(expected["environment"]["skills"]["workshop-skill"]["sha256"], skill_hash)
         self.assertEqual((self.out / f"{SCENARIO}-wright/workspace/dirs.txt").read_text().strip(), str(skill.resolve()))
-        stray = self.trial("echo '{\"loaded\": [\"workshop-wiki\", \"other\"]}' > \"$BENCH_CONTEXT\"", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
+        stray = self.trial("echo '{\"loaded\": [\"workshop-skill\", \"other\"]}' > \"$BENCH_CONTEXT\"", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
         self.assertIn("unexpected loaded context", stray["invalid"])
-        (skill / "BUILD.json").write_text(json.dumps({"name": "workshop-wiki", "skillSha256": "0" * 64}))
+        (skill / "BUILD.json").write_text(json.dumps({"name": "workshop-skill", "skillSha256": "0" * 64}))
         with self.assertRaisesRegex(SystemExit, "skill content mismatch"):
             self.trial("true", skills=("workshop-skill",), skill_dirs={"workshop-skill": skill})
 
@@ -732,6 +732,54 @@ class DetectorTest(unittest.TestCase):
     def serve(self, line, direction="req", transport="stdio", session=7, t=0.0):
         return {"tool": "wright", "type": "serve", "dir": direction, "t": t, "line": line, "transport": transport, "session": session}
 
+    def test_correction_rounds_counts_failed_validation_then_edit(self):
+        events = [
+            self.call(["check", "mode.ws"], exit_code=1, t=1.0),
+            self.call(["check", "mode.ws"], exit_code=1, t=3.0),
+            self.call(["check", "mode.ws"], exit_code=0, t=5.0),
+        ]
+        snapshots = [{"t": 2.0}, {"t": 4.0}, {"t": 6.0}]
+        # fail -> edit, fail -> edit: two rounds; the pass at t=5 and the edit at t=6 are not one.
+        self.assertEqual(bench_trace.correction_rounds(events, snapshots), 2)
+        # consecutive failures before one edit are one round
+        self.assertEqual(bench_trace.correction_rounds(events[:2], snapshots[:1]), 1)
+        # a pass between failure and edit is not a correction
+        self.assertEqual(bench_trace.correction_rounds([events[0], events[2]], [{"t": 6.0}]), 0)
+        self.assertEqual(bench_trace.correction_rounds([], snapshots), 0)
+        # usage errors and crashes are neutral: the fail -> edit round still counts, and they are not corrections
+        errored = self.call(["check", "mode.ws", "--bogus"], exit_code=2, t=4.0)
+        crashed = self.call(["check", "mode.ws"], exit_code=4, t=4.5)
+        self.assertEqual(bench_trace.correction_rounds([events[0], errored, crashed], [{"t": 6.0}]), 1)
+        self.assertEqual(bench_trace.correction_rounds([errored, crashed], [{"t": 6.0}]), 0)
+        # `overpy compile` is the validating op of the opy cell
+        opy = [self.call(["compile", "-i", "mode.opy"], exit_code=1, t=1.0, tool="overpy")]
+        self.assertEqual(bench_trace.correction_rounds(opy, [{"t": 2.0}]), 1)
+
+    def test_correction_rounds_covers_serve_ops_and_ignores_refusals(self):
+        request = '{"op": "check"}'
+        failed = '{"result": {"ok": false, "exit": 1, "diagnostics": []}}'
+        passed = '{"result": {"ok": true, "exit": 0, "diagnostics": []}}'
+        refused = '{"error": {"code": -32602, "message": "bad params"}}'
+        events = [
+            self.serve(request, t=1.0), self.serve(failed, direction="res", t=1.1),
+            self.serve(request, t=3.0), self.serve(passed, direction="res", t=3.1),
+            self.serve(request, t=5.0), self.serve(refused, direction="res", t=5.1),
+            self.serve(request, t=7.0),  # unanswered: not a completed validation
+        ]
+        # t=1 fail -> t=2 edit; t=3 pass clears; t=5 refusal is not a correction signal; t=7 pending with no edit.
+        self.assertEqual(bench_trace.correction_rounds(events, [{"t": 2.0}, {"t": 6.0}, {"t": 8.0}]), 1)
+
+    def test_correction_rounds_unwraps_mcp_tool_payloads(self):
+        request = '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "wright_check", "arguments": {}}}'
+        result = '{"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "{\\"ok\\": false, \\"exit\\": 1}"}]}}'
+        events = [self.serve(request, transport="mcp", t=1.0), self.serve(result, direction="res", transport="mcp", t=1.1)]
+        self.assertEqual(bench_trace.correction_rounds(events, [{"t": 2.0}]), 1)
+        # an isError refusal (`{code, message}` payload) is neutral: it neither fails nor clears a pending correction
+        refusal = '{"jsonrpc": "2.0", "id": 2, "result": {"isError": true, "content": [{"type": "text", "text": "{\\"code\\": \\"refused\\"}"}]}}'
+        neutral = [self.serve(request, transport="mcp", t=3.0), self.serve(refusal, direction="res", transport="mcp", t=3.1)]
+        self.assertEqual(bench_trace.correction_rounds(neutral, [{"t": 4.0}]), 0)
+        self.assertEqual(bench_trace.correction_rounds(events + neutral, [{"t": 2.0}, {"t": 4.0}]), 1)
+
     def test_serve_request_mirrors_the_servers_answer_rule(self):
         notification = '{"jsonrpc":"2.0","method":"notifications/initialized"}'
         self.assertFalse(bench_trace.serve_request("", "mcp")["expects"])  # blank lines are skipped silently
@@ -846,6 +894,37 @@ class ReportTest(unittest.TestCase):
         self.assertAlmostEqual(low, 0.237, places=2)
         self.assertAlmostEqual(high, 0.763, places=2)
         self.assertEqual(bench_report.wilson(0, 0), (0.0, 0.0))
+
+    def test_paired_lift_against_each_named_reference(self):
+        runs = [
+            self.result("none/none/off", 1, False, 100),
+            self.result("none/wiki/off", 1, True, 200),
+            self.result("wright/none/off", 1, True, 80),
+        ]
+        text, _ = bench_report.render(runs, references=["none/none/off", "none/wiki/off"])
+        self.assertIn("Paired against `none/none/off`", text)
+        self.assertIn("Paired against `none/wiki/off`", text)
+        self.assertIn("wright/none/off vs none/none/off", text)
+        self.assertIn("wright/none/off vs none/wiki/off", text)
+        self.assertIn("none/wiki/off vs none/none/off", text)
+        text, _ = bench_report.render(runs)  # the default pairs only against the baseline
+        self.assertIn("Paired against `none/none/off`", text)
+        self.assertNotIn("Paired against `none/wiki/off`", text)
+        text, _ = bench_report.render(runs, references=["missing/cell/here"])
+        self.assertNotIn("Paired against", text)
+
+    def test_correction_rounds_reach_the_cell_summary(self):
+        run = self.result("wright/none/off", 1, True, 100)
+        run["correctionRounds"] = 2.0
+        text, summary = bench_report.render([run])
+        self.assertEqual(summary["cells"]["m|wright/none/off"]["correctionRounds"], 2.0)
+        self.assertIn("| corr |", text)
+
+    def test_references_of_normalizes_flag_and_config_forms(self):
+        ns = argparse.Namespace(reference=["a/b/c", "d/e/f"])
+        self.assertEqual(agent_bench.references_of(ns), ["a/b/c", "d/e/f"])
+        self.assertEqual(agent_bench.references_of(argparse.Namespace(reference="a/b/c")), ["a/b/c"])
+        self.assertEqual(agent_bench.references_of(argparse.Namespace(reference=None)), [bench_report.BASELINE])
 
     def test_paired_efficiency_counts_only_both_usable_and_failures_cost(self):
         runs = [self.result("none/none/off", 1, True, 1000), self.result("wright/none/off", 1, True, 600),

@@ -61,7 +61,7 @@ The default categories are actions, values, events, constants, and references;
 add `tutorials` through `--categories` for a separate second-tier experiment.
 The mirror's manifest is incomplete and is not the crawl source.
 
-The `workshop-skill` is built by `agent_bench.py wiki-skill`. It is a separate skill (generated name `workshop-wiki`) with a short `SKILL.md`, category
+The `workshop-skill` is built by `agent_bench.py wiki-skill`. It is a separate skill (generated name `workshop-skill`) with a short `SKILL.md`, category
 indexes, and individual articles. It takes a pinned snapshot, the workshop-rs catalog,
 and the opy-rs manifest; OverPy spellings are included only when found in the pinned
 upstream oracle. The generated skill is community guidance, not canonical semantic
@@ -71,12 +71,12 @@ is not counted as an edit, so edits there are not detected.
 
 ```sh
 python3 benchmarks/agent/agent_bench.py wiki-skill \
-    --snapshot /abs/path/pinned-wiki --out-dir /abs/path/local/workshop-wiki \
+    --snapshot /abs/path/pinned-wiki --out-dir /abs/path/local/workshop-skill \
     --catalog /abs/path/workshop-rs/crates/workshop-rs/src/catalog/data/catalog.json \
     --opy-manifest /abs/path/opy-rs/crates/opy-rs/src/manifest/data/manifest.json
 ```
 
-The output directory must be named `workshop-wiki` and must not exist. Run
+The output directory must be named `workshop-skill` and must not exist. Run
 `setup-oracle` first. Snapshots and derived skills are local benchmark material;
 do not commit or distribute them. The [Workshop.codes Terms of Service](https://workshop.codes/tos)
 apply to the source content; generating a skill grants no additional permission.
@@ -235,7 +235,7 @@ python3 benchmarks/agent/agent_bench.py run <scenario> --agent-id LABEL --agent-
     --tool wright --skills wright-skill --skill-dir wright-skill=DIR \
     --knowledge none --network off --trials 5
 python3 benchmarks/agent/agent_bench.py matrix matrix.json   # agents x cells x scenarios x trials
-python3 benchmarks/agent/agent_bench.py report target/agent-bench [--regrade] [--reference none/none/off]
+python3 benchmarks/agent/agent_bench.py report target/agent-bench [--regrade] [--reference none/none/off ...]
 python3 benchmarks/agent/agent_bench.py score target/agent-bench   # Wright Agent Score cards
 ```
 
@@ -281,6 +281,7 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | `toolUse` | Per tool (`wright`, `overpy`): invocations by subcommand, failures, exits of 3 or 4 (candidate owner or environment gaps), and estimated output tokens per command. Under level `mcp`, each `tools/call` counts as an invocation of the Wright operation its tool name carries; the `initialize`/`tools/list` handshake is not an invocation but its response bytes (the tool schemas) are included in `mcp:tools/list`'s estimated output tokens |
 | `toolCalls` | Model-visible tool calls by name from the adapter's normalized transcript (`bash`, `fetch`, `wright_*` under `mcp`), when the adapter writes one |
 | `friction`, `expectations` | Usage errors, unknown subcommands, help lookups, retries, malformed `serve` requests, unparsed `serve` responses, identical repeats; expectation E01-E12 verdicts |
+| `correctionRounds` | Failed-validation → workspace-edit rounds: the condition tool's validating op (`check`/`lint`/`analyze`/`compile`, `overpy compile` under the `opy` cell) reporting `exit` 1 followed by an edit; consecutive failures before one edit count once, a pass resets the sequence, and refusals are not corrections |
 | `snapshots` | Strict validity of each snapshot of the entry, first valid index, and valid-to-invalid regressions |
 | `usage`, `context` | Turns, tokens by kind, peak context (and its share of the limit), tokens to first valid; loaded context |
 | `invalid`, `infraRetries`, `fileReadEnforcement`, `fileWriteEnforcement`, `networkEnforcement` | Present when the run was excluded or retried; how file reads (`allow-list` with the hidden and allowed paths, or `unrestricted`), file writes (`trial-directory-only` or `unrestricted`), and network `off` (`canary-checked` or `declared-only`) were enforced |
@@ -299,7 +300,8 @@ output use four bytes per token; provider-reported usage is authoritative.
 
 `agent_bench.py report` writes `report.md` and `summary.json`: usable and passed
 counts with scenario-clustered 95% intervals (resampling scenarios, then trials), tokens per run and per usable result, peak
-context, paired comparison against `--reference` (default `none/none/off`) (same scenario, agent, and
+context, mean correction rounds per condition, paired comparison against each `--reference` (repeatable for
+lift against several named references; default `none/none/off`) (same scenario, agent, and
 trial; token comparison only where both are usable), per-scenario and per-split
 tables, expectation rates, friction, output size per command, and diagnostics.
 Diagnostics flag headroom (baseline usable rate of at least 95%), infrastructure

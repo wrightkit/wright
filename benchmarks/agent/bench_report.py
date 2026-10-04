@@ -85,6 +85,7 @@ def group_rows(runs: list[dict]) -> dict:
         "peakContext": mean(peaks) if peaks else None,
         "seconds": mean(r["agent"]["seconds"] for r in runs),
         "usedTool": sum(1 for r in runs if any(u["invocations"] for u in r.get("toolUse", {}).values())),
+        "correctionRounds": mean_of([r.get("correctionRounds") for r in runs]),
     }
 
 
@@ -238,13 +239,13 @@ def setup_rows(runs: list[dict]) -> list[str]:
     return out
 
 
-def render(results: list[dict], regrade: list[str] | None = None, reference: str = BASELINE) -> tuple[str, dict]:
+def render(results: list[dict], regrade: list[str] | None = None, references: list[str] | None = None) -> tuple[str, dict]:
     invalid = [r for r in results if r["status"] == "invalid"]
     infrastructure = [r for r in results if r["status"] == "provider-interrupted"]
     runs = [r for r in results if r["status"] not in ("invalid", "provider-interrupted")]
     out = ["# Agent benchmark report", "", f"{len(runs)} valid run(s), {len(invalid)} invalid, {len(infrastructure)} infrastructure failures excluded.", ""]
     summary: dict = {"cells": {}, "infrastructureFailures": len(infrastructure)}
-    out += ["## Outcome by agent and condition", "", "| agent | condition | runs | usable | passed | used a tool | tokens/run | tokens per usable | peak context | s/run |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    out += ["## Outcome by agent and condition", "", "| agent | condition | runs | usable | passed | used a tool | tokens/run | tokens per usable | peak context | s/run | corr |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for agent in sorted({r["agent"]["id"] for r in runs}):
         for cell in sorted({label(r) for r in runs}):
             group = [r for r in runs if r["agent"]["id"] == agent and label(r) == cell]
@@ -253,7 +254,7 @@ def render(results: list[dict], regrade: list[str] | None = None, reference: str
             row = group_rows(group)
             summary["cells"][f"{agent}|{cell}"] = row
             out.append(f"| {agent} | {cell} | {row['n']} | {rate_runs(group)} | {row['passed']}/{row['n']} | {row['usedTool']}/{row['n']} | "
-                       f"{fmt(row['tokens'])} | {fmt(row['tokensPerUsable'])} | {fmt(row['peakContext'])} | {fmt(row['seconds'], 1)} |")
+                       f"{fmt(row['tokens'])} | {fmt(row['tokensPerUsable'])} | {fmt(row['peakContext'])} | {fmt(row['seconds'], 1)} | {fmt(row['correctionRounds'], 1)} |")
     out += setup_rows(runs)
     out += ["", "## By scenario", "", "| scenario | agent | condition | usable |", "| --- | --- | --- | --- |"]
     groups: dict[tuple, list[dict]] = defaultdict(list)
@@ -283,9 +284,10 @@ def render(results: list[dict], regrade: list[str] | None = None, reference: str
                 "search/read shell command (a `bash` call invoking the wright CLI counts once, as a wright call).", "",
                 "| agent | cell | level | runs | usable | passed | search/read | wright calls | bash calls | tool calls | turns | tokens/run |",
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |", *level_lines]
-    pairs = paired(runs, reference)
-    if pairs:
-        out += ["", f"## Paired against `{reference}` (same scenario, agent, trial)", "", "| agent | comparison | pairs | usable gained/lost | tokens where both usable |", "| --- | --- | --- | --- | --- |", *pairs]
+    for reference in references or [BASELINE]:
+        pairs = paired(runs, reference)
+        if pairs:
+            out += ["", f"## Paired against `{reference}` (same scenario, agent, trial)", "", "| agent | comparison | pairs | usable gained/lost | tokens where both usable |", "| --- | --- | --- | --- | --- |", *pairs]
     exp = expectations(runs)
     if exp:
         out += ["", "## Expectation rates (pass/(pass+fail); n/a and unavailable excluded)", "", "| condition | expectations |", "| --- | --- |", *exp]
@@ -324,13 +326,13 @@ def render(results: list[dict], regrade: list[str] | None = None, reference: str
     return "\n".join(out) + "\n", summary
 
 
-def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, reference: str = BASELINE) -> int:
+def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, references: list[str] | None = None) -> int:
     results = load(dirs)
     if not results:
         print("no results found")
         return 1
     notes = regrade_notes([r for r in results if r["status"] != "invalid"], wright, load_scenario) if regrade else None
-    text, summary = render(results, notes, reference)
+    text, summary = render(results, notes, references)
     (dirs[0] / "report.md").write_text(text)
     write_json(dirs[0] / "summary.json", summary)
     print(text)
