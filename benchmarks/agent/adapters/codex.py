@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, feed_stdin, INFRA_EXIT, TRANSIENT
 
 
 def usage_row(usage: dict, timestamp: float, limit: int | None) -> dict:
@@ -78,8 +78,7 @@ def main() -> int:
     final, errors, summary, seen, servers, item_types, scanned = "", [], None, set(), set(), set(), 0.0
     with (run / "codex-stderr.log").open("w") as stderr, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript, open(env["BENCH_USAGE"], "w", buffering=1) as usage:
         process = subprocess.Popen(command, env=child_env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True)
-        process.stdin.write(prompt)
-        process.stdin.close()
+        feed_stdin(process, prompt)
         for line in process.stdout:
             try:
                 event = json.loads(line)

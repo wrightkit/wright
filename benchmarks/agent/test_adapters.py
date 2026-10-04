@@ -225,6 +225,13 @@ class DirectAdapterTest(unittest.TestCase):
         code, *_ = self.run_direct("anthropic/m", "ANTHROPIC_BASE_URL", [(400, {"error": "bad"})])
         self.assertEqual(code, 1)
 
+    def test_a_malformed_payload_is_a_clean_provider_error_not_a_traceback(self):
+        for model, base_var, replies in (("anthropic/m", "ANTHROPIC_BASE_URL", [(200, {"unexpected": "shape"})]),
+                                         ("openai/m", "OPENAI_BASE_URL", [(200, {"choices": []})])):
+            with self.subTest(model=model):
+                code, *_ = self.run_direct(model, base_var, replies)
+                self.assertEqual(code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

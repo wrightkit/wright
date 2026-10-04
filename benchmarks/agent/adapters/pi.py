@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, feed_stdin, INFRA_EXIT, TRANSIENT
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
@@ -84,8 +84,7 @@ def main() -> int:
     limit = context_limit(pi, model, child_env, extensions)
     Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "pi", "version": cli_version(pi), "model": model, "effort": env.get("BENCH_THINKING"), "tools": ["read", "bash", "edit", "write"], "extensions": [e for e in extensions if e]}, indent=2))
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=child_env)
-    proc.stdin.write(prompt)
-    proc.stdin.close()
+    feed_stdin(proc, prompt)
     loaded: list[str] = []
     final, error = "", ""
     with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage

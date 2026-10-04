@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import as_dict, cli_version, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, feed_stdin, INFRA_EXIT, TRANSIENT
 
 TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 WEB_TOOLS = ["WebFetch", "WebSearch"]
@@ -56,8 +56,7 @@ def main() -> int:
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         env={**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"},
     )
-    proc.stdin.write(prompt)
-    proc.stdin.close()
+    feed_stdin(proc, prompt)
     final, errored = "", False
     with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage
         for line in proc.stdout:

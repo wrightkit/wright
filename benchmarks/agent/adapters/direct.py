@@ -82,10 +82,14 @@ class Anthropic:
 
     def step(self) -> tuple[str, list[tuple[str, str, dict]], dict]:
         data = post(self.url, self.headers, {"model": self.model, "max_tokens": MAX_OUTPUT_TOKENS, "system": self.system, "tools": self.tools, "messages": self.messages})
-        self.messages.append({"role": "assistant", "content": data["content"]})
+        try:
+            content = data["content"]
+            text = "".join(b.get("text", "") for b in content if b["type"] == "text")
+            calls = [(b["id"], b["name"], b["input"]) for b in content if b["type"] == "tool_use"]
+        except (KeyError, IndexError, TypeError, AttributeError) as error:
+            raise ProviderError(f"malformed response: {error}", False) from error
+        self.messages.append({"role": "assistant", "content": content})
         u = data.get("usage") or {}
-        text = "".join(b.get("text", "") for b in data["content"] if b["type"] == "text")
-        calls = [(b["id"], b["name"], b["input"]) for b in data["content"] if b["type"] == "tool_use"]
         return text, calls, usage_row(u.get("input_tokens") or 0, u.get("output_tokens") or 0, u.get("cache_read_input_tokens") or 0, u.get("cache_creation_input_tokens") or 0, None)
 
 
@@ -106,12 +110,15 @@ class OpenAI:
     def step(self) -> tuple[str, list[tuple[str, str, dict]], dict]:
         body = {"model": self.model, "tools": self.tools, "messages": self.messages, **({"reasoning_effort": self.effort} if self.effort else {})}
         data = post(self.url, self.headers, body)
-        message = data["choices"][0]["message"]
+        try:
+            message = data["choices"][0]["message"]
+            calls = [(c["id"], c["function"]["name"], json.loads(c["function"]["arguments"] or "{}")) for c in message.get("tool_calls") or []]
+        except (KeyError, IndexError, TypeError, AttributeError, json.JSONDecodeError) as error:
+            raise ProviderError(f"malformed response: {error}", False) from error
         self.messages.append(message)
         u = data.get("usage") or {}
         cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
         reasoning = (u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
-        calls = [(c["id"], c["function"]["name"], json.loads(c["function"]["arguments"] or "{}")) for c in message.get("tool_calls") or []]
         return message.get("content") or "", calls, usage_row((u.get("prompt_tokens") or 0) - cached, (u.get("completion_tokens") or 0) - reasoning, cached, 0, reasoning)
 
 
