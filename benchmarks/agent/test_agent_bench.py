@@ -169,6 +169,25 @@ class AgentBenchTest(unittest.TestCase):
         self.assertTrue(all(json.loads(p.read_text())["status"] != "provider-interrupted" for p in (self.out / "m").rglob("result.json")))
         self.assertEqual(len(list((self.out / "m").rglob("result.json"))), 4)  # the interrupted two were rerun and the rest ran
 
+    def test_a_partial_result_from_a_killed_run_is_retried_instead_of_crashing(self):
+        import io
+        cell = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "none", "network": "off"})
+        config = self.out / "matrix.json"
+        config.write_text(json.dumps({
+            "agents": [{"id": "fake", "cmd": "exit 0"}],
+            "cells": [cell], "scenarios": [SCENARIO], "trials": 1, "parallel": 1, "seed": 1,
+            "options": {"timeout": 30, "infra_retries": 0},
+        }))
+        out = agent_bench.trial_dir(self.out / "m", SCENARIO, "fake", cell, 1)
+        out.mkdir(parents=True)
+        (out / "result.json").write_text('{"status": "com')  # a kill mid-write left this
+        args = argparse.Namespace(config=config, out=self.out / "m", wright=str(Path(WRIGHT).resolve()), skill_dirs={}, wiki_dir=None, env_pass=[],
+                                  check_ancestors=False, canary_cmd=None, timeout=30, infra_retries=0, file_sandbox=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = agent_bench.cmd_matrix(args)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads((out / "result.json").read_text())["status"], "completed")
+
     def test_evaluate_serializes_the_run_options_so_its_matrix_reproduces_the_run(self):
         import contextlib
         import io
@@ -212,6 +231,21 @@ class AgentBenchTest(unittest.TestCase):
         result = json.loads((trial / "result.json").read_text())
         self.assertEqual((result["protocol"]["timeoutSeconds"], result["fileWriteEnforcement"]), (30, "unrestricted"))
         self.assertEqual((trial / "workspace" / "probe.txt").read_text(), f"present|{Path.home()}")  # env_pass reached the agent again
+
+    def test_evaluate_reports_a_missing_wright_binary_instead_of_crashing(self):
+        import io
+        self.skill_dir("wright-skill")
+        args = argparse.Namespace(
+            adapter="fake", model="m", effort=None, name="eval", out=self.out, wright=str(self.out / "no-such-wright"),
+            skill_dirs={"wright-skill": self.out / "skills" / "wright-skill"}, wiki_dir=None, env_pass=[],
+            allow_read=[], deny_read=[], canary_cmd=None, check_ancestors=False,
+            timeout=30, infra_retries=0, infra_backoff=0, no_file_sandbox=True, dry_run=False,
+            cells="score", split="test", scenarios=[SCENARIO], trials=1, parallel=1, seed=1)
+        with patch.dict(agent_bench.ADAPTERS, {"fake": "x.py"}), patch.dict(agent_bench.ADAPTER_READS, {"fake": []}), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as stop:
+            agent_bench.cmd_evaluate(args)
+        self.assertIn("cannot start", str(stop.exception.code))
+        self.assertIn("wright binary not found", str(stop.exception.code))
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
@@ -401,6 +435,11 @@ class AgentBenchTest(unittest.TestCase):
             failed = agent_bench.cmd_suite(argparse.Namespace(models=[{"adapter": "devin", "model": "m"}], only=None, out=self.out, suite_name="s3", dry_run=True))
         self.assertEqual(failed, 1)  # a model that finished with errors fails the suite, it does not pass silently
 
+        models = [{"adapter": "devin", "model": "m"}]
+        for bad in ("..", "a/b", ""):
+            with self.assertRaises(SystemExit):
+                agent_bench.cmd_suite(argparse.Namespace(models=models, only=None, out=self.out, suite_name=bad, dry_run=True))
+
     def test_a_repeated_run_refuses_a_different_wright_binary(self):
         run = self.out / "r"
         trial = run / "s" / "agent" / "cell-1"
@@ -413,6 +452,9 @@ class AgentBenchTest(unittest.TestCase):
         self.assertIn("--wright", message)
         self.assertIsNone(agent_bench.wright_mismatch(self.out / "fresh", str(other)))  # a new run has nothing to disagree with
         (trial / "result.json").write_text(json.dumps({"environment": {"wright": "x", "wrightSha256": agent_bench.file_sha256(other)}}))
+        self.assertIsNone(agent_bench.wright_mismatch(run, str(other)))
+        self.assertIsNone(agent_bench.wright_mismatch(run, str(self.out / "no-such-binary")))  # preflight names the missing binary; hashing it must not crash first
+        (trial / "result.json").write_text('{"environment": {"wrightSha')  # a mid-write kill left a partial file: the trial is unfinished, not evidence
         self.assertIsNone(agent_bench.wright_mismatch(run, str(other)))
 
     def test_an_effort_the_model_id_already_names_is_not_repeated_in_the_run_name(self):

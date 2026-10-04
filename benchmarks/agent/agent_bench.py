@@ -400,7 +400,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
         if reason:
             result = base_result(scenario, cell, args, out, 0.0, None)
             result.update(invalid=reason, status="invalid")
-            (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+            write_json(out / "result.json", result)
             return result
         snapshots = bench_trace.Snapshots(workspace, scenario.get("watch", [scenario["entry"]]), out / "snapshots")
         snapshots.start()
@@ -443,7 +443,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     first_valid = next((s["t"] for s in result["snapshots"]["series"] if s["valid"]), None)
     result["usage"] = bench_trace.usage_summary(out / "usage.jsonl", first_valid)
     result["status"] = run_status(result)
-    (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    write_json(out / "result.json", result)
     return result
 
 
@@ -475,10 +475,16 @@ def harness_commit() -> str:
     return proc.stdout.strip() + ("+dirty" if dirty else "")
 
 
-def file_sha256(path: str) -> str:
+def file_sha256(path: str | Path) -> str:
     """Re-hashed per call: a suite resumes for days in one process and the binary may be rebuilt between trials."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
+
+def write_json(path: Path, data: dict) -> None:
+    """A kill mid-write leaves no partial JSON to crash the next resume: temp file in the same directory, then replace."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(temporary, path)
 
 
 def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path, seconds: float, agent_exit: int | None) -> dict:
@@ -574,7 +580,11 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         scenario_id, agent, cell, trial = job
         out = trial_dir(merged["out"], scenario_id, agent["id"], cell, trial)
         finished = out / "result.json"
-        if finished.is_file() and json.loads(finished.read_text()).get("status") != "provider-interrupted":  # an interrupted trial is retried on the next run
+        try:
+            status = json.loads(finished.read_text()).get("status") if finished.is_file() else None
+        except json.JSONDecodeError:
+            status = None  # a mid-write kill left a partial file; the trial is unfinished and retried
+        if status is not None and status != "provider-interrupted":  # an interrupted trial is retried on the next run
             return
         with lock:
             if state["streak"] >= STOP_AFTER_INTERRUPTIONS:
@@ -657,9 +667,14 @@ def wright_mismatch(run_dir: Path, wright: str) -> str | None:
 
     A run is repeated to finish it later, possibly after `wright` on PATH was upgraded. Trials made with two binaries cannot be scored
     together, so the mismatch is refused up front instead of being found when the score card is refused."""
+    if not Path(wright).is_file():
+        return None  # preflight already names the missing binary
     current = file_sha256(Path(wright))
     for path in sorted(run_dir.glob("*/*/*/result.json")):
-        env = json.loads(path.read_text()).get("environment", {})
+        try:
+            env = json.loads(path.read_text()).get("environment", {})
+        except json.JSONDecodeError:
+            continue  # a partial file means the trial never finished; it will be retried
         recorded = env.get("wrightSha256")
         if recorded and recorded != current:
             return (f"{run_dir.name} already has trials made with {env.get('wright')} (sha256 {recorded[:12]}), but {wright} is a different binary. "
@@ -744,6 +759,8 @@ def cmd_suite(args: argparse.Namespace) -> int:
     models = [m for m in (args.models or []) if not args.only or any(m["adapter"] == o or f"{m['adapter']}:{m['model']}" == o for o in args.only)]  # exact adapter or adapter:model — 'codex:gpt-6' must not swallow 'codex:gpt-6-luna'
     if not models:
         raise SystemExit(f'no models: add "models": [{{"adapter": "devin", "model": "swe-2-max"}}, ...] to {CONFIG_PATH}')
+    if not args.suite_name or args.suite_name in (".", "..") or Path(args.suite_name).name != args.suite_name:
+        raise SystemExit("--suite-name must be a single directory name")
     root = args.out / args.suite_name
     outcome = {}
     for entry in models:
