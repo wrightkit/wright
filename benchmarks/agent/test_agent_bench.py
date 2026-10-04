@@ -564,6 +564,47 @@ class AgentBenchTest(unittest.TestCase):
             self.assertEqual(auth["disagreement"]["kind"], "wright-accepts-oracle-rejects")
 
 
+@unittest.skipUnless(sys.platform == "darwin", "file flags are the macOS enforcement")
+class DropTest(unittest.TestCase):
+    def setUp(self):
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
+        self.out = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")).resolve()
+        self.addCleanup(shutil.rmtree, self.out, True)
+
+    def test_repairs_never_reach_through_a_symlink_to_a_host_file(self):
+        host_file = self.out / "host-file.txt"
+        host_file.write_text("host data the run must not mutate")
+        host_file.chmod(0o400)
+        os.chflags(host_file, stat.UF_IMMUTABLE)
+        link = self.out / "run" / "stale-link"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(host_file)
+        try:
+            agent_bench.drop(link)
+            self.assertFalse(os.path.lexists(link))
+            self.assertTrue(os.lstat(host_file).st_flags & stat.UF_IMMUTABLE, "the link redirected the flag repair onto the host file")
+            self.assertEqual(host_file.stat().st_mode & 0o777, 0o400)
+        finally:
+            with contextlib.suppress(OSError):
+                os.chflags(host_file, 0)
+            host_file.chmod(0o600)
+
+    def test_nested_chmodded_directories_come_down_a_level_per_pass(self):
+        root = self.out / "run" / "denied"
+        inner = root / "inner"
+        inner.mkdir(parents=True)
+        (inner / "left.txt").write_text("agent-owned")
+        for directory in (inner, root):
+            directory.chmod(0)  # the agent can make its own directories untraversable — deepest first, the parent must stay resolvable
+        try:
+            agent_bench.drop(self.out / "run")
+            self.assertFalse(os.path.lexists(self.out / "run"))
+        finally:
+            for directory in (root, inner):
+                with contextlib.suppress(OSError):
+                    directory.chmod(0o700)
+
+
 class DetectorTest(unittest.TestCase):
     def call(self, argv, exit_code=0, t=0.0, **extra):
         return {"tool": "wright", "type": "call", "t": t, "argv": argv, "exit": exit_code, "seconds": 0.1, "stdoutBytes": 40, "stderrBytes": 0, "stderrHead": "", "envelope": None, **extra}

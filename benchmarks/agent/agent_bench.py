@@ -345,22 +345,24 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
 
 def drop(path: Path) -> None:
     """Best-effort removal of a path inside the agent-writable run tree. The agent can chflags or chmod its own files —
-    and a run killed mid-trial can leave agent.sb locked — so a plain rmtree/unlink can hit EPERM; restore writability
-    at the failing node and retry rather than leave the run directory permanently unreusable."""
-    def unlock_and_retry(func, node, _exc):
-        with contextlib.suppress(OSError, AttributeError):  # no chflags outside the BSDs
-            os.chflags(node, 0)
-        with contextlib.suppress(OSError):
-            os.chmod(node, 0o700)
-        with contextlib.suppress(OSError):
-            func(node)
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path, onexc=unlock_and_retry)
-    else:
-        with contextlib.suppress(OSError, AttributeError):
-            os.chflags(path, 0)
-        with contextlib.suppress(OSError):
-            path.unlink()
+    and a run killed mid-trial can leave agent.sb locked — so a plain rmtree/unlink can hit EPERM. Repairs stay on the
+    run-dir node itself so a planted symlink cannot redirect them onto a host file; a leaf removal retries right away,
+    and the next pass reaches whatever a blocked traversal skipped."""
+    def unlock(func, node, _exc):
+        with contextlib.suppress(OSError, AttributeError, NotImplementedError):  # chflags is a BSD mechanism
+            os.chflags(node, 0, follow_symlinks=False)
+        with contextlib.suppress(OSError, NotImplementedError):
+            os.chmod(node, 0o700, follow_symlinks=False)
+        if func in (os.unlink, os.rmdir):
+            with contextlib.suppress(OSError):
+                func(node)
+    for _ in range(8):
+        if not os.path.lexists(path):
+            return
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, onexc=unlock)
+        else:
+            unlock(os.unlink, str(path), None)
 
 
 def context_report(out: Path, skill_names: list[str]) -> dict:
