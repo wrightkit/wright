@@ -329,9 +329,9 @@ fn mapped_provenance(
     authored: &Path,
     edit: impl FnOnce(&mut serde_json::Value),
 ) -> wright_driver::SourceProvenance {
-    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog");
+    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
     let locale = workshop_rs::catalog::Locale::new("en-US");
-    let program = workshop_rs::parser::parse_with_context(text, &catalog, &locale, &catalog)
+    let program = workshop_rs::parser::parse_with_context(text, &catalog, &locale, &*catalog)
         .expect("fixture parses");
     let json =
         workshop_rs::MappedText::new(text, workshop_rs::SourceMap::extract(&program)).to_json();

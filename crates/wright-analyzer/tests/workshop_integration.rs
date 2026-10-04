@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use workshop_rs::catalog::{Catalog, Locale};
+use workshop_rs::catalog::Locale;
 use workshop_rs::parser;
 use workshop_rs::{
     Action, Condition, Event, EventTarget, EventTeam, PlayerEventKind, Program, Rule,
@@ -39,8 +39,8 @@ fn workshop_service_from_text(text: &str) -> SemanticService<'static> {
     // expected enum domains (e.g. Create HUD Text's Reevaluation argument is
     // HudReeval), resolving bare members that are ambiguous across the
     // catalog's enum domains (#118).
-    let catalog = Catalog::builtin().unwrap();
-    let program = parser::parse_with_context(text, &catalog, &Locale::new("en-US"), &catalog)
+    let catalog = wright_analyzer::catalog::builtin().unwrap();
+    let program = parser::parse_with_context(text, &catalog, &Locale::new("en-US"), &*catalog)
         .unwrap_or_else(|error| panic!("Workshop source must parse: {error}"));
     let program = Box::leak(Box::new(program));
     SemanticService::from_workshop(program, "en-US")
@@ -604,8 +604,8 @@ rule ("severity override") {
     }
 }
 "#;
-    let catalog = Catalog::builtin().unwrap();
-    let program = parser::parse_with_context(source, &catalog, &Locale::new("en-US"), &catalog)
+    let catalog = wright_analyzer::catalog::builtin().unwrap();
+    let program = parser::parse_with_context(source, &catalog, &Locale::new("en-US"), &*catalog)
         .expect("Workshop source parses");
     let mut config = LintConfig::default();
     config.set_severity("while-without-wait", Severity::Error);

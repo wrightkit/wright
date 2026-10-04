@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::provider::{
     Diagnostic as ProviderDiagnostic, LanguageProvider, ProviderError, Result as ProviderResult,
@@ -6,13 +7,13 @@ use crate::provider::{
 };
 /// Wright's in-process provider for localized raw Workshop source.
 pub struct WorkshopProvider {
-    catalog: workshop_rs::catalog::Catalog,
+    catalog: Arc<workshop_rs::catalog::Catalog>,
 }
 
 impl WorkshopProvider {
     /// Construct a provider from the canonical Workshop catalog.
     pub fn new() -> ProviderResult<Self> {
-        let catalog = workshop_rs::catalog::Catalog::builtin()
+        let catalog = wright_analyzer::catalog::builtin()
             .map_err(|error| ProviderError::new("workshop.catalog", error.to_string()))?;
         Ok(Self { catalog })
     }
@@ -23,7 +24,7 @@ impl LanguageProvider for WorkshopProvider {
         let locale = workshop_rs::detect::resolve_locale(source, &self.catalog, None)
             .map_err(|error| ProviderError::new("workshop.locale", error.to_string()))?;
         let program =
-            workshop_rs::parser::parse_with_context(source, &self.catalog, &locale, &self.catalog)
+            workshop_rs::parser::parse_with_context(source, &self.catalog, &locale, &*self.catalog)
                 .map_err(|error| ProviderError::new("workshop.parse", error.to_string()))?;
         program
             .validate()

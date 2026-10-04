@@ -111,7 +111,7 @@ fn loaded_origin(loaded: &Loaded) -> Origin {
 pub struct CompilerSession {
     /// The session configuration (input, frontend, overrides, format).
     pub config: SessionConfig,
-    catalog: workshop_rs::catalog::Catalog,
+    catalog: Arc<workshop_rs::catalog::Catalog>,
     lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
     loaded_operation: Option<ProviderOperation>,
@@ -123,10 +123,7 @@ pub struct CompilerSession {
 impl CompilerSession {
     /// Build a session from a configuration.
     pub fn new(config: SessionConfig) -> Result<CompilerSession, Diagnostic> {
-        let catalog = hotpath::measure_block!("session::catalog_builtin", {
-            workshop_rs::catalog::Catalog::builtin()
-        })
-        .map_err(|error| {
+        let catalog = wright_analyzer::catalog::builtin().map_err(|error| {
             Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
@@ -447,7 +444,7 @@ impl CompilerSession {
             &workshop_text,
             &self.catalog,
             &locale,
-            &self.catalog,
+            &*self.catalog,
         )
         .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
         let mut provenance = Provenance::Unmapped;
@@ -571,7 +568,7 @@ impl CompilerSession {
                 &resolved.text,
                 &self.catalog,
                 &locale,
-                &self.catalog,
+                &*self.catalog,
             )
         })
         .map_err(|error| workshop_diag(error, resolved))?;

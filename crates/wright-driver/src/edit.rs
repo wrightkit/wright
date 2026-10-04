@@ -1142,6 +1142,7 @@ fn rename_in_line(line: &str, from: &str, to: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -1162,8 +1163,8 @@ mod tests {
         .unwrap()
     }
 
-    fn catalog() -> Catalog {
-        Catalog::builtin().expect("builtin catalog")
+    fn catalog() -> Arc<Catalog> {
+        wright_analyzer::catalog::builtin().expect("builtin catalog")
     }
 
     fn temp_workshop(text: &str) -> (PathBuf, PathBuf) {
