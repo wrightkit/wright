@@ -287,14 +287,18 @@ class AgentBenchTest(unittest.TestCase):
         root = self.out
         skills = {"wright-skill": root / "s1", "opy-skill": root / "s2"}
         args = argparse.Namespace(out=root / "run-a", out_root=root, wright=WRIGHT, skill_dirs=skills, wiki_dir=None, deny_read=[], allow_read=[str(root / "creds")], adapter="devin")
-        hidden, allowed = agent_bench.read_policy(args, {"BENCH_RUN_DIR": str(root / "run-a" / "t"), "BENCH_SKILLS": "wright-skill"})
+        env = {"BENCH_RUN_DIR": str(root / "run-a" / "t"), "BENCH_SKILLS": "wright-skill", "BENCH_TOOL": "wright"}
+        hidden, allowed = agent_bench.read_policy(args, env)
         self.assertTrue(all(p in hidden for p in (Path("/Users"), root.resolve(), agent_bench.HERE)))
         self.assertTrue(all(d.resolve() in hidden for d in agent_bench.DATA_ROOTS))
         self.assertIn(skills["opy-skill"].resolve(), hidden)
         self.assertNotIn(skills["wright-skill"].resolve(), hidden)
-        for needed in (root / "run-a" / "t", skills["wright-skill"], root / "creds", agent_bench.HERE / "adapters", agent_bench.HERE / "bench_trace.py", agent_bench.HERE / "oracle", Path(WRIGHT).resolve().parent):
+        for needed in (root / "run-a" / "t", skills["wright-skill"], root / "creds", agent_bench.HERE / "adapters", agent_bench.HERE / "bench_trace.py", Path(WRIGHT).resolve().parent):
             self.assertIn(needed.resolve(), allowed)
         self.assertNotIn(agent_bench.HERE / "bench_grade.py", allowed)
+        self.assertNotIn((agent_bench.HERE / "oracle").resolve(), allowed)  # the grading authority is readable only where the tool needs it
+        _, allowed = agent_bench.read_policy(args, {**env, "BENCH_TOOL": "overpy"})
+        self.assertIn((agent_bench.HERE / "oracle").resolve(), allowed)
 
     @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
     def test_the_agent_sees_only_its_run_the_allowed_paths_and_the_shim(self):
@@ -306,13 +310,14 @@ class AgentBenchTest(unittest.TestCase):
         granted.mkdir()
         (granted / "note.txt").write_text("a file the adapter needs")
         probes = {"unlisted": other / "note.txt", "granted": granted / "note.txt", "grader": agent_bench.HERE / "bench_grade.py", "shim": agent_bench.HERE / "bench_trace.py",
-                  "answer": agent_bench.SCENARIOS / SCENARIO / "reference" / "mode.ws", "oracle": agent_bench.HERE / "oracle" / "compile.js"}
+                  "answer": agent_bench.SCENARIOS / SCENARIO / "reference" / "mode.ws", "oracle": agent_bench.HERE / "oracle" / "compile.js",
+                  "profile": self.out / f"{SCENARIO}-wright" / "agent.sb"}  # the sandbox profile itself, which lists the hidden paths
         code = ("import json\nfrom pathlib import Path\nout = {}\n"
                 + "".join(f"try:\n    Path({str(p)!r}).read_text(); out[{k!r}] = 'read'\nexcept PermissionError:\n    out[{k!r}] = 'blocked'\n" for k, p in probes.items())
                 + "Path('probe.json').write_text(json.dumps(out))\n")
         result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True, allow_read=[str(granted)])
         seen = json.loads((self.out / f"{SCENARIO}-wright/workspace/probe.json").read_text())
-        self.assertEqual(seen, {"unlisted": "blocked", "granted": "read", "grader": "blocked", "shim": "read", "answer": "blocked", "oracle": "read"})
+        self.assertEqual(seen, {"unlisted": "blocked", "granted": "read", "grader": "blocked", "shim": "read", "answer": "blocked", "oracle": "blocked", "profile": "blocked"})  # wright cells must not read the grading authority, and no cell reads its own sandbox profile
         self.assertEqual(result["fileReadEnforcement"]["mode"], "allow-list")
 
     def test_the_tool_shim_runs_without_the_grader(self):

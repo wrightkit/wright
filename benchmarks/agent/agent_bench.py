@@ -269,8 +269,10 @@ def read_policy(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[P
     for binary in (shutil.which("node"), shutil.which(ADAPTER_BINARY.get(getattr(args, "adapter", ""), ""))):
         if binary:
             runtime.append(Path(binary))
-    allowed = [run_dir, HERE / "adapters", HERE / "bench_trace.py", HERE / "oracle", Path(sys.prefix), Path(sys.base_prefix),
+    allowed = [run_dir, HERE / "adapters", HERE / "bench_trace.py", Path(sys.prefix), Path(sys.base_prefix),
                *(Path(args.skill_dirs[name]) for name in selected), *(Path(p).expanduser() for p in getattr(args, "allow_read", []) or [])]
+    if env.get("BENCH_TOOL") == "overpy":  # only the overpy launcher execs the pinned oracle; other cells must not read the grading authority
+        allowed.append(HERE / "oracle")
     for binary in runtime:  # the directory of the binary and of the file its symlink resolves to
         allowed += [binary.parent, binary.resolve().parent]
     unique = lambda paths: list(dict.fromkeys(p.resolve() for p in paths))
@@ -298,7 +300,8 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
         profile.write_text('(version 1)\n(allow default)\n(deny file-write*)\n'
                            f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n'
                            '(deny file-read-data (require-all (regex "/(AGENTS|CLAUDE|GEMINI)[.]md$") '
-                           f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n' + rules)
+                           f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n' + rules
+                           + f'(deny file-read-data (literal {json.dumps(str(profile.resolve()))}))\n')  # the profile lists what is hidden; the agent must not read it
         command = ["sandbox-exec", "-f", str(profile), "/bin/sh", "-c", args.agent_cmd]
     proc = subprocess.Popen(
         command, shell=isinstance(command, str), cwd=workspace, env=env, text=True,
