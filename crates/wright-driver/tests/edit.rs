@@ -73,7 +73,7 @@ fn opy_validation_routes_to_the_provider_operation() {
             kind: SourceKind::Opy,
             ..SessionConfig::default()
         },
-        &workshop_rs::catalog::Catalog::builtin().expect("catalog"),
+        &wright_analyzer::catalog::builtin().expect("catalog"),
         Some(&sources),
         &transaction,
     );
@@ -114,7 +114,7 @@ fn workshop_validation_applies_and_reparses() {
             kind: SourceKind::Workshop,
             ..SessionConfig::default()
         },
-        &workshop_rs::catalog::Catalog::builtin().expect("catalog"),
+        &wright_analyzer::catalog::builtin().expect("catalog"),
         Some(&sources),
         &transaction,
     );

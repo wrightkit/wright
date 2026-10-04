@@ -142,10 +142,10 @@ fn compile_warns_over_client_element_limit_but_still_emits() {
         "variables {{\n    global:\n        0: values\n}}\n\nrule (\"fill\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(values, Array({elements}));\n    }}\n}}\n"
     );
     // The warning's numbers come from the canonical owner, not a guess.
-    let catalog = workshop_rs::catalog::Catalog::builtin().expect("catalog");
+    let catalog = wright_analyzer::catalog::builtin().expect("catalog");
     let locale = workshop_rs::catalog::Locale::new("en-US");
     let expected_total =
-        workshop_rs::parser::parse_with_context(&source, &catalog, &locale, &catalog)
+        workshop_rs::parser::parse_with_context(&source, &catalog, &locale, &*catalog)
             .expect("generated program parses")
             .element_count(&catalog)
             .expect("generated program counts")

@@ -458,8 +458,8 @@ impl LintRegistry {
 
     /// Load one external declarative rule against the canonical Workshop catalog.
     pub fn load_yaml_str(&mut self, input: &str) -> Result<(), RuleRegistryError> {
-        let catalog =
-            Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
+        let catalog = crate::catalog::builtin()
+            .map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
         let definition = RuleDefinition::from_yaml_str(input).map_err(RuleRegistryError::Rule)?;
         let rule = DeclarativeRule::from_definition(definition, &catalog)
             .map_err(RuleRegistryError::Rule)?;
@@ -468,8 +468,8 @@ impl LintRegistry {
 
     /// Load all `.yaml`/`.yml` files in a path, or one file, in lexical order.
     pub fn load_path(&mut self, path: &Path) -> Result<(), RuleRegistryError> {
-        let catalog =
-            Catalog::builtin().map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
+        let catalog = crate::catalog::builtin()
+            .map_err(|error| RuleRegistryError::Catalog(error.to_string()))?;
         self.load_path_with_catalog(path, &catalog)
     }
 

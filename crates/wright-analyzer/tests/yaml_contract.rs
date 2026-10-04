@@ -31,7 +31,7 @@ rules:
 
 #[test]
 fn declarative_rule_ids_keep_the_namespace_slash_contract() {
-    let catalog = Catalog::builtin().unwrap();
+    let catalog = wright_analyzer::catalog::builtin().unwrap();
     let definition = RuleDefinition::from_yaml_str(
         r#"
 id: Community_Name/Rule.Name
@@ -67,7 +67,7 @@ matcher: {}
 
 #[test]
 fn declarative_scopes_match_all_requested_public_control_flow_regions() {
-    let catalog = Catalog::builtin().unwrap();
+    let catalog = wright_analyzer::catalog::builtin().unwrap();
     let mut program = Program::new();
     program.rule(
         Rule::new("scopes", Event::Global)

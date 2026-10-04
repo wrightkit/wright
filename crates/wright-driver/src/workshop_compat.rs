@@ -21,7 +21,7 @@ pub struct WorkshopSemanticSide {
 }
 
 pub fn compare_workshop_texts(expected: &str, actual: &str) -> WorkshopSemanticComparison {
-    let catalog = match workshop_rs::catalog::Catalog::builtin() {
+    let catalog = match wright_analyzer::catalog::builtin() {
         Ok(c) => c,
         Err(e) => return catalog_failure(e.to_string()),
     };
