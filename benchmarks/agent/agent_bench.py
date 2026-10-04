@@ -701,7 +701,7 @@ def cmd_suite(args: argparse.Namespace) -> int:
     """Evaluate every model of the user's list one after another, then write the publishable results page.
 
     Safe to repeat: finished runs are skipped, so quota or time limits only postpone the rest. Exit 3 when something is waiting for a rerun."""
-    models = [m for m in (args.models or []) if not args.only or any(f"{m['adapter']}:{m['model']}".startswith(o) for o in args.only)]
+    models = [m for m in (args.models or []) if not args.only or any(m["adapter"] == o or f"{m['adapter']}:{m['model']}" == o for o in args.only)]  # exact adapter or adapter:model — 'codex:gpt-6' must not swallow 'codex:gpt-6-luna'
     if not models:
         raise SystemExit(f'no models: add "models": [{{"adapter": "devin", "model": "swe-2-max"}}, ...] to {CONFIG_PATH}')
     root = args.out / args.suite_name
