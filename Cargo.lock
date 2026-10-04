@@ -2332,6 +2332,7 @@ dependencies = [
  "url",
  "workshop-rs",
  "wright-driver",
+ "wright-lpp",
 ]
 
 [[package]]

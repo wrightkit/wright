@@ -535,6 +535,36 @@ impl CompilerSession {
             .map(|b| Box::new(b) as Box<dyn wright_lpp::LanguageProvider>)
     }
 
+    /// Run a provider-driven mutation flow (#139) over a fresh provider
+    /// session: spawn by opaque language id, initialize with `client`, run
+    /// the flow, and terminate gracefully.
+    ///
+    /// Any failure before the flow — an unconfigured language id, a spawn
+    /// failure, a failed handshake — is the same structured
+    /// [`crate::provider_edit::ProviderMutation`] refusal surface the flow
+    /// itself uses, so callers handle one refusal contract. The provider
+    /// process never outlives the request: graceful shutdown when possible,
+    /// and the provider's drop guard terminates it otherwise.
+    pub fn run_provider_flow(
+        &self,
+        language_id: &str,
+        client: &wright_lpp::ClientInfo,
+        flow: impl FnOnce(
+            &mut dyn wright_lpp::LanguageProvider,
+        ) -> crate::provider_edit::ProviderMutation,
+    ) -> crate::provider_edit::ProviderMutation {
+        let mut provider = match self.language_provider(language_id) {
+            Ok(provider) => provider,
+            Err(error) => return crate::provider_edit::provider_failure(&error),
+        };
+        if let Err(error) = provider.initialize(Some(client)) {
+            return crate::provider_edit::provider_failure(&error);
+        }
+        let mutation = flow(provider.as_mut());
+        let _ = provider.shutdown();
+        mutation
+    }
+
     /// The locale a Workshop input resolved to, if the last load was
     /// Workshop-origin.
     pub fn resolved_locale(&self) -> Option<String> {

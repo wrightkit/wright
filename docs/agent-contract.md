@@ -78,12 +78,16 @@ ADR-0020). The adapter speaks newline-delimited JSON-RPC 2.0 and implements
 | `costEstimate` | `wright_cost_estimate` |
 | `semanticRename` | `wright_semantic_rename` |
 | `validateEditTransaction` | `wright_validate_edit_transaction` |
+| `providerSemanticRename` | `wright_provider_semantic_rename` |
+| `providerValidateEdit` | `wright_provider_validate_edit` |
 
 `tools/list` contains a tool only when its operation is in this set and
 advertised by `capabilities.operations`. Each tool's `inputSchema` is derived
 from the operation's request schema with `op` removed (the tool name carries
-it); the edit tools also omit `sources`, which then defaults to the on-disk
-text (#472). `tools/call` arguments are the request fields.
+it); the Workshop edit tools also omit `sources`, which then defaults to the
+on-disk text (#472). The provider tools keep `documents` and `sources`
+required — the caller owns the document set. `tools/call` arguments are the
+request fields.
 
 A successful service `result` is returned unchanged as the tool result's JSON
 text content. A service refusal is a tool result with `isError: true` whose

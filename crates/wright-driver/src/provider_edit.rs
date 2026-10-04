@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -112,12 +112,29 @@ pub fn semantic_rename(
         Err(diag) => return refusal(vec![diag], None),
     };
 
+    // The supplied document set is deliberately wider than the target
+    // project: only the provider can compute project membership (include
+    // resolution, entry selection), and `lpp/rename` needs every open
+    // document to spot references the project must account for. The
+    // post-edit check verdict is therefore scoped to the mutation the
+    // provider actually produced — the edit sites plus the position
+    // document — so an unrelated open document cannot block a valid
+    // rename. Diagnostics in member files that were never supplied still
+    // attribute to the entry document's check view and remain blocking.
+    let mut edit_scope: BTreeSet<String> = transaction
+        .edits
+        .iter()
+        .map(|edit| edit.source.clone())
+        .collect();
+    edit_scope.insert(request.position_document_uri.clone());
+
     finish_transaction(
         provider,
         &request.documents,
         transaction,
         &request.sources,
         request.project_root.as_deref(),
+        &edit_scope,
     )
 }
 
@@ -129,12 +146,17 @@ pub fn validate_transaction(
         Ok(transaction) => transaction,
         Err(diagnostic) => return refusal(vec![diagnostic], None),
     };
+    // A caller-supplied document set is the declared project: every
+    // supplied document's errors stay blocking, including unedited
+    // members — the post-edit check is the only project-level gate here.
+    let edit_scope: BTreeSet<String> = request.documents.keys().cloned().collect();
     finish_transaction(
         provider,
         &request.documents,
         transaction,
         &request.sources,
         request.project_root.as_deref(),
+        &edit_scope,
     )
 }
 
@@ -144,6 +166,7 @@ fn finish_transaction(
     transaction: EditTransaction,
     sources: &BTreeMap<String, String>,
     project_root: Option<&str>,
+    edit_scope: &BTreeSet<String>,
 ) -> ProviderMutation {
     for edit in &transaction.edits {
         if let Some(diagnostic) = crate::edit::source_precondition(edit, sources) {
@@ -154,9 +177,14 @@ fn finish_transaction(
         Ok(previews) => previews,
         Err(diag) => return refusal(vec![diag], None),
     };
-    if let Err((diagnostics, provider)) =
-        validate_pipeline(provider, documents, &transaction, &previews, project_root)
-    {
+    if let Err((diagnostics, provider)) = validate_pipeline(
+        provider,
+        documents,
+        &transaction,
+        &previews,
+        project_root,
+        edit_scope,
+    ) {
         return refusal(diagnostics, provider);
     }
     ProviderMutation {
@@ -175,6 +203,7 @@ fn validate_pipeline(
     transaction: &EditTransaction,
     previews: &[SourcePreview],
     project_root: Option<&str>,
+    edit_scope: &BTreeSet<String>,
 ) -> Result<(), (Vec<Diagnostic>, Option<ProviderInfo>)> {
     let mut by_source: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
     for edit in &transaction.edits {
@@ -261,6 +290,13 @@ fn validate_pipeline(
         .check(&edited, project_root)
         .map_err(provider_failure_tuple)?;
     for doc in &checked.documents {
+        // Only documents the mutation is allowed to affect can block it:
+        // the request set may intentionally carry unrelated open documents
+        // (see `semantic_rename`), whose diagnostics are not this project's
+        // problem.
+        if !edit_scope.contains(&doc.uri) {
+            continue;
+        }
         for diag in &doc.diagnostics {
             if diag.severity == wright_lpp::DiagnosticSeverity::Error {
                 return Err((
@@ -445,6 +481,7 @@ mod tests {
     };
 
     const URI: &str = "file:///project/puzzle.xdl";
+    const UNRELATED_URI: &str = "file:///project/unrelated.xdl";
     const CLEAN: &str = "puzzle clean {\n  target = 40\n  start = 10\n  ops {\n    double: x => x * 2\n    plus1: x => x + 1\n  }\n  solution = [ double, double ]\n}";
 
     fn document(text: &str) -> Document {
@@ -932,6 +969,138 @@ mod tests {
             }),
         };
         let mutation = semantic_rename(&mut provider, &rename_request());
+        assert!(!mutation.ok);
+        assert_eq!(mutation.diagnostics[0].code, "provider-semantic-error");
+        assert!(mutation.transaction.is_none());
+        assert!(mutation.preview.is_none());
+    }
+
+    #[test]
+    fn rename_post_edit_check_drops_unrelated_open_document_errors() {
+        // The rename document set is language-wide because only the
+        // provider can compute project membership; a supplied document the
+        // mutation never touched must not block it.
+        let mut request = rename_request();
+        request.documents.insert(
+            UNRELATED_URI.to_string(),
+            wright_lpp::Document {
+                uri: UNRELATED_URI.to_string(),
+                language_id: "x-demo-lang".to_string(),
+                version: 1,
+                text: "puzzle broken {\n".to_string(),
+            },
+        );
+        request
+            .sources
+            .insert(UNRELATED_URI.to_string(), "puzzle broken {\n".to_string());
+        let mut provider = ScriptedProvider {
+            rename: Ok(clean_rename_result()),
+            validate_edits: Ok(ValidateEditsResult {
+                valid: true,
+                version: 3,
+                reason: None,
+                failing_edit_index: None,
+            }),
+            check: Ok(CheckResult {
+                documents: vec![wright_lpp::DocumentDiagnostics {
+                    uri: UNRELATED_URI.to_string(),
+                    version: 1,
+                    diagnostics: vec![wright_lpp::Diagnostic {
+                        range: wright_lpp::Range {
+                            start: wright_lpp::Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: wright_lpp::Position {
+                                line: 0,
+                                character: 15,
+                            },
+                        },
+                        severity: wright_lpp::DiagnosticSeverity::Error,
+                        code: Some("x-demo/unterminated".to_string()),
+                        message: "unterminated puzzle".to_string(),
+                        source: Some("x-demo-lang".to_string()),
+                    }],
+                }],
+            }),
+        };
+        let mutation = semantic_rename(&mut provider, &request);
+        assert!(
+            mutation.ok,
+            "an unrelated document's error cannot block the rename: {:?}",
+            mutation.diagnostics
+        );
+        assert!(mutation.transaction.is_some());
+    }
+
+    #[test]
+    fn validate_transaction_check_scope_covers_the_whole_caller_set() {
+        // A caller-supplied document set is the declared project — unlike
+        // the rename-collected set above, an error in an unedited document
+        // still blocks because the post-edit check is the only project gate.
+        let transaction = EditTransaction::new(vec![SourceEdit {
+            edit_kind: "rename".to_string(),
+            source: URI.to_string(),
+            source_identity: crate::input_identity(CLEAN),
+            range: EditRange {
+                start_line: 5,
+                start_col: 5,
+                end_line: 5,
+                end_col: 11,
+            },
+            new_text: "twice".to_string(),
+        }])
+        .expect("transaction");
+        let mut request = ProviderValidateRequest {
+            documents: document_set(),
+            transaction,
+            sources: sources(CLEAN),
+            project_root: None,
+        };
+        request.documents.insert(
+            UNRELATED_URI.to_string(),
+            wright_lpp::Document {
+                uri: UNRELATED_URI.to_string(),
+                language_id: "x-demo-lang".to_string(),
+                version: 1,
+                text: "puzzle broken {\n".to_string(),
+            },
+        );
+        request
+            .sources
+            .insert(UNRELATED_URI.to_string(), "puzzle broken {\n".to_string());
+        let mut provider = ScriptedProvider {
+            rename: Ok(RenameResult { edits: vec![] }),
+            validate_edits: Ok(ValidateEditsResult {
+                valid: true,
+                version: 3,
+                reason: None,
+                failing_edit_index: None,
+            }),
+            check: Ok(CheckResult {
+                documents: vec![wright_lpp::DocumentDiagnostics {
+                    uri: UNRELATED_URI.to_string(),
+                    version: 1,
+                    diagnostics: vec![wright_lpp::Diagnostic {
+                        range: wright_lpp::Range {
+                            start: wright_lpp::Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: wright_lpp::Position {
+                                line: 0,
+                                character: 15,
+                            },
+                        },
+                        severity: wright_lpp::DiagnosticSeverity::Error,
+                        code: Some("x-demo/unterminated".to_string()),
+                        message: "unterminated puzzle".to_string(),
+                        source: Some("x-demo-lang".to_string()),
+                    }],
+                }],
+            }),
+        };
+        let mutation = validate_transaction(&mut provider, &request);
         assert!(!mutation.ok);
         assert_eq!(mutation.diagnostics[0].code, "provider-semantic-error");
         assert!(mutation.transaction.is_none());

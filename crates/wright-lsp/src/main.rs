@@ -7,37 +7,65 @@ use std::str::FromStr;
 
 use lsp_types::notification::{Notification, PublishDiagnostics};
 use lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams, Range as LspRange,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, Uri,
+    AnnotatedTextEdit, Diagnostic as LspDiagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentChanges, InitializeParams, InitializeResult, OneOf,
+    OptionalVersionedTextDocumentIdentifier, Position as LspPosition, PositionEncodingKind,
+    PublishDiagnosticsParams, Range as LspRange, RenameParams, ServerCapabilities, ServerInfo,
+    TextDocumentEdit, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextEdit, Uri, WorkspaceEdit,
 };
 use serde_json::Value;
 
-use wright_language::LanguageService;
-use wright_language::document::{Document, Range};
+use wright_language::document::{Document, Position, Range};
+use wright_language::service::{RenameOutcome, SourceTextEdit};
+use wright_language::{LanguageService, OpyProviderConfig, SessionConfig};
 
 type PublicationOwnership = BTreeMap<String, BTreeSet<String>>;
 
 fn main() {
-    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
-        println!("wright-lsp {}", env!("CARGO_PKG_VERSION"));
-        return;
+    let mut args = std::env::args().skip(1);
+    let mut opy_provider: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--version" | "-V" => {
+                println!("wright-lsp {}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
+            "--opy-provider" => {
+                let Some(path) = args.next() else {
+                    eprintln!("wright-lsp: --opy-provider requires a PATH value");
+                    std::process::exit(2);
+                };
+                opy_provider = Some(PathBuf::from(path));
+            }
+            _ => {}
+        }
     }
-    if let Err(message) = run() {
+    if let Err(message) = run(opy_provider) {
         eprintln!("wright-lsp: {message}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), String> {
+fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
     let mut reader = std::io::stdin().lock();
     let mut writer = std::io::stdout().lock();
 
+    let config = SessionConfig {
+        opy_provider: OpyProviderConfig {
+            executable: opy_provider,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let mut root = std::env::current_dir().map_err(|e| e.to_string())?;
-    let mut service = LanguageService::new(root.clone());
+    let mut service = LanguageService::with_config(root.clone(), config.clone());
     let mut ownership: PublicationOwnership = BTreeMap::new();
+    // Whether the client negotiated versioned workspace edits
+    // (`workspace.workspaceEdit.documentChanges`). Renames are only served
+    // when they can carry the validated document version.
+    let mut versioned_workspace_edits = false;
 
     loop {
         let message = read_message(&mut reader)?;
@@ -52,26 +80,41 @@ fn run() -> Result<(), String> {
 
         match method.as_str() {
             "initialize" => {
-                if let Some(params) = params {
-                    if let Ok(init) = serde_json::from_value::<InitializeParams>(params) {
-                        if let Some(resolved) = initialize_root(&init) {
-                            root = resolved;
-                            service = LanguageService::new(root.clone());
-                            ownership.clear();
-                        }
+                let init = params
+                    .and_then(|params| serde_json::from_value::<InitializeParams>(params).ok());
+                versioned_workspace_edits = init
+                    .as_ref()
+                    .and_then(|init| {
+                        init.capabilities
+                            .workspace
+                            .as_ref()?
+                            .workspace_edit
+                            .as_ref()?
+                            .document_changes
+                    })
+                    .unwrap_or(false);
+                if let Some(init) = init {
+                    if let Some(resolved) = initialize_root(&init) {
+                        root = resolved;
+                        service = LanguageService::with_config(root.clone(), config.clone());
+                        ownership.clear();
                     }
                 }
                 write_response(
                     &mut writer,
                     id,
-                    serde_json::to_value(initialize_result()).unwrap(),
+                    serde_json::to_value(initialize_result(versioned_workspace_edits)).unwrap(),
                 )?;
             }
             "initialized" => {}
             "shutdown" => write_response(&mut writer, id, Value::Null)?,
             "exit" => break,
             "textDocument/didOpen" => {
-                let params: DidOpenTextDocumentParams = parse_params(params)?;
+                let Some(params) =
+                    read_params::<DidOpenTextDocumentParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
                 let uri = params.text_document.uri.to_string();
                 let document = Document::with_version(
                     uri.clone(),
@@ -83,7 +126,11 @@ fn run() -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didChange" => {
-                let params: DidChangeTextDocumentParams = parse_params(params)?;
+                let Some(params) =
+                    read_params::<DidChangeTextDocumentParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
                 let uri = params.text_document.uri.to_string();
                 if let Some(change) = params.content_changes.last() {
                     service
@@ -93,7 +140,11 @@ fn run() -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didClose" => {
-                let params: DidCloseTextDocumentParams = parse_params(params)?;
+                let Some(params) =
+                    read_params::<DidCloseTextDocumentParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
                 let uri = params.text_document.uri.to_string();
                 let owned = ownership.remove(&uri).unwrap_or_default();
                 service.store.close(&uri);
@@ -110,6 +161,57 @@ fn run() -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didSave" => {}
+            "textDocument/rename" => {
+                let Some(params) = read_params::<RenameParams>(&mut writer, &id, params)? else {
+                    continue;
+                };
+                if id.is_none() {
+                    continue; // a notification gets no response and no provider call
+                }
+                if !versioned_workspace_edits {
+                    // `WorkspaceEdit.changes` cannot carry the document
+                    // version the provider validated; serving it would let a
+                    // client apply the edit to a buffer that moved while the
+                    // rename was pending without ever detecting it.
+                    write_error(
+                        &mut writer,
+                        id,
+                        -32803,
+                        "rename requires versioned workspace edits \
+                         (workspace.workspaceEdit.documentChanges is not negotiated); \
+                         the request is refused rather than risk a stale buffer",
+                        "rename-unversioned-workspace-edit",
+                    )?;
+                    continue;
+                }
+                let outcome = service.rename(
+                    params.text_document_position.text_document.uri.as_str(),
+                    Position {
+                        line: params.text_document_position.position.line,
+                        character: params.text_document_position.position.character,
+                    },
+                    &params.new_name,
+                );
+                match outcome {
+                    RenameOutcome::Applied(edits) => match versioned_workspace_edit(edits) {
+                        Ok(edit) => {
+                            write_response(&mut writer, id, serde_json::to_value(edit).unwrap())?
+                        }
+                        Err(uri) => write_error(
+                            &mut writer,
+                            id,
+                            -32803,
+                            &format!(
+                                "the provider produced an edit against an unparseable URI {uri}"
+                            ),
+                            "rename-edit-malformed-uri",
+                        )?,
+                    },
+                    RenameOutcome::Refused { code, message } => {
+                        write_error(&mut writer, id, -32803, &message, &code)?;
+                    }
+                }
+            }
             _ => {
                 if id.is_some() {
                     write_response(&mut writer, id, Value::Null)?;
@@ -120,7 +222,41 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn initialize_result() -> InitializeResult {
+/// `documentChanges` carries the validated document version per file so the
+/// client can reject the edit if its buffer moved while the rename was
+/// pending. One `TextDocumentEdit` per document; a dropped edit would apply a
+/// partial rename, so an unparseable URI is returned as the error.
+fn versioned_workspace_edit(edits: Vec<SourceTextEdit>) -> Result<WorkspaceEdit, String> {
+    let mut grouped: BTreeMap<String, (i32, Vec<OneOf<TextEdit, AnnotatedTextEdit>>)> =
+        BTreeMap::new();
+    for edit in edits {
+        let version = edit.version;
+        grouped
+            .entry(edit.uri)
+            .or_insert_with(|| (version, Vec::new()))
+            .1
+            .push(OneOf::Left(TextEdit {
+                range: convert_range(edit.range),
+                new_text: edit.new_text,
+            }));
+    }
+    let document_edits = grouped
+        .into_iter()
+        .map(|(uri, (version, edits))| {
+            let parsed = Uri::from_str(&uri).map_err(|_| uri)?;
+            Ok(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier::new(parsed, version),
+                edits,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(WorkspaceEdit {
+        document_changes: Some(DocumentChanges::Edits(document_edits)),
+        ..Default::default()
+    })
+}
+
+fn initialize_result(versioned_workspace_edits: bool) -> InitializeResult {
     InitializeResult {
         capabilities: ServerCapabilities {
             position_encoding: Some(PositionEncodingKind::UTF16),
@@ -131,6 +267,10 @@ fn initialize_result() -> InitializeResult {
                     ..Default::default()
                 },
             )),
+            // Applied renames are returned as versioned `documentChanges`;
+            // a client that cannot receive the validated document version
+            // cannot be handed an edit safely, so rename stays unadvertised.
+            rename_provider: versioned_workspace_edits.then_some(OneOf::Left(true)),
             ..Default::default()
         },
         server_info: Some(ServerInfo {
@@ -175,8 +315,49 @@ fn write_response(writer: &mut impl Write, id: Option<Value>, result: Value) -> 
     )
 }
 
+/// A JSON-RPC error response that preserves the refusal's structured code in
+/// `error.data.code` so clients can distinguish refusals without parsing the
+/// message.
+fn write_error(
+    writer: &mut impl Write,
+    id: Option<Value>,
+    code: i64,
+    message: &str,
+    refusal_code: &str,
+) -> Result<(), String> {
+    write_msg(
+        writer,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": code, "message": message, "data": { "code": refusal_code } },
+        }),
+    )
+}
+
 fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, String> {
-    serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())
+    serde_json::from_value(params.ok_or_else(|| "missing params".to_string())?)
+        .map_err(|error| error.to_string())
+}
+
+/// Params for a message, answering `-32602` when a request carries none or
+/// malformed ones. `None` means the message was malformed and already handled —
+/// or was a notification, which gets no response — so the caller skips it and
+/// the server keeps serving.
+fn read_params<T: serde::de::DeserializeOwned>(
+    writer: &mut impl Write,
+    id: &Option<Value>,
+    params: Option<Value>,
+) -> Result<Option<T>, String> {
+    match parse_params(params) {
+        Ok(parsed) => Ok(Some(parsed)),
+        Err(message) => {
+            if id.is_some() {
+                write_error(writer, id.clone(), -32602, &message, "invalid-params")?;
+            }
+            Ok(None)
+        }
+    }
 }
 
 fn publish_affected_diagnostics(
@@ -322,5 +503,68 @@ fn convert_range(range: Range) -> LspRange {
             line: range.end.line,
             character: range.end.character,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edit(uri: &str, version: i32, line: u32, new_text: &str) -> SourceTextEdit {
+        let at = |character| Position { line, character };
+        SourceTextEdit {
+            uri: uri.to_string(),
+            range: Range {
+                start: at(10),
+                end: at(15),
+            },
+            new_text: new_text.to_string(),
+            version,
+        }
+    }
+
+    #[test]
+    fn rename_edits_are_grouped_per_document_with_their_validated_version() {
+        let edits = vec![
+            edit("file:///w/a.opy", 3, 0, "vault"),
+            edit("file:///w/b.opy", 7, 1, "vault"),
+            edit("file:///w/a.opy", 3, 4, "vault"),
+        ];
+        let value = serde_json::to_value(versioned_workspace_edit(edits).unwrap()).unwrap();
+        assert!(value.get("changes").is_none(), "unversioned map: {value}");
+        let changes = value["documentChanges"].as_array().unwrap();
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0]["textDocument"]["uri"], "file:///w/a.opy");
+        assert_eq!(changes[0]["textDocument"]["version"], 3);
+        assert_eq!(changes[0]["edits"].as_array().unwrap().len(), 2);
+        assert_eq!(changes[1]["textDocument"]["uri"], "file:///w/b.opy");
+        assert_eq!(changes[1]["textDocument"]["version"], 7);
+        assert_eq!(changes[1]["edits"][0]["newText"], "vault");
+        assert_eq!(changes[1]["edits"][0]["range"]["start"]["character"], 10);
+    }
+
+    #[test]
+    fn an_unparseable_edit_uri_refuses_the_whole_edit() {
+        let edits = vec![
+            edit("file:///w/a.opy", 1, 0, "vault"),
+            edit("not a uri", 1, 0, "vault"),
+        ];
+        assert_eq!(versioned_workspace_edit(edits).unwrap_err(), "not a uri");
+    }
+
+    #[test]
+    fn rename_is_advertised_only_with_versioned_workspace_edits() {
+        assert!(
+            initialize_result(true)
+                .capabilities
+                .rename_provider
+                .is_some()
+        );
+        assert!(
+            initialize_result(false)
+                .capabilities
+                .rename_provider
+                .is_none()
+        );
     }
 }

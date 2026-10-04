@@ -601,16 +601,8 @@ impl<'a> ToolService<'a> {
         self.session.language_provider(language_id)
     }
 
-    /// Run a provider-driven mutation flow (#139) over a fresh provider
-    /// session: spawn by opaque language id, initialize, run the flow, and
-    /// terminate gracefully.
-    ///
-    /// Any failure before the flow — an unconfigured language id, a spawn
-    /// failure, a failed handshake — is the same structured
-    /// [`crate::provider_edit::ProviderMutation`] refusal surface the flow
-    /// itself uses, so callers handle one refusal contract. The provider
-    /// process never outlives the request: graceful shutdown when possible,
-    /// and the session's drop guard terminates it otherwise.
+    /// Run a provider-driven mutation flow (#139) through the session's
+    /// shared provider lifecycle path.
     fn run_provider_flow(
         &self,
         language_id: &str,
@@ -618,19 +610,14 @@ impl<'a> ToolService<'a> {
             &mut dyn wright_lpp::LanguageProvider,
         ) -> crate::provider_edit::ProviderMutation,
     ) -> crate::provider_edit::ProviderMutation {
-        let mut provider = match self.session.language_provider(language_id) {
-            Ok(provider) => provider,
-            Err(error) => return crate::provider_edit::provider_failure(&error),
-        };
-        if let Err(error) = provider.initialize(Some(&wright_lpp::ClientInfo {
-            name: SERVICE_NAME.to_string(),
-            version: SERVICE_VERSION.to_string(),
-        })) {
-            return crate::provider_edit::provider_failure(&error);
-        }
-        let mutation = flow(provider.as_mut());
-        let _ = provider.shutdown();
-        mutation
+        self.session.run_provider_flow(
+            language_id,
+            &wright_lpp::ClientInfo {
+                name: SERVICE_NAME.to_string(),
+                version: SERVICE_VERSION.to_string(),
+            },
+            flow,
+        )
     }
 
     fn ok(&self, result: serde_json::Value) -> ToolResponse {

@@ -650,6 +650,8 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_cost_estimate",
             "wright_semantic_rename",
             "wright_validate_edit_transaction",
+            "wright_provider_semantic_rename",
+            "wright_provider_validate_edit",
         ]
     );
     // tools/list is a subset of the contract's advertised operations.
@@ -667,6 +669,8 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "cost_estimate" => "costEstimate",
             "semantic_rename" => "semanticRename",
             "validate_edit_transaction" => "validateEditTransaction",
+            "provider_semantic_rename" => "providerSemanticRename",
+            "provider_validate_edit" => "providerValidateEdit",
             other => other,
         };
         assert!(
@@ -739,6 +743,8 @@ fn mcp_transport_results_match_the_service_contract() {
             "cost_estimate" => "costEstimate",
             "semantic_rename" => "semanticRename",
             "validate_edit_transaction" => "validateEditTransaction",
+            "provider_semantic_rename" => "providerSemanticRename",
+            "provider_validate_edit" => "providerValidateEdit",
             other => other,
         };
         let mut request = arguments.clone();
