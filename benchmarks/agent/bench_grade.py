@@ -13,7 +13,7 @@ HERE = Path(__file__).resolve().parent
 ORACLE = HERE / "oracle"
 GRADER_FILES = ("bench_grade.py", "oracle/compile.js", "oracle/package-lock.json")
 SUITE_VERSION = "v1"
-UNSAFE_IGNORED = ("wiki", ".agents", ".devin")  # linked wiki and skills installed through the agent's own mechanism
+UNSAFE_IGNORED = ("wiki", ".agents", ".devin", ".opencode")  # linked wiki and skills installed through the agent's own mechanism
 
 
 def wright_json(wright: str, args: list[str]) -> tuple[int, dict]:
@@ -82,6 +82,14 @@ def authorities(wright: str, source: Path, scratch: Path) -> dict:
                 "wright": result["wrightCompile"],
                 "oracle": result["oracle"],
             }
+    return result
+
+
+def missing_entry_authorities(entry: Path) -> dict:
+    """The agent produced no entry file: every authority rejects it, and the oracle is only unavailable when it is not installed."""
+    result: dict = {"wrightCompile": {"status": "error", "error": "entry file missing"}}
+    if entry.suffix == ".opy" and oracle_available():
+        result["oracle"] = {"status": "error", "error": "entry file missing"}
     return result
 
 
@@ -206,7 +214,7 @@ def grade(scenario: dict, workspace: Path, wright: str, scratch: Path | None = N
     entry = workspace / scenario["entry"]
     scratch = scratch or workspace.parent / f"{workspace.name}-grading"
     shutil.rmtree(scratch, ignore_errors=True)
-    state: dict = {"scratch": scratch, "authorities": authorities(wright, entry, scratch) if entry.is_file() else {"wrightCompile": {"status": "error"}}}
+    state: dict = {"scratch": scratch, "authorities": authorities(wright, entry, scratch) if entry.is_file() else missing_entry_authorities(entry)}
     _, lint = wright_json(wright, ["lint", str(entry)])
     state["lint"] = (lint.get("result") or {}).get("findings") or []
     checks = [run_check(c, workspace, entry, wright, state) for c in scenario["checks"]]

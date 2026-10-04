@@ -21,8 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "websocket error", "connection error")
+from common import as_dict, cli_version, drain, feed_stdin, INFRA_EXIT, TRANSIENT
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
@@ -31,7 +30,10 @@ def context_limit(pi: str, model: str, env: dict, extensions: list[str]) -> int 
     command = [pi, "--no-extensions"]
     for extension in filter(None, extensions):
         command += ["-e", extension]
-    listing = subprocess.run([*command, "--list-models", model.split("/")[-1]], env=env, capture_output=True, text=True).stdout
+    try:
+        listing = subprocess.run([*command, "--list-models", model.split("/")[-1]], env=env, capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     for line in listing.splitlines():
         cols = line.split()
         if len(cols) > 2 and cols[0] == model.split("/")[0] and cols[1] == model.split("/")[-1]:
@@ -80,10 +82,10 @@ def main() -> int:
         cmd += ["--thinking", env["BENCH_THINKING"]]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home), "PI_CODING_AGENT_DIR": str(state)}
     limit = context_limit(pi, model, child_env, extensions)
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "pi", "model": model, "effort": env.get("BENCH_THINKING"), "tools": ["read", "bash", "edit", "write"], "extensions": [e for e in extensions if e]}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "pi", "version": cli_version(pi), "model": model, "effort": env.get("BENCH_THINKING"), "tools": ["read", "bash", "edit", "write"], "extensions": [e for e in extensions if e]}, indent=2))
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=child_env)
-    proc.stdin.write(prompt)
-    proc.stdin.close()
+    stderr_text = drain(proc.stderr)
+    feed_stdin(proc, prompt)
     loaded: list[str] = []
     final, error = "", ""
     with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage
@@ -92,20 +94,22 @@ def main() -> int:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
             now = time.time()
-            message = event.get("message") or {}
-            if event["type"] != "message_update":
+            message, etype = as_dict(event.get("message")), event.get("type")
+            if etype != "message_update":
                 transcript.write(json.dumps({"t": now, **event}) + "\n")
-            if event["type"] == "message_start" and message.get("role") == "system":
+            if etype == "message_start" and message.get("role") == "system":
                 loaded = skill_names(message)
-            if event["type"] == "message_end" and message.get("role") == "assistant":
+            if etype == "message_end" and message.get("role") == "assistant":
                 usage.write(json.dumps(usage_row(message, limit, now)) + "\n")
                 final = message_text(message) or final
                 if message.get("stopReason") == "error":
-                    error = str(message.get("errorMessage") or message_text(message))
+                    error = str(message.get("errorMessage") or "error")  # only the structured error classifies; message text is the agent's own
                 else:
                     error = ""
-    stderr = proc.stderr.read()
+    stderr = stderr_text()
     code = proc.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
     sys.stdout.write(final)

@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
-INFRA_EXIT = 75
+from common import as_dict, cli_version, drain, feed_stdin, INFRA_EXIT, TRANSIENT
+
 TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 WEB_TOOLS = ["WebFetch", "WebSearch"]
 
@@ -40,20 +41,23 @@ def main() -> int:
     loaded: list[str] = []
     skills = [Path(p) for p in env.get("BENCH_SKILL_DIRS", "").split(os.pathsep) if p]
     if skills:
-        plugin = Path(tempfile.mkdtemp(dir=env["BENCH_RUN_DIR"]))
-        (plugin / ".claude-plugin").mkdir()
+        plugin = Path(env["BENCH_RUN_DIR"]) / "claude-plugin"  # a fixed name: an infra retry would else orphan a mkdtemp dir
+        shutil.rmtree(plugin, ignore_errors=True)
+        (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "bench", "version": "0.0.0", "description": "benchmark skills"}))
         for skill in skills:
             shutil.copytree(skill, plugin / "skills" / skill.name)
-            loaded.append(skill.name)
+            match = re.search(r"^name:\s*(\S+)", (skill / "SKILL.md").read_text(), re.M)  # the name the harness checks, not the directory name
+            loaded.append(match.group(1) if match else skill.name)
         cmd += ["--plugin-dir", str(plugin)]
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "claude-code", "model": env.get("BENCH_MODEL", "sonnet"), "tools": TOOLS + (WEB_TOOLS if web else [])}, indent=2))
+    claude = cmd[0]
+    init: dict = {}
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         env={**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"},
     )
-    proc.stdin.write(prompt)
-    proc.stdin.close()
+    feed_stdin(proc, prompt)
+    stderr_text = drain(proc.stderr)
     final, errored = "", False
     with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage
         for line in proc.stdout:
@@ -61,9 +65,13 @@ def main() -> int:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
             transcript.write(json.dumps({"t": time.time(), **event}) + "\n")
+            if event.get("type") == "system" and event.get("subtype") == "init":
+                init = event
             if event.get("type") == "assistant":
-                u = event["message"].get("usage") or {}
+                u = as_dict(event.get("message")).get("usage") or {}
                 cached = u.get("cache_read_input_tokens") or 0
                 written = u.get("cache_creation_input_tokens") or 0
                 usage.write(json.dumps({
@@ -72,15 +80,16 @@ def main() -> int:
                     "context": (u.get("input_tokens") or 0) + cached + written, "context_limit": None,
                 }) + "\n")
             if event.get("type") == "result":
-                final, errored = event.get("result", ""), bool(event.get("is_error"))
-    stderr = proc.stderr.read()
+                result_value = event.get("result")
+                final, errored = (result_value if isinstance(result_value, str) else final), bool(event.get("is_error"))
+    stderr = stderr_text()
     code = proc.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "claude-code", "version": cli_version(claude), "model": init.get("model") or env.get("BENCH_MODEL", "sonnet"), "tools": init.get("tools") or TOOLS + (WEB_TOOLS if web else []), "toolsSource": "init" if init.get("tools") else "requested", "mcpServers": init.get("mcp_servers")}, indent=2))
     sys.stdout.write(final)
     sys.stderr.write(stderr)
     if errored or code != 0:
-        transient = any(s in stderr.lower() + final.lower() for s in ("overloaded", "rate limit", "529", "timed out"))
-        return INFRA_EXIT if transient else (code or 1)
+        return INFRA_EXIT if any(s in stderr.lower() for s in TRANSIENT) else (code or 1)  # `final` is the agent's own text; only provider channels classify
     return 0
 
 

@@ -11,6 +11,14 @@ import sys
 import time
 from pathlib import Path
 
+from common import as_dict, cli_version, split_effort, INFRA_EXIT, TRANSIENT
+
+
+def transient(error: str) -> bool:
+    """A provider failure. The CLI reports a dropped connection as `API error (attempt N): request failed: ... EOF`, even after the answer was written."""
+    lowered = error.lower()
+    return any(s in lowered for s in TRANSIENT) or "api error (attempt" in lowered or "request failed" in lowered
+
 
 def usage_row(usage: dict, timestamp: float) -> dict:
     cached = usage.get("cache_read_tokens") or 0
@@ -38,41 +46,47 @@ def main() -> int:
         shutil.copytree(skill, Path.cwd() / ".agents/skills" / skill.name)
         installed.append(skill.name)
     binary = shutil.which("agy", path=env.get("BENCH_HOST_PATH")) or "agy"
-    command = [binary, "--model", env["BENCH_MODEL"], "--effort", env["BENCH_THINKING"],
+    effort = env.get("BENCH_THINKING")
+    command = [binary, "--model", env["BENCH_MODEL"], *(["--effort", effort] if effort else []),
                "--output-format", "stream-json", "--print-timeout", "0", "--print", sys.stdin.read()]
     child_env = {**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "HOME": str(home)}
     seen, result, init, unexpected = set(), {}, {}, set()
     with (run / "agy-stderr.log").open("w") as stderr, open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:
         process = subprocess.Popen(command, env=child_env, stdout=subprocess.PIPE, stderr=stderr, text=True)
         for line in process.stdout:
-            event = json.loads(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
             now = time.time()
             transcript.write(json.dumps({"t": now, **event}) + "\n")
-            if event["event"] == "init":
-                init = event["init"]
-            step = event.get("step_update") or {}
+            if event.get("event") == "init":
+                init = event.get("init") or {}
+            step = as_dict(event.get("step_update"))
             tool = step.get("tool_name", "")
             if env["BENCH_NETWORK"] == "off" and tool in {"search_web", "read_url_content", "browser_subagent", "open_browser_url"}:
                 unexpected.add("network-tool:" + tool)
                 process.terminate()
 
-            if step.get("state") == "DONE" and step.get("usage") and step["step_index"] not in seen:
-                seen.add(step["step_index"])
+            if step.get("state") == "DONE" and step.get("usage") and (index := step.get("step_index")) is not None and index not in seen:
+                seen.add(index)
                 usage.write(json.dumps(usage_row(step["usage"], now)) + "\n")
-            if event["event"] == "result":
-                result = event["result"]
+            if event.get("event") == "result":
+                result = as_dict(event.get("result"))
         code = process.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"installed": installed, "audit": "isolated-home; CLI does not export loaded skill context", "unexpected": sorted(unexpected)}))
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "model": env["BENCH_MODEL"], "effort": env["BENCH_THINKING"], "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))
-    (run / "adapter.json").write_text(json.dumps({"agent": "agy", "requestedModel": env["BENCH_MODEL"], "requestedEffort": env["BENCH_THINKING"], "observedModel": init.get("model"), "status": result.get("status"), "usageSource": "stream-step-usage", "providerUsage": result.get("usage")}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "agy", "version": cli_version(binary), "model": split_effort(env["BENCH_MODEL"])[0], "modelId": env["BENCH_MODEL"], "effort": effort or split_effort(env["BENCH_MODEL"])[1], "tools": None, "note": "the CLI does not expose its tool list"}, indent=2))
+    (run / "adapter.json").write_text(json.dumps({"agent": "agy", "requestedModel": env["BENCH_MODEL"], "requestedEffort": effort, "observedModel": init.get("model"), "status": result.get("status"), "usageSource": "stream-step-usage", "providerUsage": result.get("usage")}, indent=2))
     sys.stdout.write(result.get("response", ""))
     stderr_text = (run / "agy-stderr.log").read_text()
     sys.stderr.write(stderr_text)
     error = str(result.get("error", "")) + stderr_text
     if "no output produced" in stderr_text and "headless" in stderr_text:
-        return 75
+        return INFRA_EXIT
     if code or result.get("status") != "SUCCESS":
-        return 75 if any(s in error.lower() for s in ("quota", "rate limit", "429", "temporarily", "503", "credits")) else (code or 1)
+        return INFRA_EXIT if transient(error) else (code or 1)
     return 0
 
 
