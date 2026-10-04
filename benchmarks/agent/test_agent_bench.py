@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -612,6 +613,32 @@ class AgentBenchTest(unittest.TestCase):
     def test_an_effort_the_model_id_already_names_is_not_repeated_in_the_run_name(self):
         self.assertEqual(agent_bench.model_slug({"adapter": "agy", "model": "gemini-3.8-flash-high", "effort": "high"}), "agy-gemini-3.8-flash-high")
         self.assertEqual(agent_bench.model_slug({"adapter": "codex", "model": "gpt-6-luna", "effort": "xhigh"}), "codex-gpt-6-luna-xhigh")
+
+    def test_wait_for_limits_continues_after_a_provider_limit_and_gives_up_after_max_waits(self):
+        waited = []
+        with patch.object(agent_bench, "cmd_matrix", side_effect=[3, 3, 0]) as matrix, patch.object(agent_bench.time, "sleep", side_effect=waited.append), contextlib.redirect_stdout(io.StringIO()):
+            status = agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=2100, max_waits=5))
+        self.assertEqual((status, matrix.call_count, waited), (0, 3, [2100, 2100]))
+        with patch.object(agent_bench, "cmd_matrix", return_value=3) as matrix, patch.object(agent_bench.time, "sleep"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=1, max_waits=2)), 3)
+        self.assertEqual(matrix.call_count, 3)  # the first run and two waits
+        with patch.object(agent_bench, "cmd_matrix", return_value=3) as matrix:  # without the option the exit code is left for the caller
+            self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=False, max_waits=5)), 3)
+        self.assertEqual(matrix.call_count, 1)
+
+    def test_wait_for_limits_rejects_a_negative_poll_or_wait_count(self):
+        for bad in (argparse.Namespace(wait_for_limits=True, limits_poll=-1, max_waits=5), argparse.Namespace(wait_for_limits=True, limits_poll=2100, max_waits=-1)):
+            with patch.object(agent_bench, "cmd_matrix", return_value=3), self.assertRaises(SystemExit):
+                agent_bench.matrix_waiting_for_limits(bad)
+        with patch.object(agent_bench, "cmd_matrix", return_value=0):  # a namespace without the options takes the defaults and does not wait
+            self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace()), 0)
+        argv = ["evaluate", "--adapter", "devin", "--model", "m"]
+        with self.assertRaises(SystemExit) as neg:
+            with contextlib.redirect_stderr(io.StringIO()):
+                agent_bench.build_parser().parse_args(argv + ["--limits-poll", "-1"])
+        self.assertNotEqual(neg.exception.code, 0)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            agent_bench.build_parser().parse_args(argv + ["--wait-for-limits", "30"])  # the flag takes no argument
 
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
