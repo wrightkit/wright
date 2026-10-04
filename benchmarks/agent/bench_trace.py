@@ -298,6 +298,69 @@ def call_counts(path: Path) -> dict[str, int] | None:
     return counts or None
 
 
+COMMAND_KEYS = ("command", "cmd")
+ARG_KEYS = ("arguments", "input", "params", "args")
+NAME_KEYS = ("name", "function_name", "tool_name", "toolName", "function")
+CALL_TYPES = ("tool_use", "tool_call", "toolCall", "function_call", "functionCall", "command_execution", "local_shell_call", "custom_tool_call", "mcp_tool_call", "shell", "bash", "exec")
+
+
+def is_call(node) -> bool:
+    """A dict that records a tool call rather than merely looking like one: a typed call record, or a named entry carrying its arguments."""
+    return isinstance(node, dict) and (
+        node.get("type") in CALL_TYPES
+        or any(key in node for key in NAME_KEYS) and any(key in node for key in (*ARG_KEYS, *COMMAND_KEYS)))
+
+
+def shell_commands(path: Path):
+    """Every shell command a transcript records inside a tool call: the `command`/`cmd` field — or a JSON-encoded
+    `arguments`/`input` payload — of a call-shaped entry. A message that only quotes such a payload is not a command."""
+    def walk(node, in_call: bool):
+        if isinstance(node, dict):
+            in_call = in_call or is_call(node)
+            for key, value in node.items():
+                if in_call and key in COMMAND_KEYS and isinstance(value, str):
+                    yield value
+                elif in_call and key in COMMAND_KEYS and isinstance(value, list) and all(isinstance(part, str) for part in value):
+                    yield " ".join(value)
+                elif in_call and key in ARG_KEYS and isinstance(value, str) and value.startswith(("{", "[")) and len(value) < 200_000:
+                    try:
+                        yield from walk(json.loads(value), True)
+                    except ValueError:
+                        pass
+                else:
+                    yield from walk(value, in_call)
+        elif isinstance(node, list):
+            for item in node:
+                yield from walk(item, in_call)
+    for event in transcript_events(path):
+        yield from walk(event, False)
+
+
+# every package manager and downloader the network-off blockers shadow, plus the other install/download routes; the
+# withheld tool name must follow in the same command segment, so `apt update` or `cargo build` alone never match
+_FETCH = (
+    r"(?:\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|exec|dlx|x|pack)\b|\bnpx\b|\bbunx\b|\buvx?\b"
+    r"|\b(?:pip3?|pipx)\s+(?:install|download|add|run)\b|-m\s+pip\s+(?:install|download)\b"
+    r"|\b(?:cargo|brew|gem|composer|go)\s+(?:install|add|require|create-project|get|update)\b"
+    r"|\bapt(?:-get)?\s+(?:install|download)\b|\bgit\s+clone\b|\bwget\b"
+    r"|\bcurl\b[^|;&\n]*(?:-[A-Za-z]*[oO]\b|--output[=\s]|>))[^|;&\n]*"
+)
+INSTALLS = {  # fetching a tool the condition withholds
+    "wright": re.compile(_FETCH + r"(?<![\w-])wright\b|curl[^\n]*wrightkit[^\n]*\|\s*(?:sh|bash)"),
+    "overpy": re.compile(_FETCH + r"(?<![\w-])overpy\b"),
+}
+
+
+def contraband_installs(path: Path, allowed_tool: str) -> list[tuple[str, str]]:
+    """(tool, command) for each command that installs or runs through a package manager a tool the condition withholds."""
+    found = []
+    for command in shell_commands(path):
+        for tool, pattern in INSTALLS.items():
+            if tool != allowed_tool and pattern.search(command):
+                found.append((tool, command.replace("\n", " ")[:120]))
+    return found
+
+
 SEARCH_COMMAND = re.compile(r"(?<![\w./-])(?:rg|grep|find|fd|cat|bat|head|tail|less|more|sed|awk|ls|tree|wc|file|stat|strings|diff|du)\b")
 WRIGHT_IN_SHELL = re.compile(r"(?<![\w./-])wright\b")
 

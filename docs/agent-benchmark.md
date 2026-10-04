@@ -209,10 +209,11 @@ Two checks protect the context. The workspace must not sit below a directory
 that holds instruction files (`AGENTS.md`, `CLAUDE.md`, and similar), because
 agents discover them by walking up; the default `--out` is
 `~/.local/share/wright-agent-bench/runs` for that reason, and a violation marks the run
-`invalid` (`--no-ancestor-check` disables it). Network `off` is enforced only
-when `--canary-cmd` is given and fails inside the agent environment; without it
-the result records `networkEnforcement: declared-only`, which is what the shell
-tools of pi and Devin provide today.
+`invalid` (`--no-ancestor-check` disables it). Under network `off` the result records
+`networkEnforcement: fetch-blocked`, or `fetch-blocked+canary-checked` when `--canary-cmd`
+is given and fails inside the agent environment; `on` cells record `unrestricted`. The
+marker is part of the score identity: runs made before the blockers existed (`declared-only`,
+`canary-checked`) do not merge into one score card with blocked runs.
 
 On macOS, `--file-sandbox` applies `sandbox-exec` to the adapter and all descendant
 processes: filesystem writes are restricted to that trial's output directory
@@ -226,8 +227,14 @@ the checkouts of the repositories under test. The adapter, harness code, the `wr
 binary directory, and the condition's skills stay readable. The result lists the
 denied paths in `fileReadEnforcement`. Without this, agents find the answer keys and the
 owner repositories on the host (seen in practice), so `evaluate` turns the sandbox on by
-default (`--no-file-sandbox` disables it). Other host reads remain possible, and
-network isolation is not enforced. Model
+default (`--no-file-sandbox` disables it). Network isolation is not enforced, and will not be: network
+`off` is an instruction plus two measures. The package managers and downloaders an agent
+would use to fetch a withheld tool (`npm`, `npx`, `pip`, `uv`, `cargo`, `brew`, `curl`,
+`wget`, and similar) are shimmed to fail — the shims fail the whole tool, so legitimate
+subcommands such as `npm test`, `cargo build`, or `curl localhost` are also unavailable
+under `off` — and a transcript that shows a tool the condition withholds being fetched
+through a package manager marks the run `invalid`. This was added
+after a baseline run installed `@wrightkit/wright` and `overpy` from npm. Model
 account usage, CPU and disk consumption remain shared with the host. Provider
 failures returned as exit 75 are listed separately and excluded from outcome
 metrics. The harness never edits the task prompt: network `off` and the workspace
@@ -355,7 +362,7 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | `correctionRounds` | Failed-validation → workspace-edit rounds: the condition tool's validating op (`check`/`lint`/`analyze`/`compile`, `overpy compile` under the `opy` cell) reporting `exit` 1 followed by an edit; consecutive failures before one edit count once, a pass resets the sequence, and refusals are not corrections |
 | `snapshots` | Strict validity of each snapshot of the entry, first valid index, and valid-to-invalid regressions |
 | `usage`, `context` | Turns, tokens by kind, peak context (and its share of the limit), tokens to first valid; loaded context |
-| `invalid`, `infraRetries`, `fileReadEnforcement`, `fileWriteEnforcement`, `networkEnforcement` | Present when the run was excluded or retried; how file reads (`allow-list` with the hidden and allowed paths, or `unrestricted`), file writes (`trial-directory-only` or `unrestricted`), and network `off` (`canary-checked` or `declared-only`) were enforced |
+| `invalid`, `infraRetries`, `fileReadEnforcement`, `fileWriteEnforcement`, `networkEnforcement` | Present when the run was excluded or retried; how file reads (`allow-list` with the hidden and allowed paths, or `unrestricted`), file writes (`trial-directory-only` or `unrestricted`), and the network were enforced (`fetch-blocked` or `fetch-blocked+canary-checked` under `off`, `unrestricted` under `on`; older runs record `declared-only` or `canary-checked`) |
 
 `toolUse` is recorded per CLI invocation through the shim; `wright serve` sessions —
 stdio or MCP — are teed line by line into the trace, and each `tools/call` is

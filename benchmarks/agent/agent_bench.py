@@ -218,6 +218,9 @@ def check_cell(cell: dict, args: argparse.Namespace) -> None:
         bench_wiki.identity(Path(args.wiki_dir))
 
 
+NETWORK_TOOLS = ("npm", "npx", "pnpm", "yarn", "bun", "bunx", "pip", "pip3", "pipx", "uv", "uvx", "cargo", "brew", "gem", "curl", "wget")
+
+
 def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) -> dict:
     """Scrubbed environment: allowlisted host variables, a fresh HOME, and the BENCH_* contract for the adapter."""
     home = out / "home"
@@ -225,6 +228,14 @@ def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) 
     env = {k: os.environ[k] for k in (*ENV_KEEP, *args.env_pass) if k in os.environ}
     env.setdefault("HOME", str(home))
     path = baseline_path(os.environ["PATH"])
+    shim_dir = out / "bin"
+    if cell["network"] == "off":
+        # network off is a declaration, not a block, so the package managers and downloaders an agent would use to fetch a withheld tool are made to fail
+        shim_dir.mkdir(exist_ok=True)
+        for name in NETWORK_TOOLS:
+            blocker = shim_dir / name
+            blocker.write_text(f'#!/bin/sh\necho "{name}: blocked, network access is off in this benchmark condition" >&2\nexit 1\n')
+            blocker.chmod(0o755)
     if cell["tool"] != "none":
         real = args.wright if cell["tool"] == "wright" else str(overpy_launcher(out, os.environ["PATH"]))
         env.update({f"BENCH_TOOL_REAL_{cell['tool'].upper()}": real, "BENCH_TOOL_TRACE": str(out / "tool-trace.jsonl"), "BENCH_TOOL_SIDECAR": str(out / "tool-calls")})
@@ -232,12 +243,12 @@ def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) 
             # the adapter registers the traced MCP server; the `wright` CLI itself stays off PATH (the canary enforces that)
             env["BENCH_MCP_CMD"] = shlex.join([sys.executable, str((HERE / "bench_trace.py").resolve()), "shim", "wright", "serve", "--transport", "mcp", str(workspace)])
         else:
-            shim_dir = out / "bin"
-            shim_dir.mkdir()
+            shim_dir.mkdir(exist_ok=True)
             shim = shim_dir / cell["tool"]
             shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{(HERE / "bench_trace.py").resolve()}" shim {cell["tool"]} "$@"\n')
             shim.chmod(0o755)
-            path = f"{shim_dir}{os.pathsep}{path}"
+    if shim_dir.is_dir():
+        path = f"{shim_dir}{os.pathsep}{path}"
     env.update(
         PATH=path,
         BENCH_HOST_PATH=os.environ["PATH"], BENCH_WORKSPACE=str(workspace), BENCH_RUN_DIR=str(out), BENCH_AGENT_ID=args.agent_id,
@@ -266,8 +277,12 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
         shimmed = cell["tool"] == tool and cell.get("level", "bin") == "bin"  # level `mcp` keeps the CLI off PATH on purpose
         if not shimmed and shutil.which(tool, path=env["PATH"]):
             return f"{tool} reachable although the tool is '{cell['tool']}' at level '{cell.get('level', 'bin')}'"
-    if cell["network"] == "off" and args.canary_cmd:
-        if subprocess.run(args.canary_cmd, shell=True, cwd=workspace, env=env, capture_output=True).returncode == 0:
+    if cell["network"] == "off":
+        blockers = str(Path(env["BENCH_RUN_DIR"]) / "bin")
+        for name in NETWORK_TOOLS:  # a real tool ahead of the blockers on PATH would leave fetching open
+            if shutil.which(name, path=env["PATH"]) != f"{blockers}{os.sep}{name}":
+                return f"network 'off' but {name} is not shadowed by its blocker"
+        if args.canary_cmd and subprocess.run(args.canary_cmd, shell=True, cwd=workspace, env=env, capture_output=True).returncode == 0:
             return "network reachable under network 'off'"
     return None
 
@@ -485,7 +500,10 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     (out / "agent.log").write_text(f"exit={agent_exit}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n")
     result = base_result(scenario, cell, args, out, seconds, agent_exit)
     result["infraRetries"] = infra_retries
-    result["networkEnforcement"] = "canary-checked" if cell["network"] == "off" and args.canary_cmd else "declared-only"
+    if cell["network"] == "off":  # blocker shims are always installed; the marker says what else was verified
+        result["networkEnforcement"] = "fetch-blocked+canary-checked" if args.canary_cmd else "fetch-blocked"
+    else:
+        result["networkEnforcement"] = "unrestricted"
     result["fileWriteEnforcement"] = "trial-directory-only" if getattr(args, "file_sandbox", False) else "unrestricted"
     if getattr(args, "file_sandbox", False):
         hidden, allowed = read_policy(args, env)
@@ -503,6 +521,8 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     result["toolUse"] = bench_trace.summarize_trace(events)
     if cell.get("level") == "mcp" and agent_exit != INFRA_EXIT and not any(e.get("type") == "serve" for e in bench_trace.tool_events(events, "wright")):
         reasons.append("level 'mcp' but the adapter never started the wright MCP server (BENCH_MCP_CMD)")
+    for tool, command in bench_trace.contraband_installs(out / "transcript.jsonl", cell["tool"])[:1]:
+        reasons.append(f"fetched '{tool}' from a package manager although the tool is '{cell['tool']}': {command}")
     if calls := bench_trace.call_counts(out / "transcript.jsonl"):
         result["toolCalls"] = calls
     result.update(bench_grade.grade(scenario, workspace, args.wright, out / "grading"))
