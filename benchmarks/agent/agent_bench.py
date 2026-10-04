@@ -692,6 +692,11 @@ CONTROL_CELLS = [
 ]
 
 
+CELL_SETS = {  # what `--cells` runs
+    "score": [CANONICAL_CELL],
+    "lift": [CONTROL_CELLS[0], CONTROL_CELLS[1], CONTROL_CELLS[3]],  # the withheld-tool baseline, Wright alone, and OverPy alone: the canonical cell is reused from the score run
+    "controls": CONTROL_CELLS,
+}
 ADAPTER_BINARY = {"claude-code": "claude", "pi": "pi", "devin": "devin", "codex": "codex", "agy": "agy", "opencode": "opencode", "grok": "grok"}
 DIRECT_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL")
 CONFIG_PATH = Path(os.environ.get("WRIGHT_BENCH_CONFIG", Path.home() / ".config/wright-agent-bench/config.json"))
@@ -778,7 +783,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
     agent_id = model_slug({"adapter": args.adapter, "model": args.model, "effort": args.effort})
     cmd = f"BENCH_MODEL={shlex.quote(args.model)} {effort}{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
-    wanted = getattr(args, "cell_list", None) or ([CANONICAL_CELL] if args.cells == "score" else CONTROL_CELLS)
+    wanted = getattr(args, "cell_list", None) or CELL_SETS[args.cells]
     cells = [c for c in wanted if all(s in args.skill_dirs for s in c["skills"])]
     dropped = [cell_label(normalize_cell(c)) for c in wanted if c not in cells]
     if dropped:
@@ -996,7 +1001,7 @@ def main() -> int:
     su = sub.choices["suite"]
     su.add_argument("--suite-name", default="results", help="directory under --out holding every model's run and the results page")
     su.add_argument("--only", nargs="*", metavar="ADAPTER[:MODEL]", help="evaluate only these entries of the models list")
-    su.add_argument("--cells", choices=("score", "controls"), default="score")
+    su.add_argument("--cells", choices=tuple(CELL_SETS), default="score")
     su.add_argument("--split", choices=("test", "train", "all"), default="test")
     su.add_argument("--scenarios", nargs="*")
     su.add_argument("--trials", type=int, default=3)
@@ -1018,7 +1023,7 @@ def main() -> int:
     lb = sub.add_parser("leaderboard", help="write the publishable results page (Markdown, HTML, JSON) from evaluation run directories")
     lb.add_argument("dirs", nargs="+", type=Path)
     lb.add_argument("--page-out", type=Path, help="directory for the page; `leaderboard` inside the first directory's parent by default")
-    ev.add_argument("--cells", choices=("score", "controls"), default="score", help="score: the canonical cell only; controls: also baseline and language-appropriate controls")
+    ev.add_argument("--cells", choices=tuple(CELL_SETS), default="score", help="score: the canonical cell only; lift: the baseline, Wright alone, and OverPy alone, to be compared with an earlier score run of the same agent; controls: all of them")
     ev.add_argument("--split", choices=("test", "train", "all"), default="test")
     ev.add_argument("--scenarios", nargs="*")
     ev.add_argument("--trials", type=int, default=3)
@@ -1039,6 +1044,7 @@ def main() -> int:
     wiki.add_argument("--categories", nargs="+", default=list(bench_wiki.CATEGORIES), help="wiki categories to crawl (add tutorials for the second tier)")
     report = sub.add_parser("report", help="summarize result.json files")
     report.add_argument("dirs", nargs="+", type=Path)
+    report.add_argument("--out-dir", type=Path, help="where report.md and summary.json go; with several run directories they are only printed unless this is given")
     report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
     report.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
     report.add_argument("--reference", action="append", help="condition label a paired comparison is made against; repeatable for lift against several references (default: none/none/off)")
@@ -1079,7 +1085,7 @@ def main() -> int:
     if args.command == "wiki-skill":
         return cmd_wiki_skill(args)
     if args.command == "report":
-        return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s, args.private_suite), references_of(args))
+        return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s, args.private_suite), references_of(args), args.out_dir)
     if args.command == "publish":
         try:
             return bench_publish.main(args.dirs, args.out, args.dry_run, args.endpoint)

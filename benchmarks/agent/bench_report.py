@@ -426,14 +426,19 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     return "\n".join(out) + "\n", summary
 
 
-def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, references: list[str] | None = None) -> int:
+def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, references: list[str] | None = None, out: Path | None = None) -> int:
+    """Print the report; write report.md and summary.json into `out`, or into the run directory when there is exactly one.
+    Several directories without `out` are only printed, so a combined report never overwrites one run's own."""
     results = load(dirs)
     if not results:
         print("no results found")
         return 1
     notes = regrade_notes([r for r in results if r["status"] != "invalid"], wright, load_scenario) if regrade else None
     text, summary = render(results, notes, references)
-    (dirs[0] / "report.md").write_text(text)
-    write_json(dirs[0] / "summary.json", summary)
+    target = out or (dirs[0] if len(dirs) == 1 else None)
+    if target:
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "report.md").write_text(text)
+        write_json(target / "summary.json", summary)
     print(text)
     return 0

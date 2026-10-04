@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -612,6 +613,26 @@ class AgentBenchTest(unittest.TestCase):
     def test_an_effort_the_model_id_already_names_is_not_repeated_in_the_run_name(self):
         self.assertEqual(agent_bench.model_slug({"adapter": "agy", "model": "gemini-3.8-flash-high", "effort": "high"}), "agy-gemini-3.8-flash-high")
         self.assertEqual(agent_bench.model_slug({"adapter": "codex", "model": "gpt-6-luna", "effort": "xhigh"}), "codex-gpt-6-luna-xhigh")
+
+    def test_the_lift_cells_leave_out_the_canonical_cell_and_the_skill_probe(self):
+        labels = [agent_bench.cell_label(agent_bench.normalize_cell(c)) for c in agent_bench.CELL_SETS["lift"]]
+        self.assertEqual(labels, ["none/none/off", "wright/none/off", "overpy/none/off"])
+        self.assertEqual([agent_bench.cell_label(agent_bench.normalize_cell(c)) for c in agent_bench.CELL_SETS["score"]], ["wright+wright-skill/none/off"])
+
+    def test_a_report_over_several_runs_never_overwrites_a_runs_own_report(self):
+        one, two = self.out / "one", self.out / "two"
+        for run in (one, two):
+            trial = run / "s" / "agent" / "cell-1"
+            trial.mkdir(parents=True)
+            (trial / "result.json").write_text(json.dumps({**ReportTest.result(ReportTest(), "none/none/off", 1, True, 100), "contract": "wright-agent-bench/v3", "environment": {}}, default=str))
+            (run / "report.md").write_text("the run's own report")
+        with contextlib.redirect_stdout(io.StringIO()):
+            bench_report.main([one, two], WRIGHT, False, lambda s: {})
+        self.assertEqual((one / "report.md").read_text(), "the run's own report")
+        combined = self.out / "combined"
+        with contextlib.redirect_stdout(io.StringIO()):
+            bench_report.main([one, two], WRIGHT, False, lambda s: {}, None, combined)
+        self.assertIn("Agent benchmark report", (combined / "report.md").read_text())
 
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
