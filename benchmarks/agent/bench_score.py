@@ -38,6 +38,12 @@ def pass_power_k(usable: int, valid: int, k: int) -> float:
     return comb(usable, k) / comb(valid, k) if valid >= k else 0.0
 
 
+def read_enforcement(run: dict) -> str | None:
+    """The file-read policy in one word: 'allow-list' is recorded with its hidden/allowed paths, which differ per trial."""
+    enforcement = run.get("fileReadEnforcement")
+    return enforcement.get("mode") if isinstance(enforcement, dict) else enforcement
+
+
 def identity_of(run: dict) -> dict:
     env = run["environment"]
     info = run.get("agentInfo") or {}
@@ -47,6 +53,8 @@ def identity_of(run: dict) -> dict:
         "suite": (env.get("suite") or {}).get("hash"),
         "agent": run["agent"]["id"], "model": info.get("model"), "effort": info.get("effort"),
         "protocol": run.get("protocol"),
+        "fileReadEnforcement": read_enforcement(run), "fileWriteEnforcement": run.get("fileWriteEnforcement"),
+        "networkEnforcement": run.get("networkEnforcement"),  # what the agent could reach is part of the environment being scored
     }
 
 
@@ -101,6 +109,7 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
         "harness": sorted({r["environment"].get("harness") for r in valid if r["environment"].get("harness")}),
         "networkEnforcement": sorted({r.get("networkEnforcement") or "not recorded" for r in valid}),
         "fileWriteEnforcement": sorted({r.get("fileWriteEnforcement") or "not recorded" for r in valid}),
+        "fileReadEnforcement": sorted({read_enforcement(r) or "not recorded" for r in valid}),
         "exclusions": {status: len(runs) for status, runs in sorted(excluded.items())},
         "perScenario": [{"scenario": s, "usable": sum(v), "valid": len(v), "rate": round(rates[s], 3)} for s, v in sorted(per.items())],
         "byFamily": {f: round(100 * sum(v) / len(v), 1) for f, v in sorted(families.items())},
@@ -126,6 +135,7 @@ def render(c: dict) -> str:
         f"Suite:       {c['suite'].get('version')} {c['suite'].get('hash')}", f"Wright:      {ident['wright']} sha256 {ident['wrightSha256']}",
         f"Skills:      {', '.join(f'{n} {h}' for n, h in ident['skills'].items()) or 'none'}", f"Harness:     {', '.join(c['harness']) or 'not recorded'}",
         f"Network:     {', '.join(x or 'not recorded' for x in c['networkEnforcement'])}", f"File writes: {', '.join(x or 'not recorded' for x in c['fileWriteEnforcement'])}",
+        f"File reads:  {', '.join(x or 'not recorded' for x in c['fileReadEnforcement'])}",
         f"Excluded:    {c['exclusions'] or 'none'}",
     ]
     if c["provisional"]:
@@ -137,7 +147,7 @@ def render(c: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-COMPARABLE = ("wrightSha256", "skills", "suite")  # what must match for two cards to be read side by side; agent, model, and effort are what is being compared
+COMPARABLE = ("wrightSha256", "skills", "suite", "fileReadEnforcement", "fileWriteEnforcement", "networkEnforcement")  # what must match for two cards to be read side by side; agent, model, and effort are what is being compared
 
 
 def compare(dirs: list[Path]) -> str:
