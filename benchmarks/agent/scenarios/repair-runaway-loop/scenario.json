@@ -5,13 +5,44 @@
   "split": "test",
   "entry": "mode.ws",
   "stabilityRisk": true,
-  "writable": ["mode.ws", "answer.json"],
-  "runtimeOnly": ["The server no longer freezes in a live match."],
+  "writable": [
+    "mode.ws",
+    "answer.json"
+  ],
+  "runtimeOnly": [
+    "The server no longer freezes in a live match."
+  ],
   "checks": [
-    {"id": "valid-project", "kind": "check", "layer": "workshop-rs"},
-    {"id": "no-unbounded-loop", "kind": "lint", "code": "while-without-wait", "layer": "wright"},
-    {"id": "counter-still-counts", "kind": "contains", "file": "mode.ws", "text": "Modify Global Variable(ticks, Add, 1);"},
-    {"id": "countdown-rule-preserved", "kind": "contains", "file": "mode.ws", "text": "Modify Global Variable(countdown, Subtract, 1);"},
-    {"id": "root-cause-named", "kind": "answer", "key": "rule", "expected": "tick counter"}
-  ]
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "workshop-rs"
+    },
+    {
+      "id": "no-unbounded-loop",
+      "kind": "lint",
+      "code": "while-without-wait",
+      "layer": "wright"
+    },
+    {
+      "id": "counter-still-counts",
+      "kind": "contains",
+      "file": "mode.ws",
+      "text": "Modify Global Variable(ticks, Add, 1);"
+    },
+    {
+      "id": "countdown-rule-preserved",
+      "kind": "contains",
+      "file": "mode.ws",
+      "text": "Modify Global Variable(countdown, Subtract, 1);"
+    },
+    {
+      "id": "root-cause-named",
+      "kind": "answer",
+      "key": "rule",
+      "expected": "tick counter"
+    }
+  ],
+  "canary": "WRIGHT_BENCH_CANARY_499_v2",
+  "publicSample": true
 }

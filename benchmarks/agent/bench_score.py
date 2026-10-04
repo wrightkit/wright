@@ -44,13 +44,30 @@ def read_enforcement(run: dict) -> str | None:
     return enforcement.get("mode") if isinstance(enforcement, dict) else enforcement
 
 
+def suite_identity(suite: dict) -> dict:
+    """Only the versioned public identity belongs in published artifacts."""
+    return {**{k: suite.get(k) for k in ("version", "publicHash", "privateHash", "hash", "scenarios")},
+            "mode": "official" if suite.get("mode") == "official" and suite.get("privateHash") else "public sample"}
+
+
+def is_private(run: dict) -> bool:
+    return bool(run.get("isPrivate") or str(run.get("scenario", "")).startswith("private-"))
+
+
+def private_id(run: dict) -> str:
+    import hashlib
+    import re
+    name = run["scenario"]
+    return name if re.fullmatch(r"private-[0-9]+", name) else "private-" + hashlib.sha256(name.encode()).hexdigest()[:24]
+
+
 def identity_of(run: dict) -> dict:
     env = run["environment"]
     info = run.get("agentInfo") or {}
     return {
         "wrightSha256": env.get("wrightSha256"), "wright": env.get("wright"),
         "skills": {name: s["sha256"] for name, s in sorted((env.get("skills") or {}).items())},
-        "suite": (env.get("suite") or {}).get("hash"),
+        "suite": suite_identity(env.get("suite") or {}),
         "agent": run["agent"]["id"], "model": info.get("model"), "effort": info.get("effort"),
         "protocol": run.get("protocol"),
         "fileReadEnforcement": read_enforcement(run), "fileWriteEnforcement": run.get("fileWriteEnforcement"),
@@ -65,21 +82,25 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
     valid = []
     for run in track:
         (valid if run.get("status") in VALID else excluded[run.get("status") or "missing-status"]).append(run)
+    modes = {suite_identity(r.get("environment", {}).get("suite") or {})["mode"] for r in track}
+    mode = "official" if modes == {"official"} else "public sample"
     if not valid:
-        return {"contract": CONTRACT, "track": TRACKS[language], "refused": "no valid canonical test runs for this language"}
+        return {"contract": CONTRACT, "track": TRACKS[language], "mode": mode, "refused": "no valid canonical test runs for this language"}
     identities = {json.dumps(identity_of(r), sort_keys=True) for r in valid}
     if len(identities) > 1:
         differing = sorted({k for a in map(json.loads, identities) for b in map(json.loads, identities) for k in a if a[k] != b[k]})
-        return {"contract": CONTRACT, "track": TRACKS[language], "refused": f"runs come from more than one environment; they differ in: {', '.join(differing)}"}
+        return {"contract": CONTRACT, "track": TRACKS[language], "mode": mode, "refused": f"runs come from more than one environment; they differ in: {', '.join(differing)}"}
     identity = json.loads(next(iter(identities)))
     per: dict[str, list[int]] = defaultdict(list)
     by_scenario: dict[str, list[dict]] = defaultdict(list)
     for run in valid:
-        per[run["scenario"]].append(1 if run.get("usable") else 0)
-        by_scenario[run["scenario"]].append(run)
+        scenario = private_id(run) if is_private(run) else run["scenario"]
+        per[scenario].append(1 if run.get("usable") else 0)
+        by_scenario[scenario].append(run)
     counts = {len(v) for v in per.values()}
     provisional = []
-    missing = sorted(set(expected) - set(per))
+    expected_ids = {r["scenario"]: private_id(r) for r in track if is_private(r)}
+    missing = sorted({expected_ids.get(s, s) for s in expected} - set(per))
     if missing:
         provisional.append(f"missing held-out scenarios: {', '.join(missing)}")
     if len(counts) > 1:
@@ -92,10 +113,12 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
     families: dict[str, list[float]] = defaultdict(list)
     layers: dict[str, int] = defaultdict(int)
     for s, runs in by_scenario.items():
-        families[runs[0]["family"]].append(rates[s])
+        if not is_private(runs[0]):
+            families[runs[0]["family"]].append(rates[s])
         for run in runs:
             for layer in run.get("failedLayers") or []:
-                layers[layer] += 1
+                if layer in ("agent", "workshop-rs", "opy-rs", "deltin-rs", "wright"):
+                    layers[layer] += 1
     tokens = [(r.get("usage") or {}).get("totalTokens") for r in valid]
     usable_tokens = [t for t, r in zip(tokens, valid) if r.get("usable") and t]
     return {
@@ -105,7 +128,8 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
         "passPowK": round(100 * sum(pass_power_k(sum(v), len(v), k) for v in per.values()) / len(per), 1),
         "provisional": provisional,
         "identity": identity,
-        "suite": (valid[0]["environment"].get("suite") or {}),
+        "suite": suite_identity(valid[0]["environment"].get("suite") or {}),
+        "mode": identity["suite"]["mode"],
         "harness": sorted({r["environment"].get("harness") for r in valid if r["environment"].get("harness")}),
         "networkEnforcement": sorted({r.get("networkEnforcement") or "not recorded" for r in valid}),
         "fileWriteEnforcement": sorted({r.get("fileWriteEnforcement") or "not recorded" for r in valid}),
@@ -124,15 +148,16 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
 
 def render(c: dict) -> str:
     if "refused" in c:
-        return f"{c['track']}: no score. {c['refused']}\n"
+        return f"{c['track']} ({c.get('mode', 'public sample')}): no score. {c['refused']}\n"
     ident = c["identity"]
     lines = [
-        f"{c['track']} {c['scoreVersion']}", "",
+        f"{c['track']} {c['scoreVersion']} ({c['mode']})", "",
         f"Agent:       {ident['agent']}", f"Model:       {ident['model'] or 'not recorded'}", f"Inference:   effort {ident['effort'] or 'not recorded'}", "",
         f"Score:       {c['score']}", f"95% CI:      {c['ci95'][0]}-{c['ci95'][1]}  ({c['ciMethod']})",
         f"Pass^{c['trialsPerScenario']}:      {c['passPowK']} (secondary)",
         f"Trials:      {c['trialsPerScenario']} per scenario ({c['validRuns']} valid runs)", f"Scenarios:   {c['scenarios']} held-out", "",
-        f"Suite:       {c['suite'].get('version')} {c['suite'].get('hash')}", f"Wright:      {ident['wright']} sha256 {ident['wrightSha256']}",
+        f"Suite:       {c['suite'].get('version')} {c['suite'].get('hash')}",
+        f"Public hash: {c['suite'].get('publicHash')}", f"Private hash: {c['suite'].get('privateHash') or 'none'}", f"Wright:      {ident['wright']} sha256 {ident['wrightSha256']}",
         f"Skills:      {', '.join(f'{n} {h}' for n, h in ident['skills'].items()) or 'none'}", f"Harness:     {', '.join(c['harness']) or 'not recorded'}",
         f"Network:     {', '.join(x or 'not recorded' for x in c['networkEnforcement'])}", f"File writes: {', '.join(x or 'not recorded' for x in c['fileWriteEnforcement'])}",
         f"File reads:  {', '.join(x or 'not recorded' for x in c['fileReadEnforcement'])}",

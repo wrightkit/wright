@@ -17,6 +17,38 @@ the prompt, skills, and tools did in that setup. Every report therefore lists, f
 what the adapter observed, the CLI version, model, tools, and loaded skills each
 agent actually had (`Agent setup`).
 
+## Held-out suite and publishing
+
+Tune skills, guides, and prompts against `train` only. Never use `test` outcomes
+or diagnostics to decide what to change. Test scenarios whose failures have been
+discussed publicly are exposed: move them to `train` in the next suite version
+and add new held-out test scenarios. Scores are comparable only when the suite
+version and both part hashes match.
+
+The public repository contains training scenarios and a small test-style public
+sample. The held-out prompts, checks, and references live in
+`wrightkit/benchmark-suite`. Supply that checkout with `--private-suite DIR` or
+`private_suite` in the user configuration. The harness runs both parts, and
+`validate` validates both parts; the private repository's CI owns validation of
+its contents. Every scenario file carries the suite canary string; loading a
+suite with a missing canary fails. A model that reproduces the canary reveals
+possible exposure to the suite; the canary is not proof of contamination by
+itself.
+
+Keep the private directory outside the agent's readable paths. Private trials
+require the file sandbox; its regression test verifies that the private directory
+is inaccessible even when a parent directory is allowed. This is separate from network access, which remains disclosed.
+The suite is versioned: v2 also accepts either a player variable or
+`Modify Player Score` for per-player score tracking.
+
+Cards record suite version, public hash, private hash, and mode. Runs without
+the private part are labelled **public sample** in cards, reports, results
+pages, and JSON; they are not official scores. Published private outcomes use
+opaque scenario IDs and counts and omit task names, family names, check IDs,
+prompts, references, diagnostics, and artifact paths. Raw trial directories,
+transcripts, and grading logs remain private. Share the generated score/report
+artifacts, never raw private `result.json` or logs in public issues or CI output.
+
 ## Allowed agent context
 
 - The scenario workspace: the seed project only.
