@@ -237,7 +237,9 @@ python3 benchmarks/agent/agent_bench.py score target/agent-bench   # Wright Agen
 `trials`, `parallel`, `seed` (run order is shuffled by it), and `options`. Options
 are the trial-time settings a run needs, overriding their command-line counterparts: `out` and `out_root` (relative paths resolve against the matrix
 file's directory, so `evaluate`'s `out: "."` makes the file's own directory the run directory), `wright`, `adapter`, `file_sandbox`, `env_pass`, `credentials`,
-`allow_read`/`deny_read`, `timeout`, `canary_cmd`, `check_ancestors`, `infra_retries`/`infra_backoff`, `skill_dirs` as `{name: dir}`, `wiki_dir`. Cells not
+`allow_read`/`deny_read`, `timeout`, `canary_cmd`, `check_ancestors`, `infra_retries`/`infra_backoff`, `skill_dirs` as `{name: dir}`, `wiki_dir`. Every
+path-valued option (`out`, `out_root`, `skill_dirs`, `wiki_dir`, `allow_read`, `deny_read`) follows the same rule: relative resolves against the matrix file's
+directory, and `evaluate` writes its own path options already resolved so the file reproduces the run from any cwd. Cells not
 applicable to a scenario's language are skipped; the matrix stops after two consecutive provider interruptions and exits 3 when any occurred. Finished runs
 are skipped, so an interrupted matrix resumes; `evaluate` writes its effective options into `matrix.json`, so `matrix <run>/matrix.json` resumes that run in place.
 
@@ -274,7 +276,7 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | `friction`, `expectations` | Usage errors, unknown subcommands, help lookups, retries, malformed `serve` requests, unparsed `serve` responses, identical repeats; expectation E01-E12 verdicts |
 | `snapshots` | Strict validity of each snapshot of the entry, first valid index, and valid-to-invalid regressions |
 | `usage`, `context` | Turns, tokens by kind, peak context (and its share of the limit), tokens to first valid; loaded context |
-| `invalid`, `infraRetries`, `networkEnforcement` | Present when the run was excluded or retried; whether network `off` was checked by a canary or only declared |
+| `invalid`, `infraRetries`, `fileReadEnforcement`, `fileWriteEnforcement`, `networkEnforcement` | Present when the run was excluded or retried; how file reads (`allow-list` with the hidden and allowed paths, or `unrestricted`), file writes (`trial-directory-only` or `unrestricted`), and network `off` (`canary-checked` or `declared-only`) were enforced |
 
 `toolUse` is recorded per CLI invocation through the shim; `wright serve` sessions are teed
 line by line into the trace. Comparing cells for the same scenario shows what
@@ -306,9 +308,11 @@ over scenarios, and gives a two-stage bootstrap 95% interval (10,000 draws, seed
 467) and Pass^k as a secondary figure. Provider-interrupted, invalid, and
 agent-error runs are published as exclusions; timeouts count. The score is
 refused if the runs differ in Wright binary, skill hashes, suite hash, agent,
-model, effort, or protocol, and it is marked provisional with fewer than eight
+model, effort, protocol, or file-read/file-write/network enforcement — a run
+where the agent could read answer keys does not score beside a sandboxed one —
+and it is marked provisional with fewer than eight
 held-out scenarios, missing scenarios, or unequal trials. The card discloses
-`networkEnforcement` (`declared-only` or `canary-checked`).
+`fileReadEnforcement`, `fileWriteEnforcement`, and `networkEnforcement` modes.
 
 ## Evaluating without an agent harness
 

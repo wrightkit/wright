@@ -173,15 +173,16 @@ class AgentBenchTest(unittest.TestCase):
         script = agent_bench.HERE / "adapters" / "_test_fake_adapter.py"
         script.write_text("import os, sys\nsys.stdin.read()\nopen('probe.txt', 'w').write(os.environ.get('BENCH_PROBE', '') + '|' + os.environ.get('HOME', ''))\n")
         self.addCleanup(script.unlink, True)
-        args = argparse.Namespace(
+        self.skill_dir("wright-skill")  # reached as a relative path below, resolved against the evaluate cwd
+        args = argparse.Namespace(  # relative paths must serialize resolved: the file resolves its own against its directory
             adapter="fake", model="m", effort=None, name="eval", out=self.out, wright=str(Path(WRIGHT).resolve()),
-            skill_dirs={"wright-skill": self.skill_dir("wright-skill")}, wiki_dir=None, env_pass=["BENCH_PROBE"],
-            allow_read=[str(self.out)], deny_read=[], canary_cmd=None, check_ancestors=False,
+            skill_dirs={"wright-skill": Path("skills/wright-skill")}, wiki_dir=None, env_pass=["BENCH_PROBE"],
+            allow_read=["allow-this"], deny_read=[], canary_cmd=None, check_ancestors=False,
             timeout=30, infra_retries=0, infra_backoff=0, no_file_sandbox=True, dry_run=False,
             cells="score", split="test", scenarios=[SCENARIO], trials=1, parallel=1, seed=1)
         run_dir = self.out / "eval"
         with patch.dict(agent_bench.ADAPTERS, {"fake": "_test_fake_adapter.py"}), patch.dict(agent_bench.ADAPTER_READS, {"fake": []}), \
-                patch.dict(os.environ, {"BENCH_PROBE": "present"}), contextlib.redirect_stdout(io.StringIO()):
+                patch.dict(os.environ, {"BENCH_PROBE": "present"}), contextlib.chdir(self.out), contextlib.redirect_stdout(io.StringIO()):
             code = agent_bench.cmd_evaluate(args)
         self.assertEqual(code, 0)
         options = json.loads((run_dir / "matrix.json").read_text())["options"]
@@ -189,7 +190,9 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual((options["wright"], options["timeout"], options["file_sandbox"]), (str(Path(WRIGHT).resolve()), 30, False))
         self.assertIn("BENCH_PROBE", options["env_pass"])
         self.assertIn("HOME", options["env_pass"])
-        self.assertIn(str(self.out), options["allow_read"])
+        self.assertEqual(options["skill_dirs"]["wright-skill"], str((self.out / "skills/wright-skill").resolve()))
+        self.assertEqual(options["deny_read"], [])
+        self.assertIn(str((self.out / "allow-this").resolve()), options["allow_read"])
         trial = run_dir / SCENARIO / "fake-m" / "wright+wright-skill_none_off-1"
         self.assertEqual((trial / "workspace" / "probe.txt").read_text(), f"present|{Path.home()}")
         elsewhere = self.out / "elsewhere"  # flag values that would all be wrong; every serialized option must win
