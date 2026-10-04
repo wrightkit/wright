@@ -148,6 +148,9 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                 let Some(params) = read_params::<RenameParams>(&mut writer, &id, params)? else {
                     continue;
                 };
+                if id.is_none() {
+                    continue; // a notification gets no response and no provider call
+                }
                 let outcome = service.rename(
                     params.text_document_position.text_document.uri.as_str(),
                     Position {
