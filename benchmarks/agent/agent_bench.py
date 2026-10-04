@@ -508,11 +508,20 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     base = args.config.resolve().parent  # relative option paths resolve against the matrix file, so a run's manifest is self-contained
 
     def option_path(value: str) -> Path:
-        path = Path(value)
+        path = Path(value).expanduser()
         return path if path.is_absolute() else (base / path).resolve()
 
-    options = {k: ({n: option_path(v) for n, v in val.items()} if k == "skill_dirs" else option_path(val) if k in ("wiki_dir", "out", "out_root") and val else val)
-               for k, val in config.get("options", {}).items()}
+    options = {}
+    for key, val in config.get("options", {}).items():
+        if key in ("wiki_dir", "out", "out_root") and not val:
+            continue  # a null path option means 'unset', not an override
+        if key == "skill_dirs":
+            val = {n: option_path(v) for n, v in val.items()}
+        elif key in ("wiki_dir", "out", "out_root"):
+            val = option_path(val)
+        elif key in ("allow_read", "deny_read") and isinstance(val, list):
+            val = [option_path(v) for v in val]
+        options[key] = val
     merged = {**vars(args), **options}
     if merged.get("deny_read") and not merged.get("file_sandbox"):
         raise SystemExit("config options: deny_read does nothing without file_sandbox")
@@ -655,10 +664,13 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     config = {"agents": [{"id": agent_id, "cmd": cmd}], "cells": cells, "scenarios": scenarios, "trials": args.trials, "parallel": args.parallel, "seed": args.seed,
               "options": {"out": ".", "out_root": "..", "wright": args.wright, "adapter": args.adapter,
                           "file_sandbox": args.file_sandbox, "env_pass": args.env_pass, "credentials": args.credentials,
-                          "allow_read": args.allow_read, "deny_read": args.deny_read,
+                          # paths the caller gave resolve now, against this cwd — relative ones in the file resolve against the file's directory
+                          "allow_read": [str(Path(p).expanduser().resolve()) for p in args.allow_read],
+                          "deny_read": [str(Path(p).expanduser().resolve()) for p in args.deny_read],
                           "timeout": args.timeout, "canary_cmd": args.canary_cmd, "check_ancestors": args.check_ancestors,
                           "infra_retries": args.infra_retries, "infra_backoff": args.infra_backoff,
-                          "skill_dirs": {k: str(v) for k, v in args.skill_dirs.items()}, "wiki_dir": str(args.wiki_dir) if args.wiki_dir else None}}
+                          "skill_dirs": {k: str(Path(v).resolve()) for k, v in args.skill_dirs.items()},
+                          "wiki_dir": str(args.wiki_dir.resolve()) if args.wiki_dir else None}}
     args.config = args.out / "matrix.json"
     args.config.write_text(json.dumps(config, indent=2) + "\n")
     status = cmd_matrix(args)
