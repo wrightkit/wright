@@ -2,6 +2,7 @@
 
 - Contracts: `wright-agent-bench/v3` (a run result) and `wright-agent-score/v1` (a score card)
 - Harness: [`benchmarks/agent/agent_bench.py`](../benchmarks/agent/agent_bench.py)
+- Run it from a shell: [agent-benchmark-howto.md](agent-benchmark-howto.md)
 - Design and requirements: [`SPEC-414`](specs/SPEC-414-agent-benchmark-comparison.md)
 
 The benchmark answers one product question: can a general coding agent, with no
@@ -9,6 +10,12 @@ Workshop-specific prompt or skill injection, use a project and Wright to
 complete realistic Workshop work correctly? It measures Wright's discoverable
 semantic surface; it is not a model leaderboard, and one stochastic run is not
 evidence of correctness (use `--trials`).
+
+A score is a credible reference, not a measure of an agent's ability. It holds for one
+Wright, skill set, suite, agent, model, and protocol, and it is meant to show what
+the prompt, skills, and tools did in that setup. Every report therefore lists, from
+what the adapter observed, the CLI version, model, tools, and loaded skills each
+agent actually had (`Agent setup`).
 
 ## Allowed agent context
 
@@ -120,6 +127,9 @@ keep host configuration out of the run, and it reports what loaded through
 | [`devin.py`](../benchmarks/agent/adapters/devin.py) | Devin CLI | `BENCH_MODEL` (for example `swe-2-max`). Runs with an isolated `HOME` holding only the Devin credentials, a config that reads no other tool's rules or skills, and MCP tools denied. Managed plugin skills are listed apart from `loaded`. |
 | [`codex.py`](../benchmarks/agent/adapters/codex.py) | Codex CLI | `BENCH_MODEL` and `BENCH_THINKING`. Isolated `HOME`/`CODEX_HOME`, user config and exec rules ignored, workspace skills installed under `.agents/skills`. Session token events supply per-model-call usage and observed skill context; built-ins are listed apart. Web search, Apps, and plugin discovery are disabled; any observed MCP call invalidates the trial. |
 | [`agy.py`](../benchmarks/agent/adapters/agy.py) | Antigravity CLI | `BENCH_MODEL` (for example `gemini-3.8-flash-high`) and `BENCH_THINKING`. Isolated `HOME` with only authentication files, workspace skills under `.agents/skills`, MCP/browser access denied and URL reads denied outside `web`. Observed built-in web tools under network `off` stop and invalidate the trial; URL permissions do not cover search. Streaming step usage is recorded. The CLI does not export observed loaded skills or context limits; these remain unreported. |
+| [`opencode.py`](../benchmarks/agent/adapters/opencode.py) | opencode | `BENCH_MODEL=provider/model` (as `opencode models` lists it) and `BENCH_THINKING` as the model variant. Isolated `HOME` and XDG directories holding only the credentials; `--pure`; Claude Code instructions and the real home's external skills are disabled by environment variable because opencode reads them regardless of `HOME`; skills installed under `.opencode/skills`; web tools denied outside `web`. Per-step usage comes from `step_finish` events; the tool list is what the agent used. |
+| [`grok.py`](../benchmarks/agent/adapters/grok.py) | Grok CLI | `BENCH_MODEL` (a `grok models` id) and `BENCH_THINKING` as reasoning effort. Isolated `GROK_HOME` holding only the login and the skills; prompt sent `--verbatim`; subagents disabled; web search disabled outside `web`. Tools, skills, and the context window come from the stream's init and result lines. |
+| [`direct.py`](../benchmarks/agent/adapters/direct.py) | none (built-in loop) | See below. |
 
 The pi adapter also uses an isolated `HOME` containing only its authentication
 files. Explicit provider extensions remain referenced by path, not copied with
@@ -135,7 +145,7 @@ Pass `--env-pass HOME` when the agent authenticates from the real home directory
 Two checks protect the context. The workspace must not sit below a directory
 that holds instruction files (`AGENTS.md`, `CLAUDE.md`, and similar), because
 agents discover them by walking up; the default `--out` is
-`~/.cache/wright-agent-bench` for that reason, and a violation marks the run
+`~/.local/share/wright-agent-bench/runs` for that reason, and a violation marks the run
 `invalid` (`--no-ancestor-check` disables it). Network `off` is enforced only
 when `--canary-cmd` is given and fails inside the agent environment; without it
 the result records `networkEnforcement: declared-only`, which is what the shell
@@ -146,8 +156,15 @@ processes: filesystem writes are restricted to that trial's output directory
 (plus device streams), and `TMPDIR` points inside it. Unsupported hosts fail
 instead of silently running without protection. This protects host files; it
 blocks reads of `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outside the trial workspace
-to prevent tool-path rule discovery from contaminating context. Other host reads
-remain possible, and network isolation is not enforced. Model
+to prevent tool-path rule discovery from contaminating context. It also hides from
+the agent the scenarios (their reference solutions), every other run under `--out`,
+the wiki snapshot, skills outside the condition, and any `--deny-read PATH`, such as
+the checkouts of the repositories under test. The adapter, harness code, the `wright`
+binary directory, and the condition's skills stay readable. The result lists the
+denied paths in `fileReadEnforcement`. Without this, agents find the answer keys and the
+owner repositories on the host (seen in practice), so `evaluate` turns the sandbox on by
+default (`--no-file-sandbox` disables it). Other host reads remain possible, and
+network isolation is not enforced. Model
 account usage, CPU and disk consumption remain shared with the host. Provider
 failures returned as exit 75 are listed separately and excluded from outcome
 metrics. The harness never edits the task prompt: network `off` and the workspace
@@ -217,9 +234,14 @@ python3 benchmarks/agent/agent_bench.py score target/agent-bench   # Wright Agen
 ```
 
 [`matrix.example.json`](../benchmarks/agent/matrix.example.json) is the Tier 1 matrix. `matrix.json` lists `agents` (`{id, cmd}`), `cells`, optional `scenarios`,
-`trials`, `parallel`, `seed` (run order is shuffled by it), and `options`
-(`skill_dirs` as `{name: dir}`, `wiki_dir`, `env_pass`, ...). Cells not applicable to a scenario's language are skipped; the matrix stops after two consecutive provider interruptions and exits 3 when any occurred. Finished runs are skipped, so an
-interrupted matrix resumes.
+`trials`, `parallel`, `seed` (run order is shuffled by it), and `options`. Options
+are the trial-time settings a run needs, overriding their command-line counterparts: `out` and `out_root` (relative paths resolve against the matrix
+file's directory, so `evaluate`'s `out: "."` makes the file's own directory the run directory), `wright`, `adapter`, `file_sandbox`, `env_pass`, `credentials`,
+`allow_read`/`deny_read`, `timeout`, `canary_cmd`, `check_ancestors`, `infra_retries`/`infra_backoff`, `skill_dirs` as `{name: dir}`, `wiki_dir`. Every
+path-valued option (`out`, `out_root`, `wright`, `skill_dirs`, `wiki_dir`, `allow_read`, `deny_read`) follows the same rule: relative resolves against the matrix file's
+directory, and `evaluate` writes its own path options already resolved so the file reproduces the run from any cwd. Cells not
+applicable to a scenario's language are skipped; the matrix stops after two consecutive provider interruptions and exits 3 when any occurred. Finished runs
+are skipped, so an interrupted matrix resumes; `evaluate` writes its effective options into `matrix.json`, so `matrix <run>/matrix.json` resumes that run in place.
 
 For a local offline-declared pilot, use
 [`matrix.pilot.example.json`](../benchmarks/agent/matrix.pilot.example.json): one
@@ -254,7 +276,7 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | `friction`, `expectations` | Usage errors, unknown subcommands, help lookups, retries, malformed `serve` requests, unparsed `serve` responses, identical repeats; expectation E01-E12 verdicts |
 | `snapshots` | Strict validity of each snapshot of the entry, first valid index, and valid-to-invalid regressions |
 | `usage`, `context` | Turns, tokens by kind, peak context (and its share of the limit), tokens to first valid; loaded context |
-| `invalid`, `infraRetries`, `networkEnforcement` | Present when the run was excluded or retried; whether network `off` was checked by a canary or only declared |
+| `invalid`, `infraRetries`, `fileReadEnforcement`, `fileWriteEnforcement`, `networkEnforcement` | Present when the run was excluded or retried; how file reads (`allow-list` with the hidden and allowed paths, or `unrestricted`), file writes (`trial-directory-only` or `unrestricted`), and network `off` (`canary-checked` or `declared-only`) were enforced |
 
 `toolUse` is recorded per CLI invocation through the shim; `wright serve` sessions are teed
 line by line into the trace. Comparing cells for the same scenario shows what
@@ -286,9 +308,72 @@ over scenarios, and gives a two-stage bootstrap 95% interval (10,000 draws, seed
 467) and Pass^k as a secondary figure. Provider-interrupted, invalid, and
 agent-error runs are published as exclusions; timeouts count. The score is
 refused if the runs differ in Wright binary, skill hashes, suite hash, agent,
-model, effort, or protocol, and it is marked provisional with fewer than eight
+model, effort, protocol, or file-read/file-write/network enforcement — a run
+where the agent could read answer keys does not score beside a sandboxed one —
+and it is marked provisional with fewer than eight
 held-out scenarios, missing scenarios, or unequal trials. The card discloses
-`networkEnforcement` (`declared-only` or `canary-checked`).
+`fileReadEnforcement`, `fileWriteEnforcement`, and `networkEnforcement` modes.
+
+## Evaluating without an agent harness
+
+Quick start. Put your paths in `~/.config/wright-agent-bench/config.json` once
+(`WRIGHT_BENCH_CONFIG` overrides the location):
+
+```json
+{"skill_dirs": {"wright-skill": "~/skills/skills/wright", "opy-skill": "~/skills/skills/overpy"},
+ "deny_read": ["~/Repos", "~/.agents", "~/.claude"],
+ "wiki_dir": "~/.local/share/wright-agent-bench/wiki"}
+```
+
+then run one command per agent. `--dry-run` checks the setup (wright binary, the
+agent CLI, credentials, skill directories, the oracle) and prints the plan without
+running anything; `wright` is taken from `PATH` unless `--wright` or the config says
+otherwise, and the credentials each adapter needs are passed through automatically.
+
+```sh
+python3 benchmarks/agent/agent_bench.py evaluate --adapter devin --model swe-2-max --dry-run
+python3 benchmarks/agent/agent_bench.py evaluate --adapter devin --model swe-2-max
+```
+
+`agent_bench.py evaluate --adapter ADAPTER --model MODEL --skill-dir wright-skill=DIR`
+is the one-command entry: it writes `matrix.json`, runs the cells, then writes
+`report.md`, `summary.json`, `score.json`, `score.txt`, and `RESULTS.md` into
+`<out>/<name>`. `--cells score` runs the canonical cell only; `--cells controls`
+adds the baseline, `wright` without the skill, and, for OverPy scenarios, the
+`overpy` controls (cells whose skill has no `--skill-dir` are skipped). It runs the
+same from a terminal or from inside another agent's shell, because isolation comes
+from the harness's scrubbed environment, not from its parent. It runs locally; CI
+does not run it. `evaluate` passes `HOME` through and the adapter copies the
+credentials it needs into an isolated home; preflight names the missing login when
+one is absent.
+
+`--adapter direct` is the built-in loop (`adapters/direct.py`) that needs no agent
+harness: it calls a model API with one `bash` tool (and `fetch` only for
+knowledge `web`), lists the installed skills by name and description, and records
+exact usage and a full transcript. `BENCH_MODEL` is `anthropic/<model>`
+(`ANTHROPIC_API_KEY`, optional `ANTHROPIC_BASE_URL`) or `openai/<model>`
+(`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, so OpenAI-compatible endpoints work).
+Pass the key variables with `--env-pass`. Its turn, time, and output limits are
+recorded in `agentInfo.protocol`. It does not sandbox the network, so pair it with
+`--canary-cmd`. Scores from `direct` and from product harnesses measure different
+things and are not mixed.
+
+### Running different models at different times
+
+Each `evaluate` writes its own directory and scores only its own runs, so models
+and agents can be run whenever quota allows, in any order. Put the runs side by side
+with
+
+```sh
+python3 benchmarks/agent/agent_bench.py compare ~/.local/share/wright-agent-bench/runs/{devin-swe2-stage1,codex-luna-xhigh,pi-luna-xhigh}
+```
+
+which prints one table of scores, intervals, trials, and exclusions, and warns when
+the runs differ in the Wright binary, skill contents, or suite (scenarios, grader,
+oracle lock). Scores are comparable when it prints no warning. Keep the Wright
+binary, skills, and scenarios unchanged between runs; changes to the rest of the
+harness are disclosed in each card's `Harness` line and do not block comparison.
+An interrupted run resumes by repeating the same command with the same `--name`.
 
 ## Cadence
 

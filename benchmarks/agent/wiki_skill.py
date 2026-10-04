@@ -146,7 +146,8 @@ def build(snapshot: Path, out: Path, catalog: dict, manifest: dict, upstream_sou
 
 
 def content_hash(skill_dir: Path) -> str:
-    return hashlib.sha256("".join(f"{p.relative_to(skill_dir)}{hashlib.sha256(p.read_bytes()).hexdigest()}" for p in sorted(skill_dir.rglob("*.md"))).encode()).hexdigest()
+    return hashlib.sha256("".join(f"{p.relative_to(skill_dir)}{hashlib.sha256(p.read_bytes()).hexdigest()}" for p in sorted(skill_dir.rglob("*"))
+                                  if p.is_file() and p.name != "BUILD.json").encode()).hexdigest()  # the build record is written after the hash is taken
 
 
 def identity(skill_dir: Path) -> dict:

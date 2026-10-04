@@ -22,8 +22,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-INFRA_EXIT = 75
-TRANSIENT = ("rate limit", "overloaded", "429", "503", "529", "timed out", "timeout", "temporarily", "usage limit", "quota", "insufficient credits", "fetch failed", "websocket error", "connection error")
+from common import cli_version, split_effort, INFRA_EXIT, TRANSIENT
 WEB_TOOLS = ["WebFetch", "WebSearch", "webfetch", "web_search"]
 MCP_TOOLS = ["mcp_call_tool", "mcp_list_tools", "mcp_list_servers", "mcp_read_resource"]  # org-managed plugins install MCP servers
 NO_TOOL_CONFIG = {"claude": False, "cursor": False, "windsurf": False, "codex": False}
@@ -33,6 +32,8 @@ def isolated_config(user_config: dict, model: str, web: bool) -> dict:
     config = copy.deepcopy(user_config)
     config["read_config_from"] = NO_TOOL_CONFIG
     config["permissions"] = {"deny": MCP_TOOLS + ([] if web else WEB_TOOLS)}
+    # A denied call ends a headless session, so the tools are also hidden from the agent: it never reaches for what the condition withholds.
+    config["disabled_tools"] = MCP_TOOLS + ([] if web else [t for t in WEB_TOOLS if t.islower()])
     config.setdefault("agent", {})["model"] = model
     return config
 
@@ -66,6 +67,14 @@ def parse_export(export: dict) -> tuple[list[dict], list[str], list[str]]:
     return rows, loaded, plugins
 
 
+def transient(stdout: str, stderr: str) -> bool:
+    """A provider or infrastructure failure. The agent's own text on stdout can mimic provider wording, so only stderr and the
+    CLI's anchored model-catalog error count. An empty catalog means the catalog could not be fetched, not that the model is wrong."""
+    catalog = r"unknown model[^\n]*\n\s*available:\s*$"
+    return (any(s in stderr.lower() for s in TRANSIENT)
+            or re.search(catalog, stdout.lower().strip()) is not None or re.search(catalog, stderr.lower().strip()) is not None)
+
+
 def main() -> int:
     env = os.environ
     model = env.get("BENCH_MODEL") or sys.exit("BENCH_MODEL is required: set it in --agent-cmd, for example BENCH_MODEL=swe-2-max python3 adapters/devin.py")
@@ -90,12 +99,12 @@ def main() -> int:
     Path(env["BENCH_USAGE"]).write_text("".join(json.dumps(r) + "\n" for r in rows))
     Path(env["BENCH_TRANSCRIPT"]).write_text("".join(json.dumps(s) + "\n" for s in (json.loads(export.read_text())["steps"] if export.is_file() else [])))
     exported = json.loads(export.read_text()) if export.is_file() else {}
-    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "devin", "model": model, "tools": [t["function"]["name"] for t in exported.get("agent", {}).get("tool_definitions", [])], "denied": MCP_TOOLS + ([] if env["BENCH_KNOWLEDGE"] == "web" else WEB_TOOLS)}, indent=2))
+    Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "devin", "version": cli_version(devin), "model": split_effort(model)[0], "effort": split_effort(model)[1], "modelId": model, "tools": [t["function"]["name"] for t in exported.get("agent", {}).get("tool_definitions", [])], "denied": MCP_TOOLS + ([] if env["BENCH_KNOWLEDGE"] == "web" else WEB_TOOLS)}, indent=2))
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded, "ignoredPluginSkills": plugins}))
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     if proc.returncode != 0:
-        return INFRA_EXIT if any(s in (proc.stdout + proc.stderr).lower() for s in TRANSIENT) else proc.returncode
+        return INFRA_EXIT if transient(proc.stdout, proc.stderr) else proc.returncode
     return 0
 
 

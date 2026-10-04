@@ -32,7 +32,7 @@ def load(dirs: list[Path]) -> list[dict]:
     for base in dirs:
         for path in sorted(base.rglob("result.json")):
             result = json.loads(path.read_text())
-            if str(result.get("contract", "")).startswith("wright-agent-bench/"):
+            if str(result.get("contract", "")).startswith("wright-agent-bench/") and all(k in result for k in ("status", "language", "condition", "scenario", "agent", "environment")):
                 result["_dir"] = path.parent
                 match = re.search(r"-(\d+)$", path.parent.name)
                 result["_trial"] = int(match.group(1)) if match else 0
@@ -147,6 +147,22 @@ def regrade_notes(runs: list[dict], wright: str, load_scenario) -> list[str]:
     return [f"GRADER: unstable verdict on {len(unstable)} workspace(s): {unstable}"] if unstable else ["GRADER: consistent on every regraded workspace."]
 
 
+def setup_rows(runs: list[dict]) -> list[str]:
+    """What each agent was actually given: CLI version, model, tools, and loaded skills, as the adapters observed them."""
+    out = ["", "## Agent setup", "", "What the adapters observed, not what was requested. `not recorded` means the CLI does not expose it.", "",
+           "| agent | condition | CLI | model | effort | tools | loaded skills |", "| --- | --- | --- | --- | --- | --- | --- |"]
+    for agent in sorted({r["agent"]["id"] for r in runs}):
+        for cell in sorted({label(r) for r in runs if r["agent"]["id"] == agent}):
+            group = [r for r in runs if r["agent"]["id"] == agent and label(r) == cell]
+            infos = [r.get("agentInfo") or {} for r in group]
+            first = next((i for i in infos if i), {})
+            tools = first.get("tools") or first.get("toolsObserved")
+            tool_text = "not recorded" if tools is None else f"{len(tools)}: {', '.join(tools[:12])}{' ...' if len(tools) > 12 else ''}" if tools else "none"
+            loaded = sorted({s for r in group for s in ((r.get("context") or {}).get("loaded") or [])})
+            out.append(f"| {agent} | {cell} | {first.get('version') or 'not recorded'} | {first.get('model') or 'not recorded'} | {first.get('effort') or 'not recorded'} | {tool_text} | {', '.join(loaded) or 'none'} |")
+    return out
+
+
 def render(results: list[dict], regrade: list[str] | None = None, reference: str = BASELINE) -> tuple[str, dict]:
     invalid = [r for r in results if r["status"] == "invalid"]
     infrastructure = [r for r in results if r["status"] == "provider-interrupted"]
@@ -163,6 +179,7 @@ def render(results: list[dict], regrade: list[str] | None = None, reference: str
             summary["cells"][f"{agent}|{cell}"] = row
             out.append(f"| {agent} | {cell} | {row['n']} | {rate_runs(group)} | {row['passed']}/{row['n']} | {row['usedTool']}/{row['n']} | "
                        f"{fmt(row['tokens'])} | {fmt(row['tokensPerUsable'])} | {fmt(row['peakContext'])} | {fmt(row['seconds'], 1)} |")
+    out += setup_rows(runs)
     out += ["", "## By scenario", "", "| scenario | agent | condition | usable |", "| --- | --- | --- | --- |"]
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for r in runs:

@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import functools
+import contextlib
 import hashlib
 import json
 import os
 import platform
 import random
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -21,7 +22,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+import stat
+
 import bench_grade
+import bench_leaderboard
 import bench_report
 import bench_score
 import bench_trace
@@ -168,7 +172,7 @@ def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) 
         shim_dir = out / "bin"
         shim_dir.mkdir()
         shim = shim_dir / cell["tool"]
-        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{Path(__file__).resolve()}" shim {cell["tool"]} "$@"\n')
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{(HERE / "bench_trace.py").resolve()}" shim {cell["tool"]} "$@"\n')
         shim.chmod(0o755)
         real = args.wright if cell["tool"] == "wright" else str(overpy_launcher(out, os.environ["PATH"]))
         env.update({f"BENCH_TOOL_REAL_{cell['tool'].upper()}": real, "BENCH_TOOL_TRACE": str(out / "tool-trace.jsonl"), "BENCH_TOOL_SIDECAR": str(out / "tool-calls")})
@@ -206,6 +210,85 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
     return None
 
 
+BENCH_HOME = Path(os.environ.get("WRIGHT_BENCH_HOME", Path.home() / ".local/share/wright-agent-bench"))  # the one place for runs (`runs/`), wiki snapshots, and pinned skills
+DATA_ROOTS = (BENCH_HOME, Path.home() / ".cache/wright-agent-bench")  # hidden from agents; the second is where earlier versions wrote runs
+HIDDEN_ROOTS = (Path("/Users"), Path("/Volumes"), Path.home())  # the host's home directories and external drives are hidden unless listed below
+ADAPTER_READS = {  # what each adapter reads from the real home before the agent starts: credentials, configuration, installation (relative to the home directory)
+    "devin": [".local/share/devin", ".config/devin"], "pi": [".pi"], "codex": [".codex/auth.json"], "agy": [".gemini/antigravity-cli"],
+    "opencode": [".local/share/opencode/auth.json"], "grok": [".grok/auth.json"], "claude-code": [".claude.json", ".claude/.credentials.json"], "direct": [],
+}
+
+
+CREDENTIALS = {  # (real file relative to the home directory, its isolated copy relative to the run directory) per adapter; preflight requires every one
+    "codex": [(".codex/auth.json", "codex-home/.codex/auth.json")],
+    "pi": [(".pi/agent/auth.json", "pi-home/.pi/agent/auth.json")],
+    "devin": [(".local/share/devin/credentials.toml", "devin-home/.local/share/devin/credentials.toml"),
+             (".config/devin/config.json", "devin-home/.config/devin/config.json")],
+    "agy": [(".gemini/antigravity-cli/antigravity-oauth-token", "agy-home/.gemini/antigravity-cli/antigravity-oauth-token"),
+            (".gemini/antigravity-cli/installation_id", "agy-home/.gemini/antigravity-cli/installation_id")],
+    "opencode": [(".local/share/opencode/auth.json", "opencode-home/.local/share/opencode/auth.json")],
+    "grok": [(".grok/auth.json", "grok-home/auth.json")],
+}
+OPTIONAL_CREDENTIALS = {  # synced back when present, but not every install needs them (pi's antigravity login)
+    "pi": [(".pi/agent/antigravity-accounts.json", "pi-home/.pi/agent/antigravity-accounts.json")],
+}
+
+
+def sync_credentials_back(pairs: list[tuple[str, str]], run_dir: Path, home: Path | None = None) -> list[str]:
+    """Copy a login the agent's CLI refreshed inside its isolated home back to the real one.
+
+    Adapters hand the CLI a copy of the user's OAuth login. Refresh tokens rotate, so a refresh in the copy that is then discarded
+    leaves the user's own login holding a dead token. Only a changed, newer copy is written back, atomically."""
+    home = home or Path.home()
+    updated = []
+    for real_rel, isolated_rel in pairs:
+        real, isolated = home / real_rel, run_dir / isolated_rel
+        if not isolated.is_file() or not real.is_file() or isolated.read_bytes() == real.read_bytes() or isolated.stat().st_mtime <= real.stat().st_mtime:
+            continue
+        temporary = real.with_name(f".{real.name}.bench-sync")
+        temporary.unlink(missing_ok=True)  # a leftover temp keeps its mode; start fresh at 0o600 so a credential never sits at the default umask
+        temporary.touch(mode=0o600)
+        temporary.write_bytes(isolated.read_bytes())
+        temporary.chmod(real.stat().st_mode & 0o777)
+        os.replace(temporary, real)
+        updated.append(real_rel)
+    return updated
+
+
+def read_policy(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[Path]]:
+    """What the agent may not read, and the exceptions it needs.
+
+    An allow-list: the host's home directories and drives are hidden, so the agent sees the machine as a clean one holding only its run
+    directory, the condition's skills, the tool and runtime binaries, and what its adapter needs. Agents otherwise read the whole machine:
+    the answer keys, other runs, the grader, installed copies of the OverPy source, and checkouts of the repositories under test, so the
+    benchmark would measure what the agent could find instead of what it was given."""
+    run_dir = Path(env["BENCH_RUN_DIR"]).resolve()
+    selected = [name for name in env["BENCH_SKILLS"].split(",") if name]
+    hidden = [*HIDDEN_ROOTS, args.out, getattr(args, "out_root", args.out), *DATA_ROOTS, HERE, *(Path(p).expanduser() for p in getattr(args, "deny_read", []) or [])]
+    if getattr(args, "wiki_dir", None):
+        hidden.append(Path(args.wiki_dir))
+    hidden += [Path(d) for name, d in (args.skill_dirs or {}).items() if name not in selected]
+    runtime = [Path(args.wright), Path(sys.executable)]
+    for binary in (shutil.which("node"), shutil.which(ADAPTER_BINARY.get(getattr(args, "adapter", ""), ""))):
+        if binary:
+            runtime.append(Path(binary))
+    allowed = [run_dir, HERE / "adapters", HERE / "bench_trace.py", Path(sys.prefix), Path(sys.base_prefix),
+               *(Path(args.skill_dirs[name]) for name in selected), *(Path(p).expanduser() for p in getattr(args, "allow_read", []) or [])]
+    if env.get("BENCH_TOOL") == "overpy":  # only the overpy launcher execs the pinned oracle; other cells must not read the grading authority
+        allowed.append(HERE / "oracle")
+    for binary in runtime:  # the directory of the binary and of the file its symlink resolves to
+        allowed += [binary.parent, binary.resolve().parent]
+    unique = lambda paths: list(dict.fromkeys(p.resolve() for p in paths))
+    return unique(hidden), unique(allowed)
+
+
+def sandbox_read_rules(hidden: list[Path], allowed: list[Path]) -> str:
+    def rule(action: str, path: Path) -> str:
+        return f"({action} file-read-data ({'literal' if path.is_file() else 'subpath'} {json.dumps(str(path))}))\n"
+    # the allow-list overrides the hidden roots, and the answer keys are hidden again whatever else is allowed
+    return "".join(rule("deny", p) for p in hidden) + "".join(rule("allow", p) for p in allowed) + rule("deny", SCENARIOS.resolve())
+
+
 def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str) -> tuple[int | None, str, str]:
     command = args.agent_cmd
     if getattr(args, "file_sandbox", False):
@@ -215,26 +298,71 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
         temporary = run_dir / "tmp"
         temporary.mkdir(exist_ok=True)
         env = {**env, "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1"}
+        rules = sandbox_read_rules(*read_policy(args, env))
         profile = run_dir / "agent.sb"
+        if profile.exists():
+            os.chflags(profile, 0)  # an attempt killed mid-run leaves it locked
+        # the profile lists what is hidden, so the agent must not read it — and it sits inside the writable run dir, so a
+        # bare read deny is renamed around. the write deny keeps the name bound; UF_IMMUTABLE backs it where path rules
+        # cannot reach (hardlinking an immutable file fails outright), and the write deny in turn blocks the chflags
+        # that would clear the flag.
+        locked = str(profile.resolve())
         profile.write_text('(version 1)\n(allow default)\n(deny file-write*)\n'
                            f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n'
                            '(deny file-read-data (require-all (regex "/(AGENTS|CLAUDE|GEMINI)[.]md$") '
-                           f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n')
+                           f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n' + rules
+                           + f'(deny file-read-data (literal {json.dumps(locked)}))\n'
+                           + f'(deny file-write* (literal {json.dumps(locked)}))\n')
+        os.chflags(profile, stat.UF_IMMUTABLE)
         command = ["sandbox-exec", "-f", str(profile), "/bin/sh", "-c", args.agent_cmd]
+    else:
+        profile = None
     proc = subprocess.Popen(
         command, shell=isinstance(command, str), cwd=workspace, env=env, text=True,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
     )
     try:
-        stdout, stderr = proc.communicate(input=prompt, timeout=args.timeout)
-        return proc.returncode, stdout, stderr
-    except subprocess.TimeoutExpired:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        stdout, stderr = proc.communicate()
-        return None, stdout, f"{stderr}\ntimeout" if stderr else "timeout"
+            stdout, stderr = proc.communicate(input=prompt, timeout=args.timeout)
+            return proc.returncode, stdout, stderr
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                stdout, stderr = proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:  # a detached grandchild still holds the pipes; the adapter's own transcript has the record
+                proc.stdout.close()
+                proc.stderr.close()
+                stdout, stderr = "", ""
+            return None, stdout, f"{stderr}\ntimeout" if stderr else "timeout"
+    finally:
+        if profile is not None:
+            with contextlib.suppress(OSError):
+                os.chflags(profile, 0)
+
+
+def drop(path: Path) -> None:
+    """Best-effort removal of a path inside the agent-writable run tree. The agent can chflags or chmod its own files —
+    and a run killed mid-trial can leave agent.sb locked — so a plain rmtree/unlink can hit EPERM. Repairs stay on the
+    run-dir node itself so a planted symlink cannot redirect them onto a host file; a leaf removal retries right away,
+    and the next pass reaches whatever a blocked traversal skipped."""
+    def unlock(func, node, _exc):
+        with contextlib.suppress(OSError, AttributeError, NotImplementedError):  # chflags is a BSD mechanism
+            os.chflags(node, 0, follow_symlinks=False)
+        with contextlib.suppress(OSError, NotImplementedError):
+            os.chmod(node, 0o700, follow_symlinks=False)
+        if func in (os.unlink, os.rmdir):
+            with contextlib.suppress(OSError):
+                func(node)
+    for _ in range(8):
+        if not os.path.lexists(path):
+            return
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, onexc=unlock)
+        else:
+            unlock(os.unlink, str(path), None)
 
 
 def context_report(out: Path, skill_names: list[str]) -> dict:
@@ -253,16 +381,17 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     check_cell(cell, args)
     if not applicable(scenario, cell):
         raise SystemExit(f"condition {cell_label(cell)} does not apply to the {scenario['language']} scenario {scenario['id']}")
-    shutil.rmtree(out, ignore_errors=True)
+    drop(out)
     out.mkdir(parents=True)
     workspace = out / "workspace"
     prompt = (scenario["dir"] / "prompt.md").read_text()  # the exact pinned prompt: the harness adds no text
     infra_retries = 0
     while True:
-        shutil.rmtree(workspace, ignore_errors=True)
-        for stale in ("home", "bin", "real", "tool-trace.jsonl", "tool-calls", "usage.jsonl", "transcript.jsonl", "context.json", "agent-info.json", "snapshots"):
-            target = out / stale
-            shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink(missing_ok=True)
+        drop(workspace)
+        for stale in ("home", "bin", "real", "tool-trace.jsonl", "tool-calls", "usage.jsonl", "transcript.jsonl", "context.json", "agent-info.json", "snapshots", "tmp",
+                      "devin-export.json",  # devin only writes this on success; a retry that produces none would parse the previous attempt's export
+                      *(child.name for child in out.iterdir() if child.name.endswith(("-home", "-user")))):  # adapters keep their isolated homes here; a retry starts from none
+            drop(out / stale)
         materialize(scenario, workspace)
         if cell["knowledge"] == "wiki":
             shutil.copytree(Path(args.wiki_dir), workspace / "wiki")  # a real copy: tools that skip symlinks (rg) must see it
@@ -271,16 +400,18 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
         if reason:
             result = base_result(scenario, cell, args, out, 0.0, None)
             result.update(invalid=reason, status="invalid")
-            (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+            write_json(out / "result.json", result)
             return result
         snapshots = bench_trace.Snapshots(workspace, scenario.get("watch", [scenario["entry"]]), out / "snapshots")
         snapshots.start()
         start = time.monotonic()
         agent_exit, stdout, stderr = run_agent(args, env, workspace, prompt)
+        sync_credentials_back(getattr(args, "credentials", []), out)
         seconds = round(time.monotonic() - start, 1)
         snaps = snapshots.finish()
         if agent_exit == INFRA_EXIT and infra_retries < args.infra_retries:
             infra_retries += 1
+            time.sleep(getattr(args, "infra_backoff", 0) * infra_retries)  # an outage lasts longer than an immediate retry
             continue
         break
     (out / "agent.log").write_text(f"exit={agent_exit}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n")
@@ -288,6 +419,11 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     result["infraRetries"] = infra_retries
     result["networkEnforcement"] = "canary-checked" if cell["network"] == "off" and args.canary_cmd else "declared-only"
     result["fileWriteEnforcement"] = "trial-directory-only" if getattr(args, "file_sandbox", False) else "unrestricted"
+    if getattr(args, "file_sandbox", False):
+        hidden, allowed = read_policy(args, env)
+        result["fileReadEnforcement"] = {"mode": "allow-list", "hidden": [str(p) for p in hidden], "allowed": [str(p) for p in allowed]}
+    else:
+        result["fileReadEnforcement"] = "unrestricted"
     context = context_report(out, [skill_name(Path(args.skill_dirs[name])) for name in cell["skills"]])
     result["context"] = context
     if context.get("unexpected"):
@@ -307,7 +443,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     first_valid = next((s["t"] for s in result["snapshots"]["series"] if s["valid"]), None)
     result["usage"] = bench_trace.usage_summary(out / "usage.jsonl", first_valid)
     result["status"] = run_status(result)
-    (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    write_json(out / "result.json", result)
     return result
 
 
@@ -333,21 +469,22 @@ def snapshot_validity(scenario: dict, snaps: list[dict], wright: str, out: Path)
     return {"count": len(series), "firstValidIndex": next((s["i"] for s in series if s["valid"]), None), "regressions": regressions, "series": series}
 
 
-@functools.lru_cache(maxsize=None)
 def harness_commit() -> str:
     proc = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"], capture_output=True, text=True)
     dirty = subprocess.run(["git", "-C", str(HERE), "status", "--porcelain", "--", "."], capture_output=True, text=True).stdout.strip()
     return proc.stdout.strip() + ("+dirty" if dirty else "")
 
 
-@functools.lru_cache(maxsize=None)
-def file_sha256(path: str) -> str:
+def file_sha256(path: str | Path) -> str:
+    """Re-hashed per call: a suite resumes for days in one process and the binary may be rebuilt between trials."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-@functools.lru_cache(maxsize=None)
-def cached_suite(scenarios: str) -> tuple:
-    return tuple(bench_grade.suite_identity(Path(scenarios)).items())
+def write_json(path: Path, data: dict) -> None:
+    """A kill mid-write leaves no partial JSON to crash the next resume: temp file in the same directory, then replace."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(temporary, path)
 
 
 def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path, seconds: float, agent_exit: int | None) -> dict:
@@ -365,7 +502,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
             "wrightSha256": file_sha256(args.wright),
             "harness": harness_commit(),
-            "suite": dict(cached_suite(str(SCENARIOS))),
+            "suite": bench_grade.suite_identity(Path(SCENARIOS)),  # recomputed per trial: the suite may change during a days-long run
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "skills": {name: skill_identity(name, Path(args.skill_dirs[name])) for name in cell["skills"]},
             **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
@@ -417,18 +554,43 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         print(f"not applicable: {scenario_id} {label}", flush=True)
     state = {"streak": 0, "interrupted": 0, "unattempted": 0, "failed": 0}
     lock = threading.Lock()
+    base = args.config.resolve().parent  # relative option paths resolve against the matrix file, so a run's manifest is self-contained
+
+    def option_path(value: str) -> Path:
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else (base / path).resolve()
+
+    path_keys = ("wiki_dir", "out", "out_root", "wright")
+    options = {}
+    for key, val in config.get("options", {}).items():
+        if key in path_keys + ("skill_dirs",) and not val:
+            continue  # a null path option means 'unset', not an override
+        if key == "skill_dirs":
+            val = {n: option_path(v) for n, v in val.items()}
+        elif key in path_keys:
+            val = option_path(val)
+        elif key in ("allow_read", "deny_read") and isinstance(val, list):
+            val = [option_path(v) for v in val]
+        options[key] = val
+    merged = {**vars(args), **options}
+    if merged.get("deny_read") and not merged.get("file_sandbox"):
+        raise SystemExit("config options: deny_read does nothing without file_sandbox")
 
     def work(job: tuple) -> None:
         scenario_id, agent, cell, trial = job
-        out = trial_dir(args.out, scenario_id, agent["id"], cell, trial)
-        if (out / "result.json").is_file():
+        out = trial_dir(merged["out"], scenario_id, agent["id"], cell, trial)
+        finished = out / "result.json"
+        try:
+            status = json.loads(finished.read_text()).get("status") if finished.is_file() else None
+        except json.JSONDecodeError:
+            status = None  # a mid-write kill left a partial file; the trial is unfinished and retried
+        if status is not None and status != "provider-interrupted":  # an interrupted trial is retried on the next run
             return
         with lock:
             if state["streak"] >= STOP_AFTER_INTERRUPTIONS:
                 state["unattempted"] += 1
                 return
-        options = {k: ({n: Path(v) for n, v in val.items()} if k == "skill_dirs" else Path(val) if k == "wiki_dir" and val else val) for k, val in config.get("options", {}).items()}
-        trial_args = argparse.Namespace(**{**vars(args), "agent_id": agent["id"], "agent_cmd": agent["cmd"], **options})
+        trial_args = argparse.Namespace(**{**merged, "agent_id": agent["id"], "agent_cmd": agent["cmd"]})
         result = run_trial(load_scenario(scenario_id), cell, trial_args, out)
         with lock:
             state["streak"] = state["streak"] + 1 if result["status"] == "provider-interrupted" else 0
@@ -441,6 +603,180 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     if state["unattempted"]:
         print(f"stopped after {STOP_AFTER_INTERRUPTIONS} provider interruptions in a row: {state['unattempted']} job(s) left unattempted; rerun to resume", flush=True)
     return 3 if state["interrupted"] or state["unattempted"] else 1 if state["failed"] else 0
+
+
+ADAPTERS = {"claude-code": "claude_code.py", "pi": "pi.py", "devin": "devin.py", "codex": "codex.py", "agy": "agy.py", "opencode": "opencode.py", "grok": "grok.py", "direct": "direct.py"}
+CANONICAL_CELL = {"tool": "wright", "skills": ["wright-skill"], "knowledge": "none", "network": "off"}
+CONTROL_CELLS = [
+    {"tool": "none", "skills": [], "knowledge": "none", "network": "off"},
+    {"tool": "wright", "skills": [], "knowledge": "none", "network": "off"},
+    CANONICAL_CELL,
+    {"tool": "overpy", "skills": [], "knowledge": "none", "network": "off"},
+    {"tool": "overpy", "skills": ["opy-skill"], "knowledge": "none", "network": "off"},
+]
+
+
+ADAPTER_BINARY = {"claude-code": "claude", "pi": "pi", "devin": "devin", "codex": "codex", "agy": "agy", "opencode": "opencode", "grok": "grok"}
+DIRECT_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL")
+CONFIG_PATH = Path(os.environ.get("WRIGHT_BENCH_CONFIG", Path.home() / ".config/wright-agent-bench/config.json"))
+
+
+def user_defaults() -> dict:
+    """Per-user defaults for the long options, so a run is `evaluate --adapter A --model M`: keys wright, out, wiki_dir, env_pass, deny_read, skill_dirs {name: dir}."""
+    if not CONFIG_PATH.is_file():
+        return {}
+    config = json.loads(CONFIG_PATH.read_text())
+    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "allow_read", "skill_dirs", "models"}
+    if unknown:
+        raise SystemExit(f"{CONFIG_PATH}: unknown key(s) {sorted(unknown)}")
+    for i, entry in enumerate(config.get("models", [])):
+        if not isinstance(entry, dict) or entry.get("adapter") not in ADAPTERS or not entry.get("model"):
+            raise SystemExit(f"{CONFIG_PATH}: models[{i}] needs an adapter in {sorted(ADAPTERS)} and a model")
+    defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir")}
+    defaults.update({k: Path(v).expanduser() for k, v in config.items() if k in ("out", "wiki_dir")})
+    if "skill_dirs" in config:
+        defaults["skill_dir"] = [f"{name}={Path(d).expanduser()}" for name, d in config["skill_dirs"].items()]
+    return defaults
+
+
+def preflight(args: argparse.Namespace, cells: list[dict]) -> list[str]:
+    """Problems that would waste a run, found before it starts."""
+    problems = []
+    if not Path(args.wright).is_file():
+        problems.append(f"wright binary not found: {args.wright} (pass --wright or put `wright` on PATH)")
+    binary = ADAPTER_BINARY.get(args.adapter)
+    if binary and not shutil.which(binary):
+        problems.append(f"`{binary}` is not on PATH, which adapter '{args.adapter}' needs")
+    if args.adapter == "direct" and not any(os.environ.get(k) for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")):
+        problems.append("adapter 'direct' needs ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment")
+    for name in sorted({s for c in cells for s in c["skills"]}):
+        if not (Path(args.skill_dirs.get(name, "/nonexistent")) / "SKILL.md").is_file():
+            problems.append(f"skill '{name}' needs --skill-dir {name}=DIR (or skill_dirs in {CONFIG_PATH})")
+    if any(c["tool"] == "overpy" for c in cells) and not bench_grade.oracle_available():
+        problems.append("tool 'overpy' needs the pinned oracle: run `agent_bench.py setup-oracle`")
+    if getattr(args, "file_sandbox", False) and (sys.platform != "darwin" or not shutil.which("sandbox-exec")):
+        problems.append("the file sandbox needs macOS sandbox-exec; pass --no-file-sandbox for an unprotected run")
+    for real_rel, _ in CREDENTIALS.get(getattr(args, "adapter", ""), []):
+        if not (Path.home() / real_rel).is_file():
+            problems.append(f"adapter '{args.adapter}' needs ~/{real_rel} (sign in with that program first)")
+    return problems
+
+
+def wright_mismatch(run_dir: Path, wright: str) -> str | None:
+    """Why a repeated run must not continue with this Wright binary, or None.
+
+    A run is repeated to finish it later, possibly after `wright` on PATH was upgraded. Trials made with two binaries cannot be scored
+    together, so the mismatch is refused up front instead of being found when the score card is refused."""
+    if not Path(wright).is_file():
+        return None  # preflight already names the missing binary
+    current = file_sha256(Path(wright))
+    for path in sorted(run_dir.glob("*/*/*/result.json")):
+        try:
+            env = json.loads(path.read_text()).get("environment", {})
+        except json.JSONDecodeError:
+            continue  # a partial file means the trial never finished; it will be retried
+        recorded = env.get("wrightSha256")
+        if recorded and recorded != current:
+            return (f"{run_dir.name} already has trials made with {env.get('wright')} (sha256 {recorded[:12]}), but {wright} is a different binary. "
+                    f"Pass --wright with the binary that made them, or start a new run with --name.")
+    return None
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """One command from agent and model to data and document: run the matrix, then write report, score cards, and RESULTS.md.
+
+    Needs no agent harness around it: isolation comes from the harness's own scrubbed environment, so it runs the same from a
+    terminal or from inside another agent's shell."""
+    args.file_sandbox = not args.no_file_sandbox  # evaluation hides the answer keys and the rest of the host from the agent by default
+    if args.deny_read and not args.file_sandbox:
+        raise SystemExit("--deny-read does nothing without the file sandbox")
+    args.credentials = CREDENTIALS.get(args.adapter, []) + OPTIONAL_CREDENTIALS.get(args.adapter, [])
+    args.allow_read = [*(str(Path.home() / rel) for rel in ADAPTER_READS[args.adapter]), *args.allow_read]
+    if args.adapter == "claude-code" and args.file_sandbox:
+        print("note: the file sandbox lets claude-code read but not refresh its login; pass --no-file-sandbox when its token may rotate mid-run", flush=True)
+    script = Path(__file__).parent / "adapters" / ADAPTERS[args.adapter]
+    if not args.name or args.name in (".", "..") or Path(args.name).name != args.name:
+        raise SystemExit("--name must be a single directory name")
+    effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
+    agent_id = model_slug({"adapter": args.adapter, "model": args.model, "effort": args.effort})
+    cmd = f"BENCH_MODEL={shlex.quote(args.model)} {effort}{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+    wanted = [CANONICAL_CELL] if args.cells == "score" else CONTROL_CELLS
+    cells = [c for c in wanted if all(s in args.skill_dirs for s in c["skills"])]
+    dropped = [cell_label(normalize_cell(c)) for c in wanted if c not in cells]
+    if dropped:
+        print(f"skipped cells without --skill-dir: {', '.join(dropped)}", flush=True)
+    if not cells:
+        raise SystemExit("no cell can run: pass --skill-dir wright-skill=DIR")
+    args.env_pass = sorted({*args.env_pass, *(DIRECT_ENV if args.adapter == "direct" else ("HOME",))})  # the credentials the adapter copies or reads
+    problems = preflight(args, [normalize_cell(c) for c in cells])
+    if (problem := wright_mismatch(args.out / args.name, args.wright)):
+        problems.append(problem)
+    if problems:
+        raise SystemExit("cannot start:\n  " + "\n  ".join(problems))
+    scenarios = args.scenarios or [s for s in all_scenario_ids() if args.split == "all" or load_scenario(s).get("split") == args.split]
+    runnable = sum(args.trials for s in scenarios for c in cells if applicable(load_scenario(s), normalize_cell(c)))
+    print(f"{args.adapter} {args.model}: {len(scenarios)} scenario(s), cells {', '.join(cell_label(normalize_cell(c)) for c in cells)}, {runnable} trial(s) into {args.out / args.name}", flush=True)
+    if args.dry_run:
+        return 0
+    args.out_root = args.out  # sibling evaluation runs must stay unreadable too
+    args.out = args.out / args.name
+    args.out.mkdir(parents=True, exist_ok=True)
+    # every option a trial reads is serialized at its effective value, so `matrix` on this file reproduces the run
+    config = {"agents": [{"id": agent_id, "cmd": cmd}], "cells": cells, "scenarios": scenarios, "trials": args.trials, "parallel": args.parallel, "seed": args.seed,
+              "options": {"out": ".", "out_root": "..", "wright": args.wright, "adapter": args.adapter,
+                          "file_sandbox": args.file_sandbox, "env_pass": args.env_pass, "credentials": args.credentials,
+                          # paths the caller gave resolve now, against this cwd — relative ones in the file resolve against the file's directory
+                          "allow_read": [str(Path(p).expanduser().resolve()) for p in args.allow_read],
+                          "deny_read": [str(Path(p).expanduser().resolve()) for p in args.deny_read],
+                          "timeout": args.timeout, "canary_cmd": args.canary_cmd, "check_ancestors": args.check_ancestors,
+                          "infra_retries": args.infra_retries, "infra_backoff": args.infra_backoff,
+                          "skill_dirs": {k: str(Path(v).expanduser().resolve()) for k, v in args.skill_dirs.items()},
+                          "wiki_dir": str(args.wiki_dir.expanduser().resolve()) if args.wiki_dir else None}}
+    args.config = args.out / "matrix.json"
+    args.config.write_text(json.dumps(config, indent=2) + "\n")
+    status = cmd_matrix(args)
+    if not list(args.out.glob("*/*/*/result.json")):
+        return status or 1
+    bench_report.main([args.out], args.wright, False, load_scenario, bench_report.BASELINE)
+    languages = ["workshop", "opy"]
+    expected = {lang: [s for s in all_scenario_ids() if load_scenario(s)["language"] == lang and load_scenario(s).get("split") == "test"] for lang in languages}
+    bench_score.main([args.out], languages, expected, None)
+    (args.out / "RESULTS.md").write_text(f"# Agent benchmark results: {args.name}\n\nAgent `{agent_id}`. Generated by `agent_bench.py evaluate`; `agent_bench.py matrix <this directory>/matrix.json` resumes it in place.\n\n"
+                                         f"## Score\n\n```\n{(args.out / 'score.txt').read_text()}```\n\n{(args.out / 'report.md').read_text()}")
+    print(f"wrote {args.out / 'RESULTS.md'}")
+    return status
+
+
+def model_slug(entry: dict) -> str:
+    effort = entry.get("effort")
+    return "-".join(filter(None, (entry["adapter"], entry["model"].replace("/", "_"), None if effort and entry["model"].endswith(f"-{effort}") else effort)))  # an effort the model id names is not repeated
+
+
+def cmd_suite(args: argparse.Namespace) -> int:
+    """Evaluate every model of the user's list one after another, then write the publishable results page.
+
+    Safe to repeat: finished runs are skipped, so quota or time limits only postpone the rest. Exit 3 when something is waiting for a rerun."""
+    models = [m for m in (args.models or []) if not args.only or any(m["adapter"] == o or f"{m['adapter']}:{m['model']}" == o for o in args.only)]  # exact adapter or adapter:model — 'codex:gpt-6' must not swallow 'codex:gpt-6-luna'
+    if not models:
+        raise SystemExit(f'no models: add "models": [{{"adapter": "devin", "model": "swe-2-max"}}, ...] to {CONFIG_PATH}')
+    if not args.suite_name or args.suite_name in (".", "..") or Path(args.suite_name).name != args.suite_name:
+        raise SystemExit("--suite-name must be a single directory name")
+    root = args.out / args.suite_name
+    outcome = {}
+    for entry in models:
+        slug = model_slug(entry)
+        print(f"\n=== {slug}", flush=True)
+        sub = argparse.Namespace(**{**vars(args), "adapter": entry["adapter"], "model": entry["model"], "effort": entry.get("effort"), "name": slug, "out": root})
+        try:
+            outcome[slug] = {0: "done", 3: "waiting: provider limit or outage, rerun later"}.get(cmd_evaluate(sub), "finished with errors")
+        except SystemExit as stop:
+            outcome[slug] = f"skipped: {stop.code}"
+    print("\n" + "\n".join(f"{slug}: {state}" for slug, state in outcome.items()))
+    if not args.dry_run:
+        bench_leaderboard.main(sorted(root.glob("*/")), root / "leaderboard")
+    if any(state.startswith("waiting") for state in outcome.values()):
+        return 3
+    return 0 if all(state == "done" for state in outcome.values()) else 1
 
 
 def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
@@ -460,15 +796,14 @@ def cmd_setup_oracle(_: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) > 1 and sys.argv[1] == "shim":
-        return bench_trace.shim_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("validate", "run", "matrix"):
-        p = sub.add_parser(name)
+    sub.add_parser("suite", help="evaluate every model listed in the user config in turn, then write the results page")
+    for name in ("validate", "run", "matrix", "evaluate", "suite"):
+        p = sub.choices[name] if name == "suite" else sub.add_parser(name)
         p.add_argument("--wright", default=str(ROOT / "target/debug/wright"), help="Wright binary under test")
-        p.add_argument("--out", type=Path, default=Path.home() / ".cache/wright-agent-bench", help="outside any repository, so agents cannot discover its instruction files")
-    for name in ("run", "matrix"):
+        p.add_argument("--out", type=Path, default=BENCH_HOME / "runs", help="outside any repository, so agents cannot discover its instruction files")
+    for name in ("run", "matrix", "evaluate", "suite"):
         p = sub.choices[name]
         p.add_argument("--skill-dir", action="append", default=[], metavar="NAME=DIR", help=f"pinned skill directory for one of {', '.join(SKILLS)}; repeatable")
         p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked as ./wiki for knowledge 'wiki'; content hashes are verified")
@@ -476,8 +811,12 @@ def main() -> int:
         p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")
         p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
         p.add_argument("--timeout", type=int, default=1800)
-        p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory")
+        p.add_argument("--deny-read", nargs="*", default=[], metavar="PATH", help="extra directories hidden from the agent (the home directories and drives already are); needs the file sandbox")
+        p.add_argument("--allow-read", nargs="*", default=[], metavar="PATH", help="paths the agent's CLI needs inside the hidden home directories (credentials, installation); `evaluate` adds its adapter's")
         p.add_argument("--infra-retries", type=int, default=2, help="retries when the agent exits 75 (provider or infrastructure failure)")
+        p.add_argument("--infra-backoff", type=int, default=60, help="seconds before the first retry; each further retry waits one more multiple")
+    for p in (sub.choices["run"], sub.choices["matrix"]):
+        p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory, and hide the scenarios, other runs, the wiki, unselected skills, and --deny-read paths")
     run = sub.choices["run"]
     run.add_argument("scenario", choices=all_scenario_ids())
     run.add_argument("--agent-cmd", required=True, help="shell command; the task prompt arrives on stdin, cwd is the workspace, BENCH_* describes the condition")
@@ -488,6 +827,33 @@ def main() -> int:
     run.add_argument("--network", choices=("off", "on"), default="off")
     run.add_argument("--trials", type=int, default=1)
     sub.choices["matrix"].add_argument("config", type=Path, help="JSON: agents[{id,cmd}], cells[{tool,skills,knowledge,network}], scenarios, trials, parallel, seed, options")
+    ev = sub.choices["evaluate"]
+    ev.add_argument("--adapter", choices=sorted(ADAPTERS), required=True, help="agent adapter; `direct` is the built-in loop that needs no agent harness")
+    ev.add_argument("--model", required=True, help="BENCH_MODEL, in the form the adapter expects")
+    ev.add_argument("--effort", help="BENCH_THINKING, where the adapter supports it")
+    ev.add_argument("--name", default=time.strftime("%Y%m%d-%H%M%S"), help="run directory under --out")
+    su = sub.choices["suite"]
+    su.add_argument("--suite-name", default="results", help="directory under --out holding every model's run and the results page")
+    su.add_argument("--only", nargs="*", metavar="ADAPTER[:MODEL]", help="evaluate only these entries of the models list")
+    su.add_argument("--cells", choices=("score", "controls"), default="score")
+    su.add_argument("--split", choices=("test", "train", "all"), default="test")
+    su.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
+    su.add_argument("--trials", type=int, default=3)
+    su.add_argument("--parallel", type=int, default=1)
+    su.add_argument("--seed", type=int, default=1)
+    su.add_argument("--dry-run", action="store_true")
+    su.add_argument("--no-file-sandbox", action="store_true")
+    lb = sub.add_parser("leaderboard", help="write the publishable results page (Markdown, HTML, JSON) from evaluation run directories")
+    lb.add_argument("dirs", nargs="+", type=Path)
+    lb.add_argument("--page-out", type=Path, help="directory for the page; `leaderboard` inside the first directory's parent by default")
+    ev.add_argument("--cells", choices=("score", "controls"), default="score", help="score: the canonical cell only; controls: also baseline and language-appropriate controls")
+    ev.add_argument("--split", choices=("test", "train", "all"), default="test")
+    ev.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
+    ev.add_argument("--trials", type=int, default=3)
+    ev.add_argument("--parallel", type=int, default=1, help="trials at a time; sequential by default so provider limits are not hit, and a run can continue across sessions")
+    ev.add_argument("--seed", type=int, default=1)
+    ev.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
+    ev.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox: the agent can then read the scenario answer keys")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
     skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-wiki skill from a wiki snapshot")
     skill.add_argument("--snapshot", type=Path, required=True)
@@ -495,7 +861,7 @@ def main() -> int:
     skill.add_argument("--catalog", type=Path, required=True, help="workshop-rs catalog.json, for Workshop names and ids")
     skill.add_argument("--opy-manifest", type=Path, required=True, help="opy-rs manifest.json, for upstream OverPy spellings")
     wiki = sub.add_parser("wiki-snapshot", help="fetch the Workshop wiki Markdown mirror into a pinned local snapshot")
-    wiki.add_argument("--dir", type=Path, default=Path.home() / ".cache/wright-agent-bench-wiki")
+    wiki.add_argument("--dir", type=Path, default=BENCH_HOME / "wiki")
     wiki.add_argument("--base", default=bench_wiki.BASE)
     wiki.add_argument("--categories", nargs="+", default=list(bench_wiki.CATEGORIES), help="wiki categories to crawl (add tutorials for the second tier)")
     report = sub.add_parser("report", help="summarize result.json files")
@@ -503,9 +869,18 @@ def main() -> int:
     report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
     report.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
     report.add_argument("--reference", default=bench_report.BASELINE, help="condition label the paired comparison is made against")
+    compare = sub.add_parser("compare", help="one table from the score.json of several evaluation runs, warning when they are not comparable")
+    compare.add_argument("dirs", nargs="+", type=Path)
     score = sub.add_parser("score", help="compute the Wright Agent Score card of each language track from canonical test runs")
     score.add_argument("dirs", nargs="+", type=Path)
     score.add_argument("--language", choices=("workshop", "opy"), action="append", help="track to score; both when omitted")
+    defaults = user_defaults()
+    for choice in sub.choices.values():
+        known = {a.dest for a in choice._actions}
+        choice.set_defaults(**{k: v for k, v in defaults.items() if k in known})
+    for name in ("evaluate", "suite"):
+        sub.choices[name].set_defaults(wright=defaults.get("wright") or shutil.which("wright") or str(ROOT / "target/debug/wright"))
+    sub.choices["suite"].set_defaults(models=defaults.get("models"))
     args = parser.parse_args()
     if hasattr(args, "wright"):
         args.wright = str(Path(args.wright).resolve())
@@ -518,6 +893,8 @@ def main() -> int:
             if name not in SKILLS or not directory:
                 raise SystemExit(f"--skill-dir expects NAME=DIR with NAME one of {', '.join(SKILLS)}: {item}")
             args.skill_dirs[name] = Path(directory)
+    if getattr(args, "deny_read", None) and not getattr(args, "file_sandbox", False) and args.command not in ("evaluate", "suite"):
+        raise SystemExit("--deny-read needs --file-sandbox")
     if args.command == "validate":
         return 0 if validate(args.wright, args.out) else 1
     if args.command == "setup-oracle":
@@ -528,11 +905,16 @@ def main() -> int:
         return cmd_wiki_skill(args)
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s), args.reference)
+    if args.command == "leaderboard":
+        return bench_leaderboard.main(args.dirs, args.page_out or args.dirs[0].parent / "leaderboard")
+    if args.command == "compare":
+        print(bench_score.compare(args.dirs))
+        return 0
     if args.command == "score":
         languages = args.language or ["workshop", "opy"]
         expected = {lang: [s for s in all_scenario_ids() if load_scenario(s)["language"] == lang and load_scenario(s).get("split") == "test"] for lang in languages}
         return bench_score.main(args.dirs, languages, expected, None)
-    return cmd_run(args) if args.command == "run" else cmd_matrix(args)
+    return {"run": cmd_run, "matrix": cmd_matrix, "evaluate": cmd_evaluate, "suite": cmd_suite}[args.command](args)
 
 
 if __name__ == "__main__":

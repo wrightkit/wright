@@ -14,7 +14,7 @@ MIN_SCENARIOS = 8
 BOOTSTRAP_DRAWS = 10_000
 BOOTSTRAP_SEED = 467
 METHOD = f"two-stage percentile bootstrap (scenarios, then trials within a scenario), {BOOTSTRAP_DRAWS} draws, seed {BOOTSTRAP_SEED}"
-EXCLUDED = ("provider-interrupted", "invalid", "agent-error")  # reported separately; a timeout is the agent's own outcome and counts
+VALID = ("completed", "timeout")  # a timeout is the agent's own outcome and counts; every other status is excluded and reported separately
 TRACKS = {"workshop": "Wright Workshop Agent Score", "opy": "Wright OPY Agent Score"}
 
 
@@ -38,6 +38,12 @@ def pass_power_k(usable: int, valid: int, k: int) -> float:
     return comb(usable, k) / comb(valid, k) if valid >= k else 0.0
 
 
+def read_enforcement(run: dict) -> str | None:
+    """The file-read policy in one word: 'allow-list' is recorded with its hidden/allowed paths, which differ per trial."""
+    enforcement = run.get("fileReadEnforcement")
+    return enforcement.get("mode") if isinstance(enforcement, dict) else enforcement
+
+
 def identity_of(run: dict) -> dict:
     env = run["environment"]
     info = run.get("agentInfo") or {}
@@ -47,16 +53,18 @@ def identity_of(run: dict) -> dict:
         "suite": (env.get("suite") or {}).get("hash"),
         "agent": run["agent"]["id"], "model": info.get("model"), "effort": info.get("effort"),
         "protocol": run.get("protocol"),
+        "fileReadEnforcement": read_enforcement(run), "fileWriteEnforcement": run.get("fileWriteEnforcement"),
+        "networkEnforcement": run.get("networkEnforcement"),  # what the agent could reach is part of the environment being scored
     }
 
 
 def card(results: list[dict], language: str, expected: list[str]) -> dict:
     """The score card of one language track, or a refusal when the runs are not one comparable environment."""
-    track = [r for r in results if r["language"] == language and r["condition"]["label"] == CANONICAL and r.get("split") == "test"]
+    track = [r for r in results if r.get("language") == language and (r.get("condition") or {}).get("label") == CANONICAL and r.get("split") == "test"]
     excluded = defaultdict(list)
     valid = []
     for run in track:
-        (excluded[run["status"]] if run["status"] in EXCLUDED else valid).append(run)
+        (valid if run.get("status") in VALID else excluded[run.get("status") or "missing-status"]).append(run)
     if not valid:
         return {"contract": CONTRACT, "track": TRACKS[language], "refused": "no valid canonical test runs for this language"}
     identities = {json.dumps(identity_of(r), sort_keys=True) for r in valid}
@@ -99,8 +107,9 @@ def card(results: list[dict], language: str, expected: list[str]) -> dict:
         "identity": identity,
         "suite": (valid[0]["environment"].get("suite") or {}),
         "harness": sorted({r["environment"].get("harness") for r in valid if r["environment"].get("harness")}),
-        "networkEnforcement": sorted({r.get("networkEnforcement") for r in valid}),
-        "fileWriteEnforcement": sorted({r.get("fileWriteEnforcement") for r in valid}),
+        "networkEnforcement": sorted({r.get("networkEnforcement") or "not recorded" for r in valid}),
+        "fileWriteEnforcement": sorted({r.get("fileWriteEnforcement") or "not recorded" for r in valid}),
+        "fileReadEnforcement": sorted({read_enforcement(r) or "not recorded" for r in valid}),
         "exclusions": {status: len(runs) for status, runs in sorted(excluded.items())},
         "perScenario": [{"scenario": s, "usable": sum(v), "valid": len(v), "rate": round(rates[s], 3)} for s, v in sorted(per.items())],
         "byFamily": {f: round(100 * sum(v) / len(v), 1) for f, v in sorted(families.items())},
@@ -126,6 +135,7 @@ def render(c: dict) -> str:
         f"Suite:       {c['suite'].get('version')} {c['suite'].get('hash')}", f"Wright:      {ident['wright']} sha256 {ident['wrightSha256']}",
         f"Skills:      {', '.join(f'{n} {h}' for n, h in ident['skills'].items()) or 'none'}", f"Harness:     {', '.join(c['harness']) or 'not recorded'}",
         f"Network:     {', '.join(x or 'not recorded' for x in c['networkEnforcement'])}", f"File writes: {', '.join(x or 'not recorded' for x in c['fileWriteEnforcement'])}",
+        f"File reads:  {', '.join(x or 'not recorded' for x in c['fileReadEnforcement'])}",
         f"Excluded:    {c['exclusions'] or 'none'}",
     ]
     if c["provisional"]:
@@ -134,6 +144,34 @@ def render(c: dict) -> str:
         lines += ["", "Network was off by declaration only for some runs; the canonical condition asks for it to be disabled."]
     lines += ["", "By scenario: " + ", ".join(f"{p['scenario']} {p['usable']}/{p['valid']}" for p in c["perScenario"]), "By family: " + ", ".join(f"{f} {v}" for f, v in c["byFamily"].items()),
               "Failure layers: " + (", ".join(f"{k} {v}" for k, v in c["failureLayers"].items()) or "none")]
+    return "\n".join(lines) + "\n"
+
+
+COMPARABLE = ("wrightSha256", "skills", "suite", "fileReadEnforcement", "fileWriteEnforcement", "networkEnforcement")  # what must match for two cards to be read side by side; agent, model, and effort are what is being compared
+
+
+def compare(dirs: list[Path]) -> str:
+    """One table from the score cards of several evaluation runs, with a warning when they were not made against the same Wright, skills, and suite."""
+    rows, identities = [], {}
+    for directory in dirs:
+        path = directory / "score.json"
+        if not path.is_file():
+            rows.append(("", directory.name, "no score", "no score.json in this directory"))
+            continue
+        for card_ in json.loads(path.read_text())["cards"]:
+            if "refused" in card_:
+                rows.append((card_["track"], directory.name, "no score", card_["refused"]))
+                continue
+            ident = card_["identity"]
+            identities.setdefault(card_["track"], []).append((directory.name, {k: ident.get(k) for k in COMPARABLE}))  # cards written before a field existed compare as 'not recorded'
+            label = " ".join(filter(None, (ident.get("agent"), ident.get("effort") and f"effort {ident['effort']}")))
+            note = "provisional: " + "; ".join(card_["provisional"]) if card_["provisional"] else ""
+            rows.append((card_["track"], directory.name, f"{card_['score']} [{card_['ci95'][0]}-{card_['ci95'][1]}]", f"{label}; {card_['trialsPerScenario']} trial(s) x {card_['scenarios']} scenarios; excluded {card_['exclusions'] or 'none'}. {note}".strip()))
+    lines = ["| track | run | score [95% CI] | agent and notes |", "| --- | --- | --- | --- |", *(f"| {t} | {d} | {s} | {n} |" for t, d, s, n in sorted(rows))]
+    for track, entries in identities.items():
+        differing = sorted({k for _, a in entries for _, b in entries for k in COMPARABLE if a[k] != b[k]})
+        if differing:
+            lines.append(f"\nWARNING {track}: runs differ in {', '.join(differing)}, so these scores are not directly comparable.")
     return "\n".join(lines) + "\n"
 
 
