@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -20,6 +21,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
+import stat
 
 import bench_grade
 import bench_leaderboard
@@ -297,31 +300,47 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
         env = {**env, "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1"}
         rules = sandbox_read_rules(*read_policy(args, env))
         profile = run_dir / "agent.sb"
+        if profile.exists():
+            os.chflags(profile, 0)  # an attempt killed mid-run leaves it locked
+        # the profile lists what is hidden, so the agent must not read it — and it sits inside the writable run dir, so a
+        # bare read deny is renamed around. the write deny keeps the name bound; UF_IMMUTABLE backs it where path rules
+        # cannot reach (hardlinking an immutable file fails outright), and the write deny in turn blocks the chflags
+        # that would clear the flag.
+        locked = str(profile.resolve())
         profile.write_text('(version 1)\n(allow default)\n(deny file-write*)\n'
                            f'(allow file-write* (subpath {json.dumps(str(run_dir.resolve()))}) (subpath "/dev"))\n'
                            '(deny file-read-data (require-all (regex "/(AGENTS|CLAUDE|GEMINI)[.]md$") '
                            f'(require-not (subpath {json.dumps(str(workspace.resolve()))}))))\n' + rules
-                           + f'(deny file-read-data (literal {json.dumps(str(profile.resolve()))}))\n')  # the profile lists what is hidden; the agent must not read it
+                           + f'(deny file-read-data (literal {json.dumps(locked)}))\n'
+                           + f'(deny file-write* (literal {json.dumps(locked)}))\n')
+        os.chflags(profile, stat.UF_IMMUTABLE)
         command = ["sandbox-exec", "-f", str(profile), "/bin/sh", "-c", args.agent_cmd]
+    else:
+        profile = None
     proc = subprocess.Popen(
         command, shell=isinstance(command, str), cwd=workspace, env=env, text=True,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
     )
     try:
-        stdout, stderr = proc.communicate(input=prompt, timeout=args.timeout)
-        return proc.returncode, stdout, stderr
-    except subprocess.TimeoutExpired:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            stdout, stderr = proc.communicate(timeout=10)
-        except subprocess.TimeoutExpired:  # a detached grandchild still holds the pipes; the adapter's own transcript has the record
-            proc.stdout.close()
-            proc.stderr.close()
-            stdout, stderr = "", ""
-        return None, stdout, f"{stderr}\ntimeout" if stderr else "timeout"
+            stdout, stderr = proc.communicate(input=prompt, timeout=args.timeout)
+            return proc.returncode, stdout, stderr
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                stdout, stderr = proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:  # a detached grandchild still holds the pipes; the adapter's own transcript has the record
+                proc.stdout.close()
+                proc.stderr.close()
+                stdout, stderr = "", ""
+            return None, stdout, f"{stderr}\ntimeout" if stderr else "timeout"
+    finally:
+        if profile is not None:
+            with contextlib.suppress(OSError):
+                os.chflags(profile, 0)
 
 
 def context_report(out: Path, skill_names: list[str]) -> dict:
