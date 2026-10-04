@@ -167,6 +167,44 @@ class AgentBenchTest(unittest.TestCase):
         self.assertTrue(all(json.loads(p.read_text())["status"] != "provider-interrupted" for p in (self.out / "m").rglob("result.json")))
         self.assertEqual(len(list((self.out / "m").rglob("result.json"))), 4)  # the interrupted two were rerun and the rest ran
 
+    def test_evaluate_serializes_the_run_options_so_its_matrix_reproduces_the_run(self):
+        import contextlib
+        import io
+        script = agent_bench.HERE / "adapters" / "_test_fake_adapter.py"
+        script.write_text("import os, sys\nsys.stdin.read()\nopen('probe.txt', 'w').write(os.environ.get('BENCH_PROBE', '') + '|' + os.environ.get('HOME', ''))\n")
+        self.addCleanup(script.unlink, True)
+        args = argparse.Namespace(
+            adapter="fake", model="m", effort=None, name="eval", out=self.out, wright=str(Path(WRIGHT).resolve()),
+            skill_dirs={"wright-skill": self.skill_dir("wright-skill")}, wiki_dir=None, env_pass=["BENCH_PROBE"],
+            allow_read=[str(self.out)], deny_read=[], canary_cmd=None, check_ancestors=False,
+            timeout=30, infra_retries=0, infra_backoff=0, no_file_sandbox=True, dry_run=False,
+            cells="score", split="test", scenarios=[SCENARIO], trials=1, parallel=1, seed=1)
+        run_dir = self.out / "eval"
+        with patch.dict(agent_bench.ADAPTERS, {"fake": "_test_fake_adapter.py"}), patch.dict(agent_bench.ADAPTER_READS, {"fake": []}), \
+                patch.dict(os.environ, {"BENCH_PROBE": "present"}), contextlib.redirect_stdout(io.StringIO()):
+            code = agent_bench.cmd_evaluate(args)
+        self.assertEqual(code, 0)
+        options = json.loads((run_dir / "matrix.json").read_text())["options"]
+        self.assertEqual((options["out"], options["out_root"], options["adapter"]), (".", "..", "fake"))
+        self.assertEqual((options["wright"], options["timeout"], options["file_sandbox"]), (str(Path(WRIGHT).resolve()), 30, False))
+        self.assertIn("BENCH_PROBE", options["env_pass"])
+        self.assertIn("HOME", options["env_pass"])
+        self.assertIn(str(self.out), options["allow_read"])
+        trial = run_dir / SCENARIO / "fake-m" / "wright+wright-skill_none_off-1"
+        self.assertEqual((trial / "workspace" / "probe.txt").read_text(), f"present|{Path.home()}")
+        elsewhere = self.out / "elsewhere"  # flag values that would all be wrong; every serialized option must win
+        margs = argparse.Namespace(config=run_dir / "matrix.json", out=elsewhere, wright="/missing", skill_dirs={}, wiki_dir=None,
+                                   env_pass=[], check_ancestors=True, canary_cmd=None, timeout=99, infra_retries=5, infra_backoff=5,
+                                   file_sandbox=True, deny_read=[], allow_read=[])
+        (trial / "result.json").unlink()
+        with patch.dict(os.environ, {"BENCH_PROBE": "present"}), contextlib.redirect_stdout(io.StringIO()):
+            code = agent_bench.cmd_matrix(margs)
+        self.assertEqual(code, 0)
+        self.assertFalse(elsewhere.exists())  # the run's own directory, not --out, receives the rerun trial
+        result = json.loads((trial / "result.json").read_text())
+        self.assertEqual((result["protocol"]["timeoutSeconds"], result["fileWriteEnforcement"]), (30, "unrestricted"))
+        self.assertEqual((trial / "workspace" / "probe.txt").read_text(), f"present|{Path.home()}")  # env_pass reached the agent again
+
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
 
