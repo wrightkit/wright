@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -11,6 +12,13 @@ from statistics import mean, pstdev
 
 BASELINE = "none/none/off"
 HEADROOM = 0.95
+
+
+def write_json(path: Path, data: dict) -> None:
+    """A kill mid-write leaves no partial JSON to crash the next resume: temp file in the same directory, then replace."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(temporary, path)
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -31,7 +39,10 @@ def load(dirs: list[Path]) -> list[dict]:
     results = []
     for base in dirs:
         for path in sorted(base.rglob("result.json")):
-            result = json.loads(path.read_text())
+            try:
+                result = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                continue  # a partial file means the trial never finished; it will be retried
             if str(result.get("contract", "")).startswith("wright-agent-bench/") and all(k in result for k in ("status", "language", "condition", "scenario", "agent", "environment")):
                 result["_dir"] = path.parent
                 match = re.search(r"-(\d+)$", path.parent.name)
@@ -249,6 +260,6 @@ def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, reference:
     notes = regrade_notes([r for r in results if r["status"] != "invalid"], wright, load_scenario) if regrade else None
     text, summary = render(results, notes, reference)
     (dirs[0] / "report.md").write_text(text)
-    (dirs[0] / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    write_json(dirs[0] / "summary.json", summary)
     print(text)
     return 0

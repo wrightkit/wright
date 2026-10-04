@@ -50,7 +50,10 @@ def load_entries(dirs: list[Path]) -> list[dict]:
         path = directory / "score.json"
         if not path.is_file():
             continue
-        cards = {c["language"]: c for c in json.loads(path.read_text())["cards"] if "refused" not in c}
+        try:
+            cards = {c["language"]: c for c in json.loads(path.read_text())["cards"] if "refused" not in c}
+        except json.JSONDecodeError:
+            continue  # a partial file means scoring never finished; the run has no entry yet
         if not cards:
             continue
         first = next(iter(cards.values()))
@@ -183,7 +186,7 @@ def main(dirs: list[Path], out: Path) -> int:
     out.mkdir(parents=True, exist_ok=True)
     (out / "LEADERBOARD.md").write_text(markdown(data))
     (out / "leaderboard.html").write_text(page(data))
-    (out / "leaderboard.json").write_text(json.dumps(data, indent=2) + "\n")
+    bench_report.write_json(out / "leaderboard.json", data)
     print(markdown(data))
     print(f"wrote {out / 'LEADERBOARD.md'}, {out / 'leaderboard.html'}, {out / 'leaderboard.json'}")
     return 0 if data["entries"] else 1

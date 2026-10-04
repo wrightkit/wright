@@ -400,7 +400,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
         if reason:
             result = base_result(scenario, cell, args, out, 0.0, None)
             result.update(invalid=reason, status="invalid")
-            write_json(out / "result.json", result)
+            bench_report.write_json(out / "result.json", result)
             return result
         snapshots = bench_trace.Snapshots(workspace, scenario.get("watch", [scenario["entry"]]), out / "snapshots")
         snapshots.start()
@@ -443,7 +443,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     first_valid = next((s["t"] for s in result["snapshots"]["series"] if s["valid"]), None)
     result["usage"] = bench_trace.usage_summary(out / "usage.jsonl", first_valid)
     result["status"] = run_status(result)
-    write_json(out / "result.json", result)
+    bench_report.write_json(out / "result.json", result)
     return result
 
 
@@ -478,13 +478,6 @@ def harness_commit() -> str:
 def file_sha256(path: str | Path) -> str:
     """Re-hashed per call: a suite resumes for days in one process and the binary may be rebuilt between trials."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def write_json(path: Path, data: dict) -> None:
-    """A kill mid-write leaves no partial JSON to crash the next resume: temp file in the same directory, then replace."""
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(json.dumps(data, indent=2) + "\n")
-    os.replace(temporary, path)
 
 
 def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path, seconds: float, agent_exit: int | None) -> dict:
