@@ -7,13 +7,14 @@ from pathlib import Path
 import bench_score
 
 
-def run(scenario, trial, usable, label=bench_score.CANONICAL, status="completed", split="test", language="opy", sha="a" * 64, model="m"):
+def run(scenario, trial, usable, label=bench_score.CANONICAL, status="completed", split="test", language="opy", sha="a" * 64, model="m", **fields):
     return {
         "scenario": scenario, "family": "diagnosis" if scenario.endswith("1") else "modification", "language": language, "split": split,
         "condition": {"label": label}, "status": status, "usable": usable, "failedLayers": [] if usable else ["agent"],
         "agent": {"id": "codex", "seconds": 10.0}, "agentInfo": {"model": model, "effort": "high"}, "protocol": {"timeoutSeconds": 60, "infraRetries": 0},
         "environment": {"wright": "wright 0.5.0", "wrightSha256": sha, "skills": {"wright-skill": {"sha256": "b" * 64}}, "suite": {"version": "v1", "hash": "c" * 64}, "harness": "abc"},
-        "networkEnforcement": "declared-only", "fileWriteEnforcement": "trial-directory-only", "usage": {"totalTokens": 1000}, "_trial": trial,
+        "networkEnforcement": "declared-only", "fileWriteEnforcement": "trial-directory-only",
+        "fileReadEnforcement": {"mode": "allow-list", "hidden": ["/home"], "allowed": ["/run"]}, "usage": {"totalTokens": 1000}, "_trial": trial, **fields,
     }
 
 
@@ -70,6 +71,14 @@ class ScoreTest(unittest.TestCase):
         self.assertIn("no score", bench_score.render(c))
         self.assertIn("model", bench_score.card(runs({"s0"}) + [run("s1", 9, True, model="other")], "opy", SCENARIOS)["refused"])
 
+    def test_mixed_file_read_enforcement_is_refused(self):
+        mixed = runs({"s0"}) + [run("s0", 9, True, fileReadEnforcement="unrestricted")]
+        c = bench_score.card(mixed, "opy", SCENARIOS)
+        self.assertIn("fileReadEnforcement", c["refused"])
+        clean = bench_score.card(runs(set(SCENARIOS)), "opy", SCENARIOS)
+        self.assertEqual(clean["fileReadEnforcement"], ["allow-list"])  # the allow-list mode, not the per-trial path lists
+        self.assertIn("File reads:  allow-list", bench_score.render(clean))
+
     def test_small_suites_and_missing_scenarios_are_provisional(self):
         c = bench_score.card(runs(set(SCENARIOS))[:21], "opy", SCENARIOS)
         self.assertTrue(any("missing held-out scenarios" in p for p in c["provisional"]))
@@ -116,6 +125,16 @@ class ScoreTest(unittest.TestCase):
         self.assertIn("runs differ in wrightSha256", table)
         same = bench_score.compare([root / "codex-run"])
         self.assertNotIn("WARNING", same)
+
+    def test_compare_warns_when_the_file_read_policy_differs(self):
+        root = Path(tempfile.mkdtemp(dir=Path(__file__).resolve().parents[2] / "target"))
+        self.addCleanup(shutil.rmtree, root, True)
+        for name, enforcement in (("sandboxed", {"mode": "allow-list"}), ("open", "unrestricted")):
+            directory = root / name
+            directory.mkdir()
+            card = bench_score.card(runs(SCENARIOS[:6], fileReadEnforcement=enforcement), "opy", SCENARIOS)
+            (directory / "score.json").write_text(json.dumps({"contract": bench_score.CONTRACT, "cards": [card]}))
+        self.assertIn("runs differ in fileReadEnforcement", bench_score.compare([root / "sandboxed", root / "open"]))
 
 
 if __name__ == "__main__":
