@@ -12,7 +12,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ORACLE = HERE / "oracle"
 GRADER_FILES = ("bench_grade.py", "oracle/compile.js", "oracle/package-lock.json")
-SUITE_VERSION = "v1"
+SUITE_VERSION = "v2"
 UNSAFE_IGNORED = ("wiki", ".agents", ".devin", ".opencode")  # linked wiki and skills installed through the agent's own mechanism
 
 

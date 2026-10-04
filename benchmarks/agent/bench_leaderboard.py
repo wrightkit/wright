@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 
 import bench_report
+import bench_score
 
 TRACKS = (("workshop", "Workshop"), ("opy", "OverPy"))
 
@@ -56,6 +57,10 @@ def load_entries(dirs: list[Path]) -> list[dict]:
             continue  # a partial file means scoring never finished; the run has no entry yet
         if not cards:
             continue
+        suites = {json.dumps(bench_score.suite_identity(c["suite"]), sort_keys=True) for c in cards.values()}
+        if len(suites) != 1:
+            entries.append({"run": directory.name, "refused": "language tracks were made against different task suites"})
+            continue
         first = next(iter(cards.values()))
         ident = first["identity"]
         info = next((r.get("agentInfo") or {} for r in bench_report.load([directory]) if r.get("agentInfo")), {})
@@ -64,7 +69,7 @@ def load_entries(dirs: list[Path]) -> list[dict]:
             "harness": info.get("agent") or ident["agent"], "harnessVersion": info.get("version"),
             "model": info.get("model") or ident.get("model"), "effort": info.get("effort") or ident.get("effort"),
             "tracks": {lang: {"score": c["score"], "ci": c["ci95"], "trials": c["trialsPerScenario"], "scenarios": c["scenarios"], "passPowK": c["passPowK"], "provisional": c["provisional"], "exclusions": c["exclusions"]} for lang, c in cards.items()},
-            "environment": {"wrightSha256": ident["wrightSha256"], "wright": ident["wright"], "skills": ident["skills"], "suite": first["suite"].get("hash")},
+            "environment": {"wrightSha256": ident["wrightSha256"], "wright": ident["wright"], "skills": ident["skills"], "suite": bench_score.suite_identity(first["suite"])},
             "network": first["networkEnforcement"], "harnessCommit": first["harness"],
         })
     return entries
@@ -88,9 +93,11 @@ def standing(entry: dict, leader: dict) -> str:
 
 
 def build(dirs: list[Path]) -> dict:
-    entries = load_entries(dirs)
+    loaded = load_entries(dirs)
+    rejected = [{"run": e["run"], "reason": e["refused"]} for e in loaded if "refused" in e]
+    entries = [e for e in loaded if "refused" not in e]
     if not entries:
-        return {"entries": [], "excluded": [], "environment": None, "date": date.today().isoformat()}
+        return {"entries": [], "excluded": rejected, "environment": None, "mode": "public sample", "date": date.today().isoformat()}
     coverage = max(len(e["tracks"]) for e in entries)
     covered, partial = [e for e in entries if len(e["tracks"]) == coverage], [e for e in entries if len(e["tracks"]) < coverage]
     key = lambda e: json.dumps(e["environment"], sort_keys=True)
@@ -98,9 +105,9 @@ def build(dirs: list[Path]) -> dict:
     ranked = sorted([e for e in covered if key(e) == main_key], key=mean_score, reverse=True)
     for entry in ranked:
         entry["standing"] = standing(entry, ranked[0])
-    other = [{"run": e["run"], "reason": "made against a different Wright binary, skills, or task suite"} for e in covered if key(e) != main_key]
+    other = rejected + [{"run": e["run"], "reason": "made against a different Wright binary, skills, or task suite"} for e in covered if key(e) != main_key]
     other += [{"run": e["run"], "reason": f"covers {len(e['tracks'])} of {coverage} language tracks"} for e in partial]
-    return {"entries": ranked, "excluded": other, "environment": ranked[0]["environment"], "date": date.today().isoformat()}
+    return {"entries": ranked, "excluded": other, "environment": ranked[0]["environment"], "mode": ranked[0]["environment"]["suite"]["mode"], "date": date.today().isoformat()}
 
 
 def label(entry: dict) -> str:
@@ -115,9 +122,9 @@ def bar(score: float, width: int = 10) -> str:
 
 def markdown(data: dict) -> str:
     env = data["environment"]
-    lines = ["# Wright Agent Score", "", f"How well coding agents work on real Overwatch Workshop projects with Wright. Results of {data['date']}.", ""]
+    lines = [f"# Wright Agent Score ({data['mode']})", "", f"How well coding agents work on real Overwatch Workshop projects with Wright. Results of {data['date']}.", ""]
     if not data["entries"]:
-        return "\n".join(lines + ["No results yet.", ""])
+        return "\n".join(lines + ["No results yet.", "", *(f"- `{o['run']}`: {o['reason']}." for o in data["excluded"])]) + "\n"
     lines += ["| # | Agent | Model | Effort | " + " | ".join(f"{n} score" for _, n in TRACKS) + " | Against the top |", "| --- | --- | --- | --- | " + " | ".join("---" for _ in TRACKS) + " | --- |"]
     cell = lambda s: str(s if s is not None else "not recorded").replace("|", "\\|")  # a raw | would break the table row
     for rank, e in enumerate(data["entries"], 1):
@@ -131,8 +138,9 @@ def markdown(data: dict) -> str:
         lines.append("- ⚠️ marks a score that is provisional because the run did not cover every task or had unequal trials.")
     skills = ", ".join(f"{k} `{v[:8]}`" for k, v in (env["skills"] or {}).items()) or "none"
     commits = ", ".join(f"`{c[:8]}`" for c in sorted({c for e in data["entries"] for c in e["harnessCommit"]})) or "not recorded"
-    lines += ["", "## What was run", "", f"- Wright: {env['wright'] or 'not recorded'} (sha256 `{(env['wrightSha256'] or 'not recorded')[:12]}`)", f"- Skills: {skills}", f"- Task suite: `{(env['suite'] or 'not recorded')[:12]}`",
-              f"- Harness commit: {commits}", "- Scores come from the benchmark in `benchmarks/agent`; the run directories hold every result.json."]
+    lines += ["", "## What was run", "", f"- Wright: {env['wright'] or 'not recorded'} (sha256 `{(env['wrightSha256'] or 'not recorded')[:12]}`)", f"- Skills: {skills}", f"- Task suite: {env['suite'].get('version') or 'not recorded'} `{(env['suite'].get('hash') or 'not recorded')[:12]}`",
+              f"- Public hash: `{env['suite'].get('publicHash') or 'not recorded'}`; private hash: `{env['suite'].get('privateHash') or 'none'}`",
+              f"- Harness commit: {commits}", "- Scores come from the benchmark in `benchmarks/agent`; raw private run directories must not be published."]
     if data["excluded"]:
         lines += ["", "## Not comparable", "", *(f"- `{o['run']}`: {o['reason']}." for o in data["excluded"])]
     return "\n".join(lines) + "\n"
@@ -173,10 +181,10 @@ th{{font-size:13px;color:var(--muted);font-weight:600}}.bar{{position:relative;h
 tr.top td:first-child{{font-weight:700}}small,.muted{{color:var(--muted)}}section{{margin-top:28px;background:var(--soft);border-radius:8px;padding:4px 16px 12px}}li{{margin:6px 0}}code{{font-size:13px}}
 @media (max-width:640px){{th:nth-child(4),td:nth-child(4){{display:none}}}}
 </style></head><body><main>
-<h1>Wright Agent Score</h1><p class="sub">How well coding agents work on real Overwatch Workshop projects with Wright. Results of {esc(data.get("date", ""))}.</p>
+<h1>Wright Agent Score ({esc(data["mode"])})</h1><p class="sub">How well coding agents work on real Overwatch Workshop projects with Wright. Results of {esc(data.get("date", ""))}.</p>
 {body}
 {prose}{excluded}
-<section><h2>What was run</h2><p class="muted">Wright {esc(str(env.get("wright") or "not recorded"))} · sha256 <code>{sha12(env.get("wrightSha256"))}</code> · skills {esc(skills)} · task suite <code>{sha12(env.get("suite"))}</code></p></section>
+<section><h2>What was run</h2><p class="muted">Wright {esc(str(env.get("wright") or "not recorded"))} · sha256 <code>{sha12(env.get("wrightSha256"))}</code> · skills {esc(skills)} · task suite {esc(str((env.get("suite") or {}).get("version") or "not recorded"))} <code>{sha12((env.get("suite") or {}).get("hash"))}</code> · public hash <code>{sha12((env.get("suite") or {}).get("publicHash"))}</code> · private hash <code>{sha12((env.get("suite") or {}).get("privateHash"))}</code></p></section>
 </main></body></html>
 """
 

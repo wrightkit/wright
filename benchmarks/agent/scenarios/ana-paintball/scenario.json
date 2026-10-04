@@ -156,5 +156,6 @@
         "wright-compiles"
       ]
     }
-  }
+  },
+  "canary": "WRIGHT_BENCH_CANARY_499_v2"
 }

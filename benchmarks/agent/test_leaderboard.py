@@ -52,6 +52,48 @@ class LeaderboardTest(unittest.TestCase):
         self.assertIn("width:75.0%", page)  # 6 of 8 scenarios
         self.assertNotIn("<script", page)
 
+    def test_results_page_and_json_label_public_sample(self):
+        data = bench_leaderboard.build([self.write("sample", 4)])
+        self.assertEqual(data["mode"], "public sample")
+        self.assertIn("public sample", bench_leaderboard.markdown(data))
+        self.assertIn("public sample", bench_leaderboard.page(data))
+        self.assertIn("public sample", json.dumps(data))
+
+    def test_a_suite_version_change_is_not_ranked_with_the_original(self):
+        a, b, changed = self.write("a", 5), self.write("b", 5), self.write("changed", 8)
+        data = json.loads((changed / "score.json").read_text())
+        for card in data["cards"]:
+            card["suite"]["version"] = "v3"
+        (changed / "score.json").write_text(json.dumps(data))
+        leaderboard = bench_leaderboard.build([a, b, changed])
+        self.assertEqual({e["run"] for e in leaderboard["entries"]}, {"a", "b"})
+        self.assertEqual([e["run"] for e in leaderboard["excluded"]], ["changed"])
+
+
+    def test_private_score_page_contains_no_task_or_grader_material(self):
+        marker = "PRIVATE_PROMPT_CHECK_REFERENCE_TEXT"
+        directory = self.root / "private-run"
+        directory.mkdir()
+        run = runs([], trials=1)[0]
+        run.update({"scenario": "private-1", "isPrivate": True, "family": marker, "checks": [marker], "prompt": marker, "reference": marker})
+        run["environment"]["suite"] = {"version": "v2", "publicHash": "p", "privateHash": "q", "hash": "h", "mode": "official", "path": marker}
+        score = bench_score.card([run], "opy", ["private-1"])
+        (directory / "score.json").write_text(json.dumps({"cards": [score]}))
+        (directory / "result.json").write_text(json.dumps({"contract": "wright-agent-bench/v3", **run}))
+        data = bench_leaderboard.build([directory])
+        self.assertEqual(data["mode"], "official")
+        self.assertNotIn(marker, json.dumps(data) + bench_leaderboard.markdown(data) + bench_leaderboard.page(data))
+
+    def test_tracks_from_different_suites_do_not_form_an_entry(self):
+        directory = self.write("mixed", 8)
+        data = json.loads((directory / "score.json").read_text())
+        data["cards"][0]["suite"]["version"] = "different-version"
+        (directory / "score.json").write_text(json.dumps(data))
+        leaderboard = bench_leaderboard.build([directory])
+        self.assertEqual(leaderboard["entries"], [])
+        self.assertIn("different task suites", leaderboard["excluded"][0]["reason"])
+
+
     def test_the_page_escapes_what_comes_from_results(self):
         data = bench_leaderboard.build([self.write("x", 4, model="<img src=x onerror=alert(1)>")])
         data["entries"][0]["model"] = "<img src=x onerror=alert(1)>"

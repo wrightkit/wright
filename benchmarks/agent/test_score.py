@@ -96,6 +96,38 @@ class ScoreTest(unittest.TestCase):
             self.assertIn(needle, text)
         json.dumps(c)
 
+    def test_suite_version_parts_and_mode_are_comparison_identity(self):
+        suite = {"version": "v2", "publicHash": "p", "privateHash": "q", "hash": "combined", "mode": "official"}
+        data = runs(set(SCENARIOS))
+        for r in data:
+            r["environment"]["suite"] = suite.copy()
+        self.assertEqual(bench_score.card(data, "opy", SCENARIOS)["mode"], "official")
+        for key, value in (("version", "v3"), ("publicHash", "other"), ("privateHash", "other"), ("mode", "public sample")):
+            changed = run("s0", 9, True)
+            changed["environment"]["suite"] = {**suite, key: value}
+            self.assertIn("suite", bench_score.card([*data, changed], "opy", SCENARIOS)["refused"])
+        sample = bench_score.card(runs(set(SCENARIOS)), "opy", SCENARIOS)
+        self.assertEqual(sample["mode"], "public sample")
+        self.assertIn("public sample", bench_score.render(sample))
+
+    def test_published_private_results_do_not_contain_task_or_grader_material(self):
+        import bench_report
+        marker = "DO_NOT_PUBLISH_PRIVATE_CONTENT"
+        private = run("private-1", 1, False, isPrivate=True, family=marker, prompt=marker, checks=[marker],
+                      reference=marker, expectations={marker: {"status": "fail"}}, invalid=marker,
+                      disagreement={"kind": marker}, friction={marker: 1}, failedLayers=[marker],
+                      toolUse={"wright": {"invocations": 1, "outputTokensEstimate": {marker: 50}}},
+                      context={"reported": True, "loaded": [marker]}, _dir=Path(marker))
+        private["environment"]["suite"] = {"version": "v2", "publicHash": "p", "privateHash": "q", "hash": "h", "mode": "official", "path": marker}
+        score = bench_score.card([private], "opy", ["private-1"])
+        text, summary = bench_report.render([private, {**private, "status": "provider-interrupted"}], [marker])
+        published = bench_score.render(score) + json.dumps(score) + text + json.dumps(summary)
+        self.assertNotIn(marker, published)
+        self.assertIn("private-1", published)
+        self.assertEqual(summary["mode"], "official")
+        self.assertEqual(summary["scenarios"], [{"id": "private-1", "runs": 1}])
+
+
     def test_main_writes_the_machine_readable_card_and_exit_status(self):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)

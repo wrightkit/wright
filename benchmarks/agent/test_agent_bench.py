@@ -38,7 +38,7 @@ class AgentBenchTest(unittest.TestCase):
             "env_pass": [], "canary_cmd": None, "skill_dirs": {}, "wiki_dir": None, "check_ancestors": False, "out": self.out, **options,
         })
         cell = agent_bench.normalize_cell({"tool": tool, "level": level, "skills": list(skills), "knowledge": knowledge, "network": "off"})
-        return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{tool}")
+        return agent_bench.run_trial(agent_bench.load_scenario(scenario, getattr(args, "private_suite", None)), cell, args, self.out / f"{scenario}-{tool}")
 
     def test_wiki_snapshot_is_copied_and_identified(self):
         snapshot = self.out / "snapshot"
@@ -174,7 +174,7 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(result["protocol"], {"timeoutSeconds": 60, "infraRetries": 2})
         env = result["environment"]
         self.assertEqual(env["wrightSha256"], hashlib.sha256(Path(WRIGHT).read_bytes()).hexdigest())
-        self.assertEqual((env["suite"]["version"], len(env["suite"]["hash"])), ("v1", 64))
+        self.assertEqual((env["suite"]["version"], len(env["suite"]["hash"])), ("v2", 64))
         self.assertTrue(env["harness"])
         interrupted = self.trial("exit 75", infra_retries=0)
         self.assertEqual(interrupted["status"], "provider-interrupted")
@@ -247,6 +247,30 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads((out / "result.json").read_text())["status"], "completed")
 
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_evaluate_runs_private_scenarios_and_records_versioned_parts(self):
+        import io
+        root = self.private_suite()
+        script = agent_bench.HERE / "adapters" / "_test_private_adapter.py"
+        script.write_text("import sys\nsys.stdin.read()\n")
+        self.addCleanup(script.unlink, True)
+        args = argparse.Namespace(
+            adapter="fake", model="m", effort=None, name="eval", out=self.out,
+            wright=str(Path(WRIGHT).resolve()), private_suite=root,
+            skill_dirs={"wright-skill": self.skill_dir("wright-skill")}, wiki_dir=None, env_pass=[],
+            allow_read=[], deny_read=[], canary_cmd=None, check_ancestors=False,
+            timeout=30, infra_retries=0, infra_backoff=0, no_file_sandbox=False, dry_run=False,
+            cells="score", split="test", scenarios=None, trials=1, parallel=1, seed=1)
+        with patch.dict(agent_bench.ADAPTERS, {"fake": script.name}), patch.dict(agent_bench.ADAPTER_READS, {"fake": []}), \
+                patch.object(agent_bench, "all_scenario_ids", return_value=[SCENARIO, "private-001"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(agent_bench.cmd_evaluate(args), 0)
+        records = [json.loads(p.read_text()) for p in (self.out / "eval").glob("*/*/*/result.json")]
+        self.assertEqual({r["scenario"] for r in records}, {SCENARIO, "private-001"})
+        self.assertTrue(all(r["environment"]["suite"]["privateHash"] for r in records))
+        self.assertTrue(any(r["isPrivate"] for r in records))
+        self.assertEqual(json.loads((self.out / "eval/matrix.json").read_text())["options"]["private_suite"], str(root))
+
     def test_evaluate_serializes_the_run_options_so_its_matrix_reproduces_the_run(self):
         import contextlib
         import io
@@ -308,6 +332,52 @@ class AgentBenchTest(unittest.TestCase):
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
+
+    def private_suite(self):
+        root = self.out / "private"
+        scenario = root / "scenarios" / "private-001"
+        shutil.copytree(agent_bench.SCENARIOS / SCENARIO, scenario)
+        data = json.loads((scenario / "scenario.json").read_text())
+        data["id"] = "private-001"
+        (scenario / "scenario.json").write_text(json.dumps(data))
+        (root / "suite.json").write_text(json.dumps({"version": "v2"}))
+        return root
+
+    def test_private_loading_canary_and_separate_content_hashes(self):
+        root = self.private_suite()
+        self.assertIn("private-001", agent_bench.all_scenario_ids(root))
+        loaded = agent_bench.load_scenario("private-001", root)
+        self.assertTrue(loaded["isPrivate"])
+        public = agent_bench.suite_identity()
+        combined = agent_bench.suite_identity(root)
+        self.assertEqual(public["mode"], "public sample")
+        self.assertEqual(combined["mode"], "official")
+        self.assertEqual(public["publicHash"], combined["publicHash"])
+        prompt = loaded["dir"] / "prompt.md"
+        prompt.write_text(prompt.read_text() + "changed")
+        changed = agent_bench.suite_identity(root)
+        self.assertEqual(combined["publicHash"], changed["publicHash"])
+        self.assertNotEqual(combined["privateHash"], changed["privateHash"])
+        data = json.loads((loaded["dir"] / "scenario.json").read_text())
+        del data["canary"]
+        (loaded["dir"] / "scenario.json").write_text(json.dumps(data))
+        with self.assertRaisesRegex(SystemExit, "canary"):
+            agent_bench.load_scenario("private-001", root)
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
+    def test_private_suite_reads_denied_even_under_an_allowed_directory(self):
+        import shlex
+        root = self.private_suite()
+        target = root / "scenarios/private-001/prompt.md"
+        code = f"from pathlib import Path; Path({str(target)!r}).read_text()"
+        result = self.trial(f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}', file_sandbox=True,
+                            private_suite=root, allow_read=[str(self.out)], scenario="private-001")
+        self.assertNotEqual(result["agent"]["exit"], 0)
+        self.assertIn("PermissionError", (self.out / "private-001-wright/agent.log").read_text())
+        self.assertTrue(result["isPrivate"])
+        self.assertEqual(result["environment"]["suite"]["version"], "v2")
+        with self.assertRaisesRegex(SystemExit, "requires the file sandbox"):
+            self.trial("true", private_suite=root)
 
     @unittest.skipUnless(sys.platform == "darwin" and shutil.which("sandbox-exec"), "macOS file sandbox")
     def test_agent_file_writes_cannot_escape_the_trial_directory(self):
@@ -619,7 +689,7 @@ class AgentBenchTest(unittest.TestCase):
             (directory / name).mkdir(parents=True)
             (directory / name / "mode.ws").write_text(text)
         spec = {
-            "id": "tiny", "family": "modification", "language": "workshop", "entry": "mode.ws", "writable": ["mode.ws"],
+            "canary": agent_bench.CANARY, "id": "tiny", "family": "modification", "language": "workshop", "entry": "mode.ws", "writable": ["mode.ws"],
             "checks": [{"id": "has-y", "kind": "contains", "file": "mode.ws", "text": "Y"}],
             "negatives": {"nope": {"fails": negative_fails}},
         }
@@ -648,7 +718,7 @@ class AgentBenchTest(unittest.TestCase):
     def test_missing_entry_is_an_agent_failure_not_an_unavailable_grader(self):
         workspace = self.out / "empty"
         workspace.mkdir()
-        scenario = agent_bench.load_scenario("widow-headshots")
+        scenario = agent_bench.load_scenario("ana-paintball")
         graded = bench_grade.grade(scenario, workspace, WRIGHT)
         self.assertEqual(graded["authorities"]["oracle"]["status"], "error")
         self.assertNotIn("grader-unavailable", graded["usableReason"])

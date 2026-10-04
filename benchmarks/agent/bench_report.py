@@ -239,12 +239,36 @@ def setup_rows(runs: list[dict]) -> list[str]:
     return out
 
 
+def public_result(result: dict) -> dict:
+    """Private results expose outcomes, never grader text or host artifact paths."""
+    from bench_score import is_private, private_id
+    if not is_private(result):
+        return result
+    public = {k: result[k] for k in (
+        "status", "language", "condition", "agent", "agentInfo", "environment", "split", "usable", "passed",
+        "usage", "toolCalls", "correctionRounds", "infraRetries", "_trial", "_dir", "isPrivate"
+    ) if k in result}
+    public["isPrivate"] = True
+    public["scenario"] = private_id(result)
+    public["invalid"] = "private run rejected"
+    public["agentInfo"] = {k: v for k, v in (result.get("agentInfo") or {}).items() if k in ("agent", "version", "model", "effort")}
+    public["context"] = {"reported": (result.get("context") or {}).get("reported")}
+    public["toolCalls"] = {k: v for k, v in (result.get("toolCalls") or {}).items() if k in ("bash", "wright", "mcp")}
+    public["toolUse"] = {k: {"invocations": v.get("invocations", 0)} for k, v in (result.get("toolUse") or {}).items() if k in ("wright", "overpy")}
+    return public
+
+
 def render(results: list[dict], regrade: list[str] | None = None, references: list[str] | None = None) -> tuple[str, dict]:
+    from bench_score import is_private, suite_identity
+    has_private = any(is_private(r) for r in results)
+    suites = [suite_identity(r.get("environment", {}).get("suite") or {}) for r in results]
+    mode = "official" if suites and all(s["mode"] == "official" for s in suites) else "public sample"
+    results = [public_result(r) for r in results]
     invalid = [r for r in results if r["status"] == "invalid"]
     infrastructure = [r for r in results if r["status"] == "provider-interrupted"]
     runs = [r for r in results if r["status"] not in ("invalid", "provider-interrupted")]
-    out = ["# Agent benchmark report", "", f"{len(runs)} valid run(s), {len(invalid)} invalid, {len(infrastructure)} infrastructure failures excluded.", ""]
-    summary: dict = {"cells": {}, "infrastructureFailures": len(infrastructure)}
+    out = [f"# Agent benchmark report ({mode})", "", f"{len(runs)} valid run(s), {len(invalid)} invalid, {len(infrastructure)} infrastructure failures excluded.", ""]
+    summary: dict = {"mode": mode, "suites": list({json.dumps(s, sort_keys=True): s for s in suites}.values()), "cells": {}, "infrastructureFailures": len(infrastructure)}
     out += ["## Outcome by agent and condition", "", "| agent | condition | runs | usable | passed | used a tool | tokens/run | tokens per usable | peak context | s/run | corr |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for agent in sorted({r["agent"]["id"] for r in runs}):
         for cell in sorted({label(r) for r in runs}):
@@ -312,15 +336,16 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     if tok:
         out += ["", "## Tool output size per command (estimated tokens per run that used it)", "", "| command | runs | mean | max |", "| --- | --- | --- | --- |"]
         out += [f"| {cmd} | {len(v['tokens'])} | {mean(v['tokens']):.0f} | {max(v['tokens'])} |" for cmd, v in sorted(tok.items())]
-    notes = diagnostics(runs, invalid) + (regrade or [])
+    notes = diagnostics(runs, invalid) + ([] if has_private else (regrade or []))
     if infrastructure:
         notes.append(f"INFRASTRUCTURE: {len(infrastructure)} provider/infrastructure failures (exit 75) excluded from outcome metrics.")
         out += ["", "## Provider/infrastructure failures", "", "| agent | scenario | condition | artifact |", "| --- | --- | --- | --- |"]
-        out += [f"| {r['agent']['id']} | {r['scenario']} | {label(r)} | {r['_dir']} |" for r in infrastructure]
+        out += [f"| {r['agent']['id']} | {r['scenario']} | {label(r)} | {('[private artifact]' if r.get('isPrivate') else r['_dir'])} |" for r in infrastructure]
     missing_context = sum(1 for r in runs if not (r.get("context") or {}).get("reported"))
     if missing_context:
         notes.append(f"CONTEXT: {missing_context} run(s) lack observed loaded-context data; installed skills are not proof of loading.")
     out += ["", "## Diagnostics", ""] + ([f"- {n}" for n in notes] or ["- none"])
+    summary["scenarios"] = [{"id": scenario, "runs": sum(len(g) for (s, _a, _c), g in groups.items() if s == scenario)} for scenario in sorted({s for s, _a, _c in groups})]
     summary["diagnostics"] = notes
     summary["stdev"] = {k: pstdev([r["agent"]["seconds"] for r in runs if f"{r['agent']['id']}|{label(r)}" == k]) for k in summary["cells"]} if runs else {}
     return "\n".join(out) + "\n", summary

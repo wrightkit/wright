@@ -45,15 +45,55 @@ INFRA_EXIT = 75  # EX_TEMPFAIL: the adapter reports a provider or infrastructure
 ENV_KEEP = ("LANG", "LC_ALL", "TERM", "TMPDIR", "USER", "LOGNAME")
 
 
-def load_scenario(scenario_id: str) -> dict:
-    directory = SCENARIOS / scenario_id
+CANARY = "WRIGHT_BENCH_CANARY_499_v2"
+
+
+def scenario_directories(private_suite: Path | None = None) -> dict[str, Path]:
+    roots = [SCENARIOS]
+    if private_suite:
+        private_suite = Path(private_suite).resolve()
+        manifest = json.loads((private_suite / "suite.json").read_text())
+        if manifest.get("version") != bench_grade.SUITE_VERSION:
+            raise SystemExit("private suite version must match public suite v2")
+        roots.append(private_suite / "scenarios")
+    directories = {}
+    for root in roots:
+        for directory in sorted(root.iterdir()):
+            if not (directory / "scenario.json").is_file():
+                continue
+            if directory.name in directories:
+                raise SystemExit("duplicate scenario id across suite parts")
+            directories[directory.name] = directory
+    return directories
+
+
+def load_scenario(scenario_id: str, private_suite: Path | None = None) -> dict:
+    directory = scenario_directories(private_suite)[scenario_id]
     scenario = json.loads((directory / "scenario.json").read_text())
+    if scenario.get("canary") != CANARY:
+        raise SystemExit(f"scenario {scenario_id} lacks the suite canary")
+    if scenario.get("id") != scenario_id:
+        raise SystemExit("scenario directory and id disagree")
     scenario["dir"] = directory
+    scenario["isPrivate"] = directory.parent.resolve() != SCENARIOS.resolve()
+    if scenario["isPrivate"] and not re.fullmatch(r"private-[0-9]+", scenario_id):
+        raise SystemExit("private scenario ids must be opaque: private-NNN")
     return scenario
 
 
-def all_scenario_ids() -> list[str]:
-    return sorted(p.name for p in SCENARIOS.iterdir() if (p / "scenario.json").is_file())
+def all_scenario_ids(private_suite: Path | None = None) -> list[str]:
+    return sorted(scenario_directories(private_suite))
+
+
+def suite_identity(private_suite: Path | None = None) -> dict:
+    public = bench_grade.suite_identity(SCENARIOS)
+    if private_suite:
+        scenario_directories(private_suite)
+    private = bench_grade.suite_identity(Path(private_suite) / "scenarios") if private_suite else None
+    parts = {"version": bench_grade.SUITE_VERSION, "publicHash": public["hash"], "privateHash": private["hash"] if private else None,
+             "mode": "official" if private else "public sample"}
+    return {**parts, "hash": hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest(),
+            "scenarios": public["scenarios"] + (private["scenarios"] if private else 0)}
 
 
 def materialize(scenario: dict, workspace: Path, overlay: str | None = None) -> None:
@@ -62,11 +102,11 @@ def materialize(scenario: dict, workspace: Path, overlay: str | None = None) -> 
         shutil.copytree(scenario["dir"] / overlay, workspace, dirs_exist_ok=True)
 
 
-def validate(wright: str, out: Path) -> bool:
+def validate(wright: str, out: Path, private_suite: Path | None = None) -> bool:
     """Graders are calibrated: the reference passes, the seed fails, each negative fails exactly its named checks."""
     ok = True
-    for scenario_id in all_scenario_ids():
-        scenario = load_scenario(scenario_id)
+    for scenario_id in all_scenario_ids(private_suite):
+        scenario = load_scenario(scenario_id, private_suite)
         runs = [("seed", None), ("reference", "reference")] + [(f"negative-{n}", f"negative/{n}") for n in scenario.get("negatives", {})]
         results = {}
         for name, overlay in runs:
@@ -87,7 +127,7 @@ def validate(wright: str, out: Path) -> bool:
                 problems.append(f"negative '{name}' failed {failed}, expected {sorted(expected['fails'])}")
         if problems:
             ok = False
-            print(f"INVALID {scenario_id}: {'; '.join(problems)}")
+            print(f"INVALID {scenario_id}: " + ("private calibration failed" if scenario["isPrivate"] else "; ".join(problems)))
         else:
             print(f"ok      {scenario_id}")
     return ok
@@ -298,11 +338,11 @@ def read_policy(args: argparse.Namespace, env: dict) -> tuple[list[Path], list[P
     return unique(hidden), unique(allowed)
 
 
-def sandbox_read_rules(hidden: list[Path], allowed: list[Path]) -> str:
+def sandbox_read_rules(hidden: list[Path], allowed: list[Path], private_suite: Path | None = None) -> str:
     def rule(action: str, path: Path) -> str:
         return f"({action} file-read-data ({'literal' if path.is_file() else 'subpath'} {json.dumps(str(path))}))\n"
     # the allow-list overrides the hidden roots, and the answer keys are hidden again whatever else is allowed
-    return "".join(rule("deny", p) for p in hidden) + "".join(rule("allow", p) for p in allowed) + rule("deny", SCENARIOS.resolve())
+    return "".join(rule("deny", p) for p in hidden) + "".join(rule("allow", p) for p in allowed) + rule("deny", SCENARIOS.resolve()) + (rule("deny", Path(private_suite).resolve()) if private_suite else "")
 
 
 def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str) -> tuple[int | None, str, str]:
@@ -314,7 +354,7 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
         temporary = run_dir / "tmp"
         temporary.mkdir(exist_ok=True)
         env = {**env, "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1"}
-        rules = sandbox_read_rules(*read_policy(args, env))
+        rules = sandbox_read_rules(*read_policy(args, env), getattr(args, "private_suite", None))
         profile = run_dir / "agent.sb"
         if profile.exists():
             os.chflags(profile, 0)  # an attempt killed mid-run leaves it locked
@@ -394,6 +434,12 @@ def context_report(out: Path, skill_names: list[str]) -> dict:
 
 
 def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -> dict:
+    if getattr(args, "private_suite", None):
+        if not getattr(args, "file_sandbox", False):
+            raise SystemExit("private suite requires the file sandbox")
+        private = Path(args.private_suite).resolve()
+        if out.resolve().is_relative_to(private) or private.is_relative_to(out.resolve()):
+            raise SystemExit("private suite and trial directory must be separate")
     check_cell(cell, args)
     if not applicable(scenario, cell):
         raise SystemExit(f"condition {cell_label(cell)} does not apply to the {scenario['language']} scenario {scenario['id']}")
@@ -508,6 +554,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
     return {
         "contract": RESULT_CONTRACT,
         "scenario": scenario["id"],
+        "isPrivate": scenario.get("isPrivate", False),
         "family": scenario["family"],
         "language": scenario["language"],
         "split": scenario.get("split"),
@@ -519,7 +566,7 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
             "wright": subprocess.run([args.wright, "--version"], capture_output=True, text=True).stdout.strip(),
             "wrightSha256": file_sha256(args.wright),
             "harness": harness_commit(),
-            "suite": bench_grade.suite_identity(Path(SCENARIOS)),  # recomputed per trial: the suite may change during a days-long run
+            "suite": suite_identity(getattr(args, "private_suite", None)),  # recomputed per trial: the suite may change during a days-long run
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "skills": {name: skill_identity(name, Path(args.skill_dirs[name])) for name in cell["skills"]},
             **({"wiki": bench_wiki.identity(Path(args.wiki_dir))} if cell["knowledge"] == "wiki" else {}),
@@ -536,7 +583,7 @@ def verdict_word(result: dict) -> str:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    scenario = load_scenario(args.scenario)
+    scenario = load_scenario(args.scenario, getattr(args, "private_suite", None))
     cell = normalize_cell({"tool": args.tool, "level": args.level, "skills": args.skills, "knowledge": args.knowledge, "network": args.network})
     code = 0
     for trial in range(1, args.trials + 1):
@@ -556,10 +603,16 @@ def cmd_matrix(args: argparse.Namespace) -> int:
     Exit 0 when every run completed (graded failures are results, not errors), 3 when provider interruptions occurred, 1 otherwise.
     After repeated provider interruptions in a row the remaining jobs are left unattempted instead of burning through them."""
     config = json.loads(args.config.read_text())
+    private_suite = getattr(args, "private_suite", None) or config.get("options", {}).get("private_suite")
+    if private_suite:
+        private_suite = Path(private_suite).expanduser()
+        if not private_suite.is_absolute():
+            private_suite = (args.config.resolve().parent / private_suite).resolve()
+        args.private_suite = private_suite
     cells = [normalize_cell(c) for c in config["cells"]]
     jobs, skipped = [], []
-    for scenario_id in config.get("scenarios") or all_scenario_ids():
-        scenario = load_scenario(scenario_id)
+    for scenario_id in config.get("scenarios") or all_scenario_ids(private_suite):
+        scenario = load_scenario(scenario_id, private_suite)
         for agent in config["agents"]:
             for cell in cells:
                 if not applicable(scenario, cell):
@@ -577,7 +630,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         path = Path(value).expanduser()
         return path if path.is_absolute() else (base / path).resolve()
 
-    path_keys = ("wiki_dir", "out", "out_root", "wright")
+    path_keys = ("private_suite", "wiki_dir", "out", "out_root", "wright")
     options = {}
     for key, val in config.get("options", {}).items():
         if key in path_keys + ("skill_dirs",) and not val:
@@ -608,7 +661,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
                 state["unattempted"] += 1
                 return
         trial_args = argparse.Namespace(**{**merged, "agent_id": agent["id"], "agent_cmd": agent["cmd"]})
-        result = run_trial(load_scenario(scenario_id), cell, trial_args, out)
+        result = run_trial(load_scenario(scenario_id, getattr(trial_args, "private_suite", None)), cell, trial_args, out)
         with lock:
             state["streak"] = state["streak"] + 1 if result["status"] == "provider-interrupted" else 0
             state["interrupted"] += result["status"] == "provider-interrupted"
@@ -643,14 +696,14 @@ def user_defaults() -> dict:
     if not CONFIG_PATH.is_file():
         return {}
     config = json.loads(CONFIG_PATH.read_text())
-    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "allow_read", "skill_dirs", "models"}
+    unknown = set(config) - {"wright", "out", "wiki_dir", "env_pass", "deny_read", "allow_read", "skill_dirs", "models", "private_suite"}
     if unknown:
         raise SystemExit(f"{CONFIG_PATH}: unknown key(s) {sorted(unknown)}")
     for i, entry in enumerate(config.get("models", [])):
         if not isinstance(entry, dict) or entry.get("adapter") not in ADAPTERS or not entry.get("model"):
             raise SystemExit(f"{CONFIG_PATH}: models[{i}] needs an adapter in {sorted(ADAPTERS)} and a model")
-    defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir")}
-    defaults.update({k: Path(v).expanduser() for k, v in config.items() if k in ("out", "wiki_dir")})
+    defaults = {k: v for k, v in config.items() if k not in ("skill_dirs", "out", "wiki_dir", "private_suite")}
+    defaults.update({k: Path(v).expanduser() for k, v in config.items() if k in ("out", "wiki_dir", "private_suite")})
     if "skill_dirs" in config:
         defaults["skill_dir"] = [f"{name}={Path(d).expanduser()}" for name, d in config["skill_dirs"].items()]
     return defaults
@@ -659,6 +712,8 @@ def user_defaults() -> dict:
 def preflight(args: argparse.Namespace, cells: list[dict]) -> list[str]:
     """Problems that would waste a run, found before it starts."""
     problems = []
+    if getattr(args, "private_suite", None) and not getattr(args, "file_sandbox", False):
+        problems.append("private suite requires the file sandbox")
     if not Path(args.wright).is_file():
         problems.append(f"wright binary not found: {args.wright} (pass --wright or put `wright` on PATH)")
     binary = ADAPTER_BINARY.get(args.adapter)
@@ -730,8 +785,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         problems.append(problem)
     if problems:
         raise SystemExit("cannot start:\n  " + "\n  ".join(problems))
-    scenarios = args.scenarios or [s for s in all_scenario_ids() if args.split == "all" or load_scenario(s).get("split") == args.split]
-    runnable = sum(args.trials for s in scenarios for c in cells if applicable(load_scenario(s), normalize_cell(c)))
+    scenarios = args.scenarios or [s for s in all_scenario_ids(getattr(args, "private_suite", None)) if args.split == "all" or load_scenario(s, getattr(args, "private_suite", None)).get("split") == args.split]
+    runnable = sum(args.trials for s in scenarios for c in cells if applicable(load_scenario(s, getattr(args, "private_suite", None)), normalize_cell(c)))
     print(f"{args.adapter} {args.model}: {len(scenarios)} scenario(s), cells {', '.join(cell_label(normalize_cell(c)) for c in cells)}, {runnable} trial(s) into {args.out / args.name}", flush=True)
     if args.dry_run:
         return 0
@@ -741,6 +796,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     # every option a trial reads is serialized at its effective value, so `matrix` on this file reproduces the run
     config = {"agents": [{"id": agent_id, "cmd": cmd}], "cells": cells, "scenarios": scenarios, "trials": args.trials, "parallel": args.parallel, "seed": args.seed,
               "options": {"out": ".", "out_root": "..", "wright": args.wright, "adapter": args.adapter,
+                          "private_suite": str(Path(args.private_suite).resolve()) if getattr(args, "private_suite", None) else None,
                           "file_sandbox": args.file_sandbox, "env_pass": args.env_pass, "credentials": args.credentials,
                           # paths the caller gave resolve now, against this cwd — relative ones in the file resolve against the file's directory
                           "allow_read": [str(Path(p).expanduser().resolve()) for p in args.allow_read],
@@ -754,9 +810,9 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     status = cmd_matrix(args)
     if not list(args.out.glob("*/*/*/result.json")):
         return status or 1
-    bench_report.main([args.out], args.wright, False, load_scenario, references_of(args))
+    bench_report.main([args.out], args.wright, False, lambda s: load_scenario(s, getattr(args, "private_suite", None)), references_of(args))
     languages = ["workshop", "opy"]
-    expected = {lang: [s for s in all_scenario_ids() if load_scenario(s)["language"] == lang and load_scenario(s).get("split") == "test"] for lang in languages}
+    expected = {lang: [s for s in all_scenario_ids(getattr(args, "private_suite", None)) if load_scenario(s, getattr(args, "private_suite", None))["language"] == lang and load_scenario(s, getattr(args, "private_suite", None)).get("split") == "test"] for lang in languages}
     bench_score.main([args.out], languages, expected, None)
     (args.out / "RESULTS.md").write_text(f"# Agent benchmark results: {args.name}\n\nAgent `{agent_id}`. Generated by `agent_bench.py evaluate`; `agent_bench.py matrix <this directory>/matrix.json` resumes it in place.\n\n"
                                          f"## Score\n\n```\n{(args.out / 'score.txt').read_text()}```\n\n{(args.out / 'report.md').read_text()}")
@@ -835,7 +891,7 @@ def main() -> int:
     for p in (sub.choices["run"], sub.choices["matrix"]):
         p.add_argument("--file-sandbox", action="store_true", help="macOS: restrict agent and descendant file writes to the trial directory, and hide the scenarios, other runs, the wiki, unselected skills, and --deny-read paths")
     run = sub.choices["run"]
-    run.add_argument("scenario", choices=all_scenario_ids())
+    run.add_argument("scenario")
     run.add_argument("--agent-cmd", required=True, help="shell command; the task prompt arrives on stdin, cwd is the workspace, BENCH_* describes the condition")
     run.add_argument("--agent-id", required=True, help="recorded agent/model/version label")
     run.add_argument("--tool", choices=TOOLS, default="wright")
@@ -855,7 +911,7 @@ def main() -> int:
     su.add_argument("--only", nargs="*", metavar="ADAPTER[:MODEL]", help="evaluate only these entries of the models list")
     su.add_argument("--cells", choices=("score", "controls"), default="score")
     su.add_argument("--split", choices=("test", "train", "all"), default="test")
-    su.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
+    su.add_argument("--scenarios", nargs="*")
     su.add_argument("--trials", type=int, default=3)
     su.add_argument("--parallel", type=int, default=1)
     su.add_argument("--seed", type=int, default=1)
@@ -866,7 +922,7 @@ def main() -> int:
     lb.add_argument("--page-out", type=Path, help="directory for the page; `leaderboard` inside the first directory's parent by default")
     ev.add_argument("--cells", choices=("score", "controls"), default="score", help="score: the canonical cell only; controls: also baseline and language-appropriate controls")
     ev.add_argument("--split", choices=("test", "train", "all"), default="test")
-    ev.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
+    ev.add_argument("--scenarios", nargs="*")
     ev.add_argument("--trials", type=int, default=3)
     ev.add_argument("--parallel", type=int, default=1, help="trials at a time; sequential by default so provider limits are not hit, and a run can continue across sessions")
     ev.add_argument("--seed", type=int, default=1)
@@ -893,6 +949,8 @@ def main() -> int:
     score = sub.add_parser("score", help="compute the Wright Agent Score card of each language track from canonical test runs")
     score.add_argument("dirs", nargs="+", type=Path)
     score.add_argument("--language", choices=("workshop", "opy"), action="append", help="track to score; both when omitted")
+    for name in ("validate", "run", "matrix", "evaluate", "suite", "report", "score"):
+        sub.choices[name].add_argument("--private-suite", type=Path, help="private versioned suite directory, kept unreadable by the agent")
     defaults = user_defaults()
     for choice in sub.choices.values():
         known = {a.dest for a in choice._actions}
@@ -915,7 +973,7 @@ def main() -> int:
     if getattr(args, "deny_read", None) and not getattr(args, "file_sandbox", False) and args.command not in ("evaluate", "suite"):
         raise SystemExit("--deny-read needs --file-sandbox")
     if args.command == "validate":
-        return 0 if validate(args.wright, args.out) else 1
+        return 0 if validate(args.wright, args.out, args.private_suite) else 1
     if args.command == "setup-oracle":
         return cmd_setup_oracle(args)
     if args.command == "wiki-snapshot":
@@ -923,7 +981,7 @@ def main() -> int:
     if args.command == "wiki-skill":
         return cmd_wiki_skill(args)
     if args.command == "report":
-        return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s), references_of(args))
+        return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s, args.private_suite), references_of(args))
     if args.command == "leaderboard":
         return bench_leaderboard.main(args.dirs, args.page_out or args.dirs[0].parent / "leaderboard")
     if args.command == "compare":
@@ -931,7 +989,7 @@ def main() -> int:
         return 0
     if args.command == "score":
         languages = args.language or ["workshop", "opy"]
-        expected = {lang: [s for s in all_scenario_ids() if load_scenario(s)["language"] == lang and load_scenario(s).get("split") == "test"] for lang in languages}
+        expected = {lang: [s for s in all_scenario_ids(getattr(args, "private_suite", None)) if load_scenario(s, getattr(args, "private_suite", None))["language"] == lang and load_scenario(s, getattr(args, "private_suite", None)).get("split") == "test"] for lang in languages}
         return bench_score.main(args.dirs, languages, expected, None)
     return {"run": cmd_run, "matrix": cmd_matrix, "evaluate": cmd_evaluate, "suite": cmd_suite}[args.command](args)
 

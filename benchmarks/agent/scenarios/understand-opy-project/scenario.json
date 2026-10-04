@@ -60,5 +60,6 @@
         "unused-variables"
       ]
     }
-  }
+  },
+  "canary": "WRIGHT_BENCH_CANARY_499_v2"
 }
