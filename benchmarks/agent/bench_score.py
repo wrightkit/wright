@@ -164,7 +164,7 @@ def compare(dirs: list[Path]) -> str:
                 continue
             ident = card_["identity"]
             identities.setdefault(card_["track"], []).append((directory.name, {k: ident.get(k) for k in COMPARABLE}))  # cards written before a field existed compare as 'not recorded'
-            label = " ".join(filter(None, (ident["agent"], ident["effort"] and f"effort {ident['effort']}")))
+            label = " ".join(filter(None, (ident.get("agent"), ident.get("effort") and f"effort {ident['effort']}")))
             note = "provisional: " + "; ".join(card_["provisional"]) if card_["provisional"] else ""
             rows.append((card_["track"], directory.name, f"{card_['score']} [{card_['ci95'][0]}-{card_['ci95'][1]}]", f"{label}; {card_['trialsPerScenario']} trial(s) x {card_['scenarios']} scenarios; excluded {card_['exclusions'] or 'none'}. {note}".strip()))
     lines = ["| track | run | score [95% CI] | agent and notes |", "| --- | --- | --- | --- |", *(f"| {t} | {d} | {s} | {n} |" for t, d, s, n in sorted(rows))]

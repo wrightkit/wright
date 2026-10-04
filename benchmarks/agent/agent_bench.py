@@ -511,13 +511,14 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         path = Path(value).expanduser()
         return path if path.is_absolute() else (base / path).resolve()
 
+    path_keys = ("wiki_dir", "out", "out_root", "wright")
     options = {}
     for key, val in config.get("options", {}).items():
-        if key in ("wiki_dir", "out", "out_root") and not val:
+        if key in path_keys + ("skill_dirs",) and not val:
             continue  # a null path option means 'unset', not an override
         if key == "skill_dirs":
             val = {n: option_path(v) for n, v in val.items()}
-        elif key in ("wiki_dir", "out", "out_root"):
+        elif key in path_keys:
             val = option_path(val)
         elif key in ("allow_read", "deny_read") and isinstance(val, list):
             val = [option_path(v) for v in val]
@@ -636,6 +637,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.adapter == "claude-code" and args.file_sandbox:
         print("note: the file sandbox lets claude-code read but not refresh its login; pass --no-file-sandbox when its token may rotate mid-run", flush=True)
     script = Path(__file__).parent / "adapters" / ADAPTERS[args.adapter]
+    if not args.name or args.name in (".", "..") or Path(args.name).name != args.name:
+        raise SystemExit("--name must be a single directory name")
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
     agent_id = model_slug({"adapter": args.adapter, "model": args.model, "effort": args.effort})
     cmd = f"BENCH_MODEL={shlex.quote(args.model)} {effort}{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
@@ -669,8 +672,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
                           "deny_read": [str(Path(p).expanduser().resolve()) for p in args.deny_read],
                           "timeout": args.timeout, "canary_cmd": args.canary_cmd, "check_ancestors": args.check_ancestors,
                           "infra_retries": args.infra_retries, "infra_backoff": args.infra_backoff,
-                          "skill_dirs": {k: str(Path(v).resolve()) for k, v in args.skill_dirs.items()},
-                          "wiki_dir": str(args.wiki_dir.resolve()) if args.wiki_dir else None}}
+                          "skill_dirs": {k: str(Path(v).expanduser().resolve()) for k, v in args.skill_dirs.items()},
+                          "wiki_dir": str(args.wiki_dir.expanduser().resolve()) if args.wiki_dir else None}}
     args.config = args.out / "matrix.json"
     args.config.write_text(json.dumps(config, indent=2) + "\n")
     status = cmd_matrix(args)
