@@ -14,6 +14,7 @@ from pathlib import Path
 
 TOKEN_BYTES = 4  # estimation only: bytes per token for Wright output attribution
 DECISION_COMMANDS = ("check", "lint", "analyze", "inspect")
+JSONRPC_METHODS = ("compile", "check", "analyze", "inspect")  # serve.rs's direct methods — `lint` exists only as a CLI command
 VALIDATING = ("check", "lint", "analyze", "compile")
 OUTPUT_FORMAT_FLAGS = ("--format", "-f")
 
@@ -108,9 +109,9 @@ def serve_tee(real: str, argv: list[str], started: float) -> int:
     reader = threading.Thread(target=pump)
     reader.start()
     for line in sys.stdin.buffer:
+        log("req", line)  # before the write: the pump can log a fast response before a req logged after the write
         proc.stdin.write(line)
         proc.stdin.flush()
-        log("req", line)
     proc.stdin.close()
     code = proc.wait()
     reader.join()
@@ -159,7 +160,7 @@ def serve_request(line: str, transport: str = "stdio") -> dict:
     params = message.get("params") if isinstance(message.get("params"), dict) else {}
     if transport == "mcp" and method == "tools/call":
         return {"op": mcp_op(params.get("name")), "args": params.get("arguments"), "expects": expects}
-    if transport == "jsonrpc" and (method == "request" and (op := params.get("op")) or method in DECISION_COMMANDS and (op := method)):
+    if transport == "jsonrpc" and (method == "request" and (op := params.get("op")) or method in JSONRPC_METHODS and (op := method)):
         return {"op": op if isinstance(op, str) else None, "args": params or None, "expects": expects}
     return {"op": f"{transport}:{method}" if isinstance(method, str) else None, "args": None, "expects": expects}
 

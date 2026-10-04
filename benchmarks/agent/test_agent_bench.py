@@ -742,6 +742,9 @@ class DetectorTest(unittest.TestCase):
         self.assertTrue(bench_trace.serve_request(notification, "stdio")["expects"])  # stdio answers every non-blank line
         request = bench_trace.serve_request('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"wright_call_graph","arguments":{"depth":2}}}', "mcp")
         self.assertEqual((request["op"], request["args"], request["expects"]), ("callGraph", {"depth": 2}, True))
+        # the jsonrpc transport's wright methods are compile/check/analyze/inspect — lint is a CLI op the server rejects
+        self.assertEqual(bench_trace.serve_request('{"jsonrpc":"2.0","id":4,"method":"compile"}', "jsonrpc")["op"], "compile")
+        self.assertEqual(bench_trace.serve_request('{"jsonrpc":"2.0","id":5,"method":"lint"}', "jsonrpc")["op"], "jsonrpc:lint")
 
     def test_serve_pairs_do_not_desynchronize_on_silent_lines(self):
         res1, res2, res3 = (json.dumps({"jsonrpc": "2.0", "id": i, "result": {}}) for i in (1, 2, 3))
