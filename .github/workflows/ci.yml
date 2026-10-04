@@ -295,6 +295,12 @@ jobs:
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
+    env:
+      # The pinned provider version and the store it installs into, shared
+      # by the install step, the provider-backed test step, and the compile
+      # smoke check.
+      OPY_PROVIDER_VERSION: "0.1.38"
+      WRIGHT_PROVIDER_DATA_DIR: ${{ github.workspace }}/.wright-provider-data
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -334,7 +340,15 @@ jobs:
           && cargo test --locked -p wright-consumer --test consumer
 
       - name: Install pinned OPY provider
-        run: target/debug/wright update provider opy --version 0.1.38
+        run: target/debug/wright update provider opy --version "$OPY_PROVIDER_VERSION"
+
+      # The provider-backed language-service/LSP rename regressions
+      # self-skip without a real provider; point them at the pinned install
+      # so a stale-edit or project-scope regression fails CI.
+      - name: Run provider-backed language tests
+        run: >-
+          WRIGHT_OPY_PROVIDER="$WRIGHT_PROVIDER_DATA_DIR/providers/opy/$OPY_PROVIDER_VERSION/x86_64-unknown-linux-gnu/opy-provider"
+          cargo test --locked -p wright-language -p wright-lsp
 
       - name: Compile OPY via provider
         run: >-
