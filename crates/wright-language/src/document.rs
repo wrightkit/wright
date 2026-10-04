@@ -156,25 +156,22 @@ pub fn utf16_len(s: &str) -> usize {
     s.chars().map(|c| c.len_utf16()).sum()
 }
 
+/// A 1-based line and 1-based character column as a UTF-16 `Position`; a line or column past the end clamps.
+pub fn line_col_position(source: &str, line: u32, col: u32) -> Position {
+    let index = line.saturating_sub(1) as usize;
+    let character = source.lines().nth(index).map_or(0, |line| {
+        char_offset_to_utf16(line, col.saturating_sub(1) as usize)
+    });
+    Position {
+        line: index as u32,
+        character: character as u32,
+    }
+}
+
 pub fn span_to_range(span: &workshop_rs::source::Span, source: &str) -> Range {
-    let sl = span.start.line.saturating_sub(1) as usize;
-    let el = span.end.line.saturating_sub(1) as usize;
-    let lines: Vec<&str> = source.lines().collect();
-    let sc = lines.get(sl).map_or(0, |line| {
-        char_offset_to_utf16(line, span.start.col.saturating_sub(1) as usize)
-    });
-    let ec = lines.get(el).map_or(0, |line| {
-        char_offset_to_utf16(line, span.end.col.saturating_sub(1) as usize)
-    });
     Range {
-        start: Position {
-            line: sl as u32,
-            character: sc as u32,
-        },
-        end: Position {
-            line: el as u32,
-            character: ec as u32,
-        },
+        start: line_col_position(source, span.start.line, span.start.col),
+        end: line_col_position(source, span.end.line, span.end.col),
     }
 }
 

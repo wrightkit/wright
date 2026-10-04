@@ -277,7 +277,8 @@ fn write_error(
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, String> {
-    serde_json::from_value(params.unwrap()).map_err(|error| error.to_string())
+    serde_json::from_value(params.ok_or_else(|| "missing params".to_string())?)
+        .map_err(|error| error.to_string())
 }
 
 fn publish_affected_diagnostics(

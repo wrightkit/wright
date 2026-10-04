@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use wright_driver::{CompilerSession, SessionConfig};
 
-use crate::document::{DocumentStore, Position, Range, char_offset_to_utf16};
+use crate::document::{DocumentStore, Position, Range, line_col_position};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceDiagnostic {
@@ -245,20 +245,9 @@ fn is_source_document(uri: &str) -> bool {
 /// Convert a driver [`wright_driver::edit::EditRange`] (1-based line and
 /// character column, half-open) back into UTF-16 document coordinates.
 fn edit_range(text: &str, range: &wright_driver::edit::EditRange) -> Range {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let position = |line: u32, col: u32| {
-        let line_index = line.saturating_sub(1) as usize;
-        let character = lines.get(line_index).map_or(0, |line| {
-            char_offset_to_utf16(line, col.saturating_sub(1) as usize)
-        });
-        Position {
-            line: line_index as u32,
-            character: character as u32,
-        }
-    };
     Range {
-        start: position(range.start_line, range.start_col),
-        end: position(range.end_line, range.end_col),
+        start: line_col_position(text, range.start_line, range.start_col),
+        end: line_col_position(text, range.end_line, range.end_col),
     }
 }
 
@@ -390,5 +379,24 @@ mod tests {
         // space before it); the end col 6 lands after it at utf16 offset 6.
         assert_eq!(converted.start.character, 4);
         assert_eq!(converted.end.character, 6);
+    }
+
+    #[test]
+    fn edit_range_on_crlf_does_not_count_the_carriage_return() {
+        // str::lines drops the \r: a column past it must land on the last
+        // real char, matching span_to_range's line split.
+        let text = "a = 1\r\nb = 2\r\n";
+        let range = wright_driver::edit::EditRange {
+            start_line: 2,
+            start_col: 1,
+            end_line: 2,
+            end_col: 7,
+        };
+        let converted = edit_range(text, &range);
+        assert_eq!(converted.start.character, 0);
+        assert_eq!(
+            converted.end.character, 5,
+            "'b = 2' is 5 chars; the \\r is not a column"
+        );
     }
 }
