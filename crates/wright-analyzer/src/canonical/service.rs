@@ -115,8 +115,12 @@ impl<'a> SemanticService<'a> {
         config: LintConfig,
         registry: Arc<crate::registry::LintRegistry>,
     ) -> Self {
-        let index = Arc::new(SemanticIndex::build(program.as_ref()));
-        let report = registry.run_report(program.as_ref(), &config);
+        let index = hotpath::measure_block!("analyzer::index_build", {
+            Arc::new(SemanticIndex::build(program.as_ref()))
+        });
+        let report = hotpath::measure_block!("analyzer::lint_run", {
+            registry.run_report(program.as_ref(), &config)
+        });
         Self {
             program,
             index,
@@ -129,7 +133,9 @@ impl<'a> SemanticService<'a> {
     }
 
     pub fn with_lint_config(&self, config: LintConfig) -> Self {
-        let report = self.registry.run_report(self.program.as_ref(), &config);
+        let report = hotpath::measure_block!("analyzer::lint_run_reconfigured", {
+            self.registry.run_report(self.program.as_ref(), &config)
+        });
         Self {
             program: self.program.clone(),
             index: Arc::clone(&self.index),
@@ -141,6 +147,7 @@ impl<'a> SemanticService<'a> {
         }
     }
 
+    #[hotpath::measure]
     pub fn references_for_all_symbols(&self) -> JsonValue {
         JsonValue::Array(
             self.index
@@ -234,6 +241,9 @@ impl<'a> SemanticService<'a> {
         serde_json::to_string(&response).expect("response serializes")
     }
     pub fn handle(&self, request: &Request) -> Response {
+        hotpath::measure_block!(request_label(request), self.dispatch(request))
+    }
+    fn dispatch(&self, request: &Request) -> Response {
         match request {
             Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": env!("CARGO_PKG_VERSION"), "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
             Request::Program => Response::Ok { result: json!({"origin": self.origin, "files": file_count(self.program.as_ref()), "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
@@ -269,6 +279,24 @@ impl<'a> SemanticService<'a> {
     }
 }
 
+/// The hotpath measurement label for one semantic request's dispatch.
+#[cfg_attr(not(feature = "hotpath"), allow(dead_code))]
+fn request_label(request: &Request) -> &'static str {
+    match request {
+        Request::Version => "svc::version",
+        Request::Program => "svc::program",
+        Request::ListRules => "svc::listRules",
+        Request::GetRule { .. } => "svc::getRule",
+        Request::ListSymbols { .. } => "svc::listSymbols",
+        Request::GetSymbol { .. } => "svc::getSymbol",
+        Request::FindReferences { .. } => "svc::findReferences",
+        Request::GetUsage { .. } => "svc::getUsage",
+        Request::GetCfg { .. } => "svc::getCfg",
+        Request::GetFindings => "svc::getFindings",
+        Request::GetPersistentObjects => "svc::getPersistentObjects",
+        Request::LintRules => "svc::lintRules",
+    }
+}
 fn lint_rules(
     registry: &crate::registry::LintRegistry,
     config: &LintConfig,

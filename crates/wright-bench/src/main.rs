@@ -22,6 +22,7 @@ const BENCH_CONFIG: &str = r#"{
   }
 }"#;
 
+#[hotpath::main(limit = 0)]
 fn main() -> ExitCode {
     match run() {
         Ok(true) => ExitCode::SUCCESS,
@@ -249,6 +250,7 @@ fn benchmark_semantic_queries(
     })
 }
 
+#[hotpath::measure]
 fn semantic_query_trial(
     source: &str,
     fixture: &str,
@@ -310,6 +312,7 @@ fn semantic_query_trial(
     result
 }
 
+#[hotpath::measure]
 fn compile(
     source: &str,
     fixture: &str,

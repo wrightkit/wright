@@ -584,8 +584,12 @@ impl LintRegistry {
             }
         }
 
-        let mut findings = crate::canonical::analyze(program, config);
-        findings.extend(self.run_canonical_custom(program, config));
+        let mut findings = hotpath::measure_block!("analyzer::lint_analyze", {
+            crate::canonical::analyze(program, config)
+        });
+        findings.extend(hotpath::measure_block!("analyzer::lint_custom", {
+            self.run_canonical_custom(program, config)
+        }));
         findings.retain(|finding| available.get(finding.rule).copied().unwrap_or(false));
         let order: HashMap<_, _> = self
             .entries

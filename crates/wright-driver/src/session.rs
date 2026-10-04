@@ -123,7 +123,10 @@ pub struct CompilerSession {
 impl CompilerSession {
     /// Build a session from a configuration.
     pub fn new(config: SessionConfig) -> Result<CompilerSession, Diagnostic> {
-        let catalog = workshop_rs::catalog::Catalog::builtin().map_err(|error| {
+        let catalog = hotpath::measure_block!("session::catalog_builtin", {
+            workshop_rs::catalog::Catalog::builtin()
+        })
+        .map_err(|error| {
             Diagnostic::error(
                 "catalog-error",
                 Stage::Internal,
@@ -217,6 +220,7 @@ impl CompilerSession {
         self.load()
     }
 
+    #[hotpath::measure]
     fn load_with_operation(
         &mut self,
         provider_operation: ProviderOperation,
@@ -241,7 +245,8 @@ impl CompilerSession {
             .diagnostic());
         }
         self.progress(ProgressEvent::new(ProgressPhase::InputResolution));
-        let mut resolved = input::resolve(&self.config)?;
+        let mut resolved =
+            hotpath::measure_block!("load::resolve_input", input::resolve(&self.config))?;
         let provider_backend = match self.config.source_backend {
             SourceBackend::Native => false,
             SourceBackend::Provider => true,
@@ -293,7 +298,11 @@ impl CompilerSession {
         // run (#442).
         let completeness_issues = (resolved.kind == SourceKind::Workshop
             && self.config.profile != wright_transform::Profile::Off)
-            .then(|| program.semantic_issues(&self.catalog));
+            .then(|| {
+                hotpath::measure_block!("load::semantic_issues", {
+                    program.semantic_issues(&self.catalog)
+                })
+            });
         apply_profile(&mut program, self.config.profile)?;
         let loaded = Loaded {
             program: Arc::new(program),
@@ -549,26 +558,30 @@ impl CompilerSession {
             .locale
             .as_deref()
             .map(workshop_rs::catalog::Locale::new);
-        let locale = workshop_rs::detect::resolve_locale(
-            &resolved.text,
-            &self.catalog,
-            override_locale.as_ref(),
-        )
+        let locale = hotpath::measure_block!("load::detect_locale", {
+            workshop_rs::detect::resolve_locale(
+                &resolved.text,
+                &self.catalog,
+                override_locale.as_ref(),
+            )
+        })
         .map_err(|error| workshop_diag(error, resolved))?;
-        let program = workshop_rs::parser::parse_with_context(
-            &resolved.text,
-            &self.catalog,
-            &locale,
-            &self.catalog,
-        )
+        let program = hotpath::measure_block!("load::parse", {
+            workshop_rs::parser::parse_with_context(
+                &resolved.text,
+                &self.catalog,
+                &locale,
+                &self.catalog,
+            )
+        })
         .map_err(|error| workshop_diag(error, resolved))?;
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        program
-            .validate()
+        hotpath::measure_block!("load::validate", program.validate())
             .map_err(|error| workshop_diag(error, resolved))?;
         Ok((program, locale.to_string()))
     }
 
+    #[hotpath::measure]
     pub fn compile(&mut self) -> Envelope<CompileResult> {
         let mut result = CompileResult::default();
         let output = match self.compile_output() {
@@ -607,10 +620,12 @@ impl CompilerSession {
         let loaded = self.load_with_operation(ProviderOperation::Compile)?;
         let locale = Self::locale_for(&loaded);
         self.progress(ProgressEvent::new(ProgressPhase::Emission));
-        let text = workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
-            .map_err(|error| workshop_diag(error, &loaded.input))?;
+        let text = hotpath::measure_block!("compile::emit", {
+            workshop_rs::emitter::emit(&loaded.program, &self.catalog, &locale)
+        })
+        .map_err(|error| workshop_diag(error, &loaded.input))?;
         self.attach_target_limits(&loaded);
-        let sha256 = input_identity(&text);
+        let sha256 = hotpath::measure_block!("compile::sha256", input_identity(&text));
         Ok(CompiledOutput {
             text,
             sha256,
@@ -620,6 +635,7 @@ impl CompilerSession {
         })
     }
 
+    #[hotpath::measure]
     pub fn check(&mut self) -> Envelope<CheckResult> {
         self.with_loaded(
             "check",
@@ -732,6 +748,7 @@ impl CompilerSession {
         )
     }
 
+    #[hotpath::measure]
     pub(crate) fn shared_service_with(
         &self,
         loaded: &Loaded,
@@ -756,7 +773,9 @@ impl CompilerSession {
     /// diagnostics stay free of source-language logic. `check` does not run
     /// this: it is a source-correctness workflow, not a client-import gate.
     fn attach_target_limits(&mut self, loaded: &Loaded) {
-        let report = match loaded.program.element_count(&self.catalog) {
+        let report = match hotpath::measure_block!("compile::element_count", {
+            loaded.program.element_count(&self.catalog)
+        }) {
             Ok(report) => report,
             Err(error) => {
                 // Without the canonical count the budget is unevaluated —
@@ -932,6 +951,7 @@ impl CompilerSession {
     }
 }
 
+#[hotpath::measure]
 fn apply_profile(
     program: &mut Program,
     profile: wright_transform::Profile,
