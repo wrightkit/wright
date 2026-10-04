@@ -93,7 +93,11 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
             "shutdown" => write_response(&mut writer, id, Value::Null)?,
             "exit" => break,
             "textDocument/didOpen" => {
-                let params: DidOpenTextDocumentParams = parse_params(params)?;
+                let Some(params) =
+                    read_params::<DidOpenTextDocumentParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
                 let uri = params.text_document.uri.to_string();
                 let document = Document::with_version(
                     uri.clone(),
@@ -105,7 +109,11 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didChange" => {
-                let params: DidChangeTextDocumentParams = parse_params(params)?;
+                let Some(params) =
+                    read_params::<DidChangeTextDocumentParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
                 let uri = params.text_document.uri.to_string();
                 if let Some(change) = params.content_changes.last() {
                     service
@@ -115,7 +123,11 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didClose" => {
-                let params: DidCloseTextDocumentParams = parse_params(params)?;
+                let Some(params) =
+                    read_params::<DidCloseTextDocumentParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
                 let uri = params.text_document.uri.to_string();
                 let owned = ownership.remove(&uri).unwrap_or_default();
                 service.store.close(&uri);
@@ -133,7 +145,9 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
             }
             "textDocument/didSave" => {}
             "textDocument/rename" => {
-                let params: RenameParams = parse_params(params)?;
+                let Some(params) = read_params::<RenameParams>(&mut writer, &id, params)? else {
+                    continue;
+                };
                 let outcome = service.rename(
                     params.text_document_position.text_document.uri.as_str(),
                     Position {
@@ -279,6 +293,26 @@ fn write_error(
 fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, String> {
     serde_json::from_value(params.ok_or_else(|| "missing params".to_string())?)
         .map_err(|error| error.to_string())
+}
+
+/// Params for a message, answering `-32602` when a request carries none or
+/// malformed ones. `None` means the message was malformed and already handled —
+/// or was a notification, which gets no response — so the caller skips it and
+/// the server keeps serving.
+fn read_params<T: serde::de::DeserializeOwned>(
+    writer: &mut impl Write,
+    id: &Option<Value>,
+    params: Option<Value>,
+) -> Result<Option<T>, String> {
+    match parse_params(params) {
+        Ok(parsed) => Ok(Some(parsed)),
+        Err(message) => {
+            if id.is_some() {
+                write_error(writer, id.clone(), -32602, &message, "invalid-params")?;
+            }
+            Ok(None)
+        }
+    }
 }
 
 fn publish_affected_diagnostics(

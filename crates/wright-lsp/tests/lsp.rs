@@ -159,6 +159,39 @@ fn initialize_advertises_only_backed_capabilities() {
 }
 
 #[test]
+fn malformed_params_answer_invalid_params_and_the_server_keeps_serving() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+
+    for (id, message) in [
+        (
+            7,
+            serde_json::json!({"jsonrpc": "2.0", "id": 7, "method": "textDocument/rename"}),
+        ),
+        (
+            8,
+            serde_json::json!({"jsonrpc": "2.0", "id": 8, "method": "textDocument/rename", "params": "bogus"}),
+        ),
+    ] {
+        client.send(message);
+        let error = client.read_message();
+        assert_eq!(error["id"], id);
+        assert_eq!(
+            error["error"]["code"], -32602,
+            "missing or malformed params are Invalid params, not a dead server"
+        );
+    }
+
+    // a malformed notification gets no response but costs no session either
+    client.send(serde_json::json!({"jsonrpc": "2.0", "method": "textDocument/didOpen"}));
+    let shutdown = client.request(9, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
 fn workshop_lsp_workflow_keeps_protocol_and_lifecycle_contracts() {
     let root = workspace_root();
     let mut client = LspClient::spawn(&root);
