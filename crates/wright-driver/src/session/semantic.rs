@@ -146,6 +146,22 @@ fn semantic_facts(
     })
 }
 
+fn analyze_result(
+    service: &SemanticService<'_>,
+    loaded: &Loaded,
+    catalog: &Catalog,
+) -> AnalyzeResult {
+    let mut program = service_response(service, &Request::Program);
+    if let serde_json::Value::Object(object) = &mut program {
+        object.remove("findings");
+    }
+    let mut facts = semantic_facts(service, loaded, catalog);
+    hotpath::measure_block!("analyze::resolve_span_paths", {
+        resolve_span_paths(&mut facts, loaded)
+    });
+    AnalyzeResult { program, facts }
+}
+
 /// The `{file,start,end}` span shape every other `facts` entry carries, so
 /// `resolve_span_paths` maps element-count locations the same way.
 fn fact_span_json(span: Option<Span>) -> serde_json::Value {
@@ -323,19 +339,7 @@ impl CompilerSession {
             |session, loaded| {
                 let service = session.service(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                let mut program = service_response(&service, &Request::Program);
-                if let serde_json::Value::Object(object) = &mut program {
-                    object.remove("findings");
-                }
-                let mut facts = semantic_facts(&service, &loaded, session.catalog());
-                // Resolve every fact span like `lint` does: mapped or
-                // source-parsed locations become authored paths, while
-                // unmapped provider output resolves to `<provider-artifact>`
-                // instead of a fabricated location (#445).
-                hotpath::measure_block!("analyze::resolve_span_paths", {
-                    resolve_span_paths(&mut facts, &loaded)
-                });
-                AnalyzeResult { program, facts }
+                analyze_result(&service, &loaded, session.catalog())
             },
         )
     }
@@ -454,6 +458,21 @@ impl CompilerSession {
             |session, _loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 inspect_result(service)
+            },
+        )
+    }
+
+    pub(crate) fn analyze_loaded(
+        &mut self,
+        loaded: Loaded,
+        service: &SemanticService<'_>,
+    ) -> Envelope<AnalyzeResult> {
+        self.with_loaded(
+            "analyze",
+            |_| Ok(loaded),
+            |session, loaded| {
+                session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
+                analyze_result(service, &loaded, session.catalog())
             },
         )
     }

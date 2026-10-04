@@ -514,6 +514,11 @@ impl LintRegistry {
         Ok(())
     }
 
+    /// Whether a native or declarative rule with this ID is registered.
+    pub fn contains(&self, id: &str) -> bool {
+        self.entries.iter().any(|entry| entry.id() == id)
+    }
+
     /// Return metadata for native and declarative rules in deterministic order.
     pub fn descriptors(&self, config: &LintConfig) -> Vec<RuleDescriptor> {
         self.entries

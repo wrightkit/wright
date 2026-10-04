@@ -838,6 +838,20 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     ));
     assert_eq!(before, ["score", "setup"]);
 
+    for request in [
+        ToolRequest::References { symbol: 0.into() },
+        ToolRequest::Findings(FindingSelection::default()),
+        ToolRequest::LintRules,
+        ToolRequest::Inspect,
+        ToolRequest::Analyze,
+    ] {
+        let before = serde_json::to_string(&service.handle(&request)).unwrap();
+        assert_eq!(
+            before,
+            serde_json::to_string(&service.handle(&request)).unwrap()
+        );
+    }
+
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
     let after = names(result_of(

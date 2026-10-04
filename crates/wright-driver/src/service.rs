@@ -449,8 +449,11 @@ impl<'a> ToolService<'a> {
                 ToolResponse::Ok { result }
             }
             ToolRequest::Analyze => {
-                let result = serde_json::to_value(self.session.analyze())
-                    .expect("analyze result serializes");
+                let result = serde_json::to_value(
+                    self.session
+                        .analyze_loaded(self.loaded.clone(), &self.semantic),
+                )
+                .expect("analyze result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Inspect => {
