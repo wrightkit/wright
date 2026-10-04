@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 
 INFRA_EXIT = 75  # EX_TEMPFAIL: a provider or infrastructure failure, not an agent failure; the harness retries the trial later
 # Error text that means the provider, not the agent, failed. Shared so the classification cannot drift between adapters.
@@ -13,6 +14,17 @@ TRANSIENT = ("rate limit", "overloaded", "429", "502", "503", "529", "bad gatewa
 def as_dict(value) -> dict:
     """value when it is a dict, else {} — `or {}` alone does not guard a truthy non-dict from a malformed stream line."""
     return value if isinstance(value, dict) else {}
+
+
+def feed_stdin(proc: subprocess.Popen, text: str) -> None:
+    """Write the prompt to the child's stdin on a thread — a large prompt otherwise blocks the loop that must drain the pipes."""
+    def feed() -> None:
+        try:
+            proc.stdin.write(text)
+            proc.stdin.close()
+        except (BrokenPipeError, ValueError):  # the child exited before taking the whole prompt
+            pass
+    threading.Thread(target=feed, daemon=True).start()
 
 
 def cli_version(binary: str, env: dict | None = None) -> str | None:
