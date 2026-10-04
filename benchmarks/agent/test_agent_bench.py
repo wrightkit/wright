@@ -174,11 +174,12 @@ class AgentBenchTest(unittest.TestCase):
         script.write_text("import os, sys\nsys.stdin.read()\nopen('probe.txt', 'w').write(os.environ.get('BENCH_PROBE', '') + '|' + os.environ.get('HOME', ''))\n")
         self.addCleanup(script.unlink, True)
         self.skill_dir("wright-skill")  # reached as a relative path below, resolved against the evaluate cwd
+        (self.out / "wiki-snap").mkdir()
         args = argparse.Namespace(  # relative paths must serialize resolved: the file resolves its own against its directory
             adapter="fake", model="m", effort=None, name="eval", out=self.out, wright=str(Path(WRIGHT).resolve()),
-            skill_dirs={"wright-skill": Path("skills/wright-skill")}, wiki_dir=None, env_pass=["BENCH_PROBE"],
+            skill_dirs={"wright-skill": Path("skills/wright-skill")}, wiki_dir=Path("wiki-snap"), env_pass=["BENCH_PROBE"],
             allow_read=["allow-this"], deny_read=[], canary_cmd=None, check_ancestors=False,
-            timeout=30, infra_retries=0, infra_backoff=0, no_file_sandbox=True, dry_run=False,
+            timeout=30, infra_retries=3, infra_backoff=0, no_file_sandbox=True, dry_run=False,
             cells="score", split="test", scenarios=[SCENARIO], trials=1, parallel=1, seed=1)
         run_dir = self.out / "eval"
         with patch.dict(agent_bench.ADAPTERS, {"fake": "_test_fake_adapter.py"}), patch.dict(agent_bench.ADAPTER_READS, {"fake": []}), \
@@ -191,7 +192,9 @@ class AgentBenchTest(unittest.TestCase):
         self.assertIn("BENCH_PROBE", options["env_pass"])
         self.assertIn("HOME", options["env_pass"])
         self.assertEqual(options["skill_dirs"]["wright-skill"], str((self.out / "skills/wright-skill").resolve()))
+        self.assertEqual(options["wiki_dir"], str((self.out / "wiki-snap").resolve()))
         self.assertEqual(options["deny_read"], [])
+        self.assertEqual(options["infra_retries"], 3)
         self.assertIn(str((self.out / "allow-this").resolve()), options["allow_read"])
         trial = run_dir / SCENARIO / "fake-m" / "wright+wright-skill_none_off-1"
         self.assertEqual((trial / "workspace" / "probe.txt").read_text(), f"present|{Path.home()}")

@@ -238,7 +238,7 @@ python3 benchmarks/agent/agent_bench.py score target/agent-bench   # Wright Agen
 are the trial-time settings a run needs, overriding their command-line counterparts: `out` and `out_root` (relative paths resolve against the matrix
 file's directory, so `evaluate`'s `out: "."` makes the file's own directory the run directory), `wright`, `adapter`, `file_sandbox`, `env_pass`, `credentials`,
 `allow_read`/`deny_read`, `timeout`, `canary_cmd`, `check_ancestors`, `infra_retries`/`infra_backoff`, `skill_dirs` as `{name: dir}`, `wiki_dir`. Every
-path-valued option (`out`, `out_root`, `skill_dirs`, `wiki_dir`, `allow_read`, `deny_read`) follows the same rule: relative resolves against the matrix file's
+path-valued option (`out`, `out_root`, `wright`, `skill_dirs`, `wiki_dir`, `allow_read`, `deny_read`) follows the same rule: relative resolves against the matrix file's
 directory, and `evaluate` writes its own path options already resolved so the file reproduces the run from any cwd. Cells not
 applicable to a scenario's language are skipped; the matrix stops after two consecutive provider interruptions and exits 3 when any occurred. Finished runs
 are skipped, so an interrupted matrix resumes; `evaluate` writes its effective options into `matrix.json`, so `matrix <run>/matrix.json` resumes that run in place.
