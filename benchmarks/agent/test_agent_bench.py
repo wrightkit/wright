@@ -30,12 +30,12 @@ class AgentBenchTest(unittest.TestCase):
         self.out = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")).resolve()
         self.addCleanup(shutil.rmtree, self.out, True)
 
-    def trial(self, agent_cmd: str, tool: str = "wright", skills: tuple = (), knowledge: str = "none", scenario: str = SCENARIO, **options) -> dict:
+    def trial(self, agent_cmd: str, tool: str = "wright", skills: tuple = (), knowledge: str = "none", scenario: str = SCENARIO, level: str = "bin", **options) -> dict:
         args = argparse.Namespace(**{
             "wright": str(Path(WRIGHT).resolve()), "agent_id": "fake", "agent_cmd": agent_cmd, "timeout": 60, "infra_retries": 2,
             "env_pass": [], "canary_cmd": None, "skill_dirs": {}, "wiki_dir": None, "check_ancestors": False, "out": self.out, **options,
         })
-        cell = agent_bench.normalize_cell({"tool": tool, "skills": list(skills), "knowledge": knowledge, "network": "off"})
+        cell = agent_bench.normalize_cell({"tool": tool, "level": level, "skills": list(skills), "knowledge": knowledge, "network": "off"})
         return agent_bench.run_trial(agent_bench.load_scenario(scenario), cell, args, self.out / f"{scenario}-{tool}")
 
     def test_wiki_snapshot_is_copied_and_identified(self):
@@ -86,6 +86,65 @@ class AgentBenchTest(unittest.TestCase):
         fmt = agent_bench.normalize_cell({"tool": "none", "skills": ["workshop-format-skill"], "knowledge": "none", "network": "off"})
         self.assertTrue(agent_bench.applicable({"language": "workshop"}, fmt))
         self.assertFalse(agent_bench.applicable({"language": "opy"}, fmt))
+
+    def test_mcp_level_label_and_cell_validation(self):
+        cell = agent_bench.normalize_cell({"tool": "wright", "level": "mcp", "skills": ["wright-skill"], "knowledge": "none", "network": "off"})
+        self.assertEqual(agent_bench.cell_label(cell), "wright-mcp+wright-skill/none/off")
+        self.assertEqual(agent_bench.normalize_cell({"tool": "wright", "skills": [], "knowledge": "none", "network": "off"})["level"], "bin")
+        self.assertEqual(agent_bench.cell_label(agent_bench.normalize_cell({"tool": "wright", "skills": [], "knowledge": "none", "network": "off"})), "wright/none/off")
+        args = argparse.Namespace(skill_dirs={}, wiki_dir=None)
+        with self.assertRaisesRegex(SystemExit, "level 'mcp' is a `wright` level"):
+            agent_bench.check_cell(agent_bench.normalize_cell({"tool": "overpy", "level": "mcp", "skills": [], "knowledge": "none", "network": "off"}), args)
+        with self.assertRaisesRegex(SystemExit, "level 'mcp' is a `wright` level"):
+            agent_bench.check_cell(agent_bench.normalize_cell({"tool": "none", "level": "mcp", "skills": [], "knowledge": "none", "network": "off"}), args)
+        with self.assertRaisesRegex(SystemExit, "invalid condition"):
+            agent_bench.check_cell(agent_bench.normalize_cell({"tool": "wright", "level": "bogus", "skills": [], "knowledge": "none", "network": "off"}), args)
+
+    def test_mcp_env_hides_the_cli_and_describes_the_server(self):
+        workspace = self.out / "ws"
+        workspace.mkdir()
+        args = argparse.Namespace(wright=str(Path(WRIGHT).resolve()), agent_id="fake", env_pass=[], skill_dirs={}, wiki_dir=None, check_ancestors=False, canary_cmd=None)
+        cell = agent_bench.normalize_cell({"tool": "wright", "level": "mcp", "skills": [], "knowledge": "none", "network": "off"})
+        env = agent_bench.build_env(cell, args, self.out / "run", workspace)
+        self.assertEqual(env["BENCH_TOOL_LEVEL"], "mcp")
+        self.assertIn("serve --transport mcp", env["BENCH_MCP_CMD"])
+        self.assertIn("bench_trace.py", env["BENCH_MCP_CMD"])
+        self.assertIn(str(workspace), env["BENCH_MCP_CMD"])
+        self.assertIsNone(shutil.which("wright", path=env["PATH"]))
+        self.assertFalse((self.out / "run/bin").exists())
+        shims = self.out / "shims"
+        shims.mkdir()
+        (shims / "wright").write_text("#!/bin/sh\nexit 0\n")
+        (shims / "wright").chmod(0o755)
+        self.assertIn("reachable", agent_bench.canaries(cell, {**env, "PATH": str(shims)}, workspace, args))
+        env_bin = agent_bench.build_env({**cell, "level": "bin"}, args, self.out / "run2", workspace)
+        self.assertTrue((self.out / "run2/bin").is_dir())
+        self.assertTrue(str(shutil.which("wright", path=env_bin["PATH"])).startswith(str(self.out / "run2")))
+
+    def test_mcp_level_is_invalid_when_the_adapter_never_registers_the_server(self):
+        result = self.trial("true", level="mcp")
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("BENCH_MCP_CMD", result["invalid"])
+
+    def test_mcp_tools_calls_are_traced_as_wright_uses(self):
+        lines = [
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}',
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"wright_check","arguments":{}}}',
+            '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"wright_nope","arguments":{}}}',
+        ]
+        agent = "printf '%s\\n' " + " ".join(f"'{line}'" for line in lines) + ' | sh -c "$BENCH_MCP_CMD" >/dev/null'
+        result = self.trial(agent, level="mcp")
+        use = result["toolUse"]["wright"]
+        self.assertEqual((use["invocations"], use["byCommand"]["check"]), (2, 1))
+        self.assertEqual(use["byCommand"]["nope"], 1)
+        self.assertEqual(use["failedInvocations"], 1)
+        self.assertNotIn("invalid", result)
+        self.assertEqual(result["expectations"]["E11"]["status"], "pass")
+        self.assertEqual(result["expectations"]["E01"]["status"], "pass")
+        self.assertEqual(result["expectations"]["E02"]["status"], "pass")
+        self.assertGreater(use["outputTokensEstimate"]["mcp:tools/list"], 0)
 
     @unittest.skipUnless(bench_grade.oracle_available(), "run `agent_bench.py setup-oracle`")
     def test_overpy_tool_is_traced_and_wright_is_hidden(self):
@@ -569,6 +628,72 @@ class DetectorTest(unittest.TestCase):
         self.assertEqual(result["malformedServeRequests"], 1)
         self.assertEqual(result["unparsedServeResponses"], 1)
 
+    def serve(self, line, direction="req", transport="stdio", session=7, t=0.0):
+        return {"tool": "wright", "type": "serve", "dir": direction, "t": t, "line": line, "transport": transport, "session": session}
+
+    def test_serve_request_mirrors_the_servers_answer_rule(self):
+        notification = '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+        self.assertFalse(bench_trace.serve_request("", "mcp")["expects"])  # blank lines are skipped silently
+        self.assertFalse(bench_trace.serve_request("   ", "stdio")["expects"])
+        self.assertFalse(bench_trace.serve_request(notification, "mcp")["expects"])
+        self.assertTrue(bench_trace.serve_request("not json", "stdio")["expects"])  # answered with a parse error
+        self.assertTrue(bench_trace.serve_request('{"foo":1}', "mcp")["expects"])  # no method: answered -32600
+        self.assertTrue(bench_trace.serve_request(notification, "stdio")["expects"])  # stdio answers every non-blank line
+        request = bench_trace.serve_request('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"wright_call_graph","arguments":{"depth":2}}}', "mcp")
+        self.assertEqual((request["op"], request["args"], request["expects"]), ("callGraph", {"depth": 2}, True))
+        # the jsonrpc transport's wright methods are compile/check/analyze/inspect — lint is a CLI op the server rejects
+        self.assertEqual(bench_trace.serve_request('{"jsonrpc":"2.0","id":4,"method":"compile"}', "jsonrpc")["op"], "compile")
+        self.assertEqual(bench_trace.serve_request('{"jsonrpc":"2.0","id":5,"method":"lint"}', "jsonrpc")["op"], "jsonrpc:lint")
+
+    def test_serve_pairs_do_not_desynchronize_on_silent_lines(self):
+        res1, res2, res3 = (json.dumps({"jsonrpc": "2.0", "id": i, "result": {}}) for i in (1, 2, 3))
+        events = [
+            self.serve(""),  # skipped silently by the server
+            self.serve('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wright_check"}}', transport="mcp"),
+            self.serve('{"jsonrpc":"2.0","method":"notifications/initialized"}', transport="mcp"),  # notification: no answer
+            self.serve('{"foo":1}', transport="mcp"),  # answered -32600
+            self.serve(res1, "res", "mcp"), self.serve('{"error":{"code":-32600}}', "res", "mcp"),
+            self.serve('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"wright_symbols"}}', transport="mcp"),
+            self.serve(res2, "res", "mcp"),
+            self.serve('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"wright_lint"}}', transport="mcp"),  # unanswered
+        ]
+        pairs = bench_trace.serve_pairs(events)
+        self.assertEqual([r["op"] for _, r, _ in pairs], ["check", None, "symbols", "lint"])
+        self.assertEqual(pairs[0][2]["line"], res1)
+        self.assertEqual(pairs[1][2]["line"], '{"error":{"code":-32600}}')
+        self.assertEqual(pairs[2][2]["line"], res2)
+        self.assertIsNone(pairs[3][2])
+
+    def test_serve_pairs_separate_concurrent_sessions(self):
+        events = [
+            self.serve('{"op":"check"}', session=1, t=1), self.serve('{"op":"lint"}', session=2, t=2),
+            self.serve('{"r":1}', "res", session=1, t=3), self.serve('{"r":2}', "res", session=2, t=4),
+        ]
+        pairs = bench_trace.serve_pairs(events)
+        self.assertEqual([(r["op"], s["line"]) for _, r, s in pairs], [("check", '{"r":1}'), ("lint", '{"r":2}')])
+
+    def test_serve_error_classifies_refusals_and_malformed(self):
+        self.assertEqual(bench_trace.serve_error('{"error":{"code":-32700}}'), "malformed")
+        self.assertEqual(bench_trace.serve_error('{"error":{"code":"malformed-request"}}'), "malformed")
+        self.assertEqual(bench_trace.serve_error('{"error":{"code":-32602,"message":"unknown tool"}}'), "refused")
+        self.assertEqual(bench_trace.serve_error('{"result":{"isError":true,"content":[]}}'), "refused")
+        self.assertIsNone(bench_trace.serve_error('{"result":{"ok":true}}'))
+
+    def test_call_counts_and_shell_search_reads(self):
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
+        transcript = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")) / "transcript.jsonl"
+        self.addCleanup(shutil.rmtree, transcript.parent, True)
+        transcript.write_text("\n".join(json.dumps(e) for e in [
+            {"type": "assistant", "calls": [{"name": "bash", "input": {"command": "rg foo && cat mode.ws"}},
+                                            {"name": "wright_check", "input": {"file": "mode.ws"}}]},
+            {"type": "assistant", "calls": [{"name": "bash", "input": {"command": "wright check mode.ws"}},
+                                            {"name": "bash", "input": "a string input"},
+                                            {"name": "bash", "input": {"command": "ls"}}]},
+            "not json",
+        ]))
+        self.assertEqual(bench_trace.call_counts(transcript), {"bash": 4, "wright_check": 1})
+        self.assertEqual(bench_trace.shell_search_reads(transcript), 2)  # the wright-CLI call is counted by toolUse, not here
+
     def test_serve_trace_preserves_large_json_responses(self):
         import io
         from types import SimpleNamespace
@@ -641,6 +766,37 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(summary["cells"]["m|none/none/off"]["n"], 1)
         self.assertEqual(summary["infrastructureFailures"], 1)
         self.assertIn("excluded from outcome metrics", text)
+
+    def level_result(self, level, trial, usable, tokens, bash=(), wright_invocations=0, tool_calls=None, scenario="s"):
+        run = self.result("wright-mcp/none/off" if level == "mcp" else "wright/none/off", trial, usable, tokens, scenario=scenario)
+        run["condition"].update(tool="wright", level=level, knowledge="none", network="off", skills=[])
+        run["toolUse"] = {"wright": {"invocations": wright_invocations}}
+        run["toolCalls"] = tool_calls or {}
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
+        directory = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        transcript = [{"type": "assistant", "calls": [{"name": "bash", "input": {"command": command}} for command in bash]}]
+        (directory / "transcript.jsonl").write_text("\n".join(json.dumps(e) for e in transcript))
+        run["_dir"] = directory
+        return run
+
+    def test_level_comparison_pairs_mcp_with_bin(self):
+        runs = [
+            self.level_result("bin", 1, True, 1000, bash=("rg foo mode.ws", "wright check mode.ws", "cat mode.ws"), wright_invocations=2, tool_calls={"bash": 3}),
+            self.level_result("mcp", 1, True, 800, wright_invocations=3, tool_calls={"wright_check": 2, "wright_symbols": 1, "bash": 1}),
+            self.level_result("bin", 2, False, 900, bash=("ls",), wright_invocations=1, tool_calls={"bash": 1}),
+            self.level_result("mcp", 2, True, 700, wright_invocations=2, tool_calls={"wright_check": 2}),
+        ]
+        text, summary = bench_report.render(runs)
+        self.assertIn("Level comparison", text)
+        self.assertIn("+1 / -0", text)  # mcp turned trial 2 usable
+        stats = {row["cell"]: row["stats"] for row in summary["levels"]}
+        self.assertEqual(stats["wright/none/off"]["mcp"]["searchReads"], 2.5)  # wright invocations only; no shell search commands
+        self.assertEqual(stats["wright/none/off"]["bin"]["searchReads"], 3.0)  # (2 wright + 2 shell) and (1 wright + 1 shell)
+        self.assertIn("[", text.split("Level comparison")[1])  # Wilson intervals on the rates
+        # trial keys do not cross-pair: bin trial 1 and mcp trial 2 are different trials
+        text, _ = bench_report.render([runs[0], runs[3]])
+        self.assertNotIn("Level comparison", text)
 
 
 if __name__ == "__main__":

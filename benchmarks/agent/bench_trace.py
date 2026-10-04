@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -13,6 +14,7 @@ from pathlib import Path
 
 TOKEN_BYTES = 4  # estimation only: bytes per token for Wright output attribution
 DECISION_COMMANDS = ("check", "lint", "analyze", "inspect")
+JSONRPC_METHODS = ("compile", "check", "analyze", "inspect")  # serve.rs's direct methods — `lint` exists only as a CLI command
 VALIDATING = ("check", "lint", "analyze", "compile")
 OUTPUT_FORMAT_FLAGS = ("--format", "-f")
 
@@ -79,13 +81,24 @@ def shim_main(argv: list[str]) -> int:
     return proc.returncode
 
 
+def serve_transport(argv: list[str]) -> str:
+    """The transport a `wright serve` argv selected; stdio is the server default."""
+    for i, a in enumerate(argv):
+        if a == "--transport" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--transport="):
+            return a.split("=", 1)[1]
+    return "stdio"
+
+
 def serve_tee(real: str, argv: list[str], started: float) -> int:
     proc = subprocess.Popen([real, *argv], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     counts = {"req": 0, "res": 0}
+    session = {"session": os.getpid(), "transport": serve_transport(argv)}  # separates this session's lines from a concurrent one
 
     def log(direction: str, line: bytes) -> None:
         counts[direction] += 1
-        append_event({"type": "serve", "dir": direction, "t": time.time(), "line": line.decode(errors="replace")})
+        append_event({"type": "serve", "dir": direction, "t": time.time(), "line": line.decode(errors="replace"), **session})
 
     def pump() -> None:
         for line in proc.stdout:
@@ -96,9 +109,9 @@ def serve_tee(real: str, argv: list[str], started: float) -> int:
     reader = threading.Thread(target=pump)
     reader.start()
     for line in sys.stdin.buffer:
+        log("req", line)  # before the write: the pump can log a fast response before a req logged after the write
         proc.stdin.write(line)
         proc.stdin.flush()
-        log("req", line)
     proc.stdin.close()
     code = proc.wait()
     reader.join()
@@ -109,6 +122,145 @@ def serve_tee(real: str, argv: list[str], started: float) -> int:
 
 def read_events(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.is_file() else []
+
+
+def mcp_op(name) -> str | None:
+    """The Wright operation an MCP tool name carries: `wright_call_graph` -> `callGraph`."""
+    if not isinstance(name, str):
+        return None
+    return re.sub(r"_([a-z])", lambda m: m.group(1).upper(), name.removeprefix("wright_"))
+
+
+def serve_request(line: str, transport: str = "stdio") -> dict:
+    """One serve request line: `{op, args, expects}`.
+
+    `expects` mirrors the server's answer rule for the session's transport (`serve.rs`/`mcp.rs`): a blank line is skipped
+    silently; under jsonrpc/mcp a notification — a JSON-RPC object with a string `method` and no `id` — is answered with
+    silence; every other line is answered, including unparseable or malformed input (a parse/invalid-request error).
+    `tools/call` maps to the Wright operation its tool name carries, and the jsonrpc transport's wright methods
+    (`compile`, `check`, `analyze`, `inspect`) map to their names; every other method keeps a `<transport>:` name so
+    transport traffic (handshake, `tools/list`) is distinguishable from Wright operations."""
+    if not line.strip():
+        return {"op": None, "args": None, "expects": False}
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        message = None
+    expects = transport == "stdio" or not (
+        isinstance(message, dict) and message.get("jsonrpc") == "2.0" and isinstance(message.get("method"), str) and "id" not in message
+    )
+    if not isinstance(message, dict):
+        return {"op": None, "args": None, "expects": expects}
+    if transport == "stdio":  # a bare {op, ...} request per line; anything else is answered malformed-request
+        if "op" in message:
+            op = message["op"]
+            return {"op": op if isinstance(op, str) else "", "args": {k: v for k, v in message.items() if k != "op"}, "expects": expects}
+        return {"op": None, "args": None, "expects": expects}
+    method = message.get("method")
+    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+    if transport == "mcp" and method == "tools/call":
+        return {"op": mcp_op(params.get("name")), "args": params.get("arguments"), "expects": expects}
+    if transport == "jsonrpc" and (method == "request" and (op := params.get("op")) or method in JSONRPC_METHODS and (op := method)):
+        return {"op": op if isinstance(op, str) else None, "args": params or None, "expects": expects}
+    return {"op": f"{transport}:{method}" if isinstance(method, str) else None, "args": None, "expects": expects}
+
+
+def serve_pairs(events: list[dict]) -> list[tuple[dict, dict, dict | None]]:
+    """`(request event, parsed request, response event)` for every serve request that expects an answer, in request order.
+
+    Serve lines carry their session's id and transport (the shim tags them); pairing is FIFO within a session because the
+    server answers its lines strictly in order. A request left without a response pairs with None."""
+    sessions: dict = {}
+    for event in events:
+        if event.get("type") == "serve":
+            sessions.setdefault(event.get("session"), []).append(event)
+    pairs: list[tuple[dict, dict, dict | None]] = []
+    for stream in sessions.values():
+        pending: list[tuple[dict, dict]] = []
+        for event in stream:
+            if event["dir"] == "req":
+                request = serve_request(event["line"], event.get("transport", "stdio"))
+                if request["expects"]:
+                    pending.append((event, request))
+            elif pending:
+                pairs.append((*pending.pop(0), event))
+        pairs += [(*pair, None) for pair in pending]
+    return sorted(pairs, key=lambda pair: pair[0]["t"])
+
+
+def serve_error(line: str) -> str | None:
+    """Why a serve response failed: `malformed` when the request could not be understood at all, `refused` for a structured
+    rejection the server understood (unknown tool, bad params, or a Wright refusal), else None."""
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        return None  # counted by `unparsedServeResponses`, not here
+    if not isinstance(message, dict):
+        return None
+    error = message.get("error")
+    if isinstance(error, dict):
+        code = error.get("code")
+        return "malformed" if code in (-32700, -32600, "malformed-request") else "refused"
+    result = message.get("result")
+    if isinstance(result, dict) and result.get("isError") and "content" in result:  # an MCP tool result carrying a refusal
+        return "refused"
+    return None
+
+
+def serve_use(request: dict) -> bool:
+    """A serve request counts as a Wright use when it carried a Wright operation; `<transport>:` methods are transport traffic."""
+    return bool(request["op"]) and ":" not in request["op"]
+
+
+def request_key(request: dict) -> tuple:
+    """Identity for repeat/retry detection: the operation plus its serialized arguments."""
+    return (request["op"], json.dumps(request["args"], sort_keys=True))
+
+
+def serve_ops(events: list[dict]) -> list[str]:
+    """The operation names a serve session carried, in order: Wright ops and `<transport>:` methods."""
+    return [request["op"] for _, request, _ in serve_pairs(events) if request["op"]]
+
+
+def transcript_events(path: Path):
+    """Parsed transcript events (dicts only); empty when the transcript does not exist."""
+    if not path.is_file():
+        return
+    for line in path.read_text().splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            yield event
+
+
+def call_counts(path: Path) -> dict[str, int] | None:
+    """Model tool calls by name from a normalized adapter transcript (`calls` on its events), None when it has none."""
+    counts: dict[str, int] = {}
+    for event in transcript_events(path):
+        for call in event.get("calls") or []:
+            name = call.get("name") if isinstance(call, dict) else None
+            if name:
+                counts[name] = counts.get(name, 0) + 1
+    return counts or None
+
+
+SEARCH_COMMAND = re.compile(r"(?<![\w./-])(?:rg|grep|find|fd|cat|bat|head|tail|less|more|sed|awk|ls|tree|wc|file|stat|strings|diff|du)\b")
+WRIGHT_IN_SHELL = re.compile(r"(?<![\w./-])wright\b")
+
+
+def shell_search_reads(path: Path) -> int:
+    """`bash` transcript calls that ran a search/read command; a call that invokes the wright CLI is excluded (`toolUse` counts it)."""
+    count = 0
+    for event in transcript_events(path):
+        for call in event.get("calls") or []:
+            if not isinstance(call, dict) or call.get("name") != "bash":
+                continue
+            command = call.get("input").get("command") if isinstance(call.get("input"), dict) else None
+            if isinstance(command, str) and SEARCH_COMMAND.search(command) and not WRIGHT_IN_SHELL.search(command):
+                count += 1
+    return count
 
 
 class Snapshots(threading.Thread):
@@ -158,19 +310,36 @@ def summarize_trace(events: list[dict]) -> dict:
 
 
 def summarize_tool(events: list[dict]) -> dict:
+    """Wright uses: every CLI invocation, plus each serve request's operation (`check`, `lint`, ...).
+
+    A `serve` session is a container — its spawn is not itself a use unless it never carried a request — so a
+    `wright serve` session and an MCP `tools/call` count the same way. The `<transport>:` handshake is not a use
+    either, but its response bytes (`mcp:tools/list` carries the schemas) count as output."""
     calls = [e for e in events if e["type"] == "call"]
+    cli = [c for c in calls if "requests" not in c]
+    sessions = [c for c in calls if "requests" in c]
+    pairs = serve_pairs(events)
+    uses = [(request, response) for _, request, response in pairs if serve_use(request)]
     by_command: dict[str, int] = {}
     for call in calls:
         by_command[command_of(call["argv"])] = by_command.get(command_of(call["argv"]), 0) + 1
+    for _, request, _ in pairs:
+        if request["op"]:
+            by_command[request["op"]] = by_command.get(request["op"], 0) + 1
+    output: dict[str, int] = {}
+    for call in calls:
+        command = command_of(call["argv"])
+        if command:
+            output[command] = output.get(command, 0) + call.get("stdoutBytes", 0) + call.get("stderrBytes", 0)
+    for _, request, response in pairs:
+        if request["op"] and response:
+            output[request["op"]] = output.get(request["op"], 0) + len(response["line"])
     return {
-        "invocations": len(calls),
+        "invocations": len(cli) + len(uses) + sum(1 for c in sessions if not c["requests"]),
         "byCommand": by_command,
-        "failedInvocations": sum(1 for c in calls if c["exit"] != 0),
+        "failedInvocations": sum(1 for c in calls if c["exit"] != 0) + sum(1 for request, response in uses if response and serve_error(response["line"])),
         "ownerOrEnvironmentGaps": [c["argv"] for c in calls if c["exit"] >= 3],
-        "outputTokensEstimate": {
-            cmd: sum(c.get("stdoutBytes", 0) + c.get("stderrBytes", 0) for c in calls if command_of(c["argv"]) == cmd) // TOKEN_BYTES
-            for cmd in by_command if cmd
-        },
+        "outputTokensEstimate": {cmd: total // TOKEN_BYTES for cmd, total in output.items()},
     }
 
 
@@ -178,41 +347,33 @@ def friction(events: list[dict]) -> dict:
     """Wright friction; other tools are summarized by `summarize_trace` only."""
     events = tool_events(events, "wright")
     calls = [e for e in events if e["type"] == "call"]
-    seen: list[tuple] = []
+    pairs = serve_pairs(events)
+    requests = [(request, response) for _, request, response in pairs if serve_use(request)]
+    seen: list = []
     repeats = 0
-    for call in calls:
-        key = tuple(call["argv"])
+    for key in [tuple(c["argv"]) for c in calls] + [request_key(request) for request, _ in requests]:
         repeats += key in seen
         seen.append(key)
-    serve_responses = []
+    errors = [serve_error(e["line"]) for e in events if e["type"] == "serve" and e["dir"] == "res"]
     unparsed = 0
     for event in events:
         if event["type"] == "serve" and event["dir"] == "res":
             try:
-                serve_responses.append(json.loads(event["line"]))
+                json.loads(event["line"])
             except json.JSONDecodeError:
                 unparsed += 1
+    keys = [request_key(request) for request, _ in requests]
     return {
         "usageErrors": sum(1 for c in calls if c["exit"] == 2),
         "unknownSubcommands": sum(1 for c in calls if "unrecognized subcommand" in c.get("stderrHead", "")),
         "helpLookups": sum(1 for c in calls if any(a in ("--help", "-h", "help") for a in c["argv"])),
-        "retriesAfterUnsupported": sum(1 for i, c in enumerate(calls) if c["exit"] >= 3 and tuple(c["argv"]) in [tuple(x["argv"]) for x in calls[i + 1:]]),
-        "malformedServeRequests": sum(1 for r in serve_responses if r.get("error", {}).get("code") == "malformed-request"),
+        "retriesAfterUnsupported": sum(1 for i, c in enumerate(calls) if c["exit"] >= 3 and tuple(c["argv"]) in [tuple(x["argv"]) for x in calls[i + 1:]])
+        + sum(1 for i, (request, response) in enumerate(requests) if response and serve_error(response["line"]) == "refused" and keys[i] in keys[i + 1:]),
+        "malformedServeRequests": errors.count("malformed"),
         "unparsedServeResponses": unparsed,
         "identicalRepeats": repeats,
         "callsToFirstSuccess": next((i + 1 for i, c in enumerate(calls) if c["exit"] == 0 and not any(a in ("--help", "-h", "--version") for a in c["argv"])), None),
     }
-
-
-def serve_ops(events: list[dict]) -> list[str]:
-    ops = []
-    for e in events:
-        if e["type"] == "serve" and e["dir"] == "req":
-            try:
-                ops.append(json.loads(e["line"]).get("op", ""))
-            except json.JSONDecodeError:
-                ops.append("")
-    return ops
 
 
 def expectation(status: str, detail: str = "") -> dict:
@@ -223,24 +384,27 @@ def detect_expectations(events: list[dict], snapshots: list[dict], scenario: dic
     """SPEC-414 E01-E12 over the Wright trace. E05, E07, E09, E10 need the agent transcript: `unavailable`."""
     events = tool_events(events, "wright")
     calls = [e for e in events if e["type"] == "call"]
+    pairs = serve_pairs(events)
     ops = serve_ops(events)
+    requests = [request for _, request, _ in pairs if serve_use(request)]
+    real_ops = [request["op"] for request in requests]
     used = bool(calls)
     unavailable = expectation("unavailable", "needs the normalized agent transcript")
     result = {k: unavailable for k in ("E05", "E07", "E09", "E10")}
     if not used:
         return {**result, **{k: expectation("na", "Wright not used") for k in ("E01", "E02", "E03", "E04", "E06", "E08", "E11", "E12")}}
     first = calls[0]
-    discovery = any(a in ("--help", "-h", "help", "--version") for a in first["argv"]) or "capabilities" in ops[:1]
+    discovery = any(a in ("--help", "-h", "help", "--version") for a in first["argv"]) or "capabilities" in ops[:1] or (ops[:1] and ":" in ops[0])
     result["E01"] = expectation("pass" if discovery else "fail", f"first call: {' '.join(first['argv'])}")
     decision = [c for c in calls if command_of(c["argv"]) in DECISION_COMMANDS]
     structured = [c for c in decision if wants_json(c["argv"])]
-    if decision or ops:
-        rate = (len(structured) + len(ops)) / (len(decision) + len(ops))
+    if decision or real_ops:
+        rate = (len(structured) + len(real_ops)) / (len(decision) + len(real_ops))
         result["E02"] = expectation("pass" if rate >= 0.5 else "fail", f"structured share {rate:.2f}")
     else:
         result["E02"] = expectation("na", "no decision-driving calls")
     if scenario.get("stabilityRisk"):
-        stability = any(command_of(c["argv"]) in ("lint", "analyze") for c in calls) or any(o in ("lint", "findings", "analyze") for o in ops)
+        stability = any(command_of(c["argv"]) in ("lint", "analyze") for c in calls) or any(o in ("lint", "findings", "analyze") for o in real_ops)
         result["E03"] = expectation("pass" if stability else "fail", "lint or analyze run" if stability else "only check-level validation")
     else:
         result["E03"] = expectation("na", "scenario has no stability risk")
@@ -249,6 +413,7 @@ def detect_expectations(events: list[dict], snapshots: list[dict], scenario: dic
         result["E04"] = expectation("na", "no edits observed")
     else:
         after = [c for c in calls if command_of(c["argv"]) in VALIDATING and c["t"] + c["seconds"] >= last_edit]
+        after += [e for e, request in ((e, p) for e, p, _ in pairs) if request["op"] in VALIDATING and e["t"] >= last_edit]
         matched = [c for c in after if c.get("envelope") and c["envelope"].get("inputIdentity") == final_sha256]
         result["E04"] = expectation("pass" if after else "fail", f"{len(after)} validation(s) after last edit; {len(matched)} match the final content")
     withheld = [c for c in calls if ((c.get("envelope") or {}).get("selection") or {}).get("withheld")]
@@ -256,10 +421,15 @@ def detect_expectations(events: list[dict], snapshots: list[dict], scenario: dic
     result["E06"] = expectation("na" if not withheld and not flags else "info", f"{flags} selection-flag call(s), {len(withheld)} withheld result(s)")
     unsupported = [c for c in calls if c["exit"] >= 3]
     excess = [c for c in unsupported if sum(1 for x in calls if x["argv"] == c["argv"]) > 2]
-    result["E08"] = expectation("na" if not unsupported else ("fail" if excess else "pass"), f"{len(unsupported)} exit 3/4 call(s), {len(excess)} retried more than twice")
+    refused = [i for i, (_, request, response) in enumerate(pairs) if response and serve_error(response["line"]) == "refused"]
+    keys = [request_key(request) for _, request, _ in pairs]
+    retry_pairs = sum(1 for i in refused if keys.count(keys[i]) > 2)
+    result["E08"] = expectation("na" if not unsupported and not refused else ("fail" if excess or retry_pairs else "pass"),
+                                f"{len(unsupported)} exit 3/4 call(s) and {len(refused)} refused request(s), {len(excess) + retry_pairs} retried more than twice")
     if ops:
         malformed = friction(events)["malformedServeRequests"]
-        result["E11"] = expectation("pass" if ops[0] == "capabilities" and not malformed else "fail", f"first op '{ops[0]}', {malformed} malformed")
+        discovery_op = ops[0] == "capabilities" or ":" in ops[0]  # a transport handshake (`mcp:initialize`, ...) is the discovery
+        result["E11"] = expectation("pass" if discovery_op and not malformed else "fail", f"first op '{ops[0]}', {malformed} malformed")
     else:
         result["E11"] = expectation("na", "no serve session")
     edit_times = [s["t"] for s in snapshots]
@@ -268,6 +438,12 @@ def detect_expectations(events: list[dict], snapshots: list[dict], scenario: dic
         for later in calls[i + 1:]:
             if later["argv"] == c["argv"]:
                 wasted += not any(c["t"] <= t <= later["t"] for t in edit_times)
+                break
+    request_events = [(e, request_key(request)) for e, request, _ in pairs if serve_use(request)]
+    for i, (event, key) in enumerate(request_events):
+        for later, later_key in request_events[i + 1:]:
+            if later_key == key and not any(event["t"] <= t <= later["t"] for t in edit_times):
+                wasted += 1
                 break
     result["E12"] = expectation("pass" if wasted == 0 else "fail", f"{wasted} identical repeat(s) with no edit between")
     return result
