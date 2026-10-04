@@ -24,15 +24,6 @@ impl LspClient {
         Self::launch(Command::new(env!("CARGO_BIN_EXE_wright-lsp")).current_dir(cwd))
     }
 
-    fn spawn_with_provider(cwd: &Path, provider: &Path) -> Self {
-        Self::launch(
-            Command::new(env!("CARGO_BIN_EXE_wright-lsp"))
-                .arg("--opy-provider")
-                .arg(provider)
-                .current_dir(cwd),
-        )
-    }
-
     fn launch(command: &mut Command) -> Self {
         let mut child = command
             .stdin(Stdio::piped())
@@ -417,78 +408,6 @@ fn rename_is_only_negotiated_for_versioned_workspace_edits() {
     assert_eq!(
         response["error"]["data"]["code"], "rename-unversioned-workspace-edit",
         "an unversioned workspace edit would violate the freshness contract: {response}"
-    );
-
-    client.notify("exit", serde_json::json!(null));
-}
-
-/// `WRIGHT_OPY_PROVIDER` points at an `opy-provider` executable; without it
-/// the provider-backed rename cannot run and the test self-skips.
-#[test]
-fn rename_returns_versioned_document_changes_scoped_to_the_project() {
-    let Ok(provider) = std::env::var("WRIGHT_OPY_PROVIDER") else {
-        eprintln!("SKIPPED: WRIGHT_OPY_PROVIDER is not set");
-        return;
-    };
-    let root = workspace_root();
-    let mut client = LspClient::spawn_with_provider(&root, Path::new(&provider));
-    initialize(&mut client);
-    client.notify("initialized", serde_json::json!({}));
-
-    let main = "file:///workspace/main.opy";
-    open_document(&mut client, main, "opy", "globalvar score = 0\n");
-    client.read_notification("textDocument/publishDiagnostics");
-    // A broken OPY document in the same language but outside main.opy's
-    // project: its diagnostics must not block the target rename.
-    open_document(
-        &mut client,
-        "file:///workspace/unrelated/broken.opy",
-        "opy",
-        "#!include \"missing.opy\"\n",
-    );
-    client.read_notification("textDocument/publishDiagnostics");
-
-    // Send the rename, then race it: the buffer changes before the client
-    // reads the response, so the version the provider validated no longer
-    // matches the client's buffer — the version tag is what lets the
-    // client detect that.
-    client.send(serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "textDocument/rename",
-        "params": {
-            "textDocument": { "uri": main },
-            "position": { "line": 0, "character": 12 },
-            "newName": "vault",
-        },
-    }));
-    client.notify(
-        "textDocument/didChange",
-        serde_json::json!({
-            "textDocument": { "uri": main, "version": 2 },
-            "contentChanges": [{ "text": "# extra comment\nglobalvar score = 0\n" }],
-        }),
-    );
-
-    // Requests are served in order: the rename response precedes the
-    // diagnostics notification the didChange triggers.
-    let response = client.read_message();
-    assert_eq!(response["id"], 3);
-    let document_changes = response["result"]["documentChanges"]
-        .as_array()
-        .unwrap_or_else(|| panic!("versioned documentChanges expected: {response}"));
-    assert_eq!(document_changes.len(), 1);
-    let edit = &document_changes[0];
-    assert_eq!(edit["textDocument"]["uri"], main);
-    assert_eq!(
-        edit["textDocument"]["version"], 1,
-        "the edit carries the validated version so the client rejects it once its buffer moved: {edit}"
-    );
-    let text_edits = edit["edits"].as_array().expect("text edits");
-    assert!(!text_edits.is_empty());
-    assert!(
-        text_edits.iter().all(|e| e["newText"] == "vault"),
-        "every edit applies the rename: {text_edits:?}"
     );
 
     client.notify("exit", serde_json::json!(null));

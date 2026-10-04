@@ -18,7 +18,7 @@ use lsp_types::{
 use serde_json::Value;
 
 use wright_language::document::{Document, Position, Range};
-use wright_language::service::RenameOutcome;
+use wright_language::service::{RenameOutcome, SourceTextEdit};
 use wright_language::{LanguageService, OpyProviderConfig, SessionConfig};
 
 type PublicationOwnership = BTreeMap<String, BTreeSet<String>>;
@@ -193,63 +193,20 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                     &params.new_name,
                 );
                 match outcome {
-                    RenameOutcome::Applied(edits) => {
-                        // `documentChanges` carries the validated document
-                        // version per file so the client can reject the edit
-                        // if its buffer moved while the rename was pending.
-                        // One `TextDocumentEdit` per document; a dropped
-                        // edit would apply a partial rename, so an
-                        // unparseable URI is an error.
-                        let mut grouped: BTreeMap<
-                            String,
-                            (i32, Vec<OneOf<TextEdit, AnnotatedTextEdit>>),
-                        > = BTreeMap::new();
-                        for edit in edits {
-                            let version = edit.version;
-                            grouped
-                                .entry(edit.uri)
-                                .or_insert_with(|| (version, Vec::new()))
-                                .1
-                                .push(OneOf::Left(TextEdit {
-                                    range: convert_range(edit.range),
-                                    new_text: edit.new_text,
-                                }));
+                    RenameOutcome::Applied(edits) => match versioned_workspace_edit(edits) {
+                        Ok(edit) => {
+                            write_response(&mut writer, id, serde_json::to_value(edit).unwrap())?
                         }
-                        let mut document_edits = Vec::with_capacity(grouped.len());
-                        let mut malformed = None;
-                        for (uri, (version, text_edits)) in grouped {
-                            match Uri::from_str(&uri) {
-                                Ok(uri) => document_edits.push(TextDocumentEdit {
-                                    text_document: OptionalVersionedTextDocumentIdentifier::new(
-                                        uri, version,
-                                    ),
-                                    edits: text_edits,
-                                }),
-                                Err(_) => malformed = Some(uri),
-                            }
-                        }
-                        if let Some(uri) = malformed {
-                            write_error(
-                                &mut writer,
-                                id,
-                                -32803,
-                                &format!(
-                                    "the provider produced an edit against an unparseable URI {uri}"
-                                ),
-                                "rename-edit-malformed-uri",
-                            )?;
-                        } else {
-                            write_response(
-                                &mut writer,
-                                id,
-                                serde_json::to_value(WorkspaceEdit {
-                                    document_changes: Some(DocumentChanges::Edits(document_edits)),
-                                    ..Default::default()
-                                })
-                                .unwrap(),
-                            )?;
-                        }
-                    }
+                        Err(uri) => write_error(
+                            &mut writer,
+                            id,
+                            -32803,
+                            &format!(
+                                "the provider produced an edit against an unparseable URI {uri}"
+                            ),
+                            "rename-edit-malformed-uri",
+                        )?,
+                    },
                     RenameOutcome::Refused { code, message } => {
                         write_error(&mut writer, id, -32803, &message, &code)?;
                     }
@@ -263,6 +220,40 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// `documentChanges` carries the validated document version per file so the
+/// client can reject the edit if its buffer moved while the rename was
+/// pending. One `TextDocumentEdit` per document; a dropped edit would apply a
+/// partial rename, so an unparseable URI is returned as the error.
+fn versioned_workspace_edit(edits: Vec<SourceTextEdit>) -> Result<WorkspaceEdit, String> {
+    let mut grouped: BTreeMap<String, (i32, Vec<OneOf<TextEdit, AnnotatedTextEdit>>)> =
+        BTreeMap::new();
+    for edit in edits {
+        let version = edit.version;
+        grouped
+            .entry(edit.uri)
+            .or_insert_with(|| (version, Vec::new()))
+            .1
+            .push(OneOf::Left(TextEdit {
+                range: convert_range(edit.range),
+                new_text: edit.new_text,
+            }));
+    }
+    let document_edits = grouped
+        .into_iter()
+        .map(|(uri, (version, edits))| {
+            let parsed = Uri::from_str(&uri).map_err(|_| uri)?;
+            Ok(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier::new(parsed, version),
+                edits,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(WorkspaceEdit {
+        document_changes: Some(DocumentChanges::Edits(document_edits)),
+        ..Default::default()
+    })
 }
 
 fn initialize_result(versioned_workspace_edits: bool) -> InitializeResult {
@@ -512,5 +503,68 @@ fn convert_range(range: Range) -> LspRange {
             line: range.end.line,
             character: range.end.character,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edit(uri: &str, version: i32, line: u32, new_text: &str) -> SourceTextEdit {
+        let at = |character| Position { line, character };
+        SourceTextEdit {
+            uri: uri.to_string(),
+            range: Range {
+                start: at(10),
+                end: at(15),
+            },
+            new_text: new_text.to_string(),
+            version,
+        }
+    }
+
+    #[test]
+    fn rename_edits_are_grouped_per_document_with_their_validated_version() {
+        let edits = vec![
+            edit("file:///w/a.opy", 3, 0, "vault"),
+            edit("file:///w/b.opy", 7, 1, "vault"),
+            edit("file:///w/a.opy", 3, 4, "vault"),
+        ];
+        let value = serde_json::to_value(versioned_workspace_edit(edits).unwrap()).unwrap();
+        assert!(value.get("changes").is_none(), "unversioned map: {value}");
+        let changes = value["documentChanges"].as_array().unwrap();
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0]["textDocument"]["uri"], "file:///w/a.opy");
+        assert_eq!(changes[0]["textDocument"]["version"], 3);
+        assert_eq!(changes[0]["edits"].as_array().unwrap().len(), 2);
+        assert_eq!(changes[1]["textDocument"]["uri"], "file:///w/b.opy");
+        assert_eq!(changes[1]["textDocument"]["version"], 7);
+        assert_eq!(changes[1]["edits"][0]["newText"], "vault");
+        assert_eq!(changes[1]["edits"][0]["range"]["start"]["character"], 10);
+    }
+
+    #[test]
+    fn an_unparseable_edit_uri_refuses_the_whole_edit() {
+        let edits = vec![
+            edit("file:///w/a.opy", 1, 0, "vault"),
+            edit("not a uri", 1, 0, "vault"),
+        ];
+        assert_eq!(versioned_workspace_edit(edits).unwrap_err(), "not a uri");
+    }
+
+    #[test]
+    fn rename_is_advertised_only_with_versioned_workspace_edits() {
+        assert!(
+            initialize_result(true)
+                .capabilities
+                .rename_provider
+                .is_some()
+        );
+        assert!(
+            initialize_result(false)
+                .capabilities
+                .rename_provider
+                .is_none()
+        );
     }
 }

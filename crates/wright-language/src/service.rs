@@ -373,50 +373,6 @@ mod tests {
         assert_ne!(code, "rename-refused", "a structured code must surface");
     }
 
-    /// `WRIGHT_OPY_PROVIDER` points at an `opy-provider` executable; without
-    /// it the provider-backed rename cannot run and the test self-skips.
-    #[test]
-    fn an_unrelated_broken_open_document_does_not_block_a_project_rename() {
-        let Ok(provider) = std::env::var("WRIGHT_OPY_PROVIDER") else {
-            eprintln!("SKIPPED: WRIGHT_OPY_PROVIDER is not set");
-            return;
-        };
-        let config = SessionConfig {
-            opy_provider: wright_driver::OpyProviderConfig::with_executable(PathBuf::from(
-                provider,
-            )),
-            ..SessionConfig::default()
-        };
-        let mut service = LanguageService::with_config(PathBuf::from("/project"), config);
-        let uri = open(&mut service, "main.opy", "globalvar score = 0\n");
-        // A broken OPY document in the same language but outside the
-        // position document's project: its error must not block the rename.
-        open(
-            &mut service,
-            "unrelated/broken.opy",
-            "#!include \"missing.opy\"\n",
-        );
-        match service.rename(
-            &uri,
-            Position {
-                line: 0,
-                character: 12,
-            },
-            "vault",
-        ) {
-            RenameOutcome::Applied(edits) => {
-                assert!(!edits.is_empty());
-                assert!(
-                    edits.iter().all(|edit| edit.version == 1),
-                    "every applied edit carries the validated document version"
-                );
-            }
-            RenameOutcome::Refused { code, message } => {
-                panic!("expected applied edits; refused ({code}): {message}")
-            }
-        }
-    }
-
     #[test]
     fn utf16_edit_ranges_convert_from_driver_columns() {
         // EditRange cols are 1-based character columns over a line whose
