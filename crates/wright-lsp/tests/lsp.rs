@@ -1,9 +1,13 @@
 //! LSP contract tests for the currently backed capability set.
 //!
-//! `wright-lsp` advertises document synchronization only; unbacked editor
-//! capabilities are neither advertised nor answered. OPY/DEL/OSTW documents
-//! report an explicit `source-provider-unavailable` diagnostic, while raw
-//! Workshop documents receive no diagnostic at all.
+//! `wright-lsp` advertises document synchronization and rename; unbacked
+//! editor capabilities are neither advertised nor answered. OPY/DEL/OSTW
+//! documents report an explicit `source-provider-unavailable` diagnostic,
+//! while raw Workshop documents receive no diagnostic at all. Rename routes
+//! through the provider-owned mutation path: applied renames return a
+//! `WorkspaceEdit`, and unsupported documents, unconfigured providers, and
+//! provider refusals answer with a `RequestFailed` error carrying the
+//! structured refusal code in `error.data.code`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -132,12 +136,15 @@ fn initialize_advertises_only_backed_capabilities() {
     assert_eq!(init["result"]["serverInfo"]["name"], "wright-lsp");
     let capabilities = init["result"]["capabilities"].as_object().unwrap();
     assert!(capabilities.contains_key("textDocumentSync"));
+    assert_eq!(
+        capabilities["renameProvider"], true,
+        "rename is provider-backed and advertised"
+    );
     for capability in [
         "hoverProvider",
         "definitionProvider",
         "referencesProvider",
         "completionProvider",
-        "renameProvider",
         "semanticTokensProvider",
     ] {
         assert!(
@@ -147,6 +154,39 @@ fn initialize_advertises_only_backed_capabilities() {
     }
     client.notify("initialized", serde_json::json!({}));
     let shutdown = client.request(2, "shutdown", serde_json::json!(null));
+    assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn malformed_params_answer_invalid_params_and_the_server_keeps_serving() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+
+    for (id, message) in [
+        (
+            7,
+            serde_json::json!({"jsonrpc": "2.0", "id": 7, "method": "textDocument/rename"}),
+        ),
+        (
+            8,
+            serde_json::json!({"jsonrpc": "2.0", "id": 8, "method": "textDocument/rename", "params": "bogus"}),
+        ),
+    ] {
+        client.send(message);
+        let error = client.read_message();
+        assert_eq!(error["id"], id);
+        assert_eq!(
+            error["error"]["code"], -32602,
+            "missing or malformed params are Invalid params, not a dead server"
+        );
+    }
+
+    // a malformed notification gets no response but costs no session either
+    client.send(serde_json::json!({"jsonrpc": "2.0", "method": "textDocument/didOpen"}));
+    let shutdown = client.request(9, "shutdown", serde_json::json!(null));
     assert!(shutdown["result"].is_null());
     client.notify("exit", serde_json::json!(null));
 }
@@ -234,5 +274,93 @@ fn opy_lsp_workflow_reports_provider_boundary_without_static_fallback() {
 
     let shutdown = client.request(3, "shutdown", serde_json::json!(null));
     assert!(shutdown["result"].is_null());
+    client.notify("exit", serde_json::json!(null));
+}
+
+fn rename_request(client: &mut LspClient, id: u64, uri: &str) -> serde_json::Value {
+    client.request(
+        id,
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 1 },
+            "newName": "renamed",
+        }),
+    )
+}
+
+fn open_document(client: &mut LspClient, uri: &str, language_id: &str, text: &str) {
+    client.notify(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": {
+                "uri": uri,
+                "languageId": language_id,
+                "version": 1,
+                "text": text,
+            }
+        }),
+    );
+}
+
+#[test]
+fn rename_on_an_unopen_document_is_a_structured_request_error() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+
+    let response = rename_request(&mut client, 2, "file:///workspace/main.opy");
+    assert_eq!(response["error"]["code"], -32803);
+    assert_eq!(
+        response["error"]["data"]["code"], "rename-unknown-document",
+        "the structured refusal code rides in error.data.code: {response}"
+    );
+
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn rename_on_a_non_source_document_is_a_structured_request_error() {
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+    open_document(
+        &mut client,
+        "file:///workspace/notes.txt",
+        "plaintext",
+        "hello\n",
+    );
+    client.read_notification("textDocument/publishDiagnostics");
+
+    let response = rename_request(&mut client, 2, "file:///workspace/notes.txt");
+    assert_eq!(response["error"]["code"], -32803);
+    assert_eq!(
+        response["error"]["data"]["code"],
+        "rename-unsupported-document"
+    );
+
+    client.notify("exit", serde_json::json!(null));
+}
+
+#[test]
+fn rename_without_a_configured_provider_is_a_structured_request_error() {
+    // No DEL provider exists, so `.del` deterministically reaches the
+    // unconfigured-provider refusal rather than any textual fallback.
+    let root = workspace_root();
+    let mut client = LspClient::spawn(&root);
+    initialize(&mut client);
+    client.notify("initialized", serde_json::json!({}));
+    open_document(&mut client, "file:///workspace/main.del", "del", "x\n");
+    client.read_notification("textDocument/publishDiagnostics");
+
+    let response = rename_request(&mut client, 2, "file:///workspace/main.del");
+    assert_eq!(response["error"]["code"], -32803);
+    assert_eq!(
+        response["error"]["data"]["code"], "provider-not-configured",
+        "an unconfigured provider refuses explicitly: {response}"
+    );
+
     client.notify("exit", serde_json::json!(null));
 }

@@ -101,6 +101,18 @@ const TOOLS: &[ToolSpec] = &[
         drop_fields: &["sources"],
         description: "Validate and preview a source-edit transaction atomically against the session's project; no filesystem writes. Sources default to the on-disk text.",
     },
+    ToolSpec {
+        op: "providerSemanticRename",
+        request_def: "ProviderSemanticRenameRequest",
+        drop_fields: &[],
+        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. `documents` and `sources` are supplied by the caller.",
+    },
+    ToolSpec {
+        op: "providerValidateEdit",
+        request_def: "ProviderValidateEditRequest",
+        drop_fields: &[],
+        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. `documents` and `sources` are supplied by the caller.",
+    },
 ];
 
 /// A tool definition as listed by `tools/list`.
@@ -359,6 +371,8 @@ mod tests {
         assert_eq!(names[7], "wright_cost_estimate");
         assert_eq!(names[8], "wright_semantic_rename");
         assert_eq!(names[9], "wright_validate_edit_transaction");
+        assert_eq!(names[10], "wright_provider_semantic_rename");
+        assert_eq!(names[11], "wright_provider_validate_edit");
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
