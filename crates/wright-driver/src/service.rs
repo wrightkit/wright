@@ -242,6 +242,7 @@ pub struct ToolService<'a> {
 
 impl<'a> ToolService<'a> {
     /// Build the service over a session, loading the program eagerly.
+    #[hotpath::measure]
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         let loaded = session.load()?;
         let fingerprint = input::disk_fingerprint(&session.config, &loaded.input);
@@ -335,7 +336,7 @@ impl<'a> ToolService<'a> {
                 return ToolResponse::Error { error };
             }
         }
-        let response = self.dispatch(request);
+        let response = hotpath::measure_block!(request_label(request), self.dispatch(request));
         self.note_id_space(request, &response);
         response
     }
@@ -870,6 +871,35 @@ impl<'a> ToolService<'a> {
                 "members": domain.members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
+    }
+}
+
+/// The hotpath measurement label for one request's dispatch.
+#[cfg_attr(not(feature = "hotpath"), allow(dead_code))]
+fn request_label(request: &ToolRequest) -> &'static str {
+    match request {
+        ToolRequest::Capabilities => "req::capabilities",
+        ToolRequest::Compile => "req::compile",
+        ToolRequest::Check => "req::check",
+        ToolRequest::Analyze => "req::analyze",
+        ToolRequest::Inspect => "req::inspect",
+        ToolRequest::Project => "req::project",
+        ToolRequest::Rules => "req::rules",
+        ToolRequest::Symbols { .. } => "req::symbols",
+        ToolRequest::References { .. } => "req::references",
+        ToolRequest::Usage { .. } => "req::usage",
+        ToolRequest::Cfg { .. } => "req::cfg",
+        ToolRequest::Findings(_) => "req::findings",
+        ToolRequest::PersistentObjects => "req::persistentObjects",
+        ToolRequest::Lint(_) => "req::lint",
+        ToolRequest::LintRules => "req::lintRules",
+        ToolRequest::CallGraph => "req::callGraph",
+        ToolRequest::CostEstimate(_) => "req::costEstimate",
+        ToolRequest::TargetMetadata => "req::targetMetadata",
+        ToolRequest::ValidateEdit { .. } => "req::validateEdit",
+        ToolRequest::SemanticRename { .. } => "req::semanticRename",
+        ToolRequest::ProviderSemanticRename { .. } => "req::providerSemanticRename",
+        ToolRequest::ProviderValidateEdit { .. } => "req::providerValidateEdit",
     }
 }
 

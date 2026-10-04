@@ -35,6 +35,7 @@ fn service_response(service: &SemanticService<'_>, request: &Request) -> serde_j
 /// that declare a `performance` or `stability` tag, so correctness findings
 /// stay out of the risk frame. Lint rules remain owned by `LintRegistry` and
 /// are only exposed in full by `lint`/`findings` queries.
+#[hotpath::measure]
 fn semantic_facts(
     service: &SemanticService<'_>,
     loaded: &Loaded,
@@ -232,6 +233,7 @@ fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
     serde_json::Value::Array(risks)
 }
 
+#[hotpath::measure]
 fn inspect_result(service: &SemanticService<'_>) -> InspectResult {
     InspectResult {
         program: service_response(service, &Request::Program),
@@ -313,6 +315,7 @@ pub(crate) fn span_path(file: Option<u64>, loaded: &Loaded) -> String {
 }
 
 impl CompilerSession {
+    #[hotpath::measure]
     pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
         self.with_loaded(
             "analyze",
@@ -329,13 +332,16 @@ impl CompilerSession {
                 // source-parsed locations become authored paths, while
                 // unmapped provider output resolves to `<provider-artifact>`
                 // instead of a fabricated location (#445).
-                resolve_span_paths(&mut facts, &loaded);
+                hotpath::measure_block!("analyze::resolve_span_paths", {
+                    resolve_span_paths(&mut facts, &loaded)
+                });
                 AnalyzeResult { program, facts }
             },
         )
     }
 
     /// `inspect`: load and produce the structural/semantic program model.
+    #[hotpath::measure]
     pub fn inspect(&mut self) -> Envelope<InspectResult> {
         self.with_loaded(
             "inspect",
@@ -461,6 +467,7 @@ impl CompilerSession {
     /// Workshop semantic-completeness diagnostics remain in the envelope.
     /// Rule enable/disable and severity come from `self.config.lint`, the same
     /// configuration the CLI flags and programmatic consumers set.
+    #[hotpath::measure]
     pub fn lint(&mut self) -> Envelope<LintResult> {
         self.with_loaded(
             "lint",

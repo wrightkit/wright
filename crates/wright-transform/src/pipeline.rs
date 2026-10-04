@@ -21,44 +21,49 @@ pub struct PassResult {
 
 /// Run the semantics-preserving transform profile over the canonical public
 /// Workshop program model.
+#[hotpath::measure]
 pub fn run(
     program: &mut workshop_rs::Program,
     profile: Profile,
 ) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
-    program.validate()?;
+    hotpath::measure_block!("transform::validate_pre", program.validate())?;
     if profile == Profile::Off {
         return Ok(Vec::new());
     }
     let mut changed = 0;
     let mut first_iteration = true;
     let mut nodes_before = 0;
-    let nodes_after = loop {
-        let mut nodes = 0;
-        let iteration_changed = program
-            .rules
-            .iter_mut()
-            .map(|rule| {
-                rule.conditions
-                    .iter_mut()
-                    .map(|condition| usize::from(fold_value_once(&mut condition.value, &mut nodes)))
-                    .sum::<usize>()
-                    + rule
-                        .actions
+    let nodes_after = hotpath::measure_block!("transform::fold_to_fixpoint", {
+        loop {
+            let mut nodes = 0;
+            let iteration_changed = program
+                .rules
+                .iter_mut()
+                .map(|rule| {
+                    rule.conditions
                         .iter_mut()
-                        .map(|action| fold_action_once(action, &mut nodes))
+                        .map(|condition| {
+                            usize::from(fold_value_once(&mut condition.value, &mut nodes))
+                        })
                         .sum::<usize>()
-            })
-            .sum::<usize>();
-        if first_iteration {
-            nodes_before = nodes;
-            first_iteration = false;
+                        + rule
+                            .actions
+                            .iter_mut()
+                            .map(|action| fold_action_once(action, &mut nodes))
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
+            if first_iteration {
+                nodes_before = nodes;
+                first_iteration = false;
+            }
+            if iteration_changed == 0 {
+                break nodes;
+            }
+            changed += iteration_changed;
         }
-        if iteration_changed == 0 {
-            break nodes;
-        }
-        changed += iteration_changed;
-    };
-    program.validate()?;
+    });
+    hotpath::measure_block!("transform::validate_post", program.validate())?;
     Ok(vec![PassResult {
         stats: PassStats {
             pass: "fold-constants".to_string(),

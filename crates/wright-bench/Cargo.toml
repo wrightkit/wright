@@ -18,5 +18,10 @@ path = "src/main.rs"
 libc.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+hotpath = "0.28"
 workshop-rs.workspace = true
 wright-driver.workspace = true
+
+[features]
+hotpath = ["hotpath/hotpath", "wright-driver/hotpath"]
+hotpath-alloc = ["hotpath/hotpath-alloc", "wright-driver/hotpath-alloc"]

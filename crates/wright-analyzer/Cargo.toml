@@ -14,5 +14,10 @@ workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 yaml_serde.workspace = true
+hotpath = "0.28"
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
+
+[features]
+hotpath = ["hotpath/hotpath"]
+hotpath-alloc = ["hotpath/hotpath-alloc"]
