@@ -40,7 +40,7 @@ class WikiSkillTest(unittest.TestCase):
             records.append({"slug": slug, "categories": cats, "title": title, "updatedAt": "2026-07-10T18:15:21.022Z", "contentHash": "abc", "sha256": hashlib.sha256(raw).hexdigest()})
         identity_text = "\n".join(f"{d['slug']} {d['sha256']}" for d in sorted(records, key=lambda d: d["slug"]))
         (snap / "SNAPSHOT.json").write_text(json.dumps({"snapshotSha256": hashlib.sha256(identity_text.encode()).hexdigest(), "documents": records}))
-        self.snap, self.out = snap, self.tmp / "workshop-wiki"
+        self.snap, self.out = snap, self.tmp / "workshop-skill"
 
     def build(self, upstream: str = UPSTREAM) -> dict:
         return wiki_skill.build(self.snap, self.out, CATALOG, MANIFEST, upstream)
@@ -48,7 +48,7 @@ class WikiSkillTest(unittest.TestCase):
     def test_layout_and_progressive_disclosure(self):
         stats = self.build()
         skill = (self.out / "SKILL.md").read_text()
-        self.assertIn("name: workshop-wiki", skill)
+        self.assertIn("name: workshop-skill", skill)
         self.assertLess(len(skill.splitlines()), 40)
         self.assertEqual(stats["articles"], 5)
         categories = (self.out / "references/categories.md").read_text()

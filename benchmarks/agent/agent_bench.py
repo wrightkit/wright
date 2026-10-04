@@ -99,6 +99,12 @@ def baseline_path(path: str) -> str:
     return os.pathsep.join(kept)
 
 
+def references_of(args: argparse.Namespace) -> list[str]:
+    """The paired-comparison reference labels: `action="append"` collects them; a programmatic caller may pass a bare string."""
+    value = getattr(args, "reference", None) or bench_report.BASELINE
+    return value if isinstance(value, list) else [value]
+
+
 def normalize_cell(raw: dict) -> dict:
     return {"tool": raw["tool"], "level": raw.get("level") or "bin", "skills": sorted(raw.get("skills") or []), "knowledge": raw["knowledge"], "network": raw["network"]}
 
@@ -434,6 +440,7 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     entry = workspace / scenario["entry"]
     final_sha = hashlib.sha256(entry.read_bytes()).hexdigest() if entry.is_file() else None
     result["friction"] = bench_trace.friction(events)
+    result["correctionRounds"] = bench_trace.correction_rounds(events, snaps)
     result["expectations"] = bench_trace.detect_expectations(events, snaps, scenario, final_sha)
     result["snapshots"] = snapshot_validity(scenario, snaps, args.wright, out)
     first_valid = next((s["t"] for s in result["snapshots"]["series"] if s["valid"]), None)
@@ -718,7 +725,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     status = cmd_matrix(args)
     if not list(args.out.glob("*/*/*/result.json")):
         return status or 1
-    bench_report.main([args.out], args.wright, False, load_scenario, bench_report.BASELINE)
+    bench_report.main([args.out], args.wright, False, load_scenario, references_of(args))
     languages = ["workshop", "opy"]
     expected = {lang: [s for s in all_scenario_ids() if load_scenario(s)["language"] == lang and load_scenario(s).get("split") == "test"] for lang in languages}
     bench_score.main([args.out], languages, expected, None)
@@ -832,10 +839,11 @@ def main() -> int:
     ev.add_argument("--trials", type=int, default=3)
     ev.add_argument("--parallel", type=int, default=1, help="trials at a time; sequential by default so provider limits are not hit, and a run can continue across sessions")
     ev.add_argument("--seed", type=int, default=1)
+    ev.add_argument("--reference", action="append", help="condition label the report's paired comparison is made against; repeatable (default: none/none/off)")
     ev.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
     ev.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox: the agent can then read the scenario answer keys")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
-    skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-wiki skill from a wiki snapshot")
+    skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-skill from a wiki snapshot")
     skill.add_argument("--snapshot", type=Path, required=True)
     skill.add_argument("--out-dir", type=Path, required=True, help="new skill directory (not overwritten)")
     skill.add_argument("--catalog", type=Path, required=True, help="workshop-rs catalog.json, for Workshop names and ids")
@@ -848,7 +856,7 @@ def main() -> int:
     report.add_argument("dirs", nargs="+", type=Path)
     report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
     report.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
-    report.add_argument("--reference", default=bench_report.BASELINE, help="condition label the paired comparison is made against")
+    report.add_argument("--reference", action="append", help="condition label a paired comparison is made against; repeatable for lift against several references (default: none/none/off)")
     compare = sub.add_parser("compare", help="one table from the score.json of several evaluation runs, warning when they are not comparable")
     compare.add_argument("dirs", nargs="+", type=Path)
     score = sub.add_parser("score", help="compute the Wright Agent Score card of each language track from canonical test runs")
@@ -884,7 +892,7 @@ def main() -> int:
     if args.command == "wiki-skill":
         return cmd_wiki_skill(args)
     if args.command == "report":
-        return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s), args.reference)
+        return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s), references_of(args))
     if args.command == "leaderboard":
         return bench_leaderboard.main(args.dirs, args.page_out or args.dirs[0].parent / "leaderboard")
     if args.command == "compare":
