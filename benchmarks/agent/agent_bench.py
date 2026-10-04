@@ -243,6 +243,8 @@ def sync_credentials_back(pairs: list[tuple[str, str]], run_dir: Path, home: Pat
         if not isolated.is_file() or not real.is_file() or isolated.read_bytes() == real.read_bytes() or isolated.stat().st_mtime <= real.stat().st_mtime:
             continue
         temporary = real.with_name(f".{real.name}.bench-sync")
+        temporary.unlink(missing_ok=True)  # a leftover temp keeps its mode; start fresh at 0o600 so a credential never sits at the default umask
+        temporary.touch(mode=0o600)
         temporary.write_bytes(isolated.read_bytes())
         temporary.chmod(real.stat().st_mode & 0o777)
         os.replace(temporary, real)
@@ -622,6 +624,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         raise SystemExit("--deny-read does nothing without the file sandbox")
     args.credentials = CREDENTIALS.get(args.adapter, []) + OPTIONAL_CREDENTIALS.get(args.adapter, [])
     args.allow_read = [*(str(Path.home() / rel) for rel in ADAPTER_READS[args.adapter]), *args.allow_read]
+    if args.adapter == "claude-code" and args.file_sandbox:
+        print("note: the file sandbox lets claude-code read but not refresh its login; pass --no-file-sandbox when its token may rotate mid-run", flush=True)
     script = Path(__file__).parent / "adapters" / ADAPTERS[args.adapter]
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
     agent_id = model_slug({"adapter": args.adapter, "model": args.model, "effort": args.effort})
@@ -756,15 +760,14 @@ def main() -> int:
     su = sub.choices["suite"]
     su.add_argument("--suite-name", default="results", help="directory under --out holding every model's run and the results page")
     su.add_argument("--only", nargs="*", metavar="ADAPTER[:MODEL]", help="evaluate only these entries of the models list")
-    for shared in (su,):
-        shared.add_argument("--cells", choices=("score", "controls"), default="score")
-        shared.add_argument("--split", choices=("test", "train", "all"), default="test")
-        shared.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
-        shared.add_argument("--trials", type=int, default=3)
-        shared.add_argument("--parallel", type=int, default=1)
-        shared.add_argument("--seed", type=int, default=1)
-        shared.add_argument("--dry-run", action="store_true")
-        shared.add_argument("--no-file-sandbox", action="store_true")
+    su.add_argument("--cells", choices=("score", "controls"), default="score")
+    su.add_argument("--split", choices=("test", "train", "all"), default="test")
+    su.add_argument("--scenarios", nargs="*", choices=all_scenario_ids())
+    su.add_argument("--trials", type=int, default=3)
+    su.add_argument("--parallel", type=int, default=1)
+    su.add_argument("--seed", type=int, default=1)
+    su.add_argument("--dry-run", action="store_true")
+    su.add_argument("--no-file-sandbox", action="store_true")
     lb = sub.add_parser("leaderboard", help="write the publishable results page (Markdown, HTML, JSON) from evaluation run directories")
     lb.add_argument("dirs", nargs="+", type=Path)
     lb.add_argument("--page-out", type=Path, help="directory for the page; `leaderboard` inside the first directory's parent by default")
