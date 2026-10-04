@@ -27,6 +27,7 @@ import stat
 import bench_grade
 import bench_leaderboard
 import bench_report
+import bench_publish
 import bench_score
 import bench_trace
 import bench_wiki
@@ -917,6 +918,11 @@ def main() -> int:
     su.add_argument("--seed", type=int, default=1)
     su.add_argument("--dry-run", action="store_true")
     su.add_argument("--no-file-sandbox", action="store_true")
+    publish = sub.add_parser("publish", help="build allow-listed hosted results and upload to the release bucket")
+    publish.add_argument("dirs", nargs="+", type=Path, help="evaluation directories containing score.json and result.json files")
+    publish.add_argument("--out", type=Path, required=True, help="bundle output directory")
+    publish.add_argument("--dry-run", action="store_true", help="write bundles and list uploads without contacting R2")
+    publish.add_argument("--endpoint", help="release R2 S3 endpoint (defaults to R2_ENDPOINT)")
     lb = sub.add_parser("leaderboard", help="write the publishable results page (Markdown, HTML, JSON) from evaluation run directories")
     lb.add_argument("dirs", nargs="+", type=Path)
     lb.add_argument("--page-out", type=Path, help="directory for the page; `leaderboard` inside the first directory's parent by default")
@@ -982,6 +988,11 @@ def main() -> int:
         return cmd_wiki_skill(args)
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s, args.private_suite), references_of(args))
+    if args.command == "publish":
+        try:
+            return bench_publish.main(args.dirs, args.out, args.dry_run, args.endpoint)
+        except (ValueError, OSError) as error:
+            raise SystemExit(str(error)) from None
     if args.command == "leaderboard":
         return bench_leaderboard.main(args.dirs, args.page_out or args.dirs[0].parent / "leaderboard")
     if args.command == "compare":

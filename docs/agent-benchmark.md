@@ -1,6 +1,6 @@
 # Agent Benchmark
 
-- Contracts: `wright-agent-bench/v3` (a run result) and `wright-agent-score/v1` (a score card)
+- Contracts: `wright-agent-bench/v3` (a run result), `wright-agent-score/v1` (a score card), and `wright-agent-results/v1` (hosted results data)
 - Harness: [`benchmarks/agent/agent_bench.py`](../benchmarks/agent/agent_bench.py)
 - Run it from a shell: [agent-benchmark-howto.md](agent-benchmark-howto.md)
 - Design and requirements: [`SPEC-414`](specs/SPEC-414-agent-benchmark-comparison.md)
@@ -48,6 +48,21 @@ opaque scenario IDs and counts and omit task names, family names, check IDs,
 prompts, references, diagnostics, and artifact paths. Raw trial directories,
 transcripts, and grading logs remain private. Share the generated score/report
 artifacts, never raw private `result.json` or logs in public issues or CI output.
+
+`agent_bench.py publish DIRS --out DIR` builds the hosted results data the
+public results page reads: `bench/latest.json` plus one immutable
+`bench/runs/<run-id>.json` per run, uploaded under the release bucket's `bench/`
+prefix (`wright-agent-results/v1`; the committed schema is
+`schemas/wright-agent-results-v1.schema.json`). A bundle carries scores, 95%
+intervals, trials, scenario counts, exclusions, provisional reasons, the agent
+setup (program and version, model, effort, loaded skills), and the environment
+identity — never a transcript, a workspace, a host path, a private scenario's
+task or check, or wiki content. Runs made against a different Wright binary,
+skills, or suite are left out of `latest.json` and listed as excluded. A run
+object is immutable once published — republishing its id with different content
+is refused — and `latest.json` is the only mutable object. `--dry-run` writes
+the bundle locally and lists the uploads; a real publish goes through the
+release bucket's `R2_ENDPOINT` S3 endpoint.
 
 ## Allowed agent context
 

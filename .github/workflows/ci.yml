@@ -464,6 +464,7 @@ jobs:
           cargo build --locked -p wright-cli
           python3 benchmarks/agent/agent_bench.py setup-oracle
           python3 benchmarks/agent/agent_bench.py validate
+          python3 -m pip install -r benchmarks/agent/requirements-publish.txt
           python3 -m unittest discover -s benchmarks/agent
 
       - name: Upload benchmark report
