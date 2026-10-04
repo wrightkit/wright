@@ -7,11 +7,13 @@ use std::str::FromStr;
 
 use lsp_types::notification::{Notification, PublishDiagnostics};
 use lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    OneOf, Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams,
-    Range as LspRange, RenameParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Uri, WorkspaceEdit,
+    AnnotatedTextEdit, Diagnostic as LspDiagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentChanges, InitializeParams, InitializeResult, OneOf,
+    OptionalVersionedTextDocumentIdentifier, Position as LspPosition, PositionEncodingKind,
+    PublishDiagnosticsParams, Range as LspRange, RenameParams, ServerCapabilities, ServerInfo,
+    TextDocumentEdit, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextEdit, Uri, WorkspaceEdit,
 };
 use serde_json::Value;
 
@@ -60,6 +62,10 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
     let mut root = std::env::current_dir().map_err(|e| e.to_string())?;
     let mut service = LanguageService::with_config(root.clone(), config.clone());
     let mut ownership: PublicationOwnership = BTreeMap::new();
+    // Whether the client negotiated versioned workspace edits
+    // (`workspace.workspaceEdit.documentChanges`). Renames are only served
+    // when they can carry the validated document version.
+    let mut versioned_workspace_edits = false;
 
     loop {
         let message = read_message(&mut reader)?;
@@ -74,19 +80,30 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
 
         match method.as_str() {
             "initialize" => {
-                if let Some(params) = params {
-                    if let Ok(init) = serde_json::from_value::<InitializeParams>(params) {
-                        if let Some(resolved) = initialize_root(&init) {
-                            root = resolved;
-                            service = LanguageService::with_config(root.clone(), config.clone());
-                            ownership.clear();
-                        }
+                let init = params
+                    .and_then(|params| serde_json::from_value::<InitializeParams>(params).ok());
+                versioned_workspace_edits = init
+                    .as_ref()
+                    .and_then(|init| {
+                        init.capabilities
+                            .workspace
+                            .as_ref()?
+                            .workspace_edit
+                            .as_ref()?
+                            .document_changes
+                    })
+                    .unwrap_or(false);
+                if let Some(init) = init {
+                    if let Some(resolved) = initialize_root(&init) {
+                        root = resolved;
+                        service = LanguageService::with_config(root.clone(), config.clone());
+                        ownership.clear();
                     }
                 }
                 write_response(
                     &mut writer,
                     id,
-                    serde_json::to_value(initialize_result()).unwrap(),
+                    serde_json::to_value(initialize_result(versioned_workspace_edits)).unwrap(),
                 )?;
             }
             "initialized" => {}
@@ -151,6 +168,22 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                 if id.is_none() {
                     continue; // a notification gets no response and no provider call
                 }
+                if !versioned_workspace_edits {
+                    // `WorkspaceEdit.changes` cannot carry the document
+                    // version the provider validated; serving it would let a
+                    // client apply the edit to a buffer that moved while the
+                    // rename was pending without ever detecting it.
+                    write_error(
+                        &mut writer,
+                        id,
+                        -32803,
+                        "rename requires versioned workspace edits \
+                         (workspace.workspaceEdit.documentChanges is not negotiated); \
+                         the request is refused rather than risk a stale buffer",
+                        "rename-unversioned-workspace-edit",
+                    )?;
+                    continue;
+                }
                 let outcome = service.rename(
                     params.text_document_position.text_document.uri.as_str(),
                     Position {
@@ -161,23 +194,38 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                 );
                 match outcome {
                     RenameOutcome::Applied(edits) => {
-                        // `WorkspaceEdit.changes` keys on `Uri`, whose cached
-                        // parse trips mutable-key-type; the key is hashed by
-                        // its string form only. A dropped edit would apply a
-                        // partial rename, so an unparseable URI is an error.
-                        #[allow(clippy::mutable_key_type)]
-                        let mut changes: std::collections::HashMap<
-                            Uri,
-                            Vec<TextEdit>,
-                        > = std::collections::HashMap::new();
-                        let mut malformed = None;
+                        // `documentChanges` carries the validated document
+                        // version per file so the client can reject the edit
+                        // if its buffer moved while the rename was pending.
+                        // One `TextDocumentEdit` per document; a dropped
+                        // edit would apply a partial rename, so an
+                        // unparseable URI is an error.
+                        let mut grouped: BTreeMap<
+                            String,
+                            (i32, Vec<OneOf<TextEdit, AnnotatedTextEdit>>),
+                        > = BTreeMap::new();
                         for edit in edits {
-                            match Uri::from_str(&edit.uri) {
-                                Ok(uri) => changes.entry(uri).or_default().push(TextEdit {
+                            let version = edit.version;
+                            grouped
+                                .entry(edit.uri)
+                                .or_insert_with(|| (version, Vec::new()))
+                                .1
+                                .push(OneOf::Left(TextEdit {
                                     range: convert_range(edit.range),
                                     new_text: edit.new_text,
+                                }));
+                        }
+                        let mut document_edits = Vec::with_capacity(grouped.len());
+                        let mut malformed = None;
+                        for (uri, (version, text_edits)) in grouped {
+                            match Uri::from_str(&uri) {
+                                Ok(uri) => document_edits.push(TextDocumentEdit {
+                                    text_document: OptionalVersionedTextDocumentIdentifier::new(
+                                        uri, version,
+                                    ),
+                                    edits: text_edits,
                                 }),
-                                Err(_) => malformed = Some(edit.uri),
+                                Err(_) => malformed = Some(uri),
                             }
                         }
                         if let Some(uri) = malformed {
@@ -195,7 +243,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                                 &mut writer,
                                 id,
                                 serde_json::to_value(WorkspaceEdit {
-                                    changes: Some(changes),
+                                    document_changes: Some(DocumentChanges::Edits(document_edits)),
                                     ..Default::default()
                                 })
                                 .unwrap(),
@@ -217,7 +265,7 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
-fn initialize_result() -> InitializeResult {
+fn initialize_result(versioned_workspace_edits: bool) -> InitializeResult {
     InitializeResult {
         capabilities: ServerCapabilities {
             position_encoding: Some(PositionEncodingKind::UTF16),
@@ -228,7 +276,10 @@ fn initialize_result() -> InitializeResult {
                     ..Default::default()
                 },
             )),
-            rename_provider: Some(OneOf::Left(true)),
+            // Applied renames are returned as versioned `documentChanges`;
+            // a client that cannot receive the validated document version
+            // cannot be handed an edit safely, so rename stays unadvertised.
+            rename_provider: versioned_workspace_edits.then_some(OneOf::Left(true)),
             ..Default::default()
         },
         server_info: Some(ServerInfo {

@@ -20,12 +20,15 @@ pub struct SourceDiagnostic {
 }
 
 /// One validated text replacement produced by a provider-owned edit, in the
-/// document store's UTF-16 coordinates.
+/// document store's UTF-16 coordinates. `version` is the document version
+/// the provider computed and Wright re-validated the edit against; the
+/// range is only meaningful to a buffer at that version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceTextEdit {
     pub uri: String,
     pub range: Range,
     pub new_text: String,
+    pub version: i32,
 }
 
 /// The outcome of a provider-owned source mutation (#156): validated edits
@@ -98,10 +101,11 @@ impl LanguageService {
     /// and agent surfaces: the provider computes the edits for the open
     /// document set, Wright verifies document versions, applies source
     /// preconditions, asks the provider to validate the transaction, and
-    /// checks the edited project before returning anything. A refusal —
-    /// unopen or unsupported document, unconfigured provider, provider
-    /// refusal, validation failure — is structured and final; no textual
-    /// fallback exists here.
+    /// checks the edited project before returning anything. Every applied
+    /// edit carries the validated document version so the caller can reject
+    /// it once its buffer has moved. A refusal — unopen or unsupported
+    /// document, unconfigured provider, provider refusal, validation
+    /// failure — is structured and final; no textual fallback exists here.
     pub fn rename(&mut self, uri: &str, position: Position, new_name: &str) -> RenameOutcome {
         if self.store.document(uri).is_none() {
             return RenameOutcome::Refused {
@@ -118,9 +122,12 @@ impl LanguageService {
             };
         };
 
-        // The document set holds this language's open documents: foreign
-        // source documents cannot produce rename edits and an unrelated
-        // diagnostic on one must not block this rename.
+        // The document set stays language-wide: only the provider can
+        // compute project membership, and `lpp/rename` needs every open
+        // document as a potential include or rename site. `semantic_rename`
+        // scopes the post-edit check verdict to the documents the provider
+        // actually edited (plus the position document), so an unrelated
+        // broken open document cannot block a valid rename.
         let mut documents = wright_lpp::DocumentSet::new();
         let mut sources = BTreeMap::new();
         for doc_uri in self.store.uris() {
@@ -215,6 +222,10 @@ impl LanguageService {
                 uri: edit.source,
                 range: edit_range(&doc.text, &edit.range),
                 new_text: edit.new_text,
+                // `semantic_rename` verified the provider's edits against
+                // this exact version; the caller uses it to reject stale
+                // edits.
+                version: doc.version,
             });
         }
         RenameOutcome::Applied(applied)
@@ -360,6 +371,50 @@ mod tests {
         ));
         // The explicit executable fails validation before any spawn.
         assert_ne!(code, "rename-refused", "a structured code must surface");
+    }
+
+    /// `WRIGHT_OPY_PROVIDER` points at an `opy-provider` executable; without
+    /// it the provider-backed rename cannot run and the test self-skips.
+    #[test]
+    fn an_unrelated_broken_open_document_does_not_block_a_project_rename() {
+        let Ok(provider) = std::env::var("WRIGHT_OPY_PROVIDER") else {
+            eprintln!("SKIPPED: WRIGHT_OPY_PROVIDER is not set");
+            return;
+        };
+        let config = SessionConfig {
+            opy_provider: wright_driver::OpyProviderConfig::with_executable(PathBuf::from(
+                provider,
+            )),
+            ..SessionConfig::default()
+        };
+        let mut service = LanguageService::with_config(PathBuf::from("/project"), config);
+        let uri = open(&mut service, "main.opy", "globalvar score = 0\n");
+        // A broken OPY document in the same language but outside the
+        // position document's project: its error must not block the rename.
+        open(
+            &mut service,
+            "unrelated/broken.opy",
+            "#!include \"missing.opy\"\n",
+        );
+        match service.rename(
+            &uri,
+            Position {
+                line: 0,
+                character: 12,
+            },
+            "vault",
+        ) {
+            RenameOutcome::Applied(edits) => {
+                assert!(!edits.is_empty());
+                assert!(
+                    edits.iter().all(|edit| edit.version == 1),
+                    "every applied edit carries the validated document version"
+                );
+            }
+            RenameOutcome::Refused { code, message } => {
+                panic!("expected applied edits; refused ({code}): {message}")
+            }
+        }
     }
 
     #[test]

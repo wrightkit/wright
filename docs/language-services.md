@@ -30,12 +30,15 @@ analyzer contracts.
 - `textDocument/publishDiagnostics`: versioned, grouped by source identity,
   with didClose cleanup.
 
-The `initialize` result advertises `textDocumentSync`, the UTF-16 position
-encoding, and `renameProvider`. It contains no provider entry for hover,
-definition, references, completion, or semantic tokens: those capabilities
-have no backing implementation and are never advertised. A request for an
-unadvertised or unknown method receives a `result: null` response and the
-server keeps running.
+The `initialize` result advertises `textDocumentSync` and the UTF-16
+position encoding unconditionally, plus `renameProvider` when the client
+negotiates `workspace.workspaceEdit.documentChanges` — applied renames are
+returned as versioned `TextDocumentEdit`s, and a client that cannot receive
+the validated document version cannot be handed an edit safely. The result
+contains no provider entry for hover, definition, references, completion,
+or semantic tokens: those capabilities have no backing implementation and
+are never advertised. A request for an unadvertised or unknown method
+receives a `result: null` response and the server keeps running.
 
 Diagnostics: opening a source-language document (`.opy`, `.del`, `.ostw`)
 publishes an explicit `source-provider-unavailable` error while no provider
@@ -44,12 +47,23 @@ document without a source language) publishes no diagnostics.
 
 `textDocument/rename` on a source-language document routes through the same
 provider-owned mutation path as the CLI and agent surfaces (#156): the
-provider computes edits over the open document set, Wright verifies document
-versions and source preconditions, asks the provider to validate the
-transaction, and rechecks the edited project before returning a
-`WorkspaceEdit`. Unsupported documents (`rename-unsupported-document`),
-unopen documents (`rename-unknown-document`), unconfigured providers, and
-provider or validation refusals answer with a `RequestFailed` error whose
+provider computes edits over the open document set (only the provider can
+compute project membership, so the set stays language-wide), Wright verifies
+document versions and source preconditions, asks the provider to validate
+the transaction, and rechecks the edited project — with the check verdict
+scoped to the documents the provider actually edited plus the position
+document, so an unrelated open document cannot block a valid rename — before
+returning anything. A successful rename answers with versioned
+`WorkspaceEdit.documentChanges`: each `TextDocumentEdit` carries the
+document version the provider computed and Wright re-validated, so the
+client can reject the edit when its buffer has moved. Clients that did not
+negotiate `workspace.workspaceEdit.documentChanges` get no `renameProvider`
+advertisement, and their rename requests are refused
+(`rename-unversioned-workspace-edit`) rather than served an unversioned
+`changes` map a stale buffer could silently absorb. Unsupported documents
+(`rename-unsupported-document`), unopen documents
+(`rename-unknown-document`), unconfigured providers, and provider or
+validation refusals answer with a `RequestFailed` error whose
 `error.data.code` carries the structured refusal code — there is no textual
 search/replace fallback. `--opy-provider <PATH>` points the session at an
 explicit OPY provider executable; by default the resolver locates or
@@ -76,8 +90,9 @@ through Wright-side reimplementation or static fallbacks.
   `wright_language::document` (`uri_to_path`, `path_to_uri`) using the
   standard URL parser, covering percent-encoding, spaces, Unicode filenames,
   and platform drive paths.
-* Every result carries `document_version`; stale results are detectable and
-  replaceable.
+* Every result carries the document version it was validated against
+  (`document_version`, `SourceTextEdit.version`); stale results are
+  detectable and replaceable.
 
 ## Incremental behavior
 
