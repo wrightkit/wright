@@ -295,12 +295,6 @@ jobs:
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
-    env:
-      # The pinned provider version and the store it installs into, shared
-      # by the install step, the provider-backed test step, and the compile
-      # smoke check.
-      OPY_PROVIDER_VERSION: "0.1.38"
-      WRIGHT_PROVIDER_DATA_DIR: ${{ github.workspace }}/.wright-provider-data
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -340,20 +334,33 @@ jobs:
           && cargo test --locked -p wright-consumer --test consumer
 
       - name: Install pinned OPY provider
-        run: target/debug/wright update provider opy --version "$OPY_PROVIDER_VERSION"
-
-      # The provider-backed language-service/LSP rename regressions
-      # self-skip without a real provider; point them at the pinned install
-      # so a stale-edit or project-scope regression fails CI.
-      - name: Run provider-backed language tests
-        run: >-
-          WRIGHT_OPY_PROVIDER="$WRIGHT_PROVIDER_DATA_DIR/providers/opy/$OPY_PROVIDER_VERSION/x86_64-unknown-linux-gnu/opy-provider"
-          cargo test --locked -p wright-language -p wright-lsp
+        run: target/debug/wright update provider opy --version 0.1.38
 
       - name: Compile OPY via provider
         run: >-
           target/debug/wright compile tests/fixtures/opy/basic-rule.opy
           --profile compat
+
+      # The provider-backed language-service/LSP rename regressions need
+      # `lpp/rename`, which the released distribution (0.1.38) predates —
+      # so they build the pinned opy-rs commit the tests were validated
+      # against instead of self-skipping. The pin advances through normal
+      # `deps:` bumps as the provider releases.
+      - name: Checkout opy-rs
+        uses: actions/checkout@v7
+        with:
+          repository: wrightkit/opy-rs
+          ref: 4e2be75af207b2d792b4558b83af4ed83918bcf8
+          path: opy-rs
+
+      - name: Build OPY provider
+        run: cargo build --locked -p opy-provider
+        working-directory: opy-rs
+
+      - name: Run provider-backed language tests
+        env:
+          WRIGHT_OPY_PROVIDER: ${{ github.workspace }}/opy-rs/target/debug/opy-provider
+        run: cargo test --locked -p wright-language -p wright-lsp
 
   # -------------------------------------------------------------------------
   # [3] LPP INTEGRATION  (Wright's Language Provider Protocol client contract)
