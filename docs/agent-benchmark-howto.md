@@ -72,6 +72,22 @@ python3 benchmarks/agent/agent_bench.py leaderboard ~/.local/share/wright-agent-
 
 Runs made against a different Wright binary, skills, or task suite are listed as not comparable instead of being ranked.
 
+## Publish the hosted results
+
+Maintainers publish the data the public results page reads (see
+[agent-benchmark.md](agent-benchmark.md#held-out-suite-and-publishing) for what
+the bundle contains):
+
+```sh
+python3 -m pip install -r benchmarks/agent/requirements-publish.txt
+python3 benchmarks/agent/agent_bench.py publish ~/.local/share/wright-agent-bench/runs/{run-a,run-b} --out target/publish --dry-run
+```
+
+`--dry-run` writes the bundle and lists the uploads without contacting R2.
+Without it, the command uploads to the release bucket under `bench/` through
+`R2_ENDPOINT`: `bench/latest.json` plus one immutable `bench/runs/<id>.json`
+per run. Republishing a run id with different content is refused.
+
 ## The agent programs
 
 | Program | `adapter` | `model` | `effort` | State |

@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wrightkit.dev/schemas/wright-agent-results-v1.schema.json",
+  "title": "Wright hosted agent results v1",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "wright-agent-results/v1"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "minItems": 1
+    },
+    "excluded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/runId"
+          },
+          "reason": {
+            "const": "different environment"
+          }
+        },
+        "required": [
+          "id",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contract",
+    "entries",
+    "excluded"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "text": {
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^(?!.*(?:/Users/|/home/|/root/|[A-Za-z]:[\\\\/]|~[\\\\/]|(?:^|[\\s(:])/))[A-Za-z0-9][A-Za-z0-9 ._+():@/-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^run-[a-f0-9]{24}$"
+    },
+    "skill": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "enum": [
+            "wright-skill",
+            "workshop-skill",
+            "opy-skill",
+            "workshop-format-skill"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "name",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "suite": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/text"
+        },
+        "hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "publicHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "privateHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "enum": [
+            "official",
+            "public sample"
+          ]
+        },
+        "scenarios": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "version",
+        "hash",
+        "publicHash",
+        "privateHash",
+        "mode",
+        "scenarios"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "official"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "privateHash": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "privateHash": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "wright": {
+          "$ref": "#/$defs/text"
+        },
+        "wrightSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/skill"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "suite": {
+          "$ref": "#/$defs/suite"
+        },
+        "protocol": {
+          "type": "object",
+          "properties": {
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "infraRetries": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "timeoutSeconds",
+            "infraRetries"
+          ],
+          "additionalProperties": false
+        },
+        "fileReadEnforcement": {
+          "enum": [
+            "allow-list",
+            "unrestricted"
+          ]
+        },
+        "fileWriteEnforcement": {
+          "enum": [
+            "trial-directory-only",
+            "unrestricted"
+          ]
+        },
+        "networkEnforcement": {
+          "enum": [
+            "declared-only",
+            "canary-checked"
+          ]
+        }
+      },
+      "required": [
+        "wright",
+        "wrightSha256",
+        "skills",
+        "suite",
+        "protocol",
+        "fileReadEnforcement",
+        "fileWriteEnforcement",
+        "networkEnforcement"
+      ],
+      "additionalProperties": false
+    },
+    "track": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "enum": [
+            "workshop",
+            "opy"
+          ]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "ci95": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "ciMethod": {
+          "const": "two-stage percentile bootstrap (scenarios, then trials within a scenario), 10000 draws, seed 467"
+        },
+        "trialsPerScenario": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scenarios": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "validRuns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "provisional": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "missing held-out scenarios",
+              "unequal valid trials per scenario",
+              "too few held-out scenarios"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "enum": [
+                  "agent-error",
+                  "invalid",
+                  "provider-interrupted",
+                  "missing-status"
+                ]
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "status",
+              "count"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "language",
+        "score",
+        "ci95",
+        "ciMethod",
+        "trialsPerScenario",
+        "scenarios",
+        "validRuns",
+        "provisional",
+        "exclusions"
+      ],
+      "additionalProperties": false
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/runId"
+        },
+        "agent": {
+          "type": "object",
+          "properties": {
+            "program": {
+              "$ref": "#/$defs/text"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effort": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/skill"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "program",
+            "version",
+            "model",
+            "effort",
+            "skills"
+          ],
+          "additionalProperties": false
+        },
+        "environment": {
+          "$ref": "#/$defs/environment"
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          },
+          "minItems": 1,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "id",
+        "agent",
+        "environment",
+        "tracks"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
