@@ -1,8 +1,10 @@
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import unittest
@@ -324,6 +326,22 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(seen, {"unlisted": "blocked", "granted": "read", "grader": "blocked", "shim": "read", "answer": "blocked", "oracle": "blocked",
                                 "profile": "blocked", "profile-renamed": "blocked", "profile-linked": "blocked"})  # wright cells must not read the grading authority, and no cell reads its own sandbox profile
         self.assertEqual(result["fileReadEnforcement"]["mode"], "allow-list")
+
+    @unittest.skipUnless(sys.platform == "darwin", "file flags are the macOS enforcement")
+    def test_a_locked_profile_left_by_a_killed_run_does_not_block_the_next_trial(self):
+        out = self.out / f"{SCENARIO}-wright"
+        locked = {"profile": out / "agent.sb", "agent-file": out / "workspace" / "agent-locked.txt"}
+        for name, path in locked.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"left by a run killed before cleanup ({name})")
+            os.chflags(path, stat.UF_IMMUTABLE)  # the harness locks agent.sb; the agent can lock anything inside its run dir
+        try:
+            result = self.trial("true")
+            self.assertNotIn("invalid", result)
+        finally:
+            for path in locked.values():  # if drop left them, free the test's own cleanup
+                with contextlib.suppress(OSError):
+                    os.chflags(path, 0)
 
     def test_the_tool_shim_runs_without_the_grader(self):
         shim = (agent_bench.HERE / "bench_trace.py").read_text()

@@ -343,6 +343,26 @@ def run_agent(args: argparse.Namespace, env: dict, workspace: Path, prompt: str)
                 os.chflags(profile, 0)
 
 
+def drop(path: Path) -> None:
+    """Best-effort removal of a path inside the agent-writable run tree. The agent can chflags or chmod its own files —
+    and a run killed mid-trial can leave agent.sb locked — so a plain rmtree/unlink can hit EPERM; restore writability
+    at the failing node and retry rather than leave the run directory permanently unreusable."""
+    def unlock_and_retry(func, node, _exc):
+        with contextlib.suppress(OSError, AttributeError):  # no chflags outside the BSDs
+            os.chflags(node, 0)
+        with contextlib.suppress(OSError):
+            os.chmod(node, 0o700)
+        with contextlib.suppress(OSError):
+            func(node)
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, onexc=unlock_and_retry)
+    else:
+        with contextlib.suppress(OSError, AttributeError):
+            os.chflags(path, 0)
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+
 def context_report(out: Path, skill_names: list[str]) -> dict:
     path = out / "context.json"
     if not path.is_file():
@@ -359,18 +379,17 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     check_cell(cell, args)
     if not applicable(scenario, cell):
         raise SystemExit(f"condition {cell_label(cell)} does not apply to the {scenario['language']} scenario {scenario['id']}")
-    shutil.rmtree(out, ignore_errors=True)
+    drop(out)
     out.mkdir(parents=True)
     workspace = out / "workspace"
     prompt = (scenario["dir"] / "prompt.md").read_text()  # the exact pinned prompt: the harness adds no text
     infra_retries = 0
     while True:
-        shutil.rmtree(workspace, ignore_errors=True)
+        drop(workspace)
         for stale in ("home", "bin", "real", "tool-trace.jsonl", "tool-calls", "usage.jsonl", "transcript.jsonl", "context.json", "agent-info.json", "snapshots", "tmp",
                       "devin-export.json",  # devin only writes this on success; a retry that produces none would parse the previous attempt's export
                       *(child.name for child in out.iterdir() if child.name.endswith(("-home", "-user")))):  # adapters keep their isolated homes here; a retry starts from none
-            target = out / stale
-            shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink(missing_ok=True)
+            drop(out / stale)
         materialize(scenario, workspace)
         if cell["knowledge"] == "wiki":
             shutil.copytree(Path(args.wiki_dir), workspace / "wiki")  # a real copy: tools that skip symlinks (rg) must see it
