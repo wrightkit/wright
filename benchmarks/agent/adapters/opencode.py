@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import as_dict, cli_version, feed_stdin, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, drain, feed_stdin, INFRA_EXIT, TRANSIENT
 WEB_PERMISSIONS = {"webfetch": "deny", "websearch": "deny"}
 
 
@@ -61,6 +61,7 @@ def main() -> int:
     if env.get("BENCH_THINKING"):
         cmd += ["--variant", env["BENCH_THINKING"]]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=child_env)
+    stderr_text = drain(proc.stderr)
     feed_stdin(proc, sys.stdin.read())
     final, error, tools = "", "", set()
     with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage
@@ -81,7 +82,7 @@ def main() -> int:
                 tools.add(part["tool"])
             elif etype == "error":
                 error = json.dumps(event.get("error"))
-    stderr = proc.stderr.read()
+    stderr = stderr_text()
     code = proc.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
     Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "opencode", "version": version, "model": model, "effort": env.get("BENCH_THINKING"), "tools": sorted(tools), "toolsNote": "tools the agent used; the CLI does not list its tools", "denied": [] if web else sorted(WEB_PERMISSIONS)}, indent=2))

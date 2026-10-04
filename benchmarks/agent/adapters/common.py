@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from collections.abc import Callable
 
 INFRA_EXIT = 75  # EX_TEMPFAIL: a provider or infrastructure failure, not an agent failure; the harness retries the trial later
 # Error text that means the provider, not the agent, failed. Shared so the classification cannot drift between adapters.
@@ -25,6 +26,20 @@ def feed_stdin(proc: subprocess.Popen, text: str) -> None:
         except (BrokenPipeError, ValueError):  # the child exited before taking the whole prompt
             pass
     threading.Thread(target=feed, daemon=True).start()
+
+
+def drain(stream) -> Callable[[], str]:
+    """Read a child pipe to EOF on a thread and return a callable giving its text — a pipe read only after stdout closes
+    leaves the child blocked on a full buffer. Call the result after proc.wait()."""
+    lines: list[str] = []
+    thread = threading.Thread(target=lambda: lines.extend(stream), daemon=True)
+    thread.start()
+
+    def text() -> str:
+        thread.join()
+        return "".join(lines)
+
+    return text
 
 
 def cli_version(binary: str, env: dict | None = None) -> str | None:

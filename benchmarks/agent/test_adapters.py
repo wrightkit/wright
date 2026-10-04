@@ -233,5 +233,19 @@ class DirectAdapterTest(unittest.TestCase):
                 self.assertEqual(code, 1)
 
 
+class PipeTest(unittest.TestCase):
+    def test_drain_keeps_a_chatty_stderr_from_deadlocking_the_stdout_read(self):
+        # a child that floods stderr past the pipe buffer blocks unless someone drains it concurrently with stdout
+        import subprocess
+        import common
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stderr.write('x' * 262144); sys.stderr.flush(); print('ok')"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stderr_text = common.drain(child.stderr)
+        self.assertEqual(child.stdout.read(), "ok\n")
+        child.wait()
+        self.assertEqual(stderr_text(), "x" * 262144)
+
+
 if __name__ == "__main__":
     unittest.main()
