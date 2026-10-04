@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import as_dict, cli_version, feed_stdin, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, drain, feed_stdin, INFRA_EXIT, TRANSIENT
 SCALE = {"K": 1_000, "M": 1_000_000}
 
 
@@ -84,6 +84,7 @@ def main() -> int:
     limit = context_limit(pi, model, child_env, extensions)
     Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "pi", "version": cli_version(pi), "model": model, "effort": env.get("BENCH_THINKING"), "tools": ["read", "bash", "edit", "write"], "extensions": [e for e in extensions if e]}, indent=2))
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=child_env)
+    stderr_text = drain(proc.stderr)
     feed_stdin(proc, prompt)
     loaded: list[str] = []
     final, error = "", ""
@@ -108,7 +109,7 @@ def main() -> int:
                     error = str(message.get("errorMessage") or "error")  # only the structured error classifies; message text is the agent's own
                 else:
                     error = ""
-    stderr = proc.stderr.read()
+    stderr = stderr_text()
     code = proc.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
     sys.stdout.write(final)

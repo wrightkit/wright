@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import as_dict, cli_version, feed_stdin, INFRA_EXIT, TRANSIENT
+from common import as_dict, cli_version, drain, feed_stdin, INFRA_EXIT, TRANSIENT
 
 TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 WEB_TOOLS = ["WebFetch", "WebSearch"]
@@ -57,6 +57,7 @@ def main() -> int:
         env={**{k: v for k, v in env.items() if k != "BENCH_HOST_PATH"}, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"},
     )
     feed_stdin(proc, prompt)
+    stderr_text = drain(proc.stderr)
     final, errored = "", False
     with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:  # line-buffered: a killed run keeps its usage
         for line in proc.stdout:
@@ -81,7 +82,7 @@ def main() -> int:
             if event.get("type") == "result":
                 result_value = event.get("result")
                 final, errored = (result_value if isinstance(result_value, str) else final), bool(event.get("is_error"))
-    stderr = proc.stderr.read()
+    stderr = stderr_text()
     code = proc.wait()
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
     Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({"agent": "claude-code", "version": cli_version(claude), "model": init.get("model") or env.get("BENCH_MODEL", "sonnet"), "tools": init.get("tools") or TOOLS + (WEB_TOOLS if web else []), "toolsSource": "init" if init.get("tools") else "requested", "mcpServers": init.get("mcp_servers")}, indent=2))
