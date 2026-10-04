@@ -22,8 +22,9 @@ agent actually had (`Agent setup`).
 - The scenario workspace: the seed project only.
 - The scenario prompt, delivered on the agent's stdin. It states the
   requirement in user terms and never names Wright commands or Workshop APIs.
-- In the `wright` tool condition, the released `wright` CLI and `wright serve`
-  session on `PATH`; in the `overpy` tool condition, the `overpy` compiler.
+- In the `wright` tool condition, the released `wright` CLI on `PATH` (level
+  `bin`) or its MCP tools natively (level `mcp`), always through the tracing
+  shim; in the `overpy` tool condition, the `overpy` compiler.
 
 Not allowed in the primary condition: a Workshop/OverPy/OSTW system prompt or
 skill pack, a generated API reference, or task-specific hints. The agent,
@@ -32,12 +33,14 @@ on a vendor. Other conditions below are experiments and are labeled as such.
 
 ## Conditions
 
-A cell is `tool[+skill...]/knowledge/network`, for example `wright+wright-skill/none/off`;
-the baseline is `none/none/off`. The task and prompt are identical in every cell.
+A cell is `tool[-level][+skill...]/knowledge/network`, for example
+`wright+wright-skill/none/off` or `wright-mcp/none/off`; the baseline is
+`none/none/off`. The task and prompt are identical in every cell.
 
 | Factor | Levels |
 | --- | --- |
-| `tool` | `none`: neither tool is reachable. `wright`: `wright` on `PATH` through a tracing shim. `overpy`: the pinned `overpy` compiler through a tracing shim (OverPy scenarios only). A tool that is not part of the condition is hidden from `PATH`, and a canary fails the run if it is reachable. |
+| `tool` | `none`: neither tool is reachable. `wright`: Wright through a tracing shim; how it reaches the agent is set by `level`. `overpy`: the pinned `overpy` compiler through a tracing shim (OverPy scenarios only). A tool that is not part of the condition is hidden from `PATH`, and a canary fails the run if it is reachable. |
+| `level` | `bin` (default): the `wright` CLI on `PATH` through the shim, so the agent uses Wright as shell + JSON. `mcp` (`wright` only): the `wright` CLI stays off `PATH` and the harness gives the adapter `BENCH_MCP_CMD`, the command that starts `wright serve --transport mcp` on the workspace through the same tracing shim; the adapter registers the server and exposes its tools natively. A run at level `mcp` where the adapter never starts the server is `invalid`. |
 | `skills` | Any of `wright-skill` (how to use Wright), `workshop-skill` (the progressive wiki knowledge skill, see below), `opy-skill` (how to write OverPy and use `overpy`; OverPy scenarios only), and `workshop-format-skill` (the raw Workshop source format; Workshop scenarios only, a local benchmark control). Each is given by `--skill-dir NAME=DIR` and installed through the agent's skill mechanism. |
 | `knowledge` | `none`; `wiki`: a pinned snapshot given by `--wiki-dir`, copied into the workspace as `./wiki` (a real copy, because tools such as `rg` do not follow symlinks; never counted as an edit); `web`: the adapter enables its web tools. |
 | `network` | `off` or `on`; `web` requires `on`. |
@@ -90,7 +93,10 @@ elsewhere on disk, so run `none` in a clean environment when that matters.
 
 `--agent-cmd` is a shell command run in the workspace with the prompt on stdin.
 The harness describes the cell through environment variables, and the adapter
-enforces it: `BENCH_TOOL`, `BENCH_SKILLS` (names), `BENCH_SKILL_DIRS` (one
+enforces it: `BENCH_TOOL`, `BENCH_TOOL_LEVEL` (`bin`, or `mcp` when the cell is a
+`wright` MCP cell), `BENCH_MCP_CMD` (level `mcp` only: the command that starts the
+traced `wright serve --transport mcp` server for the adapter to register),
+`BENCH_SKILLS` (names), `BENCH_SKILL_DIRS` (one
 directory per installed skill, separated by the path separator), `BENCH_KNOWLEDGE`,
 `BENCH_NETWORK`, `BENCH_HOST_PATH` (the unscrubbed
 `PATH`, for locating the agent binary itself; do not pass it to the agent), and
@@ -129,7 +135,7 @@ keep host configuration out of the run, and it reports what loaded through
 | [`agy.py`](../benchmarks/agent/adapters/agy.py) | Antigravity CLI | `BENCH_MODEL` (for example `gemini-3.8-flash-high`) and `BENCH_THINKING`. Isolated `HOME` with only authentication files, workspace skills under `.agents/skills`, MCP/browser access denied and URL reads denied outside `web`. Observed built-in web tools under network `off` stop and invalidate the trial; URL permissions do not cover search. Streaming step usage is recorded. The CLI does not export observed loaded skills or context limits; these remain unreported. |
 | [`opencode.py`](../benchmarks/agent/adapters/opencode.py) | opencode | `BENCH_MODEL=provider/model` (as `opencode models` lists it) and `BENCH_THINKING` as the model variant. Isolated `HOME` and XDG directories holding only the credentials; `--pure`; Claude Code instructions and the real home's external skills are disabled by environment variable because opencode reads them regardless of `HOME`; skills installed under `.opencode/skills`; web tools denied outside `web`. Per-step usage comes from `step_finish` events; the tool list is what the agent used. |
 | [`grok.py`](../benchmarks/agent/adapters/grok.py) | Grok CLI | `BENCH_MODEL` (a `grok models` id) and `BENCH_THINKING` as reasoning effort. Isolated `GROK_HOME` holding only the login and the skills; prompt sent `--verbatim`; subagents disabled; web search disabled outside `web`. Tools, skills, and the context window come from the stream's init and result lines. |
-| [`direct.py`](../benchmarks/agent/adapters/direct.py) | none (built-in loop) | See below. |
+| [`direct.py`](../benchmarks/agent/adapters/direct.py) | none (built-in loop) | See below. Under level `mcp` it registers `BENCH_MCP_CMD` and exposes the server's tools to the model; only `direct` supports level `mcp` today. |
 
 The pi adapter also uses an isolated `HOME` containing only its authentication
 files. Explicit provider extensions remain referenced by path, not copied with
@@ -272,16 +278,18 @@ with the workspace, `agent.log`, snapshots, and the Wright trace beside it.
 | `authorities`, `disagreement` | Validity per authority and any Wright/oracle disagreement |
 | `diagnostics`, `lintFindings`, `unsafeEdits` | Remaining `wright check` diagnostics, lint rule codes, files changed outside `writable` |
 | `unverifiedRuntimeClaims` | The scenario's `runtimeOnly` claims |
-| `toolUse` | Per tool (`wright`, `overpy`): invocations by subcommand, failures, exits of 3 or 4 (candidate owner or environment gaps), and estimated output tokens per command |
+| `toolUse` | Per tool (`wright`, `overpy`): invocations by subcommand, failures, exits of 3 or 4 (candidate owner or environment gaps), and estimated output tokens per command. Under level `mcp`, each `tools/call` counts as an invocation of the Wright operation its tool name carries; the `initialize`/`tools/list` handshake is not an invocation but its response bytes (the tool schemas) are included in `mcp:tools/list`'s estimated output tokens |
+| `toolCalls` | Model-visible tool calls by name from the adapter's normalized transcript (`bash`, `fetch`, `wright_*` under `mcp`), when the adapter writes one |
 | `friction`, `expectations` | Usage errors, unknown subcommands, help lookups, retries, malformed `serve` requests, unparsed `serve` responses, identical repeats; expectation E01-E12 verdicts |
 | `snapshots` | Strict validity of each snapshot of the entry, first valid index, and valid-to-invalid regressions |
 | `usage`, `context` | Turns, tokens by kind, peak context (and its share of the limit), tokens to first valid; loaded context |
 | `invalid`, `infraRetries`, `fileReadEnforcement`, `fileWriteEnforcement`, `networkEnforcement` | Present when the run was excluded or retried; how file reads (`allow-list` with the hidden and allowed paths, or `unrestricted`), file writes (`trial-directory-only` or `unrestricted`), and network `off` (`canary-checked` or `declared-only`) were enforced |
 
-`toolUse` is recorded per CLI invocation through the shim; `wright serve` sessions are teed
-line by line into the trace. Comparing cells for the same scenario shows what
-Wright adds. Exit 3 or 4 entries, disagreements, and failed `layer` values are
-the input for owner Issues.
+`toolUse` is recorded per CLI invocation through the shim; `wright serve` sessions —
+stdio or MCP — are teed line by line into the trace, and each `tools/call` is
+counted like one CLI invocation of the same operation. Comparing cells for the
+same scenario shows what Wright adds. Exit 3 or 4 entries, disagreements, and
+failed `layer` values are the input for owner Issues.
 
 Expectations E05, E07, E09, and E10 need the normalized agent transcript and
 report `unavailable` until an adapter provides it. Estimated tokens for Wright
@@ -297,6 +305,17 @@ tables, expectation rates, friction, output size per command, and diagnostics.
 Diagnostics flag headroom (baseline usable rate of at least 95%), infrastructure
 failures, invalid runs, trial variance, and, with `--regrade`, a grader that
 gives different verdicts on the same stored workspace.
+
+When a directory holds both `wright` and `wright-mcp` cells, a level-comparison
+section pairs `mcp` with `bin` runs of the same scenario, agent, and trial and
+reports each side's usable and passed rates with Wilson intervals, mean
+search/read operations (every Wright invocation plus `bash` calls that ran a
+search/read shell command), Wright calls, `bash` calls, total model tool calls,
+turns, and tokens per run, plus the paired usable gained/lost and token delta.
+The MCP tool schemas are part of the model request, so their context cost is
+inside the provider-reported input tokens the usage accounting sums; the
+`mcp:tools/list` estimate under `toolUse` shows the same payload on the Wright
+side.
 
 ## Score
 

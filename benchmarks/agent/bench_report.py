@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -11,6 +12,13 @@ from statistics import mean, pstdev
 
 BASELINE = "none/none/off"
 HEADROOM = 0.95
+
+
+def write_json(path: Path, data: dict) -> None:
+    """A kill mid-write leaves no partial JSON to crash the next resume: temp file in the same directory, then replace."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(temporary, path)
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -31,7 +39,10 @@ def load(dirs: list[Path]) -> list[dict]:
     results = []
     for base in dirs:
         for path in sorted(base.rglob("result.json")):
-            result = json.loads(path.read_text())
+            try:
+                result = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                continue  # a partial file means the trial never finished; it will be retried
             if str(result.get("contract", "")).startswith("wright-agent-bench/") and all(k in result for k in ("status", "language", "condition", "scenario", "agent", "environment")):
                 result["_dir"] = path.parent
                 match = re.search(r"-(\d+)$", path.parent.name)
@@ -79,6 +90,70 @@ def group_rows(runs: list[dict]) -> dict:
 
 def fmt(value, digits: int = 0) -> str:
     return "n/a" if value is None else f"{value:,.{digits}f}"
+
+
+def mean_of(values: list) -> float | None:
+    values = [v for v in values if v is not None]
+    return mean(values) if values else None
+
+
+def search_reads(result: dict) -> int:
+    """Information-gathering operations per run, the same definition at both levels: every wright invocation (CLI calls under
+    `bin`, `tools/call` under `mcp` — the shim counts both) plus `bash` calls that ran a search/read shell command. A `bash`
+    call that itself invokes the wright CLI is counted once, on the wright side."""
+    import bench_trace
+    shell = bench_trace.shell_search_reads(result["_dir"] / "transcript.jsonl")
+    wright = ((result.get("toolUse") or {}).get("wright") or {}).get("invocations") or 0
+    return shell + wright
+
+
+def level_stats(runs: list[dict]) -> dict:
+    """One level's metrics inside a paired group: rates, search/read and tool-call counts, turns, tokens."""
+    usage = [(r.get("usage") or {}) for r in runs]
+    return {
+        "n": len(runs),
+        "usable": sum(1 for r in runs if r.get("usable")),
+        "passed": sum(1 for r in runs if r.get("passed")),
+        "searchReads": mean_of([search_reads(r) for r in runs]),
+        "wrightCalls": mean_of([(r.get("toolUse") or {}).get("wright", {}).get("invocations") for r in runs]),
+        "bashCalls": mean_of([(r.get("toolCalls") or {}).get("bash") for r in runs]),
+        "toolCalls": mean_of([sum(calls.values()) if calls else None for calls in (r.get("toolCalls") for r in runs)]),
+        "turns": mean_of([u.get("turns") for u in usage]),
+        "tokens": mean_of([total_tokens(r) for r in runs]),
+    }
+
+
+def levels(runs: list[dict]) -> tuple[list[str], list[dict]]:
+    """`mcp` vs `bin` paired on (scenario, agent, trial) within one cell: rates with Wilson intervals and efficiency (#474)."""
+    by_key: dict[tuple, dict[str, dict]] = defaultdict(dict)
+    for r in runs:
+        condition = r.get("condition") or {}
+        if condition.get("tool") != "wright":
+            continue
+        key = (r["scenario"], r["agent"]["id"], r["_trial"], condition.get("knowledge"), condition.get("network"), tuple(condition.get("skills") or []))
+        by_key[key][condition.get("level", "bin")] = r
+    groups: dict[tuple, list[tuple]] = defaultdict(list)
+    for (scenario, agent, _trial, knowledge, network, skills), sides in by_key.items():
+        if "bin" in sides and "mcp" in sides:
+            groups[(agent, skills, knowledge, network)].append((sides["bin"], sides["mcp"]))
+    lines, records = [], []
+    for (agent, skills, knowledge, network), pairs in sorted(groups.items()):
+        cell = f"wright{'+'.join(['', *skills]) if skills else ''}/{knowledge}/{network}"
+        bins, mcps = [b for b, _ in pairs], [m for _, m in pairs]
+        stats = {level: level_stats(group) for level, group in (("bin", bins), ("mcp", mcps))}
+        gain = sum(1 for b, m in pairs if m.get("usable") and not b.get("usable"))
+        loss = sum(1 for b, m in pairs if b.get("usable") and not m.get("usable"))
+        both = [(total_tokens(b), total_tokens(m)) for b, m in pairs if b.get("usable") and m.get("usable") and total_tokens(b) and total_tokens(m)]
+        record = {"agent": agent, "cell": cell, "pairs": len(pairs), "stats": stats, "usableGained": gain, "usableLost": loss,
+                  "tokenSaving": mean(1 - m / b for b, m in both) if both else None, "bothUsable": len(both)}
+        records.append(record)
+        for level in ("bin", "mcp"):
+            s = stats[level]
+            lines.append(f"| {agent} | {cell} | {level} | {s['n']} | {rate(s['usable'], s['n'])} | {rate(s['passed'], s['n'])} | "
+                         f"{fmt(s['searchReads'], 1)} | {fmt(s['wrightCalls'], 1)} | {fmt(s['bashCalls'], 1)} | {fmt(s['toolCalls'], 1)} | {fmt(s['turns'], 1)} | {fmt(s['tokens'])} |")
+        saving = f"{record['tokenSaving']:+.0%} tokens (n={len(both)})" if both else "no both-usable pairs"
+        lines.append(f"| {agent} | {cell} | Δ paired | {len(pairs)} | +{gain} / -{loss} | — | — | — | — | — | — | {saving} |")
+    return lines, records
 
 
 def paired(runs: list[dict], reference: str = BASELINE) -> list[str]:
@@ -200,6 +275,14 @@ def render(results: list[dict], regrade: list[str] | None = None, reference: str
                 g = [r for r in runs if r.get("split") == split and label(r) == cell]
                 if g:
                     out.append(f"| {split} | {cell} | {rate_runs(g)} |")
+    level_lines, level_records = levels(runs)
+    if level_lines:
+        summary["levels"] = level_records
+        out += ["", "## Level comparison: `mcp` vs `bin` (paired on scenario, agent, trial)", "",
+                "`search/read` counts information-gathering operations: every wright invocation plus `bash` calls that ran a "
+                "search/read shell command (a `bash` call invoking the wright CLI counts once, as a wright call).", "",
+                "| agent | cell | level | runs | usable | passed | search/read | wright calls | bash calls | tool calls | turns | tokens/run |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |", *level_lines]
     pairs = paired(runs, reference)
     if pairs:
         out += ["", f"## Paired against `{reference}` (same scenario, agent, trial)", "", "| agent | comparison | pairs | usable gained/lost | tokens where both usable |", "| --- | --- | --- | --- | --- |", *pairs]
@@ -249,6 +332,6 @@ def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, reference:
     notes = regrade_notes([r for r in results if r["status"] != "invalid"], wright, load_scenario) if regrade else None
     text, summary = render(results, notes, reference)
     (dirs[0] / "report.md").write_text(text)
-    (dirs[0] / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    write_json(dirs[0] / "summary.json", summary)
     print(text)
     return 0

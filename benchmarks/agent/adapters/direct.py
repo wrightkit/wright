@@ -4,6 +4,8 @@
 Honors the BENCH_* contract (docs/agent-benchmark.md). BENCH_MODEL is `anthropic/<model>` (ANTHROPIC_API_KEY, optional
 ANTHROPIC_BASE_URL) or `openai/<model>` (OPENAI_API_KEY, optional OPENAI_BASE_URL, so any OpenAI-compatible endpoint works).
 The model gets one `bash` tool that runs in the workspace on the shimmed PATH, plus `fetch` only when knowledge is `web`.
+Under tool level `mcp` it also registers `BENCH_MCP_CMD` (`wright serve --transport mcp`) and exposes the server's tools
+natively; the `wright` CLI is then not on PATH.
 The system prompt lists the installed skills by name and description, and the model reads their files itself.
 The loop, its limits, and the tool set are fixed here so every model faces the same protocol; the recorded harness commit identifies them.
 It does not sandbox the network: pair it with the harness --canary-cmd. Exit 75 marks a provider or infrastructure failure.
@@ -14,6 +16,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import selectors
+import shlex
 import shutil
 import subprocess
 import sys
@@ -122,6 +126,96 @@ class OpenAI:
         return message.get("content") or "", calls, usage_row((u.get("prompt_tokens") or 0) - cached, (u.get("completion_tokens") or 0) - reasoning, cached, 0, reasoning)
 
 
+class Mcp:
+    """A `wright serve --transport mcp` server over stdio (ADR-0020): line-delimited JSON-RPC, one request at a time."""
+
+    def __init__(self, command: str, env: dict):
+        self.proc = subprocess.Popen(["/bin/sh", "-c", command], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+        self.next_id = 0
+        self.pending = b""  # bytes read past the last yielded line; keeps complete lines for the next request
+
+    def request(self, method: str, params: dict | None = None) -> dict:
+        self.next_id += 1
+        message = {"jsonrpc": "2.0", "id": self.next_id, "method": method}
+        if params is not None:
+            message["params"] = params
+        try:
+            self.proc.stdin.write(json.dumps(message) + "\n")
+            self.proc.stdin.flush()
+            for line in self._lines():
+                reply = json.loads(line)
+                if isinstance(reply, dict) and reply.get("id") == self.next_id:
+                    return reply
+        except (BrokenPipeError, json.JSONDecodeError, OSError):
+            pass
+        return {"error": {"code": -32000, "message": "the MCP server closed or timed out"}}
+
+    def _lines(self):
+        """Reply lines, bounded to COMMAND_SECONDS where the OS can poll a pipe; a hung server then reads as a tool error.
+
+        readline() would buffer ahead past what select() reports, stranding a line the next request then waits for;
+        raw reads keep every complete line either yielded or in self.pending."""
+        if os.name != "posix":
+            yield from self.proc.stdout
+            return
+        deadline = time.monotonic() + COMMAND_SECONDS
+        selector = selectors.DefaultSelector()
+        with selector:
+            selector.register(self.proc.stdout, selectors.EVENT_READ)
+            while True:
+                head, sep, rest = self.pending.partition(b"\n")
+                if sep:
+                    self.pending = rest
+                    yield head.decode("utf-8", "replace")
+                    continue
+                if not selector.select(max(0.0, deadline - time.monotonic())):
+                    return
+                chunk = os.read(self.proc.stdout.fileno(), 65536)
+                if not chunk:
+                    if self.pending:
+                        yield self.pending.decode("utf-8", "replace")
+                        self.pending = b""
+                    return
+                self.pending += chunk
+
+    def notify(self, method: str) -> None:
+        try:
+            self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": method}) + "\n")
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+
+    def close(self) -> None:
+        try:
+            self.proc.stdin.close()
+            self.proc.wait(timeout=10)
+        except Exception:
+            self.proc.kill()
+        self.proc.stdout.close()
+
+
+MCP: Mcp | None = None
+
+
+def mcp_tools(command: str, env: dict) -> list[dict]:
+    """Register the MCP server and return its tools in this loop's {name, description, schema} form."""
+    global MCP
+    MCP = Mcp(command, env)
+    try:
+        initialized = MCP.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "wright-agent-bench", "version": "1"}})
+        if "error" in initialized:
+            raise ProviderError(f"MCP initialize failed: {initialized['error'].get('message')}", False)
+        MCP.notify("notifications/initialized")
+        listed = (MCP.request("tools/list").get("result") or {}).get("tools") or []
+        if not listed:
+            raise ProviderError("MCP tools/list returned no tools", False)
+    except ProviderError:
+        MCP.close()
+        MCP = None
+        raise
+    return [{"name": tool["name"], "description": tool.get("description") or "", "schema": tool.get("inputSchema") or {"type": "object"}} for tool in listed]
+
+
 def run_tool(name: str, args: dict, env: dict) -> str:
     try:
         if name == "bash":
@@ -130,6 +224,14 @@ def run_tool(name: str, args: dict, env: dict) -> str:
         elif name == "fetch":
             with urllib.request.urlopen(args["url"], timeout=60) as response:
                 out = response.read(OUTPUT_CHARS * 2).decode(errors="replace")
+        elif MCP:
+            reply = MCP.request("tools/call", {"name": name, "arguments": args})
+            if "error" in reply:
+                return f"[mcp error {reply['error'].get('code')}: {reply['error'].get('message')}]"
+            result = reply.get("result") or {}
+            out = "\n".join(block.get("text", "") for block in result.get("content") or [] if isinstance(block, dict) and block.get("type") == "text")
+            if result.get("isError"):
+                out = f"[isError] {out}"
         else:
             return f"unknown tool {name}"
     except subprocess.TimeoutExpired:
@@ -160,35 +262,48 @@ def main() -> int:
         return 2
     web = env["BENCH_KNOWLEDGE"] == "web"
     tools = [BASH] + ([FETCH] if web else [])
+    child_env = {k: v for k, v in env.items() if k not in ("BENCH_HOST_PATH", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")}
+    global MCP
+    MCP = None
+    if env.get("BENCH_MCP_CMD"):
+        try:
+            tools += mcp_tools(env["BENCH_MCP_CMD"], child_env)
+        except ProviderError as error:
+            print(f"mcp setup: {error}", file=sys.stderr)
+            return 1
     listing, loaded = skill_listing([Path(p) for p in env.get("BENCH_SKILL_DIRS", "").split(os.pathsep) if p])
     effort = env.get("BENCH_THINKING") if provider == "openai" else None
     system = SYSTEM + listing
     chat = Anthropic(model, tools, system) if provider == "anthropic" else OpenAI(model, tools, system, effort)
     Path(env["BENCH_AGENT_INFO"]).write_text(json.dumps({
         "agent": "direct", "model": env["BENCH_MODEL"], "effort": effort, "tools": [t["name"] for t in tools],
+        "toolLevel": env.get("BENCH_TOOL_LEVEL", "bin"),
         "protocol": {"maxTurns": MAX_TURNS, "commandSeconds": COMMAND_SECONDS, "outputChars": OUTPUT_CHARS, "maxOutputTokens": MAX_OUTPUT_TOKENS}}, indent=2))
     Path(env["BENCH_CONTEXT"]).write_text(json.dumps({"loaded": loaded}))
-    child_env = {k: v for k, v in env.items() if k not in ("BENCH_HOST_PATH", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")}
     chat.user(sys.stdin.read())
     final, code = "", 0
-    with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:
-        transcript.write(json.dumps({"t": time.time(), "type": "system", "text": system}) + "\n")
-        for _ in range(MAX_TURNS):
-            try:
-                text, calls, row = chat.step()
-            except ProviderError as error:
-                print(f"provider error: {error}", file=sys.stderr)
-                code = INFRA_EXIT if error.transient else 1
-                break
-            usage.write(json.dumps(row) + "\n")
-            transcript.write(json.dumps({"t": time.time(), "type": "assistant", "text": text, "calls": [{"name": n, "input": a} for _, n, a in calls]}) + "\n")
-            final = text
-            if not calls:
-                break
-            outputs = [(i, run_tool(n, a, child_env)) for i, n, a in calls]
-            for (_, n, a), (_, out) in zip(calls, outputs):
-                transcript.write(json.dumps({"t": time.time(), "type": "tool_result", "name": n, "output": out}) + "\n")
-            chat.results(outputs)
+    try:
+        with open(env["BENCH_USAGE"], "w", buffering=1) as usage, open(env["BENCH_TRANSCRIPT"], "w", buffering=1) as transcript:
+            transcript.write(json.dumps({"t": time.time(), "type": "system", "text": system}) + "\n")
+            for _ in range(MAX_TURNS):
+                try:
+                    text, calls, row = chat.step()
+                except ProviderError as error:
+                    print(f"provider error: {error}", file=sys.stderr)
+                    code = INFRA_EXIT if error.transient else 1
+                    break
+                usage.write(json.dumps(row) + "\n")
+                transcript.write(json.dumps({"t": time.time(), "type": "assistant", "text": text, "calls": [{"name": n, "input": a} for _, n, a in calls]}) + "\n")
+                final = text
+                if not calls:
+                    break
+                outputs = [(i, run_tool(n, a, child_env)) for i, n, a in calls]
+                for (_, n, a), (_, out) in zip(calls, outputs):
+                    transcript.write(json.dumps({"t": time.time(), "type": "tool_result", "name": n, "output": out}) + "\n")
+                chat.results(outputs)
+    finally:
+        if MCP:
+            MCP.close()
     sys.stdout.write(final)
     return code
 
