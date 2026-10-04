@@ -86,7 +86,12 @@ python3 benchmarks/agent/agent_bench.py publish ~/.local/share/wright-agent-benc
 `--dry-run` writes the bundle and lists the uploads without contacting R2.
 Without it, the command uploads to the release bucket under `bench/` through
 `R2_ENDPOINT`: `bench/latest.json` plus one immutable `bench/runs/<id>.json`
-per run. Republishing a run id with different content is refused.
+per run. Republishing a run id with different content is refused. Use the
+existing release credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_DEFAULT_REGION=auto`, or an AWS profile) and an AWS CLI with conditional
+`put-object --if-none-match` support. All immutable objects are written or
+verified before `latest.json` changes; credential, transport, and content
+conflicts stop publication. No benchmark data is published by CI.
 
 ## The agent programs
 

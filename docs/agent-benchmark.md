@@ -58,7 +58,17 @@ intervals, trials, scenario counts, exclusions, provisional reasons, the agent
 setup (program and version, model, effort, loaded skills), and the environment
 identity — never a transcript, a workspace, a host path, a private scenario's
 task or check, or wiki content. Runs made against a different Wright binary,
-skills, or suite are left out of `latest.json` and listed as excluded. A run
+skills, or suite are left out of `latest.json` and listed as excluded. The
+largest group with the same environment is selected; ties use the first group
+in the supplied directory order. Protocol and file-read/file-write/network
+enforcement also have to match. Each immutable run uses the same schema with
+one entry, including runs excluded from latest. The run id is `run-` plus the
+first 24 hex characters of SHA-256 of the evaluation directory's basename;
+keep that name stable and unique across evaluations. Provisional reasons use
+fixed categories so missing private task names cannot leak through score-card
+text. The schema rejects unknown fields and path-shaped setup strings. Missing
+or inconsistent recorded agent programs and stale environment identities are
+refused; unrecorded version, model, or effort are represented as `null`. A run
 object is immutable once published — republishing its id with different content
 is refused — and `latest.json` is the only mutable object. `--dry-run` writes
 the bundle locally and lists the uploads; a real publish goes through the
