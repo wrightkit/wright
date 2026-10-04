@@ -132,6 +132,7 @@ class Mcp:
     def __init__(self, command: str, env: dict):
         self.proc = subprocess.Popen(["/bin/sh", "-c", command], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
         self.next_id = 0
+        self.pending = b""  # bytes read past the last yielded line; keeps complete lines for the next request
 
     def request(self, method: str, params: dict | None = None) -> dict:
         self.next_id += 1
@@ -150,7 +151,10 @@ class Mcp:
         return {"error": {"code": -32000, "message": "the MCP server closed or timed out"}}
 
     def _lines(self):
-        """Reply lines, bounded to COMMAND_SECONDS where the OS can poll a pipe; a hung server then reads as a tool error."""
+        """Reply lines, bounded to COMMAND_SECONDS where the OS can poll a pipe; a hung server then reads as a tool error.
+
+        readline() would buffer ahead past what select() reports, stranding a line the next request then waits for;
+        raw reads keep every complete line either yielded or in self.pending."""
         if os.name != "posix":
             yield from self.proc.stdout
             return
@@ -158,11 +162,21 @@ class Mcp:
         selector = selectors.DefaultSelector()
         with selector:
             selector.register(self.proc.stdout, selectors.EVENT_READ)
-            while selector.select(max(0.0, deadline - time.monotonic())):
-                line = self.proc.stdout.readline()
-                if not line:
+            while True:
+                head, sep, rest = self.pending.partition(b"\n")
+                if sep:
+                    self.pending = rest
+                    yield head.decode("utf-8", "replace")
+                    continue
+                if not selector.select(max(0.0, deadline - time.monotonic())):
                     return
-                yield line
+                chunk = os.read(self.proc.stdout.fileno(), 65536)
+                if not chunk:
+                    if self.pending:
+                        yield self.pending.decode("utf-8", "replace")
+                        self.pending = b""
+                    return
+                self.pending += chunk
 
     def notify(self, method: str) -> None:
         try:

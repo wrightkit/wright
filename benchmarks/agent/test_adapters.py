@@ -287,6 +287,32 @@ for line in sys.stdin:
             with patch.dict(direct.os.environ, env, clear=True), patch.object(direct.sys, "stdin", io.StringIO("task")), patch.object(direct.sys, "stdout", io.StringIO()):
                 self.assertEqual(direct.main(), 1)
 
+    NOISY_MCP = '''\
+import json, sys
+for line in sys.stdin:
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if "id" in msg:
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}) + "\\n")
+        sys.stdout.write(json.dumps({"note": "trailing"}) + "\\n")
+        sys.stdout.flush()
+'''
+
+    @unittest.skipUnless(os.name == "posix", "the reply poll needs a selectable pipe")
+    def test_mcp_lines_behind_the_reply_are_not_lost_to_the_next_request(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
+            server_py = Path(tmp) / "noisy_mcp.py"
+            server_py.write_text(self.NOISY_MCP)
+            mcp = direct.Mcp(f"{sys.executable} {server_py}", dict(os.environ))
+            try:
+                self.assertEqual(mcp.request("initialize")["id"], 1)  # the buffered trailing line must not strand request 2
+                self.assertEqual(mcp.request("tools/list")["id"], 2)
+                self.assertEqual(mcp.request("tools/call", {"name": "x", "arguments": {}})["id"], 3)
+            finally:
+                mcp.close()
+
 
 class PipeTest(unittest.TestCase):
     def test_drain_keeps_a_chatty_stderr_from_deadlocking_the_stdout_read(self):
