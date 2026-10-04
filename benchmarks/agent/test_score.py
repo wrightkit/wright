@@ -146,6 +146,43 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(card["cards"][0]["score"], 100.0)
         self.assertEqual(bench_score.main([root], ["workshop"], {"workshop": SCENARIOS}, None), 2)
 
+    def test_a_run_killed_at_the_time_limit_keeps_the_identity_it_was_launched_with(self):
+        done = run("s0", 1, True)
+        done["agent"]["command"] = "BENCH_MODEL=gpt-6-luna BENCH_THINKING=xhigh python3 codex.py"
+        done["agentInfo"] = {"model": "gpt-6-luna", "effort": "xhigh"}
+        killed = json.loads(json.dumps(done))
+        killed["agentInfo"] = {}
+        killed["status"] = "timeout"
+        self.assertEqual(bench_score.identity_of(killed), bench_score.identity_of(done))
+        devin = json.loads(json.dumps(done))
+        devin["agent"]["command"] = "BENCH_MODEL=swe-2-max python3 devin.py"
+        devin["agentInfo"] = {}
+        self.assertEqual((bench_score.identity_of(devin)["model"], bench_score.identity_of(devin)["effort"]), ("swe-2", "max"))
+
+    def test_the_launch_record_keeps_a_killed_run_comparable_for_every_adapter_convention(self):
+        # adapters that report the raw model id (codex, grok, opencode, pi, direct, claude-code): an effort suffix stays in it
+        live = run("s0", 1, True)
+        live["agent"].update({"command": "BENCH_MODEL=gpt-6-luna-max python3 codex.py", "model": "gpt-6-luna-max", "effort": None})
+        live["agentInfo"] = {"model": "gpt-6-luna-max"}
+        killed = json.loads(json.dumps(live))
+        killed["agentInfo"] = {}
+        killed["status"] = "timeout"
+        self.assertEqual(bench_score.identity_of(killed), bench_score.identity_of(live))
+        # adapters that split the effort out of the id when they report (devin, agy): the record converges to the same pair
+        split = json.loads(json.dumps(live))
+        split["agent"].update({"command": "BENCH_MODEL=gemini-3.8-flash-high python3 agy.py", "model": "gemini-3.8-flash-high", "effort": None})
+        split["agentInfo"] = {"model": "gemini-3.8-flash", "effort": "high"}
+        killed_split = json.loads(json.dumps(split))
+        killed_split["agentInfo"] = {}
+        self.assertEqual(bench_score.identity_of(killed_split), bench_score.identity_of(split))
+        # an explicit --effort recorded at launch is not duplicated by a suffix in the model id
+        both = json.loads(json.dumps(live))
+        both["agent"].update({"model": "openai/gpt-6-luna", "effort": "xhigh"})
+        both["agentInfo"] = {"model": "openai/gpt-6-luna", "effort": "xhigh"}
+        killed_both = json.loads(json.dumps(both))
+        killed_both["agentInfo"] = {}
+        self.assertEqual(bench_score.identity_of(killed_both), bench_score.identity_of(both))
+
     def test_compare_tables_runs_and_warns_when_the_environment_differs(self):
         root = Path(tempfile.mkdtemp(dir=Path(__file__).resolve().parents[2] / "target"))
         self.addCleanup(shutil.rmtree, root, True)
