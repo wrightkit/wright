@@ -818,6 +818,20 @@ class DetectorTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_load_skips_a_partial_result_left_by_a_killed_run(self):
+        import tempfile
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
+        root = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        finished = {k: v for k, v in {**self.result("wright/none/off", 2, True, 5), "environment": {}}.items() if not k.startswith("_")}  # _dir/_trial are stamped on load, not stored
+        for name, content in (("partial-1", '{"contract":'), ("done-2", json.dumps(finished))):
+            directory = root / "s" / "a" / name
+            directory.mkdir(parents=True)
+            (directory / "result.json").write_text(content)
+        loaded = bench_report.load([root])
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0]["_trial"], 2)
+
     def result(self, cell, trial, usable, tokens, split=None, scenario="s", language="opy", status="completed"):
         tool = cell.split("/")[0].split("+")[0]
         return {

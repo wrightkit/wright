@@ -158,7 +158,12 @@ def compare(dirs: list[Path]) -> str:
         if not path.is_file():
             rows.append(("", directory.name, "no score", "no score.json in this directory"))
             continue
-        for card_ in json.loads(path.read_text())["cards"]:
+        try:
+            cards_ = json.loads(path.read_text())["cards"]
+        except json.JSONDecodeError:
+            rows.append(("", directory.name, "no score", "score.json is incomplete — rerun report"))
+            continue
+        for card_ in cards_:
             if "refused" in card_:
                 rows.append((card_["track"], directory.name, "no score", card_["refused"]))
                 continue
@@ -176,7 +181,7 @@ def compare(dirs: list[Path]) -> str:
 
 
 def main(dirs: list[Path], languages: list[str], expected_by_language: dict[str, list[str]], out: Path | None) -> int:
-    from bench_report import load
+    from bench_report import load, write_json
     results = load(dirs)
     status = 0
     cards = []
@@ -186,6 +191,6 @@ def main(dirs: list[Path], languages: list[str], expected_by_language: dict[str,
         print(render(c))
         status = max(status, 2 if "refused" in c else 0)
     target = out or dirs[0]
-    (target / "score.json").write_text(json.dumps({"contract": CONTRACT, "cards": cards}, indent=2) + "\n")
+    write_json(target / "score.json", {"contract": CONTRACT, "cards": cards})
     (target / "score.txt").write_text("\n".join(render(c) for c in cards))
     return status
