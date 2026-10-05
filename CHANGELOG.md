@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.9.0](https://github.com/wrightkit/wright/compare/v0.8.0...v0.9.0) (2026-10-05)
+
+
+### Features
+
+* **bench:** add an mcp tool level beside bin for the agent benchmark ([#492](https://github.com/wrightkit/wright/issues/492)) ([d3e4f1d](https://github.com/wrightkit/wright/commit/d3e4f1d7cd04a3bfa51c9a6775ddf170bec7cd3b))
+* **bench:** correction rounds and multi-reference paired lift for the agent benchmark ([#494](https://github.com/wrightkit/wright/issues/494)) ([92179a2](https://github.com/wrightkit/wright/commit/92179a2dc85899ea085a28eb344de49b167e8c0e))
+* **bench:** isolate and version the held-out agent suite ([#502](https://github.com/wrightkit/wright/issues/502)) ([2626e91](https://github.com/wrightkit/wright/commit/2626e91f3e07e77035974abe3415c499b7752c62)), closes [#499](https://github.com/wrightkit/wright/issues/499)
+* **bench:** publish hosted agent results as immutable R2 data ([#506](https://github.com/wrightkit/wright/issues/506)) ([4bc74cc](https://github.com/wrightkit/wright/commit/4bc74cceb38125647280e0b82f3c791a6cd32d5b)), closes [#500](https://github.com/wrightkit/wright/issues/500)
+* **bench:** standardized Wright Agent Score for model comparison ([#491](https://github.com/wrightkit/wright/issues/491)) ([1ad68ec](https://github.com/wrightkit/wright/commit/1ad68ec8a80aa5f5d62d9c0bf2cfdccd3b077e92))
+* **cli:** add wright agent install for the canonical agent guide ([e2950d0](https://github.com/wrightkit/wright/commit/e2950d0c0da0bd1cc8e4778f6cc6cfeb74cb5096)), closes [#415](https://github.com/wrightkit/wright/issues/415)
+* **driver:** add opt-in hotpath profiling instrumentation ([#507](https://github.com/wrightkit/wright/issues/507)) ([a7e3c0a](https://github.com/wrightkit/wright/commit/a7e3c0aea46c5f8dbdd3c5578053a14f04d1b4ac))
+* **driver:** decouple ToolService from successful project loading ([#520](https://github.com/wrightkit/wright/issues/520)) ([56bc689](https://github.com/wrightkit/wright/commit/56bc6897d633f6b4743da1295ac58889a7e6edda))
+* **driver:** enforce fixed session configuration after construction ([#519](https://github.com/wrightkit/wright/issues/519)) ([a0f13ec](https://github.com/wrightkit/wright/commit/a0f13ecfaa3ddf68572c6d99d8d21718210e5c40))
+* **lsp,language:** wire provider-driven rename through product surfaces ([#498](https://github.com/wrightkit/wright/issues/498)) ([e86ba70](https://github.com/wrightkit/wright/commit/e86ba7038d52eb6fd77313b82f372bd271e0bb30))
+
+
+### Bug Fixes
+
+* **bench:** sanitize hosted publication validation failures ([#510](https://github.com/wrightkit/wright/issues/510)) ([b5bfa7b](https://github.com/wrightkit/wright/commit/b5bfa7b456a71b20d386ad2b1219d8d68a8dc748))
+* **cli:** harden agent install ownership and refresh semantics ([e216dd4](https://github.com/wrightkit/wright/commit/e216dd430b70f25a4533ac53d896681a9b93b98a)), closes [#415](https://github.com/wrightkit/wright/issues/415)
+* **driver:** apply canonical Workshop validation to raw Workshop check and compile ([#518](https://github.com/wrightkit/wright/issues/518)) ([40f0f69](https://github.com/wrightkit/wright/commit/40f0f69a10e9e1bb9165e9bd178a64f8ba1bda3a))
+* **release:** publish the GitHub Release only after verified R2 staging ([#497](https://github.com/wrightkit/wright/issues/497)) ([60d8bfa](https://github.com/wrightkit/wright/commit/60d8bfaee13a1d19a88b7ce93ce1e5448f93c0c4))
+
+
+### Performance Improvements
+
+* **analyzer:** cache semantic surfaces per loaded snapshot ([#515](https://github.com/wrightkit/wright/issues/515)) ([62ac4ea](https://github.com/wrightkit/wright/commit/62ac4ea91b95ba3b4ea669e31847f5fce6139194))
+* **driver:** reuse loaded semantic state across semantic workflows ([#517](https://github.com/wrightkit/wright/issues/517)) ([da5b3ea](https://github.com/wrightkit/wright/commit/da5b3eaf7f8d7a5f31a1dfc3e41cbaa620edc63b))
+* **driver:** share the built-in Workshop catalog across consumers ([#508](https://github.com/wrightkit/wright/issues/508)) ([62adea3](https://github.com/wrightkit/wright/commit/62adea34305a51566edd0dc15551deb523e7e81c))
+* **transform:** reuse driver load validation ([#516](https://github.com/wrightkit/wright/issues/516)) ([5e8033d](https://github.com/wrightkit/wright/commit/5e8033df6161bc60bbbfc231707a7d1dab38b293))
+
+
+### Code Refactoring
+
+* **driver:** deprecate the legacy textual rename helper ([#522](https://github.com/wrightkit/wright/issues/522)) ([b032e09](https://github.com/wrightkit/wright/commit/b032e0966be85fa665d887c9daf1f455c8a30e61))
+
 ## [0.8.0](https://github.com/wrightkit/wright/compare/v0.7.0...v0.8.0) (2026-10-02)
 
 
