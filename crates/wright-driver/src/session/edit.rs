@@ -28,6 +28,15 @@ impl CompilerSession {
         sources: Option<&BTreeMap<String, String>>,
         transaction: &EditTransaction,
     ) -> EditValidation {
+        if let Err(diagnostic) = self.verify_fixed_config() {
+            let diagnostics = vec![diagnostic];
+            return EditValidation {
+                ok: false,
+                exit: crate::result::exit_code_from(&diagnostics),
+                diagnostics,
+                preview: None,
+            };
+        }
         crate::edit::validate_transaction(&self.config, &self.catalog, sources, transaction)
     }
 
@@ -50,6 +59,9 @@ impl CompilerSession {
             diagnostics,
             preview: None,
         };
+        if let Err(diagnostic) = self.verify_fixed_config() {
+            return refuse(vec![diagnostic]);
+        }
         match &self.config.input {
             InputSpec::Stdin => {
                 return refuse(vec![Diagnostic::error(
@@ -82,6 +94,10 @@ impl CompilerSession {
     /// diagnostics and no partial write.
     pub fn rename(&mut self, name: &str, to: &str, write: bool) -> Envelope<RenameResult> {
         let mut result = RenameResult::default();
+        if let Err(diagnostic) = self.verify_fixed_config() {
+            self.diagnostics.push(diagnostic);
+            return self.finish("rename", result);
+        }
         match &self.config.input {
             InputSpec::Stdin => {
                 self.diagnostics.push(Diagnostic::error(

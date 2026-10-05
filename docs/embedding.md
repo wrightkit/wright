@@ -72,6 +72,29 @@ otherwise presenting the result. Events describe real orchestration phases and
 may carry bounded counts such as lint-rule count; they never contain terminal
 strings, ANSI, percentages, or fabricated completion estimates.
 
+`SessionConfig` is construction-time configuration (#511): every field is
+fixed once `CompilerSession::new` or `CompilerSession::with_source_provider`
+succeeds — input, source kind/backend, locale, root, output/format, transform
+profile, lint configuration and rule paths, finding selection, provider
+registry, and first-party provider configuration. Changing configuration
+means constructing a new session. The public `CompilerSession::config` field
+remains readable and writable for source compatibility within
+`wright-embedding/v1`, but post-construction mutation is not a supported
+capability: the next workflow (`load`, `compile`, `check`, `analyze`,
+`inspect`, `lint`, `convert`, `symbols`, `refs`, `cfg`, `callgraph`, `cost`,
+`rename`, `validate_edit_transaction`, `semantic_rename`) or `ToolService`
+construction refuses with a `session-config-changed` diagnostic naming the
+changed fields, rather than reusing state derived from the earlier
+configuration. The provider surfaces that consume the provider
+registry/first-party provider configuration — `language_provider`,
+`run_provider_flow`, and the `provider*` tool operations routed through them
+— refuse through the provider refusal channel carrying the same
+`session-config-changed` refusal code. The supported runtime changes are
+separate explicit capabilities: attaching or clearing a progress observer,
+file contents changing on disk under the configured input (the #471
+disk-refresh lifecycle), and request-local `ToolRequest`
+parameters/documents.
+
 ## Session-aware tool service
 
 `ToolService::new(&mut session)` loads the program eagerly and answers typed

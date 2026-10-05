@@ -244,8 +244,13 @@ pub struct ToolService<'a> {
 
 impl<'a> ToolService<'a> {
     /// Build the service over a session, loading the program eagerly.
+    ///
+    /// A session whose configuration changed after construction is refused
+    /// with `session-config-changed` (#511): the service never adopts state
+    /// derived from a superseded configuration.
     #[hotpath::measure]
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
+        session.verify_fixed_config()?;
         let loaded = session.load()?;
         let fingerprint = input::disk_fingerprint(&session.config, &loaded.input);
         let semantic = session.shared_semantic(&loaded);

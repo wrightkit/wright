@@ -14,7 +14,7 @@ const PROVIDER_ARCHIVE_EXTENSION: &str = "tar.gz";
 
 pub const OPY_LANGUAGE_ID: &str = "opy";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpyProviderConfig {
     pub executable: Option<PathBuf>,
     pub store_dir: Option<PathBuf>,
