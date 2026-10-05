@@ -76,7 +76,7 @@ impl InputSpec {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionConfig {
     pub input: InputSpec,
     pub kind: SourceKind,
@@ -102,5 +102,51 @@ impl SessionConfig {
             input: InputSpec::Path(path.into()),
             ..SessionConfig::default()
         }
+    }
+
+    /// The fields that differ from `other`, named for diagnostics (#511);
+    /// an empty list means the two configurations are identical.
+    pub(crate) fn changed_fields(&self, other: &SessionConfig) -> Vec<&'static str> {
+        let mut changed = Vec::new();
+        if self.input != other.input {
+            changed.push("input");
+        }
+        if self.kind != other.kind {
+            changed.push("kind");
+        }
+        if self.source_backend != other.source_backend {
+            changed.push("source_backend");
+        }
+        if self.locale != other.locale {
+            changed.push("locale");
+        }
+        if self.root != other.root {
+            changed.push("root");
+        }
+        if self.output != other.output {
+            changed.push("output");
+        }
+        if self.format != other.format {
+            changed.push("format");
+        }
+        if self.profile != other.profile {
+            changed.push("profile");
+        }
+        if self.lint != other.lint {
+            changed.push("lint");
+        }
+        if self.lint_rule_paths != other.lint_rule_paths {
+            changed.push("lint_rule_paths");
+        }
+        if self.selection != other.selection {
+            changed.push("selection");
+        }
+        if self.providers != other.providers {
+            changed.push("providers");
+        }
+        if self.opy_provider != other.opy_provider {
+            changed.push("opy_provider");
+        }
+        changed
     }
 }

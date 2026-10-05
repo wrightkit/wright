@@ -110,7 +110,19 @@ fn loaded_origin(loaded: &Loaded) -> Origin {
 /// One reusable compiler session.
 pub struct CompilerSession {
     /// The session configuration (input, frontend, overrides, format).
+    ///
+    /// Configuration is fixed at construction (#511): assign every field
+    /// before `new`/`with_source_provider`. The field stays public for
+    /// source compatibility within `wright-embedding/v1`, but
+    /// post-construction mutation is not a supported capability — the next
+    /// workflow or `ToolService` construction refuses with
+    /// `session-config-changed` rather than serving state derived from the
+    /// earlier configuration. Changing configuration means constructing a
+    /// new session.
     pub config: SessionConfig,
+    /// The construction-time snapshot `config` is verified against before
+    /// every workflow (#511).
+    fixed_config: SessionConfig,
     catalog: Arc<workshop_rs::catalog::Catalog>,
     lint_registry: Arc<LintRegistry>,
     loaded: Option<Loaded>,
@@ -159,6 +171,7 @@ impl CompilerSession {
             ));
         }
         Ok(CompilerSession {
+            fixed_config: config.clone(),
             config,
             catalog,
             lint_registry: Arc::new(lint_registry),
@@ -197,6 +210,24 @@ impl CompilerSession {
         self.progress_observer = None;
     }
 
+    /// Refuse `session-config-changed` when `config` diverged from the
+    /// construction-time snapshot (#511): nothing derived from the earlier
+    /// configuration may serve the next result.
+    pub(crate) fn verify_fixed_config(&self) -> Result<(), Diagnostic> {
+        let changed = self.config.changed_fields(&self.fixed_config);
+        if changed.is_empty() {
+            return Ok(());
+        }
+        Err(Diagnostic::error(
+            "session-config-changed",
+            Stage::Discovery,
+            format!(
+                "session configuration is fixed after construction; changed {} — construct a new CompilerSession to change configuration",
+                changed.join(", ")
+            ),
+        ))
+    }
+
     pub(crate) fn catalog(&self) -> &workshop_rs::catalog::Catalog {
         &self.catalog
     }
@@ -213,6 +244,7 @@ impl CompilerSession {
     /// re-reading the input. Returns an owned snapshot so callers can hold it
     /// while mutating the session.
     pub fn load(&mut self) -> Result<Loaded, Diagnostic> {
+        self.verify_fixed_config()?;
         if self.config.source_backend == SourceBackend::Provider
             && self.loaded_operation != Some(ProviderOperation::Compile)
         {
@@ -240,6 +272,7 @@ impl CompilerSession {
         &mut self,
         provider_operation: ProviderOperation,
     ) -> Result<Loaded, Diagnostic> {
+        self.verify_fixed_config()?;
         if let Some(loaded) = &self.loaded {
             let is_provider = self.config.source_backend != SourceBackend::Native
                 && loaded.input.kind == SourceKind::Opy;
@@ -997,7 +1030,7 @@ impl CompilerSession {
     where
         T: Default + serde::Serialize,
     {
-        let result = match load(self) {
+        let result = match self.verify_fixed_config().and_then(|()| load(self)) {
             Ok(loaded) => run(self, loaded),
             Err(diagnostic) => {
                 self.diagnostics.push(diagnostic);

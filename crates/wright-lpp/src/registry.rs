@@ -14,7 +14,7 @@ use crate::error::ProviderError;
 use crate::provider::StdioLanguageProvider;
 
 /// One configured provider, keyed by its opaque language id.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfig {
     /// The opaque language id this provider serves (the registry key).
     pub language_id: String,
@@ -65,7 +65,7 @@ impl std::error::Error for RegistryError {}
 
 /// Provider discovery: a registry of provider configurations keyed by
 /// opaque language id.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderRegistry {
     providers: BTreeMap<String, ProviderConfig>,
 }

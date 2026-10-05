@@ -6,7 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
-use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceBackend, SourceKind};
+use wright_driver::edit::{EditTransaction, RenameTarget};
+use wright_driver::service::{Address, ToolService};
+use wright_driver::{
+    CompilerSession, Diagnostic, InputSpec, SessionConfig, SourceBackend, SourceKind,
+};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
@@ -251,4 +255,92 @@ fn opy_source_never_falls_back_to_a_static_frontend() {
     let result = session.check();
     assert!(!result.ok);
     assert_eq!(result.diagnostics[0].code, "source-provider-unavailable");
+}
+
+fn refused_config_change(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|d| d.code == "session-config-changed")
+}
+
+/// #511: `SessionConfig` is construction-time. A post-construction mutation
+/// refuses the next workflow explicitly instead of serving state derived
+/// from the earlier configuration — including the already-loaded program
+/// cached before the mutation.
+#[test]
+fn session_config_mutation_refuses_workflows() {
+    let path = workshop_fixture("synthetic/control-flow");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    assert!(session.check().ok, "check: {:?}", session.diagnostics());
+
+    session.config.kind = SourceKind::Opy;
+    assert_eq!(
+        session.load().err().expect("load refuses").code,
+        "session-config-changed"
+    );
+    assert!(refused_config_change(&session.check().diagnostics));
+    assert!(refused_config_change(&session.compile().diagnostics));
+    assert!(refused_config_change(&session.inspect().diagnostics));
+    assert!(refused_config_change(&session.lint().diagnostics));
+    assert!(refused_config_change(&session.analyze().diagnostics));
+    assert!(refused_config_change(&session.symbols(None).diagnostics));
+    assert!(refused_config_change(
+        &session.rename("x", "y", false).diagnostics
+    ));
+
+    // Restoring the construction-time values is not a change: the session
+    // serves again.
+    session.config.kind = SourceKind::Workshop;
+    assert!(session.check().ok, "check: {:?}", session.diagnostics());
+}
+
+/// #511: the same refusal covers the non-load edit surfaces and service
+/// construction, and the diagnostic names the changed fields.
+#[test]
+fn session_config_mutation_refuses_edits_and_service_construction() {
+    let path = workshop_fixture("synthetic/control-flow");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+
+    session.config.lint.disable("min-wait-loop");
+
+    let validation =
+        session.validate_edit_transaction(None, &EditTransaction { edits: Vec::new() });
+    assert!(!validation.ok);
+    assert!(
+        validation
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "session-config-changed" && d.message.contains("lint")),
+        "{:?}",
+        validation.diagnostics
+    );
+
+    let rename = session.semantic_rename(
+        None,
+        &RenameTarget {
+            symbol: Some(Address::Name("x".to_string())),
+            source: None,
+            line: None,
+            col: None,
+            to: "y".to_string(),
+        },
+    );
+    assert!(!rename.ok);
+    assert!(refused_config_change(&rename.diagnostics));
+
+    let error = ToolService::new(&mut session)
+        .err()
+        .expect("service refuses");
+    assert_eq!(error.code, "session-config-changed");
+    assert!(error.message.contains("lint"), "{error:?}");
 }

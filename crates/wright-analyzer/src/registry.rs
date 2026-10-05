@@ -50,7 +50,7 @@ pub struct RuleMeta {
 }
 
 /// Configuration applied to one rule at registry execution time.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuleConfig {
     /// When `false` the rule is skipped entirely and produces no findings.
@@ -81,7 +81,7 @@ impl Default for RuleConfig {
 }
 
 /// The intentionally small option surface shared by declarative rules.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuleOptions {
     /// Require at least this many matched nodes.
@@ -138,7 +138,7 @@ impl From<Severity> for SeverityLabel {
 }
 
 /// The effective configuration for a lint run.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LintConfig {
     /// Per-rule configuration overrides keyed by stable rule ID.
