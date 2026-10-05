@@ -247,6 +247,11 @@ pub struct ToolService<'a> {
     /// How many times an observed disk change reloaded the program — the
     /// observable hook for "unchanged inputs are not reloaded" (#471).
     reloads: usize,
+    /// `true` while the service sits in the invalidated state after a
+    /// failed refresh (#512): the next successful load is a reload — an
+    /// observed change brought the project back — rather than the deferred
+    /// initial load.
+    invalidated: bool,
 }
 
 impl<'a> ToolService<'a> {
@@ -274,6 +279,7 @@ impl<'a> ToolService<'a> {
             symbol_ids_current: true,
             rule_ids_current: true,
             reloads: 0,
+            invalidated: false,
         };
         if let Ok(loaded) = service.session.load() {
             service.adopt(loaded);
@@ -385,24 +391,36 @@ impl<'a> ToolService<'a> {
     /// Ensure a valid current snapshot backs a program-reading request
     /// (#471, #512). With no snapshot the request performs the deferred
     /// initial load; with one, a changed disk fingerprint reloads it. A
-    /// failed attempt surfaces the loader's structured diagnostic — the
-    /// previous snapshot is never served — and leaves the session's cache
-    /// empty so the next request retries the same resolution; a repaired
-    /// project is adopted without restarting the service.
+    /// failed attempt surfaces the loader's structured diagnostic and
+    /// invalidates the served snapshot — the previous program is never
+    /// served, even if the input is restored to identical bytes — so the
+    /// next request retries the same resolution and a repaired project is
+    /// adopted without restarting the service.
     fn refresh(&mut self) -> Result<(), ToolErrorInfo> {
         let Some(loaded) = &self.loaded else {
-            // The deferred initial load (#512). A success establishes the
-            // id space: no earlier program could have issued ids within
-            // this service.
+            // The deferred initial load, or recovery after an invalidated
+            // snapshot (#512). Recovery counts as a reload — an observed
+            // disk change brought the project back — and keeps the dropped
+            // snapshot's id space stale until it is re-observed.
             let loaded = self.session.load().map_err(Self::loader_error)?;
             self.adopt(loaded);
+            if self.invalidated {
+                self.reloads += 1;
+                self.invalidated = false;
+            }
             return Ok(());
         };
         let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
         if self.fingerprint.as_ref() == Some(&fingerprint) {
             return Ok(());
         }
-        let loaded = self.session.reload().map_err(Self::loader_error)?;
+        let loaded = match self.session.reload() {
+            Ok(loaded) => loaded,
+            Err(diagnostic) => {
+                self.invalidate();
+                return Err(Self::loader_error(diagnostic));
+            }
+        };
         self.adopt(loaded);
         self.reloads += 1;
         // The reloaded program's numeric ids are a different space: ids
@@ -412,6 +430,21 @@ impl<'a> ToolService<'a> {
         self.symbol_ids_current = false;
         self.rule_ids_current = false;
         Ok(())
+    }
+
+    /// Drop the served snapshot after a failed refresh (#512). The next
+    /// program-reading request must load again — restoring the input's exact
+    /// previous bytes must not fingerprint-match the pre-failure snapshot
+    /// back to life — and ids issued by the dropped program refuse
+    /// `stale-id` until the new space is observed.
+    fn invalidate(&mut self) {
+        self.loaded = None;
+        self.semantic = None;
+        self.lint_semantic = None;
+        self.fingerprint = None;
+        self.symbol_ids_current = false;
+        self.rule_ids_current = false;
+        self.invalidated = true;
     }
 
     /// The loader's diagnostic carried through the request's structured
@@ -618,9 +651,10 @@ impl<'a> ToolService<'a> {
 
     /// Compile through the shared session pipeline.
     ///
-    /// A failed refresh emptied the session's cache, so `compile`'s own
-    /// load attempt re-surfaces the reload diagnostic as this envelope's
-    /// refusal; the stale `self.loaded` snapshot is never consulted (#471).
+    /// A failed refresh invalidated the service snapshot and emptied the
+    /// session's cache, so `compile`'s own load attempt re-surfaces the
+    /// reload diagnostic as this envelope's refusal; the stale snapshot is
+    /// never consulted (#471, #512).
     pub fn compile(&mut self) -> Envelope<CompileResult> {
         let _ = self.refresh();
         self.session.compile()

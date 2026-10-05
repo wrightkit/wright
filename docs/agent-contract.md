@@ -162,8 +162,11 @@ diagnostic code (`input-io`, `parse-error`, `input-kind-ambiguous`, a
 provider diagnostic). The service keeps refusing until the project loads
 again, retrying on every program-reading request; the previously loaded
 program is never served silently, and the service never substitutes an
-empty or placeholder program. Repairing the input recovers the same running
-session — no restart and no explicit reload request.
+empty or placeholder program. The failed attempt invalidates the served
+snapshot: even restoring the input to byte-identical content loads a fresh
+program rather than resurrecting the dropped one. Repairing the input
+recovers the same running session — no restart and no explicit reload
+request.
 
 Numeric symbol ids and rule indexes are valid only for the program that
 issued them. After a content-changing reload, a request carrying a numeric

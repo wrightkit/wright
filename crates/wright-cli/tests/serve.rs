@@ -1133,14 +1133,20 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
         "wright-tool-service"
     );
 
-    // The broken project does not hide tools.
+    // The broken project does not hide tools: the set is the same one the
+    // server advertises once the project loads (compared below), and it
+    // still contains a program-reading tool.
     let list = exchange(serde_json::json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/list",
     }));
-    let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 12, "{list}");
+    let broken_names: Vec<String> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
     assert!(
-        tools.iter().any(|tool| tool["name"] == "wright_project"),
+        broken_names.iter().any(|name| name == "wright_project"),
         "{list}"
     );
 
@@ -1165,6 +1171,19 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
     }));
     assert!(healed["result"].get("isError").is_none(), "{healed}");
     assert_eq!(mcp_payload(&healed)["rules"], 1, "{healed}");
+
+    // The tool set is independent of project load state: identical before
+    // and after recovery in the same server.
+    let healed_list = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 5, "method": "tools/list",
+    }));
+    let healed_names: Vec<String> = healed_list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(healed_names, broken_names, "{healed_list}");
 
     drop(stdin);
     let output = child.wait_with_output().unwrap();
