@@ -18,7 +18,7 @@ Evidence comes from the stage 1 agent benchmark (Wright 0.8.0, three models, 144
 Existing surfaces do not cover this:
 
 - `targetMetadata` returns entry counts and enum members, not spellings or signatures.
-- `domainIntelligence` (ADR-0017, not implemented, still `Proposed`) selects by canonical identity or source position and returns owner facts and Wright guidance. It does not resolve a free-text guess into an identity, which is the step the agent is missing.
+- `domainIntelligence` (ADR-0017, accepted but not implemented) selects by canonical identity or source position and returns owner facts and Wright guidance. It does not resolve a free-text guess into an identity, which is the step the agent is missing.
 
 Reaching the owners differs by language. Raw Workshop is in-process through `workshop-rs`. OverPy is reached through the language-provider protocol, where capabilities are optional and negotiated.
 
@@ -51,7 +51,7 @@ Reaching the owners differs by language. Raw Workshop is in-process through `wor
 6. **Input stays strict, and diagnostic candidates travel in the message text.**
    - Wright and the owners do not accept non-upstream spellings as aliases for agent convenience. Whether `opy-rs` should stop accepting catalog spellings that the upstream compiler rejects is an owner decision tracked in `wrightkit/opy-rs#466`.
    - The `wright-result/v1` diagnostic has no field for candidates and its schema is closed, and the LPP Diagnostic carries only a range, severity, code, message and source. Owners therefore put the nearest valid candidates in the diagnostic `message`, and no schema or protocol field is added. Wright does not rewrite owner messages, and owners do not name Wright commands.
-   - Wright's text presentation of `check` and `compile` adds a one-line pointer to `wright lookup` after a diagnostic with an unknown-name code. The structured result is unchanged. Whether a structured candidate field is worth a later schema and protocol change is decided only if a consumer needs one.
+   - Wright's text presentation of `check` and `compile` adds a one-line pointer to `wright lookup` after a diagnostic with an unknown-name code. The structured result is unchanged, so CLI JSON, `wright serve` and MCP `wright_check` results do not carry the pointer. On those surfaces the pointer is the `wright_lookup` tool description and `wright lookup --help` (decision 8), and `wrightkit/wright#482` is narrowed accordingly: candidates appear in the owner's message on every surface, and the lookup pointer appears in text output and in the discovery channels. A structured pointer or candidate field is decided only if a consumer needs one.
 
 7. **OverPy requires a provider capability.** `lookup` for `opy` needs a new optional, negotiated LPP capability, added through the protocol's additive change rules. This is the provider-backed consumer that ADR-0017 decision 10 required before extending LPP. Its wire shape is decided in `wrightkit/language-provider-protocol`, not here. Until the provider advertises the capability, `lookup` for `opy` returns `unavailable` naming `opy-rs`.
 
@@ -59,13 +59,13 @@ Reaching the owners differs by language. Raw Workshop is in-process through `wor
 
 9. **Contract change.** The operation is additive within `wright-agent/v1`. The MCP adapter gains `wright_lookup`, which updates the initial tool set in ADR-0020 and the agent contract.
 
-10. **Settings paths with templates.** A template segment keeps the owner's spelling verbatim, as in the current diagnostics (`heroes.<team>.<hero>.health`). An entry's `spelling` is that path, and `within` matches a path prefix segment by segment against the owner's spelling, so `heroes` lists the next segment and `heroes.<team>.<hero>` lists the settings under it. Whether a template segment can also be listed with its allowed values is an owner detail in `wrightkit/opy-rs#465` and `wrightkit/workshop-rs#377`.
+10. **Settings paths with templates.** A template segment keeps the owner's spelling verbatim, as in the owner's settings table, including any suffix the key carries (`heroes.<team>.<hero>.health%`, where the `%` is part of the spelling). An entry's `spelling` is that path, and `within` matches a path prefix segment by segment against the owner's spelling, so `heroes` lists the next segment and `heroes.<team>.<hero>` lists the settings under it. Whether a template segment can also be listed with its allowed values is an owner detail in `wrightkit/opy-rs#465` and `wrightkit/workshop-rs#377`.
 
 11. **ADR-0017 is reconciled in this change.** It was approved when #323 closed on 2026-09-14 and `docs/architecture/domain-intelligence.md` was merged as the current contract, but its status stayed `Proposed`. This change marks it `Accepted`, so the design authority this ADR relies on is unambiguous. `lookup` entries use the owner's opaque identity. Where an owner issues a canonical identity, it is the identity ADR-0017's canonical selector accepts. For an OverPy-specific entry with no canonical identity, the identity is owner-specific and Wright invents no cross-language identity.
 
 ## Alternatives considered
 
-- **Fold lookup into `domainIntelligence`:** rejected for now because it couples a small resolver to an unimplemented result model and blocks the work on ADR-0017 acceptance. Revisit when `domainIntelligence` ships.
+- **Fold lookup into `domainIntelligence`:** rejected for now because it couples a small resolver to the `domainIntelligence` result model, which is accepted but not implemented. Revisit when `domainIntelligence` ships.
 - **Extend `targetMetadata`:** rejected for the reason ADR-0017 gives. It is a bulk summary, and growing it would return the catalog to the agent in one payload.
 - **Accept aliases in OverPy:** rejected. Workspace principle 7 makes the upstream compiler the executable specification, and accepting non-upstream spellings would make `check` pass source the reference compiler rejects.
 - **Ship a name list or manual in a skill:** rejected. It would be a shadow semantic authority that can drift from the owners, and skills are optional.
