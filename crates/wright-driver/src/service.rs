@@ -571,10 +571,15 @@ impl<'a> ToolService<'a> {
 
     /// Analyze through the shared session pipeline.
     ///
-    /// The same refresh contract as [`Self::compile`] applies (#471).
+    /// `analyze` renders through `self.semantic`, so a failed refresh cannot
+    /// delegate to the stale snapshot the way `compile` can — the session's
+    /// own load surfaces the same failure as the envelope's refusal (#471).
     pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
-        let _ = self.refresh();
-        self.session.analyze()
+        if self.refresh().is_err() {
+            return self.session.analyze();
+        }
+        self.session
+            .analyze_loaded(self.loaded.clone(), &self.semantic)
     }
 
     /// Inspect through the shared session pipeline.

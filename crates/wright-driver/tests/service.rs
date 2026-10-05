@@ -851,6 +851,10 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
             serde_json::to_string(&service.handle(&request)).unwrap()
         );
     }
+    assert_eq!(
+        serde_json::to_value(service.analyze()).unwrap(),
+        result_of(&mut service, &ToolRequest::Analyze)
+    );
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
