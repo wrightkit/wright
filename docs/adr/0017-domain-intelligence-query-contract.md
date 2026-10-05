@@ -1,6 +1,6 @@
 # ADR-0017: Domain-intelligence query contract
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-14
 - Related: [Issue #323](https://github.com/wrightkit/wright/issues/323), [ADR-0010](0010-independent-implementations-and-wright-integration.md), [ADR-0015](0015-canonical-facts-and-declarative-lint-policy.md)
 
