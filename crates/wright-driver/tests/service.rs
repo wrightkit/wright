@@ -975,11 +975,17 @@ fn directory_inputs_observe_added_and_removed_sources() {
     );
 
     std::fs::remove_file(dir.join("other.ws")).unwrap();
+    // The failed refresh invalidated the served snapshot (#512): restoring
+    // the exact previous disk state still reloads a fresh program — the
+    // fingerprint-identical bytes do not resurrect it — and ids issued by
+    // the dropped program refuse `stale-id` until the space is re-observed.
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Cfg { rule: 0.into() }),
+        "stale-id"
+    );
     assert_eq!(rules(&mut service), 2);
-    // The failed reload left `fingerprint` at the loaded state, and removing
-    // `other.ws` restored exactly that disk state — no reload is needed
-    // because the loaded program is genuinely current again.
-    assert_eq!(service.reload_count(), 1);
+    assert_eq!(service.reload_count(), 2);
+    result_of(&mut service, &ToolRequest::Cfg { rule: 0.into() });
 
     // Removing the sole member is equally observable.
     std::fs::remove_file(dir.join("program.ws")).unwrap();
@@ -1348,6 +1354,246 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
         let result = result_of(&mut service, &request);
         assert_eq!(result["ok"], false, "{request:?}: {result}");
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── Deferred project load and project-independent operations (#512) ────────
+
+/// An unreadable configured input does not fail service construction:
+/// project-independent operations answer without consulting the load, and
+/// program-reading requests refuse with the loader's diagnostic until the
+/// input heals — all within the same running service.
+#[test]
+fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
+    let dir = freshness_dir("deferred");
+    let input = dir.join("missing.ws");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    assert!(
+        service.loaded().is_none(),
+        "no placeholder snapshot is adopted"
+    );
+
+    // Project-independent operations answer without triggering a load.
+    result_of(&mut service, &ToolRequest::Capabilities);
+    result_of(&mut service, &ToolRequest::TargetMetadata);
+
+    // Every program-reading request refuses with the loader's diagnostic;
+    // no snapshot — stale or empty — is ever served. A numeric id is the
+    // same load refusal, not a `stale-id` against a nonexistent space.
+    for request in [
+        ToolRequest::Project,
+        ToolRequest::Rules,
+        ToolRequest::Symbols { kind: None },
+        ToolRequest::Check,
+        ToolRequest::References { symbol: 0.into() },
+    ] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "input-io",
+            "{request:?}"
+        );
+    }
+
+    // A provider mutation carries its own documents: an unconfigured
+    // language is the provider refusal result, not the load failure.
+    let mutation = result_of(
+        &mut service,
+        &ToolRequest::ProviderValidateEdit {
+            language_id: "not-a-language".to_string(),
+            documents: Default::default(),
+            transaction: wright_driver::edit::EditTransaction { edits: vec![] },
+            sources: Default::default(),
+            project_root: None,
+        },
+    );
+    assert_eq!(mutation["ok"], false, "{mutation}");
+    // None of the above triggered the project load.
+    assert!(service.loaded().is_none());
+
+    // The embedding `check` workflow surfaces the same loader diagnostic.
+    let check = service.check();
+    assert!(!check.ok);
+    assert!(
+        check.diagnostics.iter().any(|d| d.code == "input-io"),
+        "{:?}",
+        check.diagnostics
+    );
+
+    // Repairing the input lets the same service answer program-reading
+    // requests — no restart, no explicit reload.
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    assert!(
+        symbols
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|symbol| symbol["name"] == "score"),
+        "{symbols}"
+    );
+    assert!(service.loaded().is_some());
+    // The deferred initial load is not a disk-change reload.
+    assert_eq!(service.reload_count(), 0);
+
+    // Breaking it again refuses program reads until it heals once more.
+    std::fs::remove_file(&input).unwrap();
+    for request in [ToolRequest::Project, ToolRequest::Symbols { kind: None }] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "input-io",
+            "{request:?}"
+        );
+    }
+    result_of(&mut service, &ToolRequest::Capabilities);
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    result_of(&mut service, &ToolRequest::Project);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A malformed configured input behaves the same way: construction
+/// succeeds, program reads refuse with the parse diagnostic, and repair in
+/// place resumes normal service.
+#[test]
+fn a_malformed_input_defers_the_load_and_recovers_in_place() {
+    let dir = freshness_dir("malformed");
+    let input = dir.join("program.ws");
+    std::fs::write(
+        &input,
+        "variables {\n    global:\n        0: score\n}\nrule (\"setup\") {\n",
+    )
+    .unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    for request in [
+        ToolRequest::Project,
+        ToolRequest::Compile,
+        ToolRequest::Symbols { kind: None },
+    ] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "parse-error",
+            "{request:?}"
+        );
+    }
+
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let project = result_of(&mut service, &ToolRequest::Project);
+    assert_eq!(project["rules"], 1, "{project}");
+    assert!(service.check().ok, "check heals on the same session");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Ids issued before a failed refresh must not silently validate against
+/// the repaired program (#512 + #471): a failed load invalidates the id
+/// space, so numeric addresses issued by the previous snapshot refuse
+/// `stale-id` until the new space is observed.
+#[test]
+fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
+    let dir = freshness_dir("stale-recovery");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(&mut service, &ToolRequest::Rules);
+    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
+
+    std::fs::write(
+        &input,
+        "variables {\n    global:\n        0: score\n}\nrule (\"setup\") {\n",
+    )
+    .unwrap();
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Project),
+        "parse-error"
+    );
+
+    // The repaired program is adopted, but the previous snapshot's numeric
+    // ids refuse `stale-id` until the client re-observes each space.
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::References { symbol: 0.into() }),
+        "stale-id"
+    );
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Cfg { rule: 1.into() }),
+        "stale-id"
+    );
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
+    assert_eq!(usage["symbol"], "points");
+    result_of(&mut service, &ToolRequest::Rules);
+    result_of(&mut service, &ToolRequest::Cfg { rule: 1.into() });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A failed refresh invalidates the served snapshot even when the input is
+/// restored to byte-identical content (#512): recovery reloads a fresh
+/// program instead of fingerprint-matching the pre-failure snapshot back to
+/// life, and ids it issued refuse `stale-id` until the new space is
+/// observed.
+#[test]
+fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
+    let dir = freshness_dir("invalidate");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
+    let builds = service.semantic_build_count();
+
+    // Break the input, observe the refusal, then restore the exact previous
+    // bytes.
+    std::fs::write(
+        &input,
+        "variables {\n    global:\n        0: score\n}\nrule (\"setup\") {\n",
+    )
+    .unwrap();
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::Project),
+        "parse-error"
+    );
+    assert!(
+        service.loaded().is_none(),
+        "the failed refresh drops the served snapshot"
+    );
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+
+    // The next program read reloads: the fingerprint-identical restored
+    // bytes still produce a fresh snapshot, not the pre-failure one.
+    result_of(&mut service, &ToolRequest::Project);
+    assert_eq!(service.semantic_build_count(), builds + 1);
+
+    // The pre-failure numeric ids are stale until the space is re-observed.
+    assert_eq!(
+        refusal_code(&mut service, &ToolRequest::References { symbol: 0.into() }),
+        "stale-id"
+    );
+    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
     let _ = std::fs::remove_dir_all(&dir);
 }
 

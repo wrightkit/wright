@@ -19,9 +19,13 @@ envelope inside the agent response.
 
 Start a session with `wright serve [INPUT]`. `INPUT` is a source file or
 project directory; omission uses the current directory. Standard input is
-reserved for requests, so `-` is not a valid source input. The server loads one
-project and processes requests until standard input closes. The default
-transport is one JSON request per line on stdio:
+reserved for requests, so `-` is not a valid source input. The server binds
+the configured project and processes requests until standard input closes.
+Starting does not require the project to load successfully (#512): a project
+that is missing, unreadable, or malformed is retried by the next
+program-reading request, while `capabilities`, `targetMetadata`, and the
+`provider*` operations answer regardless. The default transport is one JSON
+request per line on stdio:
 
 ```json
 {"op":"capabilities"}
@@ -82,12 +86,14 @@ ADR-0020). The adapter speaks newline-delimited JSON-RPC 2.0 and implements
 | `providerValidateEdit` | `wright_provider_validate_edit` |
 
 `tools/list` contains a tool only when its operation is in this set and
-advertised by `capabilities.operations`. Each tool's `inputSchema` is derived
-from the operation's request schema with `op` removed (the tool name carries
-it); the Workshop edit tools also omit `sources`, which then defaults to the
-on-disk text (#472). The provider tools keep `documents` and `sources`
-required — the caller owns the document set. `tools/call` arguments are the
-request fields.
+advertised by `capabilities.operations`. `initialize`, `tools/list`, and the
+tool set itself are independent of whether the configured project currently
+loads — a broken project never hides tools (#512). Each tool's `inputSchema`
+is derived from the operation's request schema with `op` removed (the tool
+name carries it); the Workshop edit tools also omit `sources`, which then
+defaults to the on-disk text (#472). The provider tools keep `documents` and
+`sources` required — the caller owns the document set. `tools/call`
+arguments are the request fields.
 
 A successful service `result` is returned unchanged as the tool result's JSON
 text content. A service refusal is a tool result with `isError: true` whose
@@ -132,25 +138,35 @@ the successful `result` payload.
 | `providerSemanticRename` | `language_id`, `documents`, `position_document_uri`, `position`, `new_name`, optional `project_root`, `sources` | Provider-resolved rename transaction or structured refusal |
 | `providerValidateEdit` | `language_id`, `documents`, `transaction`, `sources`, optional `project_root` | Provider-validated transaction or structured refusal |
 
-### Freshness and id validity (#471)
+### Freshness and id validity (#471, #512)
 
-A request that consults the loaded program is served from the project as it
-exists on disk at request time. The service fingerprints the input's
-observable file set — a file input's own content, a directory input's
-resolved members, or every file under a source-language project's entry
-directory — and reloads when it changes, so an edit, an added file, or a
-removed file is reflected in the next `symbols`, `references`, `check`,
-`lint`, or other program-reading request without restarting the session. An
-unchanged input is never reloaded. `capabilities` (service metadata),
-`targetMetadata` (the static catalog), and `provider*` operations
-(caller-supplied documents) do not consult the loaded program and are
-answered regardless of disk state.
+The service may exist without a program snapshot: construction over a
+project that cannot load succeeds, and `capabilities`, `targetMetadata`
+(the static catalog), and `provider*` operations (caller-supplied
+documents) answer without consulting the project at all — they neither
+require nor trigger its load.
 
-A reload that fails — the entry was removed, or the source no longer loads —
-refuses the request with the loader's structured diagnostic code
-(`input-io`, `parse-error`, `input-kind-ambiguous`, a provider diagnostic).
-The session keeps refusing until the input loads again; the previously
-loaded program is never served silently.
+A request that consults the program needs a valid current snapshot at
+request time. When none exists, the request performs the deferred initial
+load; when one exists, the service fingerprints the input's observable file
+set — a file input's own content, a directory input's resolved members, or
+every file under a source-language project's entry directory — and reloads
+when it changes, so an edit, an added file, or a removed file is reflected
+in the next `symbols`, `references`, `check`, `lint`, or other
+program-reading request without restarting the session. An unchanged input
+is never reloaded.
+
+A load or reload that fails — the entry is missing or unreadable, or the
+source does not parse — refuses the request with the loader's structured
+diagnostic code (`input-io`, `parse-error`, `input-kind-ambiguous`, a
+provider diagnostic). The service keeps refusing until the project loads
+again, retrying on every program-reading request; the previously loaded
+program is never served silently, and the service never substitutes an
+empty or placeholder program. The failed attempt invalidates the served
+snapshot: even restoring the input to byte-identical content loads a fresh
+program rather than resurrecting the dropped one. Repairing the input
+recovers the same running session — no restart and no explicit reload
+request.
 
 Numeric symbol ids and rule indexes are valid only for the program that
 issued them. After a content-changing reload, a request carrying a numeric
@@ -159,8 +175,10 @@ the client observes the new space: a successful `symbols` response
 re-establishes symbol ids, a successful `rules` response re-establishes
 rule indexes, and an `ambiguous-symbol`/`ambiguous-rule` refusal
 re-establishes its own space because it already names the current
-candidates. Name addressing resolves against the current program in both
-states and is never stale.
+candidates. A reload that succeeds after earlier attempts failed is no
+exception: ids issued by the last served program do not silently validate
+against the repaired one. Name addressing resolves against the current
+program in both states and is never stale.
 
 The responses that issue numeric ids or indexes into the loaded program are
 `symbols` (symbol ids), `rules` (rule indexes), `usage` (the resolved `id`),

@@ -367,6 +367,109 @@ fn capability_negotiation_is_preserved() {
 }
 
 #[test]
+fn stdio_and_jsonrpc_transports_serve_over_an_unloadable_project() {
+    // #512: a configured input that cannot load must not stop `wright
+    // serve` — project-independent operations answer and program-reading
+    // operations refuse with the loader's diagnostic on every transport.
+    let dir = std::env::temp_dir().join(format!("wright-serve-512-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("missing.ws");
+
+    let stdio = run_lines(
+        "stdio",
+        &input,
+        &[
+            r#"{"op":"capabilities"}"#,
+            r#"{"op":"targetMetadata"}"#,
+            r#"{"op":"project"}"#,
+            r#"{"op":"symbols"}"#,
+        ],
+    );
+    assert_eq!(stdio[0]["result"]["agent_contract"], "wright-agent/v1");
+    assert!(
+        stdio[1]["result"]["actions"].as_u64().unwrap() > 0,
+        "{stdio:?}"
+    );
+    for response in &stdio[2..] {
+        assert_eq!(response["error"]["code"], "input-io", "{response}");
+    }
+
+    let jsonrpc = run_lines(
+        "jsonrpc",
+        &input,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"project"}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"check"}"#,
+        ],
+    );
+    // Service refusals stay application results: the loader's code rides
+    // `result.error`, never the JSON-RPC `error` member.
+    assert_eq!(jsonrpc[0]["result"]["error"]["code"], "input-io");
+    assert!(jsonrpc[0].get("error").is_none());
+    assert_eq!(jsonrpc[1]["id"], 2);
+    assert!(jsonrpc[1].get("error").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn stdio_transport_recovers_in_the_same_process() {
+    // #512: a session that started over a missing input loads the repaired
+    // project on the next program-reading request — no restart, no reload
+    // request.
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!("wright-serve-512-live-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("session.ws");
+
+    let mut child = Command::new(wright())
+        .args(["serve", "--transport", "stdio"])
+        .arg(&input)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright serve spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut exchange = |request: &str| -> serde_json::Value {
+        writeln!(stdin, "{request}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        assert_ne!(
+            stdout.read_line(&mut line).unwrap(),
+            0,
+            "the session answered {request}"
+        );
+        serde_json::from_str(&line).expect("JSON response")
+    };
+
+    assert_eq!(exchange(r#"{"op":"project"}"#)["error"]["code"], "input-io");
+    std::fs::write(
+        &input,
+        "variables {\n    global:\n        0: score\n}\n\nrule (\"setup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(score, 1);\n    }\n}\n",
+    )
+    .unwrap();
+    let healed = exchange(r#"{"op":"symbols"}"#);
+    assert!(
+        healed["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|symbol| symbol["name"] == "score"),
+        "the repaired input answers in the same session: {healed}"
+    );
+
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "serve exited: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn stdio_transport_serves_mutation_operations() {
     // #130/#434: the stdio adapter exposes the shared mutation operations as
     // thin mappings — validated edit preview and semantic rename — with the
@@ -976,6 +1079,111 @@ fn mcp_transport_observes_disk_changes_and_enforces_fresh_ids() {
     assert_eq!(names, ["points", "setup"]);
     let numeric = exchange(call("wright_references", serde_json::json!({"symbol": 0})));
     assert!(numeric["result"].get("isError").is_none(), "{numeric}");
+
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "serve exited: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
+    // #512: MCP `initialize`/`tools/list` are independent of the session
+    // project — a missing input must not prevent bootstrap or hide the
+    // stable tool set. `tools/call` maps the project-load refusal to the
+    // `isError` tool result, and the same server adopts the repaired input.
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!("wright-serve-mcp-512-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("session.ws");
+
+    let mut child = Command::new(wright())
+        .args(["serve", "--transport", "mcp"])
+        .arg(&input)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright serve spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut exchange = |request: serde_json::Value| -> serde_json::Value {
+        writeln!(stdin, "{request}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        assert_ne!(
+            stdout.read_line(&mut line).unwrap(),
+            0,
+            "no answer to {request}"
+        );
+        serde_json::from_str(&line).expect("JSON response")
+    };
+
+    let initialize = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}},
+    }));
+    assert_eq!(initialize["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(
+        initialize["result"]["serverInfo"]["name"],
+        "wright-tool-service"
+    );
+
+    // The broken project does not hide tools: the set is the same one the
+    // server advertises once the project loads (compared below), and it
+    // still contains a program-reading tool.
+    let list = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/list",
+    }));
+    let broken_names: Vec<String> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        broken_names.iter().any(|name| name == "wright_project"),
+        "{list}"
+    );
+
+    // A program-reading tool call is the service's structured refusal as an
+    // `isError` tool result — not a protocol error.
+    let refused = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "wright_project", "arguments": {}},
+    }));
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+    assert_eq!(mcp_payload(&refused)["code"], "input-io", "{refused}");
+
+    // Repairing the input recovers the same running server.
+    std::fs::write(
+        &input,
+        "variables {\n    global:\n        0: score\n}\n\nrule (\"setup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        Set Global Variable(score, 1);\n    }\n}\n",
+    )
+    .unwrap();
+    let healed = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+        "params": {"name": "wright_project", "arguments": {}},
+    }));
+    assert!(healed["result"].get("isError").is_none(), "{healed}");
+    assert_eq!(mcp_payload(&healed)["rules"], 1, "{healed}");
+
+    // The tool set is independent of project load state: identical before
+    // and after recovery in the same server.
+    let healed_list = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 5, "method": "tools/list",
+    }));
+    let healed_names: Vec<String> = healed_list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(healed_names, broken_names, "{healed_list}");
 
     drop(stdin);
     let output = child.wait_with_output().unwrap();

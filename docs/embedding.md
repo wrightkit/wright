@@ -97,8 +97,17 @@ parameters/documents.
 
 ## Session-aware tool service
 
-`ToolService::new(&mut session)` loads the program eagerly and answers typed
-[`ToolRequest`]s with owned [`ToolResponse`]s. `Capabilities` negotiates the
+`ToolService::new(&mut session)` loads the configured project when it can and
+answers typed [`ToolRequest`]s with owned [`ToolResponse`]s. A project that
+cannot load at construction does not fail the service (#512): the service
+exists without a program snapshot — `loaded()` returns `None` rather than a
+placeholder program — and each program-reading request retries the load,
+refusing with the loader's structured diagnostic until the project heals on
+disk. `capabilities`, `targetMetadata`, and the `provider*` operations carry
+their own data and answer without consulting the project at all. Repairing
+the input recovers the same running service on the next program-reading
+request; no restart or explicit reload is needed.
+`Capabilities` negotiates the
 service version, `wright-agent/v1` request/response contract,
 `wright-result/v1` workflow envelope, operations, languages, and profiles.
 The operation schemas, error model, and transport mapping are specified in the
@@ -166,7 +175,11 @@ explicit caller responsibility.
 
 `wright serve` exposes the same operations over stdio JSON-lines, JSON-RPC
 2.0, and MCP (`--transport mcp`); all three map to the same `ToolService`
-results as in-process consumers (equivalence tested). The separate
+results as in-process consumers (equivalence tested). Starting the server
+does not require the configured project to load (#512): MCP `initialize` and
+`tools/list` — and the stable tool set itself — are available over a broken
+project, and a program-reading `tools/call` surfaces the loader's refusal
+until the project heals. The separate
 `wright-serve` workspace binary remains an alias for the same adapter.
 JSON-RPC protocol failures use the standard top-level `error` member, while a
 service refusal remains an application result under the top-level `result`
