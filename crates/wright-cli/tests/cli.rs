@@ -2467,12 +2467,13 @@ fn rename_refusals_carry_structured_diagnostics_and_write_nothing() {
 }
 
 #[test]
-fn agent_mcp_configures_a_project_whose_server_answers_mcp() {
+fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     use std::io::{BufRead, BufReader};
     let project = temp_dir();
-    let in_project = |args: &[&str]| {
+    let elsewhere = temp_dir();
+    let install = |args: &[&str]| {
         Command::new(wright())
-            .args(["agent", "mcp"])
+            .args(["agent", "install"])
             .args(args)
             .current_dir(&project)
             .stdin(Stdio::null())
@@ -2480,24 +2481,22 @@ fn agent_mcp_configures_a_project_whose_server_answers_mcp() {
             .expect("wright runs")
     };
 
-    let output = in_project(&["install", "--target", "claude", "--guide"]);
+    let output = install(&["--mcp", "claude", "--no-guide"]);
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(project.join(".agents/skills/wright/SKILL.md").is_file());
+    assert!(!project.join(".agents").exists());
     let first = std::fs::read(project.join(".mcp.json")).unwrap();
-    assert!(
-        in_project(&["install", "--target", "claude"])
-            .status
-            .success()
-    );
+    assert!(install(&["--mcp", "claude", "--no-guide"]).status.success());
     assert_eq!(std::fs::read(project.join(".mcp.json")).unwrap(), first);
+    assert!(install(&["--mcp", "claude"]).status.success());
+    assert!(project.join(".agents/skills/wright/SKILL.md").is_file());
 
-    // Start the configured server exactly as the harness would: the entry's
-    // command and args, in the project root, with `wright` resolved to the
-    // binary under test.
+    // Start the configured server as the harness would: the entry's command
+    // and args with the harness's project-root expansion applied, from a
+    // working directory that is not the project.
     let config: serde_json::Value = serde_json::from_slice(&first).unwrap();
     let entry = &config["mcpServers"]["wright"];
     assert_eq!(entry["command"], "wright");
@@ -2506,16 +2505,20 @@ fn agent_mcp_configures_a_project_whose_server_answers_mcp() {
         corpus_workshop("synthetic/control-flow"),
     )
     .unwrap();
-    let mut child = Command::new(wright())
-        .args(
-            entry["args"]
-                .as_array()
+    let project_dir = project.to_str().unwrap();
+    let args: Vec<String> = entry["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| {
+            arg.as_str()
                 .unwrap()
-                .iter()
-                .map(|a| a.as_str().unwrap()),
-        )
-        .arg("session.ws")
-        .current_dir(&project)
+                .replace("${CLAUDE_PROJECT_DIR:-.}", project_dir)
+        })
+        .collect();
+    let mut child = Command::new(wright())
+        .args(&args)
+        .current_dir(&elsewhere)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -2549,18 +2552,27 @@ fn agent_mcp_configures_a_project_whose_server_answers_mcp() {
     drop(stdin);
     let _ = child.wait();
 
-    // Removal keeps the file but drops the Wright entry; an unsupported
-    // target fails with usage guidance instead of writing anything.
+    // Hand removal (delete the `wright` entry) is the documented removal; a
+    // differing entry is then refused without --force.
+    let mut config = config;
+    config["mcpServers"]["wright"]["command"] = "other".into();
+    std::fs::write(project.join(".mcp.json"), config.to_string()).unwrap();
+    let refused = install(&["--mcp", "claude", "--no-guide"]);
+    assert_eq!(refused.status.code(), Some(1));
     assert!(
-        in_project(&["remove", "--target", "claude"])
+        install(&["--mcp", "claude", "--no-guide", "--force"])
             .status
             .success()
     );
-    let config: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(project.join(".mcp.json")).unwrap()).unwrap();
-    assert!(config["mcpServers"].as_object().unwrap().is_empty());
-    let output = in_project(&["install", "--target", "emacs"]);
+    config["mcpServers"] = serde_json::json!({});
+    std::fs::write(project.join(".mcp.json"), config.to_string()).unwrap();
+    assert!(install(&["--mcp", "claude", "--no-guide"]).status.success());
+
+    // An unsupported target and `--no-guide` alone are usage errors.
+    let output = install(&["--mcp", "emacs"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("claude"));
+    assert_eq!(install(&["--no-guide"]).status.code(), Some(2));
     let _ = std::fs::remove_dir_all(&project);
+    let _ = std::fs::remove_dir_all(&elsewhere);
 }

@@ -212,35 +212,72 @@ pub(crate) fn install(args: &AgentInstallArgs) -> Result<InstallStatus, AgentErr
     })
 }
 
+fn report_guide(status: &InstallStatus) {
+    match status {
+        InstallStatus::Created(path) | InstallStatus::Updated(path) => {
+            let verb = if matches!(status, InstallStatus::Created(_)) {
+                "installed"
+            } else {
+                "updated"
+            };
+            println!("==> {verb} the Wright agent guide in {}", path.display());
+            println!("remove that directory to uninstall; re-run `wright agent install` to update");
+        }
+        InstallStatus::UpToDate(path) => {
+            println!(
+                "the Wright agent guide in {} is already up to date",
+                path.display()
+            );
+        }
+        InstallStatus::DryRun(path) => {
+            println!("would install the Wright agent guide to {}", path.display());
+        }
+    }
+}
+
+fn report_mcp(status: &mcp::McpStatus) {
+    match status {
+        mcp::McpStatus::Created(path) => {
+            println!("==> configured the Wright MCP server in {}", path.display());
+            println!("delete its `wright` entry to remove it");
+        }
+        mcp::McpStatus::Replaced(path) => {
+            println!(
+                "==> replaced the Wright MCP server entry in {}",
+                path.display()
+            );
+        }
+        mcp::McpStatus::UpToDate(path) => {
+            println!(
+                "the Wright MCP server in {} is already up to date",
+                path.display()
+            );
+        }
+        mcp::McpStatus::DryRun(path) => {
+            println!(
+                "would configure the Wright MCP server in {}",
+                path.display()
+            );
+        }
+    }
+}
+
 pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
     match &args.subcommand {
         Some(AgentSubcommand::Install(install_args)) => {
-            let status = install(install_args)?;
-            match &status {
-                InstallStatus::Created(path) | InstallStatus::Updated(path) => {
-                    let verb = if matches!(status, InstallStatus::Created(_)) {
-                        "installed"
-                    } else {
-                        "updated"
-                    };
-                    println!("==> {verb} the Wright agent guide in {}", path.display());
-                    println!(
-                        "remove that directory to uninstall; re-run `wright agent install` to update"
-                    );
-                }
-                InstallStatus::UpToDate(path) => {
-                    println!(
-                        "the Wright agent guide in {} is already up to date",
-                        path.display()
-                    );
-                }
-                InstallStatus::DryRun(path) => {
-                    println!("would install the Wright agent guide to {}", path.display());
-                }
+            if !install_args.no_guide {
+                report_guide(&install(install_args)?);
+            }
+            if let Some(target) = install_args.mcp {
+                report_mcp(&mcp::install(
+                    Path::new("."),
+                    target,
+                    install_args.force,
+                    install_args.dry_run,
+                )?);
             }
             Ok(exit::SUCCESS)
         }
-        Some(AgentSubcommand::Mcp(mcp_args)) => mcp::run(mcp_args),
         None => Err(AgentError::Usage(
             "specify an agent command (run `wright agent --help` for details)".into(),
         )),
@@ -256,6 +293,8 @@ mod tests {
             dest,
             force,
             dry_run,
+            mcp: None,
+            no_guide: false,
         }
     }
 
