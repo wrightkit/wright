@@ -11,6 +11,8 @@ use wright_driver::sha256_hex;
 
 use crate::cli::{AgentArgs, AgentInstallArgs, AgentSubcommand};
 
+mod mcp;
+
 mod exit {
     pub(super) const SUCCESS: u8 = 0;
     pub(super) const USER_ERROR: u8 = 1;
@@ -238,6 +240,7 @@ pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
             }
             Ok(exit::SUCCESS)
         }
+        Some(AgentSubcommand::Mcp(mcp_args)) => mcp::run(mcp_args),
         None => Err(AgentError::Usage(
             "specify an agent command (run `wright agent --help` for details)".into(),
         )),

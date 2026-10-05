@@ -328,6 +328,64 @@ pub(crate) enum AgentSubcommand {
     /// Install the canonical Wright agent guide as an agent skill in the
     /// project; re-running refreshes it in place.
     Install(AgentInstallArgs),
+    /// Register or remove Wright's MCP server in a coding-agent harness's
+    /// project-local config (#509).
+    Mcp(AgentMcpArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentMcpArgs {
+    #[command(subcommand)]
+    pub(crate) action: AgentMcpAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentMcpAction {
+    /// Add or update the Wright MCP server entry; re-running is idempotent.
+    Install(AgentMcpInstallArgs),
+    /// Remove the Wright MCP server entry, leaving other configuration alone.
+    Remove(AgentMcpRemoveArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum McpTarget {
+    /// Claude Code: `.mcp.json`.
+    Claude,
+    /// Cursor: `.cursor/mcp.json`.
+    Cursor,
+    /// VS Code: `.vscode/mcp.json`.
+    Vscode,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentMcpInstallArgs {
+    /// Harness whose project-local config to write.
+    #[arg(long, value_enum)]
+    pub(crate) target: McpTarget,
+
+    /// Replace a `wright` server entry that does not run
+    /// `wright serve --transport mcp`.
+    #[arg(long)]
+    pub(crate) force: bool,
+
+    /// Report the change without writing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+
+    /// Also install the Wright agent guide, as `wright agent install` does.
+    #[arg(long)]
+    pub(crate) guide: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentMcpRemoveArgs {
+    /// Harness whose project-local config to edit.
+    #[arg(long, value_enum)]
+    pub(crate) target: McpTarget,
+
+    /// Report the change without writing files.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Debug, Args)]

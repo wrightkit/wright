@@ -47,6 +47,7 @@ result.
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
 | `wright agent install` | Install the canonical Wright agent guide into the project's agent skills directory | installation progress and guidance |
+| `wright agent mcp install\|remove --target <claude\|cursor\|vscode>` | Register or remove Wright's MCP server in a harness's project-local config | configuration progress and guidance |
 
 `wright --version` prints the implementation version banner
 (`wright <version> (wright-driver <version>)`); the version is the single
@@ -112,6 +113,37 @@ dropped inside it are removed. A path that was not installed by `wright
 agent install` (directory, file, or link) is refused unless `--force` is
 passed. Removing the directory uninstalls the guide; nothing outside the
 skills directory is touched.
+
+## `wright agent mcp` — MCP bootstrap (#509)
+
+`wright agent mcp install --target <TARGET>` writes the one Wright-owned entry
+that makes a coding-agent harness start `wright serve --transport mcp` for the
+current project, so the shipped `wright_*` tools are discoverable without
+hand-written MCP configuration (ADR-0020). It runs from the project root and
+writes only project-local config:
+
+| Target | File | Servers key |
+| --- | --- | --- |
+| `claude` | `.mcp.json` | `mcpServers` |
+| `cursor` | `.cursor/mcp.json` | `mcpServers` (input `${workspaceFolder}`) |
+| `vscode` | `.vscode/mcp.json` | `servers` (input `${workspaceFolder}`) |
+
+Any other target is a usage error; Wright does not guess harness formats. The
+harness owns starting and stopping the stdio process; Wright adds no daemon or
+registry. `--guide` also installs the agent guide exactly as `wright agent
+install` does; MCP setup does not require it.
+
+The entry is idempotent and Wright-owned when its command is `wright` and its
+arguments begin `serve --transport mcp`. Re-running reports up to date, or
+updates a stale Wright-owned entry in place under its existing key, so no
+duplicate server appears. Other servers and settings are preserved (JSON key
+order may be normalized). A `wright` entry that runs something else is refused
+unless `--force`; a config that is not plain JSON (for example JSONC with
+comments) is refused untouched. `--dry-run` reports without writing.
+
+`wright agent mcp remove --target <TARGET>` deletes only the Wright-owned
+entry and leaves the file and everything else in it; a foreign `wright` entry
+is refused. To update after upgrading Wright, re-run `install`.
 
 Commands that report findings (`check`, `analyze`, `lint`, `inspect cost`)
 share the finding-selection options `--severity`, `--rule-id`, `--file`, and
