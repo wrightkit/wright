@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -45,21 +46,142 @@ impl LanguageProvider for WorkshopProvider {
 }
 
 /// Catalog-aware validation over the owner's canonical contract, composed
-/// with the residual completeness surface: `validate_canonical_ids` also
-/// rejects catalog-unknown action and value spellings, but those are the
-/// `semantic_issues` channel's territory — they report as classified
-/// residual diagnostics, not a single aborting error. Deferring keeps that
-/// contract; every other canonical error is a real owner rejection.
+/// with the residual completeness surface. `validate_canonical_ids` is
+/// fail-fast, so a catalog-unknown residual it also flags would mask every
+/// later violation; instead the constructs the owner itself reports as
+/// residuals (`semantic_issues`) are neutralized in a clone, and canonical
+/// validation judges the remaining program. Residuals still report through
+/// the completeness channel; every canonical error on the known remainder
+/// is a real owner rejection.
 pub(crate) fn validate_canonical(
     program: &workshop_rs::Program,
     catalog: &workshop_rs::catalog::Catalog,
 ) -> Result<(), workshop_rs::WorkshopError> {
-    match workshop_rs::validate::validate_canonical_ids(program, catalog) {
-        Err(workshop_rs::WorkshopError::Unknown {
-            kind: "action" | "value",
+    let mut residual_actions = HashSet::new();
+    let mut residual_values = HashSet::new();
+    for issue in program.semantic_issues(catalog) {
+        match issue.kind {
+            workshop_rs::rules::IncompletenessKind::UnknownAction
+            | workshop_rs::rules::IncompletenessKind::OpaqueAction => {
+                residual_actions.insert(issue.name);
+            }
+            workshop_rs::rules::IncompletenessKind::UnknownValue => {
+                residual_values.insert(issue.name);
+            }
+            workshop_rs::rules::IncompletenessKind::RawSetting => {}
+        }
+    }
+    if residual_actions.is_empty() && residual_values.is_empty() {
+        return workshop_rs::validate::validate_canonical_ids(program, catalog);
+    }
+    let mut stripped = program.clone();
+    strip_residuals(&mut stripped, &residual_actions, &residual_values);
+    workshop_rs::validate::validate_canonical_ids(&stripped, catalog)
+}
+
+fn strip_residuals(
+    program: &mut workshop_rs::Program,
+    residual_actions: &HashSet<String>,
+    residual_values: &HashSet<String>,
+) {
+    for rule in &mut program.rules {
+        rule.actions
+            .retain(|action| !is_residual_action(action, residual_actions));
+        for action in &mut rule.actions {
+            strip_action_values(action, residual_values);
+        }
+        for condition in &mut rule.conditions {
+            strip_residual_value(&mut condition.value, residual_values);
+        }
+    }
+}
+
+/// Whether an action is itself a reported residual — an unknown or opaque
+/// call, or a disabled block wrapping one.
+fn is_residual_action(action: &workshop_rs::Action, residual_actions: &HashSet<String>) -> bool {
+    match action {
+        workshop_rs::Action::Call { name, .. } => residual_actions.contains(name),
+        workshop_rs::Action::Disabled { action } => is_residual_action(action, residual_actions),
+        _ => false,
+    }
+}
+
+fn strip_action_values(action: &mut workshop_rs::Action, residual_values: &HashSet<String>) {
+    use workshop_rs::Action;
+    match action {
+        Action::Call { args, .. } => {
+            for arg in args {
+                strip_residual_value(arg, residual_values);
+            }
+        }
+        Action::SetGlobalVariable { value, .. }
+        | Action::ModifyGlobalVariable { value, .. }
+        | Action::If { condition: value }
+        | Action::ElseIf { condition: value }
+        | Action::While { condition: value } => {
+            strip_residual_value(value, residual_values);
+        }
+        Action::SetPlayerVariable { player, value, .. }
+        | Action::ModifyPlayerVariable { player, value, .. }
+        | Action::AssignMember {
+            target: player,
+            value,
             ..
-        }) => Ok(()),
-        result => result,
+        } => {
+            strip_residual_value(player, residual_values);
+            strip_residual_value(value, residual_values);
+        }
+        Action::ForGlobalVariable {
+            start, stop, step, ..
+        } => {
+            for value in [start, stop, step] {
+                strip_residual_value(value, residual_values);
+            }
+        }
+        Action::ForPlayerVariable {
+            player,
+            start,
+            stop,
+            step,
+            ..
+        } => {
+            for value in [player, start, stop, step] {
+                strip_residual_value(value, residual_values);
+            }
+        }
+        Action::Disabled { action } => strip_action_values(action, residual_values),
+        Action::CallSubroutine { .. } | Action::Else | Action::End => {}
+    }
+}
+
+/// Replace a residual value call with `Null`: the owner treats Null as a
+/// valid placeholder for every value contract, so the substitution cannot
+/// fabricate a violation, and it keeps the enclosing call's arity and the
+/// rest of its arguments under canonical scrutiny.
+fn strip_residual_value(value: &mut workshop_rs::Value, residual_values: &HashSet<String>) {
+    use workshop_rs::Value;
+    if matches!(value, Value::Call { name, .. } if residual_values.contains(name)) {
+        *value = Value::Null;
+        return;
+    }
+    match value {
+        Value::Call { args, .. } => {
+            for arg in args {
+                strip_residual_value(arg, residual_values);
+            }
+        }
+        Value::Array(elements) => {
+            for element in elements {
+                strip_residual_value(element, residual_values);
+            }
+        }
+        Value::Vector { x, y, z } => {
+            for component in [x.as_mut(), y.as_mut(), z.as_mut()] {
+                strip_residual_value(component, residual_values);
+            }
+        }
+        Value::PlayerVariable { player, .. } => strip_residual_value(player, residual_values),
+        _ => {}
     }
 }
 

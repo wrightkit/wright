@@ -62,6 +62,38 @@ fn provider_check_reports_canonical_rejection_as_error_diagnostic() {
     );
 }
 
+/// A catalog-unknown residual must not mask a later canonical violation:
+/// the owner validator is fail-fast, so residual constructs are neutralized
+/// before canonical validation judges the rest of the program. The
+/// violation reports in either order and the residual still reports.
+#[test]
+fn provider_check_rejects_violations_beside_residuals() {
+    let provider = WorkshopProvider::new().expect("provider initializes");
+    for (name, actions) in [
+        ("residual-first.txt", "Wait(sqrt(4)); Wait();"),
+        ("violation-first.txt", "Wait(); Wait(sqrt(4));"),
+    ] {
+        let source =
+            format!("rule (\"r\") {{ event {{ Ongoing - Global; }} actions {{ {actions} }} }}");
+        let diagnostics = provider
+            .check(&source, Path::new(name))
+            .expect("check reports diagnostics");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.code == "workshop.catalog-validation"
+                    && d.severity == wright_driver::Severity::Error),
+            "{name}: residual does not mask the Wait() arity violation: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.code == "workshop.unknown-value.sqrt"),
+            "{name}: the sqrt residual still reports: {diagnostics:?}"
+        );
+    }
+}
+
 #[test]
 fn provider_parse_failure_is_an_explicit_result_error() {
     let provider = WorkshopProvider::new().expect("provider initializes");

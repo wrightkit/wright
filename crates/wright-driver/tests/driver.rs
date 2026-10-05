@@ -168,6 +168,61 @@ fn workshop_check_and_compile_reject_catalog_signature_violations() {
     let _ = std::fs::remove_dir_all(&directory);
 }
 
+/// A catalog-unknown residual must not mask a later canonical violation:
+/// the owner validator is fail-fast, so the residual construct is
+/// neutralized before canonical validation judges the rest of the program.
+/// The violation is rejected in either order, including under a transform
+/// profile that would fold the residual away before emission.
+#[test]
+fn workshop_check_and_compile_reject_violations_beside_residuals() {
+    let directory = workspace_root()
+        .join("target")
+        .join(format!("wright-driver-mixed-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("fixture directory creates");
+    for (name, calls) in [
+        ("residual-then-violation", "Wait(sqrt(4));\n        Wait();"),
+        ("violation-then-residual", "Wait();\n        Wait(sqrt(4));"),
+    ] {
+        let path = directory.join(format!("{name}.ws"));
+        std::fs::write(
+            &path,
+            format!("rule (\"r\")\n{{\n    event\n    {{\n        Ongoing - Global;\n    }}\n    actions\n    {{\n        {calls}\n    }}\n}}\n"),
+        )
+        .expect("fixture writes");
+        for profile in [wright_driver::Profile::Off, wright_driver::Profile::Compat] {
+            let mut session = CompilerSession::new(SessionConfig {
+                input: InputSpec::Path(path.clone()),
+                kind: SourceKind::Workshop,
+                profile,
+                ..SessionConfig::default()
+            })
+            .expect("session creates");
+            let check = session.check();
+            assert!(
+                !check.ok
+                    && check
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.code == "unsupported-construct"
+                            && d.severity == wright_driver::Severity::Error),
+                "{name}/{profile:?}: check rejects the canonical violation: {:?}",
+                check.diagnostics
+            );
+            let compile = session.compile();
+            assert!(
+                !compile.ok
+                    && compile
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.code == "unsupported-construct"),
+                "{name}/{profile:?}: compile rejects instead of emitting: {:?}",
+                compile.diagnostics
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 /// Trailing catalog defaults are not required arguments: the owner
 /// validator accepts `Wait(1)` and `Wait(1, Ignore Condition)`, and the
 /// integration must not reject them.
