@@ -30,11 +30,36 @@ impl LanguageProvider for WorkshopProvider {
             .validate()
             .map_err(|error| ProviderError::new("workshop.validate", error.to_string()))?;
 
-        Ok(program
-            .semantic_issues(&self.catalog)
-            .into_iter()
-            .map(|issue| map_issue(&issue, path))
-            .collect())
+        let mut diagnostics = Vec::new();
+        if let Err(error) = validate_canonical(&program, &self.catalog) {
+            diagnostics.push(canonical_diagnostic(&error, path));
+        }
+        diagnostics.extend(
+            program
+                .semantic_issues(&self.catalog)
+                .into_iter()
+                .map(|issue| map_issue(&issue, path)),
+        );
+        Ok(diagnostics)
+    }
+}
+
+/// Catalog-aware validation over the owner's canonical contract, composed
+/// with the residual completeness surface: `validate_canonical_ids` also
+/// rejects catalog-unknown action and value spellings, but those are the
+/// `semantic_issues` channel's territory — they report as classified
+/// residual diagnostics, not a single aborting error. Deferring keeps that
+/// contract; every other canonical error is a real owner rejection.
+pub(crate) fn validate_canonical(
+    program: &workshop_rs::Program,
+    catalog: &workshop_rs::catalog::Catalog,
+) -> Result<(), workshop_rs::WorkshopError> {
+    match workshop_rs::validate::validate_canonical_ids(program, catalog) {
+        Err(workshop_rs::WorkshopError::Unknown {
+            kind: "action" | "value",
+            ..
+        }) => Ok(()),
+        result => result,
     }
 }
 
@@ -99,6 +124,29 @@ pub fn diagnostic_code(kind: &str, identity: &str) -> String {
             })
             .collect::<String>()
     )
+}
+
+/// Project an owner canonical-validation rejection into a provider
+/// diagnostic: the owner error keeps its identity and source span while the
+/// rejection surfaces as an error-severity finding, like the residual
+/// diagnostics this path already returns.
+fn canonical_diagnostic(error: &workshop_rs::WorkshopError, path: &Path) -> ProviderDiagnostic {
+    ProviderDiagnostic {
+        code: "workshop.catalog-validation".to_string(),
+        severity: ProviderSeverity::Error,
+        status: Status::Unsupported,
+        span: provider_span(workshop_error_span(error), path),
+        message: error.to_string(),
+    }
+}
+
+fn workshop_error_span(error: &workshop_rs::WorkshopError) -> Option<workshop_rs::source::Span> {
+    match error {
+        workshop_rs::WorkshopError::Unknown { span, .. }
+        | workshop_rs::WorkshopError::Malformed { span, .. }
+        | workshop_rs::WorkshopError::Unsupported { span, .. } => *span,
+        _ => None,
+    }
 }
 
 fn status_name(status: Status) -> &'static str {

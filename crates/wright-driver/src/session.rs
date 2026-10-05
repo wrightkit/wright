@@ -605,6 +605,11 @@ impl CompilerSession {
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
         hotpath::measure_block!("load::validate", program.validate())
             .map_err(|error| workshop_diag(error, resolved))?;
+        hotpath::measure_block!(
+            "load::validate_canonical",
+            crate::workshop_provider::validate_canonical(&program, &self.catalog)
+        )
+        .map_err(|error| workshop_diag(error, resolved))?;
         Ok((program, locale.to_string()))
     }
 

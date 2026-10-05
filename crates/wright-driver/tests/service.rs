@@ -563,7 +563,7 @@ rule ("effect") {
         Ongoing - Global;
     }
     actions {
-        Create Effect(All Players(All), Orb, Red, Vector(0, 0, 0), 1, None);
+        Create Effect(All Players(All Teams), Orb, Red, Vector(0, 0, 0), 1, None);
     }
 }
 "#;
