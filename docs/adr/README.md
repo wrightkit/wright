@@ -40,4 +40,5 @@ its audit date.
 * [ADR-0018: Tests-first integration verification](0018-tests-first-integration-verification.md)
 * [ADR-0019: Stable installer bootstrap distribution](0019-stable-installer-bootstrap-distribution.md)
 * [ADR-0020: Native coding-agent tools as an MCP adapter over `ToolService`](0020-native-agent-tool-adapter.md)
+* [ADR-0021: Name and signature lookup for agent authoring](0021-name-and-signature-lookup.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
