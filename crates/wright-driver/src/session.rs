@@ -557,11 +557,23 @@ impl CompilerSession {
     /// provider is configured for the id, or when a required capability was
     /// not negotiated, the failure is an explicit structured
     /// `wright_lpp::ProviderError` — there is no silent fallback to
-    /// in-process compiler semantics.
+    /// in-process compiler semantics. A session whose configuration changed
+    /// after construction refuses through the LPP refusal channel with
+    /// `refusalCode` `session-config-changed` (#511).
     pub fn language_provider(
         &self,
         id: &str,
     ) -> Result<Box<dyn wright_lpp::LanguageProvider>, wright_lpp::ProviderError> {
+        // Provider workflows consume `config.providers`/`config.opy_provider`
+        // live; a changed configuration refuses through the provider refusal
+        // channel carrying `session-config-changed` (#511).
+        if let Err(diagnostic) = self.verify_fixed_config() {
+            return Err(wright_lpp::ProviderError::lpp(
+                wright_lpp::LppErrorKind::Refusal,
+                serde_json::json!({ "refusalCode": diagnostic.code }),
+                diagnostic.message,
+            ));
+        }
         if id == opy_provider::OPY_LANGUAGE_ID && !self.config.providers.contains(id) {
             let res = self.config.opy_provider.resolve().map_err(|e| {
                 wright_lpp::ProviderError::Local {

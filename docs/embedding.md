@@ -85,10 +85,15 @@ capability: the next workflow (`load`, `compile`, `check`, `analyze`,
 `rename`, `validate_edit_transaction`, `semantic_rename`) or `ToolService`
 construction refuses with a `session-config-changed` diagnostic naming the
 changed fields, rather than reusing state derived from the earlier
-configuration. The supported runtime changes are separate explicit
-capabilities: attaching or clearing a progress observer, file contents
-changing on disk under the configured input (the #471 disk-refresh
-lifecycle), and request-local `ToolRequest` parameters/documents.
+configuration. The provider surfaces that consume the provider
+registry/first-party provider configuration — `language_provider`,
+`run_provider_flow`, and the `provider*` tool operations routed through them
+— refuse through the provider refusal channel carrying the same
+`session-config-changed` refusal code. The supported runtime changes are
+separate explicit capabilities: attaching or clearing a progress observer,
+file contents changing on disk under the configured input (the #471
+disk-refresh lifecycle), and request-local `ToolRequest`
+parameters/documents.
 
 ## Session-aware tool service
 

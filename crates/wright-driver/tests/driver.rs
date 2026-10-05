@@ -344,3 +344,55 @@ fn session_config_mutation_refuses_edits_and_service_construction() {
     assert_eq!(error.code, "session-config-changed");
     assert!(error.message.contains("lint"), "{error:?}");
 }
+
+/// #511: the provider seam consumes `config.providers`/`config.opy_provider`
+/// live; a mutated registry refuses through the provider refusal channel
+/// carrying `session-config-changed` instead of spawning from the changed
+/// configuration.
+#[test]
+fn session_config_mutation_refuses_provider_workflows() {
+    let path = workshop_fixture("synthetic/control-flow");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+
+    session
+        .config
+        .providers
+        .register(wright_lpp::ProviderConfig::new(
+            "x-demo",
+            "/bin/false",
+            Vec::new(),
+        ))
+        .expect("provider registers");
+
+    let error = session
+        .language_provider("x-demo")
+        .err()
+        .expect("provider spawn refuses");
+    assert_eq!(
+        error.refusal_code(),
+        Some("session-config-changed"),
+        "{error:?}"
+    );
+
+    // The provider-mutation flow surfaces the same structured refusal and
+    // never runs its flow.
+    let mutation = session.run_provider_flow(
+        "x-demo",
+        &wright_lpp::ClientInfo {
+            name: "wright-driver-test".to_string(),
+            version: "0".to_string(),
+        },
+        |_| panic!("the provider flow must not run"),
+    );
+    assert!(!mutation.ok);
+    assert_eq!(
+        mutation.provider_code.as_deref(),
+        Some("session-config-changed"),
+        "{mutation:?}"
+    );
+}
