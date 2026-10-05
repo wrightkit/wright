@@ -573,3 +573,73 @@ fn caller_transaction_that_breaks_the_source_refuses() {
     assert!(mutation.transaction.is_none());
     assert!(mutation.preview.is_none(), "no partial preview");
 }
+
+// ---------------------------------------------------------------------------
+// Provider operations are independent of the session project (#512)
+// ---------------------------------------------------------------------------
+
+/// Provider mutations carry their own documents and project context: an
+/// unrelated broken session project neither blocks them nor gets loaded by
+/// them.
+#[test]
+fn provider_mutations_do_not_require_the_session_project() {
+    let Some(provider) = mock_provider_path() else {
+        return;
+    };
+    let mut registry = wright_lpp::ProviderRegistry::new();
+    registry
+        .register(wright_lpp::ProviderConfig::new(
+            DEMO_LANGUAGE_ID,
+            provider,
+            Vec::new(),
+        ))
+        .expect("registered");
+    // The configured session input does not exist; the service still
+    // starts, without a snapshot.
+    let dir = std::env::temp_dir().join(format!("wright-provider-512-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(dir.join("missing.ws")),
+        kind: SourceKind::Workshop,
+        providers: registry,
+        ..SessionConfig::default()
+    })
+    .expect("session");
+    let session = Box::leak(Box::new(session));
+    let mut service = ToolService::new(session).expect("service starts without a snapshot");
+    assert!(service.loaded().is_none());
+
+    let rename = handle(
+        &mut service,
+        &rename_request(
+            single_document_set(),
+            URI,
+            DOUBLE_POSITION,
+            "twice",
+            sources_of(&single_document_set()),
+        ),
+    );
+    assert!(
+        rename.ok,
+        "the provider rename succeeds over its own documents: {:?}",
+        rename.diagnostics
+    );
+    let validate = handle(
+        &mut service,
+        &ToolRequest::ProviderValidateEdit {
+            language_id: DEMO_LANGUAGE_ID.to_string(),
+            documents: single_document_set(),
+            transaction: rename_all_occurrences_transaction(),
+            sources: sources_of(&single_document_set()),
+            project_root: None,
+        },
+    );
+    assert!(
+        validate.ok,
+        "the provider validation succeeds over its own documents: {:?}",
+        validate.diagnostics
+    );
+    // Neither flow triggered the unrelated session-project load.
+    assert!(service.loaded().is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}

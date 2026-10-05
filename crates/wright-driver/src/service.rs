@@ -223,13 +223,20 @@ pub struct Capabilities {
 /// The session-aware tool service.
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
-    loaded: Loaded,
-    semantic: Arc<SemanticService<'static>>,
+    /// The current program snapshot, when one exists. The service may exist
+    /// without one (#512): a configured project that cannot load at
+    /// construction is deferred to the first program-reading request rather
+    /// than failing the service, so `None` is the unloaded state — never an
+    /// empty placeholder program.
+    loaded: Option<Loaded>,
+    /// The shared semantic service over `loaded` — `Some` exactly when a
+    /// snapshot is held.
+    semantic: Option<Arc<SemanticService<'static>>>,
     lint_semantic: Option<SemanticService<'static>>,
     /// The disk state `loaded` was read from, recomputed before every
     /// program-reading request so a long-lived session observes edits, file
-    /// additions, and removals (#471).
-    fingerprint: input::DiskFingerprint,
+    /// additions, and removals (#471). `None` while no snapshot is held.
+    fingerprint: Option<input::DiskFingerprint>,
     /// Whether the symbol ids a client holds were issued by the current
     /// program (#471): a reload clears it until a `symbols` listing or an
     /// `ambiguous-symbol` refusal names the current space.
@@ -243,41 +250,50 @@ pub struct ToolService<'a> {
 }
 
 impl<'a> ToolService<'a> {
-    /// Build the service over a session, loading the program eagerly.
+    /// Build the service over a session.
     ///
     /// A session whose configuration changed after construction is refused
     /// with `session-config-changed` (#511): the service never adopts state
     /// derived from a superseded configuration.
+    ///
+    /// The configured project is loaded eagerly when it can be, but a load
+    /// failure does not fail construction (#512): the service exists without
+    /// a program snapshot, project-independent operations (`capabilities`,
+    /// `targetMetadata`, the `provider*` mutations) stay available, and each
+    /// program-reading request retries the load — surfacing the loader's
+    /// structured diagnostic until the project heals.
     #[hotpath::measure]
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         session.verify_fixed_config()?;
-        let loaded = session.load()?;
-        let fingerprint = input::disk_fingerprint(&session.config, &loaded.input);
-        let semantic = session.shared_semantic(&loaded);
-        let lint_semantic = (!session.config.lint.rules.is_empty())
-            .then(|| semantic.with_lint_config(session.config.lint.clone()));
-        Ok(ToolService {
+        let mut service = ToolService {
             session,
-            loaded,
-            semantic,
-            lint_semantic,
-            fingerprint,
+            loaded: None,
+            semantic: None,
+            lint_semantic: None,
+            fingerprint: None,
             symbol_ids_current: true,
             rule_ids_current: true,
             reloads: 0,
-        })
+        };
+        if let Ok(loaded) = service.session.load() {
+            service.adopt(loaded);
+        }
+        Ok(service)
     }
 
     /// Reloads caused by observed disk changes (#471). An input whose
     /// fingerprint has not changed is never reloaded, so a stable value
     /// across requests proves the session kept serving the same snapshot.
+    /// The deferred initial load (#512) is not a reload.
     pub fn reload_count(&self) -> usize {
         self.reloads
     }
 
-    /// The loaded program snapshot (origin, input identity, canonical program).
-    pub fn loaded(&self) -> &Loaded {
-        &self.loaded
+    /// The current program snapshot (origin, input identity, canonical
+    /// program), or `None` while the configured project cannot load (#512).
+    /// The first successful program-reading request populates it.
+    pub fn loaded(&self) -> Option<&Loaded> {
+        self.loaded.as_ref()
     }
 
     /// Full semantic-service builds behind this service's session (#513) —
@@ -332,14 +348,15 @@ impl<'a> ToolService<'a> {
 
     /// Handle one tool request, returning a structured owned response.
     ///
-    /// A request that reads the loaded program is checked against the
-    /// input's disk fingerprint first (#471): a changed fingerprint reloads
-    /// the session, so a long-lived session serves the project as it exists
-    /// now, and a failed reload is the request's structured refusal — the
-    /// old snapshot is never served silently. `capabilities` reports service
-    /// metadata, `targetMetadata` the static catalog, and `provider*`
-    /// operations carry their own documents, so none of them consult the
-    /// loaded program.
+    /// A request that reads the loaded program requires a valid current
+    /// snapshot at request time (#471, #512): the deferred initial load runs
+    /// here when the service was built over an unloadable project, and a
+    /// changed input fingerprint reloads the session, so a long-lived
+    /// session serves the project as it exists now. Either failure is the
+    /// request's structured refusal — the previous snapshot is never served
+    /// silently. `capabilities` reports service metadata, `targetMetadata`
+    /// the static catalog, and `provider*` operations carry their own
+    /// documents, so none of them consult or trigger the project load.
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
         if Self::reads_program(request) {
             if let Err(error) = self.refresh() {
@@ -365,19 +382,27 @@ impl<'a> ToolService<'a> {
         )
     }
 
-    /// Reload the program when the input's disk fingerprint changed (#471).
-    /// An unchanged fingerprint leaves the session untouched; a failed
-    /// reload leaves the session's cache empty so the next request retries
-    /// the same resolution instead of resurrecting the stale program.
+    /// Ensure a valid current snapshot backs a program-reading request
+    /// (#471, #512). With no snapshot the request performs the deferred
+    /// initial load; with one, a changed disk fingerprint reloads it. A
+    /// failed attempt surfaces the loader's structured diagnostic — the
+    /// previous snapshot is never served — and leaves the session's cache
+    /// empty so the next request retries the same resolution; a repaired
+    /// project is adopted without restarting the service.
     fn refresh(&mut self) -> Result<(), ToolErrorInfo> {
-        let fingerprint = input::disk_fingerprint(&self.session.config, &self.loaded.input);
-        if fingerprint == self.fingerprint {
+        let Some(loaded) = &self.loaded else {
+            // The deferred initial load (#512). A success establishes the
+            // id space: no earlier program could have issued ids within
+            // this service.
+            let loaded = self.session.load().map_err(Self::loader_error)?;
+            self.adopt(loaded);
+            return Ok(());
+        };
+        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
+        if self.fingerprint.as_ref() == Some(&fingerprint) {
             return Ok(());
         }
-        let loaded = self.session.reload().map_err(|diagnostic| ToolErrorInfo {
-            code: diagnostic.code,
-            message: diagnostic.message,
-        })?;
+        let loaded = self.session.reload().map_err(Self::loader_error)?;
         self.adopt(loaded);
         self.reloads += 1;
         // The reloaded program's numeric ids are a different space: ids
@@ -389,15 +414,38 @@ impl<'a> ToolService<'a> {
         Ok(())
     }
 
+    /// The loader's diagnostic carried through the request's structured
+    /// refusal unchanged.
+    fn loader_error(diagnostic: Diagnostic) -> ToolErrorInfo {
+        ToolErrorInfo {
+            code: diagnostic.code,
+            message: diagnostic.message,
+        }
+    }
+
     /// Replace the loaded snapshot and rebuild the semantic services over it.
     fn adopt(&mut self, loaded: Loaded) {
-        self.semantic = self.session.shared_semantic(&loaded);
-        self.lint_semantic = (!self.session.config.lint.rules.is_empty()).then(|| {
-            self.semantic
-                .with_lint_config(self.session.config.lint.clone())
-        });
-        self.fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
-        self.loaded = loaded;
+        let semantic = self.session.shared_semantic(&loaded);
+        self.lint_semantic = (!self.session.config.lint.rules.is_empty())
+            .then(|| semantic.with_lint_config(self.session.config.lint.clone()));
+        self.semantic = Some(semantic);
+        self.fingerprint = Some(input::disk_fingerprint(&self.session.config, &loaded.input));
+        self.loaded = Some(loaded);
+    }
+
+    /// The current snapshot — present whenever a program-reading request
+    /// reaches `dispatch`, because `refresh` succeeded first.
+    fn snapshot(&self) -> &Loaded {
+        self.loaded
+            .as_ref()
+            .expect("the refresh gate guarantees a snapshot")
+    }
+
+    /// The semantic service over the current snapshot — built in `adopt`.
+    fn semantic(&self) -> &SemanticService<'static> {
+        self.semantic
+            .as_deref()
+            .expect("the refresh gate guarantees a snapshot")
     }
 
     /// Refuse a numeric id that was issued by an earlier program (#471):
@@ -460,19 +508,25 @@ impl<'a> ToolService<'a> {
                 ToolResponse::Ok { result }
             }
             ToolRequest::Analyze => {
-                let result = serde_json::to_value(
-                    self.session
-                        .analyze_loaded(self.loaded.clone(), &self.semantic),
-                )
-                .expect("analyze result serializes");
+                let loaded = self.snapshot().clone();
+                let semantic = Arc::clone(
+                    self.semantic
+                        .as_ref()
+                        .expect("the refresh gate guarantees a snapshot"),
+                );
+                let result = serde_json::to_value(self.session.analyze_loaded(loaded, &semantic))
+                    .expect("analyze result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Inspect => {
-                let result = serde_json::to_value(
-                    self.session
-                        .inspect_loaded(self.loaded.clone(), &self.semantic),
-                )
-                .expect("inspect result serializes");
+                let loaded = self.snapshot().clone();
+                let semantic = Arc::clone(
+                    self.semantic
+                        .as_ref()
+                        .expect("the refresh gate guarantees a snapshot"),
+                );
+                let result = serde_json::to_value(self.session.inspect_loaded(loaded, &semantic))
+                    .expect("inspect result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Project => self.ok(self.project()),
@@ -590,8 +644,13 @@ impl<'a> ToolService<'a> {
         if self.refresh().is_err() {
             return self.session.analyze();
         }
-        self.session
-            .analyze_loaded(self.loaded.clone(), &self.semantic)
+        let loaded = self.snapshot().clone();
+        let semantic = Arc::clone(
+            self.semantic
+                .as_ref()
+                .expect("the refresh gate guarantees a snapshot"),
+        );
+        self.session.analyze_loaded(loaded, &semantic)
     }
 
     /// Inspect through the shared session pipeline.
@@ -603,8 +662,13 @@ impl<'a> ToolService<'a> {
         if self.refresh().is_err() {
             return self.session.inspect();
         }
-        self.session
-            .inspect_loaded(self.loaded.clone(), &self.semantic)
+        let loaded = self.snapshot().clone();
+        let semantic = Arc::clone(
+            self.semantic
+                .as_ref()
+                .expect("the refresh gate guarantees a snapshot"),
+        );
+        self.session.inspect_loaded(loaded, &semantic)
     }
 
     /// Spawn the LPP provider client for `language_id` through the session's
@@ -663,7 +727,7 @@ impl<'a> ToolService<'a> {
                     _ => Vec::new(),
                 };
                 let (findings, outcome) = selection
-                    .apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
+                    .apply_findings(findings, &crate::select::file_bases(&self.snapshot().input));
                 match outcome {
                     Some(outcome) => self.ok(json!({ "findings": findings, "selection": outcome })),
                     None => self.ok(serde_json::Value::Array(findings)),
@@ -685,7 +749,7 @@ impl<'a> ToolService<'a> {
         match address {
             Address::Id(id) => Ok(*id),
             Address::Name(name) => self
-                .semantic
+                .semantic()
                 .resolve_symbol(name)
                 .map(|symbol| symbol.id.index() as u32),
         }
@@ -695,14 +759,14 @@ impl<'a> ToolService<'a> {
     fn rule_address(&self, address: &Address) -> Result<u32, ToolErrorInfo> {
         match address {
             Address::Id(id) => Ok(*id),
-            Address::Name(name) => self.semantic.resolve_rule(name).map(|rule| rule as u32),
+            Address::Name(name) => self.semantic().resolve_rule(name).map(|rule| rule as u32),
         }
     }
 
     fn semantic_query_with_resolved_span_paths(&self, request: Request) -> ToolResponse {
         match self.semantic_query(request) {
             ToolResponse::Ok { mut result } => {
-                crate::session::resolve_span_paths(&mut result, &self.loaded);
+                crate::session::resolve_span_paths(&mut result, self.snapshot());
                 ToolResponse::Ok { result }
             }
             other => other,
@@ -711,13 +775,13 @@ impl<'a> ToolService<'a> {
 
     /// Run one semantic query over the loaded program.
     fn semantic_query(&self, request: Request) -> ToolResponse {
-        self.semantic.handle(&request)
+        self.semantic().handle(&request)
     }
 
     fn configured_semantic(&self) -> &SemanticService<'static> {
         self.lint_semantic
             .as_ref()
-            .unwrap_or(self.semantic.as_ref())
+            .unwrap_or_else(|| self.semantic())
     }
 
     /// A selection naming an unknown rule id is a usage error, never a
@@ -753,15 +817,15 @@ impl<'a> ToolService<'a> {
             Response::Ok { result } => result,
             Response::Error { .. } => serde_json::json!([]),
         };
-        crate::session::resolve_span_paths(&mut findings, &self.loaded);
+        crate::session::resolve_span_paths(&mut findings, self.snapshot());
         let findings = match findings {
             serde_json::Value::Array(findings) => findings,
             _ => Vec::new(),
         };
         let (findings, outcome) =
-            selection.apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
+            selection.apply_findings(findings, &crate::select::file_bases(&self.snapshot().input));
         let mut result = json!({
-            "inputIdentity": self.loaded.input.identity,
+            "inputIdentity": self.snapshot().input.identity,
             "rules": crate::result::compact_lint_rules(lint_rules.get("rules")),
             "config": lint_rules.get("config").cloned().unwrap_or_else(|| json!({})),
             "findings": findings,
@@ -775,19 +839,20 @@ impl<'a> ToolService<'a> {
 
     /// Program summary with origin and source identity.
     fn project(&self) -> serde_json::Value {
-        let index = SemanticIndex::build(&self.loaded.program);
+        let loaded = self.snapshot();
+        let index = SemanticIndex::build(&loaded.program);
         let findings = wright_analyzer::canonical::analyze(
-            &self.loaded.program,
+            &loaded.program,
             &wright_analyzer::registry::LintConfig::default(),
         );
         json!({
-            "origin": { "kind": self.loaded.origin.kind, "locale": self.loaded.origin.locale },
-            "inputIdentity": self.loaded.input.identity,
-            "files": self.loaded.source_files.len().max(1),
-            "globalVariables": self.loaded.program.global_variables.len(),
-            "playerVariables": self.loaded.program.player_variables.len(),
-            "subroutines": self.loaded.program.subroutines.len(),
-            "rules": self.loaded.program.rules.len(),
+            "origin": { "kind": loaded.origin.kind, "locale": loaded.origin.locale },
+            "inputIdentity": loaded.input.identity,
+            "files": loaded.source_files.len().max(1),
+            "globalVariables": loaded.program.global_variables.len(),
+            "playerVariables": loaded.program.player_variables.len(),
+            "subroutines": loaded.program.subroutines.len(),
+            "rules": loaded.program.rules.len(),
             "symbols": index.symbols().count(),
             "findings": findings.len(),
         })
@@ -795,7 +860,7 @@ impl<'a> ToolService<'a> {
 
     fn call_graph(&self) -> serde_json::Value {
         let edges = self
-            .loaded
+            .snapshot()
             .program
             .rules
             .iter()
@@ -818,12 +883,11 @@ impl<'a> ToolService<'a> {
         if let Some(error) = self.selection_error(selection) {
             return error;
         }
-        let locale = CompilerSession::locale_for(&self.loaded);
-        let text =
-            workshop_rs::emitter::emit(&self.loaded.program, self.session.catalog(), &locale)
-                .unwrap_or_default();
-        let waits = self
-            .loaded
+        let loaded = self.snapshot();
+        let locale = CompilerSession::locale_for(loaded);
+        let text = workshop_rs::emitter::emit(&loaded.program, self.session.catalog(), &locale)
+            .unwrap_or_default();
+        let waits = loaded
             .program
             .rules
             .iter()
@@ -831,7 +895,7 @@ impl<'a> ToolService<'a> {
             .filter(|a| matches!(a, workshop_rs::Action::Call { name, .. } if name == "wait"))
             .count();
         let findings = wright_analyzer::canonical::analyze(
-            &self.loaded.program,
+            &loaded.program,
             &wright_analyzer::registry::LintConfig::default(),
         );
         let findings = findings
@@ -845,12 +909,12 @@ impl<'a> ToolService<'a> {
             })
             .collect::<Vec<_>>();
         let (findings, outcome) =
-            selection.apply_findings(findings, &crate::select::file_bases(&self.loaded.input));
+            selection.apply_findings(findings, &crate::select::file_bases(&loaded.input));
         let mut result = json!({
             "exact": {
                 "emittedBytes": text.len(),
-                "programActions": self.loaded.program.rules.iter().map(|r| r.actions.len()).sum::<usize>(),
-                "programRules": self.loaded.program.rules.len(),
+                "programActions": loaded.program.rules.iter().map(|r| r.actions.len()).sum::<usize>(),
+                "programRules": loaded.program.rules.len(),
                 "waitActions": waits,
             },
             "findings": findings,
