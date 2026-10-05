@@ -1984,6 +1984,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2246,14 +2255,16 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "1.3.2"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9373e8de5ec69b650613a39cfd6a9d82e85031522d612f7f75cd9268e651aa6"
+checksum = "770340d28d9c890b7b590a4d672ced4290c59539d7479081ba78080a03d4b300"
 dependencies = [
+ "aho-corasick",
  "serde",
  "serde_json",
  "sha2",
  "unicode-ident",
+ "unicode-normalization",
 ]
 
 [[package]]

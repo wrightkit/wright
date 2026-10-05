@@ -274,14 +274,21 @@ jobs:
 
           check_output="$(run_workflow check)"
           lint_output="$(run_workflow lint)"
+          # A passing project must load a lintable program; a project expected
+          # to fail may be rejected at load (canonical validation), leaving no
+          # program but at least one diagnostic.
           jq -e -n \
             --argjson check "$check_output" \
             --argjson lint "$lint_output" \
+            --argjson expected_exit "$EXPECTED_EXIT" \
             '(
               $check.diagnostics == $lint.diagnostics and
               $check.ok == $lint.ok and
               $check.exit == $lint.exit and
-              ($lint.result.program.rules | numbers | . > 0)
+              (if $expected_exit == 0
+               then ($lint.result.program.rules | numbers | . > 0)
+               else ($lint.diagnostics | length > 0)
+               end)
             )' >/dev/null
 
   # -------------------------------------------------------------------------

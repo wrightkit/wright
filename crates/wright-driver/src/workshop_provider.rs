@@ -30,11 +30,20 @@ impl LanguageProvider for WorkshopProvider {
             .validate()
             .map_err(|error| ProviderError::new("workshop.validate", error.to_string()))?;
 
-        Ok(program
-            .semantic_issues(&self.catalog)
-            .into_iter()
-            .map(|issue| map_issue(&issue, path))
-            .collect())
+        let mut diagnostics = Vec::new();
+        if let Err(error) = workshop_rs::validate::validate_canonical_ids_tolerating_residuals(
+            &program,
+            &self.catalog,
+        ) {
+            diagnostics.push(canonical_diagnostic(&error, path));
+        }
+        diagnostics.extend(
+            program
+                .semantic_issues(&self.catalog)
+                .into_iter()
+                .map(|issue| map_issue(&issue, path)),
+        );
+        Ok(diagnostics)
     }
 }
 
@@ -99,6 +108,29 @@ pub fn diagnostic_code(kind: &str, identity: &str) -> String {
             })
             .collect::<String>()
     )
+}
+
+/// Project an owner canonical-validation rejection into a provider
+/// diagnostic: the owner error keeps its identity and source span while the
+/// rejection surfaces as an error-severity finding, like the residual
+/// diagnostics this path already returns.
+fn canonical_diagnostic(error: &workshop_rs::WorkshopError, path: &Path) -> ProviderDiagnostic {
+    ProviderDiagnostic {
+        code: "workshop.catalog-validation".to_string(),
+        severity: ProviderSeverity::Error,
+        status: Status::Unsupported,
+        span: provider_span(workshop_error_span(error), path),
+        message: error.to_string(),
+    }
+}
+
+fn workshop_error_span(error: &workshop_rs::WorkshopError) -> Option<workshop_rs::source::Span> {
+    match error {
+        workshop_rs::WorkshopError::Unknown { span, .. }
+        | workshop_rs::WorkshopError::Malformed { span, .. }
+        | workshop_rs::WorkshopError::Unsupported { span, .. } => *span,
+        _ => None,
+    }
 }
 
 fn status_name(status: Status) -> &'static str {

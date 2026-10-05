@@ -104,6 +104,206 @@ fn workshop_check_reports_residuals_under_transform_profile() {
     }
 }
 
+/// Raw Workshop check and compile must apply the owner's catalog-aware
+/// canonical validation, not only the structural `validate()` pass: calls
+/// that violate declared catalog signatures are rejected with the owner's
+/// error and source span instead of reporting clean success.
+#[test]
+fn workshop_check_and_compile_reject_catalog_signature_violations() {
+    let directory = workspace_root()
+        .join("target")
+        .join(format!("wright-driver-canonical-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("fixture directory creates");
+    for (name, call) in [
+        ("missing-required-argument", "Wait();"),
+        (
+            "catalog-invalid-slot-type",
+            "Small Message(All Players(All Teams), Array(1, 2));",
+        ),
+    ] {
+        let path = directory.join(format!("{name}.ws"));
+        std::fs::write(
+            &path,
+            format!("rule (\"r\")\n{{\n    event\n    {{\n        Ongoing - Global;\n    }}\n    actions\n    {{\n        {call}\n    }}\n}}\n"),
+        )
+        .expect("fixture writes");
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(path),
+            kind: SourceKind::Workshop,
+            ..SessionConfig::default()
+        })
+        .expect("session creates");
+        let check = session.check();
+        assert!(
+            !check.ok,
+            "{name}: check must reject the canonical violation: {:?}",
+            check.diagnostics
+        );
+        let diagnostic = check
+            .diagnostics
+            .iter()
+            .find(|d| d.severity == wright_driver::Severity::Error)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name}: the owner rejection is reported: {:?}",
+                    check.diagnostics
+                )
+            });
+        assert_eq!(diagnostic.code, "unsupported-construct", "{name}");
+        let span = diagnostic.span.as_ref().unwrap_or_else(|| {
+            panic!("{name}: the rejection keeps its source span: {diagnostic:?}")
+        });
+        assert_eq!(
+            (span.start.line, span.end.line),
+            (9, 9),
+            "{name}: the span locates the violating call"
+        );
+        let compile = session.compile();
+        assert!(
+            !compile.ok
+                && compile
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code == "unsupported-construct"),
+            "{name}: compile reports the same owner rejection: {:?}",
+            compile.diagnostics
+        );
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// A catalog-unknown residual must not mask a later canonical violation:
+/// the owner validator is fail-fast, so the residual construct is
+/// neutralized before canonical validation judges the rest of the program.
+/// The violation is rejected in either order, including under a transform
+/// profile that would fold the residual away before emission.
+#[test]
+fn workshop_check_and_compile_reject_violations_beside_residuals() {
+    let directory = workspace_root()
+        .join("target")
+        .join(format!("wright-driver-mixed-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("fixture directory creates");
+    for (name, calls) in [
+        ("residual-then-violation", "Wait(sqrt(4));\n        Wait();"),
+        ("violation-then-residual", "Wait();\n        Wait(sqrt(4));"),
+    ] {
+        let path = directory.join(format!("{name}.ws"));
+        std::fs::write(
+            &path,
+            format!("rule (\"r\")\n{{\n    event\n    {{\n        Ongoing - Global;\n    }}\n    actions\n    {{\n        {calls}\n    }}\n}}\n"),
+        )
+        .expect("fixture writes");
+        for profile in [wright_driver::Profile::Off, wright_driver::Profile::Compat] {
+            let mut session = CompilerSession::new(SessionConfig {
+                input: InputSpec::Path(path.clone()),
+                kind: SourceKind::Workshop,
+                profile,
+                ..SessionConfig::default()
+            })
+            .expect("session creates");
+            let check = session.check();
+            assert!(
+                !check.ok
+                    && check
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.code == "unsupported-construct"
+                            && d.severity == wright_driver::Severity::Error),
+                "{name}/{profile:?}: check rejects the canonical violation: {:?}",
+                check.diagnostics
+            );
+            let compile = session.compile();
+            assert!(
+                !compile.ok
+                    && compile
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.code == "unsupported-construct"),
+                "{name}/{profile:?}: compile rejects instead of emitting: {:?}",
+                compile.diagnostics
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// Trailing catalog defaults are not required arguments: the owner
+/// validator accepts `Wait(1)` and `Wait(1, Ignore Condition)`, and the
+/// integration must not reject them.
+#[test]
+fn workshop_check_accepts_optional_action_defaults() {
+    let directory = workspace_root()
+        .join("target")
+        .join(format!("wright-driver-defaults-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("fixture directory creates");
+    for (name, call) in [
+        ("wait-time-only", "Wait(1);"),
+        ("wait-full", "Wait(1, Ignore Condition);"),
+    ] {
+        let path = directory.join(format!("{name}.ws"));
+        std::fs::write(
+            &path,
+            format!("rule (\"r\")\n{{\n    event\n    {{\n        Ongoing - Global;\n    }}\n    actions\n    {{\n        {call}\n    }}\n}}\n"),
+        )
+        .expect("fixture writes");
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(path),
+            kind: SourceKind::Workshop,
+            ..SessionConfig::default()
+        })
+        .expect("session creates");
+        let result = session.check();
+        assert!(
+            result.ok,
+            "{name}: optional defaults stay accepted: {:?}",
+            result.diagnostics
+        );
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// Catalog-unknown constructs belong to the completeness residual channel:
+/// canonical validation defers them rather than aborting the load, so a
+/// preserved opaque action still reports as a classified residual.
+#[test]
+fn workshop_check_reports_opaque_residuals_beside_canonical_validation() {
+    let directory = workspace_root()
+        .join("target")
+        .join(format!("wright-driver-opaque-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("fixture directory creates");
+    // A trailing unmatched structural marker is preserved by the parser as
+    // an opaque raw action instead of rejecting the source.
+    let path = directory.join("opaque-residual.ws");
+    std::fs::write(
+        &path,
+        "rule (\"r\")\n{\n    event\n    {\n        Ongoing - Global;\n    }\n    actions\n    {\n        Wait(1);\n        Else;\n    }\n}\n",
+    )
+    .expect("fixture writes");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    let result = session.check();
+    let residual = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "workshop.opaque-action.rawworkshopaction")
+        .unwrap_or_else(|| {
+            panic!(
+                "the opaque residual is reported through the completeness channel: {:?}",
+                result.diagnostics
+            )
+        });
+    assert_eq!(residual.severity, wright_driver::Severity::Error);
+    assert_eq!(
+        residual.status,
+        Some(wright_driver::provider::Status::Unsupported)
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 #[test]
 fn workshop_compile_is_deterministic_and_idempotent() {
     let path = workshop_fixture("synthetic/basic-rule");
