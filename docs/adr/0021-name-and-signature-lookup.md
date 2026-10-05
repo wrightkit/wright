@@ -1,6 +1,6 @@
 # ADR-0021: Name and signature lookup for agent authoring
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-05
 - Related: [Issue #482](https://github.com/wrightkit/wright/issues/482), [Issue #521](https://github.com/wrightkit/wright/issues/521), [ADR-0010](0010-independent-implementations-and-wright-integration.md), [ADR-0017](0017-domain-intelligence-query-contract.md), [ADR-0020](0020-native-agent-tool-adapter.md), [Agent contract](../agent-contract.md)
 
@@ -97,7 +97,7 @@ Verification the implementation must provide:
 - For a rejected spelling, the candidates in the diagnostic message and the top entries of `lookup` on that spelling come from the same matcher.
 - CLI JSON, `wright serve`, and MCP return the same structured result for the same request.
 - `lookup` answers in a session whose project cannot load and does not trigger a load, and an unsupported owner capability is reported as `unavailable`.
-- A paired agent run under the same condition as stage 1: the `bin` level with the same `wright-skill`, the same models and scenarios, and network isolation enforced, with `lookup` as the only difference. It shows the failing calls per trial and the tokens to a first valid OverPy program fall from the stage 1 baseline, or attributes what remains to a concrete owner or model limitation, as `wrightkit/wright#482` requires. A comparison at the `mcp` level stays under ADR-0020 and is not attributed to `lookup`.
+- A paired agent run under the same condition as stage 1: the `bin` level with the same `wright-skill`, the same models and scenarios, and network isolation enforced, with `lookup` as the only difference. It shows the failing calls per trial and the tokens to a first valid OverPy program fall from a baseline re-run under that same condition after network isolation and the grader checks are fixed (the stage 1 baseline had network access in some trials and literal-text checks that may reject equivalent output), or attributes what remains to a concrete owner or model limitation, as `wrightkit/wright#482` requires. A comparison at the `mcp` level stays under ADR-0020 and is not attributed to `lookup`.
 
 ## Scope boundaries
 
