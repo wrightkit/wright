@@ -14,10 +14,11 @@
 //! semantics-preserving representation/resource behavior (#112).
 //!
 //! [`run`] validates the WIR before and after the pipeline, so a pass can
-//! never leave the program in an invalid state.
+//! never leave the program in an invalid state. [`run_validated`] skips input
+//! validation when the caller has already validated the canonical program.
 
 pub mod pipeline;
 pub mod profile;
 
-pub use pipeline::{PassResult, PassStats, run, run_canonical};
+pub use pipeline::{PassResult, PassStats, run, run_canonical, run_validated};
 pub use profile::Profile;

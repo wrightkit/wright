@@ -18,6 +18,13 @@ safe source-edit contracts, and the transport adapters
 | `wright serve` stdio/JSON-RPC/MCP adapters | **stable** | Thin mappings over `ToolService` and `wright-agent/v1`; `wright-serve` remains a workspace binary alias |
 | `wright-transform` passes | experimental per pass | Only evidence-backed passes ship in `compat`; `aggressive` is an explicit experimental marker |
 
+`wright_transform::run` (also exported as `run_canonical`) validates input before
+transforming it. `run_validated` requires the caller to have successfully called
+`Program::validate()` since the last mutation and skips that duplicate traversal.
+Both entry points validate after a non-off transform profile. The driver uses
+`run_validated` after validating raw Workshop or provider output at load. With
+`off`, the driver validates only at load and performs no transforms.
+
 The Rust packages in this workspace are implementation packages for the Wright
 product, not a crates.io distribution surface. They are explicitly marked
 `publish = false`; the current public release flow is the CLI/LSP binary and

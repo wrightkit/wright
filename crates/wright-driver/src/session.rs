@@ -984,7 +984,7 @@ fn apply_profile(
     profile: wright_transform::Profile,
 ) -> Result<(), Diagnostic> {
     if profile != wright_transform::Profile::Off {
-        wright_transform::run_canonical(program, profile).map_err(|error| {
+        wright_transform::run_validated(program, profile).map_err(|error| {
             Diagnostic::error(
                 "transform-error",
                 Stage::Internal,
