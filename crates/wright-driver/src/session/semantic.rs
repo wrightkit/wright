@@ -243,6 +243,28 @@ fn inspect_result(service: &SemanticService<'_>) -> InspectResult {
     }
 }
 
+/// The `analyze` report over one semantic service: the `program` summary
+/// without the lint-finding count, then the fact layers with every span
+/// resolved against the loaded input like `lint` does — mapped or
+/// source-parsed locations become authored paths, while unmapped provider
+/// output resolves to `<provider-artifact>` instead of a fabricated
+/// location (#445).
+fn analyze_result(
+    service: &SemanticService<'_>,
+    loaded: &Loaded,
+    catalog: &Catalog,
+) -> AnalyzeResult {
+    let mut program = service_response(service, &Request::Program);
+    if let serde_json::Value::Object(object) = &mut program {
+        object.remove("findings");
+    }
+    let mut facts = semantic_facts(service, loaded, catalog);
+    hotpath::measure_block!("analyze::resolve_span_paths", {
+        resolve_span_paths(&mut facts, loaded)
+    });
+    AnalyzeResult { program, facts }
+}
+
 /// Unwrap a [`ToolResponse`] into its result or its structured error.
 fn tool_result(response: ToolResponse) -> Result<serde_json::Value, ToolErrorInfo> {
     match response {
@@ -321,21 +343,28 @@ impl CompilerSession {
             "analyze",
             |session| session.load_with_operation(ProviderOperation::Compile),
             |session, loaded| {
-                let service = session.service(&loaded);
+                let service = session.shared_semantic(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                let mut program = service_response(&service, &Request::Program);
-                if let serde_json::Value::Object(object) = &mut program {
-                    object.remove("findings");
-                }
-                let mut facts = semantic_facts(&service, &loaded, session.catalog());
-                // Resolve every fact span like `lint` does: mapped or
-                // source-parsed locations become authored paths, while
-                // unmapped provider output resolves to `<provider-artifact>`
-                // instead of a fabricated location (#445).
-                hotpath::measure_block!("analyze::resolve_span_paths", {
-                    resolve_span_paths(&mut facts, &loaded)
-                });
-                AnalyzeResult { program, facts }
+                analyze_result(&service, &loaded, session.catalog())
+            },
+        )
+    }
+
+    /// `analyze` over an already-loaded snapshot and its held semantic
+    /// service — the ToolService reuse path (#513): the report renders
+    /// through the service built once per loaded program rather than
+    /// rebuilding the index per request.
+    pub(crate) fn analyze_loaded(
+        &mut self,
+        loaded: Loaded,
+        service: &SemanticService<'_>,
+    ) -> Envelope<AnalyzeResult> {
+        self.with_loaded(
+            "analyze",
+            |_| Ok(loaded),
+            |session, loaded| {
+                session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
+                analyze_result(service, &loaded, session.catalog())
             },
         )
     }
@@ -347,7 +376,7 @@ impl CompilerSession {
             "inspect",
             |session| session.load(),
             |session, loaded| {
-                let service = session.service(&loaded);
+                let service = session.shared_semantic(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
                 inspect_result(&service)
             },
@@ -474,10 +503,21 @@ impl CompilerSession {
             |session| session.load_with_operation(ProviderOperation::Compile),
             |session, loaded| {
                 session.attach_workshop_completeness(&loaded);
-                let service = session.service_with(&loaded, session.config.lint.clone());
+                let shared = session.shared_semantic(&loaded);
+                // An explicitly configured lint run shares the snapshot's
+                // index and only reruns the registry under the effective
+                // configuration (#513); the default configuration is the
+                // shared service itself.
+                let configured;
+                let service = if session.config.lint.rules.is_empty() {
+                    &*shared
+                } else {
+                    configured = shared.with_lint_config(session.config.lint.clone());
+                    &configured
+                };
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                let program = service_response(&service, &Request::Program);
-                let lint_rules = service_response(&service, &Request::LintRules);
+                let program = service_response(service, &Request::Program);
+                let lint_rules = service_response(service, &Request::LintRules);
                 let lint_rule_count = lint_rules
                     .pointer("/rules")
                     .and_then(serde_json::Value::as_array)
@@ -487,7 +527,7 @@ impl CompilerSession {
                     lint_rule_count,
                     ProgressUnit::Rules,
                 ));
-                let mut findings = service_response(&service, &Request::GetFindings);
+                let mut findings = service_response(service, &Request::GetFindings);
                 resolve_span_paths(&mut findings, &loaded);
                 let findings = match findings {
                     serde_json::Value::Array(findings) => findings,

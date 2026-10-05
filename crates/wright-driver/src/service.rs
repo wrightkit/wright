@@ -10,6 +10,8 @@
 //! harness (emitted bytes, canonical program counts, action/rule counts) and
 //! distinguishes exact counts from static findings.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -222,7 +224,7 @@ pub struct Capabilities {
 pub struct ToolService<'a> {
     session: &'a mut CompilerSession,
     loaded: Loaded,
-    semantic: SemanticService<'static>,
+    semantic: Arc<SemanticService<'static>>,
     lint_semantic: Option<SemanticService<'static>>,
     /// The disk state `loaded` was read from, recomputed before every
     /// program-reading request so a long-lived session observes edits, file
@@ -246,8 +248,7 @@ impl<'a> ToolService<'a> {
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         let loaded = session.load()?;
         let fingerprint = input::disk_fingerprint(&session.config, &loaded.input);
-        let semantic =
-            session.shared_service_with(&loaded, wright_analyzer::registry::LintConfig::default());
+        let semantic = session.shared_semantic(&loaded);
         let lint_semantic = (!session.config.lint.rules.is_empty())
             .then(|| semantic.with_lint_config(session.config.lint.clone()));
         Ok(ToolService {
@@ -272,6 +273,13 @@ impl<'a> ToolService<'a> {
     /// The loaded program snapshot (origin, input identity, canonical program).
     pub fn loaded(&self) -> &Loaded {
         &self.loaded
+    }
+
+    /// Full semantic-service builds behind this service's session (#513) —
+    /// the observable hook proving repeated requests share the loaded
+    /// snapshot's index rather than rebuilding it.
+    pub fn semantic_build_count(&self) -> usize {
+        self.session.semantic_build_count()
     }
 
     /// The capability/version contract.
@@ -378,9 +386,7 @@ impl<'a> ToolService<'a> {
 
     /// Replace the loaded snapshot and rebuild the semantic services over it.
     fn adopt(&mut self, loaded: Loaded) {
-        self.semantic = self
-            .session
-            .shared_service_with(&loaded, wright_analyzer::registry::LintConfig::default());
+        self.semantic = self.session.shared_semantic(&loaded);
         self.lint_semantic = (!self.session.config.lint.rules.is_empty()).then(|| {
             self.semantic
                 .with_lint_config(self.session.config.lint.clone())
@@ -449,8 +455,11 @@ impl<'a> ToolService<'a> {
                 ToolResponse::Ok { result }
             }
             ToolRequest::Analyze => {
-                let result = serde_json::to_value(self.session.analyze())
-                    .expect("analyze result serializes");
+                let result = serde_json::to_value(
+                    self.session
+                        .analyze_loaded(self.loaded.clone(), &self.semantic),
+                )
+                .expect("analyze result serializes");
                 ToolResponse::Ok { result }
             }
             ToolRequest::Inspect => {
@@ -568,10 +577,16 @@ impl<'a> ToolService<'a> {
 
     /// Analyze through the shared session pipeline.
     ///
-    /// The same refresh contract as [`Self::compile`] applies (#471).
+    /// The same refresh contract as [`Self::inspect`] applies (#471): a
+    /// failed refresh cannot delegate to the stale snapshot, so the
+    /// session's own load surfaces the refusal (#513 reuses the held
+    /// semantic service on the fresh path).
     pub fn analyze(&mut self) -> Envelope<AnalyzeResult> {
-        let _ = self.refresh();
-        self.session.analyze()
+        if self.refresh().is_err() {
+            return self.session.analyze();
+        }
+        self.session
+            .analyze_loaded(self.loaded.clone(), &self.semantic)
     }
 
     /// Inspect through the shared session pipeline.
@@ -695,7 +710,9 @@ impl<'a> ToolService<'a> {
     }
 
     fn configured_semantic(&self) -> &SemanticService<'static> {
-        self.lint_semantic.as_ref().unwrap_or(&self.semantic)
+        self.lint_semantic
+            .as_ref()
+            .unwrap_or(self.semantic.as_ref())
     }
 
     /// A selection naming an unknown rule id is a usage error, never a
