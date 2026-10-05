@@ -2465,3 +2465,102 @@ fn rename_refusals_carry_structured_diagnostics_and_write_nothing() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
     let _ = std::fs::remove_dir_all(opy.parent().unwrap());
 }
+
+#[test]
+fn agent_mcp_configures_a_project_whose_server_answers_mcp() {
+    use std::io::{BufRead, BufReader};
+    let project = temp_dir();
+    let in_project = |args: &[&str]| {
+        Command::new(wright())
+            .args(["agent", "mcp"])
+            .args(args)
+            .current_dir(&project)
+            .stdin(Stdio::null())
+            .output()
+            .expect("wright runs")
+    };
+
+    let output = in_project(&["install", "--target", "claude", "--guide"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(project.join(".agents/skills/wright/SKILL.md").is_file());
+    let first = std::fs::read(project.join(".mcp.json")).unwrap();
+    assert!(
+        in_project(&["install", "--target", "claude"])
+            .status
+            .success()
+    );
+    assert_eq!(std::fs::read(project.join(".mcp.json")).unwrap(), first);
+
+    // Start the configured server exactly as the harness would: the entry's
+    // command and args, in the project root, with `wright` resolved to the
+    // binary under test.
+    let config: serde_json::Value = serde_json::from_slice(&first).unwrap();
+    let entry = &config["mcpServers"]["wright"];
+    assert_eq!(entry["command"], "wright");
+    std::fs::write(
+        project.join("session.ws"),
+        corpus_workshop("synthetic/control-flow"),
+    )
+    .unwrap();
+    let mut child = Command::new(wright())
+        .args(
+            entry["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a.as_str().unwrap()),
+        )
+        .arg("session.ws")
+        .current_dir(&project)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("configured server spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut exchange = |request: serde_json::Value| -> serde_json::Value {
+        writeln!(stdin, "{request}").unwrap();
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).expect("JSON response")
+    };
+    let init = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}},
+    }));
+    assert_eq!(init["result"]["serverInfo"]["name"], "wright-tool-service");
+    let list = exchange(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    assert!(
+        list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "wright_project")
+    );
+    let call = exchange(serde_json::json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "wright_project", "arguments": {}},
+    }));
+    assert!(call["result"].get("isError").is_none(), "{call}");
+    drop(stdin);
+    let _ = child.wait();
+
+    // Removal keeps the file but drops the Wright entry; an unsupported
+    // target fails with usage guidance instead of writing anything.
+    assert!(
+        in_project(&["remove", "--target", "claude"])
+            .status
+            .success()
+    );
+    let config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(project.join(".mcp.json")).unwrap()).unwrap();
+    assert!(config["mcpServers"].as_object().unwrap().is_empty());
+    let output = in_project(&["install", "--target", "emacs"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("claude"));
+    let _ = std::fs::remove_dir_all(&project);
+}

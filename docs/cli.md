@@ -59,7 +59,8 @@ See the [versioned Wright Agent Contract](agent-contract.md).
 
 See [architecture, commands, and conversion](cli/commands.md): `agent`
 installs the canonical Wright agent guide into a project's agent skills
-directory.
+directory; `agent mcp` registers Wright's MCP server in a harness's
+project-local config.
 
 ## Determinism
 
