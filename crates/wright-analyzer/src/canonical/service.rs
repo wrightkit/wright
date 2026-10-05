@@ -1,4 +1,7 @@
-use std::{ops::Deref, sync::Arc};
+use std::{
+    ops::Deref,
+    sync::{Arc, OnceLock},
+};
 
 use serde_json::{Value as JsonValue, json};
 use workshop_rs::source::{FileId, Span};
@@ -45,6 +48,10 @@ pub struct SemanticService<'a> {
     origin: Origin,
     config: LintConfig,
     registry: Arc<crate::registry::LintRegistry>,
+    symbols_json: OnceLock<Vec<JsonValue>>,
+    references_json: OnceLock<Vec<JsonValue>>,
+    findings_json: OnceLock<JsonValue>,
+    lint_rules_json: OnceLock<JsonValue>,
 }
 
 impl<'a> SemanticService<'a> {
@@ -129,6 +136,10 @@ impl<'a> SemanticService<'a> {
             origin,
             config,
             registry,
+            symbols_json: OnceLock::new(),
+            references_json: OnceLock::new(),
+            findings_json: OnceLock::new(),
+            lint_rules_json: OnceLock::new(),
         }
     }
 
@@ -144,25 +155,33 @@ impl<'a> SemanticService<'a> {
             origin: self.origin.clone(),
             config,
             registry: Arc::clone(&self.registry),
+            symbols_json: OnceLock::new(),
+            references_json: OnceLock::new(),
+            findings_json: OnceLock::new(),
+            lint_rules_json: OnceLock::new(),
         }
     }
 
     #[hotpath::measure]
     pub fn references_for_all_symbols(&self) -> JsonValue {
-        JsonValue::Array(
+        JsonValue::Array(self.references_json().clone())
+    }
+
+    fn symbols_json(&self) -> &Vec<JsonValue> {
+        self.symbols_json
+            .get_or_init(|| self.index.symbols().map(symbol_json).collect())
+    }
+
+    fn references_json(&self) -> &Vec<JsonValue> {
+        self.references_json.get_or_init(|| {
             self.index
                 .references_for_all_symbols()
                 .into_iter()
                 .map(|references| {
-                    json!(
-                        references
-                            .into_iter()
-                            .map(reference_json)
-                            .collect::<Vec<_>>()
-                    )
+                    JsonValue::Array(references.into_iter().map(reference_json).collect())
                 })
-                .collect(),
-        )
+                .collect()
+        })
     }
 
     /// Resolve a symbol by its exact declared name (#429). A name matching no
@@ -249,15 +268,15 @@ impl<'a> SemanticService<'a> {
             Request::Program => Response::Ok { result: json!({"origin": self.origin, "files": file_count(self.program.as_ref()), "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
             Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
-            Request::ListSymbols { kind } => Response::Ok { result: json!(self.index.symbols().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol.kind.as_str() == kind)).map(symbol_json).collect::<Vec<_>>()) },
-            Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: symbol_json(symbol) }),
-            Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: json!(self.index.references(id).into_iter().map(reference_json).collect::<Vec<_>>()) } } }
+            Request::ListSymbols { kind } => Response::Ok { result: JsonValue::Array(self.symbols_json().iter().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol["kind"].as_str() == Some(kind))).cloned().collect()) },
+            Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: self.symbols_json()[symbol.id.index()].clone() }),
+            Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: self.references_json()[id.index()].clone() } } }
             Request::GetUsage { symbol } => { let id = SymbolId::from_index(*symbol as usize); self.index.symbol(id).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |data| { let usage = self.index.usage(id); Response::Ok { result: json!({"id": id.index(), "kind": data.kind.as_str(), "symbol": data.name, "reads": usage.reads, "writes": usage.writes, "calls": usage.calls, "rules": usage.rules}) } }) }
             Request::GetCfg { rule } => cfg_response(self.program.as_ref(), *rule as usize),
-            Request::GetFindings => Response::Ok { result: json!(self.findings.iter().map(finding_json).collect::<Vec<_>>()) },
+            Request::GetFindings => Response::Ok { result: self.findings_json.get_or_init(|| json!(self.findings.iter().map(finding_json).collect::<Vec<_>>())).clone() },
             Request::GetPersistentObjects => Response::Ok { result: json!(persistent_objects(self.program.as_ref())) },
             Request::LintRules => Response::Ok {
-                result: lint_rules(&self.registry, &self.config, &self.skipped),
+                result: self.lint_rules_json.get_or_init(|| lint_rules(&self.registry, &self.config, &self.skipped)).clone(),
             }
         }
     }
@@ -302,6 +321,8 @@ fn lint_rules(
     config: &LintConfig,
     skipped: &[SkippedRule],
 ) -> JsonValue {
+    #[cfg(test)]
+    tests::BUILDS.with(|count| count.set(count.get() + 1));
     let descriptors = registry.descriptors(config);
     let rules = descriptors
         .iter()
@@ -351,9 +372,13 @@ pub(super) fn span_json(span: Option<Span>) -> JsonValue {
     span.map_or(JsonValue::Null, |span| json!({"file": span.file.index(), "start": {"line": span.start.line, "col": span.start.col}, "end": {"line": span.end.line, "col": span.end.col}}))
 }
 fn symbol_json(symbol: &Symbol) -> JsonValue {
+    #[cfg(test)]
+    tests::BUILDS.with(|count| count.set(count.get() + 1));
     json!({"id": symbol.id.index(), "kind": symbol.kind.as_str(), "name": symbol.name, "span": span_json(symbol.span)})
 }
 fn finding_json(finding: &Finding) -> JsonValue {
+    #[cfg(test)]
+    tests::BUILDS.with(|count| count.set(count.get() + 1));
     json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str)})
 }
 fn reference_kind_name(kind: ReferenceKind) -> &'static str {
@@ -367,6 +392,8 @@ fn reference_kind_name(kind: ReferenceKind) -> &'static str {
 }
 
 fn reference_json(reference: &Reference) -> JsonValue {
+    #[cfg(test)]
+    tests::BUILDS.with(|count| count.set(count.get() + 1));
     json!({
         "kind": reference_kind_name(reference.kind),
         "span": span_json(reference.span),
@@ -379,5 +406,95 @@ fn event_name(event: &Event) -> String {
     match event {
         Event::Subroutine(name) => format!("subroutine:{name}"),
         _ => crate::declarative::public_event_id(event).to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        pub(super) static BUILDS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[test]
+    fn unchanged_queries_reuse_serialized_surfaces_and_reconfiguration_is_fresh() {
+        let catalog = crate::catalog::builtin().unwrap();
+        let text = include_str!("../../../../tests/fixtures/workshop/synthetic/control-flow.ws");
+        let program = workshop_rs::parser::parse_with_context(
+            text,
+            &catalog,
+            &workshop_rs::catalog::Locale::new("en-US"),
+            &*catalog,
+        )
+        .unwrap();
+        let service = SemanticService::new(&program);
+        let requests = [
+            Request::ListSymbols { kind: None },
+            Request::ListSymbols {
+                kind: Some("globalVariable".into()),
+            },
+            Request::ListSymbols {
+                kind: Some("unknown".into()),
+            },
+            Request::GetSymbol { symbol: 0 },
+            Request::FindReferences { symbol: 0 },
+            Request::FindReferences { symbol: u32::MAX },
+            Request::GetFindings,
+            Request::LintRules,
+        ];
+        let warm = requests
+            .iter()
+            .map(|r| serde_json::to_string(&service.handle(r)).unwrap())
+            .collect::<Vec<_>>();
+        let references = service.references_for_all_symbols();
+        let builds = BUILDS.with(Cell::get);
+        assert!(builds > 0);
+        for _ in 0..3 {
+            for (request, expected) in requests.iter().zip(&warm) {
+                assert_eq!(
+                    serde_json::to_string(&service.handle(request)).unwrap(),
+                    *expected
+                );
+            }
+            assert_eq!(service.references_for_all_symbols(), references);
+            assert_eq!(
+                BUILDS.with(Cell::get),
+                builds,
+                "warm queries must not rebuild metadata or serialize index data"
+            );
+        }
+        let mut config = LintConfig::default();
+        config.disable("min-wait-loop");
+        config
+            .rules
+            .entry("while-without-wait".into())
+            .or_default()
+            .severity_override = Some(crate::registry::SeverityLabel::Error);
+        config
+            .rules
+            .entry("repeated-value".into())
+            .or_default()
+            .options
+            .min_matches = Some(7);
+        let configured = service.with_lint_config(config.clone());
+        let fresh =
+            SemanticService::with_origin_and_config(&program, service.origin.clone(), config);
+        for request in &requests {
+            assert_eq!(
+                serde_json::to_string(&configured.handle(request)).unwrap(),
+                serde_json::to_string(&fresh.handle(request)).unwrap()
+            );
+        }
+        assert_ne!(
+            serde_json::to_string(&configured.handle(&Request::LintRules)).unwrap(),
+            warm.last().unwrap().as_str()
+        );
+        let builds = BUILDS.with(Cell::get);
+        for request in &requests {
+            configured.handle(request);
+        }
+        assert_eq!(BUILDS.with(Cell::get), builds);
     }
 }

@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use wright_analyzer::registry::{LintConfig, LintRegistry};
+use wright_analyzer::registry::LintRegistry;
 
 use crate::diag::{Diagnostic, Severity};
 use crate::input::ResolvedInput;
@@ -85,11 +85,7 @@ impl FindingSelection {
     /// typo'd id.
     pub fn validate(&self, registry: &LintRegistry) -> Result<(), String> {
         if let Some(rule) = &self.rule {
-            let known = registry
-                .descriptors(&LintConfig::default())
-                .iter()
-                .any(|descriptor| descriptor.id == *rule);
-            if !known {
+            if !registry.contains(rule) {
                 return Err(format!("unknown rule id '{rule}'"));
             }
         }
