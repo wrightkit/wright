@@ -27,6 +27,19 @@ pub fn run(
     profile: Profile,
 ) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
     hotpath::measure_block!("transform::validate_pre", program.validate())?;
+    run_validated(program, profile)
+}
+
+/// Run a transform profile on an already-validated canonical program.
+///
+/// The caller must successfully call [`workshop_rs::Program::validate`] after
+/// the last mutation before invoking this function. Input validation is skipped;
+/// non-off profiles still validate the program after the transform fixpoint.
+#[hotpath::measure]
+pub fn run_validated(
+    program: &mut workshop_rs::Program,
+    profile: Profile,
+) -> Result<Vec<PassResult>, workshop_rs::WorkshopError> {
     if profile == Profile::Off {
         return Ok(Vec::new());
     }

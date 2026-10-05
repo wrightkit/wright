@@ -1629,3 +1629,150 @@ fn unsourced_transaction_unifies_spelling_variants_of_the_input() {
     assert_eq!(refused["diagnostics"][0]["code"], "edit-overlap");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+// ── Shared semantic state over one loaded snapshot (#513) ──────────────────
+
+/// `analyze` renders through the service the loaded snapshot already
+/// holds: repeated transport requests never rebuild the index, and the
+/// embedding `analyze` shares the same build.
+#[test]
+fn repeated_analyze_requests_do_not_rebuild_semantic_state() {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(declarations_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    assert_eq!(service.semantic_build_count(), 1);
+
+    for _ in 0..3 {
+        let analyze = result_of(&mut service, &ToolRequest::Analyze);
+        assert_eq!(analyze["command"], "analyze");
+        assert!(analyze["ok"].as_bool().unwrap_or(false), "{analyze}");
+    }
+    assert_eq!(service.semantic_build_count(), 1);
+
+    // The embedding method renders through the same held service.
+    assert!(service.analyze().ok);
+    assert_eq!(service.semantic_build_count(), 1);
+}
+
+/// The session's own embedding workflows share the loaded snapshot's
+/// semantic service: one construction serves analyze/inspect/lint and
+/// every service_query command.
+#[test]
+fn repeated_embedding_workflows_share_one_semantic_build() {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(declarations_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+
+    assert!(session.analyze().ok);
+    assert!(session.inspect().ok);
+    assert!(session.lint().ok);
+    assert!(session.symbols(None).ok);
+    assert!(session.refs("score").ok);
+    assert!(session.cfg("player starts").ok);
+    assert!(session.callgraph().ok);
+    assert!(session.cost().ok);
+    assert_eq!(session.semantic_build_count(), 1);
+
+    // Repetition on the unchanged snapshot is still the same build.
+    assert!(session.analyze().ok);
+    assert!(session.inspect().ok);
+    assert!(session.lint().ok);
+    assert!(session.symbols(None).ok);
+    assert_eq!(session.semantic_build_count(), 1);
+}
+
+/// An effective lint configuration still configures the lint run over the
+/// shared index: the custom severity reaches `lint`, and repeats keep
+/// sharing the one build.
+#[test]
+fn session_lint_keeps_the_effective_configuration_over_the_shared_index() {
+    let mut lint = wright_driver::config::LintConfig::default();
+    assert!(lint.set_severity_by_name("min-wait-loop", "error"));
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        lint,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+
+    let lint = session.lint();
+    let finding = lint
+        .result
+        .findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["code"] == "min-wait-loop")
+        .expect("the fixture triggers min-wait-loop");
+    assert_eq!(finding["severity"], "error");
+
+    assert!(session.lint().ok);
+    assert!(session.analyze().ok);
+    assert_eq!(session.semantic_build_count(), 1);
+}
+
+/// The tool-service `analyze` result equals the session workflow's — one
+/// report rendered through the shared service.
+#[test]
+fn tool_service_analyze_matches_session_analyze() {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let expected = session.analyze();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let actual = service.analyze();
+
+    assert_eq!(actual.ok, expected.ok);
+    assert_eq!(
+        serde_json::to_value(actual.result).unwrap(),
+        serde_json::to_value(expected.result).unwrap()
+    );
+    assert_eq!(service.semantic_build_count(), 1);
+}
+
+/// A reload produces a fresh program and therefore a fresh service: the
+/// count grows by exactly one and the new snapshot's facts are served.
+#[test]
+fn a_reload_rebuilds_the_semantic_service_once() {
+    let dir = freshness_dir("semantic");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, FRESHNESS_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    result_of(&mut service, &ToolRequest::Analyze);
+    assert_eq!(service.semantic_build_count(), 1);
+
+    std::fs::write(&input, FRESHNESS_V2).unwrap();
+    let analyze = result_of(&mut service, &ToolRequest::Analyze);
+    assert!(
+        analyze["result"]["facts"]["symbols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|symbol| symbol["name"] == "points"),
+        "the reloaded program's facts are served: {analyze}"
+    );
+    assert_eq!(service.semantic_build_count(), 2);
+
+    // The new snapshot is stable again: further semantic requests share it.
+    result_of(&mut service, &ToolRequest::Analyze);
+    result_of(&mut service, &ToolRequest::Inspect);
+    assert_eq!(service.semantic_build_count(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}

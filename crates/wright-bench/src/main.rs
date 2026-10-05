@@ -242,7 +242,7 @@ fn benchmark_semantic_queries(
     Ok(SemanticQueryReport {
         workload: serde_json::json!({
             "fixtures": fixtures.iter().map(|fixture| fixture.fixture).collect::<Vec<_>>(),
-            "requests": ["rules", "symbols", "references(symbol:0)", "usage(symbol:0)", "cfg(rule:0)", "findings", "persistentObjects", "lint", "lintRules", "inspect"],
+            "requests": ["rules", "symbols", "references(symbol:0)", "usage(symbol:0)", "cfg(rule:0)", "findings", "persistentObjects", "lint", "lintRules", "inspect", "analyze"],
             "repeatsPerFixturePerIteration": repeats,
             "timing": "CompilerSession::load is completed before timing; initialization measures ToolService::new, repeatedQueries measures the listed request sequence, and loadedService is their sum.",
         }),
@@ -303,6 +303,13 @@ fn semantic_query_trial(
                 return Err(format!(
                     "{fixture}: inspect failed: {:?}",
                     inspection.diagnostics
+                ));
+            }
+            let analysis = service.analyze();
+            if !analysis.ok {
+                return Err(format!(
+                    "{fixture}: analyze failed: {:?}",
+                    analysis.diagnostics
                 ));
             }
         }

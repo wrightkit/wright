@@ -78,6 +78,8 @@ def entry(directory: Path) -> dict:
         info = result.get("agentInfo") or {}
         infos.append({"program": info.get("agent"), "version": info.get("version"),
                       "model": info.get("model"), "effort": info.get("effort")})
+    if len({c["language"] for c in cards}) != len(cards):
+        raise ValueError("duplicate language tracks")
     if not infos or any(i != infos[0] for i in infos):
         raise ValueError("missing or inconsistent recorded agent setup")
     setup = infos[0]
@@ -102,7 +104,11 @@ def validate(bundle: dict) -> None:
         from jsonschema import Draft202012Validator
     except ImportError:
         raise ValueError("publish needs jsonschema: pip install -r benchmarks/agent/requirements-publish.txt") from None
-    Draft202012Validator(json.loads(SCHEMA.read_text())).validate(bundle)
+    from jsonschema.exceptions import ValidationError
+    try:
+        Draft202012Validator(json.loads(SCHEMA.read_text())).validate(bundle)
+    except ValidationError as error:
+        raise ValueError("bundle violates the public results schema at " + ".".join(map(str, error.absolute_path))) from None
 
 
 def build(dirs: list[Path]) -> tuple[dict, dict[str, dict]]:

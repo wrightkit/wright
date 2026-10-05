@@ -5,7 +5,7 @@
 
 use workshop_rs::{Action, Event, Program, Rule, Value, Variable};
 use wright_transform::profile::Profile;
-use wright_transform::run;
+use wright_transform::{run, run_validated};
 
 /// Build a program with `x = len(points) + 2 * 3`.
 fn arithmetic_program() -> Program {
@@ -99,4 +99,41 @@ fn aggressive_profile_uses_evidence_backed_passes_only() {
     let results = run(&mut program, Profile::Aggressive).unwrap();
     assert_eq!(results.len(), 1, "aggressive = compat passes in v1");
     assert!(program.validate().is_ok());
+}
+
+#[test]
+fn validated_entry_preserves_output_and_pass_results() {
+    let catalog = workshop_rs::catalog::Catalog::builtin().unwrap();
+    let locale = workshop_rs::catalog::Locale::new("en-US");
+    for profile in [Profile::Off, Profile::Compat, Profile::Aggressive] {
+        let mut checked = arithmetic_program();
+        let mut validated = checked.clone();
+        validated.validate().unwrap();
+
+        let expected = run(&mut checked, profile).unwrap();
+        let actual = run_validated(&mut validated, profile).unwrap();
+
+        assert_eq!(actual, expected, "{profile:?}");
+        assert_eq!(
+            workshop_rs::emitter::emit(&validated, &catalog, &locale).unwrap(),
+            workshop_rs::emitter::emit(&checked, &catalog, &locale).unwrap(),
+            "{profile:?}"
+        );
+        validated.validate().unwrap();
+    }
+}
+
+#[test]
+fn checked_entry_rejects_invalid_input_before_mutation() {
+    for profile in [Profile::Off, Profile::Compat, Profile::Aggressive] {
+        let mut program = arithmetic_program();
+        program.global_variables.clear();
+        let expected = program.validate().unwrap_err().to_string();
+        let before = program.dump();
+
+        let error = run(&mut program, profile).unwrap_err();
+
+        assert_eq!(error.to_string(), expected, "{profile:?}");
+        assert_eq!(program.dump(), before, "{profile:?} rejects before folding");
+    }
 }
