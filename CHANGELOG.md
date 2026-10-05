@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/wrightkit/wright/compare/v0.9.0...v0.10.0) (2026-10-05)
+
+
+### Features
+
+* **agent:** add first-party MCP bootstrap for coding-agent projects ([0a0a832](https://github.com/wrightkit/wright/commit/0a0a832995ab3950b998b06a40fd19020b51deab)), closes [#509](https://github.com/wrightkit/wright/issues/509)
+
+
+### Bug Fixes
+
+* **agent:** address review of MCP bootstrap ([f0d3cfe](https://github.com/wrightkit/wright/commit/f0d3cfe32bfead9f49aba977aa6b92dfb606b114))
+
 ## [0.9.0](https://github.com/wrightkit/wright/compare/v0.8.0...v0.9.0) (2026-10-05)
 
 
