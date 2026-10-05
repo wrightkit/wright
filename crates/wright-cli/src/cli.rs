@@ -328,23 +328,6 @@ pub(crate) enum AgentSubcommand {
     /// Install the canonical Wright agent guide as an agent skill in the
     /// project; re-running refreshes it in place.
     Install(AgentInstallArgs),
-    /// Register or remove Wright's MCP server in a coding-agent harness's
-    /// project-local config (#509).
-    Mcp(AgentMcpArgs),
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct AgentMcpArgs {
-    #[command(subcommand)]
-    pub(crate) action: AgentMcpAction,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum AgentMcpAction {
-    /// Add or update the Wright MCP server entry; re-running is idempotent.
-    Install(AgentMcpInstallArgs),
-    /// Remove the Wright MCP server entry, leaving other configuration alone.
-    Remove(AgentMcpRemoveArgs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -358,37 +341,6 @@ pub(crate) enum McpTarget {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct AgentMcpInstallArgs {
-    /// Harness whose project-local config to write.
-    #[arg(long, value_enum)]
-    pub(crate) target: McpTarget,
-
-    /// Replace a `wright` server entry that does not run
-    /// `wright serve --transport mcp`.
-    #[arg(long)]
-    pub(crate) force: bool,
-
-    /// Report the change without writing files.
-    #[arg(long)]
-    pub(crate) dry_run: bool,
-
-    /// Also install the Wright agent guide, as `wright agent install` does.
-    #[arg(long)]
-    pub(crate) guide: bool,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct AgentMcpRemoveArgs {
-    /// Harness whose project-local config to edit.
-    #[arg(long, value_enum)]
-    pub(crate) target: McpTarget,
-
-    /// Report the change without writing files.
-    #[arg(long)]
-    pub(crate) dry_run: bool,
-}
-
-#[derive(Debug, Args)]
 pub(crate) struct AgentInstallArgs {
     /// Destination skills directory; the guide installs under DIR/wright
     /// (default: .agents/skills in the current project).
@@ -396,13 +348,23 @@ pub(crate) struct AgentInstallArgs {
     pub(crate) dest: Option<PathBuf>,
 
     /// Replace whatever already occupies the guide path when it was not
-    /// installed by `wright agent install`.
+    /// installed by `wright agent install`, or a `wright` MCP server entry
+    /// that is not the one this command generates.
     #[arg(long)]
     pub(crate) force: bool,
 
     /// Report the destination without writing files.
     #[arg(long)]
     pub(crate) dry_run: bool,
+
+    /// Also register Wright's MCP server (`wright serve --transport mcp`) in
+    /// this harness's project-local config (#509).
+    #[arg(long, value_enum, value_name = "TARGET")]
+    pub(crate) mcp: Option<McpTarget>,
+
+    /// Skip the agent guide and only register the MCP server.
+    #[arg(long, requires = "mcp")]
+    pub(crate) no_guide: bool,
 }
 
 #[derive(Debug, Args, Clone)]
