@@ -1010,6 +1010,10 @@ fn char_col(line: &str, col: u32) -> usize {
         .unwrap_or(line.len())
 }
 
+/// Deprecated `wright-embedding/v1` compatibility surface (#514): the
+/// request consumed by [`rename_symbol`]. Kept source-compatible for v1
+/// callers; removal requires a breaking embedding-contract transition.
+#[deprecated = "v1 compatibility helper for `rename_symbol`; the supported rename is the semantic `semanticRename` path"]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameRequest {
     pub symbol_kind: String,
@@ -1019,10 +1023,18 @@ pub struct RenameRequest {
     pub source_identity: String,
 }
 
-/// Build a whole-file `rename` edit that rewrites every word-boundary
-/// occurrence of a name in `source` (#129). This is a proposal helper for
-/// callers that only have source text — the raw Workshop `semanticRename`
-/// path never uses it; it rewrites exact identifier spans instead (#434).
+/// Deprecated `wright-embedding/v1` compatibility helper (#514): builds a
+/// whole-file `rename` edit that rewrites every word-boundary occurrence of
+/// a name in `source` (#129). The replacement is textual only — it cannot
+/// distinguish semantic identity from strings, comments, or unrelated
+/// same-named symbols — so it carries no semantic-identity guarantee and no
+/// Wright product, CLI, LSP, agent, or embedding workflow may use it as a
+/// semantic-rename fallback. The supported rename is the semantic path
+/// (#434): `semanticRename`, [`CompilerSession::semantic_rename`], or
+/// `ToolRequest::SemanticRename`, which rewrites exact identifier spans.
+/// Removal requires a breaking embedding-contract transition.
+#[deprecated = "textual whole-word proposal helper with no semantic-identity guarantee; use `semanticRename` instead"]
+#[allow(deprecated)]
 pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit, Diagnostic> {
     if request.from.is_empty() || request.to.is_empty() {
         return Err(Diagnostic::error(
@@ -1053,7 +1065,9 @@ pub fn rename_symbol(source: &str, request: &RenameRequest) -> Result<SourceEdit
     )
 }
 
-pub fn rename_occurrences(
+// The textual rewrite behind the deprecated `rename_symbol` v1 helper
+// (#514): private implementation, not a supported public surface.
+fn rename_occurrences(
     source: &str,
     from: &str,
     to: &str,
@@ -1149,6 +1163,7 @@ mod tests {
 
     const SOURCE: &str = "globalvar score = 0\n\nrule \"r\":\n    @Event global\n    score += 1\n";
 
+    #[allow(deprecated)]
     fn rename_edit(source: &str, from: &str, to: &str) -> SourceEdit {
         rename_symbol(
             source,
@@ -1218,6 +1233,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn rename_unknown_symbol_fails_explicitly() {
         let error = rename_symbol(
             SOURCE,
@@ -1907,6 +1923,67 @@ mod tests {
             4,
             "the surviving declaration keeps every binding: {text}"
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn semantic_rename_leaves_other_namespaces_and_strings_untouched() {
+        // #434: a global variable, a player variable, and a rule name may
+        // share one identifier text. The namespaces are separate symbols and
+        // the rule name is a string literal, so renaming the global variable
+        // rewrites only its own declaration and references — same-named
+        // player occurrences, the rule name, and comments stay untouched.
+        let source = "// score tracks the global score\nvariables {\n    global:\n        0: score\n    player:\n        1: score\n}\n\nrule (\"score\") {\n    event {\n        Ongoing - Each Player;\n        All;\n        All;\n    }\n    actions {\n        Set Global Variable(score, Add(Global.score, 1));\n        Set Player Variable(Event Player, score, Add(Event Player.score, 1));\n    }\n}\n";
+        let (dir, mut session) = workshop_session(source);
+        let loaded = session.load().expect("loaded");
+        let sources = BTreeMap::from([(loaded.input.display.clone(), loaded.input.text.clone())]);
+        let index = SemanticIndex::build(&loaded.program);
+        let id_of = |kind| {
+            index
+                .symbols()
+                .find(|symbol| symbol.name == "score" && symbol.kind == kind)
+                .map(|symbol| symbol.id.index() as u32)
+                .expect("score symbol")
+        };
+        let target = |id| RenameTarget {
+            symbol: Some(Address::Id(id)),
+            source: None,
+            line: None,
+            col: None,
+            to: "streak".to_string(),
+        };
+
+        let global = semantic_rename(
+            &loaded,
+            session.catalog(),
+            Some(&sources),
+            &target(id_of(SymbolKind::GlobalVariable)),
+        );
+        assert!(global.ok, "{:?}", global.diagnostics);
+        let text = &global.preview.as_ref().unwrap()[0].new_text;
+        assert!(text.contains("0: streak"), "{text}");
+        assert!(text.contains("Set Global Variable(streak,"), "{text}");
+        assert!(text.contains("Global.streak"), "{text}");
+        assert!(text.contains("1: score"), "{text}");
+        assert!(text.contains("Event Player, score,"), "{text}");
+        assert!(text.contains("Event Player.score"), "{text}");
+        assert!(text.contains("rule (\"score\")"), "{text}");
+        assert!(text.contains("// score tracks the global score"), "{text}");
+
+        let player = semantic_rename(
+            &loaded,
+            session.catalog(),
+            Some(&sources),
+            &target(id_of(SymbolKind::PlayerVariable)),
+        );
+        assert!(player.ok, "{:?}", player.diagnostics);
+        let text = &player.preview.as_ref().unwrap()[0].new_text;
+        assert!(text.contains("1: streak"), "{text}");
+        assert!(text.contains("Event Player, streak,"), "{text}");
+        assert!(text.contains("Event Player.streak"), "{text}");
+        assert!(text.contains("0: score"), "{text}");
+        assert!(text.contains("Set Global Variable(score,"), "{text}");
+        assert!(text.contains("Global.score"), "{text}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
