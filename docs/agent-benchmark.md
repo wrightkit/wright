@@ -365,6 +365,17 @@ Diagnostics flag headroom (baseline usable rate of at least 95%), infrastructure
 failures, invalid runs, trial variance, and, with `--regrade`, a grader that
 gives different verdicts on the same stored workspace.
 
+The report also computes a per-scenario `discrimination` flag from the results
+(never stored in a scenario file): `smoke` when every condition that ran the
+scenario got the same 0% or 100% usable rate — a scenario every condition
+passes or every condition fails says nothing about Wright — `indeterminate`
+when fewer than two conditions ran it, and `discriminating` otherwise, with
+the conditions whose usable rate differs. Smoke scenarios stay in the
+canonical score (it is a fixed contract), and the paired-comparison tables
+report lift over all scenarios and over discriminating scenarios side by
+side, naming the smoke scenarios kept out of the discriminating figure.
+`summary.json` carries the flag and per-condition usable rate per scenario.
+
 When a directory holds both `wright` and `wright-mcp` cells, a level-comparison
 section pairs `mcp` with `bin` runs of the same scenario, agent, and trial and
 reports each side's usable and passed rates with Wilson intervals, mean

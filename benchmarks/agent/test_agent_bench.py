@@ -983,6 +983,42 @@ class ReportTest(unittest.TestCase):
         text, _ = bench_report.render(runs, references=["missing/cell/here"])
         self.assertNotIn("Paired against", text)
 
+    def test_scenario_discrimination_flags(self):
+        runs = [
+            self.result("none/none/off", 1, True, 100, scenario="always-pass"),
+            self.result("wright/none/off", 1, True, 100, scenario="always-pass"),
+            self.result("none/none/off", 1, False, 100, scenario="always-fail"),
+            self.result("wright/none/off", 1, False, 100, scenario="always-fail"),
+            self.result("none/none/off", 1, False, 100, scenario="wright-helps"),
+            self.result("wright/none/off", 1, True, 100, scenario="wright-helps"),
+            self.result("none/none/off", 1, True, 100, scenario="one-cell"),
+        ]
+        flags = bench_report.discrimination(runs)
+        self.assertEqual(flags["always-pass"]["discrimination"], "smoke")
+        self.assertEqual(flags["always-fail"]["discrimination"], "smoke")
+        self.assertEqual(flags["wright-helps"]["discrimination"], "discriminating")
+        self.assertEqual(flags["wright-helps"]["differingConditions"], ["none/none/off", "wright/none/off"])
+        self.assertEqual(flags["one-cell"]["discrimination"], "indeterminate")
+        rates = flags["wright-helps"]["conditions"]
+        self.assertEqual(rates["none/none/off"], {"usable": 0, "runs": 1, "rate": 0.0})
+        self.assertEqual(rates["wright/none/off"], {"usable": 1, "runs": 1, "rate": 1.0})
+
+    def test_lift_report_shows_both_denominators_and_names_smoke_scenarios(self):
+        runs = [
+            self.result("none/none/off", 1, False, 100, scenario="wright-helps"),
+            self.result("wright/none/off", 1, True, 100, scenario="wright-helps"),
+            self.result("none/none/off", 1, True, 100, scenario="always-pass"),
+            self.result("wright/none/off", 1, True, 100, scenario="always-pass"),
+        ]
+        text, summary = bench_report.render(runs)
+        self.assertIn("usable gained/lost (all)", text)
+        self.assertIn("usable gained/lost (discriminating)", text)
+        self.assertIn("+1 / -0 | +1 / -0 (n=1)", text)
+        self.assertIn("Smoke scenarios kept out of the discriminating column: always-pass", text)
+        entries = {s["id"]: s for s in summary["scenarios"]}
+        self.assertEqual(entries["always-pass"]["discrimination"], "smoke")
+        self.assertEqual(entries["wright-helps"]["discrimination"], "discriminating")
+
     def test_correction_rounds_reach_the_cell_summary(self):
         run = self.result("wright/none/off", 1, True, 100)
         run["correctionRounds"] = 2.0
