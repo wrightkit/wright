@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.11.0](https://github.com/wrightkit/wright/compare/v0.10.0...v0.11.0) (2026-10-06)
+
+
+### Features
+
+* **agent:** add the brief result form to analyze, inspect, and lint ([cc535d0](https://github.com/wrightkit/wright/commit/cc535d0c1080741be3bf081647b66c4580e9b87b)), closes [#532](https://github.com/wrightkit/wright/issues/532)
+* **agent:** bound and select semantic query results ([46cf32f](https://github.com/wrightkit/wright/commit/46cf32fa0b03894471a27b214ab7b87e76f37c4f)), closes [#531](https://github.com/wrightkit/wright/issues/531)
+* **agent:** emit client tool definitions ([beb0bc5](https://github.com/wrightkit/wright/commit/beb0bc593431a1f274085c0db4bf65533ed7b05a)), closes [#535](https://github.com/wrightkit/wright/issues/535)
+* **benchmarks:** design and prove seeded defect injection for scenario families ([bfaaa2e](https://github.com/wrightkit/wright/commit/bfaaa2ec1055665a25e70e8fe3d0f8f0d543f0e8)), closes [#534](https://github.com/wrightkit/wright/issues/534)
+* **benchmarks:** report scenario discrimination and name smoke scenarios ([6fbf16a](https://github.com/wrightkit/wright/commit/6fbf16ae647e3246b0f8b9ac4371c2890b32d747)), closes [#533](https://github.com/wrightkit/wright/issues/533)
+* **benchmarks:** track agent-facing metrics for drift ([7175b56](https://github.com/wrightkit/wright/commit/7175b56d05de6f6668e71b273bcc696240756675)), closes [#530](https://github.com/wrightkit/wright/issues/530)
+* **lookup:** owner name and signature lookup ([#529](https://github.com/wrightkit/wright/issues/529)) ([f677b82](https://github.com/wrightkit/wright/commit/f677b82859ae789394115891902908cf591ce751))
+
+
+### Bug Fixes
+
+* **agent:** keep symbols?kind on its pre-selection shape; normalize latency bands by machine ([241fe9c](https://github.com/wrightkit/wright/commit/241fe9c743980bac569fcbc31b27f7a5e4a3fd51)), closes [#531](https://github.com/wrightkit/wright/issues/531)
+
 ## [0.10.0](https://github.com/wrightkit/wright/compare/v0.9.0...v0.10.0) (2026-10-05)
 
 
