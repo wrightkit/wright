@@ -152,7 +152,7 @@ the successful `result` payload.
 | `inspect` | optional `brief` | `wright-result/v1` inspection envelope; the brief form when `brief` is true |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
 | `rules` | optional selection | Canonical Workshop rules; `{"rules": [...], "selection": {...}}` when a selection is applied |
-| `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when a selection is applied |
+| `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
 | `references` | required `symbol` (id or name), optional selection | References for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
 | `cfg` | required `rule` (index or name), optional selection | Control-flow graph for the rule, plus `selection` when a selection is applied |
@@ -274,8 +274,11 @@ that matches nothing in the loaded program — is a structured
 `invalid-selection` error, never a silent empty result.
 
 * `rules`: `name` (a declared rule name), `file`, `max`.
-* `symbols`: `kind` (`globalVariable`, `playerVariable`, `subroutine`,
-  `rule`), `file`, `max`.
+* `symbols`: `file`, `max`, plus the pre-existing `kind` (`globalVariable`,
+  `playerVariable`, `subroutine`, `rule`). `kind` predates this selection
+  contract: a request carrying only `kind` keeps the previous filtered bare
+  array; `file`/`max` wrap the result, and a `kind` sent alongside them
+  counts inside the reported selection.
 * `references`: `kind` (`declaration`, `definition`, `read`, `write`,
   `call`), `rule` (only references inside this rule, addressed by index or
   declared name), `file`, `max`.
@@ -289,7 +292,8 @@ that matches nothing in the loaded program — is a structured
 The `file` field resolves like finding selection: any spelling that resolves
 to the same source file selects it. Requests without selection fields receive
 the previous shapes unchanged (bare arrays for `rules`, `symbols`,
-`references`, `callGraph`; the unextended object for `cfg`). The CLI options
+`references`, `callGraph`; the unextended object for `cfg`) — including
+`symbols` requests carrying only the pre-existing `kind` field. The CLI options
 `--only`, `--rule`, `--file`, `--caller`, `--callee`, and `--max` on `inspect`
 subcommands drive the same `wright-driver` selection.
 

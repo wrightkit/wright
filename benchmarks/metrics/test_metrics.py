@@ -95,6 +95,45 @@ class BandTest(unittest.TestCase):
         violations2, _ = metrics.compare_metrics(base, run2)
         self.assertEqual(violations2, [])
 
+    def test_uniform_latency_shift_is_machine_speed_not_drift(self):
+        # Every metric at 1.6x — a slower host, not a per-operation
+        # regression; the median factor normalizes it out and is reported.
+        count = metrics.MIN_LATENCY_PAIRS + 2
+        base_map = {f"m{i}": _metric(1000, 100.0) for i in range(count)}
+        run_map = {f"m{i}": _metric(1000, 160.0) for i in range(count)}
+        violations, warnings = metrics.compare_metrics(
+            _doc({"p": {"status": "ok", "metrics": base_map}}),
+            _doc({"p": {"status": "ok", "metrics": run_map}}),
+        )
+        self.assertFalse(any(v["field"] == "latencyMs" for v in violations), violations)
+        self.assertTrue(any("machine factor: 1.60" in w for w in warnings), warnings)
+
+    def test_one_latency_outlier_flags_against_the_fleet(self):
+        # Eleven metrics at 1.6x and one at 5x: the outlier deviates from the
+        # normalized baseline (160 * 1.5) while the fleet stays clean.
+        count = metrics.MIN_LATENCY_PAIRS + 2
+        base_map = {f"m{i}": _metric(1000, 100.0) for i in range(count)}
+        run_map = {f"m{i}": _metric(1000, 160.0) for i in range(count)}
+        run_map["m11"] = _metric(1000, 500.0)
+        violations, _ = metrics.compare_metrics(
+            _doc({"p": {"status": "ok", "metrics": base_map}}),
+            _doc({"p": {"status": "ok", "metrics": run_map}}),
+        )
+        flagged = [v["metric"] for v in violations if v["field"] == "latencyMs"]
+        self.assertEqual(flagged, ["m11"], violations)
+
+    def test_too_few_pairs_falls_back_to_absolute_band(self):
+        # Below MIN_LATENCY_PAIRS the machine factor is not trusted.
+        base_map = {f"m{i}": _metric(1000, 100.0) for i in range(3)}
+        run_map = {f"m{i}": _metric(1000, 160.0) for i in range(3)}
+        violations, _ = metrics.compare_metrics(
+            _doc({"p": {"status": "ok", "metrics": base_map}}),
+            _doc({"p": {"status": "ok", "metrics": run_map}}),
+        )
+        self.assertEqual(
+            len([v for v in violations if v["field"] == "latencyMs"]), 3, violations
+        )
+
     def test_sub_millisecond_latency_jitter_is_ignored(self):
         base = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000, 0.1)}}})
         run = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000, 0.0)}}})

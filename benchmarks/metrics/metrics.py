@@ -49,6 +49,14 @@ LATENCY_REL_BAND = 0.50
 # Median latency below ~1 ms is measurement noise at our timer resolution;
 # require a minimum absolute delta before the relative band applies.
 LATENCY_ABS_BAND = 1.0
+# Latency is machine-relative: a baseline recorded on one host re-run on
+# another differs by a uniform speed factor, not a per-operation change.
+# `check` derives that factor as the median run/baseline latency ratio over
+# every comparable metric and bands each metric against `baseline * factor`,
+# so a slower CI runner does not flag a fleet of metrics while one operation
+# deviating from the fleet still does. Below this many comparable pairs the
+# factor is not trustworthy and the absolute band applies unchanged.
+MIN_LATENCY_PAIRS = 10
 REQUEST_TIMEOUT_S = 180.0
 
 METRICS_DIR = Path(__file__).resolve().parent
@@ -566,6 +574,37 @@ def _latency_out_of_band(base: float, current: float) -> bool:
     return delta > LATENCY_ABS_BAND and delta > LATENCY_REL_BAND * base
 
 
+def _latency_factor(baseline: dict, current: dict) -> tuple[float, int]:
+    """(median run/baseline latency ratio, pair count): the machine-speed
+    offset between the baseline host and this host."""
+    ratios = []
+    base_projects = baseline.get("projects") or {}
+    run_projects = current.get("projects") or {}
+    for pid in set(base_projects) & set(run_projects):
+        base_p = base_projects[pid]
+        run_p = run_projects[pid]
+        if base_p.get("status") != "ok" or run_p.get("status") != "ok":
+            continue
+        base_metrics = base_p.get("metrics") or {}
+        run_metrics = run_p.get("metrics") or {}
+        for key in set(base_metrics) & set(run_metrics):
+            base_m = base_metrics[key]
+            run_m = run_metrics[key]
+            if any("error" in m or "skipped" in m for m in (base_m, run_m)):
+                continue
+            base_v = base_m.get("latencyMs")
+            run_v = run_m.get("latencyMs")
+            if (
+                isinstance(base_v, (int, float))
+                and isinstance(run_v, (int, float))
+                and base_v >= LATENCY_ABS_BAND
+            ):
+                ratios.append(run_v / base_v)
+    if len(ratios) < MIN_LATENCY_PAIRS:
+        return 1.0, len(ratios)
+    return statistics.median(ratios), len(ratios)
+
+
 def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str]]:
     """(violations, warnings): every out-of-band metric and structural change."""
     violations: list[dict] = []
@@ -582,6 +621,13 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
         )
     base_projects = baseline.get("projects") or {}
     run_projects = current.get("projects") or {}
+    latency_factor, latency_pairs = _latency_factor(baseline, current)
+    if latency_pairs >= MIN_LATENCY_PAIRS and abs(latency_factor - 1.0) > 0.02:
+        warnings.append(
+            f"latency machine factor: {latency_factor:.2f} "
+            f"(median run/baseline over {latency_pairs} metrics; "
+            "bands apply to the normalized baseline)"
+        )
     for pid in sorted(set(base_projects) | set(run_projects)):
         base_p = base_projects.get(pid)
         run_p = run_projects.get(pid)
@@ -620,7 +666,7 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
                     {"project": pid, "metric": key, "change": "now-measured"}
                 )
                 continue
-            violations.extend(_compare_metric(pid, key, base_m, run_m))
+            violations.extend(_compare_metric(pid, key, base_m, run_m, latency_factor))
             # #532: brief results carry a stated token budget — exceeding it
             # is a violation regardless of the drift band.
             if key.endswith("?brief"):
@@ -640,28 +686,34 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
     return violations, warnings
 
 
-def _compare_metric(pid: str, key: str, base: dict, current: dict) -> list[dict]:
+def _compare_metric(
+    pid: str, key: str, base: dict, current: dict, latency_factor: float = 1.0
+) -> list[dict]:
     diffs: list[dict] = []
-    for field, out_of_band in (
-        ("tokens", _size_out_of_band),
-        ("latencyMs", _latency_out_of_band),
-    ):
+    for field in ("tokens", "latencyMs"):
         base_v = base.get(field)
         run_v = current.get(field)
-        if (
-            isinstance(base_v, (int, float))
-            and isinstance(run_v, (int, float))
-            and out_of_band(base_v, run_v)
+        if not (
+            isinstance(base_v, (int, float)) and isinstance(run_v, (int, float))
         ):
+            continue
+        if field == "latencyMs":
+            adjusted = base_v * latency_factor
+            out = _latency_out_of_band(adjusted, run_v)
+            shown_base: float = round(adjusted, 1)
+        else:
+            out = _size_out_of_band(base_v, run_v)
+            shown_base = base_v
+        if out:
             diffs.append(
                 {
                     "project": pid,
                     "metric": key,
                     "field": field,
-                    "baseline": base_v,
+                    "baseline": shown_base,
                     "current": run_v,
-                    "delta": round(run_v - base_v, 1),
-                    "change": "increase" if run_v > base_v else "decrease",
+                    "delta": round(run_v - shown_base, 1),
+                    "change": "increase" if run_v > shown_base else "decrease",
                 }
             )
     base_counts = base.get("counts") or {}

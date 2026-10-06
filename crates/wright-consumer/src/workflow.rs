@@ -102,7 +102,7 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
             file: None,
             max: None,
         }) {
-            wright_driver::service::ToolResponse::Ok { result } => result["symbols"]
+            wright_driver::service::ToolResponse::Ok { result } => result
                 .as_array()
                 .and_then(|symbols| symbols.first())
                 .and_then(|symbol| symbol.get("name"))

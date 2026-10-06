@@ -2032,12 +2032,21 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     assert_eq!(rule["kind"], "rule");
     assert_eq!(rule["span"]["path"], "cake.txt");
 
-    // --only narrows to one symbol kind; --kind stays the input frontend. A
-    // selection flag wraps the list in `{symbols, selection}` (#531).
+    // --only narrows to one symbol kind; --kind stays the input frontend.
+    // `kind` predates #531: alone it keeps the bare array, while --max (or
+    // --file) wraps the list in `{symbols, selection}` (#531).
     let output = run(&["inspect", "symbols", path, "--only", "rule", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
-    let symbols = envelope["result"]["symbols"].as_array().unwrap();
+    let symbols = envelope["result"].as_array().unwrap();
     assert_eq!(symbols.len(), 2);
+    assert!(symbols.iter().all(|symbol| symbol["kind"] == "rule"));
+
+    let output = run(&[
+        "inspect", "symbols", path, "--only", "rule", "--max", "1", "-f", "json",
+    ]);
+    let envelope = parse_json(&output.stdout);
+    let symbols = envelope["result"]["symbols"].as_array().unwrap();
+    assert_eq!(symbols.len(), 1);
     assert!(symbols.iter().all(|symbol| symbol["kind"] == "rule"));
     assert_eq!(envelope["result"]["selection"]["total"], 5);
 

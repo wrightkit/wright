@@ -61,7 +61,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         drop_fields: &[],
         mcp: true,
         description: "Every symbol in the loaded program, optionally narrowed by `kind`, `file`, or `max`. Issues the numeric ids other tools accept.",
-        result: "the program's symbols, selection-wrapped when a selector was sent",
+        result: "the program's symbols, selection-wrapped when `file`/`max` was sent (`kind` alone keeps the bare array)",
     },
     ToolSpec {
         op: "references",

@@ -671,6 +671,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     assert!(all.is_array());
     let total = all.as_array().unwrap().len();
 
+    // `kind` predates #531: alone it keeps the filtered bare array; combined
+    // with `file`/`max` it joins the selection and wraps.
     let rules_only = result_of(
         &mut service,
         &ToolRequest::Symbols {
@@ -679,11 +681,22 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             max: None,
         },
     );
-    let kept = rules_only["symbols"].as_array().unwrap();
-    assert!(kept.iter().all(|symbol| symbol["kind"] == "rule"));
-    assert!(!kept.is_empty());
-    assert_eq!(rules_only["selection"]["total"], total);
-    assert_eq!(rules_only["selection"]["withheld"], 0);
+    assert!(rules_only.is_array(), "kind alone keeps the bare array");
+    let rules_only = rules_only.as_array().unwrap();
+    assert!(rules_only.iter().all(|symbol| symbol["kind"] == "rule"));
+    assert!(!rules_only.is_empty());
+    assert!(rules_only.len() < total);
+
+    let bounded_rules = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: Some("rule".to_string()),
+            file: None,
+            max: Some(1),
+        },
+    );
+    assert_eq!(bounded_rules["symbols"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded_rules["selection"]["total"], total);
 
     let bounded = result_of(
         &mut service,

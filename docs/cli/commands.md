@@ -204,6 +204,8 @@ resolution never guesses.
 * `inspect symbols --only <KIND>` narrows the list to `globalVariable`,
   `playerVariable`, `subroutine`, or `rule` (kebab-case aliases work). It is
   spelled `--only` because `--kind` already selects the input frontend.
+  `--only` predates the selection contract, so used alone it keeps the
+  previous bare list; `--file`/`--max` opt into the selection wrapper.
 * The query subcommands accept the same selection fields the agent
   operations take (#531): `inspect symbols` adds `--file`/`--max`,
   `inspect refs` adds `--only` (a reference kind), `--rule`, `--file`, and

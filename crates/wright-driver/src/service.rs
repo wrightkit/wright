@@ -942,9 +942,6 @@ impl<'a> ToolService<'a> {
             serde_json::Value::Array(items) => items,
             _ => Vec::new(),
         };
-        if !selected {
-            return self.ok(serde_json::Value::Array(items));
-        }
         let (kept, outcome) = crate::select::select_list(
             items,
             file,
@@ -953,6 +950,9 @@ impl<'a> ToolService<'a> {
             keep,
             max,
         );
+        if !selected {
+            return self.ok(serde_json::Value::Array(kept));
+        }
         self.ok(json!({ key: kept, "selection": outcome }))
     }
 
@@ -999,10 +999,11 @@ impl<'a> ToolService<'a> {
         }
     }
 
-    /// `symbols`: every symbol with resolved span paths. `kind` and the
-    /// `file`/`max` selection fields narrow the reported set (#531); any
-    /// selection field wraps the result in `{"symbols": [...], "selection":
-    /// {...}}` with the pre-selection total.
+    /// `symbols`: every symbol with resolved span paths. `kind` predates
+    /// #531 — a request carrying only `kind` keeps the previous bare-array
+    /// shape, still filtered; the `file`/`max` selection fields wrap the
+    /// result in `{"symbols": [...], "selection": {...}}` with the
+    /// pre-selection total.
     fn symbols(&self, kind: Option<&str>, file: Option<&str>, max: Option<usize>) -> ToolResponse {
         if let Some(kind) = kind {
             if !SymbolKind::ALL.iter().any(|known| known.as_str() == kind) {
@@ -1016,7 +1017,7 @@ impl<'a> ToolService<'a> {
                 file,
                 |symbol| kind.is_none_or(|kind| symbol["kind"].as_str() == Some(kind)),
                 max,
-                kind.is_some() || file.is_some() || max.is_some(),
+                file.is_some() || max.is_some(),
             ),
             other => other,
         }

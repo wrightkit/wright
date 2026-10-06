@@ -38,8 +38,14 @@ python3 benchmarks/metrics/metrics.py check                  # compare vs baseli
 `baseline-<corpusVersion>.json`, exiting 1 when anything leaves its band:
 
 - **tokens and counts**: |delta| > 15% **and** > 30 absolute;
-- **latencyMs**: |delta| > 50% AND > 1 ms absolute (sub-millisecond medians are
-  measurement noise at our timer resolution);
+- **latencyMs**: machine-relative — `check` derives a machine factor as the
+  median run/baseline latency ratio across every comparable metric (≥10
+  pairs) and bands each metric against `baseline * factor`; |delta| > 50%
+  AND > 1 ms absolute. A uniformly slower or faster host therefore passes,
+  while one operation deviating from the fleet is flagged — and the factor
+  itself is reported as a warning (a uniform *product* slowdown is
+  indistinguishable from a slower machine, so watch that line). Below 10
+  comparable pairs the factor is not trusted and the absolute band applies;
 - **brief budget**: every `*?brief` metric — the `brief` request form and the
   CLI `--brief` form (#532) for `lint`, `analyze`, and `inspect` — must stay
   within `briefTokenBudget` (500 estimated tokens on the agent surface, 800
