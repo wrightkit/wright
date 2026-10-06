@@ -173,6 +173,13 @@ fn workshop_lookup_answers_a_setting_key() {
         )),
         "settings children are settings or segments: {entries:?}"
     );
+    // Scoped children spell the segment below the prefix (`name-lookup.md`
+    // §21.3): leaf settings carry their key, not the full path.
+    assert!(
+        entries.iter().all(|entry| entry["kind"] != "setting"
+            || !entry["spelling"].as_str().unwrap_or_default().contains('.')),
+        "leaf settings spell a single segment: {entries:?}"
+    );
 }
 
 #[test]
@@ -224,10 +231,9 @@ fn workshop_lookup_bounds_scoped_results_by_limit() {
 fn workshop_lookup_filters_scoped_children_by_the_owner_matcher() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
-    // `within` + `query` routes matching and ranking through workshop-rs:
-    // the result is the owner's ranked unscoped matches intersected with
-    // the scope's children, so "team 1" resolves the members the owner
-    // scored — never a Wright-side substring filter.
+    // `within` + `query` delegates matching and ranking to workshop-rs's
+    // scoped lookup: "team 1" resolves the members the owner scored —
+    // never a Wright-side substring filter.
     let entries = entries_of(service.handle(&ToolRequest::Lookup {
         language: "workshop".to_string(),
         query: Some("team 1".to_string()),
@@ -249,21 +255,23 @@ fn workshop_lookup_filters_scoped_children_by_the_owner_matcher() {
         "owner ranking puts the closest match first"
     );
 
-    // Parameters are outside the owner's match vocabulary — an unscoped
-    // request never returns them — so a scoped query drops them rather
-    // than guessing at a spelling.
+    // Parameters are matchable children: the owner scores them by name,
+    // so a scoped query resolves `VisibleTo` rather than dropping it.
     let entries = entries_of(service.handle(&ToolRequest::Lookup {
         language: "workshop".to_string(),
-        query: Some("text".to_string()),
+        query: Some("visibleTo".to_string()),
         kind: None,
         within: Some("createHudText".to_string()),
         locale: None,
         limit: None,
     }));
-    assert!(
-        entries.is_empty(),
-        "parameters are not matchable vocabulary: {entries:?}"
+    assert_eq!(
+        entries.len(),
+        1,
+        "the scoped param query resolves: {entries:?}"
     );
+    assert_eq!(entries[0]["identity"], "createHudText.VisibleTo");
+    assert_eq!(entries[0]["kind"], "parameter");
 }
 
 #[test]
@@ -417,10 +425,14 @@ for line in sys.stdin:
 #[cfg(unix)]
 fn write_provider(script: &str) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // One directory per call: parallel tests sharing a script must not
+    // overwrite or remove each other's provider file.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "wright-lookup-provider-{}-{}",
         std::process::id(),
-        script.len()
+        NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("fake-provider");

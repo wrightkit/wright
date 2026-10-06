@@ -13,15 +13,16 @@
 //! Owners match and rank and supply facts; Wright renders the `signature`
 //! string from those facts under its own presentation rules (ADR-0021
 //! decision 4). Wright performs no matching of its own — a scoped `within`
-//! query is the owner's ranked matches intersected with the scope's
-//! children — stores no names, and does not translate between languages.
+//! query delegates to `Catalog::lookup_within`, which ranks children with
+//! the owner's scorer — stores no names, and does not translate between
+//! languages.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
 use workshop_rs::lookup::LookupMatch;
-use workshop_rs::settings::{self, SettingDefinition, SettingValueDomain};
+use workshop_rs::settings::{SettingDefinition, SettingValueDomain};
 use wright_lpp::{Capability, LookupParams, LookupWithin};
 
 use crate::CompilerSession;
@@ -174,13 +175,17 @@ fn workshop_locale(
 }
 
 /// The owner-issued identity of one `lookup` match — the `identity` an
-/// entry carries and the key a scoped query intersects on.
+/// entry carries.
 fn match_identity(found: &LookupMatch) -> Option<String> {
     match found {
         LookupMatch::Builtin { id, .. } => Some(id.clone()),
         LookupMatch::EnumMember { domain, member, .. } => Some(format!("{domain}.{member}")),
         LookupMatch::EnumDomain { domain, .. } => Some(domain.clone()),
         LookupMatch::Setting { definition, .. } => Some(definition.path().to_string()),
+        LookupMatch::Parameter {
+            callable, param, ..
+        } => Some(format!("{callable}.{}", param.name)),
+        LookupMatch::SettingPath { path, .. } => Some(path.clone()),
         _ => None,
     }
 }
@@ -263,13 +268,63 @@ fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Opt
         }
         LookupMatch::Setting {
             definition,
+            spelling,
             display_name,
         } => json!({
             "identity": identity,
             "kind": "setting",
-            "spelling": identity,
+            "spelling": spelling,
             "displayName": display_name,
             "setting": setting_facts(&definition),
+        }),
+        LookupMatch::Parameter {
+            required,
+            param,
+            domain,
+            ..
+        } => {
+            let mut parameter = json!({
+                "type": param
+                    .param_type
+                    .clone()
+                    .unwrap_or_else(|| "any".to_string()),
+                "required": required,
+            });
+            if let Some(default) = &param.default {
+                parameter["default"] = if default == "null" {
+                    Value::Null
+                } else {
+                    json!(default)
+                };
+            }
+            if let Some(domain) = domain {
+                parameter["enum"] = json!({
+                    "domain": domain.domain,
+                    "members": domain
+                        .members
+                        .iter()
+                        .map(|member| {
+                            member
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| member.id.clone())
+                        })
+                        .collect::<Vec<_>>(),
+                });
+            }
+            json!({
+                "identity": identity,
+                "kind": "parameter",
+                "spelling": param.name,
+                "displayName": param.name,
+                "parameter": parameter,
+            })
+        }
+        LookupMatch::SettingPath { path, segment } => json!({
+            "identity": identity,
+            "kind": "settingPath",
+            "spelling": segment,
+            "displayName": path,
         }),
         // A `LookupMatch` variant added after this Wright: unknown entries
         // drop out of the result rather than fail the request.
@@ -380,12 +435,12 @@ fn workshop_default(catalog: &Catalog, locale: &Locale, default: &str) -> String
         .to_string()
 }
 
-/// `within` children for Workshop: the identity selects the members of an
-/// enum domain, the parameters of a callable, or the settings keys and
-/// segments under a path prefix — resolved in that order, so a canonical
-/// domain name or settings prefix cannot be shadowed by a same-named
-/// callable spelling. `query` then filters the children by identity or
-/// spelling, `kind` by entry kind.
+/// `within` children for Workshop: `workshop-rs` resolves the scope and
+/// owns matching and ranking — an enum domain's members, a callable's
+/// parameters, or the settings keys and segments under a path prefix —
+/// and Wright projects the result (`name-lookup.md` §21.3). `kind`
+/// narrows the entry kinds afterward; it is a result-shaping filter, not
+/// matching.
 fn workshop_within(
     catalog: &Catalog,
     locale: &Locale,
@@ -393,213 +448,25 @@ fn workshop_within(
     query: Option<&str>,
     kind: Option<&str>,
 ) -> Result<Vec<Value>, ToolResponse> {
-    let mut entries = workshop_within_enum(catalog, locale, within)
-        .or_else(|| workshop_within_callable(catalog, locale, within))
-        .or_else(|| workshop_within_settings(within))
-        .ok_or_else(|| ToolResponse::Error {
-            error: ToolErrorInfo {
-                code: UNKNOWN_WITHIN.to_string(),
-                message: format!("within names no known Workshop scope: {within:?}"),
-            },
-        })?;
-    if let Some(query) = query.filter(|query| !query.is_empty()) {
-        // Matching and ranking stay with the owner (ADR-0021 decision 4):
-        // a scoped query is the owner's ranked unscoped matches intersected
-        // with the scope's children by identity. Children outside the
-        // owner's match vocabulary — parameters and path segments — drop,
-        // exactly as they cannot answer an unscoped request.
-        let matches = catalog
-            .lookup(locale, query)
-            .map_err(|error| refusal("lookup-failed", error.to_string()))?;
-        let mut rank = HashMap::new();
-        for (index, found) in matches.iter().enumerate() {
-            if let Some(identity) = match_identity(found) {
-                rank.entry(identity).or_insert(index);
+    let children = catalog
+        .lookup_within(locale, within, query)
+        .map_err(|error| match &error {
+            workshop_rs::WorkshopError::Unknown {
+                kind: "lookup scope",
+                ..
             }
-        }
-        entries.retain(|entry| rank.contains_key(entry["identity"].as_str().unwrap_or_default()));
-        entries.sort_by_key(|entry| rank[entry["identity"].as_str().unwrap_or_default()]);
-    }
+            | workshop_rs::WorkshopError::UnknownWithCandidates {
+                kind: "lookup scope",
+                ..
+            } => refusal(UNKNOWN_WITHIN, error.to_string()),
+            _ => refusal("lookup-failed", error.to_string()),
+        })?;
+    let mut entries: Vec<Value> = children
+        .into_iter()
+        .filter_map(|child| workshop_entry(catalog, locale, child))
+        .collect();
     entries.retain(|entry| kind.is_none_or(|k| entry["kind"] == k));
     Ok(entries)
-}
-
-/// The parameters of one Workshop callable, in call order. `value` is the
-/// canonical id or a localized spelling the catalog resolves.
-fn workshop_within_callable(catalog: &Catalog, locale: &Locale, value: &str) -> Option<Vec<Value>> {
-    let entry = [Kind::Action, Kind::Value].into_iter().find_map(|kind| {
-        catalog
-            .entry(kind, value)
-            .or_else(|| catalog.resolve(kind, locale, value))
-    })?;
-    let required = entry.required_param_count();
-    let mut entries = Vec::with_capacity(entry.param_count());
-    for index in 0..entry.param_count() {
-        let name = entry.param_name(index).unwrap_or_default().to_string();
-        let mut parameter = json!({
-            "type": entry.param_type(index).unwrap_or("any"),
-            "required": index < required,
-        });
-        if let Some(default) = entry.param_default(index) {
-            parameter["default"] = if default == "null" {
-                Value::Null
-            } else {
-                json!(default)
-            };
-        }
-        if let Some(domain) = entry.param_domain(index) {
-            parameter["enum"] = json!({
-                "domain": domain,
-                "members": catalog
-                    .enum_domain(domain)
-                    .map(|domain_entry| {
-                        domain_entry
-                            .members
-                            .iter()
-                            .map(|member| {
-                                catalog
-                                    .enum_spelling(domain, locale, &member.member)
-                                    .unwrap_or(member.member.as_str())
-                                    .to_string()
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default(),
-            });
-        }
-        entries.push(json!({
-            "identity": format!("{}.{}", entry.id, name),
-            "kind": "parameter",
-            "spelling": name.clone(),
-            "displayName": name,
-            "parameter": parameter,
-        }));
-    }
-    Some(entries)
-}
-
-/// The members of one Workshop enum domain — a catalog domain or a settings
-/// enum domain — in the domain's order. `value` is the canonical domain
-/// name or a spelling the catalog resolves.
-fn workshop_within_enum(catalog: &Catalog, locale: &Locale, value: &str) -> Option<Vec<Value>> {
-    let domain = if catalog.enum_domain(value).is_some() {
-        Some(value.to_string())
-    } else {
-        catalog
-            .resolve_enum_domain(locale, value)
-            .map(str::to_string)
-    };
-    if let Some(domain) = domain {
-        let domain_entry = catalog.enum_domain(&domain)?;
-        return Some(
-            domain_entry
-                .members
-                .iter()
-                .map(|member| {
-                    let spelling = catalog
-                        .enum_spelling(&domain, locale, &member.member)
-                        .unwrap_or(member.member.as_str())
-                        .to_string();
-                    json!({
-                        "identity": format!("{domain}.{}", member.member),
-                        "kind": "enumMember",
-                        "spelling": spelling.clone(),
-                        "displayName": spelling,
-                    })
-                })
-                .collect(),
-        );
-    }
-    // A settings enum domain answers under the same identity.
-    let members: Vec<Value> = settings::definitions()
-        .filter(|definition| {
-            matches!(
-                definition.domain(),
-                SettingValueDomain::Enum { domain } if domain.as_str() == value
-            )
-        })
-        .flat_map(|definition| {
-            definition
-                .enum_members()
-                .map(|member| {
-                    let spelling = member.english_name().to_string();
-                    json!({
-                        "identity": format!("{}.{}", member.domain(), member.id()),
-                        "kind": "enumMember",
-                        "spelling": spelling.clone(),
-                        "displayName": spelling,
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    (!members.is_empty()).then_some(members)
-}
-
-/// The immediate settings children under `prefix`, matched segment by
-/// segment against the canonical settings paths (whose template segments
-/// are `<team>` and `<hero>` and match any concrete value): leaf keys
-/// become `setting` entries, intermediate segments `settingPath` entries,
-/// each `spelling` equal to its own path segment. An empty `prefix` lists
-/// the root.
-fn workshop_within_settings(prefix: &str) -> Option<Vec<Value>> {
-    let prefix_segments: Vec<&str> = if prefix.is_empty() {
-        Vec::new()
-    } else {
-        prefix.split('.').collect()
-    };
-    let mut children: BTreeMap<String, Value> = BTreeMap::new();
-    let mut known_scope = prefix.is_empty();
-    for definition in settings::definitions() {
-        let segments: Vec<&str> = definition.path().split('.').collect();
-        if segments.len() < prefix_segments.len() {
-            continue;
-        }
-        let matches_prefix =
-            prefix_segments
-                .iter()
-                .zip(segments.iter())
-                .all(|(asked, declared)| {
-                    declared == asked || *declared == "<team>" || *declared == "<hero>"
-                });
-        if !matches_prefix {
-            continue;
-        }
-        if segments.len() == prefix_segments.len() {
-            // The prefix names this leaf itself — an existing but empty
-            // scope, not an unknown one.
-            known_scope = true;
-            continue;
-        }
-        known_scope = true;
-        let child = segments[prefix_segments.len()];
-        let identity = if prefix.is_empty() {
-            child.to_string()
-        } else {
-            format!("{prefix}.{child}")
-        };
-        if segments.len() == prefix_segments.len() + 1 {
-            children.entry(identity).or_insert_with(|| {
-                json!({
-                    "identity": definition.path().to_string(),
-                    "kind": "setting",
-                    "spelling": child,
-                    "displayName": definition.presentation().english_name,
-                    "setting": setting_facts(&definition),
-                })
-            });
-        } else {
-            children.entry(identity.clone()).or_insert_with(|| {
-                json!({
-                    "identity": identity.clone(),
-                    "kind": "settingPath",
-                    "spelling": child,
-                    "displayName": identity,
-                })
-            });
-        }
-    }
-    known_scope.then(|| children.into_values().collect())
 }
 
 /// The `setting` fact object: the value domain the key accepts, with its
