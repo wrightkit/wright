@@ -75,6 +75,7 @@ edit), not by mirroring the contract:
 | Navigate | `references`, `usage`, `callGraph` |
 | Validate | `check`, `lint`, `costEstimate` |
 | Edit | `semanticRename`, `validateEditTransaction` |
+| Vocabulary | `lookup` (added by #529 / ADR-0021: agent evidence showed unknown-name and rejected-name failures dominating authoring sessions) |
 
 Not exposed initially: `rules`, `cfg`, `findings`, `persistentObjects`,
 `lintRules`, `targetMetadata`, `inspect`, `analyze`, `compile`, and the

@@ -207,6 +207,14 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. `documents` and `sources` are supplied by the caller.",
         result: "the provider-validated transaction or a structured refusal",
     },
+    ToolSpec {
+        op: "lookup",
+        request_def: "LookupRequest",
+        drop_fields: &[],
+        mcp: true,
+        description: "Resolve a display name, near spelling, or guess to the language owner's accepted spelling and signature. Use it before writing in an unfamiliar language and when a name is rejected.",
+        result: "the ranked matches with owner spellings, signatures, and vocabulary facts",
+    },
 ];
 
 /// The schema `$defs` of the committed agent contract.

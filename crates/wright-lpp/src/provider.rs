@@ -20,12 +20,13 @@ use crate::error::ProviderError;
 use crate::process::ChildProcess;
 use crate::types::{
     Capabilities, Capability, CheckResult, ClientInfo, CompileResult, Document, DocumentSet,
-    InitializeResult, LocationsResult, Position, ProjectEntry, ReconstructResult, RenameResult,
-    SymbolsResult, TextEdit, ValidateEditsResult, WorkshopArtifact,
+    InitializeResult, LocationsResult, LookupParams, LookupResult, Position, ProjectEntry,
+    ReconstructResult, RenameResult, SymbolsResult, TextEdit, ValidateEditsResult,
+    WorkshopArtifact,
 };
 use crate::{
     LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION, LPP_DIRECTORY_TARGET_PROTOCOL_VERSION,
-    LPP_PROTOCOL_VERSION,
+    LPP_LOOKUP_PROTOCOL_VERSION, LPP_PROTOCOL_VERSION,
 };
 
 /// The negotiated result of a successful `lpp/initialize`.
@@ -110,6 +111,17 @@ pub trait LanguageProvider {
             supported: Vec::new(),
             message: "the provider client does not support LPP 1.4 artifact negotiation"
                 .to_string(),
+        })
+    }
+
+    /// Initialize with LPP 1.5 for `lpp/lookup` name and signature facts.
+    fn initialize_lookup(
+        &mut self,
+        _client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        Err(ProviderError::ProtocolVersionMismatch {
+            supported: Vec::new(),
+            message: "the provider client does not support LPP 1.5 name lookup".to_string(),
         })
     }
 
@@ -228,6 +240,13 @@ pub trait LanguageProvider {
         document: &Document,
         edits: &[TextEdit],
     ) -> Result<ValidateEditsResult, ProviderError>;
+
+    /// `lpp/lookup` (LPP 1.5): resolve a free-text name guess to the
+    /// provider's vocabulary entries. Answered from the provider's language
+    /// vocabulary alone — no documents, no loaded project.
+    fn lookup(&mut self, _params: &LookupParams) -> Result<LookupResult, ProviderError> {
+        capability_unavailable("lookup", "lpp/lookup")
+    }
 
     /// Graceful termination: send `lpp/shutdown`, close the provider's
     /// stdin, and wait (bounded) for the provider to exit.
@@ -412,6 +431,13 @@ impl LanguageProvider for StdioLanguageProvider {
         self.initialize_with_version(LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION, client_info)
     }
 
+    fn initialize_lookup(
+        &mut self,
+        client_info: Option<&ClientInfo>,
+    ) -> Result<InitializeResult, ProviderError> {
+        self.initialize_with_version(LPP_LOOKUP_PROTOCOL_VERSION, client_info)
+    }
+
     fn capabilities(&self) -> Result<&NegotiatedCapabilities, ProviderError> {
         self.negotiated
             .as_ref()
@@ -579,6 +605,13 @@ impl LanguageProvider for StdioLanguageProvider {
         )
     }
 
+    fn lookup(&mut self, params: &LookupParams) -> Result<LookupResult, ProviderError> {
+        self.call(
+            Capability::Lookup,
+            serde_json::to_value(params).expect("lookup params serialize"),
+        )
+    }
+
     fn shutdown(&mut self) -> Result<(), ProviderError> {
         if let Err(mut error) = self.client.shutdown() {
             self.enrich_transport_error(&mut error, "lpp/shutdown");
@@ -649,6 +682,7 @@ mod tests {
 
     use super::*;
     use crate::client::{ClientConfig, ClientPhase};
+    use crate::types::LookupWithin;
 
     /// A placeholder child whose pipes are taken and discarded; only the
     /// exit-status surface is used by these tests.
@@ -778,6 +812,13 @@ mod tests {
     fn init_result_artifact_negotiation_json() -> Value {
         let mut result = init_result_project_loading_json();
         result["protocolVersion"] = json!("1.4");
+        result
+    }
+
+    fn init_result_lookup_json() -> Value {
+        let mut result = init_result_artifact_negotiation_json();
+        result["protocolVersion"] = json!("1.5");
+        result["capabilities"]["lookup"] = json!(true);
         result
     }
 
@@ -1012,6 +1053,75 @@ mod tests {
             .compile_target_accepting(&target, None, None, &["workshop-rs/text-v1"])
             .expect_err("pre-1.4 session");
         assert_eq!(error.supported_protocol_versions(), vec!["1.2"]);
+        fake.assert_only_requests(1);
+    }
+
+    #[test]
+    fn lookup_uses_lpp_15_and_requires_the_capability() {
+        let (mut provider, fake) = Fake::spawn(vec![
+            FakeStep::Respond(ok_response(init_result_lookup_json())),
+            FakeStep::Respond(ok_response(json!({
+                "entries": [{
+                    "identity": "x-demo:operator/multiply",
+                    "kind": "operator",
+                    "spelling": "*",
+                    "displayName": "multiply",
+                    "callable": { "parameters": [
+                        { "name": "arg", "type": "integer", "required": true }
+                    ] },
+                }]
+            }))),
+        ]);
+        provider
+            .initialize_lookup(None)
+            .expect("LPP 1.5 initialize");
+        let params = LookupParams {
+            language_id: "x-demo-lang".to_string(),
+            query: Some("multiply".to_string()),
+            kind: None,
+            within: Some(LookupWithin {
+                kind: "enum".to_string(),
+                value: "x-demo:enum/operator".to_string(),
+            }),
+            locale: None,
+            limit: Some(3),
+        };
+        let result = provider.lookup(&params).expect("lookup result");
+        assert_eq!(result.entries.len(), 1);
+        let initialize: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("initialize request"),
+        )
+        .expect("initialize JSON");
+        assert_eq!(initialize["params"]["protocolVersion"], "1.5");
+        let request: Value = serde_json::from_str(
+            &fake
+                .requests
+                .recv_timeout(Duration::from_millis(250))
+                .expect("lookup request"),
+        )
+        .expect("lookup JSON");
+        assert_eq!(request["method"], "lpp/lookup");
+        assert_eq!(request["params"]["languageId"], "x-demo-lang");
+        assert_eq!(request["params"]["query"], "multiply");
+        assert_eq!(
+            request["params"]["within"],
+            json!({ "kind": "enum", "value": "x-demo:enum/operator" })
+        );
+        assert_eq!(request["params"]["limit"], 3);
+        fake.assert_only_requests(0);
+
+        // A session negotiated below 1.5 refuses before any wire traffic.
+        let (mut older, fake) = Fake::spawn(vec![FakeStep::Respond(ok_response(
+            init_result_artifact_negotiation_json(),
+        ))]);
+        older
+            .initialize_artifact_negotiation(None)
+            .expect("LPP 1.4 initialize");
+        let error = older.lookup(&params).expect_err("pre-1.5 session");
+        assert_eq!(error.code(), "capability-unavailable");
         fake.assert_only_requests(1);
     }
 }

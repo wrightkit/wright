@@ -31,6 +31,7 @@ const EXPECTED_V1_OPERATIONS: &[&str] = &[
     "semanticRename",
     "providerSemanticRename",
     "providerValidateEdit",
+    "lookup",
 ];
 
 fn workspace_root() -> PathBuf {
@@ -124,6 +125,15 @@ fn requests() -> Vec<Value> {
             }]},
             "sources":{"file:///project.opy":"rule(\"Example\") {}"},
             "project_root":null
+        }),
+        json!({
+            "op":"lookup",
+            "language":"workshop",
+            "query":"wait",
+            "kind":null,
+            "within":null,
+            "locale":null,
+            "limit":null
         }),
     ]
 }

@@ -61,6 +61,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Command::SemanticCompare(args)) => run_semantic_compare(args),
+        Some(Command::Lookup(args)) => run_lookup(&args),
         Some(Command::Serve(args)) => serve::run(args),
         Some(Command::Completion(args)) => match args.subcommand {
             Some(cli::CompletionSubcommand::Install(install_args)) => {
@@ -274,6 +275,7 @@ fn run_workflow(command: Command) -> ExitCode {
         | Command::Update(_)
         | Command::Agent(_)
         | Command::Serve(_)
+        | Command::Lookup(_)
         | Command::SemanticCompare(_) => {
             unreachable!("non-workflow command handled before run_workflow")
         }
@@ -309,6 +311,113 @@ fn run_configured<T: serde::Serialize + present::ResultPresentation>(
     };
 
     ExitCode::from(run_command(&mut session, run, presentation, subject))
+}
+
+/// Run `wright lookup` (#529): the same `ToolRequest::Lookup` the agent
+/// contract serves, over a session that never loads a project. Text mode
+/// prints one line per entry — the rendered signature for a callable, else
+/// the accepted spelling — with its kind and identity; JSON mode prints the
+/// result `wright serve` returns for the same request.
+fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
+    let config = SessionConfig {
+        opy_provider: wright_driver::OpyProviderConfig {
+            executable: args.opy_provider.clone(),
+            ..wright_driver::OpyProviderConfig::default()
+        },
+        ..SessionConfig::default()
+    };
+    let mut session = match wright_driver::CompilerSession::new(config) {
+        Ok(session) => session,
+        Err(diagnostic) => {
+            eprintln!("wright: {}", diagnostic.message);
+            return ExitCode::from(exit::USAGE);
+        }
+    };
+    let mut service = match wright_driver::service::ToolService::new(&mut session) {
+        Ok(service) => service,
+        Err(diagnostic) => {
+            eprintln!("wright: {}", diagnostic.message);
+            return ExitCode::from(exit::USAGE);
+        }
+    };
+    let request = wright_driver::service::ToolRequest::Lookup {
+        language: args.language.as_str().to_string(),
+        query: args.query.clone(),
+        kind: args.kind.map(|kind| kind.as_str().to_string()),
+        within: args.within.clone(),
+        locale: args.locale.clone(),
+        limit: args.limit,
+    };
+    match service.handle(&request) {
+        wright_driver::service::ToolResponse::Ok { result } => {
+            match args.format {
+                OutputFormatArg::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).expect("result serializes")
+                ),
+                OutputFormatArg::Text => print_lookup_text(&result),
+            }
+            if result.get("unavailable").is_some() {
+                return ExitCode::from(exit::UNSUPPORTED);
+            }
+            if result["entries"].as_array().is_none_or(Vec::is_empty) {
+                eprintln!("wright: lookup returned no entries");
+                return ExitCode::from(exit::SOURCE_ERROR);
+            }
+            ExitCode::SUCCESS
+        }
+        wright_driver::service::ToolResponse::Error { error } => {
+            match args.format {
+                OutputFormatArg::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "error": error }))
+                        .expect("error serializes")
+                ),
+                OutputFormatArg::Text => {
+                    eprintln!("wright: {}: {}", error.code, error.message)
+                }
+            }
+            if error.code.starts_with("invalid-") {
+                ExitCode::from(exit::USAGE)
+            } else {
+                ExitCode::from(exit::SOURCE_ERROR)
+            }
+        }
+    }
+}
+
+/// One line per lookup entry in text mode: the rendered signature for a
+/// callable, else the accepted spelling, then its kind, the owner identity
+/// when it differs from the spelling, and the display name when that adds
+/// information. An `unavailable` result names the owner and the missing
+/// capability.
+fn print_lookup_text(result: &serde_json::Value) {
+    if let Some(unavailable) = result.get("unavailable") {
+        eprintln!(
+            "unavailable: {} ({})",
+            unavailable["message"].as_str().unwrap_or_default(),
+            result["owner"].as_str().unwrap_or_default()
+        );
+        return;
+    }
+    let Some(entries) = result["entries"].as_array() else {
+        return;
+    };
+    for entry in entries {
+        let spelling = entry["spelling"].as_str().unwrap_or_default();
+        let head = entry["signature"].as_str().unwrap_or(spelling);
+        let mut line = format!("{head} [{}]", entry["kind"].as_str().unwrap_or_default());
+        let identity = entry["identity"].as_str().unwrap_or_default();
+        if identity != spelling {
+            line.push_str(&format!("  {identity}"));
+        }
+        if let Some(display) = entry["displayName"].as_str() {
+            if display != spelling {
+                line.push_str(&format!("  — {display}"));
+            }
+        }
+        println!("{line}");
+    }
 }
 
 fn run_semantic_compare(args: cli::SemanticCompareArgs) -> ExitCode {

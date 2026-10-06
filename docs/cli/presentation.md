@@ -121,13 +121,17 @@ mapped diagnostic carries its `-->` location plus a one-line source frame on
 the diagnostic stream. Spans whose path is not a readable source file —
 `<stdin>`, `<provider-artifact>`, or a dangling `<file N>` — are never dressed
 up as file locations; the reported position and the pipeline stage trail each
-diagnostic as secondary metadata instead. A compact footer closes the report
+diagnostic as secondary metadata instead. A diagnostic whose code carries an
+`unknown-` kind (a rejected Workshop or OverPy name) is followed by a
+one-line `hint: run 'wright lookup' ...` pointer on `check` and `compile`
+(#529, ADR-0021); the hint is text presentation only and never enters the
+envelope. A compact footer closes the report
 with the count of affected source files and, on an interactive terminal, the
 elapsed workflow time; plain output omits wall-clock values so it stays
-deterministic. Severity ordering, secondary metadata, and the footer are
-presentation-layer concerns: the `wright-result/v1` envelope keeps the
-driver's diagnostic set and production order, and the GitHub Actions
-renderer is unchanged.
+deterministic. Severity ordering, secondary metadata, the lookup hint, and
+the footer are presentation-layer concerns: the `wright-result/v1` envelope
+keeps the driver's diagnostic set and production order, and the GitHub
+Actions renderer is unchanged.
 
 The `lint` report applies the same hierarchy to findings: the verdict
 leads with finding counts by severity, findings render in action order, and a

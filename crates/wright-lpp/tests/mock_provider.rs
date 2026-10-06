@@ -107,6 +107,13 @@ fn initialize() -> (StdioLanguageProvider, wright_lpp::InitializeResult) {
 // Initialize / handshake / capability negotiation
 // ---------------------------------------------------------------------------
 
+/// An LPP `x.y` protocol version as a comparable tuple.
+fn protocol_tuple(version: &str) -> (u32, u32) {
+    let mut parts = version.split('.');
+    let parse = |part: Option<&str>| part.and_then(|part| part.parse().ok()).unwrap_or(0);
+    (parse(parts.next()), parse(parts.next()))
+}
+
 #[test]
 fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
     let Some(_) = mock_provider_path() else {
@@ -123,7 +130,9 @@ fn initializes_and_negotiates_capabilities_with_x_demo_lang() {
     let negotiated = provider.capabilities().expect("negotiated");
     assert_eq!(negotiated.language_ids(), vec![DEMO_LANGUAGE_ID]);
     for capability in Capability::ALL {
-        if capability == Capability::ProjectLoading {
+        // Capabilities introduced after the negotiated protocol version are
+        // not advertised on this session.
+        if protocol_tuple(capability.since()) > protocol_tuple(&result.protocol_version) {
             continue;
         }
         assert!(

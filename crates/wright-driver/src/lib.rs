@@ -8,6 +8,7 @@ pub mod config;
 pub mod diag;
 pub mod edit;
 pub mod input;
+pub(crate) mod lookup;
 pub mod opy_provider;
 pub mod progress;
 pub mod provider;

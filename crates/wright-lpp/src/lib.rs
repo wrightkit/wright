@@ -47,6 +47,9 @@ pub const LPP_DIRECTORY_TARGET_PROTOCOL_VERSION: &str = "1.2";
 /// The LPP 1.4 version that adds artifact format negotiation on `lpp/compile`.
 pub const LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION: &str = "1.4";
 
+/// The LPP 1.5 version that adds name and signature lookup on `lpp/lookup`.
+pub const LPP_LOOKUP_PROTOCOL_VERSION: &str = "1.5";
+
 /// The client name reported in `lpp/initialize` `clientInfo`.
 pub const LPP_CLIENT_NAME: &str = "wright";
 
@@ -58,7 +61,8 @@ pub use registry::{ProviderConfig, ProviderRegistry, RegistryError};
 pub use types::{
     Capabilities, Capability, CheckResult, ClientInfo, CompileResult, Diagnostic,
     DiagnosticSeverity, Document, DocumentDiagnostics, DocumentEdits, DocumentSet, DocumentSymbols,
-    InitializeResult, LanguageInfo, Location, LocationsResult, Position, ProjectEntry,
-    ProjectTargetKind, Range, ReconstructResult, RenameResult, ServerInfo, Symbol, SymbolsResult,
-    TextEdit, ValidateEditsResult, WorkshopArtifact,
+    InitializeResult, LanguageInfo, Location, LocationsResult, LookupParams, LookupResult,
+    LookupWithin, Position, ProjectEntry, ProjectTargetKind, Range, ReconstructResult,
+    RenameResult, ServerInfo, Symbol, SymbolsResult, TextEdit, ValidateEditsResult,
+    WorkshopArtifact,
 };

@@ -193,10 +193,11 @@ mod tests {
             "wright_validate_edit_transaction",
             "wright_provider_semantic_rename",
             "wright_provider_validate_edit",
+            "wright_lookup",
         ] {
             assert!(names.iter().any(|n| n == name), "missing {name}");
         }
-        assert_eq!(names.len(), 14);
+        assert_eq!(names.len(), 15);
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
@@ -218,6 +219,11 @@ mod tests {
         let input = input_schema(&defs, project, &[]);
         assert!(input["required"].is_null());
         assert_eq!(input["properties"], json!({}));
+        let lookup = TOOL_SPECS.iter().find(|spec| spec.op == "lookup").unwrap();
+        let input = input_schema(&defs, lookup, &[]);
+        assert_eq!(input["required"], json!(["language"]));
+        assert!(input["properties"].get("op").is_none());
+        assert!(input["properties"].get("within").is_some());
 
         // #532: the brief tools expose `brief` in their generated schemas.
         for op in ["analyze", "inspect", "lint"] {

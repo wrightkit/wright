@@ -1117,7 +1117,8 @@ pub(crate) fn workshop_diag(
                 format!("{}: {}", catalog.code, catalog.message),
             );
         }
-        workshop_rs::WorkshopError::Unknown { kind, span, .. } => {
+        workshop_rs::WorkshopError::Unknown { kind, span, .. }
+        | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. } => {
             (format!("unknown-{kind}"), Stage::Frontend, to_span(*span))
         }
         workshop_rs::WorkshopError::Malformed { span, .. } => {

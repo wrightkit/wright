@@ -6,6 +6,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use serde_json::json;
+
 fn wright() -> &'static str {
     env!("CARGO_BIN_EXE_wright")
 }
@@ -412,6 +414,63 @@ fn stdio_and_jsonrpc_transports_serve_over_an_unloadable_project() {
 }
 
 #[test]
+fn lookup_answers_over_every_transport_and_a_broken_project() {
+    // #529: `lookup` reads owner vocabulary, never the program — the same
+    // result arrives over stdio, JSON-RPC `request`, and MCP `tools/call`,
+    // even over a session whose input cannot load.
+    let input = corpus_workshop("synthetic/basic-rule");
+    let stdio = run_lines(
+        "stdio",
+        &input,
+        &[r#"{"op":"lookup","language":"workshop","query":"wait"}"#],
+    );
+    let jsonrpc = run_lines(
+        "jsonrpc",
+        &input,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"request","params":{"op":"lookup","language":"workshop","query":"wait"}}"#,
+        ],
+    );
+    let mcp = run_lines(
+        "mcp",
+        &input,
+        &[&mcp_call(
+            1,
+            "wright_lookup",
+            json!({"language": "workshop", "query": "wait"}),
+        )],
+    );
+    let result = &stdio[0]["result"];
+    assert_eq!(result["owner"], "workshop-rs");
+    assert!(
+        result["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["signature"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("Wait(")),
+        "a callable entry renders its signature: {result}"
+    );
+    assert_eq!(result, &jsonrpc[0]["result"]);
+    assert_eq!(result, &mcp_payload(&mcp[0]));
+
+    // #512 + #529: a session over a missing input still answers lookup —
+    // the request never touches the failed project load.
+    let dir = std::env::temp_dir().join(format!("wright-serve-529-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = dir.join("missing.ws");
+    let broken = run_lines(
+        "stdio",
+        &missing,
+        &[r#"{"op":"lookup","language":"workshop","query":"wait"}"#],
+    );
+    assert_eq!(broken[0]["result"], *result);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn stdio_transport_recovers_in_the_same_process() {
     // #512: a session that started over a missing input loads the repaired
     // project on the next program-reading request — no restart, no reload
@@ -757,6 +816,7 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_semantic_rename",
             "wright_provider_semantic_rename",
             "wright_provider_validate_edit",
+            "wright_lookup",
         ]
     );
     // tools/list is a subset of the contract's advertised operations.
@@ -803,6 +863,15 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "{name} has no brief field"
         );
     }
+    // #529: `wright_lookup`'s schema derives from `LookupRequest` — `op` is
+    // dropped, `language` stays required.
+    let lookup = tools.iter().find(|t| t["name"] == "wright_lookup").unwrap();
+    assert_eq!(lookup["inputSchema"]["required"], json!(["language"]));
+    assert!(
+        lookup["inputSchema"]["properties"].get("op").is_none()
+            && lookup["inputSchema"]["properties"].get("query").is_some()
+            && lookup["inputSchema"]["properties"].get("within").is_some()
+    );
 }
 
 #[test]
@@ -848,6 +917,12 @@ fn mcp_transport_results_match_the_service_contract() {
                     }]
                 }
             }),
+        ),
+        // #529: vocabulary lookup needs no project state — the payload is
+        // the same result object stdio returns.
+        (
+            "wright_lookup",
+            serde_json::json!({"language": "workshop", "query": "wait"}),
         ),
     ];
     let mut mcp_lines = vec![];

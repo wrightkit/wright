@@ -25,8 +25,9 @@ pub(crate) struct Cli {
 pub(crate) const LONG_ABOUT: &str = "Wright compiler and Workshop tooling CLI.
 
 Commands check correctness, summarize semantic hotspots, lint, compile,
-rename Workshop symbols, or reconstruct source through the typed
-wright-driver result envelope. `inspect`
+rename Workshop symbols, resolve owner names and signatures (`lookup`), or
+reconstruct source through the typed wright-driver result envelope.
+`inspect`
 prints the semantic summary, and its query subcommands (symbols, refs, cfg,
 callgraph, cost) expose each detail area. `compile` and `convert`
 keep their source artifact stdout contracts; JSON mode prints only one
@@ -95,6 +96,10 @@ pub(crate) enum Command {
     /// Rename a Workshop variable or subroutine semantically (#434): previews
     /// the validated source diff by default; `--write` applies it atomically.
     Rename(RenameArgs),
+    /// Resolve a display name, near spelling, or guess to the language
+    /// owner's accepted spelling and signature (#529). Use it before writing
+    /// in an unfamiliar language and when a name is rejected.
+    Lookup(LookupArgs),
     /// Generate static shell completion from the command model.
     Completion(CompletionArgs),
     /// Update Wright-managed components: a standalone installation and
@@ -232,6 +237,76 @@ pub(crate) struct RenameArgs {
     pub(crate) write: bool,
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+}
+
+/// Arguments of `lookup` (#529): the free-text query, the language selector,
+/// and the optional narrowing fields of the `lookup` operation. It answers
+/// from language vocabulary alone, so it takes no input path.
+#[derive(Debug, Args)]
+pub(crate) struct LookupArgs {
+    /// Free text to resolve: a display name, a near spelling, or a guess.
+    #[arg(value_name = "QUERY")]
+    pub(crate) query: Option<String>,
+    /// The language vocabulary to query.
+    #[arg(long, value_enum, value_name = "LANG", default_value_t = LookupLanguageArg::Workshop)]
+    pub(crate) language: LookupLanguageArg,
+    /// Restrict entries to one kind.
+    #[arg(long, value_enum, value_name = "KIND")]
+    pub(crate) kind: Option<LookupKindArg>,
+    /// List the members, parameters, or settings children of this identity:
+    /// an enum domain, a callable, or a settings path prefix.
+    #[arg(long, value_name = "IDENTITY")]
+    pub(crate) within: Option<String>,
+    /// Workshop display-name locale.
+    #[arg(long, value_name = "LOCALE")]
+    pub(crate) locale: Option<String>,
+    /// Maximum entries; the default is 3 and the maximum is 10.
+    #[arg(long, value_name = "N")]
+    pub(crate) limit: Option<usize>,
+    /// Override the first-party OPY provider executable.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) opy_provider: Option<PathBuf>,
+    /// Output format.
+    #[arg(short = 'f', long, value_enum, default_value_t = OutputFormatArg::Text)]
+    pub(crate) format: OutputFormatArg,
+}
+
+/// The language a `lookup` request queries (`capabilities.languages`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum LookupLanguageArg {
+    Workshop,
+    Opy,
+}
+
+impl LookupLanguageArg {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Workshop => "workshop",
+            Self::Opy => "opy",
+        }
+    }
+}
+
+/// Entry kinds the `lookup` operation filters on (ADR-0021).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum LookupKindArg {
+    Action,
+    Value,
+    Event,
+    EnumMember,
+    Setting,
+}
+
+impl LookupKindArg {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Action => "action",
+            Self::Value => "value",
+            Self::Event => "event",
+            Self::EnumMember => "enumMember",
+            Self::Setting => "setting",
+        }
+    }
 }
 
 /// Arguments of `inspect`: an optional query subcommand naming one detail
