@@ -13,6 +13,7 @@ Keep these sources of authority separate:
 
 | Concern | Current contract / authority |
 | --- | --- |
+| Path to 1.0: product direction, readiness model, planning rules | [`product-contract.md`](product-contract.md) |
 | Product/repository ownership and dependency direction | [`ownership.md`](ownership.md) |
 | Language/provider integration and failure routing | [`integration.md`](integration.md) |
 | Wright-owned lint/analyze/inspect/edit/agent/CI/LSP tooling model | [`tooling.md`](tooling.md) |

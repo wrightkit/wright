@@ -41,4 +41,6 @@ its audit date.
 * [ADR-0019: Stable installer bootstrap distribution](0019-stable-installer-bootstrap-distribution.md)
 * [ADR-0020: Native coding-agent tools as an MCP adapter over `ToolService`](0020-native-agent-tool-adapter.md)
 * [ADR-0021: Name and signature lookup for agent authoring](0021-name-and-signature-lookup.md)
+* [ADR-0022: One shared surface for the semantic queries](0022-shared-surface-for-semantic-queries.md)
+* [ADR-0023: LSP scope for 1.0](0023-lsp-scope-for-1-0.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
