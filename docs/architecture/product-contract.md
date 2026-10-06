@@ -1,6 +1,6 @@
 # Product contract: the path to 1.0
 
-Moved from `wrightkit/wright#134` on 2026-10-06, where it was maintained as an issue body, then deduplicated against the documents that already own parts of it (the first commit of that change is the unchanged move). This document is the current contract; the execution state is tracked in `wrightkit/wright#537` and the live issues it links, never here.
+The execution state is tracked in `wrightkit/wright#537` and the live issues it links, never here.
 
 ## Goal
 
@@ -51,6 +51,8 @@ Wright 1.0 is ready when users can rely on it as a stable Workshop tooling platf
 
 - cross-platform installation and update;
 - stable declared `check`, `lint`, `analyze`, `inspect`, source-edit/fix, agent/embedding, and native-tool contracts;
+- the semantic queries reachable through one shared surface for the CLI and the agent paths ([ADR-0022](../adr/0022-shared-surface-for-semantic-queries.md));
+- editor language services declared at the scope of [ADR-0023](../adr/0023-lsp-scope-for-1-0.md), each advertised only when backed;
 - canonical raw Workshop parsing, validation, analysis inputs, and emission through `workshop-rs`;
 - independently usable OPY and DEL/OSTW owner implementations for the source-language scopes Wright declares supported;
 - compilation/conversion only where the owning implementation and Wright integration have actually established the declared scope;

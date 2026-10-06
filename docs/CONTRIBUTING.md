@@ -82,6 +82,6 @@ compiler/tooling crates (`wright-driver`, `wright-language`, and `wright-lsp`):
 * Keep commits focused on one functional boundary and do not include unrelated
   working-tree changes.
 * Describe planning work by concrete capability, issue reference, or release
-  version (normative pre-1.0 roadmap: [#134](https://github.com/wrightkit/wright/issues/134));
+  version (normative pre-1.0 contract: [`architecture/product-contract.md`](architecture/product-contract.md));
   internal phase-number labels are not the roadmap model for new issues, PRs,
   or living docs.
