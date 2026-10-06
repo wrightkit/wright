@@ -175,6 +175,18 @@ fn service_responses() -> Vec<(String, Value)> {
         .collect()
 }
 
+fn service_response(request: &ToolRequest) -> ToolResponse {
+    let input = workspace_root().join("tests/fixtures/workshop/synthetic/control-flow.ws");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session starts");
+    let mut service = ToolService::new(&mut session).expect("service loads the project");
+    service.handle(request)
+}
+
 #[test]
 fn agent_v1_schema_covers_every_advertised_request_and_response() {
     let root = workspace_root();
@@ -329,50 +341,74 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
     assert!(!response_schema.is_valid(&json!({"result":{},"error":{"code":"x","message":"y"}})));
     assert!(!request_schema.is_valid(&json!({"op":"check","unexpected":true})));
 
-    let operation_results = [
-        ("capabilities", "CapabilitiesResult"),
-        ("compile", "CompileResult"),
-        ("check", "CheckResult"),
-        ("analyze", "AnalyzeResult"),
-        ("inspect", "InspectResult"),
-        ("project", "ProjectResult"),
-        ("rules", "RulesResult"),
-        ("symbols", "SymbolsResult"),
-        ("references", "ReferencesResult"),
-        ("usage", "UsageResult"),
-        ("cfg", "CfgResult"),
-        ("findings", "FindingsResult"),
-        ("persistentObjects", "PersistentObjectsResult"),
-        ("lint", "LintResult"),
-        ("lintRules", "LintRulesResult"),
-        ("callGraph", "CallGraphResult"),
-        ("costEstimate", "CostEstimateResult"),
-        ("targetMetadata", "TargetMetadataResult"),
-        ("validateEditTransaction", "ValidateEditTransactionResult"),
-        ("semanticRename", "SemanticRenameResult"),
-        ("providerSemanticRename", "ProviderSemanticRenameResult"),
-        ("providerValidateEdit", "ProviderValidateEditResult"),
-    ];
+    // #532: `capabilities.result_schemas` names the committed-schema definition
+    // describing each advertised operation's result. An advertised operation
+    // without a result schema fails here.
+    let result_schemas = current["result_schemas"].as_object().unwrap();
+    assert_eq!(
+        result_schemas.keys().cloned().collect::<BTreeSet<String>>(),
+        advertised
+    );
     let live_responses = service_responses();
-    assert_eq!(live_responses.len(), operation_results.len());
-    for ((operation, result), (expected_operation, definition)) in
-        live_responses.iter().zip(operation_results)
-    {
-        assert_eq!(operation, expected_operation);
+    assert_eq!(live_responses.len(), result_schemas.len());
+    for (operation, result) in &live_responses {
+        let reference = result_schemas[operation]
+            .as_str()
+            .unwrap_or_else(|| panic!("{operation} has no result schema"));
+        let definition = reference
+            .strip_prefix("#/$defs/")
+            .unwrap_or_else(|| panic!("{operation} result schema is not a local ref: {reference}"));
+        assert!(
+            schema["$defs"].get(definition).is_some(),
+            "{operation} result schema {reference} has no definition"
+        );
         let response = json!({"result":result});
         assert!(
             response_schema.is_valid(&response),
             "ToolResponse schema rejected {operation}: {response}"
         );
         let mut operation_document = schema.clone();
-        operation_document["$ref"] = Value::String(format!("#/$defs/{definition}"));
+        operation_document["$ref"] = Value::String(reference.to_string());
         let operation_schema =
             JSONSchema::compile(&operation_document).expect("operation result schema compiles");
         assert!(
             operation_schema.is_valid(result),
-            "{operation} result does not match {definition}: {result}"
+            "{operation} result does not match {reference}: {result}"
         );
     }
+
+    // #532: `brief` validates and deserializes on analyze/inspect/lint, and a
+    // brief result validates against the same operation result schema.
+    for request in [
+        json!({"op":"analyze","brief":true}),
+        json!({"op":"inspect","brief":true}),
+        json!({"op":"lint","brief":true}),
+        json!({"op":"lint","brief":false,"severity":"warning","max":3}),
+    ] {
+        assert!(
+            request_schema.is_valid(&request),
+            "invalid request: {request}"
+        );
+        let parsed =
+            serde_json::from_value::<ToolRequest>(request.clone()).expect("request deserializes");
+        let ToolResponse::Ok { result } = service_response(&parsed) else {
+            panic!("brief request failed: {request}");
+        };
+        let reference = result_schemas[request["op"].as_str().unwrap()]
+            .as_str()
+            .unwrap();
+        let mut operation_document = schema.clone();
+        operation_document["$ref"] = Value::String(reference.to_string());
+        let operation_schema =
+            JSONSchema::compile(&operation_document).expect("operation result schema compiles");
+        assert!(
+            operation_schema.is_valid(&result),
+            "{} brief result does not match {reference}: {result}",
+            request["op"]
+        );
+    }
+    assert!(!request_schema.is_valid(&json!({"op":"lint","brief":"yes"})));
+    assert!(!request_schema.is_valid(&json!({"op":"check","brief":true})));
 
     let valid_range = json!({"start_line":1,"start_col":1,"end_line":1,"end_col":1});
     assert!(edit_range_schema.is_valid(&valid_range));
@@ -398,11 +434,14 @@ fn cli_and_agent_selections_return_the_same_set() {
     })
     .expect("session starts");
     let mut service = ToolService::new(&mut session).expect("service loads");
-    let agent = match service.handle(&ToolRequest::Lint(FindingSelection {
-        rule: Some("repeated-value".to_string()),
-        max: Some(2),
-        ..FindingSelection::default()
-    })) {
+    let agent = match service.handle(&ToolRequest::Lint {
+        selection: FindingSelection {
+            rule: Some("repeated-value".to_string()),
+            max: Some(2),
+            ..FindingSelection::default()
+        },
+        brief: false,
+    }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("lint selection failed: {error:?}"),
     };
@@ -464,4 +503,53 @@ fn cli_and_agent_selections_return_the_same_set() {
     let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
     assert_eq!(cli["symbols"], agent["symbols"], "same selected set");
     assert_eq!(cli["selection"], agent["selection"], "same truncation");
+
+    // #532: `--brief` and the `brief` request field produce the same brief
+    // payload for the same input — the agent and CLI surfaces share one
+    // driver-side form.
+    for (request, args, envelope) in [
+        (
+            ToolRequest::Lint {
+                selection: FindingSelection::default(),
+                brief: true,
+            },
+            vec!["lint", "--brief"],
+            false,
+        ),
+        (
+            ToolRequest::Analyze { brief: true },
+            vec!["analyze", "--brief"],
+            true,
+        ),
+        (
+            ToolRequest::Inspect { brief: true },
+            vec!["inspect", "--brief"],
+            true,
+        ),
+    ] {
+        let agent = match service.handle(&request) {
+            ToolResponse::Ok { result } => {
+                if envelope {
+                    result["result"].clone()
+                } else {
+                    result
+                }
+            }
+            ToolResponse::Error { error } => panic!("{request:?} failed: {error:?}"),
+        };
+        let output = Command::new(env!("CARGO_BIN_EXE_wright"))
+            .args(args)
+            .arg(input.to_str().unwrap())
+            .args(["-f", "json"])
+            .stdin(Stdio::null())
+            .output()
+            .expect("brief command runs");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
+        assert_eq!(cli, agent, "{request:?} differs between CLI and service");
+    }
 }

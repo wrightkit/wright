@@ -15,8 +15,8 @@ use wright_driver::config::OutputFormat;
 use wright_driver::edit::RenameResult;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::{
-    AnalyzeResult, CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult,
-    CostResult, Envelope, InspectResult, LintResult, RefsResult, SymbolsResult,
+    AnalyzeResult, BriefResult, CallGraphResult, CfgResult, CheckResult, CompileResult,
+    ConvertResult, CostResult, Envelope, InspectResult, LintResult, RefsResult, SymbolsResult,
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
@@ -708,6 +708,62 @@ impl ResultPresentation for InspectResult {
     }
     fn render_body(&self, _ctx: &RenderContext<'_>) {
         render_inspect(self);
+    }
+}
+
+/// The verdict a brief result leads with (#532): the collection counts the
+/// summary reports — severity-grouped finding totals first, then the
+/// remaining collection totals in a stable order.
+fn brief_metadata(value: &serde_json::Value) -> String {
+    let counts = &value["counts"];
+    let mut parts = Vec::new();
+    for key in ["findings", "risks"] {
+        if let Some(group) = counts.get(key) {
+            let total = group["total"].as_u64().unwrap_or(0);
+            let error = group["error"].as_u64().unwrap_or(0);
+            let warning = group["warning"].as_u64().unwrap_or(0);
+            let info = group["info"].as_u64().unwrap_or(0);
+            parts.push(format!(
+                "{total} {key} ({error} error(s), {warning} warning(s), {info} info)"
+            ));
+        }
+    }
+    for key in [
+        "rules",
+        "symbols",
+        "references",
+        "elements",
+        "persistentObjects",
+        "skipped",
+    ] {
+        if let Some(total) = counts.get(key).and_then(serde_json::Value::as_u64) {
+            parts.push(format!("{total} {key}"));
+        }
+    }
+    parts.join(", ")
+}
+
+impl ResultPresentation for BriefResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!("{}; brief", brief_metadata(&self.0)))
+    }
+    fn render_body(&self, ctx: &RenderContext<'_>) {
+        render_brief(self, ctx);
+    }
+    /// The brief's counts carry the reported severities, so the verdict
+    /// color still reflects the highest-severity finding of the full set.
+    fn update_summary_status(&self, status: &mut SummaryStatus) {
+        for key in ["findings", "risks"] {
+            let Some(group) = self.0["counts"].get(key) else {
+                continue;
+            };
+            for severity in ["error", "warning", "info"] {
+                if group[severity].as_u64().unwrap_or(0) > 0 {
+                    *status = (*status).max(SummaryStatus::from_finding_severity(severity));
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -1649,6 +1705,42 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
     let parts = lint_footer_parts(files.len(), array_len(&result.skipped), ctx);
     if !parts.is_empty() {
         println!("  {}", dim(&parts.join(" · "), ctx.presentation.color));
+    }
+}
+
+/// The `--brief` body (#532): the summary's highest-priority items, then
+/// the expansion hint. Finding items render through the lint finding
+/// style; rule/fact items render as `name — N element(s) --> location`.
+fn render_brief(result: &BriefResult, ctx: &RenderContext<'_>) {
+    let items = result.0["items"].as_array().map_or(&[][..], Vec::as_slice);
+    let heading = if items.iter().any(|item| item["severity"].is_string()) {
+        "Top findings"
+    } else {
+        "Top items"
+    };
+    println!("\n{heading}");
+    if items.is_empty() {
+        println!("  none");
+    }
+    for item in items {
+        if item["severity"].is_string() {
+            render_finding_group(std::slice::from_ref(item), ctx);
+            continue;
+        }
+        let name = item["name"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("<unnamed>");
+        let elements = item["elements"]
+            .as_u64()
+            .map_or(String::new(), |count| format!(", {count} element(s)"));
+        match item.get("span").and_then(inline_location) {
+            Some(location) => println!("  {name}{elements} --> {location}"),
+            None => println!("  {name}{elements}"),
+        }
+    }
+    if let Some(expand) = result.0["expand"].as_str() {
+        println!("  {}", dim(expand, ctx.presentation.color));
     }
 }
 

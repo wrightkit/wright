@@ -80,6 +80,15 @@ AGENT_OPS = [
 
 CLI_COMMANDS = ["check", "lint", "analyze", "inspect", "compile"]
 
+# #532: the brief result form is the recommended agent-facing shape; both
+# surfaces are measured on it. `briefTokenBudget` bounds the JSON output of
+# any brief metric per surface — the `brief` request payload at 500
+# estimated tokens, the CLI `--brief` envelope (which adds pretty-printing
+# and diagnostics framing) at 800. Exceeding the budget is a drift
+# violation, not a band check.
+BRIEF_OPS = ["lint", "analyze", "inspect"]
+BRIEF_TOKEN_BUDGET = {"agent": 500, "cli": 800}
+
 
 class ServeSession:
     """One `wright serve --transport stdio` process with line requests."""
@@ -374,6 +383,26 @@ def run_agent_ops(
             except (queue.Empty, TimeoutError):
                 metrics[key] = {"error": "timeout"}
                 break
+        for op in BRIEF_OPS:
+            key = f"agent:{op}?brief"
+            try:
+                lines_bytes: list[int] = []
+                latencies: list[float] = []
+                counts: dict = {}
+                for _ in range(repeats):
+                    line, elapsed = session.request_timed(op, brief=True)
+                    lines_bytes.append(len(line.encode("utf-8")))
+                    latencies.append(elapsed)
+                    response = json.loads(line)
+                    if "error" in response:
+                        metrics[key] = {"error": response["error"].get("code", "error")}
+                        break
+                    counts = brief_counts(response.get("result"))
+                else:
+                    metrics[key] = metric_record(lines_bytes, latencies, counts)
+            except (queue.Empty, TimeoutError):
+                metrics[key] = {"error": "timeout"}
+                break
     return metrics
 
 
@@ -387,33 +416,53 @@ def _first_id(items) -> int | None:
     return None
 
 
+def brief_counts(payload) -> dict:
+    """Result-shape counts for a brief result (#532): the bounded item list
+    plus every count the form reports. Callers pass either the brief object
+    itself or one of the envelopes carrying it (`response.result` or the CLI
+    envelope), so unwrap until the `brief` member appears."""
+    result = payload
+    for _ in range(3):
+        if isinstance(result, dict) and result.get("brief"):
+            break
+        result = result.get("result") if isinstance(result, dict) else None
+    if not isinstance(result, dict) or not result.get("brief"):
+        return {}
+    counts: dict[str, float] = {"items": len(result.get("items") or [])}
+    for key, value in (result.get("counts") or {}).items():
+        if isinstance(value, dict):
+            counts[f"counts.{key}.total"] = value.get("total", len(value))
+        elif isinstance(value, (int, float)):
+            counts[f"counts.{key}"] = value
+    return counts
+
+
 def run_cli_commands(
     wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
 ) -> dict:
     metrics: dict[str, dict] = {}
-    for command in CLI_COMMANDS:
+    for command in CLI_COMMANDS + [f"{command}?brief" for command in BRIEF_OPS]:
         outputs_bytes: list[int] = []
         latencies: list[float] = []
         counts: dict = {}
+        name, _, form = command.partition("?")
+        argv = [wright, name, str(entry), "--kind", kind, "-f", "json"]
+        if form == "brief":
+            argv.append("--brief")
         for _ in range(repeats):
             start = time.monotonic()
             completed = subprocess.run(
-                [
-                    wright,
-                    command,
-                    str(entry),
-                    "--kind",
-                    kind,
-                    "-f",
-                    "json",
-                ],
+                argv,
                 capture_output=True,
                 cwd=project_dir,
             )
             latencies.append((time.monotonic() - start) * 1000.0)
             outputs_bytes.append(len(completed.stdout))
             try:
-                counts = cli_counts(command, json.loads(completed.stdout))
+                envelope = json.loads(completed.stdout)
+                counts = (
+                    brief_counts(envelope) if form else cli_counts(name, envelope)
+                )
             except json.JSONDecodeError:
                 counts = {"unparsedStdout": len(completed.stdout)}
         metrics[f"cli:{command}"] = metric_record(outputs_bytes, latencies, counts)
@@ -497,6 +546,7 @@ def run_metrics(wright: str, corpus: dict, repeats: int, only: set[str] | None) 
         "corpusVersion": corpus["version"],
         "wright": wright_version(wright),
         "opyProvider": provider_version(),
+        "briefTokenBudget": BRIEF_TOKEN_BUDGET,
         "projects": projects,
     }
 
@@ -571,6 +621,22 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
                 )
                 continue
             violations.extend(_compare_metric(pid, key, base_m, run_m))
+            # #532: brief results carry a stated token budget — exceeding it
+            # is a violation regardless of the drift band.
+            if key.endswith("?brief"):
+                budget = BRIEF_TOKEN_BUDGET[key.split(":", 1)[0]]
+                tokens = run_m.get("tokens")
+                if isinstance(tokens, (int, float)) and tokens > budget:
+                    violations.append(
+                        {
+                            "project": pid,
+                            "metric": key,
+                            "field": "tokens",
+                            "baseline": budget,
+                            "current": tokens,
+                            "change": "exceeds-brief-budget",
+                        }
+                    )
     return violations, warnings
 
 

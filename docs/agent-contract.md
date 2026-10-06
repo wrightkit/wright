@@ -78,6 +78,8 @@ ADR-0020). The adapter speaks newline-delimited JSON-RPC 2.0 and implements
 | `usage` | `wright_usage` |
 | `callGraph` | `wright_call_graph` |
 | `check` | `wright_check` |
+| `analyze` | `wright_analyze` |
+| `inspect` | `wright_inspect` |
 | `lint` | `wright_lint` |
 | `costEstimate` | `wright_cost_estimate` |
 | `semanticRename` | `wright_semantic_rename` |
@@ -115,11 +117,11 @@ the successful `result` payload.
 
 | Operation | Request fields | Successful `result` |
 | --- | --- | --- |
-| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, languages, and profiles |
+| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation → committed-schema definition), languages, and profiles |
 | `compile` | none | `wright-result/v1` compile envelope |
 | `check` | none | `wright-result/v1` check envelope |
-| `analyze` | none | `wright-result/v1` analysis envelope |
-| `inspect` | none | `wright-result/v1` inspection envelope |
+| `analyze` | optional `brief` | `wright-result/v1` analysis envelope; the brief form when `brief` is true |
+| `inspect` | optional `brief` | `wright-result/v1` inspection envelope; the brief form when `brief` is true |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
 | `rules` | optional selection | Canonical Workshop rules; `{"rules": [...], "selection": {...}}` when a selection is applied |
 | `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when a selection is applied |
@@ -128,7 +130,7 @@ the successful `result` payload.
 | `cfg` | required `rule` (index or name), optional selection | Control-flow graph for the rule, plus `selection` when a selection is applied |
 | `findings` | optional selection | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
 | `persistentObjects` | none | Persistent Workshop object facts |
-| `lint` | optional selection | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied |
+| `lint` | optional selection, optional `brief` | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied; the brief form when `brief` is true |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
 | `callGraph` | optional selection | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
 | `costEstimate` | optional selection | Exact generated-resource counts, findings, and `selection` when applied |
@@ -262,6 +264,27 @@ the previous shapes unchanged (bare arrays for `rules`, `symbols`,
 `references`, `callGraph`; the unextended object for `cfg`). The CLI options
 `--only`, `--rule`, `--file`, `--caller`, `--callee`, and `--max` on `inspect`
 subcommands drive the same `wright-driver` selection.
+
+### Brief results (#532)
+
+`analyze`, `inspect`, and `lint` accept an optional `brief` field (the CLI's
+`--brief`; defaults preserve the full result on every surface). A brief
+result is the small object `{"brief": true, "program"?, "counts", "items",
+"expand", "selection"?}`: `program` repeats the operation's program summary
+when one exists, `counts` totals the collections the full result reports
+(findings/risks by severity, rules, symbols, references, elements, skipped),
+`items` carries at most five highest-priority entries — highest-severity
+findings for `lint`, the costliest rules for `analyze`, the leading rules for
+`inspect` — and `expand` names the way back to the full result. `lint`
+composes `brief` with finding selection: selection narrows the finding set
+first, the counts and items describe the selected set, and the `selection`
+member keeps the pre-selection total.
+
+CLI (`--brief`), `serve` (`"brief": true`), and the MCP tools
+(`wright_analyze`, `wright_inspect`, `wright_lint` with `brief` in their
+generated input schemas) return the same brief payload for the same input and
+form. `capabilities.result_schemas` names the `$defs` definition describing
+each advertised operation's result, including the brief form for these three.
 
 Edit transactions use source identities and half-open, 1-based line/column
 ranges. Provider positions use 0-based line/character coordinates. Wright

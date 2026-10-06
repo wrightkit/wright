@@ -350,13 +350,13 @@
     "AnalyzeResult": {
       "allOf": [
         { "$ref": "#/$defs/WorkflowEnvelope" },
-        { "type": "object", "properties": { "command": { "const": "analyze" }, "result": { "$ref": "#/$defs/AnalyzePayload" } } }
+        { "type": "object", "properties": { "command": { "const": "analyze" }, "result": { "anyOf": [{ "$ref": "#/$defs/AnalyzePayload" }, { "$ref": "#/$defs/BriefResult" }] } } }
       ]
     },
     "InspectResult": {
       "allOf": [
         { "$ref": "#/$defs/WorkflowEnvelope" },
-        { "type": "object", "properties": { "command": { "const": "inspect" }, "result": { "$ref": "#/$defs/InspectPayload" } } }
+        { "type": "object", "properties": { "command": { "const": "inspect" }, "result": { "anyOf": [{ "$ref": "#/$defs/InspectPayload" }, { "$ref": "#/$defs/BriefResult" }] } } }
       ]
     },
     "ProjectResult": {
@@ -512,6 +512,12 @@
       }
     },
     "LintResult": {
+      "anyOf": [
+        { "$ref": "#/$defs/LintPayload" },
+        { "$ref": "#/$defs/BriefResult" }
+      ]
+    },
+    "LintPayload": {
       "type": "object",
       "required": ["inputIdentity", "rules", "config", "findings", "skipped"],
       "properties": {
@@ -520,6 +526,19 @@
         "config": { "$ref": "#/$defs/LintConfiguration" },
         "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
         "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
+      },
+      "additionalProperties": true
+    },
+    "BriefResult": {
+      "type": "object",
+      "required": ["brief", "counts", "items", "expand"],
+      "properties": {
+        "brief": { "const": true },
+        "program": { "type": "object", "additionalProperties": true },
+        "counts": { "type": "object", "additionalProperties": true },
+        "items": { "type": "array" },
+        "expand": { "type": "string" },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
       "additionalProperties": true
@@ -681,7 +700,7 @@
     },
     "Capabilities": {
       "type": "object",
-      "required": ["name", "version", "contract", "agent_contract", "operations", "languages", "profiles"],
+      "required": ["name", "version", "contract", "agent_contract", "operations", "result_schemas", "languages", "profiles"],
       "properties": {
         "name": { "type": "string" },
         "version": { "type": "string" },
@@ -691,6 +710,11 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string" }
+        },
+        "result_schemas": {
+          "type": "object",
+          "description": "The committed-schema definition describing each advertised operation's result (#532): operation name to its `#/$defs/<Op>Result` reference.",
+          "additionalProperties": { "type": "string" }
         },
         "languages": { "type": "array", "items": { "type": "string" } },
         "profiles": { "type": "array", "items": { "type": "string" } }
@@ -776,8 +800,8 @@
     "CapabilitiesRequest": { "type": "object", "properties": { "op": { "const": "capabilities" } }, "required": ["op"], "additionalProperties": false },
     "CompileRequest": { "type": "object", "properties": { "op": { "const": "compile" } }, "required": ["op"], "additionalProperties": false },
     "CheckRequest": { "type": "object", "properties": { "op": { "const": "check" } }, "required": ["op"], "additionalProperties": false },
-    "AnalyzeRequest": { "type": "object", "properties": { "op": { "const": "analyze" } }, "required": ["op"], "additionalProperties": false },
-    "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" } }, "required": ["op"], "additionalProperties": false },
+    "AnalyzeRequest": { "type": "object", "properties": { "op": { "const": "analyze" }, "brief": { "type": "boolean", "default": false } }, "required": ["op"], "additionalProperties": false },
+    "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" }, "brief": { "type": "boolean", "default": false } }, "required": ["op"], "additionalProperties": false },
     "ProjectRequest": { "type": "object", "properties": { "op": { "const": "project" } }, "required": ["op"], "additionalProperties": false },
     "RulesRequest": {
       "type": "object",
@@ -874,7 +898,8 @@
         "severity": { "enum": ["error", "warning", "info"] },
         "rule": { "type": "string" },
         "file": { "type": "string" },
-        "max": { "type": "integer", "minimum": 0 }
+        "max": { "type": "integer", "minimum": 0 },
+        "brief": { "type": "boolean", "default": false, "description": "Brief result form (#532): finding counts by severity, the highest-severity findings, and how to expand — the full result stays one option away." }
       },
       "required": ["op"],
       "additionalProperties": false

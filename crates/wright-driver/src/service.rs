@@ -79,9 +79,18 @@ pub enum ToolRequest {
     /// Check the loaded project.
     Check,
     /// Analyze the loaded project.
-    Analyze,
+    Analyze {
+        /// Return the brief summary form (#532): counts, the
+        /// highest-priority items, and how to expand.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        brief: bool,
+    },
     /// Inspect the loaded project.
-    Inspect,
+    Inspect {
+        /// Return the brief summary form (#532).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        brief: bool,
+    },
     /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
     /// Every rule, optionally narrowed by an inline selection (`name`,
@@ -138,8 +147,15 @@ pub enum ToolRequest {
     PersistentObjects,
     /// Lint findings plus per-rule id/effective severity and the effective
     /// configuration (#98); `lintRules` serves full rule metadata (#431).
-    /// Optionally narrowed by an inline selection (#430).
-    Lint(crate::select::FindingSelection),
+    /// Optionally narrowed by an inline selection (#430), and optionally
+    /// returned in the brief summary form (#532).
+    Lint {
+        #[serde(flatten)]
+        selection: crate::select::FindingSelection,
+        /// Return the brief summary form (#532).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        brief: bool,
+    },
     /// The registered lint rules with full metadata and the effective lint
     /// configuration.
     LintRules,
@@ -259,6 +275,10 @@ pub struct Capabilities {
     pub contract: String,
     pub agent_contract: String,
     pub operations: Vec<String>,
+    /// The committed-schema `$defs` entry describing each advertised
+    /// operation's result (#532): `"<op>": "#/$defs/<Op>Result"`, so a
+    /// caller learns an operation's result shape without a second document.
+    pub result_schemas: std::collections::BTreeMap<String, String>,
     pub languages: Vec<String>,
     pub profiles: Vec<String>,
 }
@@ -354,38 +374,53 @@ impl<'a> ToolService<'a> {
 
     /// The capability/version contract.
     pub fn capabilities(&self) -> Capabilities {
+        let operations: Vec<String> = [
+            "capabilities",
+            "project",
+            "rules",
+            "symbols",
+            "references",
+            "usage",
+            "cfg",
+            "findings",
+            "persistentObjects",
+            "lint",
+            "lintRules",
+            "callGraph",
+            "costEstimate",
+            "targetMetadata",
+            "compile",
+            "check",
+            "analyze",
+            "inspect",
+            "validateEditTransaction",
+            "semanticRename",
+            "providerSemanticRename",
+            "providerValidateEdit",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        // The committed schema names every operation's result definition
+        // `<Op>Result` — `capabilities` surfaces the map so a caller learns
+        // result shapes without a second document (#532).
+        let result_schemas = operations
+            .iter()
+            .map(|op| {
+                let mut pascal = op.clone();
+                if let Some(first) = pascal.get_mut(0..1) {
+                    first.make_ascii_uppercase();
+                }
+                (op.clone(), format!("#/$defs/{pascal}Result"))
+            })
+            .collect();
         Capabilities {
             name: SERVICE_NAME.to_string(),
             version: SERVICE_VERSION.to_string(),
             contract: RESULT_CONTRACT.to_string(),
             agent_contract: AGENT_CONTRACT.to_string(),
-            operations: vec![
-                "capabilities",
-                "project",
-                "rules",
-                "symbols",
-                "references",
-                "usage",
-                "cfg",
-                "findings",
-                "persistentObjects",
-                "lint",
-                "lintRules",
-                "callGraph",
-                "costEstimate",
-                "targetMetadata",
-                "compile",
-                "check",
-                "analyze",
-                "inspect",
-                "validateEditTransaction",
-                "semanticRename",
-                "providerSemanticRename",
-                "providerValidateEdit",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+            operations,
+            result_schemas,
             languages: vec!["opy".to_string(), "workshop".to_string()],
             profiles: vec![
                 crate::Profile::Off.as_str().to_string(),
@@ -585,26 +620,34 @@ impl<'a> ToolService<'a> {
                     serde_json::to_value(self.session.check()).expect("check result serializes");
                 ToolResponse::Ok { result }
             }
-            ToolRequest::Analyze => {
+            ToolRequest::Analyze { brief } => {
                 let loaded = self.snapshot().clone();
                 let semantic = Arc::clone(
                     self.semantic
                         .as_ref()
                         .expect("the refresh gate guarantees a snapshot"),
                 );
-                let result = serde_json::to_value(self.session.analyze_loaded(loaded, &semantic))
-                    .expect("analyze result serializes");
+                let mut result =
+                    serde_json::to_value(self.session.analyze_loaded(loaded, &semantic))
+                        .expect("analyze result serializes");
+                if *brief {
+                    result["result"] = crate::brief::analyze(&result["result"]);
+                }
                 ToolResponse::Ok { result }
             }
-            ToolRequest::Inspect => {
+            ToolRequest::Inspect { brief } => {
                 let loaded = self.snapshot().clone();
                 let semantic = Arc::clone(
                     self.semantic
                         .as_ref()
                         .expect("the refresh gate guarantees a snapshot"),
                 );
-                let result = serde_json::to_value(self.session.inspect_loaded(loaded, &semantic))
-                    .expect("inspect result serializes");
+                let mut result =
+                    serde_json::to_value(self.session.inspect_loaded(loaded, &semantic))
+                        .expect("inspect result serializes");
+                if *brief {
+                    result["result"] = crate::brief::inspect(&result["result"]);
+                }
                 ToolResponse::Ok { result }
             }
             ToolRequest::Project => self.ok(self.project()),
@@ -635,7 +678,7 @@ impl<'a> ToolService<'a> {
             },
             ToolRequest::Findings(selection) => self.findings(selection),
             ToolRequest::PersistentObjects => self.persistent_objects(),
-            ToolRequest::Lint(selection) => self.lint(selection),
+            ToolRequest::Lint { selection, brief } => self.lint(selection, *brief),
             ToolRequest::LintRules => self.configured_semantic().handle(&Request::LintRules),
             ToolRequest::CallGraph {
                 caller,
@@ -1117,8 +1160,10 @@ impl<'a> ToolService<'a> {
     /// path as the CLI `lint` workflow (no duplicated rule execution, #98).
     /// Full rule metadata is served once by `lintRules` rather than inlined
     /// into every `lint` response (#431). A `selection` member records the
-    /// true total and withheld count when the request selected a subset (#430).
-    fn lint(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
+    /// true total and withheld count when the request selected a subset
+    /// (#430); a `brief` request returns the summary form over the selected
+    /// set instead (#532).
+    fn lint(&self, selection: &crate::select::FindingSelection, brief: bool) -> ToolResponse {
         if let Some(error) = self.selection_error(selection) {
             return error;
         }
@@ -1147,6 +1192,9 @@ impl<'a> ToolService<'a> {
         });
         if let Some(outcome) = outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
+        }
+        if brief {
+            result = crate::brief::lint(&result);
         }
         self.ok(result)
     }
@@ -1268,8 +1316,8 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::Capabilities => "req::capabilities",
         ToolRequest::Compile => "req::compile",
         ToolRequest::Check => "req::check",
-        ToolRequest::Analyze => "req::analyze",
-        ToolRequest::Inspect => "req::inspect",
+        ToolRequest::Analyze { .. } => "req::analyze",
+        ToolRequest::Inspect { .. } => "req::inspect",
         ToolRequest::Project => "req::project",
         ToolRequest::Rules { .. } => "req::rules",
         ToolRequest::Symbols { .. } => "req::symbols",
@@ -1278,7 +1326,7 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::Cfg { .. } => "req::cfg",
         ToolRequest::Findings(_) => "req::findings",
         ToolRequest::PersistentObjects => "req::persistentObjects",
-        ToolRequest::Lint(_) => "req::lint",
+        ToolRequest::Lint { .. } => "req::lint",
         ToolRequest::LintRules => "req::lintRules",
         ToolRequest::CallGraph { .. } => "req::callGraph",
         ToolRequest::CostEstimate(_) => "req::costEstimate",

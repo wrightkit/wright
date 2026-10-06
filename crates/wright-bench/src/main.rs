@@ -306,7 +306,10 @@ fn semantic_query_trial(
             },
             ToolRequest::Findings(FindingSelection::default()),
             ToolRequest::PersistentObjects,
-            ToolRequest::Lint(FindingSelection::default()),
+            ToolRequest::Lint {
+                selection: FindingSelection::default(),
+                brief: false,
+            },
             ToolRequest::LintRules,
         ];
         let start = Instant::now();

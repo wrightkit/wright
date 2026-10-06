@@ -150,8 +150,8 @@ fn jsonrpc_dispatch_request(service: &mut ToolService<'_>, value: Value) -> Opti
         }
         "compile" => operation_result(service, ToolRequest::Compile),
         "check" => operation_result(service, ToolRequest::Check),
-        "analyze" => operation_result(service, ToolRequest::Analyze),
-        "inspect" => operation_result(service, ToolRequest::Inspect),
+        "analyze" => operation_result(service, ToolRequest::Analyze { brief: false }),
+        "inspect" => operation_result(service, ToolRequest::Inspect { brief: false }),
         other => {
             return has_id.then(|| jsonrpc_error(id, -32601, format!("Method not found: {other}")));
         }

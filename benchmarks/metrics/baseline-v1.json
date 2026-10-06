@@ -1,4 +1,8 @@
 {
+  "briefTokenBudget": {
+    "agent": 500,
+    "cli": 800
+  },
   "contract": "wright-agent-metrics/v1",
   "corpusVersion": "v1",
   "opyProvider": "0.3.0",
@@ -20,8 +24,21 @@
             "program.rules": 307,
             "program.subroutines": 25
           },
-          "latencyMs": 184.1,
+          "latencyMs": 185.5,
           "tokens": 81809.8
+        },
+        "agent:analyze?brief": {
+          "bytes": 1303,
+          "counts": {
+            "counts.elements": 29483,
+            "counts.persistentObjects": 82,
+            "counts.risks.total": 19,
+            "counts.rules": 307,
+            "counts.symbols": 503,
+            "items": 5
+          },
+          "latencyMs": 176.6,
+          "tokens": 325.8
         },
         "agent:callGraph": {
           "bytes": 9466,
@@ -32,17 +49,17 @@
           "tokens": 2366.5
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
-          "latencyMs": 0.0,
-          "tokens": 126.2
+          "latencyMs": 0.1,
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 227,
           "counts": {
             "blocks": 2
           },
-          "latencyMs": 20.8,
+          "latencyMs": 20.9,
           "tokens": 56.8
         },
         "agent:check": {
@@ -50,7 +67,7 @@
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 22.1,
+          "latencyMs": 21.6,
           "tokens": 34.5
         },
         "agent:compile": {
@@ -59,7 +76,7 @@
             "diagnostics": 0,
             "emittedBytes": 418243
           },
-          "latencyMs": 175.4,
+          "latencyMs": 176.6,
           "tokens": 110371.0
         },
         "agent:costEstimate": {
@@ -73,7 +90,7 @@
             "programRules": 307,
             "waitActions": 304
           },
-          "latencyMs": 102.3,
+          "latencyMs": 102.9,
           "tokens": 979.8
         },
         "agent:findings": {
@@ -81,7 +98,7 @@
           "counts": {
             "items": 19
           },
-          "latencyMs": 20.8,
+          "latencyMs": 21.1,
           "tokens": 1424.0
         },
         "agent:inspect": {
@@ -98,8 +115,19 @@
             "rules": 307,
             "symbols": 503
           },
-          "latencyMs": 56.5,
+          "latencyMs": 57.8,
           "tokens": 110703.0
+        },
+        "agent:inspect?brief": {
+          "bytes": 1211,
+          "counts": {
+            "counts.references": 4117,
+            "counts.rules": 307,
+            "counts.symbols": 503,
+            "items": 5
+          },
+          "latencyMs": 43.2,
+          "tokens": 302.8
         },
         "agent:lint": {
           "bytes": 6608,
@@ -109,15 +137,26 @@
             "finding.repeated-value": 4,
             "items": 19
           },
-          "latencyMs": 21.0,
+          "latencyMs": 21.2,
           "tokens": 1652.0
+        },
+        "agent:lint?brief": {
+          "bytes": 1391,
+          "counts": {
+            "counts.findings.total": 19,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 5
+          },
+          "latencyMs": 21.8,
+          "tokens": 347.8
         },
         "agent:lintRules": {
           "bytes": 8131,
           "counts": {
             "rules": 6
           },
-          "latencyMs": 20.7,
+          "latencyMs": 21.0,
           "tokens": 2032.8
         },
         "agent:persistentObjects": {
@@ -142,7 +181,7 @@
             "subroutines": 25,
             "symbols": 503
           },
-          "latencyMs": 243.6,
+          "latencyMs": 246.1,
           "tokens": 61.8
         },
         "agent:references": {
@@ -153,7 +192,7 @@
             "reference.read": 22,
             "reference.write": 47
           },
-          "latencyMs": 21.9,
+          "latencyMs": 21.2,
           "tokens": 1146.8
         },
         "agent:rules": {
@@ -161,7 +200,7 @@
           "counts": {
             "items": 307
           },
-          "latencyMs": 26.1,
+          "latencyMs": 25.3,
           "tokens": 9648.8
         },
         "agent:symbols": {
@@ -173,7 +212,7 @@
             "symbol.rule": 307,
             "symbol.subroutine": 25
           },
-          "latencyMs": 36.9,
+          "latencyMs": 37.1,
           "tokens": 21166.5
         },
         "agent:targetMetadata": {
@@ -190,7 +229,7 @@
             "rules": 47,
             "writes": 47
           },
-          "latencyMs": 21.7,
+          "latencyMs": 21.0,
           "tokens": 28.5
         },
         "cli:analyze": {
@@ -207,15 +246,28 @@
             "program.rules": 307,
             "program.subroutines": 25
           },
-          "latencyMs": 6205.5,
+          "latencyMs": 6092.6,
           "tokens": 191343.0
+        },
+        "cli:analyze?brief": {
+          "bytes": 2488,
+          "counts": {
+            "counts.elements": 29483,
+            "counts.persistentObjects": 82,
+            "counts.risks.total": 19,
+            "counts.rules": 307,
+            "counts.symbols": 503,
+            "items": 5
+          },
+          "latencyMs": 6091.4,
+          "tokens": 622.0
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 2468.8,
+          "latencyMs": 2478.6,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -224,7 +276,7 @@
             "diagnostics": 0,
             "emittedBytes": 418243
           },
-          "latencyMs": 5908.8,
+          "latencyMs": 5851.8,
           "tokens": 110392.0
         },
         "cli:inspect": {
@@ -232,8 +284,19 @@
           "counts": {
             "diagnostics": 1
           },
-          "latencyMs": 251.6,
+          "latencyMs": 251.4,
           "tokens": 133.8
+        },
+        "cli:inspect?brief": {
+          "bytes": 738,
+          "counts": {
+            "counts.references": 0,
+            "counts.rules": 0,
+            "counts.symbols": 0,
+            "items": 0
+          },
+          "latencyMs": 250.5,
+          "tokens": 184.5
         },
         "cli:lint": {
           "bytes": 10118,
@@ -244,8 +307,19 @@
             "lint.finding.repeated-value": 4,
             "lint.items": 19
           },
-          "latencyMs": 5921.7,
+          "latencyMs": 5937.1,
           "tokens": 2529.5
+        },
+        "cli:lint?brief": {
+          "bytes": 2513,
+          "counts": {
+            "counts.findings.total": 19,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 5
+          },
+          "latencyMs": 5931.5,
+          "tokens": 628.2
         }
       },
       "status": "ok"
@@ -267,29 +341,42 @@
             "program.rules": 369,
             "program.subroutines": 70
           },
-          "latencyMs": 186.5,
+          "latencyMs": 184.7,
           "tokens": 105284.5
+        },
+        "agent:analyze?brief": {
+          "bytes": 1449,
+          "counts": {
+            "counts.elements": 16647,
+            "counts.persistentObjects": 8,
+            "counts.risks.total": 55,
+            "counts.rules": 369,
+            "counts.symbols": 576,
+            "items": 5
+          },
+          "latencyMs": 175.7,
+          "tokens": 362.2
         },
         "agent:callGraph": {
           "bytes": 8627,
           "counts": {
             "items": 95
           },
-          "latencyMs": 25.1,
+          "latencyMs": 24.3,
           "tokens": 2156.8
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
           "latencyMs": 0.1,
-          "tokens": 126.2
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 231,
           "counts": {
             "blocks": 2
           },
-          "latencyMs": 25.1,
+          "latencyMs": 24.0,
           "tokens": 57.8
         },
         "agent:check": {
@@ -297,7 +384,7 @@
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 24.5,
+          "latencyMs": 24.3,
           "tokens": 34.5
         },
         "agent:compile": {
@@ -306,7 +393,7 @@
             "diagnostics": 0,
             "emittedBytes": 341405
           },
-          "latencyMs": 320.3,
+          "latencyMs": 311.9,
           "tokens": 91467.5
         },
         "agent:costEstimate": {
@@ -318,7 +405,7 @@
             "programRules": 369,
             "waitActions": 233
           },
-          "latencyMs": 260.3,
+          "latencyMs": 259.7,
           "tokens": 3267.0
         },
         "agent:findings": {
@@ -326,7 +413,7 @@
           "counts": {
             "items": 55
           },
-          "latencyMs": 24.8,
+          "latencyMs": 24.9,
           "tokens": 4449.2
         },
         "agent:inspect": {
@@ -343,8 +430,19 @@
             "rules": 369,
             "symbols": 576
           },
-          "latencyMs": 53.1,
+          "latencyMs": 52.8,
           "tokens": 78603.5
+        },
+        "agent:inspect?brief": {
+          "bytes": 1133,
+          "counts": {
+            "counts.references": 2024,
+            "counts.rules": 369,
+            "counts.symbols": 576,
+            "items": 5
+          },
+          "latencyMs": 41.8,
+          "tokens": 283.2
         },
         "agent:lint": {
           "bytes": 18709,
@@ -352,15 +450,26 @@
             "finding.ongoing-condition-hot-path": 55,
             "items": 55
           },
-          "latencyMs": 25.1,
+          "latencyMs": 24.9,
           "tokens": 4677.2
+        },
+        "agent:lint?brief": {
+          "bytes": 1708,
+          "counts": {
+            "counts.findings.total": 55,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 5
+          },
+          "latencyMs": 25.4,
+          "tokens": 427.0
         },
         "agent:lintRules": {
           "bytes": 8131,
           "counts": {
             "rules": 6
           },
-          "latencyMs": 24.3,
+          "latencyMs": 24.6,
           "tokens": 2032.8
         },
         "agent:persistentObjects": {
@@ -370,7 +479,7 @@
             "item.hud-text": 7,
             "items": 8
           },
-          "latencyMs": 25.0,
+          "latencyMs": 24.6,
           "tokens": 678.2
         },
         "agent:project": {
@@ -384,7 +493,7 @@
             "subroutines": 70,
             "symbols": 576
           },
-          "latencyMs": 176.3,
+          "latencyMs": 174.5,
           "tokens": 61.8
         },
         "agent:references": {
@@ -395,7 +504,7 @@
             "reference.read": 1,
             "reference.write": 1
           },
-          "latencyMs": 25.0,
+          "latencyMs": 24.5,
           "tokens": 103.5
         },
         "agent:rules": {
@@ -403,7 +512,7 @@
           "counts": {
             "items": 369
           },
-          "latencyMs": 30.8,
+          "latencyMs": 30.1,
           "tokens": 11741.5
         },
         "agent:symbols": {
@@ -415,7 +524,7 @@
             "symbol.rule": 369,
             "symbol.subroutine": 70
           },
-          "latencyMs": 45.0,
+          "latencyMs": 44.7,
           "tokens": 25300.2
         },
         "agent:targetMetadata": {
@@ -432,7 +541,7 @@
             "rules": 2,
             "writes": 1
           },
-          "latencyMs": 25.4,
+          "latencyMs": 24.4,
           "tokens": 25.0
         },
         "cli:analyze": {
@@ -449,15 +558,28 @@
             "program.rules": 369,
             "program.subroutines": 70
           },
-          "latencyMs": 14025.6,
+          "latencyMs": 13848.7,
           "tokens": 252007.2
+        },
+        "cli:analyze?brief": {
+          "bytes": 2634,
+          "counts": {
+            "counts.elements": 16647,
+            "counts.persistentObjects": 8,
+            "counts.risks.total": 55,
+            "counts.rules": 369,
+            "counts.symbols": 576,
+            "items": 5
+          },
+          "latencyMs": 13811.8,
+          "tokens": 658.5
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 4855.7,
+          "latencyMs": 4755.5,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -466,7 +588,7 @@
             "diagnostics": 0,
             "emittedBytes": 341405
           },
-          "latencyMs": 13800.1,
+          "latencyMs": 13789.7,
           "tokens": 91488.5
         },
         "cli:inspect": {
@@ -474,8 +596,19 @@
           "counts": {
             "diagnostics": 1
           },
-          "latencyMs": 256.0,
+          "latencyMs": 249.7,
           "tokens": 133.8
+        },
+        "cli:inspect?brief": {
+          "bytes": 738,
+          "counts": {
+            "counts.references": 0,
+            "counts.rules": 0,
+            "counts.symbols": 0,
+            "items": 0
+          },
+          "latencyMs": 248.6,
+          "tokens": 184.5
         },
         "cli:lint": {
           "bytes": 25423,
@@ -484,8 +617,19 @@
             "lint.finding.ongoing-condition-hot-path": 55,
             "lint.items": 55
           },
-          "latencyMs": 13864.0,
+          "latencyMs": 13760.9,
           "tokens": 6355.8
+        },
+        "cli:lint?brief": {
+          "bytes": 2290,
+          "counts": {
+            "counts.findings.total": 55,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 5
+          },
+          "latencyMs": 13655.6,
+          "tokens": 572.5
         }
       },
       "status": "ok"
@@ -510,6 +654,19 @@
           "latencyMs": 1.3,
           "tokens": 1057.8
         },
+        "agent:analyze?brief": {
+          "bytes": 1192,
+          "counts": {
+            "counts.elements": 32,
+            "counts.persistentObjects": 1,
+            "counts.risks.total": 0,
+            "counts.rules": 5,
+            "counts.symbols": 8,
+            "items": 5
+          },
+          "latencyMs": 1.3,
+          "tokens": 298.0
+        },
         "agent:callGraph": {
           "bytes": 13,
           "counts": {
@@ -519,10 +676,10 @@
           "tokens": 3.2
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
           "latencyMs": 0.1,
-          "tokens": 126.2
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 227,
@@ -546,7 +703,7 @@
             "diagnostics": 0,
             "emittedBytes": 1563
           },
-          "latencyMs": 0.5,
+          "latencyMs": 0.4,
           "tokens": 505.2
         },
         "agent:costEstimate": {
@@ -585,6 +742,17 @@
           "latencyMs": 0.4,
           "tokens": 883.5
         },
+        "agent:inspect?brief": {
+          "bytes": 1037,
+          "counts": {
+            "counts.references": 18,
+            "counts.rules": 5,
+            "counts.symbols": 8,
+            "items": 5
+          },
+          "latencyMs": 0.4,
+          "tokens": 259.2
+        },
         "agent:lint": {
           "bytes": 925,
           "counts": {
@@ -592,6 +760,17 @@
           },
           "latencyMs": 0.2,
           "tokens": 231.2
+        },
+        "agent:lint?brief": {
+          "bytes": 227,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 56.8
         },
         "agent:lintRules": {
           "bytes": 8131,
@@ -685,15 +864,28 @@
             "program.rules": 5,
             "program.subroutines": 0
           },
-          "latencyMs": 378.2,
+          "latencyMs": 377.8,
           "tokens": 2514.2
+        },
+        "cli:analyze?brief": {
+          "bytes": 2377,
+          "counts": {
+            "counts.elements": 32,
+            "counts.persistentObjects": 1,
+            "counts.risks.total": 0,
+            "counts.rules": 5,
+            "counts.symbols": 8,
+            "items": 5
+          },
+          "latencyMs": 375.7,
+          "tokens": 594.2
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 300.7,
+          "latencyMs": 298.2,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -702,7 +894,7 @@
             "diagnostics": 0,
             "emittedBytes": 1563
           },
-          "latencyMs": 378.4,
+          "latencyMs": 374.6,
           "tokens": 526.2
         },
         "cli:inspect": {
@@ -710,8 +902,19 @@
           "counts": {
             "diagnostics": 1
           },
-          "latencyMs": 254.6,
+          "latencyMs": 250.1,
           "tokens": 133.8
+        },
+        "cli:inspect?brief": {
+          "bytes": 738,
+          "counts": {
+            "counts.references": 0,
+            "counts.rules": 0,
+            "counts.symbols": 0,
+            "items": 0
+          },
+          "latencyMs": 249.5,
+          "tokens": 184.5
         },
         "cli:lint": {
           "bytes": 1908,
@@ -719,8 +922,19 @@
             "diagnostics": 0,
             "lint.items": 0
           },
-          "latencyMs": 376.3,
+          "latencyMs": 373.8,
           "tokens": 477.0
+        },
+        "cli:lint?brief": {
+          "bytes": 484,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 374.8,
+          "tokens": 121.0
         }
       },
       "status": "ok"
@@ -745,6 +959,19 @@
           "latencyMs": 1.5,
           "tokens": 1249.2
         },
+        "agent:analyze?brief": {
+          "bytes": 1186,
+          "counts": {
+            "counts.elements": 33,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 0,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 1.5,
+          "tokens": 296.5
+        },
         "agent:callGraph": {
           "bytes": 13,
           "counts": {
@@ -754,10 +981,10 @@
           "tokens": 3.2
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
-          "latencyMs": 0.0,
-          "tokens": 126.2
+          "latencyMs": 0.1,
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 229,
@@ -820,6 +1047,17 @@
           "latencyMs": 0.6,
           "tokens": 1384.0
         },
+        "agent:inspect?brief": {
+          "bytes": 1044,
+          "counts": {
+            "counts.references": 25,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 0.5,
+          "tokens": 261.0
+        },
         "agent:lint": {
           "bytes": 925,
           "counts": {
@@ -827,6 +1065,17 @@
           },
           "latencyMs": 0.2,
           "tokens": 231.2
+        },
+        "agent:lint?brief": {
+          "bytes": 227,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 56.8
         },
         "agent:lintRules": {
           "bytes": 8131,
@@ -885,13 +1134,13 @@
             "symbol.playerVariable": 3,
             "symbol.rule": 6
           },
-          "latencyMs": 0.5,
+          "latencyMs": 0.4,
           "tokens": 387.0
         },
         "agent:targetMetadata": {
           "bytes": 15527,
           "counts": {},
-          "latencyMs": 0.6,
+          "latencyMs": 0.7,
           "tokens": 3881.8
         },
         "agent:usage": {
@@ -919,15 +1168,28 @@
             "program.rules": 6,
             "program.subroutines": 0
           },
-          "latencyMs": 259.1,
+          "latencyMs": 260.6,
           "tokens": 3034.5
+        },
+        "cli:analyze?brief": {
+          "bytes": 2371,
+          "counts": {
+            "counts.elements": 33,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 0,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 257.0,
+          "tokens": 592.8
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 256.8,
+          "latencyMs": 255.3,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -936,7 +1198,7 @@
             "diagnostics": 0,
             "emittedBytes": 1583
           },
-          "latencyMs": 256.6,
+          "latencyMs": 255.7,
           "tokens": 531.2
         },
         "cli:inspect": {
@@ -953,8 +1215,19 @@
             "rules": 6,
             "symbols": 11
           },
-          "latencyMs": 256.9,
+          "latencyMs": 256.4,
           "tokens": 3581.0
+        },
+        "cli:inspect?brief": {
+          "bytes": 2064,
+          "counts": {
+            "counts.references": 25,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 256.3,
+          "tokens": 516.0
         },
         "cli:lint": {
           "bytes": 1913,
@@ -962,8 +1235,19 @@
             "diagnostics": 0,
             "lint.items": 0
           },
-          "latencyMs": 257.2,
+          "latencyMs": 259.2,
           "tokens": 478.2
+        },
+        "cli:lint?brief": {
+          "bytes": 484,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 255.4,
+          "tokens": 121.0
         }
       },
       "status": "ok"
@@ -985,8 +1269,21 @@
             "program.rules": 3,
             "program.subroutines": 0
           },
-          "latencyMs": 0.8,
+          "latencyMs": 0.9,
           "tokens": 705.2
+        },
+        "agent:analyze?brief": {
+          "bytes": 902,
+          "counts": {
+            "counts.elements": 20,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 1,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
+          },
+          "latencyMs": 0.8,
+          "tokens": 225.5
         },
         "agent:callGraph": {
           "bytes": 13,
@@ -997,10 +1294,10 @@
           "tokens": 3.2
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
-          "latencyMs": 0.0,
-          "tokens": 126.2
+          "latencyMs": 0.1,
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 227,
@@ -1024,7 +1321,7 @@
             "diagnostics": 0,
             "emittedBytes": 822
           },
-          "latencyMs": 0.2,
+          "latencyMs": 0.3,
           "tokens": 310.0
         },
         "agent:costEstimate": {
@@ -1044,7 +1341,7 @@
           "counts": {
             "items": 1
           },
-          "latencyMs": 0.1,
+          "latencyMs": 0.2,
           "tokens": 127.0
         },
         "agent:inspect": {
@@ -1064,6 +1361,17 @@
           "latencyMs": 0.3,
           "tokens": 567.5
         },
+        "agent:inspect?brief": {
+          "bytes": 809,
+          "counts": {
+            "counts.references": 11,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
+          },
+          "latencyMs": 0.2,
+          "tokens": 202.2
+        },
         "agent:lint": {
           "bytes": 1420,
           "counts": {
@@ -1073,12 +1381,23 @@
           "latencyMs": 0.2,
           "tokens": 355.0
         },
+        "agent:lint?brief": {
+          "bytes": 653,
+          "counts": {
+            "counts.findings.total": 1,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 163.2
+        },
         "agent:lintRules": {
           "bytes": 8131,
           "counts": {
             "rules": 6
           },
-          "latencyMs": 0.2,
+          "latencyMs": 0.3,
           "tokens": 2032.8
         },
         "agent:persistentObjects": {
@@ -1100,7 +1419,7 @@
             "subroutines": 0,
             "symbols": 5
           },
-          "latencyMs": 0.1,
+          "latencyMs": 0.2,
           "tokens": 59.2
         },
         "agent:references": {
@@ -1163,15 +1482,28 @@
             "program.rules": 3,
             "program.subroutines": 0
           },
-          "latencyMs": 377.6,
+          "latencyMs": 376.9,
           "tokens": 1519.2
+        },
+        "cli:analyze?brief": {
+          "bytes": 1709,
+          "counts": {
+            "counts.elements": 20,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 1,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
+          },
+          "latencyMs": 374.9,
+          "tokens": 427.2
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 303.4,
+          "latencyMs": 299.0,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -1180,7 +1512,7 @@
             "diagnostics": 0,
             "emittedBytes": 822
           },
-          "latencyMs": 377.6,
+          "latencyMs": 373.8,
           "tokens": 331.0
         },
         "cli:inspect": {
@@ -1188,8 +1520,19 @@
           "counts": {
             "diagnostics": 1
           },
-          "latencyMs": 250.9,
+          "latencyMs": 248.4,
           "tokens": 133.8
+        },
+        "cli:inspect?brief": {
+          "bytes": 738,
+          "counts": {
+            "counts.references": 0,
+            "counts.rules": 0,
+            "counts.symbols": 0,
+            "items": 0
+          },
+          "latencyMs": 248.9,
+          "tokens": 184.5
         },
         "cli:lint": {
           "bytes": 2647,
@@ -1198,8 +1541,19 @@
             "lint.finding.while-without-wait": 1,
             "lint.items": 1
           },
-          "latencyMs": 377.8,
+          "latencyMs": 373.6,
           "tokens": 661.8
+        },
+        "cli:lint?brief": {
+          "bytes": 1114,
+          "counts": {
+            "counts.findings.total": 1,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 1
+          },
+          "latencyMs": 372.1,
+          "tokens": 278.5
         }
       },
       "status": "ok"
@@ -1224,6 +1578,19 @@
           "latencyMs": 0.8,
           "tokens": 731.8
         },
+        "agent:analyze?brief": {
+          "bytes": 901,
+          "counts": {
+            "counts.elements": 17,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 1,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
+          },
+          "latencyMs": 0.8,
+          "tokens": 225.2
+        },
         "agent:callGraph": {
           "bytes": 13,
           "counts": {
@@ -1233,10 +1600,10 @@
           "tokens": 3.2
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
-          "latencyMs": 0.0,
-          "tokens": 126.2
+          "latencyMs": 0.1,
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 227,
@@ -1272,7 +1639,7 @@
             "programRules": 3,
             "waitActions": 1
           },
-          "latencyMs": 0.1,
+          "latencyMs": 0.2,
           "tokens": 149.2
         },
         "agent:findings": {
@@ -1300,6 +1667,17 @@
           "latencyMs": 0.3,
           "tokens": 661.5
         },
+        "agent:inspect?brief": {
+          "bytes": 812,
+          "counts": {
+            "counts.references": 11,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
+          },
+          "latencyMs": 0.3,
+          "tokens": 203.0
+        },
         "agent:lint": {
           "bytes": 1419,
           "counts": {
@@ -1309,12 +1687,23 @@
           "latencyMs": 0.2,
           "tokens": 354.8
         },
+        "agent:lint?brief": {
+          "bytes": 652,
+          "counts": {
+            "counts.findings.total": 1,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 163.0
+        },
         "agent:lintRules": {
           "bytes": 8131,
           "counts": {
             "rules": 6
           },
-          "latencyMs": 0.2,
+          "latencyMs": 0.3,
           "tokens": 2032.8
         },
         "agent:persistentObjects": {
@@ -1371,7 +1760,7 @@
         "agent:targetMetadata": {
           "bytes": 15527,
           "counts": {},
-          "latencyMs": 0.6,
+          "latencyMs": 0.7,
           "tokens": 3881.8
         },
         "agent:usage": {
@@ -1402,12 +1791,25 @@
           "latencyMs": 257.9,
           "tokens": 1617.2
         },
+        "cli:analyze?brief": {
+          "bytes": 1708,
+          "counts": {
+            "counts.elements": 17,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 1,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
+          },
+          "latencyMs": 255.8,
+          "tokens": 427.0
+        },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 255.8,
+          "latencyMs": 267.7,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -1416,7 +1818,7 @@
             "diagnostics": 0,
             "emittedBytes": 650
           },
-          "latencyMs": 256.5,
+          "latencyMs": 257.2,
           "tokens": 284.8
         },
         "cli:inspect": {
@@ -1433,8 +1835,19 @@
             "rules": 3,
             "symbols": 5
           },
-          "latencyMs": 256.6,
+          "latencyMs": 256.4,
           "tokens": 1673.2
+        },
+        "cli:inspect?brief": {
+          "bytes": 1498,
+          "counts": {
+            "counts.references": 11,
+            "counts.rules": 3,
+            "counts.symbols": 5,
+            "items": 3
+          },
+          "latencyMs": 255.6,
+          "tokens": 374.5
         },
         "cli:lint": {
           "bytes": 2651,
@@ -1443,8 +1856,19 @@
             "lint.finding.while-without-wait": 1,
             "lint.items": 1
           },
-          "latencyMs": 258.0,
+          "latencyMs": 257.2,
           "tokens": 662.8
+        },
+        "cli:lint?brief": {
+          "bytes": 1113,
+          "counts": {
+            "counts.findings.total": 1,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 1
+          },
+          "latencyMs": 255.8,
+          "tokens": 278.2
         }
       },
       "status": "ok"
@@ -1469,6 +1893,19 @@
           "latencyMs": 1.5,
           "tokens": 1279.5
         },
+        "agent:analyze?brief": {
+          "bytes": 1199,
+          "counts": {
+            "counts.elements": 35,
+            "counts.persistentObjects": 1,
+            "counts.risks.total": 0,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 1.5,
+          "tokens": 299.8
+        },
         "agent:callGraph": {
           "bytes": 67,
           "counts": {
@@ -1478,10 +1915,10 @@
           "tokens": 16.8
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
-          "latencyMs": 0.0,
-          "tokens": 126.2
+          "latencyMs": 0.1,
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 229,
@@ -1544,6 +1981,17 @@
           "latencyMs": 0.5,
           "tokens": 1155.5
         },
+        "agent:inspect?brief": {
+          "bytes": 1049,
+          "counts": {
+            "counts.references": 24,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 0.4,
+          "tokens": 262.2
+        },
         "agent:lint": {
           "bytes": 925,
           "counts": {
@@ -1551,6 +1999,17 @@
           },
           "latencyMs": 0.2,
           "tokens": 231.2
+        },
+        "agent:lint?brief": {
+          "bytes": 227,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 56.8
         },
         "agent:lintRules": {
           "bytes": 8131,
@@ -1597,7 +2056,7 @@
           "counts": {
             "items": 6
           },
-          "latencyMs": 0.2,
+          "latencyMs": 0.3,
           "tokens": 167.5
         },
         "agent:symbols": {
@@ -1643,15 +2102,28 @@
             "program.rules": 6,
             "program.subroutines": 1
           },
-          "latencyMs": 381.6,
+          "latencyMs": 379.5,
           "tokens": 3006.8
+        },
+        "cli:analyze?brief": {
+          "bytes": 2384,
+          "counts": {
+            "counts.elements": 35,
+            "counts.persistentObjects": 1,
+            "counts.risks.total": 0,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 374.4,
+          "tokens": 596.0
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 303.0,
+          "latencyMs": 300.0,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -1660,7 +2132,7 @@
             "diagnostics": 0,
             "emittedBytes": 1746
           },
-          "latencyMs": 384.5,
+          "latencyMs": 374.8,
           "tokens": 576.0
         },
         "cli:inspect": {
@@ -1668,8 +2140,19 @@
           "counts": {
             "diagnostics": 1
           },
-          "latencyMs": 254.4,
+          "latencyMs": 251.3,
           "tokens": 133.8
+        },
+        "cli:inspect?brief": {
+          "bytes": 738,
+          "counts": {
+            "counts.references": 0,
+            "counts.rules": 0,
+            "counts.symbols": 0,
+            "items": 0
+          },
+          "latencyMs": 249.8,
+          "tokens": 184.5
         },
         "cli:lint": {
           "bytes": 1908,
@@ -1677,8 +2160,19 @@
             "diagnostics": 0,
             "lint.items": 0
           },
-          "latencyMs": 383.7,
+          "latencyMs": 381.2,
           "tokens": 477.0
+        },
+        "cli:lint?brief": {
+          "bytes": 484,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 375.4,
+          "tokens": 121.0
         }
       },
       "status": "ok"
@@ -1703,6 +2197,19 @@
           "latencyMs": 1.6,
           "tokens": 1249.2
         },
+        "agent:analyze?brief": {
+          "bytes": 1186,
+          "counts": {
+            "counts.elements": 33,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 0,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 1.5,
+          "tokens": 296.5
+        },
         "agent:callGraph": {
           "bytes": 13,
           "counts": {
@@ -1712,10 +2219,10 @@
           "tokens": 3.2
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
           "latencyMs": 0.1,
-          "tokens": 126.2
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 229,
@@ -1775,8 +2282,19 @@
             "rules": 6,
             "symbols": 11
           },
-          "latencyMs": 0.7,
+          "latencyMs": 0.6,
           "tokens": 1384.0
+        },
+        "agent:inspect?brief": {
+          "bytes": 1044,
+          "counts": {
+            "counts.references": 25,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 0.5,
+          "tokens": 261.0
         },
         "agent:lint": {
           "bytes": 925,
@@ -1785,6 +2303,17 @@
           },
           "latencyMs": 0.2,
           "tokens": 231.2
+        },
+        "agent:lint?brief": {
+          "bytes": 227,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 56.8
         },
         "agent:lintRules": {
           "bytes": 8131,
@@ -1824,7 +2353,7 @@
             "reference.read": 1,
             "reference.write": 1
           },
-          "latencyMs": 0.2,
+          "latencyMs": 0.4,
           "tokens": 111.2
         },
         "agent:rules": {
@@ -1849,7 +2378,7 @@
         "agent:targetMetadata": {
           "bytes": 15527,
           "counts": {},
-          "latencyMs": 0.6,
+          "latencyMs": 0.7,
           "tokens": 3881.8
         },
         "agent:usage": {
@@ -1877,15 +2406,28 @@
             "program.rules": 6,
             "program.subroutines": 0
           },
-          "latencyMs": 258.8,
+          "latencyMs": 257.3,
           "tokens": 3034.5
+        },
+        "cli:analyze?brief": {
+          "bytes": 2371,
+          "counts": {
+            "counts.elements": 33,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 0,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 257.6,
+          "tokens": 592.8
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 255.9,
+          "latencyMs": 254.8,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -1894,7 +2436,7 @@
             "diagnostics": 0,
             "emittedBytes": 1583
           },
-          "latencyMs": 257.4,
+          "latencyMs": 259.5,
           "tokens": 531.2
         },
         "cli:inspect": {
@@ -1911,8 +2453,19 @@
             "rules": 6,
             "symbols": 11
           },
-          "latencyMs": 258.1,
+          "latencyMs": 256.7,
           "tokens": 3581.0
+        },
+        "cli:inspect?brief": {
+          "bytes": 2064,
+          "counts": {
+            "counts.references": 25,
+            "counts.rules": 6,
+            "counts.symbols": 11,
+            "items": 5
+          },
+          "latencyMs": 256.4,
+          "tokens": 516.0
         },
         "cli:lint": {
           "bytes": 1913,
@@ -1920,8 +2473,19 @@
             "diagnostics": 0,
             "lint.items": 0
           },
-          "latencyMs": 257.1,
+          "latencyMs": 258.1,
           "tokens": 478.2
+        },
+        "cli:lint?brief": {
+          "bytes": 484,
+          "counts": {
+            "counts.findings.total": 0,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 0
+          },
+          "latencyMs": 255.0,
+          "tokens": 121.0
         }
       },
       "status": "ok"
@@ -1943,8 +2507,21 @@
             "program.rules": 7,
             "program.subroutines": 1
           },
-          "latencyMs": 1.8,
+          "latencyMs": 1.9,
           "tokens": 1524.0
+        },
+        "agent:analyze?brief": {
+          "bytes": 1183,
+          "counts": {
+            "counts.elements": 44,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 1,
+            "counts.rules": 7,
+            "counts.symbols": 12,
+            "items": 5
+          },
+          "latencyMs": 1.8,
+          "tokens": 295.8
         },
         "agent:callGraph": {
           "bytes": 69,
@@ -1955,17 +2532,17 @@
           "tokens": 17.2
         },
         "agent:capabilities": {
-          "bytes": 505,
+          "bytes": 1418,
           "counts": {},
-          "latencyMs": 0.1,
-          "tokens": 126.2
+          "latencyMs": 0.2,
+          "tokens": 354.5
         },
         "agent:cfg": {
           "bytes": 229,
           "counts": {
             "blocks": 2
           },
-          "latencyMs": 0.1,
+          "latencyMs": 0.2,
           "tokens": 57.2
         },
         "agent:check": {
@@ -2002,7 +2579,7 @@
           "counts": {
             "items": 1
           },
-          "latencyMs": 0.1,
+          "latencyMs": 0.2,
           "tokens": 126.8
         },
         "agent:inspect": {
@@ -2019,8 +2596,19 @@
             "rules": 7,
             "symbols": 12
           },
-          "latencyMs": 0.7,
+          "latencyMs": 0.8,
           "tokens": 1633.5
+        },
+        "agent:inspect?brief": {
+          "bytes": 1036,
+          "counts": {
+            "counts.references": 31,
+            "counts.rules": 7,
+            "counts.symbols": 12,
+            "items": 5
+          },
+          "latencyMs": 0.6,
+          "tokens": 259.0
         },
         "agent:lint": {
           "bytes": 1419,
@@ -2030,6 +2618,17 @@
           },
           "latencyMs": 0.2,
           "tokens": 354.8
+        },
+        "agent:lint?brief": {
+          "bytes": 652,
+          "counts": {
+            "counts.findings.total": 1,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 1
+          },
+          "latencyMs": 0.3,
+          "tokens": 163.0
         },
         "agent:lintRules": {
           "bytes": 8131,
@@ -2058,7 +2657,7 @@
             "subroutines": 1,
             "symbols": 12
           },
-          "latencyMs": 0.2,
+          "latencyMs": 0.3,
           "tokens": 60.8
         },
         "agent:references": {
@@ -2089,7 +2688,7 @@
             "symbol.rule": 7,
             "symbol.subroutine": 1
           },
-          "latencyMs": 0.4,
+          "latencyMs": 0.5,
           "tokens": 422.5
         },
         "agent:targetMetadata": {
@@ -2123,15 +2722,28 @@
             "program.rules": 7,
             "program.subroutines": 1
           },
-          "latencyMs": 259.9,
+          "latencyMs": 265.7,
           "tokens": 3620.8
+        },
+        "cli:analyze?brief": {
+          "bytes": 2368,
+          "counts": {
+            "counts.elements": 44,
+            "counts.persistentObjects": 0,
+            "counts.risks.total": 1,
+            "counts.rules": 7,
+            "counts.symbols": 12,
+            "items": 5
+          },
+          "latencyMs": 259.0,
+          "tokens": 592.0
         },
         "cli:check": {
           "bytes": 193,
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 256.1,
+          "latencyMs": 263.0,
           "tokens": 48.2
         },
         "cli:compile": {
@@ -2140,7 +2752,7 @@
             "diagnostics": 0,
             "emittedBytes": 1862
           },
-          "latencyMs": 256.9,
+          "latencyMs": 258.7,
           "tokens": 606.2
         },
         "cli:inspect": {
@@ -2157,8 +2769,19 @@
             "rules": 7,
             "symbols": 12
           },
-          "latencyMs": 258.5,
+          "latencyMs": 256.9,
           "tokens": 4251.5
+        },
+        "cli:inspect?brief": {
+          "bytes": 2056,
+          "counts": {
+            "counts.references": 31,
+            "counts.rules": 7,
+            "counts.symbols": 12,
+            "items": 5
+          },
+          "latencyMs": 257.9,
+          "tokens": 514.0
         },
         "cli:lint": {
           "bytes": 2651,
@@ -2167,8 +2790,19 @@
             "lint.finding.while-without-wait": 1,
             "lint.items": 1
           },
-          "latencyMs": 260.0,
+          "latencyMs": 264.6,
           "tokens": 662.8
+        },
+        "cli:lint?brief": {
+          "bytes": 1113,
+          "counts": {
+            "counts.findings.total": 1,
+            "counts.rules": 6,
+            "counts.skipped": 0,
+            "items": 1
+          },
+          "latencyMs": 257.1,
+          "tokens": 278.2
         }
       },
       "status": "ok"

@@ -78,10 +78,22 @@ const TOOLS: &[ToolSpec] = &[
         description: "Check the loaded project and report diagnostics.",
     },
     ToolSpec {
+        op: "analyze",
+        request_def: "AnalyzeRequest",
+        drop_fields: &[],
+        description: "Workshop cost, complexity hotspots, risk indicators, and cross-cutting state; `brief` returns the counts-and-top-items summary.",
+    },
+    ToolSpec {
+        op: "inspect",
+        request_def: "InspectRequest",
+        drop_fields: &[],
+        description: "The structural and semantic program model: program summary, rules, symbols, and references; `brief` returns the counts-and-leading-rules summary.",
+    },
+    ToolSpec {
         op: "lint",
         request_def: "LintRequest",
         drop_fields: &[],
-        description: "Lint findings with effective severities, optionally narrowed by severity, rule, file, or max.",
+        description: "Lint findings with effective severities, optionally narrowed by severity, rule, file, or max; `brief` returns the counts-and-top-findings summary.",
     },
     ToolSpec {
         op: "costEstimate",
@@ -368,11 +380,14 @@ mod tests {
         let names: Vec<String> = TOOLS.iter().map(tool_name).collect();
         assert_eq!(names[0], "wright_project");
         assert_eq!(names[4], "wright_call_graph");
-        assert_eq!(names[7], "wright_cost_estimate");
-        assert_eq!(names[8], "wright_semantic_rename");
-        assert_eq!(names[9], "wright_validate_edit_transaction");
-        assert_eq!(names[10], "wright_provider_semantic_rename");
-        assert_eq!(names[11], "wright_provider_validate_edit");
+        assert_eq!(names[6], "wright_analyze");
+        assert_eq!(names[7], "wright_inspect");
+        assert_eq!(names[8], "wright_lint");
+        assert_eq!(names[9], "wright_cost_estimate");
+        assert_eq!(names[10], "wright_semantic_rename");
+        assert_eq!(names[11], "wright_validate_edit_transaction");
+        assert_eq!(names[12], "wright_provider_semantic_rename");
+        assert_eq!(names[13], "wright_provider_validate_edit");
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
@@ -395,6 +410,16 @@ mod tests {
         let input = input_schema(defs, project);
         assert!(input["required"].is_null());
         assert_eq!(input["properties"], json!({}));
+
+        // #532: the brief tools expose `brief` in their generated schemas.
+        for op in ["analyze", "inspect", "lint"] {
+            let spec = TOOLS.iter().find(|spec| spec.op == op).unwrap();
+            let input = input_schema(defs, spec);
+            assert_eq!(
+                input["properties"]["brief"]["type"], "boolean",
+                "{op} input schema has no brief field"
+            );
+        }
     }
 
     #[test]

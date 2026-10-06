@@ -68,14 +68,17 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
             max: None,
         },
         ToolRequest::Findings(FindingSelection::default()),
-        ToolRequest::Lint(FindingSelection::default()),
+        ToolRequest::Lint {
+            selection: FindingSelection::default(),
+            brief: false,
+        },
         ToolRequest::LintRules,
         ToolRequest::CostEstimate(FindingSelection::default()),
         ToolRequest::TargetMetadata,
     ] {
         match service.handle(&request) {
             wright_driver::service::ToolResponse::Ok { result } => {
-                if matches!(request, ToolRequest::Lint(_)) {
+                if matches!(request, ToolRequest::Lint { .. }) {
                     for finding in result["findings"].as_array().unwrap() {
                         assert!(
                             finding.get("evidence").is_some(),

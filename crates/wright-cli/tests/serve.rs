@@ -749,6 +749,8 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_usage",
             "wright_call_graph",
             "wright_check",
+            "wright_analyze",
+            "wright_inspect",
             "wright_lint",
             "wright_cost_estimate",
             "wright_semantic_rename",
@@ -787,14 +789,22 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
         assert!(tool["description"].is_string());
     }
     assert!(
-        tools[8]["inputSchema"]["properties"]
+        tools[10]["inputSchema"]["properties"]
             .get("sources")
             .is_none()
-            && tools[9]["inputSchema"]["properties"]
+            && tools[11]["inputSchema"]["properties"]
                 .get("sources")
                 .is_none(),
         "edit tool schemas omit sources"
     );
+    // #532: the report tools expose `brief` in their derived input schemas.
+    for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
+        let tool = tools.iter().find(|t| t["name"] == name).unwrap();
+        assert_eq!(
+            tool["inputSchema"]["properties"]["brief"]["type"], "boolean",
+            "{name} has no brief field"
+        );
+    }
 }
 
 #[test]
@@ -811,7 +821,12 @@ fn mcp_transport_results_match_the_service_contract() {
         ("wright_usage", serde_json::json!({"symbol": "index"})),
         ("wright_call_graph", serde_json::json!({})),
         ("wright_check", serde_json::json!({})),
+        // #532: the report tools carry `brief` through to the same service
+        // result the stdio transport reports.
+        ("wright_analyze", serde_json::json!({"brief": true})),
+        ("wright_inspect", serde_json::json!({"brief": true})),
         ("wright_lint", serde_json::json!({"severity": "info"})),
+        ("wright_lint", serde_json::json!({"brief": true})),
         ("wright_cost_estimate", serde_json::json!({})),
         // #472: the edit tools run without `sources` — the service reads the
         // on-disk text.

@@ -957,6 +957,78 @@ fn lint_max_reports_the_withheld_count_in_text_and_json() {
 }
 
 #[test]
+fn brief_bounds_lint_analyze_and_inspect_results() {
+    // #532: `--brief` returns counts, the highest-priority items, and an
+    // expansion path — the same small shape on every command, in text and
+    // JSON, with the full result one flag away.
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+
+    let output = run(&["lint", path.to_str().unwrap(), "--brief"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("10 findings"), "counts line: {stdout}");
+    assert!(stdout.contains("brief"), "counts name the form: {stdout}");
+    assert!(stdout.contains("Top findings"), "{stdout}");
+    assert!(
+        stdout.contains("expand") || stdout.contains("drop"),
+        "{stdout}"
+    );
+
+    for command in ["lint", "analyze", "inspect"] {
+        let output = run(&[command, path.to_str().unwrap(), "--brief", "-f", "json"]);
+        assert!(
+            output.status.success(),
+            "{command}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result = parse_json(&output.stdout)["result"].clone();
+        assert_eq!(result["brief"], true, "{command}");
+        assert!(
+            result["items"].as_array().unwrap().len() <= 5,
+            "{command} items bounded: {result}"
+        );
+        assert!(
+            result["counts"].is_object() && result["expand"].is_string(),
+            "{command} counts+expand: {result}"
+        );
+    }
+
+    let lint = parse_json(&run(&["lint", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout)
+        ["result"]
+        .clone();
+    assert_eq!(lint["counts"]["findings"]["total"], 10);
+    assert!(lint["findings"].is_null(), "full findings withheld: {lint}");
+
+    let analyze = parse_json(
+        &run(&["analyze", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout,
+    )["result"]
+        .clone();
+    assert_eq!(analyze["counts"]["risks"]["total"], 10);
+    assert!(analyze["facts"].is_null(), "full facts withheld: {analyze}");
+
+    let inspect = parse_json(
+        &run(&["inspect", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout,
+    )["result"]
+        .clone();
+    assert_eq!(inspect["counts"]["references"], 58);
+    assert!(inspect["symbols"].is_null(), "detail withheld: {inspect}");
+
+    // `--brief` is the bare-inspect form; the detail queries keep their own
+    // options and reject the combination.
+    let output = run(&["inspect", "--brief", "symbols", path.to_str().unwrap()]);
+    assert!(
+        !output.status.success(),
+        "brief+subcommand is a usage error"
+    );
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn lint_text_collapses_identical_findings_into_one_entry() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&["lint", path.to_str().unwrap()]);

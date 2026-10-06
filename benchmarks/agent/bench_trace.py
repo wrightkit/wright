@@ -361,6 +361,34 @@ def summarize_trace(events: list[dict]) -> dict:
     return {tool: summarize_tool(tool_events(events, tool)) for tool in sorted({e["tool"] for e in events if "tool" in e})}
 
 
+BOUNDED_CLI_FLAGS = {"--brief", "--severity", "--rule-id", "--file", "--max", "--only", "--caller", "--callee"}
+# Request fields that narrow a result (#430, #531) or select the brief form
+# (#532). `rule` is a selection field on the finding/reference operations and
+# the required address on cfg, so it counts only on the ops where it selects.
+BOUNDED_FIELDS = {"severity", "kind", "file", "max", "caller", "callee", "name"}
+RULE_SELECT_OPS = {"lint", "findings", "costEstimate", "references"}
+
+
+def bounded_cli(argv: list[str]) -> bool:
+    """A CLI call adopted a bounded form (#532): `--brief`, or a selection
+    flag (`--max`, `--only`, ...). `--rule` selects only under `inspect` —
+    on `lint` it loads a rule file."""
+    if any(a in BOUNDED_CLI_FLAGS for a in argv):
+        return True
+    return command_of(argv) == "inspect" and "--rule" in argv
+
+
+def bounded_request(request: dict) -> bool:
+    """A serve request adopted a bounded form: a truthy `brief`, a selection
+    field, or `rule` on an operation where it selects rather than addresses."""
+    args = request["args"]
+    if not isinstance(args, dict):
+        return False
+    if args.get("brief"):
+        return True
+    return bool(set(args) & BOUNDED_FIELDS) or ("rule" in args and request["op"] in RULE_SELECT_OPS)
+
+
 def summarize_tool(events: list[dict]) -> dict:
     """Wright uses: every CLI invocation, plus each serve request's operation (`check`, `lint`, ...).
 
@@ -378,6 +406,7 @@ def summarize_tool(events: list[dict]) -> dict:
     for _, request, _ in pairs:
         if request["op"]:
             by_command[request["op"]] = by_command.get(request["op"], 0) + 1
+    bounded = sum(1 for c in cli if bounded_cli(c["argv"])) + sum(1 for request, _ in uses if bounded_request(request))
     output: dict[str, int] = {}
     for call in calls:
         command = command_of(call["argv"])
@@ -389,6 +418,7 @@ def summarize_tool(events: list[dict]) -> dict:
     return {
         "invocations": len(cli) + len(uses) + sum(1 for c in sessions if not c["requests"]),
         "byCommand": by_command,
+        "boundedUses": bounded,
         "failedInvocations": sum(1 for c in calls if c["exit"] != 0) + sum(1 for request, response in uses if response and serve_error(response["line"])),
         "ownerOrEnvironmentGaps": [c["argv"] for c in calls if c["exit"] >= 3],
         "outputTokensEstimate": {cmd: total // TOKEN_BYTES for cmd, total in output.items()},

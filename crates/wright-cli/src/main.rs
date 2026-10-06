@@ -139,12 +139,19 @@ fn run_workflow(command: Command) -> ExitCode {
         Command::Analyze(args) => {
             let mut config = config_from_common(&args.common, true);
             config.selection = selection_from_args(&args.select);
-            run_configured(
-                config,
-                present::Presentation::from_common(&args.common),
-                None,
-                wright_driver::CompilerSession::analyze,
-            )
+            let presentation = present::Presentation::from_common(&args.common);
+            if args.brief {
+                run_configured(config, presentation, None, |session| {
+                    brief_envelope(session.analyze(), wright_driver::brief::analyze)
+                })
+            } else {
+                run_configured(
+                    config,
+                    presentation,
+                    None,
+                    wright_driver::CompilerSession::analyze,
+                )
+            }
         }
         Command::Rename(args) => run_configured(
             config_from_common(&args.common, false),
@@ -186,14 +193,26 @@ fn run_workflow(command: Command) -> ExitCode {
                     return ExitCode::from(exit::USAGE);
                 }
             }
+            let presentation = present::Presentation::from_common(&args.common);
+            if args.brief {
+                return run_configured(config, presentation, None, |session| {
+                    brief_envelope(session.lint(), wright_driver::brief::lint)
+                });
+            }
             run_configured(
                 config,
-                present::Presentation::from_common(&args.common),
+                presentation,
                 None,
                 wright_driver::CompilerSession::lint,
             )
         }
         Command::Inspect(args) => match args.query {
+            None if args.brief => run_configured(
+                config_from_common(&args.common, false),
+                present::Presentation::from_common(&args.common),
+                None,
+                |session| brief_envelope(session.inspect(), wright_driver::brief::inspect),
+            ),
             None => run_configured(
                 config_from_common(&args.common, false),
                 present::Presentation::from_common(&args.common),
@@ -257,6 +276,20 @@ fn run_workflow(command: Command) -> ExitCode {
             unreachable!("non-workflow command handled before run_workflow")
         }
     }
+}
+
+/// The `--brief` result form of a workflow envelope (#532): the driver's
+/// brief transform builds the same payload the `serve`/`MCP` `brief`
+/// request fields return, so every surface reports the same summary.
+fn brief_envelope<T: serde::Serialize>(
+    envelope: wright_driver::Envelope<T>,
+    form: impl FnOnce(&serde_json::Value) -> serde_json::Value,
+) -> wright_driver::Envelope<wright_driver::BriefResult> {
+    envelope.map_result(|result| {
+        wright_driver::BriefResult(form(
+            &serde_json::to_value(result).expect("result serializes"),
+        ))
+    })
 }
 
 fn run_configured<T: serde::Serialize + present::ResultPresentation>(

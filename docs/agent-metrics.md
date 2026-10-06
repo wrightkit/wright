@@ -39,7 +39,12 @@ python3 benchmarks/metrics/metrics.py check                  # compare vs baseli
 
 - **tokens and counts**: |delta| > 15% **and** > 30 absolute;
 - **latencyMs**: |delta| > 50% AND > 1 ms absolute (sub-millisecond medians are
-  measurement noise at our timer resolution).
+  measurement noise at our timer resolution);
+- **brief budget**: every `*?brief` metric — the `brief` request form and the
+  CLI `--brief` form (#532) for `lint`, `analyze`, and `inspect` — must stay
+  within `briefTokenBudget` (500 estimated tokens on the agent surface, 800
+  in the CLI envelope; recorded in each run and baseline); exceeding it is a
+  violation regardless of the band.
 
 Improvements are reported alongside regressions (a smaller surface is a
 change reviewers should see too), and structural changes — added, removed,

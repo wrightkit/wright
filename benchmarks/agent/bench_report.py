@@ -289,7 +289,7 @@ def public_result(result: dict) -> dict:
     public["agentInfo"] = {k: v for k, v in (result.get("agentInfo") or {}).items() if k in ("agent", "version", "model", "effort")}
     public["context"] = {"reported": (result.get("context") or {}).get("reported")}
     public["toolCalls"] = {k: v for k, v in (result.get("toolCalls") or {}).items() if k in ("bash", "wright", "mcp")}
-    public["toolUse"] = {k: {"invocations": v.get("invocations", 0)} for k, v in (result.get("toolUse") or {}).items() if k in ("wright", "overpy")}
+    public["toolUse"] = {k: {f: v.get(f, 0) for f in ("invocations", "boundedUses")} for k, v in (result.get("toolUse") or {}).items() if k in ("wright", "overpy")}
     return public
 
 
@@ -393,6 +393,21 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     if tok:
         out += ["", "## Tool output size per command (estimated tokens per run that used it)", "", "| command | runs | mean | max |", "| --- | --- | --- | --- |"]
         out += [f"| {cmd} | {len(v['tokens'])} | {mean(v['tokens']):.0f} | {max(v['tokens'])} |" for cmd, v in sorted(tok.items())]
+    # #532: how often runs adopt a bounded form — `--brief` or the
+    # selection flags/fields — as a share of wright uses per condition.
+    bounded: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for r in runs:
+        use = (r.get("toolUse") or {}).get("wright") or {}
+        bounded[label(r)][0] += use.get("boundedUses", 0)
+        bounded[label(r)][1] += use.get("invocations", 0)
+    if any(n for _b, n in bounded.values()):
+        summary["boundedAdoption"] = {
+            cell: {"boundedUses": b, "invocations": n, "share": round(b / n, 4) if n else None}
+            for cell, (b, n) in sorted(bounded.items())
+        }
+        out += ["", "## Bounded output adoption (`--brief` or selection fields; #532)", "",
+                "| condition | bounded uses | wright uses | share |", "| --- | --- | --- | --- |"]
+        out += [f"| {cell} | {b} | {n} | {f'{b / n:.1%}' if n else 'n/a'} |" for cell, (b, n) in sorted(bounded.items())]
     notes = diagnostics(runs, invalid) + ([] if has_private else (regrade or []))
     if infrastructure:
         notes.append(f"INFRASTRUCTURE: {len(infrastructure)} provider/infrastructure failures (exit 75) excluded from outcome metrics.")

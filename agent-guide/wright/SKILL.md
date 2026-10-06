@@ -16,7 +16,7 @@ Wright is the semantic tooling for these projects: it parses, validates, lints, 
 - **Many questions about one project?** `wright serve` loads it once.
 - **Need Workshop output, or OPY from raw Workshop?** `compile`, `convert`. `convert` reconstructs, it does not recover your source.
 
-Prefer `--format json` when you will act on the result. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
+Prefer `--format json` when you will act on the result. Reach for `--brief` on `lint`, `analyze`, and `inspect` first: it returns counts, the highest-priority items, and an expansion hint at a fraction of the full result — drop the flag when you need everything. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
 
 ## Judgment that is easy to miss
 

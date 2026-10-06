@@ -33,9 +33,9 @@ result.
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | the emitted artifact (or nothing with `-o`) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
-| `wright analyze [INPUT]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels |
-| `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration |
-| `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area |
+| `wright analyze [INPUT] [--brief]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels; `--brief` prints the counts-and-costliest-rules form |
+| `wright lint [INPUT] [--brief]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration; `--brief` prints the counts-and-top-findings form |
+| `wright inspect [INPUT] [--brief]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area; `--brief` prints the counts-and-leading-rules form |
 | `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
 | `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
@@ -151,6 +151,15 @@ share the finding-selection options `--severity`, `--rule-id`, `--file`, and
 `--max`, which narrow reported diagnostics/findings without changing verdicts
 or exit codes; see [lint configuration and findings](lint.md) and
 [presentation](presentation.md).
+
+`lint`, `analyze`, and bare `inspect` also accept `--brief` (#532): the
+result shrinks to `{"brief": true, "counts", "items", "expand"}` — the same
+counts the summary line reports, at most five highest-priority items, and a
+hint naming the way back to the full result, which stays the default. The
+form composes with selection (`lint --severity error --brief` summarizes the
+selected set) and is identical on `serve` and MCP via the `brief` request
+field; the `inspect` query subcommands keep their own selection options and
+do not take `--brief`.
 
 ## Semantic query commands (#429)
 

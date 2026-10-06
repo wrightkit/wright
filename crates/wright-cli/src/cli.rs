@@ -82,7 +82,7 @@ pub(crate) enum Command {
     Check(ReportArgs),
     /// Summarize Workshop cost, complexity hotspots, risk indicators, and
     /// cross-cutting state.
-    Analyze(ReportArgs),
+    Analyze(AnalyzeArgs),
     /// Parse, lower, and report lint findings.
     Lint(LintArgs),
     /// Parse, lower, and inspect semantic facts: the bare command prints the
@@ -144,6 +144,20 @@ pub(crate) struct ReportArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
+}
+
+/// Arguments of `analyze`: shared workflow options, finding selection, and
+/// `--brief` — the summary form of the report (#532).
+#[derive(Debug, Args)]
+pub(crate) struct AnalyzeArgs {
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    #[command(flatten)]
+    pub(crate) select: SelectArgs,
+    /// Print the brief form: counts, the costliest rules, and how to
+    /// expand — the full report stays one option away.
+    #[arg(long)]
+    pub(crate) brief: bool,
 }
 
 /// Finding-selection options shared by `check`, `analyze`, `lint`, and
@@ -226,6 +240,11 @@ pub(crate) struct RenameArgs {
 pub(crate) struct InspectArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+    /// Print the brief form of the bare summary: counts, the leading rules,
+    /// and how to expand (#532). The query subcommands keep their own
+    /// selection options.
+    #[arg(long)]
+    pub(crate) brief: bool,
     #[command(subcommand)]
     pub(crate) query: Option<InspectQuery>,
 }
@@ -334,6 +353,10 @@ pub(crate) struct LintArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
+    /// Print the brief form: finding counts by severity, the
+    /// highest-severity findings, and how to expand (#532).
+    #[arg(long)]
+    pub(crate) brief: bool,
     /// Read project lint configuration YAML.
     #[arg(long = "lint-config", value_name = "PATH")]
     pub(crate) lint_config: Option<PathBuf>,

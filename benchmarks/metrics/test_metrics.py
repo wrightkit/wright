@@ -121,6 +121,35 @@ class BandTest(unittest.TestCase):
         self.assertEqual(violations, [])
         self.assertTrue(warnings)
 
+    def test_brief_budget_is_a_violation_not_a_band(self):
+        # #532: a brief result above the stated token budget fails even when
+        # the drift band itself would pass.
+        key = "cli:lint?brief"
+        metric = _metric(metrics.BRIEF_TOKEN_BUDGET["cli"] * metrics.TOKEN_BYTES + 400)
+        doc = {"p": {"status": "ok", "metrics": {key: metric}}}
+        violations, _ = metrics.compare_metrics(_doc(doc), _doc(doc))
+        self.assertTrue(
+            any(v["metric"] == key and v["change"] == "exceeds-brief-budget" for v in violations),
+            violations,
+        )
+        under = _metric(800)
+        doc = {"p": {"status": "ok", "metrics": {key: under}}}
+        violations, _ = metrics.compare_metrics(_doc(doc), _doc(doc))
+        self.assertEqual(violations, [])
+
+    def test_brief_counts_unwraps_envelopes(self):
+        brief = {
+            "brief": True,
+            "counts": {"findings": {"total": 9, "error": 1}, "rules": 6},
+            "items": [{}, {}],
+            "expand": "...",
+        }
+        expected = {"items": 2, "counts.findings.total": 9, "counts.rules": 6}
+        self.assertEqual(metrics.brief_counts(brief), expected)
+        self.assertEqual(metrics.brief_counts({"result": brief}), expected)
+        self.assertEqual(metrics.brief_counts({"result": {"result": brief}}), expected)
+        self.assertEqual(metrics.brief_counts({"result": {"findings": []}}), {})
+
 
 class RunTest(unittest.TestCase):
     def test_run_small_project_records_all_surfaces(self):
@@ -148,8 +177,11 @@ class RunTest(unittest.TestCase):
         self.assertEqual(
             keys,
             {f"agent:{op}" for op in metrics.AGENT_OPS}
-            | {f"cli:{cmd}" for cmd in metrics.CLI_COMMANDS},
+            | {f"cli:{cmd}" for cmd in metrics.CLI_COMMANDS}
+            | {f"agent:{op}?brief" for op in metrics.BRIEF_OPS}
+            | {f"cli:{cmd}?brief" for cmd in metrics.BRIEF_OPS},
         )
+        self.assertEqual(result["briefTokenBudget"], metrics.BRIEF_TOKEN_BUDGET)
         for key, record in project["metrics"].items():
             if "skipped" in record:
                 continue

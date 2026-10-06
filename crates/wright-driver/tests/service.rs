@@ -83,7 +83,10 @@ fn tool_service_lint_queries_keep_the_session_configuration() {
         "error"
     );
 
-    let lint = match service.handle(&ToolRequest::Lint(FindingSelection::default())) {
+    let lint = match service.handle(&ToolRequest::Lint {
+        selection: FindingSelection::default(),
+        brief: false,
+    }) {
         ToolResponse::Ok { result } => result,
         ToolResponse::Error { error } => panic!("lint failed: {error:?}"),
     };
@@ -144,8 +147,8 @@ fn tool_service_routes_workflows_through_the_agent_request_contract() {
     for (request, command) in [
         (ToolRequest::Compile, "compile"),
         (ToolRequest::Check, "check"),
-        (ToolRequest::Analyze, "analyze"),
-        (ToolRequest::Inspect, "inspect"),
+        (ToolRequest::Analyze { brief: false }, "analyze"),
+        (ToolRequest::Inspect { brief: false }, "inspect"),
     ] {
         let ToolResponse::Ok { result } = service.handle(&request) else {
             panic!("{command} returns its structured envelope");
@@ -190,11 +193,14 @@ fn agent_finding_selection_filters_and_truncates_without_touching_defaults() {
     );
 
     // `rule` + `max` on `lint` embed the same summary beside the findings.
-    let lint = result_of(ToolRequest::Lint(FindingSelection {
-        rule: Some("repeated-value".to_string()),
-        max: Some(2),
-        ..FindingSelection::default()
-    }));
+    let lint = result_of(ToolRequest::Lint {
+        selection: FindingSelection {
+            rule: Some("repeated-value".to_string()),
+            max: Some(2),
+            ..FindingSelection::default()
+        },
+        brief: false,
+    });
     assert_eq!(lint["findings"].as_array().unwrap().len(), 2);
     assert_eq!(
         lint["selection"],
@@ -224,10 +230,13 @@ fn an_unknown_rule_id_is_a_service_error_not_an_empty_result() {
             rule: Some("not-a-rule".to_string()),
             ..FindingSelection::default()
         }),
-        ToolRequest::Lint(FindingSelection {
-            rule: Some("not-a-rule".to_string()),
-            ..FindingSelection::default()
-        }),
+        ToolRequest::Lint {
+            selection: FindingSelection {
+                rule: Some("not-a-rule".to_string()),
+                ..FindingSelection::default()
+            },
+            brief: false,
+        },
         ToolRequest::CostEstimate(FindingSelection {
             rule: Some("not-a-rule".to_string()),
             ..FindingSelection::default()
@@ -265,6 +274,90 @@ fn an_empty_selection_serializes_identically_to_no_selection() {
         serde_json::to_vec(&plain).unwrap(),
         serde_json::to_vec(&selected).unwrap(),
     );
+}
+
+// ── Brief results (#532) ──────────────────────────────────────────────────────
+
+#[test]
+fn brief_forms_bound_and_describe_lint_analyze_and_inspect() {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    // Every brief result shares the same shape: counts, top items, and an
+    // expansion hint.
+    let lint = result_of(
+        &mut service,
+        &ToolRequest::Lint {
+            selection: FindingSelection::default(),
+            brief: true,
+        },
+    );
+    assert_eq!(lint["brief"], true);
+    assert_eq!(lint["counts"]["findings"]["total"], 1);
+    assert!(lint["counts"]["rules"].as_u64().unwrap() > 0);
+    assert!(lint["items"].as_array().unwrap().len() <= 5);
+    assert!(lint["expand"].as_str().unwrap().contains("brief"));
+    assert!(lint["findings"].is_null(), "full payload withheld: {lint}");
+
+    let analyze = result_of(&mut service, &ToolRequest::Analyze { brief: true });
+    let analyze = &analyze["result"];
+    assert_eq!(analyze["brief"], true);
+    assert_eq!(analyze["counts"]["rules"], 2);
+    assert_eq!(analyze["counts"]["risks"]["total"], 1);
+    assert!(analyze["items"].as_array().unwrap().len() <= 5);
+    assert!(analyze["expand"].is_string());
+    assert!(
+        analyze["facts"].is_null(),
+        "full payload withheld: {analyze}"
+    );
+
+    let inspect = result_of(&mut service, &ToolRequest::Inspect { brief: true });
+    let inspect = &inspect["result"];
+    assert_eq!(inspect["brief"], true);
+    assert_eq!(inspect["counts"]["rules"], 2);
+    assert_eq!(inspect["counts"]["references"], 8);
+    assert!(inspect["expand"].is_string());
+    assert!(
+        inspect["symbols"].is_null(),
+        "full payload withheld: {inspect}"
+    );
+}
+
+#[test]
+fn brief_lint_applies_selection_before_summarizing() {
+    // #532: `brief` composes with finding selection — the counts and items
+    // describe the selected set, and the selection summary survives.
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    let lint = result_of(
+        &mut service,
+        &ToolRequest::Lint {
+            selection: FindingSelection {
+                severity: Some(Severity::Warning),
+                max: Some(2),
+                ..FindingSelection::default()
+            },
+            brief: true,
+        },
+    );
+    assert_eq!(lint["brief"], true);
+    assert_eq!(
+        lint["selection"],
+        serde_json::json!({"total": 1, "withheld": 0})
+    );
+    assert_eq!(lint["counts"]["findings"]["total"], 1);
+    assert_eq!(lint["items"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -1249,8 +1342,8 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
         },
         ToolRequest::Findings(FindingSelection::default()),
         ToolRequest::LintRules,
-        ToolRequest::Inspect,
-        ToolRequest::Analyze,
+        ToolRequest::Inspect { brief: false },
+        ToolRequest::Analyze { brief: false },
     ] {
         let before = serde_json::to_string(&service.handle(&request)).unwrap();
         assert_eq!(
@@ -1260,7 +1353,7 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     }
     assert_eq!(
         serde_json::to_value(service.analyze()).unwrap(),
-        result_of(&mut service, &ToolRequest::Analyze)
+        result_of(&mut service, &ToolRequest::Analyze { brief: false })
     );
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
@@ -1292,7 +1385,10 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     );
     let lint = result_of(
         &mut service,
-        &ToolRequest::Lint(FindingSelection::default()),
+        &ToolRequest::Lint {
+            selection: FindingSelection::default(),
+            brief: false,
+        },
     );
     assert!(
         lint["findings"]
@@ -1795,8 +1891,8 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     for (request, command) in [
         (ToolRequest::Compile, "compile"),
         (ToolRequest::Check, "check"),
-        (ToolRequest::Analyze, "analyze"),
-        (ToolRequest::Inspect, "inspect"),
+        (ToolRequest::Analyze { brief: false }, "analyze"),
+        (ToolRequest::Inspect { brief: false }, "inspect"),
     ] {
         assert_eq!(result_of(&mut service, &request)["command"], command);
     }
@@ -1876,7 +1972,10 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     );
     result_of(
         &mut service,
-        &ToolRequest::Lint(FindingSelection::default()),
+        &ToolRequest::Lint {
+            selection: FindingSelection::default(),
+            brief: false,
+        },
     );
     result_of(&mut service, &ToolRequest::LintRules);
     result_of(&mut service, &ToolRequest::PersistentObjects);
@@ -1893,9 +1992,9 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
         &ToolRequest::CostEstimate(FindingSelection::default()),
     );
     assert_eq!(cost["exact"]["programRules"], 2);
-    let inspect = result_of(&mut service, &ToolRequest::Inspect);
+    let inspect = result_of(&mut service, &ToolRequest::Inspect { brief: false });
     assert_eq!(inspect["result"]["rules"].as_array().unwrap().len(), 2);
-    let analyze = result_of(&mut service, &ToolRequest::Analyze);
+    let analyze = result_of(&mut service, &ToolRequest::Analyze { brief: false });
     assert!(
         analyze["result"]["facts"]["symbols"]
             .as_array()
@@ -2643,7 +2742,7 @@ fn repeated_analyze_requests_do_not_rebuild_semantic_state() {
     assert_eq!(service.semantic_build_count(), 1);
 
     for _ in 0..3 {
-        let analyze = result_of(&mut service, &ToolRequest::Analyze);
+        let analyze = result_of(&mut service, &ToolRequest::Analyze { brief: false });
         assert_eq!(analyze["command"], "analyze");
         assert!(analyze["ok"].as_bool().unwrap_or(false), "{analyze}");
     }
@@ -2751,11 +2850,11 @@ fn a_reload_rebuilds_the_semantic_service_once() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
-    result_of(&mut service, &ToolRequest::Analyze);
+    result_of(&mut service, &ToolRequest::Analyze { brief: false });
     assert_eq!(service.semantic_build_count(), 1);
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
-    let analyze = result_of(&mut service, &ToolRequest::Analyze);
+    let analyze = result_of(&mut service, &ToolRequest::Analyze { brief: false });
     assert!(
         analyze["result"]["facts"]["symbols"]
             .as_array()
@@ -2767,8 +2866,8 @@ fn a_reload_rebuilds_the_semantic_service_once() {
     assert_eq!(service.semantic_build_count(), 2);
 
     // The new snapshot is stable again: further semantic requests share it.
-    result_of(&mut service, &ToolRequest::Analyze);
-    result_of(&mut service, &ToolRequest::Inspect);
+    result_of(&mut service, &ToolRequest::Analyze { brief: false });
+    result_of(&mut service, &ToolRequest::Inspect { brief: false });
     assert_eq!(service.semantic_build_count(), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }

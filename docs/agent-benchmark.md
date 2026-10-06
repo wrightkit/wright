@@ -360,7 +360,9 @@ counts with scenario-clustered 95% intervals (resampling scenarios, then trials)
 context, mean correction rounds per condition, paired comparison against each `--reference` (repeatable for
 lift against several named references; default `none/none/off`) (same scenario, agent, and
 trial; token comparison only where both are usable), per-scenario and per-split
-tables, expectation rates, friction, output size per command, and diagnostics.
+tables, expectation rates, friction, output size per command, bounded-output
+adoption (the share of Wright uses carrying `--brief` or a selection
+flag/field, per condition), and diagnostics.
 Diagnostics flag headroom (baseline usable rate of at least 95%), infrastructure
 failures, invalid runs, trial variance, and, with `--regrade`, a grader that
 gives different verdicts on the same stored workspace.
