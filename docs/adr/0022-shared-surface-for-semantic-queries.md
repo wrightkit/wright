@@ -1,6 +1,6 @@
 # ADR-0022: One shared surface for the semantic queries
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-06
 - Related: [Issue #429](https://github.com/wrightkit/wright/issues/429), [Issue #134](https://github.com/wrightkit/wright/issues/134), [ADR-0017](0017-domain-intelligence-query-contract.md), [ADR-0020](0020-native-agent-tool-adapter.md), [Product contract](../architecture/product-contract.md)
 
