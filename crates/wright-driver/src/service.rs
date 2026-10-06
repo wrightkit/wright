@@ -33,6 +33,33 @@ pub const SERVICE_NAME: &str = "wright-tool-service";
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 
+/// Every operation `capabilities.operations` advertises, in contract order —
+/// the catalog client tool definitions are emitted from (#535).
+pub const OPERATIONS: &[&str] = &[
+    "capabilities",
+    "project",
+    "rules",
+    "symbols",
+    "references",
+    "usage",
+    "cfg",
+    "findings",
+    "persistentObjects",
+    "lint",
+    "lintRules",
+    "callGraph",
+    "costEstimate",
+    "targetMetadata",
+    "compile",
+    "check",
+    "analyze",
+    "inspect",
+    "validateEditTransaction",
+    "semanticRename",
+    "providerSemanticRename",
+    "providerValidateEdit",
+];
+
 /// A semantic query target on the agent contract (#429): a numeric id or a
 /// declared name.
 ///
@@ -374,33 +401,7 @@ impl<'a> ToolService<'a> {
 
     /// The capability/version contract.
     pub fn capabilities(&self) -> Capabilities {
-        let operations: Vec<String> = [
-            "capabilities",
-            "project",
-            "rules",
-            "symbols",
-            "references",
-            "usage",
-            "cfg",
-            "findings",
-            "persistentObjects",
-            "lint",
-            "lintRules",
-            "callGraph",
-            "costEstimate",
-            "targetMetadata",
-            "compile",
-            "check",
-            "analyze",
-            "inspect",
-            "validateEditTransaction",
-            "semanticRename",
-            "providerSemanticRename",
-            "providerValidateEdit",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+        let operations: Vec<String> = OPERATIONS.iter().map(|op| op.to_string()).collect();
         // The committed schema names every operation's result definition
         // `<Op>Result` — `capabilities` surfaces the map so a caller learns
         // result shapes without a second document (#532).

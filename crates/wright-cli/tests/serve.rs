@@ -747,14 +747,14 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_symbols",
             "wright_references",
             "wright_usage",
+            "wright_lint",
             "wright_call_graph",
+            "wright_cost_estimate",
             "wright_check",
             "wright_analyze",
             "wright_inspect",
-            "wright_lint",
-            "wright_cost_estimate",
-            "wright_semantic_rename",
             "wright_validate_edit_transaction",
+            "wright_semantic_rename",
             "wright_provider_semantic_rename",
             "wright_provider_validate_edit",
         ]
@@ -788,15 +788,13 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
         assert!(tool["inputSchema"]["properties"].get("op").is_none());
         assert!(tool["description"].is_string());
     }
-    assert!(
-        tools[10]["inputSchema"]["properties"]
-            .get("sources")
-            .is_none()
-            && tools[11]["inputSchema"]["properties"]
-                .get("sources")
-                .is_none(),
-        "edit tool schemas omit sources"
-    );
+    for name in ["wright_validate_edit_transaction", "wright_semantic_rename"] {
+        let tool = tools.iter().find(|t| t["name"] == name).unwrap();
+        assert!(
+            tool["inputSchema"]["properties"].get("sources").is_none(),
+            "{name} omits sources"
+        );
+    }
     // #532: the report tools expose `brief` in their derived input schemas.
     for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
         let tool = tools.iter().find(|t| t["name"] == name).unwrap();

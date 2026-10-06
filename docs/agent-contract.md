@@ -108,6 +108,34 @@ protocol errors (unknown tool or method, malformed arguments) are JSON-RPC
 The released `wright` binary includes `serve`, so each supported installation
 channel can use the session contract without a separate runtime.
 
+### Client tool definitions for code-executing agents (#535)
+
+`wright agent tools` emits every operation `capabilities` advertises as
+client tool definitions for code-executing agents. The output is versioned
+with `wright-agent/v1` and deterministic: identical input produces identical
+bytes.
+
+`--format messages` (the default) emits
+`{"contract": "wright-agent/v1", "tools": [...]}` in the Anthropic Messages
+API client tool shape: each tool carries `name` (`wright_` plus the
+snake-case operation), a `description` that also describes the result in
+text, an `input_schema` derived from the operation's request schema with
+`op` removed, and `allowed_callers: ["code_execution_20260120"]` so the
+tools are callable from the code execution tool. Emitted schemas keep every
+caller-meaningful field — including `sources`, which the MCP surface drops —
+and ship their `$ref` targets under a local `$defs` with no recursive
+reference, which the Messages API rejects.
+
+`--format json-schema` emits
+`{"contract": "wright-agent/v1", "schemas": {...}}`: operation name to the
+same standalone request schema with its description inside, for harnesses
+that consume plain JSON Schema.
+
+The emitted set is generated from one catalog shared with `capabilities`
+and the MCP adapter, so the definitions cannot drift from the advertised
+operation set; a catalog change that drops a description, a request schema,
+or introduces a recursive `$ref` fails the tests.
+
 ## Operations
 
 All requests are JSON objects with a required `op` string. Request fields and

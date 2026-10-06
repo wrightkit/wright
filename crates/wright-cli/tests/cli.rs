@@ -1585,6 +1585,42 @@ fn agent_install_writes_the_guide_and_refreshes_it() {
 }
 
 #[test]
+fn agent_tools_emits_messages_and_json_schema_forms_deterministically() {
+    let messages = run(&["agent", "tools"]);
+    assert!(
+        messages.status.success(),
+        "{}",
+        String::from_utf8_lossy(&messages.stderr)
+    );
+    let doc: serde_json::Value = serde_json::from_slice(&messages.stdout).unwrap();
+    assert_eq!(doc["contract"], "wright-agent/v1");
+    let tools = doc["tools"].as_array().unwrap();
+    assert!(!tools.is_empty());
+    for tool in tools {
+        assert!(tool["name"].as_str().unwrap().starts_with("wright_"));
+        assert!(tool["description"].as_str().unwrap().contains("Result:"));
+        assert_eq!(tool["input_schema"]["type"], "object");
+        assert_eq!(
+            tool["allowed_callers"],
+            serde_json::json!(["code_execution_20260120"])
+        );
+    }
+    // Identical input emits identical bytes.
+    assert_eq!(run(&["agent", "tools"]).stdout, messages.stdout);
+
+    let plain = run(&["agent", "tools", "--format", "json-schema"]);
+    assert!(plain.status.success());
+    let doc: serde_json::Value = serde_json::from_slice(&plain.stdout).unwrap();
+    assert_eq!(doc["contract"], "wright-agent/v1");
+    let schemas = doc["schemas"].as_object().unwrap();
+    assert_eq!(schemas.len(), tools.len());
+    for (op, schema) in schemas {
+        assert_eq!(schema["type"], "object", "{op}");
+        assert!(schema["description"].is_string(), "{op}");
+    }
+}
+
+#[test]
 fn completion_install_dry_run() {
     let dir = temp_dir();
     let output = run(&[

@@ -398,6 +398,25 @@ pub(crate) enum AgentSubcommand {
     /// Install the canonical Wright agent guide as an agent skill in the
     /// project; re-running refreshes it in place.
     Install(AgentInstallArgs),
+    /// Emit the advertised agent operations as client tool definitions for
+    /// code-executing agents, or as plain JSON Schema for other harnesses (#535).
+    Tools(AgentToolsArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ToolsFormat {
+    /// Anthropic Messages API client tool definitions for programmatic
+    /// (code-execution) tool calling.
+    Messages,
+    /// One plain JSON Schema per operation for other harnesses.
+    JsonSchema,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentToolsArgs {
+    /// The emitted definition form.
+    #[arg(long, value_enum, default_value_t = ToolsFormat::Messages)]
+    pub(crate) format: ToolsFormat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

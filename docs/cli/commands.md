@@ -47,6 +47,7 @@ result.
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
 | `wright agent install` | Install the canonical Wright agent guide into the project's agent skills directory | installation progress and guidance |
+| `wright agent tools [--format messages\|json-schema]` | Emit the advertised operations as client tool definitions for code-executing agents | `wright-agent/v1` tool-definition document (JSON) |
 
 `wright --version` prints the implementation version banner
 (`wright <version> (wright-driver <version>)`); the version is the single
@@ -145,6 +146,19 @@ refused; writes replace the file atomically.
 
 To remove the server, delete the `wright` entry from the config file (and the
 guide directory if installed); to update, re-run with `--force`.
+
+## `wright agent tools` — client tool definitions (#535)
+
+`wright agent tools` prints every operation `capabilities` advertises as
+client tool definitions for code-executing agents, versioned
+`wright-agent/v1` and deterministic. `--format messages` (default) emits
+Anthropic Messages API tool definitions — `name`, `description` (which also
+describes the result), `input_schema`, and
+`allowed_callers: ["code_execution_20260120"]` for programmatic tool
+calling; emitted schemas have no recursive `$ref`, which the API rejects.
+`--format json-schema` emits the same operations as plain JSON Schema for
+other harnesses. See
+[the agent contract](../agent-contract.md#client-tool-definitions-for-code-executing-agents-535).
 
 Commands that report findings (`check`, `analyze`, `lint`, `inspect cost`)
 share the finding-selection options `--severity`, `--rule-id`, `--file`, and

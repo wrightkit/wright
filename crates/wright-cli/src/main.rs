@@ -1,10 +1,12 @@
 mod agent;
+mod agenttools;
 mod cli;
 mod completion;
 mod mcp;
 mod present;
 mod provider;
 mod serve;
+mod tooldefs;
 mod update;
 
 use std::io::Read;

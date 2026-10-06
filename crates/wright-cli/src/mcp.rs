@@ -18,114 +18,11 @@ use serde_json::{Map, Value, json};
 use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 
 use crate::serve::serve_lines;
-
-/// The committed agent schema is the single source of request shapes; tool
-/// input schemas are extracted from its `$defs` at startup rather than
-/// written a second time.
-const AGENT_SCHEMA: &str = include_str!("../../../schemas/wright-agent-v1.schema.json");
+use crate::tooldefs::{TOOL_SPECS, ToolSpec, input_schema, tool_name};
 
 /// Protocol versions the adapter negotiates (`initialize` echoes the client's
 /// version when supported, else responds with the newest listed).
 const PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
-
-/// One tool per operation in the initial MCP set (ADR-0020).
-struct ToolSpec {
-    /// The `ToolRequest` operation name (`op` field, camelCase).
-    op: &'static str,
-    /// The JSON Schema `$defs` entry describing this operation's request.
-    request_def: &'static str,
-    /// Request fields the tool schema omits (`sources` defaults to disk).
-    drop_fields: &'static [&'static str],
-    /// The tool description shown to the model.
-    description: &'static str,
-}
-
-const TOOLS: &[ToolSpec] = &[
-    ToolSpec {
-        op: "project",
-        request_def: "ProjectRequest",
-        drop_fields: &[],
-        description: "The loaded canonical program summary: origin, files, and counts of variables, subroutines, rules, symbols, and findings.",
-    },
-    ToolSpec {
-        op: "symbols",
-        request_def: "SymbolsRequest",
-        drop_fields: &[],
-        description: "Every symbol in the loaded program, optionally narrowed by `kind`, `file`, or `max`. Issues the numeric ids other tools accept.",
-    },
-    ToolSpec {
-        op: "references",
-        request_def: "ReferencesRequest",
-        drop_fields: &[],
-        description: "References to a symbol, addressed by its numeric id or its declared name, optionally narrowed by `kind`, `rule`, `file`, or `max`.",
-    },
-    ToolSpec {
-        op: "usage",
-        request_def: "UsageRequest",
-        drop_fields: &[],
-        description: "Usage counts for a symbol, addressed by its numeric id or its declared name.",
-    },
-    ToolSpec {
-        op: "callGraph",
-        request_def: "CallGraphRequest",
-        drop_fields: &[],
-        description: "The subroutine call graph: caller rules mapped to callee subroutines, optionally narrowed by `caller`, `callee`, or `max`.",
-    },
-    ToolSpec {
-        op: "check",
-        request_def: "CheckRequest",
-        drop_fields: &[],
-        description: "Check the loaded project and report diagnostics.",
-    },
-    ToolSpec {
-        op: "analyze",
-        request_def: "AnalyzeRequest",
-        drop_fields: &[],
-        description: "Workshop cost, complexity hotspots, risk indicators, and cross-cutting state; `brief` returns the counts-and-top-items summary.",
-    },
-    ToolSpec {
-        op: "inspect",
-        request_def: "InspectRequest",
-        drop_fields: &[],
-        description: "The structural and semantic program model: program summary, rules, symbols, and references; `brief` returns the counts-and-leading-rules summary.",
-    },
-    ToolSpec {
-        op: "lint",
-        request_def: "LintRequest",
-        drop_fields: &[],
-        description: "Lint findings with effective severities, optionally narrowed by severity, rule, file, or max; `brief` returns the counts-and-top-findings summary.",
-    },
-    ToolSpec {
-        op: "costEstimate",
-        request_def: "CostEstimateRequest",
-        drop_fields: &[],
-        description: "Generated-resource cost estimates: exact counts plus findings.",
-    },
-    ToolSpec {
-        op: "semanticRename",
-        request_def: "SemanticRenameRequest",
-        drop_fields: &["sources"],
-        description: "Propose a semantic rename: returns the validated transaction or structured refusal diagnostics. The target is a symbol id or declared name, or a source/line/col position. Sources default to the on-disk text.",
-    },
-    ToolSpec {
-        op: "validateEditTransaction",
-        request_def: "ValidateEditTransactionRequest",
-        drop_fields: &["sources"],
-        description: "Validate and preview a source-edit transaction atomically against the session's project; no filesystem writes. Sources default to the on-disk text.",
-    },
-    ToolSpec {
-        op: "providerSemanticRename",
-        request_def: "ProviderSemanticRenameRequest",
-        drop_fields: &[],
-        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. `documents` and `sources` are supplied by the caller.",
-    },
-    ToolSpec {
-        op: "providerValidateEdit",
-        request_def: "ProviderValidateEditRequest",
-        drop_fields: &[],
-        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. `documents` and `sources` are supplied by the caller.",
-    },
-];
 
 /// A tool definition as listed by `tools/list`.
 struct Tool {
@@ -134,120 +31,19 @@ struct Tool {
     input_schema: Value,
 }
 
-fn snake_case(name: &str) -> String {
-    let mut out = String::with_capacity(name.len() + 4);
-    for ch in name.chars() {
-        if ch.is_uppercase() {
-            out.push('_');
-            out.push(ch.to_ascii_lowercase());
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-/// Collect every `#/$defs/<name>` reachable from `value` into `needed`.
-fn collect_refs(value: &Value, defs: &Map<String, Value>, needed: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            for (key, child) in map {
-                if key == "$ref" {
-                    if let Some(name) = child
-                        .as_str()
-                        .and_then(|reference| reference.strip_prefix("#/$defs/"))
-                    {
-                        if !needed.iter().any(|seen| seen == name) {
-                            needed.push(name.to_string());
-                            if let Some(def) = defs.get(name) {
-                                collect_refs(def, defs, needed);
-                            }
-                        }
-                    }
-                } else {
-                    collect_refs(child, defs, needed);
-                }
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_refs(item, defs, needed);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// The tool `inputSchema` derived from the request `$defs` entry: the
-/// operation's parameters without `op` (the tool name carries it) and without
-/// the fields the transport omits (`sources` on edit operations).
-fn input_schema(defs: &Map<String, Value>, spec: &ToolSpec) -> Value {
-    let request = &defs[spec.request_def];
-    let mut properties = request["properties"].clone();
-    let object = properties
-        .as_object_mut()
-        .expect("request properties object");
-    object.remove("op");
-    for field in spec.drop_fields {
-        object.remove(*field);
-    }
-    let required: Vec<Value> = request["required"]
-        .as_array()
-        .map(|required| {
-            required
-                .iter()
-                .filter(|name| {
-                    name.as_str() != Some("op")
-                        && !spec
-                            .drop_fields
-                            .contains(&name.as_str().unwrap_or_default())
-                })
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut schema = json!({
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": false,
-    });
-    if !required.is_empty() {
-        schema["required"] = Value::Array(required);
-    }
-    // `$ref` targets used by the kept fields ship inside the schema so the
-    // tool definition is self-contained.
-    let mut needed = Vec::new();
-    collect_refs(&schema, defs, &mut needed);
-    if !needed.is_empty() {
-        let mut sub = Map::new();
-        for name in needed {
-            sub.insert(name.clone(), defs[&name].clone());
-        }
-        schema["$defs"] = Value::Object(sub);
-    }
-    schema
-}
-
-fn tool_name(spec: &ToolSpec) -> String {
-    format!("wright_{}", snake_case(spec.op))
-}
-
-/// The tools this service advertises: the initial set intersected with
-/// `capabilities.operations`, so listing and the contract cannot disagree.
+/// The tools this service advertises: the initial MCP set (ADR-0020)
+/// intersected with `capabilities.operations`, so listing and the contract
+/// cannot disagree.
 fn build_tools(service: &ToolService<'_>) -> (Vec<Tool>, String, String) {
     let capabilities = service.capabilities();
-    let defs = serde_json::from_str::<Value>(AGENT_SCHEMA).expect("committed agent schema parses")
-        ["$defs"]
-        .as_object()
-        .expect("schema $defs")
-        .clone();
-    let tools = TOOLS
+    let defs = crate::tooldefs::schema_defs();
+    let tools = TOOL_SPECS
         .iter()
-        .filter(|spec| capabilities.operations.iter().any(|op| op == spec.op))
+        .filter(|spec| spec.mcp && capabilities.operations.iter().any(|op| op == spec.op))
         .map(|spec| Tool {
-            name: tool_name(spec),
+            name: tool_name(spec.op),
             spec,
-            input_schema: input_schema(&defs, spec),
+            input_schema: input_schema(&defs, spec, spec.drop_fields),
         })
         .collect();
     (tools, capabilities.name, capabilities.version)
@@ -377,44 +173,56 @@ mod tests {
 
     #[test]
     fn tool_names_are_wright_prefixed_snake_case() {
-        let names: Vec<String> = TOOLS.iter().map(tool_name).collect();
-        assert_eq!(names[0], "wright_project");
-        assert_eq!(names[4], "wright_call_graph");
-        assert_eq!(names[6], "wright_analyze");
-        assert_eq!(names[7], "wright_inspect");
-        assert_eq!(names[8], "wright_lint");
-        assert_eq!(names[9], "wright_cost_estimate");
-        assert_eq!(names[10], "wright_semantic_rename");
-        assert_eq!(names[11], "wright_validate_edit_transaction");
-        assert_eq!(names[12], "wright_provider_semantic_rename");
-        assert_eq!(names[13], "wright_provider_validate_edit");
+        let names: Vec<String> = TOOL_SPECS
+            .iter()
+            .filter(|spec| spec.mcp)
+            .map(|spec| tool_name(spec.op))
+            .collect();
+        for name in [
+            "wright_project",
+            "wright_symbols",
+            "wright_references",
+            "wright_usage",
+            "wright_call_graph",
+            "wright_check",
+            "wright_analyze",
+            "wright_inspect",
+            "wright_lint",
+            "wright_cost_estimate",
+            "wright_semantic_rename",
+            "wright_validate_edit_transaction",
+            "wright_provider_semantic_rename",
+            "wright_provider_validate_edit",
+        ] {
+            assert!(names.iter().any(|n| n == name), "missing {name}");
+        }
+        assert_eq!(names.len(), 14);
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
     #[test]
     fn input_schemas_drop_op_and_edit_sources() {
-        let schema: Value = serde_json::from_str(AGENT_SCHEMA).unwrap();
-        let defs = schema["$defs"].as_object().unwrap();
-        let rename = TOOLS
+        let defs = crate::tooldefs::schema_defs();
+        let rename = TOOL_SPECS
             .iter()
             .find(|spec| spec.op == "semanticRename")
             .unwrap();
-        let input = input_schema(defs, rename);
+        let input = input_schema(&defs, rename, rename.drop_fields);
         assert_eq!(input["type"], "object");
         assert!(input["properties"].get("op").is_none());
         assert!(input["properties"].get("sources").is_none());
         assert!(input["properties"].get("target").is_some());
         assert_eq!(input["required"], json!(["target"]));
         assert!(input["$defs"].get("RenameTarget").is_some());
-        let project = TOOLS.iter().find(|spec| spec.op == "project").unwrap();
-        let input = input_schema(defs, project);
+        let project = TOOL_SPECS.iter().find(|spec| spec.op == "project").unwrap();
+        let input = input_schema(&defs, project, &[]);
         assert!(input["required"].is_null());
         assert_eq!(input["properties"], json!({}));
 
         // #532: the brief tools expose `brief` in their generated schemas.
         for op in ["analyze", "inspect", "lint"] {
-            let spec = TOOLS.iter().find(|spec| spec.op == op).unwrap();
-            let input = input_schema(defs, spec);
+            let spec = TOOL_SPECS.iter().find(|spec| spec.op == op).unwrap();
+            let input = input_schema(&defs, spec, &[]);
             assert_eq!(
                 input["properties"]["brief"]["type"], "boolean",
                 "{op} input schema has no brief field"
