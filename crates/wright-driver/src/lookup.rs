@@ -268,12 +268,11 @@ fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Opt
         }
         LookupMatch::Setting {
             definition,
-            spelling,
             display_name,
         } => json!({
             "identity": identity,
             "kind": "setting",
-            "spelling": spelling,
+            "spelling": identity,
             "displayName": display_name,
             "setting": setting_facts(&definition),
         }),
@@ -465,6 +464,21 @@ fn workshop_within(
         .into_iter()
         .filter_map(|child| workshop_entry(catalog, locale, child))
         .collect();
+    // A scoped settings child spells the segment below the prefix — the
+    // last segment of its leaf path — not the full path an unscoped
+    // `setting` entry spells (`name-lookup.md` §21.3).
+    for entry in &mut entries {
+        if entry["kind"] != "setting" {
+            continue;
+        }
+        if let Some(segment) = entry["identity"]
+            .as_str()
+            .and_then(|path| path.rsplit('.').next())
+            .map(str::to_string)
+        {
+            entry["spelling"] = json!(segment);
+        }
+    }
     entries.retain(|entry| kind.is_none_or(|k| entry["kind"] == k));
     Ok(entries)
 }
