@@ -54,6 +54,8 @@ Issue contract.
   Wright-owned tests.
 - [Licensing/provenance boundary](licensing.md): third-party reference and
   licensing constraints.
+- [Seeded defect injection](specs/SPEC-534-seeded-defect-injection.md):
+  scenario families generated from a seed project and a defect class
 - [Extensible lint rules](specs/SPEC-309-extensible-lint-rules.md): canonical
   facts, local declarative rules, metadata, and project configuration.
 - [Release/distribution](release.md): packaging and publication contract.

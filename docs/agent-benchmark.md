@@ -251,6 +251,7 @@ to form a passing solution), and optional `negative/<name>/` overlays.
 | `source`, `referenceNote` | Optional provenance of the requirement and of the reference solution; the reference only calibrates the checks and is never shown to agents |
 | `negatives` | `{name: {"fails": [check ids]}}`; the overlay must fail exactly those checks |
 | `checks` | Deterministic checks, each with `id`, `kind`, and `layer` |
+| `generated` | Present on seeded-defect instances: `{defect, site, seedHash}` provenance |
 
 Check kinds: `check` (`wright check` reports no errors), `lint` (at most `max`
 findings with lint `code`), `symbols` (at least `min` symbols of `symbolKind`
@@ -264,6 +265,19 @@ text needs a `reference` that matches and a `negative` that does not. `layer`
 names what a failure implicates: `agent` for a requirement the produced work
 does not meet, or `workshop-rs` / `opy-rs` / `deltin-rs` / `wright` for
 validity or analysis results owned by that layer.
+
+## Generated scenarios
+
+Families that need Wright are produced by seeded defect injection
+([`SPEC-534`](specs/SPEC-534-seeded-defect-injection.md)): a defect class in
+[`benchmarks/defects/`](../benchmarks/defects/) finds injectable sites in a
+pristine seed project, injects one deterministic site, and emits the ordinary
+scenario directory above — a defective `seed/`, a `reference/` overlay that
+restores the pristine files, `negative/` overlays, and checks derived from
+the seed's own compiled output so any correct fix passes, not just the
+reference. `python3 benchmarks/defects/generate.py --all` rewrites the
+committed instances and `--check` reports drift; both need the Wright binary
+and, for OverPy seeds, the installed oracle.
 
 ## Grading authorities
 
