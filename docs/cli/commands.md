@@ -36,10 +36,10 @@ result.
 | `wright analyze [INPUT]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels |
 | `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration |
 | `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area |
-| `wright inspect symbols [INPUT] [--only KIND]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
-| `wright inspect refs <NAME> [INPUT]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
-| `wright inspect cfg <RULE> [INPUT]` | Control-flow graph of one rule, addressed by name | block/edge listing |
-| `wright inspect callgraph [INPUT]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
+| `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
+| `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
+| `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
+| `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
 | `wright inspect cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
 | `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
 | `wright serve [INPUT]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
@@ -181,6 +181,14 @@ resolution never guesses.
 * `inspect symbols --only <KIND>` narrows the list to `globalVariable`,
   `playerVariable`, `subroutine`, or `rule` (kebab-case aliases work). It is
   spelled `--only` because `--kind` already selects the input frontend.
+* The query subcommands accept the same selection fields the agent
+  operations take (#531): `inspect symbols` adds `--file`/`--max`,
+  `inspect refs` adds `--only` (a reference kind), `--rule`, `--file`, and
+  `--max`, `inspect cfg` adds `--only` (a block kind) and `--max`, and
+  `inspect callgraph` adds `--caller`, `--callee`, and `--max`. With any
+  selection flag the JSON result wraps the list in `{<items>, "selection":
+  {"total", "withheld"}}`; an unknown filter value exits 1 with an
+  `invalid-selection` diagnostic.
 * `inspect cost` accepts the finding-selection options, applied to its
   findings list exactly as on `costEstimate`.
 * `persistentObjects` has no standalone command; `analyze` reports the same

@@ -51,13 +51,13 @@ const TOOLS: &[ToolSpec] = &[
         op: "symbols",
         request_def: "SymbolsRequest",
         drop_fields: &[],
-        description: "Every symbol in the loaded program, optionally filtered by `kind`. Issues the numeric ids other tools accept.",
+        description: "Every symbol in the loaded program, optionally narrowed by `kind`, `file`, or `max`. Issues the numeric ids other tools accept.",
     },
     ToolSpec {
         op: "references",
         request_def: "ReferencesRequest",
         drop_fields: &[],
-        description: "References to a symbol, addressed by its numeric id or its declared name.",
+        description: "References to a symbol, addressed by its numeric id or its declared name, optionally narrowed by `kind`, `rule`, `file`, or `max`.",
     },
     ToolSpec {
         op: "usage",
@@ -69,7 +69,7 @@ const TOOLS: &[ToolSpec] = &[
         op: "callGraph",
         request_def: "CallGraphRequest",
         drop_fields: &[],
-        description: "The subroutine call graph: caller rules mapped to callee subroutines.",
+        description: "The subroutine call graph: caller rules mapped to callee subroutines, optionally narrowed by `caller`, `callee`, or `max`.",
     },
     ToolSpec {
         op: "check",

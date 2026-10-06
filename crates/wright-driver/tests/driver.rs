@@ -488,7 +488,9 @@ fn session_config_mutation_refuses_workflows() {
     assert!(refused_config_change(&session.inspect().diagnostics));
     assert!(refused_config_change(&session.lint().diagnostics));
     assert!(refused_config_change(&session.analyze().diagnostics));
-    assert!(refused_config_change(&session.symbols(None).diagnostics));
+    assert!(refused_config_change(
+        &session.symbols(None, None, None).diagnostics
+    ));
     assert!(refused_config_change(
         &session.rename("x", "y", false).diagnostics
     ));

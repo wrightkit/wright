@@ -182,6 +182,44 @@ impl FindingSelection {
     }
 }
 
+/// Apply one list selection to a semantic operation's items (#531): the
+/// caller's `keep` encodes the operation-specific filters, `file` and `max`
+/// are shared. `total` counts the set before selection and `withheld`
+/// counts only what `max` dropped — the same semantics `FindingSelection`
+/// establishes for findings (#430).
+pub(crate) fn select_list<T>(
+    items: Vec<T>,
+    file: Option<&str>,
+    file_bases: &[PathBuf],
+    path: impl Fn(&T) -> Option<&str>,
+    keep: impl Fn(&T) -> bool,
+    max: Option<usize>,
+) -> (Vec<T>, SelectionOutcome) {
+    let matcher = file.map(|file| FileMatch::new(file, file_bases));
+    let total = items.len();
+    let mut kept: Vec<T> = items
+        .into_iter()
+        .filter(|item| {
+            matcher
+                .as_ref()
+                .is_none_or(|matcher| matcher.matches(path(item)))
+                && keep(item)
+        })
+        .collect();
+    let withheld = max.map_or(0, |max| kept.len().saturating_sub(max));
+    if let Some(max) = max {
+        kept.truncate(max);
+    }
+    (
+        kept,
+        SelectionOutcome {
+            total,
+            withheld,
+            max_severity: None,
+        },
+    )
+}
+
 /// The `file` dimension matched by file identity rather than one string
 /// spelling: `span.path` is reported root-relative on finding surfaces and
 /// cwd-relative on diagnostic surfaces, so both sides resolve under the

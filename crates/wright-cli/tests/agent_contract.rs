@@ -138,11 +138,19 @@ fn service_responses() -> Vec<(String, Value)> {
     .expect("session starts");
     let mut service = ToolService::new(&mut session).expect("service loads the project");
 
-    let rule = match service.handle(&ToolRequest::Rules) {
+    let rule = match service.handle(&ToolRequest::Rules {
+        name: None,
+        file: None,
+        max: None,
+    }) {
         ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
         ToolResponse::Error { error } => panic!("rules failed: {error:?}"),
     };
-    let symbol = match service.handle(&ToolRequest::Symbols { kind: None }) {
+    let symbol = match service.handle(&ToolRequest::Symbols {
+        kind: None,
+        file: None,
+        max: None,
+    }) {
         ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
         ToolResponse::Error { error } => panic!("symbols failed: {error:?}"),
     };
@@ -422,4 +430,38 @@ fn cli_and_agent_selections_return_the_same_set() {
     assert_eq!(cli["findings"], agent["findings"], "same selected set");
     assert_eq!(cli["selection"], agent["selection"], "same truncation");
     assert_eq!(agent["selection"], json!({"total": 10, "withheld": 7}));
+
+    // #531: the semantic-query flags select the same set the agent request
+    // fields do, through the same driver-side selection.
+    let agent = match service.handle(&ToolRequest::Symbols {
+        kind: Some("rule".to_string()),
+        file: None,
+        max: Some(2),
+    }) {
+        ToolResponse::Ok { result } => result,
+        ToolResponse::Error { error } => panic!("symbols selection failed: {error:?}"),
+    };
+    let output = Command::new(env!("CARGO_BIN_EXE_wright"))
+        .args([
+            "inspect",
+            "symbols",
+            input.to_str().unwrap(),
+            "--only",
+            "rule",
+            "--max",
+            "2",
+            "-f",
+            "json",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("wright inspect symbols runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
+    assert_eq!(cli["symbols"], agent["symbols"], "same selected set");
+    assert_eq!(cli["selection"], agent["selection"], "same truncation");
 }

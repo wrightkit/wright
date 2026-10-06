@@ -121,16 +121,16 @@ the successful `result` payload.
 | `analyze` | none | `wright-result/v1` analysis envelope |
 | `inspect` | none | `wright-result/v1` inspection envelope |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
-| `rules` | none | Canonical Workshop rules |
-| `symbols` | optional `kind` | Symbols, optionally filtered by kind |
-| `references` | required `symbol` (id or name) | References for the symbol |
+| `rules` | optional selection | Canonical Workshop rules; `{"rules": [...], "selection": {...}}` when a selection is applied |
+| `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when a selection is applied |
+| `references` | required `symbol` (id or name), optional selection | References for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
-| `cfg` | required `rule` (index or name) | Control-flow graph for the rule |
+| `cfg` | required `rule` (index or name), optional selection | Control-flow graph for the rule, plus `selection` when a selection is applied |
 | `findings` | optional selection | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
 | `persistentObjects` | none | Persistent Workshop object facts |
 | `lint` | optional selection | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
-| `callGraph` | none | Subroutine call graph |
+| `callGraph` | optional selection | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
 | `costEstimate` | optional selection | Exact generated-resource counts, findings, and `selection` when applied |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
@@ -232,6 +232,36 @@ When a request applies any selection field, the result reports
 `findings` becomes `{"findings": [...], "selection": {...}}`, while `lint`
 and `costEstimate` add a `selection` member to their existing result objects.
 Requests without selection fields receive the previous shapes unchanged.
+
+### Semantic query selection (#531)
+
+`rules`, `symbols`, `references`, `cfg`, and `callGraph` accept optional
+selection fields with the same semantics as finding selection: filters narrow
+first, `max` bounds after, and a `selection` member reports `{"total":
+<set before selection>, "withheld": <dropped by max>}`. An unknown filter
+value — a kind outside the listed domain, or a `name`/`rule`/`caller`/`callee`
+that matches nothing in the loaded program — is a structured
+`invalid-selection` error, never a silent empty result.
+
+* `rules`: `name` (a declared rule name), `file`, `max`.
+* `symbols`: `kind` (`globalVariable`, `playerVariable`, `subroutine`,
+  `rule`), `file`, `max`.
+* `references`: `kind` (`declaration`, `definition`, `read`, `write`,
+  `call`), `rule` (only references inside this rule, addressed by index or
+  declared name), `file`, `max`.
+* `cfg`: `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`), `max`.
+  Selection filters `blocks`, which keep their original `id`s, so
+  `successors` — and the `entry`/`exit` fields — still address the full
+  graph's block numbering.
+* `callGraph`: `caller` (a declared rule name), `callee` (a declared
+  subroutine name), `max`.
+
+The `file` field resolves like finding selection: any spelling that resolves
+to the same source file selects it. Requests without selection fields receive
+the previous shapes unchanged (bare arrays for `rules`, `symbols`,
+`references`, `callGraph`; the unextended object for `cfg`). The CLI options
+`--only`, `--rule`, `--file`, `--caller`, `--callee`, and `--max` on `inspect`
+subcommands drive the same `wright-driver` selection.
 
 Edit transactions use source identities and half-open, 1-based line/column
 ranges. Provider positions use 0-based line/character coordinates. Wright

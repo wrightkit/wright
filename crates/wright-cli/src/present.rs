@@ -748,15 +748,38 @@ fn symbol_kind_heading(kind: &str) -> &str {
     }
 }
 
+/// The item array of a semantic query payload (#531): the bare array of an
+/// unselected request, or the `<key>` member of a `{<key>: [...], selection:
+/// {...}}` selected result.
+fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
+    value
+        .as_array()
+        .or_else(|| value.get(key).and_then(serde_json::Value::as_array))
+        .map_or(&[][..], Vec::as_slice)
+}
+
+/// Report the count a selected query payload withheld, when there is one.
+fn print_query_withheld(value: &serde_json::Value, noun: &str) {
+    if let Some(withheld) = value["selection"]["withheld"]
+        .as_u64()
+        .filter(|withheld| *withheld > 0)
+    {
+        println!("  ... {withheld} {noun} withheld (--max)");
+    }
+}
+
 impl ResultPresentation for SymbolsResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!("{} symbol(s)", array_len(&self.0)))
+        Some(format!(
+            "{} symbol(s)",
+            query_items(&self.0, "symbols").len()
+        ))
     }
     /// One section per symbol kind, in encounter order, so a mixed list stays
     /// scannable; each entry is identity plus primary location on one line,
     /// and a section bounds at `MAX_DETAIL_ENTRIES` (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let symbols = self.0.as_array().map_or(&[][..], Vec::as_slice);
+        let symbols = query_items(&self.0, "symbols");
         println!("\nSymbols");
         if symbols.is_empty() {
             println!("  none");
@@ -788,6 +811,7 @@ impl ResultPresentation for SymbolsResult {
                 "symbol(s)",
             );
         }
+        print_query_withheld(&self.0, "symbol(s)");
     }
 }
 
@@ -841,6 +865,7 @@ impl ResultPresentation for RefsResult {
             references.len().saturating_sub(MAX_DETAIL_ENTRIES),
             "reference(s)",
         );
+        print_query_withheld(&self.0, "reference(s)");
     }
 }
 
@@ -954,18 +979,19 @@ impl ResultPresentation for CfgResult {
             blocks.len().saturating_sub(MAX_DETAIL_ENTRIES),
             "block(s)",
         );
+        print_query_withheld(&self.0, "block(s)");
     }
 }
 
 impl ResultPresentation for CallGraphResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!("{} edge(s)", array_len(&self.0)))
+        Some(format!("{} edge(s)", query_items(&self.0, "edges").len()))
     }
     /// The shape summary leads (calling rules are the graph's roots, since
     /// edges are rule → subroutine), then notable fan-in/fan-out, then the
     /// bounded edge list (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let edges = self.0.as_array().map_or(&[][..], Vec::as_slice);
+        let edges = query_items(&self.0, "edges");
         println!("\nCall graph");
         if edges.is_empty() {
             println!("  none");
@@ -1025,6 +1051,7 @@ impl ResultPresentation for CallGraphResult {
             edges.len().saturating_sub(MAX_DETAIL_ENTRIES),
             "edge(s)",
         );
+        print_query_withheld(&self.0, "edge(s)");
     }
 }
 

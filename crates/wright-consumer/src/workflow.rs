@@ -62,7 +62,11 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     }
     for request in [
         ToolRequest::Project,
-        ToolRequest::Rules,
+        ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Findings(FindingSelection::default()),
         ToolRequest::Lint(FindingSelection::default()),
         ToolRequest::LintRules,
@@ -92,8 +96,10 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     if input.ends_with(".ws") {
         let renamed = match service.handle(&ToolRequest::Symbols {
             kind: Some("globalVariable".to_string()),
+            file: None,
+            max: None,
         }) {
-            wright_driver::service::ToolResponse::Ok { result } => result
+            wright_driver::service::ToolResponse::Ok { result } => result["symbols"]
                 .as_array()
                 .and_then(|symbols| symbols.first())
                 .and_then(|symbol| symbol.get("name"))

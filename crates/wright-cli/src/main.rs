@@ -206,31 +206,37 @@ fn run_workflow(command: Command) -> ExitCode {
                     config_from_common(&query.common, false),
                     present::Presentation::from_common(&query.common),
                     None,
-                    move |session| session.symbols(kind),
+                    move |session| session.symbols(kind, query.file, query.max),
                 )
             }
-            Some(cli::InspectQuery::Refs(query)) => run_configured(
-                config_from_common(&query.common, false),
-                present::Presentation::from_common(&query.common),
-                None,
-                move |session| session.refs(&query.name),
-            ),
+            Some(cli::InspectQuery::Refs(query)) => {
+                let kind = query.only.map(|kind| kind.as_str().to_string());
+                run_configured(
+                    config_from_common(&query.common, false),
+                    present::Presentation::from_common(&query.common),
+                    None,
+                    move |session| {
+                        session.refs(&query.name, kind, query.rule, query.file, query.max)
+                    },
+                )
+            }
             Some(cli::InspectQuery::Cfg(query)) => {
                 // The cfg payload carries blocks only; the addressed rule
                 // name is the result's identity in text output (#446).
                 let subject = query.rule.clone();
+                let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(
                     config_from_common(&query.common, false),
                     present::Presentation::from_common(&query.common),
                     Some(subject.as_str()),
-                    move |session| session.cfg(&query.rule),
+                    move |session| session.cfg(&query.rule, kind, query.max),
                 )
             }
             Some(cli::InspectQuery::Callgraph(query)) => run_configured(
-                config_from_common(&query, false),
-                present::Presentation::from_common(&query),
+                config_from_common(&query.common, false),
+                present::Presentation::from_common(&query.common),
                 None,
-                wright_driver::CompilerSession::callgraph,
+                move |session| session.callgraph(query.caller, query.callee, query.max),
             ),
             Some(cli::InspectQuery::Cost(query)) => {
                 let mut config = config_from_common(&query.common, true);

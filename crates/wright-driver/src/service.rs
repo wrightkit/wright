@@ -19,7 +19,9 @@ use crate::diag::Diagnostic;
 use crate::input;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
 use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
-use wright_analyzer::canonical::{SemanticIndex, SemanticService};
+use wright_analyzer::canonical::{
+    BLOCK_KINDS, ReferenceKind, SemanticIndex, SemanticService, SymbolKind,
+};
 /// A structured tool error.
 pub use wright_analyzer::service::ErrorInfo as ToolErrorInfo;
 /// A tool response: a structured owned result or a structured error.
@@ -82,21 +84,53 @@ pub enum ToolRequest {
     Inspect,
     /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
-    /// Every rule.
-    Rules,
-    /// Symbols, optionally filtered by kind.
+    /// Every rule, optionally narrowed by an inline selection (`name`,
+    /// `file`, `max`; #531).
+    Rules {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+    },
+    /// Symbols, optionally filtered by `kind` and narrowed by an inline
+    /// selection (`file`, `max`; #531).
     Symbols {
         #[serde(default)]
         kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
     },
-    /// References to a symbol, addressed by its numeric id or its name (#429).
-    References { symbol: Address },
+    /// References to a symbol, addressed by its numeric id or its name
+    /// (#429); optionally narrowed by an inline selection (`kind`, `rule`,
+    /// `file`, `max`; #531).
+    References {
+        symbol: Address,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<Address>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+    },
     /// Usage counts for a symbol, addressed by its numeric id or its name
     /// (#429).
     Usage { symbol: Address },
     /// The control-flow graph of one rule, addressed by its numeric index or
-    /// its name (#429).
-    Cfg { rule: Address },
+    /// its name (#429); optionally narrowed by an inline selection (`kind`,
+    /// `max`; #531).
+    Cfg {
+        rule: Address,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+    },
     /// Every static-analysis finding, optionally narrowed by an inline
     /// selection (`severity`, `rule`, `file`, `max`; #430).
     Findings(crate::select::FindingSelection),
@@ -109,8 +143,17 @@ pub enum ToolRequest {
     /// The registered lint rules with full metadata and the effective lint
     /// configuration.
     LintRules,
-    /// The subroutine call graph (caller rules → callee subroutines).
-    CallGraph,
+    /// The subroutine call graph (caller rules → callee subroutines),
+    /// optionally narrowed by an inline selection (`caller`, `callee`,
+    /// `max`; #531).
+    CallGraph {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caller: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        callee: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+    },
     /// Generated-resource cost estimates (exact counts + findings),
     /// optionally narrowed by an inline selection (#430).
     CostEstimate(crate::select::FindingSelection),
@@ -486,10 +529,12 @@ impl<'a> ToolService<'a> {
     /// addressing resolves against the loaded index and is always fresh.
     fn stale_id(&self, request: &ToolRequest) -> Option<ToolErrorInfo> {
         let stale = match request {
-            ToolRequest::References { symbol } | ToolRequest::Usage { symbol } => {
+            ToolRequest::References { symbol, .. } | ToolRequest::Usage { symbol } => {
                 matches!(symbol, Address::Id(_)) && !self.symbol_ids_current
             }
-            ToolRequest::Cfg { rule } => matches!(rule, Address::Id(_)) && !self.rule_ids_current,
+            ToolRequest::Cfg { rule, .. } => {
+                matches!(rule, Address::Id(_)) && !self.rule_ids_current
+            }
             ToolRequest::SemanticRename { target, .. } => {
                 matches!(target.symbol, Some(Address::Id(_))) && !self.symbol_ids_current
             }
@@ -509,7 +554,7 @@ impl<'a> ToolService<'a> {
         match response {
             ToolResponse::Ok { result } => match request {
                 ToolRequest::Symbols { .. } => self.symbol_ids_current = true,
-                ToolRequest::Rules => self.rule_ids_current = true,
+                ToolRequest::Rules { .. } => self.rule_ids_current = true,
                 ToolRequest::SemanticRename { .. }
                     if diagnostics_list_code(result, "ambiguous-symbol") =>
                 {
@@ -563,31 +608,40 @@ impl<'a> ToolService<'a> {
                 ToolResponse::Ok { result }
             }
             ToolRequest::Project => self.ok(self.project()),
-            ToolRequest::Rules => self.semantic_query(Request::ListRules),
-            ToolRequest::Symbols { kind } => {
-                self.semantic_query_with_resolved_span_paths(Request::ListSymbols {
-                    kind: kind.clone(),
-                })
+            ToolRequest::Rules { name, file, max } => self.rules(name, file, max),
+            ToolRequest::Symbols { kind, file, max } => {
+                self.symbols(kind.as_deref(), file.as_deref(), *max)
             }
-            ToolRequest::References { symbol } => match self.symbol_address(symbol) {
-                Ok(symbol) => {
-                    self.semantic_query_with_resolved_span_paths(Request::FindReferences { symbol })
-                }
-                Err(error) => ToolResponse::Error { error },
-            },
+            ToolRequest::References {
+                symbol,
+                kind,
+                rule,
+                file,
+                max,
+            } => self.references(
+                symbol,
+                kind.as_deref(),
+                rule.as_ref(),
+                file.as_deref(),
+                *max,
+            ),
             ToolRequest::Usage { symbol } => match self.symbol_address(symbol) {
                 Ok(symbol) => self.semantic_query(Request::GetUsage { symbol }),
                 Err(error) => ToolResponse::Error { error },
             },
-            ToolRequest::Cfg { rule } => match self.rule_address(rule) {
-                Ok(rule) => self.semantic_query(Request::GetCfg { rule }),
+            ToolRequest::Cfg { rule, kind, max } => match self.rule_address(rule) {
+                Ok(rule) => self.cfg(rule, kind.as_deref(), *max),
                 Err(error) => ToolResponse::Error { error },
             },
             ToolRequest::Findings(selection) => self.findings(selection),
             ToolRequest::PersistentObjects => self.persistent_objects(),
             ToolRequest::Lint(selection) => self.lint(selection),
             ToolRequest::LintRules => self.configured_semantic().handle(&Request::LintRules),
-            ToolRequest::CallGraph => self.ok(self.call_graph()),
+            ToolRequest::CallGraph {
+                caller,
+                callee,
+                max,
+            } => self.call_graph(caller.as_deref(), callee.as_deref(), *max),
             ToolRequest::CostEstimate(selection) => self.cost_estimate(selection),
             ToolRequest::TargetMetadata => self.ok(self.target_metadata()),
             ToolRequest::ValidateEdit {
@@ -824,12 +878,238 @@ impl<'a> ToolService<'a> {
         selection
             .validate(self.session.lint_registry())
             .err()
-            .map(|message| ToolResponse::Error {
-                error: ToolErrorInfo {
-                    code: "invalid-selection".to_string(),
-                    message,
+            .map(invalid_selection)
+    }
+
+    /// Bound one list-shaped semantic operation's result (#531): without
+    /// selection fields the previous bare array is returned unchanged;
+    /// with them the result becomes `{<key>: [...], "selection": {...}}`
+    /// reporting the pre-selection `total` and the count `max` withheld.
+    fn select_result(
+        &self,
+        key: &str,
+        result: serde_json::Value,
+        file: Option<&str>,
+        keep: impl Fn(&serde_json::Value) -> bool,
+        max: Option<usize>,
+        selected: bool,
+    ) -> ToolResponse {
+        let items = match result {
+            serde_json::Value::Array(items) => items,
+            _ => Vec::new(),
+        };
+        if !selected {
+            return self.ok(serde_json::Value::Array(items));
+        }
+        let (kept, outcome) = crate::select::select_list(
+            items,
+            file,
+            &crate::select::file_bases(&self.snapshot().input),
+            json_span_path,
+            keep,
+            max,
+        );
+        self.ok(json!({ key: kept, "selection": outcome }))
+    }
+
+    /// `rules`: every rule. The selection fields are `name` (a declared
+    /// rule name), `file`, and `max` (#531); span paths resolve only when
+    /// `file` selection needs them, so a `name`/`max`-selected result stays
+    /// the bare response's subset.
+    fn rules(
+        &self,
+        name: &Option<String>,
+        file: &Option<String>,
+        max: &Option<usize>,
+    ) -> ToolResponse {
+        if let Some(name) = name {
+            if !self
+                .snapshot()
+                .program
+                .rules
+                .iter()
+                .any(|rule| rule.name == *name)
+            {
+                return invalid_selection(format!("unknown rule '{name}'"));
+            }
+        }
+        let selected = name.is_some() || file.is_some() || max.is_some();
+        let response = if file.is_some() {
+            self.semantic_query_with_resolved_span_paths(Request::ListRules)
+        } else {
+            self.semantic_query(Request::ListRules)
+        };
+        match response {
+            ToolResponse::Ok { result } => self.select_result(
+                "rules",
+                result,
+                file.as_deref(),
+                |rule| {
+                    name.as_deref()
+                        .is_none_or(|name| rule["name"].as_str() == Some(name))
                 },
+                *max,
+                selected,
+            ),
+            other => other,
+        }
+    }
+
+    /// `symbols`: every symbol with resolved span paths. `kind` and the
+    /// `file`/`max` selection fields narrow the reported set (#531); any
+    /// selection field wraps the result in `{"symbols": [...], "selection":
+    /// {...}}` with the pre-selection total.
+    fn symbols(&self, kind: Option<&str>, file: Option<&str>, max: Option<usize>) -> ToolResponse {
+        if let Some(kind) = kind {
+            if !SymbolKind::ALL.iter().any(|known| known.as_str() == kind) {
+                return invalid_selection(format!("unknown symbol kind '{kind}'"));
+            }
+        }
+        match self.semantic_query_with_resolved_span_paths(Request::ListSymbols { kind: None }) {
+            ToolResponse::Ok { result } => self.select_result(
+                "symbols",
+                result,
+                file,
+                |symbol| kind.is_none_or(|kind| symbol["kind"].as_str() == Some(kind)),
+                max,
+                kind.is_some() || file.is_some() || max.is_some(),
+            ),
+            other => other,
+        }
+    }
+
+    /// `references`: every reference to one symbol. The selection fields
+    /// are `kind` (a reference kind), `rule` (a rule address narrowing to
+    /// references inside that rule), `file`, and `max` (#531).
+    fn references(
+        &self,
+        symbol: &Address,
+        kind: Option<&str>,
+        rule: Option<&Address>,
+        file: Option<&str>,
+        max: Option<usize>,
+    ) -> ToolResponse {
+        if let Some(kind) = kind {
+            if !ReferenceKind::ALL
+                .iter()
+                .any(|known| known.as_str() == kind)
+            {
+                return invalid_selection(format!("unknown reference kind '{kind}'"));
+            }
+        }
+        let rule_id = match rule {
+            Some(address) => match self.rule_address(address) {
+                Ok(id) if (id as usize) < self.snapshot().program.rules.len() => Some(id),
+                Ok(id) => return invalid_selection(format!("unknown rule {id}")),
+                Err(error) => return invalid_selection(error.message),
+            },
+            None => None,
+        };
+        match self.symbol_address(symbol) {
+            Ok(symbol) => {
+                match self
+                    .semantic_query_with_resolved_span_paths(Request::FindReferences { symbol })
+                {
+                    ToolResponse::Ok { result } => self.select_result(
+                        "references",
+                        result,
+                        file,
+                        |reference| {
+                            kind.is_none_or(|kind| reference["kind"].as_str() == Some(kind))
+                                && rule_id.is_none_or(|id| {
+                                    reference["rule"].as_u64() == Some(u64::from(id))
+                                })
+                        },
+                        max,
+                        kind.is_some() || rule.is_some() || file.is_some() || max.is_some(),
+                    ),
+                    other => other,
+                }
+            }
+            Err(error) => ToolResponse::Error { error },
+        }
+    }
+
+    /// `cfg`: one rule's control-flow graph. The selection fields are
+    /// `kind` (a block kind) and `max` (#531): they filter and bound
+    /// `blocks` — which keep their original `id`s, so `successors` still
+    /// address the full graph — and add a `selection` member with the
+    /// pre-selection total.
+    fn cfg(&self, rule: u32, kind: Option<&str>, max: Option<usize>) -> ToolResponse {
+        if let Some(kind) = kind {
+            if !BLOCK_KINDS.contains(&kind) {
+                return invalid_selection(format!("unknown cfg block kind '{kind}'"));
+            }
+        }
+        match self.semantic_query(Request::GetCfg { rule }) {
+            ToolResponse::Ok { mut result } => {
+                if kind.is_none() && max.is_none() {
+                    return self.ok(result);
+                }
+                let blocks = result["blocks"].as_array().cloned().unwrap_or_default();
+                let (kept, outcome) = crate::select::select_list(
+                    blocks,
+                    None,
+                    &[],
+                    |_| None,
+                    |block| kind.is_none_or(|kind| block["kind"].as_str() == Some(kind)),
+                    max,
+                );
+                result["blocks"] = serde_json::Value::Array(kept);
+                result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
+                self.ok(result)
+            }
+            other => other,
+        }
+    }
+
+    /// `callGraph`: caller rules → callee subroutines. The selection fields
+    /// are `caller` (a declared rule name), `callee` (a declared subroutine
+    /// name), and `max` (#531).
+    fn call_graph(
+        &self,
+        caller: Option<&str>,
+        callee: Option<&str>,
+        max: Option<usize>,
+    ) -> ToolResponse {
+        let program = &self.snapshot().program;
+        if let Some(caller) = caller {
+            if !program.rules.iter().any(|rule| rule.name == caller) {
+                return invalid_selection(format!("unknown caller rule '{caller}'"));
+            }
+        }
+        if let Some(callee) = callee {
+            if !program
+                .subroutines
+                .iter()
+                .any(|subroutine| subroutine.name == callee)
+            {
+                return invalid_selection(format!("unknown callee subroutine '{callee}'"));
+            }
+        }
+        let edges = program
+            .rules
+            .iter()
+            .flat_map(|rule| {
+                rule.actions.iter().filter_map(move |action| match action {
+                    workshop_rs::Action::CallSubroutine { subroutine } => {
+                        Some(json!({ "caller": rule.name, "callee": subroutine }))
+                    }
+                    _ => None,
+                })
             })
+            .collect::<Vec<_>>();
+        self.select_result(
+            "edges",
+            serde_json::Value::Array(edges),
+            None,
+            |edge| {
+                caller.is_none_or(|caller| edge["caller"].as_str() == Some(caller))
+                    && callee.is_none_or(|callee| edge["callee"].as_str() == Some(callee))
+            },
+            max,
+            caller.is_some() || callee.is_some() || max.is_some(),
+        )
     }
 
     /// `lint`: per-rule id and effective severity, effective configuration,
@@ -890,24 +1170,6 @@ impl<'a> ToolService<'a> {
             "symbols": index.symbols().count(),
             "findings": findings.len(),
         })
-    }
-
-    fn call_graph(&self) -> serde_json::Value {
-        let edges = self
-            .snapshot()
-            .program
-            .rules
-            .iter()
-            .flat_map(|rule| {
-                rule.actions.iter().filter_map(move |action| match action {
-                    workshop_rs::Action::CallSubroutine { subroutine } => {
-                        Some(json!({ "caller": rule.name, "callee": subroutine }))
-                    }
-                    _ => None,
-                })
-            })
-            .collect::<Vec<_>>();
-        serde_json::Value::Array(edges)
     }
 
     /// `costEstimate`: exact generated-resource counts plus static findings.
@@ -981,6 +1243,24 @@ impl<'a> ToolService<'a> {
     }
 }
 
+/// An unknown selection/filter value is a structured usage error, never a
+/// silent empty result (#430, #531).
+fn invalid_selection(message: String) -> ToolResponse {
+    ToolResponse::Error {
+        error: ToolErrorInfo {
+            code: "invalid-selection".to_string(),
+            message,
+        },
+    }
+}
+
+/// The `span.path` a resolved semantic item carries, for `file` matching.
+fn json_span_path(item: &serde_json::Value) -> Option<&str> {
+    item.get("span")
+        .and_then(|span| span.get("path"))
+        .and_then(serde_json::Value::as_str)
+}
+
 /// The hotpath measurement label for one request's dispatch.
 #[cfg_attr(not(feature = "hotpath"), allow(dead_code))]
 fn request_label(request: &ToolRequest) -> &'static str {
@@ -991,7 +1271,7 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::Analyze => "req::analyze",
         ToolRequest::Inspect => "req::inspect",
         ToolRequest::Project => "req::project",
-        ToolRequest::Rules => "req::rules",
+        ToolRequest::Rules { .. } => "req::rules",
         ToolRequest::Symbols { .. } => "req::symbols",
         ToolRequest::References { .. } => "req::references",
         ToolRequest::Usage { .. } => "req::usage",
@@ -1000,7 +1280,7 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::PersistentObjects => "req::persistentObjects",
         ToolRequest::Lint(_) => "req::lint",
         ToolRequest::LintRules => "req::lintRules",
-        ToolRequest::CallGraph => "req::callGraph",
+        ToolRequest::CallGraph { .. } => "req::callGraph",
         ToolRequest::CostEstimate(_) => "req::costEstimate",
         ToolRequest::TargetMetadata => "req::targetMetadata",
         ToolRequest::ValidateEdit { .. } => "req::validateEdit",

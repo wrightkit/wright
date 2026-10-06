@@ -30,7 +30,11 @@ fn tool_service_queries_canonical_workshop() {
     for request in [
         ToolRequest::Capabilities,
         ToolRequest::Project,
-        ToolRequest::Rules,
+        ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Findings(FindingSelection::default()),
         ToolRequest::CostEstimate(FindingSelection::default()),
     ] {
@@ -318,7 +322,14 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
 
     // Discover the numeric ids through the shared semantic index rather than
     // hardcoding them.
-    let symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    let symbols = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     let symbol_id = |name: &str| {
         symbols
             .as_array()
@@ -328,7 +339,14 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             .and_then(|symbol| symbol["id"].as_u64())
             .unwrap_or_else(|| panic!("no symbol named {name}")) as u32
     };
-    let rules = result_of(&mut service, &ToolRequest::Rules);
+    let rules = result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
     let rule_index = |name: &str| {
         rules
             .as_array()
@@ -344,9 +362,17 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
         (
             ToolRequest::References {
                 symbol: "score".into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
             },
             ToolRequest::References {
                 symbol: symbol_id("score").into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
             },
         ),
         (
@@ -360,9 +386,13 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
         (
             ToolRequest::Cfg {
                 rule: "player starts".into(),
+                kind: None,
+                max: None,
             },
             ToolRequest::Cfg {
                 rule: rule_index("player starts").into(),
+                kind: None,
+                max: None,
             },
         ),
     ] {
@@ -388,7 +418,11 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
     // symbol id 4 but rule index 1; its symbol id is an invalid `cfg` target.
     assert_eq!(symbol_id("player starts"), 4);
     assert_eq!(rule_index("player starts"), 1);
-    match service.handle(&ToolRequest::Cfg { rule: 4.into() }) {
+    match service.handle(&ToolRequest::Cfg {
+        rule: 4.into(),
+        kind: None,
+        max: None,
+    }) {
         ToolResponse::Error { error } => assert_eq!(error.code, "invalid-id"),
         ToolResponse::Ok { result } => panic!("rule index 4 must not exist: {result}"),
     }
@@ -398,6 +432,10 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
         &mut service,
         &ToolRequest::References {
             symbol: "score".into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
         },
     );
     for reference in references.as_array().unwrap() {
@@ -458,6 +496,10 @@ rule ("dup") {
         (
             ToolRequest::References {
                 symbol: "nope".into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
             },
             "unknown-symbol",
         ),
@@ -470,16 +512,29 @@ rule ("dup") {
         (
             ToolRequest::Cfg {
                 rule: "nope".into(),
+                kind: None,
+                max: None,
             },
             "unknown-rule",
         ),
         (
             ToolRequest::References {
                 symbol: "dup".into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
             },
             "ambiguous-symbol",
         ),
-        (ToolRequest::Cfg { rule: "dup".into() }, "ambiguous-rule"),
+        (
+            ToolRequest::Cfg {
+                rule: "dup".into(),
+                kind: None,
+                max: None,
+            },
+            "ambiguous-rule",
+        ),
     ] {
         match service.handle(&request) {
             ToolResponse::Error { error } => {
@@ -494,6 +549,328 @@ rule ("dup") {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+// ── Semantic query selection and bounds (#531) ───────────────────────────────
+
+#[test]
+fn semantic_query_selection_wraps_filters_and_bounds() {
+    // #531: a request with any selection field returns `{<key>: [...],
+    // "selection": {total, withheld}}`; `total` counts the set before
+    // selection and `withheld` only what `max` dropped. Requests without
+    // selection fields keep the bare shapes.
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(declarations_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    // `symbols`: `kind` narrows, `max` bounds, `file` selects by resolved
+    // path; the bare request stays a bare array.
+    let all = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
+    assert!(all.is_array());
+    let total = all.as_array().unwrap().len();
+
+    let rules_only = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: Some("rule".to_string()),
+            file: None,
+            max: None,
+        },
+    );
+    let kept = rules_only["symbols"].as_array().unwrap();
+    assert!(kept.iter().all(|symbol| symbol["kind"] == "rule"));
+    assert!(!kept.is_empty());
+    assert_eq!(rules_only["selection"]["total"], total);
+    assert_eq!(rules_only["selection"]["withheld"], 0);
+
+    let bounded = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: Some(1),
+        },
+    );
+    assert_eq!(bounded["symbols"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded["selection"]["total"], total);
+    assert_eq!(bounded["selection"]["withheld"], total - 1);
+
+    let in_file = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: Some("declarations-rules.ws".to_string()),
+            max: None,
+        },
+    );
+    assert_eq!(in_file["symbols"].as_array().unwrap().len(), total);
+    let elsewhere = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: Some("elsewhere.ws".to_string()),
+            max: None,
+        },
+    );
+    assert!(elsewhere["symbols"].as_array().unwrap().is_empty());
+    assert_eq!(elsewhere["selection"]["total"], total);
+
+    // `rules`: `name` narrows, `file`/`max` behave like `symbols`.
+    let rules = result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
+    assert!(rules.is_array());
+    let rule_total = rules.as_array().unwrap().len();
+    let named = result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: Some("player starts".to_string()),
+            file: None,
+            max: None,
+        },
+    );
+    let kept = named["rules"].as_array().unwrap();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0]["name"], "player starts");
+    assert_eq!(named["selection"]["total"], rule_total);
+    let bounded_rules = result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: Some("declarations-rules.ws".to_string()),
+            max: Some(1),
+        },
+    );
+    assert_eq!(bounded_rules["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        bounded_rules["selection"],
+        serde_json::json!({"total": rule_total, "withheld": rule_total - 1})
+    );
+
+    // `references`: `kind` and `rule` (index or name) narrow the set.
+    let references = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "score".into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
+    );
+    assert!(references.is_array());
+    let writes = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "score".into(),
+            kind: Some("write".to_string()),
+            rule: None,
+            file: None,
+            max: None,
+        },
+    );
+    let kept = writes["references"].as_array().unwrap();
+    assert!(!kept.is_empty());
+    assert!(kept.iter().all(|reference| reference["kind"] == "write"));
+    assert_eq!(
+        writes["selection"]["total"],
+        references.as_array().unwrap().len()
+    );
+    let inside = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "score".into(),
+            kind: None,
+            rule: Some("Subroutine showStatus".into()),
+            file: None,
+            max: None,
+        },
+    );
+    let kept = inside["references"].as_array().unwrap();
+    assert!(!kept.is_empty());
+    assert!(kept.iter().all(|reference| reference["rule"] == 0));
+    let outside = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "score".into(),
+            kind: None,
+            rule: Some(1_u32.into()),
+            file: None,
+            max: None,
+        },
+    );
+    assert!(outside["references"].as_array().unwrap().is_empty());
+    assert_eq!(
+        outside["selection"]["total"],
+        references.as_array().unwrap().len()
+    );
+
+    // `cfg`: `kind`/`max` bound `blocks`; entry/exit and the original block
+    // ids are preserved so `successors` still address the full graph.
+    let cfg = result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: "player starts".into(),
+            kind: None,
+            max: None,
+        },
+    );
+    assert!(cfg["selection"].is_null());
+    let block_total = cfg["blocks"].as_array().unwrap().len();
+    let entries = result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: "player starts".into(),
+            kind: Some("entry".to_string()),
+            max: None,
+        },
+    );
+    let kept = entries["blocks"].as_array().unwrap();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0]["kind"], "entry");
+    assert_eq!(kept[0]["id"], entries["entry"]);
+    assert_eq!(entries["selection"]["total"], block_total);
+    let bounded_cfg = result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: "player starts".into(),
+            kind: None,
+            max: Some(1),
+        },
+    );
+    assert_eq!(bounded_cfg["blocks"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded_cfg["selection"]["withheld"], block_total - 1);
+
+    // `callGraph`: `caller`/`callee` narrow edges by declared name.
+    let graph = result_of(
+        &mut service,
+        &ToolRequest::CallGraph {
+            caller: None,
+            callee: None,
+            max: None,
+        },
+    );
+    assert!(graph.is_array());
+    assert_eq!(graph.as_array().unwrap().len(), 1);
+    let from_rule = result_of(
+        &mut service,
+        &ToolRequest::CallGraph {
+            caller: Some("player starts".to_string()),
+            callee: None,
+            max: None,
+        },
+    );
+    assert_eq!(
+        from_rule["edges"],
+        serde_json::json!([{ "caller": "player starts", "callee": "showStatus" }])
+    );
+    let quiet_rule = result_of(
+        &mut service,
+        &ToolRequest::CallGraph {
+            caller: Some("Subroutine showStatus".to_string()),
+            callee: None,
+            max: None,
+        },
+    );
+    assert!(quiet_rule["edges"].as_array().unwrap().is_empty());
+    assert_eq!(quiet_rule["selection"]["total"], 1);
+    let to_sub = result_of(
+        &mut service,
+        &ToolRequest::CallGraph {
+            caller: None,
+            callee: Some("showStatus".to_string()),
+            max: Some(0),
+        },
+    );
+    assert!(to_sub["edges"].as_array().unwrap().is_empty());
+    assert_eq!(
+        to_sub["selection"],
+        serde_json::json!({"total": 1, "withheld": 1})
+    );
+}
+
+#[test]
+fn semantic_query_selection_refuses_unknown_filter_values() {
+    // #531: an unknown filter value is a structured `invalid-selection`
+    // error, never a silently empty result.
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(declarations_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    for request in [
+        ToolRequest::Rules {
+            name: Some("nope".to_string()),
+            file: None,
+            max: None,
+        },
+        ToolRequest::Symbols {
+            kind: Some("nope".to_string()),
+            file: None,
+            max: None,
+        },
+        ToolRequest::References {
+            symbol: "score".into(),
+            kind: Some("nope".to_string()),
+            rule: None,
+            file: None,
+            max: None,
+        },
+        ToolRequest::References {
+            symbol: "score".into(),
+            kind: None,
+            rule: Some("nope".into()),
+            file: None,
+            max: None,
+        },
+        ToolRequest::References {
+            symbol: "score".into(),
+            kind: None,
+            rule: Some(99_u32.into()),
+            file: None,
+            max: None,
+        },
+        ToolRequest::Cfg {
+            rule: "player starts".into(),
+            kind: Some("nope".to_string()),
+            max: None,
+        },
+        ToolRequest::CallGraph {
+            caller: Some("nope".to_string()),
+            callee: None,
+            max: None,
+        },
+        ToolRequest::CallGraph {
+            caller: None,
+            callee: Some("nope".to_string()),
+            max: None,
+        },
+    ] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "invalid-selection",
+            "{request:?}"
+        );
+    }
+}
+
 #[test]
 fn session_query_workflows_return_the_agent_operation_payloads() {
     // The CLI's `symbols`/`refs`/`cfg`/`callgraph`/`cost` results are the
@@ -506,11 +883,22 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
 
     let mut agent = CompilerSession::new(input()).unwrap();
     let mut service = ToolService::new(&mut agent).unwrap();
-    let agent_symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    let agent_symbols = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     let agent_references = result_of(
         &mut service,
         &ToolRequest::References {
             symbol: "score".into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
         },
     );
     let agent_usage = result_of(
@@ -523,9 +911,18 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
         &mut service,
         &ToolRequest::Cfg {
             rule: "player starts".into(),
+            kind: None,
+            max: None,
         },
     );
-    let agent_callgraph = result_of(&mut service, &ToolRequest::CallGraph);
+    let agent_callgraph = result_of(
+        &mut service,
+        &ToolRequest::CallGraph {
+            caller: None,
+            callee: None,
+            max: None,
+        },
+    );
     let agent_cost = result_of(
         &mut service,
         &ToolRequest::CostEstimate(FindingSelection::default()),
@@ -534,22 +931,22 @@ fn session_query_workflows_return_the_agent_operation_payloads() {
 
     let mut cli = CompilerSession::new(input()).unwrap();
     assert_eq!(
-        serde_json::to_value(cli.symbols(None).result).unwrap(),
+        serde_json::to_value(cli.symbols(None, None, None).result).unwrap(),
         agent_symbols
     );
 
     // `refs` is the usage payload plus the references list under `references`.
-    let refs = serde_json::to_value(cli.refs("score").result).unwrap();
+    let refs = serde_json::to_value(cli.refs("score", None, None, None, None).result).unwrap();
     let mut expected_refs = agent_usage.as_object().unwrap().clone();
     expected_refs.insert("references".to_string(), agent_references);
     assert_eq!(refs, serde_json::Value::Object(expected_refs));
 
     assert_eq!(
-        serde_json::to_value(cli.cfg("player starts").result).unwrap(),
+        serde_json::to_value(cli.cfg("player starts", None, None).result).unwrap(),
         agent_cfg
     );
     assert_eq!(
-        serde_json::to_value(cli.callgraph().result).unwrap(),
+        serde_json::to_value(cli.callgraph(None, None, None).result).unwrap(),
         agent_callgraph
     );
     assert_eq!(serde_json::to_value(cli.cost().result).unwrap(), agent_cost);
@@ -834,12 +1231,22 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
     };
     let before = names(result_of(
         &mut service,
-        &ToolRequest::Symbols { kind: None },
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
     ));
     assert_eq!(before, ["score", "setup"]);
 
     for request in [
-        ToolRequest::References { symbol: 0.into() },
+        ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Findings(FindingSelection::default()),
         ToolRequest::LintRules,
         ToolRequest::Inspect,
@@ -860,7 +1267,11 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
 
     let after = names(result_of(
         &mut service,
-        &ToolRequest::Symbols { kind: None },
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
     ));
     assert_eq!(after, ["points", "setup", "extra"]);
     assert_eq!(service.reload_count(), 1);
@@ -894,7 +1305,14 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
 
     // The reloaded input is stable: repeat requests never reparse.
     result_of(&mut service, &ToolRequest::Project);
-    result_of(&mut service, &ToolRequest::Rules);
+    result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
     assert_eq!(service.reload_count(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -914,8 +1332,16 @@ fn an_unchanged_input_is_never_reloaded() {
 
     for request in [
         ToolRequest::Project,
-        ToolRequest::Rules,
-        ToolRequest::Symbols { kind: None },
+        ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+        ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Findings(FindingSelection::default()),
     ] {
         result_of(&mut service, &request);
@@ -924,14 +1350,35 @@ fn an_unchanged_input_is_never_reloaded() {
 
     // Rewriting identical bytes is still the same input.
     std::fs::write(&input, FRESHNESS_V1).unwrap();
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     assert_eq!(service.reload_count(), 0);
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     assert_eq!(service.reload_count(), 1);
     result_of(&mut service, &ToolRequest::Project);
-    result_of(&mut service, &ToolRequest::Rules);
+    result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
     assert_eq!(service.reload_count(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -949,10 +1396,17 @@ fn directory_inputs_observe_added_and_removed_sources() {
     let mut service = ToolService::new(&mut session).unwrap();
 
     let rules = |service: &mut ToolService<'_>| {
-        result_of(service, &ToolRequest::Rules)
-            .as_array()
-            .unwrap()
-            .len()
+        result_of(
+            service,
+            &ToolRequest::Rules {
+                name: None,
+                file: None,
+                max: None,
+            },
+        )
+        .as_array()
+        .unwrap()
+        .len()
     };
     assert_eq!(rules(&mut service), 1);
 
@@ -965,7 +1419,14 @@ fn directory_inputs_observe_added_and_removed_sources() {
     // resolver's ambiguity refusal rather than serving either file's program.
     std::fs::write(dir.join("other.ws"), FRESHNESS_V1).unwrap();
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::Rules),
+        refusal_code(
+            &mut service,
+            &ToolRequest::Rules {
+                name: None,
+                file: None,
+                max: None,
+            }
+        ),
         "input-kind-ambiguous"
     );
     // The broken state refuses consistently until the directory heals.
@@ -980,12 +1441,26 @@ fn directory_inputs_observe_added_and_removed_sources() {
     // fingerprint-identical bytes do not resurrect it — and ids issued by
     // the dropped program refuse `stale-id` until the space is re-observed.
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::Cfg { rule: 0.into() }),
+        refusal_code(
+            &mut service,
+            &ToolRequest::Cfg {
+                rule: 0.into(),
+                kind: None,
+                max: None,
+            }
+        ),
         "stale-id"
     );
     assert_eq!(rules(&mut service), 2);
     assert_eq!(service.reload_count(), 2);
-    result_of(&mut service, &ToolRequest::Cfg { rule: 0.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: 0.into(),
+            kind: None,
+            max: None,
+        },
+    );
 
     // Removing the sole member is equally observable.
     std::fs::remove_file(dir.join("program.ws")).unwrap();
@@ -1020,8 +1495,16 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
     // Every program-reading request refuses with the loader's diagnostic;
     // the stale program is never served. `capabilities` answers regardless.
     for request in [
-        ToolRequest::Symbols { kind: None },
-        ToolRequest::Rules,
+        ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+        ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Project,
         ToolRequest::Check,
     ] {
@@ -1034,7 +1517,14 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
     ));
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
-    let symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    let symbols = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     assert!(
         symbols
             .as_array()
@@ -1066,8 +1556,24 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
     let mut service = ToolService::new(&mut session).unwrap();
 
     // Both spaces are current on a fresh service: `score` is symbol id 0.
-    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
-    result_of(&mut service, &ToolRequest::Cfg { rule: 0.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: 0.into(),
+            kind: None,
+            max: None,
+        },
+    );
 
     std::fs::write(&input, FRESHNESS_V2).unwrap();
 
@@ -1075,7 +1581,13 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
     // `stale-id` after the reload; name addressing stays usable because it
     // resolves against the new program.
     for request in [
-        ToolRequest::References { symbol: 0.into() },
+        ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Usage { symbol: 0.into() },
         ToolRequest::SemanticRename {
             sources: Some(std::collections::BTreeMap::new()),
@@ -1087,7 +1599,11 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
                 to: "renamed".to_string(),
             },
         },
-        ToolRequest::Cfg { rule: 0.into() },
+        ToolRequest::Cfg {
+            rule: 0.into(),
+            kind: None,
+            max: None,
+        },
     ] {
         assert_eq!(
             refusal_code(&mut service, &request),
@@ -1099,6 +1615,10 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
         &mut service,
         &ToolRequest::References {
             symbol: "points".into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
         },
     );
     assert!(references.as_array().unwrap().len() >= 2, "{references}");
@@ -1106,20 +1626,50 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
         &mut service,
         &ToolRequest::Cfg {
             rule: "extra".into(),
+            kind: None,
+            max: None,
         },
     );
 
     // `symbols` re-establishes only the symbol space; `rules` the rule space.
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
     assert_eq!(usage["id"], 0);
     assert_eq!(usage["symbol"], "points");
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::Cfg { rule: 1.into() }),
+        refusal_code(
+            &mut service,
+            &ToolRequest::Cfg {
+                rule: 1.into(),
+                kind: None,
+                max: None,
+            }
+        ),
         "stale-id"
     );
-    result_of(&mut service, &ToolRequest::Rules);
-    result_of(&mut service, &ToolRequest::Cfg { rule: 1.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: 1.into(),
+            kind: None,
+            max: None,
+        },
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1135,7 +1685,14 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
 
     std::fs::write(&input, FRESHNESS_AMBIGUOUS).unwrap();
 
@@ -1145,22 +1702,47 @@ fn ambiguous_refusals_re_establish_the_current_id_space() {
         refusal_code(
             &mut service,
             &ToolRequest::References {
-                symbol: "dup".into()
+                symbol: "dup".into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
             }
         ),
         "ambiguous-symbol"
     );
     result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::Cfg { rule: 0.into() }),
+        refusal_code(
+            &mut service,
+            &ToolRequest::Cfg {
+                rule: 0.into(),
+                kind: None,
+                max: None,
+            }
+        ),
         "stale-id",
         "the rule space is untouched by a symbol-space observation"
     );
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::Cfg { rule: "dup".into() }),
+        refusal_code(
+            &mut service,
+            &ToolRequest::Cfg {
+                rule: "dup".into(),
+                kind: None,
+                max: None,
+            }
+        ),
         "ambiguous-rule"
     );
-    result_of(&mut service, &ToolRequest::Cfg { rule: 0.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: 0.into(),
+            kind: None,
+            max: None,
+        },
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1185,9 +1767,19 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
 
     // Numeric addresses into the pre-reload spaces refuse `stale-id`.
     for request in [
-        ToolRequest::References { symbol: 0.into() },
+        ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Usage { symbol: 0.into() },
-        ToolRequest::Cfg { rule: 0.into() },
+        ToolRequest::Cfg {
+            rule: 0.into(),
+            kind: None,
+            max: None,
+        },
     ] {
         assert_eq!(
             refusal_code(&mut service, &request),
@@ -1211,7 +1803,14 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     let project = result_of(&mut service, &ToolRequest::Project);
     assert_eq!(project["rules"], 2);
     assert_eq!(project["symbols"], 3);
-    let symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    let symbols = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     assert!(
         symbols
             .as_array()
@@ -1231,16 +1830,27 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     assert_eq!(usage["id"], 0);
     assert_eq!(usage["symbol"], "points");
     assert_eq!(
-        result_of(&mut service, &ToolRequest::Rules)
-            .as_array()
-            .unwrap()
-            .len(),
+        result_of(
+            &mut service,
+            &ToolRequest::Rules {
+                name: None,
+                file: None,
+                max: None,
+            }
+        )
+        .as_array()
+        .unwrap()
+        .len(),
         2
     );
     let references = result_of(
         &mut service,
         &ToolRequest::References {
             symbol: "points".into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
         },
     );
     // Rule-internal references carry the new program's rule indexes; the
@@ -1270,7 +1880,14 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     );
     result_of(&mut service, &ToolRequest::LintRules);
     result_of(&mut service, &ToolRequest::PersistentObjects);
-    result_of(&mut service, &ToolRequest::CallGraph);
+    result_of(
+        &mut service,
+        &ToolRequest::CallGraph {
+            caller: None,
+            callee: None,
+            max: None,
+        },
+    );
     let cost = result_of(
         &mut service,
         &ToolRequest::CostEstimate(FindingSelection::default()),
@@ -1388,10 +2005,24 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
     // same load refusal, not a `stale-id` against a nonexistent space.
     for request in [
         ToolRequest::Project,
-        ToolRequest::Rules,
-        ToolRequest::Symbols { kind: None },
+        ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+        ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Check,
-        ToolRequest::References { symbol: 0.into() },
+        ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
     ] {
         assert_eq!(
             refusal_code(&mut service, &request),
@@ -1428,7 +2059,14 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
     // Repairing the input lets the same service answer program-reading
     // requests — no restart, no explicit reload.
     std::fs::write(&input, FRESHNESS_V1).unwrap();
-    let symbols = result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    let symbols = result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     assert!(
         symbols
             .as_array()
@@ -1443,7 +2081,14 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
 
     // Breaking it again refuses program reads until it heals once more.
     std::fs::remove_file(&input).unwrap();
-    for request in [ToolRequest::Project, ToolRequest::Symbols { kind: None }] {
+    for request in [
+        ToolRequest::Project,
+        ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    ] {
         assert_eq!(
             refusal_code(&mut service, &request),
             "input-io",
@@ -1479,7 +2124,11 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
     for request in [
         ToolRequest::Project,
         ToolRequest::Compile,
-        ToolRequest::Symbols { kind: None },
+        ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
     ] {
         assert_eq!(
             refusal_code(&mut service, &request),
@@ -1511,9 +2160,32 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
-    result_of(&mut service, &ToolRequest::Rules);
-    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
+    );
 
     std::fs::write(
         &input,
@@ -1529,18 +2201,55 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
     // ids refuse `stale-id` until the client re-observes each space.
     std::fs::write(&input, FRESHNESS_V2).unwrap();
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::References { symbol: 0.into() }),
+        refusal_code(
+            &mut service,
+            &ToolRequest::References {
+                symbol: 0.into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
+            }
+        ),
         "stale-id"
     );
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::Cfg { rule: 1.into() }),
+        refusal_code(
+            &mut service,
+            &ToolRequest::Cfg {
+                rule: 1.into(),
+                kind: None,
+                max: None,
+            }
+        ),
         "stale-id"
     );
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
     let usage = result_of(&mut service, &ToolRequest::Usage { symbol: 0.into() });
     assert_eq!(usage["symbol"], "points");
-    result_of(&mut service, &ToolRequest::Rules);
-    result_of(&mut service, &ToolRequest::Cfg { rule: 1.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::Cfg {
+            rule: 1.into(),
+            kind: None,
+            max: None,
+        },
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1561,8 +2270,24 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
     })
     .unwrap();
     let mut service = ToolService::new(&mut session).unwrap();
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
-    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
+    );
     let builds = service.semantic_build_count();
 
     // Break the input, observe the refusal, then restore the exact previous
@@ -1589,11 +2314,36 @@ fn a_failed_refresh_invalidates_the_snapshot_even_when_bytes_return() {
 
     // The pre-failure numeric ids are stale until the space is re-observed.
     assert_eq!(
-        refusal_code(&mut service, &ToolRequest::References { symbol: 0.into() }),
+        refusal_code(
+            &mut service,
+            &ToolRequest::References {
+                symbol: 0.into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
+            }
+        ),
         "stale-id"
     );
-    result_of(&mut service, &ToolRequest::Symbols { kind: None });
-    result_of(&mut service, &ToolRequest::References { symbol: 0.into() });
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
+    result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1919,10 +2669,10 @@ fn repeated_embedding_workflows_share_one_semantic_build() {
     assert!(session.analyze().ok);
     assert!(session.inspect().ok);
     assert!(session.lint().ok);
-    assert!(session.symbols(None).ok);
-    assert!(session.refs("score").ok);
-    assert!(session.cfg("player starts").ok);
-    assert!(session.callgraph().ok);
+    assert!(session.symbols(None, None, None).ok);
+    assert!(session.refs("score", None, None, None, None).ok);
+    assert!(session.cfg("player starts", None, None).ok);
+    assert!(session.callgraph(None, None, None).ok);
     assert!(session.cost().ok);
     assert_eq!(session.semantic_build_count(), 1);
 
@@ -1930,7 +2680,7 @@ fn repeated_embedding_workflows_share_one_semantic_build() {
     assert!(session.analyze().ok);
     assert!(session.inspect().ok);
     assert!(session.lint().ok);
-    assert!(session.symbols(None).ok);
+    assert!(session.symbols(None, None, None).ok);
     assert_eq!(session.semantic_build_count(), 1);
 }
 
