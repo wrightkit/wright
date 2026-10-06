@@ -751,7 +751,7 @@
     },
     "Sources": {
       "type": "object",
-      "description": "Source name → full current text. On `validateEditTransaction`/`semanticRename` the key is the loaded input's source spelling and the field may be omitted (the service reads the named files from disk, #472); on the provider operations the keys are `documents` URIs covering every `edits[].source`. The text is the precondition each edit's `source_identity` verifies against and the text the edits apply to.",
+      "description": "Source name → full current text. On `validateEditTransaction`/`semanticRename` the key is the loaded input's source spelling and the field may be omitted (the service reads the named files from disk, #472). On `providerValidateEdit` the keys are `documents` URIs covering every `edits[].source`; on `providerSemanticRename` they cover every document the provider's computed rename may edit — an edit into an unsupplied source refuses `edit-unknown-source`. The text is the precondition each edit's `source_identity` verifies against and the text edits apply to.",
       "additionalProperties": { "type": "string" }
     },
     "EditRange": {
@@ -816,7 +816,7 @@
     },
     "DocumentSet": {
       "type": "object",
-      "description": "URI → `Document` map: the caller-owned project document set the provider operates on. `position_document_uri` and every `edits[].source` must be keys of this set — an edit outside it refuses `edit-unknown-source`.",
+      "description": "URI → `Document` map: the caller-owned project document set the provider operates on. `providerValidateEdit` refuses an `edits[].source` outside the set with `edit-unknown-source`; `providerSemanticRename` requires `position_document_uri` inside the set and refuses provider-returned edits outside it with `provider-edit-outside-set`.",
       "additionalProperties": { "$ref": "#/$defs/Document" }
     },
     "Position": {
@@ -985,13 +985,13 @@
       "type": "object",
       "properties": {
         "op": { "const": "providerSemanticRename" },
-        "language_id": { "type": "string", "description": "The provider's language id (`opy`); `capabilities.languages` reports the configured set." },
-        "documents": { "$ref": "#/$defs/DocumentSet" },
+        "language_id": { "type": "string", "description": "The configured source provider's language id — `opy` for the shipped provider." },
+        "documents": { "$ref": "#/$defs/DocumentSet", "description": "The caller-owned document set; must contain `position_document_uri` and every document the provider's rename may edit." },
         "position_document_uri": { "type": "string", "description": "URI of the `documents` document holding the rename position." },
         "position": { "$ref": "#/$defs/Position" },
         "new_name": { "type": "string", "description": "The replacement identifier." },
         "project_root": { "type": ["string", "null"], "description": "Optional project root the provider resolves the project from." },
-        "sources": { "$ref": "#/$defs/Sources" }
+        "sources": { "$ref": "#/$defs/Sources", "description": "URI → current text covering every document the provider's rename may edit; a returned edit into an unsupplied or mismatched source refuses `edit-unknown-source`/`edit-stale-source`." }
       },
       "required": ["op", "language_id", "documents", "position_document_uri", "position", "new_name", "sources"],
       "additionalProperties": false
@@ -1000,10 +1000,10 @@
       "type": "object",
       "properties": {
         "op": { "const": "providerValidateEdit" },
-        "language_id": { "type": "string", "description": "The provider's language id (`opy`); `capabilities.languages` reports the configured set." },
-        "documents": { "$ref": "#/$defs/DocumentSet" },
+        "language_id": { "type": "string", "description": "The configured source provider's language id — `opy` for the shipped provider." },
+        "documents": { "$ref": "#/$defs/DocumentSet", "description": "The caller-owned document set; every `edits[].source` must be a key, and errors in any supplied document block the post-edit check." },
         "transaction": { "$ref": "#/$defs/EditTransaction" },
-        "sources": { "$ref": "#/$defs/Sources" },
+        "sources": { "$ref": "#/$defs/Sources", "description": "URI → current text covering every `edits[].source`; each edit's `source_identity` verifies against it." },
         "project_root": { "type": ["string", "null"], "description": "Optional project root the provider resolves the project from." }
       },
       "required": ["op", "language_id", "documents", "transaction", "sources"],

@@ -381,14 +381,18 @@ coordinates, the provider validates each edited document, and the edited
 document set is rechecked before `ok: true`. The caller owns the document
 set:
 
-* `language_id` names the provider (`opy`); `capabilities.languages`
-  reports the configured set.
+* `language_id` names the configured provider — `opy` for the shipped
+  provider.
 * `documents` is a URI → `{uri, languageId, version, text}` map describing
-  the project as the provider sees it. Every `edits[].source` — and
-  `providerSemanticRename`'s `position_document_uri` — must be a key of
-  this set; an edit outside it refuses `edit-unknown-source`.
+  the project as the provider sees it. A `providerValidateEdit`
+  `edits[].source` outside the set refuses `edit-unknown-source`;
+  `providerSemanticRename` requires `position_document_uri` inside the set
+  and refuses provider-returned edits outside it with
+  `provider-edit-outside-set`.
 * `sources` is a URI → current-text map covering every source the
-  transaction edits: it is the precondition each `source_identity`
+  transaction may edit — each `edits[].source` on `providerValidateEdit`,
+  every document the provider's rename may touch on
+  `providerSemanticRename`: it is the precondition each `source_identity`
   verifies against (SHA-256 hex of the text, the same identity
   `project.inputIdentity` reports) and the text the edits apply to.
 * `providerValidateEdit`'s post-edit check blocks on errors in any
