@@ -90,6 +90,26 @@ pub enum ReferenceKind {
     Call,
 }
 
+impl ReferenceKind {
+    pub const ALL: [Self; 5] = [
+        Self::Declaration,
+        Self::Definition,
+        Self::Read,
+        Self::Write,
+        Self::Call,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Declaration => "declaration",
+            Self::Definition => "definition",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Call => "call",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub id: SymbolId,

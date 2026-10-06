@@ -806,12 +806,14 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "wright_symbols",
             "wright_references",
             "wright_usage",
-            "wright_call_graph",
-            "wright_check",
             "wright_lint",
+            "wright_call_graph",
             "wright_cost_estimate",
-            "wright_semantic_rename",
+            "wright_check",
+            "wright_analyze",
+            "wright_inspect",
             "wright_validate_edit_transaction",
+            "wright_semantic_rename",
             "wright_provider_semantic_rename",
             "wright_provider_validate_edit",
             "wright_lookup",
@@ -846,18 +848,24 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
         assert!(tool["inputSchema"]["properties"].get("op").is_none());
         assert!(tool["description"].is_string());
     }
-    assert!(
-        tools[8]["inputSchema"]["properties"]
-            .get("sources")
-            .is_none()
-            && tools[9]["inputSchema"]["properties"]
-                .get("sources")
-                .is_none(),
-        "edit tool schemas omit sources"
-    );
+    for name in ["wright_validate_edit_transaction", "wright_semantic_rename"] {
+        let tool = tools.iter().find(|t| t["name"] == name).unwrap();
+        assert!(
+            tool["inputSchema"]["properties"].get("sources").is_none(),
+            "{name} omits sources"
+        );
+    }
+    // #532: the report tools expose `brief` in their derived input schemas.
+    for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
+        let tool = tools.iter().find(|t| t["name"] == name).unwrap();
+        assert_eq!(
+            tool["inputSchema"]["properties"]["brief"]["type"], "boolean",
+            "{name} has no brief field"
+        );
+    }
     // #529: `wright_lookup`'s schema derives from `LookupRequest` — `op` is
     // dropped, `language` stays required.
-    let lookup = &tools[12];
+    let lookup = tools.iter().find(|t| t["name"] == "wright_lookup").unwrap();
     assert_eq!(lookup["inputSchema"]["required"], json!(["language"]));
     assert!(
         lookup["inputSchema"]["properties"].get("op").is_none()
@@ -880,7 +888,12 @@ fn mcp_transport_results_match_the_service_contract() {
         ("wright_usage", serde_json::json!({"symbol": "index"})),
         ("wright_call_graph", serde_json::json!({})),
         ("wright_check", serde_json::json!({})),
+        // #532: the report tools carry `brief` through to the same service
+        // result the stdio transport reports.
+        ("wright_analyze", serde_json::json!({"brief": true})),
+        ("wright_inspect", serde_json::json!({"brief": true})),
         ("wright_lint", serde_json::json!({"severity": "info"})),
+        ("wright_lint", serde_json::json!({"brief": true})),
         ("wright_cost_estimate", serde_json::json!({})),
         // #472: the edit tools run without `sources` — the service reads the
         // on-disk text.
@@ -1259,6 +1272,113 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
         .map(|tool| tool["name"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(healed_names, broken_names, "{healed_list}");
+
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "serve exited: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn stdio_transport_routes_opy_inputs_to_the_provider_backend() {
+    // #530: `wright serve` must serve OPY inputs like the one-shot commands —
+    // through the provider backend — instead of refusing every request with
+    // `source-provider-unavailable`. The provider is a staged LPP-conforming
+    // script so the test stays hermetic.
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+artifact = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifact.ws")).read()
+initialized = False
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        first = not initialized
+        initialized = True
+        if not first:
+            lpp_error(id, "alreadyInitialized", {}, "already initialized")
+        elif request["params"]["protocolVersion"] != "1.1":
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": ["1.1"]}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": "1.1", "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True, "compile": True, "reconstruct": False, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        (os, arch) => panic!("unsupported OPY provider target {os}/{arch}"),
+    };
+    let dir = std::env::temp_dir().join(format!("wright-serve-opy-{}", std::process::id()));
+    let provider_dir = dir.join("providers/opy/9.9.9").join(target);
+    std::fs::create_dir_all(&provider_dir).unwrap();
+    let script = provider_dir.join("opy-provider");
+    std::fs::write(&script, PROVIDER).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        provider_dir.join("artifact.ws"),
+        std::fs::read_to_string(
+            workspace_root().join("tests/fixtures/workshop/synthetic/basic-rule.ws"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(dir.join("providers/opy/active"), "9.9.9").unwrap();
+    let input = dir.join("main.opy");
+    std::fs::write(&input, "# fake OPY entry; the staged provider ignores it").unwrap();
+
+    let mut child = Command::new(wright())
+        .args(["serve", "--transport", "stdio"])
+        .arg(&input)
+        .env("WRIGHT_PROVIDER_DATA_DIR", &dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright serve spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut exchange = |request: &str| -> serde_json::Value {
+        writeln!(stdin, "{request}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        assert_ne!(
+            stdout.read_line(&mut line).unwrap(),
+            0,
+            "the session answered {request}"
+        );
+        serde_json::from_str(&line).expect("JSON response")
+    };
+
+    let check = exchange(r#"{"op":"check"}"#);
+    assert_eq!(
+        check["result"]["command"], "check",
+        "OPY input must reach the provider backend: {check}"
+    );
+    assert_eq!(check["result"]["ok"], true, "{check}");
+    let project = exchange(r#"{"op":"project"}"#);
+    assert_eq!(project["result"]["origin"]["kind"], "opy", "{project}");
 
     drop(stdin);
     let output = child.wait_with_output().unwrap();

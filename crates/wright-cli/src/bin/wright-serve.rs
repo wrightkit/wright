@@ -2,6 +2,8 @@
 mod mcp;
 #[path = "../serve.rs"]
 mod serve;
+#[path = "../tooldefs.rs"]
+mod tooldefs;
 
 use clap::Parser;
 use std::process::ExitCode;

@@ -278,6 +278,17 @@ pub(crate) fn run(args: &AgentArgs) -> Result<u8, AgentError> {
             }
             Ok(exit::SUCCESS)
         }
+        Some(AgentSubcommand::Tools(tools_args)) => {
+            let document = match tools_args.format {
+                crate::cli::ToolsFormat::Messages => crate::agenttools::messages_tools(),
+                crate::cli::ToolsFormat::JsonSchema => crate::agenttools::json_schema_tools(),
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&document).expect("tool document serializes")
+            );
+            Ok(exit::SUCCESS)
+        }
         None => Err(AgentError::Usage(
             "specify an agent command (run `wright agent --help` for details)".into(),
         )),

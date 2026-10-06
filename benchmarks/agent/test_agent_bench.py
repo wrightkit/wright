@@ -25,6 +25,29 @@ def reference(scenario: str = SCENARIO) -> str:
     return str(agent_bench.SCENARIOS / scenario / "reference")
 
 
+class BoundedUsesTest(unittest.TestCase):
+    """#532: `--brief` and the selection flags/fields count as bounded uses."""
+
+    def test_cli_classification(self):
+        self.assertTrue(bench_trace.bounded_cli(["lint", "m.ws", "--brief"]))
+        self.assertTrue(bench_trace.bounded_cli(["lint", "m.ws", "--severity", "warning"]))
+        self.assertTrue(bench_trace.bounded_cli(["inspect", "symbols", "m.ws", "--only", "rule"]))
+        self.assertTrue(bench_trace.bounded_cli(["inspect", "refs", "x", "m.ws", "--rule", "r"]))
+        # `lint --rule` loads a rule file; it does not select findings.
+        self.assertFalse(bench_trace.bounded_cli(["lint", "m.ws", "--rule", "local.yaml"]))
+        self.assertFalse(bench_trace.bounded_cli(["analyze", "m.ws"]))
+        self.assertFalse(bench_trace.bounded_cli(["check", "m.ws", "-f", "json"]))
+
+    def test_request_classification(self):
+        self.assertTrue(bench_trace.bounded_request({"op": "analyze", "args": {"brief": True}}))
+        self.assertTrue(bench_trace.bounded_request({"op": "lint", "args": {"severity": "warning"}}))
+        self.assertTrue(bench_trace.bounded_request({"op": "references", "args": {"symbol": 0, "rule": "r"}}))
+        self.assertFalse(bench_trace.bounded_request({"op": "analyze", "args": {"brief": False}}))
+        # `rule` on cfg is the required address, not a selection.
+        self.assertFalse(bench_trace.bounded_request({"op": "cfg", "args": {"rule": 0}}))
+        self.assertFalse(bench_trace.bounded_request({"op": "project", "args": {}}))
+
+
 @unittest.skipUnless(Path(WRIGHT).is_file(), "build wright first or set WRIGHT_BIN")
 class AgentBenchTest(unittest.TestCase):
     def setUp(self):
@@ -644,6 +667,19 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(result["expectations"]["E11"]["status"], "pass")
         self.assertEqual(result["expectations"]["E03"]["status"], "pass")
 
+    def test_bounded_forms_are_counted_in_tool_use(self):
+        # #532: `--brief` and selection flags/fields show up as bounded uses.
+        agent = (f"cp {reference()}/* . && wright lint mode.ws --brief -f json >/dev/null; "
+                 "wright analyze mode.ws -f json >/dev/null; "
+                 "printf '{\"op\":\"inspect\",\"brief\":true}\\n{\"op\":\"lint\",\"severity\":\"warning\"}\\n{\"op\":\"cfg\",\"rule\":0}\\n' "
+                 "| wright serve mode.ws >/dev/null")
+        result = self.trial(agent)
+        use = result["toolUse"]["wright"]
+        self.assertEqual(use["invocations"], 5)
+        # lint --brief, inspect?brief, lint?severity — analyze stays full and
+        # cfg's `rule` is its address, not a selection.
+        self.assertEqual(use["boundedUses"], 3)
+
     def test_final_state_validation_expectation(self):
         edit = f"cp {reference()}/mode.ws mode.ws"
         late = self.trial(f"wright check mode.ws >/dev/null; sleep 0.6; {edit}")
@@ -982,6 +1018,42 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("Paired against `none/wiki/off`", text)
         text, _ = bench_report.render(runs, references=["missing/cell/here"])
         self.assertNotIn("Paired against", text)
+
+    def test_scenario_discrimination_flags(self):
+        runs = [
+            self.result("none/none/off", 1, True, 100, scenario="always-pass"),
+            self.result("wright/none/off", 1, True, 100, scenario="always-pass"),
+            self.result("none/none/off", 1, False, 100, scenario="always-fail"),
+            self.result("wright/none/off", 1, False, 100, scenario="always-fail"),
+            self.result("none/none/off", 1, False, 100, scenario="wright-helps"),
+            self.result("wright/none/off", 1, True, 100, scenario="wright-helps"),
+            self.result("none/none/off", 1, True, 100, scenario="one-cell"),
+        ]
+        flags = bench_report.discrimination(runs)
+        self.assertEqual(flags["always-pass"]["discrimination"], "smoke")
+        self.assertEqual(flags["always-fail"]["discrimination"], "smoke")
+        self.assertEqual(flags["wright-helps"]["discrimination"], "discriminating")
+        self.assertEqual(flags["wright-helps"]["differingConditions"], ["none/none/off", "wright/none/off"])
+        self.assertEqual(flags["one-cell"]["discrimination"], "indeterminate")
+        rates = flags["wright-helps"]["conditions"]
+        self.assertEqual(rates["none/none/off"], {"usable": 0, "runs": 1, "rate": 0.0})
+        self.assertEqual(rates["wright/none/off"], {"usable": 1, "runs": 1, "rate": 1.0})
+
+    def test_lift_report_shows_both_denominators_and_names_smoke_scenarios(self):
+        runs = [
+            self.result("none/none/off", 1, False, 100, scenario="wright-helps"),
+            self.result("wright/none/off", 1, True, 100, scenario="wright-helps"),
+            self.result("none/none/off", 1, True, 100, scenario="always-pass"),
+            self.result("wright/none/off", 1, True, 100, scenario="always-pass"),
+        ]
+        text, summary = bench_report.render(runs)
+        self.assertIn("usable gained/lost (all)", text)
+        self.assertIn("usable gained/lost (discriminating)", text)
+        self.assertIn("+1 / -0 | +1 / -0 (n=1)", text)
+        self.assertIn("Smoke scenarios kept out of the discriminating column: always-pass", text)
+        entries = {s["id"]: s for s in summary["scenarios"]}
+        self.assertEqual(entries["always-pass"]["discrimination"], "smoke")
+        self.assertEqual(entries["wright-helps"]["discrimination"], "discriminating")
 
     def test_correction_rounds_reach_the_cell_summary(self):
         run = self.result("wright/none/off", 1, True, 100)

@@ -1,0 +1,85 @@
+{
+  "id": "renamed-callable-understand-opy",
+  "family": "diagnostics",
+  "language": "opy",
+  "split": "train",
+  "entry": "mode.opy",
+  "writable": [
+    "answer.json",
+    "mode.opy",
+    "scoring.opy"
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "compiles",
+      "kind": "wright-compile",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "callable-still-called",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Call Subroutine\\(awardBonus\\w*\\)"
+      ]
+    },
+    {
+      "id": "rules-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "rule \\(\"awardBonus\"\\)",
+        "rule \\(\"score\\ on\\ elimination\"\\)",
+        "rule \\(\"streak\\ bonus\\ points\"\\)",
+        "rule \\(\"reset\\ streak\\ on\\ death\"\\)",
+        "rule \\(\"declare\\ winner\"\\)",
+        "rule \\(\"score\\ display\"\\)"
+      ]
+    },
+    {
+      "id": "body-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Modify\\ Player\\ Variable\\(Event\\ Player,\\ score,\\ Add,\\ 2\\);",
+        "Set\\ Player\\ Variable\\(Event\\ Player,\\ streak,\\ 0\\);"
+      ]
+    },
+    {
+      "id": "missing-name",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "missing",
+      "expected": "awardBonus"
+    }
+  ],
+  "negatives": {
+    "deleted-def": {
+      "fails": [
+        "body-preserved",
+        "callable-still-called",
+        "missing-name",
+        "rules-preserved"
+      ]
+    }
+  },
+  "generated": {
+    "defect": "renamed-callable",
+    "site": {
+      "file": "scoring.opy",
+      "symbol": "awardBonus"
+    },
+    "seedHash": "d9fa8a3bb48df0d35f56cebcb156fa97293006ed5dfd45ee027f6301b4897c54"
+  },
+  "canary": "WRIGHT_BENCH_CANARY_499_v2"
+}

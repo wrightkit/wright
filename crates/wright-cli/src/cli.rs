@@ -83,7 +83,7 @@ pub(crate) enum Command {
     Check(ReportArgs),
     /// Summarize Workshop cost, complexity hotspots, risk indicators, and
     /// cross-cutting state.
-    Analyze(ReportArgs),
+    Analyze(AnalyzeArgs),
     /// Parse, lower, and report lint findings.
     Lint(LintArgs),
     /// Parse, lower, and inspect semantic facts: the bare command prints the
@@ -149,6 +149,20 @@ pub(crate) struct ReportArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
+}
+
+/// Arguments of `analyze`: shared workflow options, finding selection, and
+/// `--brief` — the summary form of the report (#532).
+#[derive(Debug, Args)]
+pub(crate) struct AnalyzeArgs {
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    #[command(flatten)]
+    pub(crate) select: SelectArgs,
+    /// Print the brief form: counts, the costliest rules, and how to
+    /// expand — the full report stays one option away.
+    #[arg(long)]
+    pub(crate) brief: bool,
 }
 
 /// Finding-selection options shared by `check`, `analyze`, `lint`, and
@@ -301,6 +315,11 @@ impl LookupKindArg {
 pub(crate) struct InspectArgs {
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+    /// Print the brief form of the bare summary: counts, the leading rules,
+    /// and how to expand (#532). The query subcommands keep their own
+    /// selection options.
+    #[arg(long)]
+    pub(crate) brief: bool,
     #[command(subcommand)]
     pub(crate) query: Option<InspectQuery>,
 }
@@ -317,7 +336,7 @@ pub(crate) enum InspectQuery {
     /// Show the control-flow graph of one rule, addressed by name.
     Cfg(CfgArgs),
     /// Show the subroutine call graph.
-    Callgraph(CommonArgs),
+    Callgraph(CallgraphArgs),
     /// Report generated-resource counts and static findings.
     Cost(ReportArgs),
 }
@@ -332,10 +351,18 @@ pub(crate) struct SymbolsArgs {
     /// Report only symbols of this kind.
     #[arg(long, value_enum, value_name = "KIND")]
     pub(crate) only: Option<SymbolKindArg>,
+    /// Report only symbols located in this source file; any spelling that
+    /// resolves to the same file selects it.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<String>,
+    /// Report at most N symbols; withheld symbols are reported, never
+    /// silently dropped.
+    #[arg(long, value_name = "N")]
+    pub(crate) max: Option<usize>,
 }
 
 /// Arguments of `inspect refs`: the symbol name, then the shared workflow
-/// options.
+/// options plus the reference selection fields (#531).
 #[derive(Debug, Args)]
 pub(crate) struct RefsArgs {
     /// The declared name of the symbol to look up.
@@ -343,10 +370,24 @@ pub(crate) struct RefsArgs {
     pub(crate) name: String,
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+    /// Report only references of this kind.
+    #[arg(long, value_enum, value_name = "KIND")]
+    pub(crate) only: Option<ReferenceKindArg>,
+    /// Report only references located inside this rule.
+    #[arg(long, value_name = "RULE")]
+    pub(crate) rule: Option<String>,
+    /// Report only references located in this source file; any spelling
+    /// that resolves to the same file selects it.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<String>,
+    /// Report at most N references; withheld references are reported, never
+    /// silently dropped.
+    #[arg(long, value_name = "N")]
+    pub(crate) max: Option<usize>,
 }
 
 /// Arguments of `inspect cfg`: the rule name, then the shared workflow
-/// options.
+/// options plus the block selection fields (#531).
 #[derive(Debug, Args)]
 pub(crate) struct CfgArgs {
     /// The declared name of the rule to look up.
@@ -354,6 +395,31 @@ pub(crate) struct CfgArgs {
     pub(crate) rule: String,
     #[command(flatten)]
     pub(crate) common: CommonArgs,
+    /// Report only blocks of this kind.
+    #[arg(long, value_enum, value_name = "KIND")]
+    pub(crate) only: Option<CfgBlockKindArg>,
+    /// Report at most N blocks; withheld blocks are reported, never
+    /// silently dropped.
+    #[arg(long, value_name = "N")]
+    pub(crate) max: Option<usize>,
+}
+
+/// Arguments of `inspect callgraph`: shared workflow options plus the
+/// edge selection fields (#531).
+#[derive(Debug, Args)]
+pub(crate) struct CallgraphArgs {
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    /// Report only edges out of this rule.
+    #[arg(long, value_name = "RULE")]
+    pub(crate) caller: Option<String>,
+    /// Report only edges into this subroutine.
+    #[arg(long, value_name = "SUBROUTINE")]
+    pub(crate) callee: Option<String>,
+    /// Report at most N edges; withheld edges are reported, never silently
+    /// dropped.
+    #[arg(long, value_name = "N")]
+    pub(crate) max: Option<usize>,
 }
 
 #[derive(Debug, Args)]
@@ -362,6 +428,10 @@ pub(crate) struct LintArgs {
     pub(crate) common: CommonArgs,
     #[command(flatten)]
     pub(crate) select: SelectArgs,
+    /// Print the brief form: finding counts by severity, the
+    /// highest-severity findings, and how to expand (#532).
+    #[arg(long)]
+    pub(crate) brief: bool,
     /// Read project lint configuration YAML.
     #[arg(long = "lint-config", value_name = "PATH")]
     pub(crate) lint_config: Option<PathBuf>,
@@ -403,6 +473,25 @@ pub(crate) enum AgentSubcommand {
     /// Install the canonical Wright agent guide as an agent skill in the
     /// project; re-running refreshes it in place.
     Install(AgentInstallArgs),
+    /// Emit the advertised agent operations as client tool definitions for
+    /// code-executing agents, or as plain JSON Schema for other harnesses (#535).
+    Tools(AgentToolsArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ToolsFormat {
+    /// Anthropic Messages API client tool definitions for programmatic
+    /// (code-execution) tool calling.
+    Messages,
+    /// One plain JSON Schema per operation for other harnesses.
+    JsonSchema,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentToolsArgs {
+    /// The emitted definition form.
+    #[arg(long, value_enum, default_value_t = ToolsFormat::Messages)]
+    pub(crate) format: ToolsFormat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -548,6 +637,74 @@ impl SymbolKindArg {
             Self::PlayerVariable => "playerVariable",
             Self::Subroutine => "subroutine",
             Self::Rule => "rule",
+        }
+    }
+}
+
+/// Reference kinds as spelled by the semantic index (#531).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ReferenceKindArg {
+    /// `declaration` references.
+    #[value(name = "declaration")]
+    Declaration,
+    /// `definition` references.
+    #[value(name = "definition")]
+    Definition,
+    /// `read` references.
+    #[value(name = "read")]
+    Read,
+    /// `write` references.
+    #[value(name = "write")]
+    Write,
+    /// `call` references.
+    #[value(name = "call")]
+    Call,
+}
+
+impl ReferenceKindArg {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Declaration => "declaration",
+            Self::Definition => "definition",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Call => "call",
+        }
+    }
+}
+
+/// Control-flow block kinds as spelled by the `cfg` operation (#531).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CfgBlockKindArg {
+    /// The `entry` block.
+    #[value(name = "entry")]
+    Entry,
+    /// The `exit` block.
+    #[value(name = "exit")]
+    Exit,
+    /// `block` basic blocks.
+    #[value(name = "block")]
+    Block,
+    /// `if` branch headers.
+    #[value(name = "if")]
+    If,
+    /// `while` loop headers.
+    #[value(name = "while")]
+    While,
+    /// `for` loop headers.
+    #[value(name = "for")]
+    For,
+}
+
+impl CfgBlockKindArg {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Entry => "entry",
+            Self::Exit => "exit",
+            Self::Block => "block",
+            Self::If => "if",
+            Self::While => "while",
+            Self::For => "for",
         }
     }
 }

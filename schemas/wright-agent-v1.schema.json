@@ -352,13 +352,13 @@
     "AnalyzeResult": {
       "allOf": [
         { "$ref": "#/$defs/WorkflowEnvelope" },
-        { "type": "object", "properties": { "command": { "const": "analyze" }, "result": { "$ref": "#/$defs/AnalyzePayload" } } }
+        { "type": "object", "properties": { "command": { "const": "analyze" }, "result": { "anyOf": [{ "$ref": "#/$defs/AnalyzePayload" }, { "$ref": "#/$defs/BriefResult" }] } } }
       ]
     },
     "InspectResult": {
       "allOf": [
         { "$ref": "#/$defs/WorkflowEnvelope" },
-        { "type": "object", "properties": { "command": { "const": "inspect" }, "result": { "$ref": "#/$defs/InspectPayload" } } }
+        { "type": "object", "properties": { "command": { "const": "inspect" }, "result": { "anyOf": [{ "$ref": "#/$defs/InspectPayload" }, { "$ref": "#/$defs/BriefResult" }] } } }
       ]
     },
     "ProjectResult": {
@@ -377,9 +377,51 @@
       },
       "additionalProperties": true
     },
-    "RulesResult": { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
-    "SymbolsResult": { "type": "array", "items": { "$ref": "#/$defs/Symbol" } },
-    "ReferencesResult": { "type": "array", "items": { "$ref": "#/$defs/Reference" } },
+    "RulesResult": {
+      "anyOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
+        { "$ref": "#/$defs/RulesSelectionResult" }
+      ]
+    },
+    "RulesSelectionResult": {
+      "type": "object",
+      "required": ["rules", "selection"],
+      "properties": {
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
+      },
+      "additionalProperties": true
+    },
+    "SymbolsResult": {
+      "anyOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/Symbol" } },
+        { "$ref": "#/$defs/SymbolsSelectionResult" }
+      ]
+    },
+    "SymbolsSelectionResult": {
+      "type": "object",
+      "required": ["symbols", "selection"],
+      "properties": {
+        "symbols": { "type": "array", "items": { "$ref": "#/$defs/Symbol" } },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
+      },
+      "additionalProperties": true
+    },
+    "ReferencesResult": {
+      "anyOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/Reference" } },
+        { "$ref": "#/$defs/ReferencesSelectionResult" }
+      ]
+    },
+    "ReferencesSelectionResult": {
+      "type": "object",
+      "required": ["references", "selection"],
+      "properties": {
+        "references": { "type": "array", "items": { "$ref": "#/$defs/Reference" } },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
+      },
+      "additionalProperties": true
+    },
     "UsageResult": {
       "type": "object",
       "required": ["id", "kind", "symbol", "reads", "writes", "calls", "rules"],
@@ -423,7 +465,8 @@
             },
             "additionalProperties": true
           }
-        }
+        },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
       "additionalProperties": true
     },
@@ -471,6 +514,12 @@
       }
     },
     "LintResult": {
+      "anyOf": [
+        { "$ref": "#/$defs/LintPayload" },
+        { "$ref": "#/$defs/BriefResult" }
+      ]
+    },
+    "LintPayload": {
       "type": "object",
       "required": ["inputIdentity", "rules", "config", "findings", "skipped"],
       "properties": {
@@ -479,6 +528,19 @@
         "config": { "$ref": "#/$defs/LintConfiguration" },
         "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
         "skipped": { "type": "array", "items": { "$ref": "#/$defs/SkippedRule" } },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
+      },
+      "additionalProperties": true
+    },
+    "BriefResult": {
+      "type": "object",
+      "required": ["brief", "counts", "items", "expand"],
+      "properties": {
+        "brief": { "const": true },
+        "program": { "type": "object", "additionalProperties": true },
+        "counts": { "type": "object", "additionalProperties": true },
+        "items": { "type": "array" },
+        "expand": { "type": "string" },
         "selection": { "$ref": "#/$defs/SelectionSummary" }
       },
       "additionalProperties": true
@@ -493,9 +555,26 @@
       },
       "additionalProperties": true
     },
+    "CallGraphEdge": {
+      "type": "object",
+      "required": ["caller", "callee"],
+      "properties": { "caller": { "type": "string" }, "callee": { "type": "string" } },
+      "additionalProperties": true
+    },
     "CallGraphResult": {
-      "type": "array",
-      "items": { "type": "object", "required": ["caller", "callee"], "properties": { "caller": { "type": "string" }, "callee": { "type": "string" } }, "additionalProperties": true }
+      "anyOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/CallGraphEdge" } },
+        { "$ref": "#/$defs/CallGraphSelectionResult" }
+      ]
+    },
+    "CallGraphSelectionResult": {
+      "type": "object",
+      "required": ["edges", "selection"],
+      "properties": {
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/CallGraphEdge" } },
+        "selection": { "$ref": "#/$defs/SelectionSummary" }
+      },
+      "additionalProperties": true
     },
     "CostEstimateResult": {
       "type": "object",
@@ -661,7 +740,7 @@
     },
     "Capabilities": {
       "type": "object",
-      "required": ["name", "version", "contract", "agent_contract", "operations", "languages", "profiles"],
+      "required": ["name", "version", "contract", "agent_contract", "operations", "result_schemas", "languages", "profiles"],
       "properties": {
         "name": { "type": "string" },
         "version": { "type": "string" },
@@ -671,6 +750,11 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string" }
+        },
+        "result_schemas": {
+          "type": "object",
+          "description": "The committed-schema definition describing each advertised operation's result (#532): operation name to its `#/$defs/<Op>Result` reference.",
+          "additionalProperties": { "type": "string" }
         },
         "languages": { "type": "array", "items": { "type": "string" } },
         "profiles": { "type": "array", "items": { "type": "string" } }
@@ -756,13 +840,28 @@
     "CapabilitiesRequest": { "type": "object", "properties": { "op": { "const": "capabilities" } }, "required": ["op"], "additionalProperties": false },
     "CompileRequest": { "type": "object", "properties": { "op": { "const": "compile" } }, "required": ["op"], "additionalProperties": false },
     "CheckRequest": { "type": "object", "properties": { "op": { "const": "check" } }, "required": ["op"], "additionalProperties": false },
-    "AnalyzeRequest": { "type": "object", "properties": { "op": { "const": "analyze" } }, "required": ["op"], "additionalProperties": false },
-    "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" } }, "required": ["op"], "additionalProperties": false },
+    "AnalyzeRequest": { "type": "object", "properties": { "op": { "const": "analyze" }, "brief": { "type": "boolean", "default": false } }, "required": ["op"], "additionalProperties": false },
+    "InspectRequest": { "type": "object", "properties": { "op": { "const": "inspect" }, "brief": { "type": "boolean", "default": false } }, "required": ["op"], "additionalProperties": false },
     "ProjectRequest": { "type": "object", "properties": { "op": { "const": "project" } }, "required": ["op"], "additionalProperties": false },
-    "RulesRequest": { "type": "object", "properties": { "op": { "const": "rules" } }, "required": ["op"], "additionalProperties": false },
+    "RulesRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "rules" },
+        "name": { "type": "string", "description": "Selection (#531): only the rule with this declared name." },
+        "file": { "type": "string", "description": "Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it." },
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped." }
+      },
+      "required": ["op"],
+      "additionalProperties": false
+    },
     "SymbolsRequest": {
       "type": "object",
-      "properties": { "op": { "const": "symbols" }, "kind": { "type": ["string", "null"] } },
+      "properties": {
+        "op": { "const": "symbols" },
+        "kind": { "enum": ["globalVariable", "playerVariable", "subroutine", "rule", null], "description": "Selection (#531): only symbols of this kind." },
+        "file": { "type": "string", "description": "Selection (#531): only symbols located in this source file; any spelling that resolves to the same file selects it." },
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many symbols; the response's `selection.withheld` counts what the bound dropped." }
+      },
       "required": ["op"],
       "additionalProperties": false
     },
@@ -775,7 +874,16 @@
           "minimum": 0,
           "maximum": 4294967295,
           "description": "Symbol id or declared name. A numeric id captured before the project changed on disk is refused `stale-id` until a `symbols` listing re-establishes the space; names are always current."
-        }
+        },
+        "kind": { "enum": ["declaration", "definition", "read", "write", "call"], "description": "Selection (#531): only references of this kind." },
+        "rule": {
+          "type": ["integer", "string"],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Selection (#531): only references inside this rule, addressed by index or declared name."
+        },
+        "file": { "type": "string", "description": "Selection (#531): only references located in this source file; any spelling that resolves to the same file selects it." },
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many references; the response's `selection.withheld` counts what the bound dropped." }
       },
       "required": ["op", "symbol"],
       "additionalProperties": false
@@ -803,7 +911,9 @@
           "minimum": 0,
           "maximum": 4294967295,
           "description": "Rule index or declared name. A numeric index captured before the project changed on disk is refused `stale-id` until a `rules` listing re-establishes the space; names are always current."
-        }
+        },
+        "kind": { "enum": ["entry", "exit", "block", "if", "while", "for"], "description": "Selection (#531): only blocks of this kind." },
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many blocks; the response's `selection.withheld` counts what the bound dropped." }
       },
       "required": ["op", "rule"],
       "additionalProperties": false
@@ -828,13 +938,24 @@
         "severity": { "enum": ["error", "warning", "info"] },
         "rule": { "type": "string" },
         "file": { "type": "string" },
-        "max": { "type": "integer", "minimum": 0 }
+        "max": { "type": "integer", "minimum": 0 },
+        "brief": { "type": "boolean", "default": false, "description": "Brief result form (#532): finding counts by severity, the highest-severity findings, and how to expand — the full result stays one option away." }
       },
       "required": ["op"],
       "additionalProperties": false
     },
     "LintRulesRequest": { "type": "object", "properties": { "op": { "const": "lintRules" } }, "required": ["op"], "additionalProperties": false },
-    "CallGraphRequest": { "type": "object", "properties": { "op": { "const": "callGraph" } }, "required": ["op"], "additionalProperties": false },
+    "CallGraphRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "callGraph" },
+        "caller": { "type": "string", "description": "Selection (#531): only edges out of this declared rule name." },
+        "callee": { "type": "string", "description": "Selection (#531): only edges into this declared subroutine name." },
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many edges; the response's `selection.withheld` counts what the bound dropped." }
+      },
+      "required": ["op"],
+      "additionalProperties": false
+    },
     "CostEstimateRequest": {
       "type": "object",
       "properties": {

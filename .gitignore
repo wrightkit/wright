@@ -33,3 +33,6 @@ target/
 
 # Agent benchmark upstream oracle
 benchmarks/agent/oracle/node_modules/
+
+# Metrics corpus external-project cache
+benchmarks/metrics/.cache/

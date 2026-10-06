@@ -33,13 +33,13 @@ result.
 | `wright compile [INPUT]` | Parse, lower, validate, emit Workshop text; warn on known client import limits | the emitted artifact (or nothing with `-o`) |
 | `wright convert [INPUT] --target opy\|ostw` | Reconstruct validated Workshop input as canonical OPY or OSTW source | the reconstructed source |
 | `wright check [INPUT]` | Parse, lower, validate, and report correctness diagnostics | verdict and validation diagnostics |
-| `wright analyze [INPUT]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels |
-| `wright lint [INPUT]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration |
-| `wright inspect [INPUT]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area |
-| `wright inspect symbols [INPUT] [--only KIND]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
-| `wright inspect refs <NAME> [INPUT]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
-| `wright inspect cfg <RULE> [INPUT]` | Control-flow graph of one rule, addressed by name | block/edge listing |
-| `wright inspect callgraph [INPUT]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
+| `wright analyze [INPUT] [--brief]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels; `--brief` prints the counts-and-costliest-rules form |
+| `wright lint [INPUT] [--brief]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration; `--brief` prints the counts-and-top-findings form |
+| `wright inspect [INPUT] [--brief]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area; `--brief` prints the counts-and-leading-rules form |
+| `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
+| `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
+| `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
+| `wright inspect callgraph [INPUT] [--caller RULE] [--callee SUBROUTINE] [--max N]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
 | `wright inspect cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
 | `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
 | `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry — signature or spelling, kind, identity |
@@ -48,6 +48,7 @@ result.
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
 | `wright update [self\|provider [NAME]]` | Update Wright-managed components: a standalone installation and installed first-party providers | update progress (text only) |
 | `wright agent install` | Install the canonical Wright agent guide into the project's agent skills directory | installation progress and guidance |
+| `wright agent tools [--format messages\|json-schema]` | Emit the advertised operations as client tool definitions for code-executing agents | `wright-agent/v1` tool-definition document (JSON) |
 
 `wright --version` prints the implementation version banner
 (`wright <version> (wright-driver <version>)`); the version is the single
@@ -148,11 +149,33 @@ refused; writes replace the file atomically.
 To remove the server, delete the `wright` entry from the config file (and the
 guide directory if installed); to update, re-run with `--force`.
 
+## `wright agent tools` — client tool definitions (#535)
+
+`wright agent tools` prints every operation `capabilities` advertises as
+client tool definitions for code-executing agents, versioned
+`wright-agent/v1` and deterministic. `--format messages` (default) emits
+Anthropic Messages API tool definitions — `name`, `description` (which also
+describes the result), `input_schema`, and
+`allowed_callers: ["code_execution_20260120"]` for programmatic tool
+calling; emitted schemas have no recursive `$ref`, which the API rejects.
+`--format json-schema` emits the same operations as plain JSON Schema for
+other harnesses. See
+[the agent contract](../agent-contract.md#client-tool-definitions-for-code-executing-agents-535).
+
 Commands that report findings (`check`, `analyze`, `lint`, `inspect cost`)
 share the finding-selection options `--severity`, `--rule-id`, `--file`, and
 `--max`, which narrow reported diagnostics/findings without changing verdicts
 or exit codes; see [lint configuration and findings](lint.md) and
 [presentation](presentation.md).
+
+`lint`, `analyze`, and bare `inspect` also accept `--brief` (#532): the
+result shrinks to `{"brief": true, "counts", "items", "expand"}` — the same
+counts the summary line reports, at most five highest-priority items, and a
+hint naming the way back to the full result, which stays the default. The
+form composes with selection (`lint --severity error --brief` summarizes the
+selected set) and is identical on `serve` and MCP via the `brief` request
+field; the `inspect` query subcommands keep their own selection options and
+do not take `--brief`.
 
 ## Semantic query commands (#429)
 
@@ -183,6 +206,16 @@ resolution never guesses.
 * `inspect symbols --only <KIND>` narrows the list to `globalVariable`,
   `playerVariable`, `subroutine`, or `rule` (kebab-case aliases work). It is
   spelled `--only` because `--kind` already selects the input frontend.
+  `--only` predates the selection contract, so used alone it keeps the
+  previous bare list; `--file`/`--max` opt into the selection wrapper.
+* The query subcommands accept the same selection fields the agent
+  operations take (#531): `inspect symbols` adds `--file`/`--max`,
+  `inspect refs` adds `--only` (a reference kind), `--rule`, `--file`, and
+  `--max`, `inspect cfg` adds `--only` (a block kind) and `--max`, and
+  `inspect callgraph` adds `--caller`, `--callee`, and `--max`. With any
+  selection flag the JSON result wraps the list in `{<items>, "selection":
+  {"total", "withheld"}}`; an unknown filter value exits 1 with an
+  `invalid-selection` diagnostic.
 * `inspect cost` accepts the finding-selection options, applied to its
   findings list exactly as on `costEstimate`.
 * `persistentObjects` has no standalone command; `analyze` reports the same

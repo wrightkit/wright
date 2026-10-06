@@ -15,8 +15,8 @@ use wright_driver::config::OutputFormat;
 use wright_driver::edit::RenameResult;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::{
-    AnalyzeResult, CallGraphResult, CfgResult, CheckResult, CompileResult, ConvertResult,
-    CostResult, Envelope, InspectResult, LintResult, RefsResult, SymbolsResult,
+    AnalyzeResult, BriefResult, CallGraphResult, CfgResult, CheckResult, CompileResult,
+    ConvertResult, CostResult, Envelope, InspectResult, LintResult, RefsResult, SymbolsResult,
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
@@ -730,6 +730,62 @@ impl ResultPresentation for InspectResult {
     }
 }
 
+/// The verdict a brief result leads with (#532): the collection counts the
+/// summary reports — severity-grouped finding totals first, then the
+/// remaining collection totals in a stable order.
+fn brief_metadata(value: &serde_json::Value) -> String {
+    let counts = &value["counts"];
+    let mut parts = Vec::new();
+    for key in ["findings", "risks"] {
+        if let Some(group) = counts.get(key) {
+            let total = group["total"].as_u64().unwrap_or(0);
+            let error = group["error"].as_u64().unwrap_or(0);
+            let warning = group["warning"].as_u64().unwrap_or(0);
+            let info = group["info"].as_u64().unwrap_or(0);
+            parts.push(format!(
+                "{total} {key} ({error} error(s), {warning} warning(s), {info} info)"
+            ));
+        }
+    }
+    for key in [
+        "rules",
+        "symbols",
+        "references",
+        "elements",
+        "persistentObjects",
+        "skipped",
+    ] {
+        if let Some(total) = counts.get(key).and_then(serde_json::Value::as_u64) {
+            parts.push(format!("{total} {key}"));
+        }
+    }
+    parts.join(", ")
+}
+
+impl ResultPresentation for BriefResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!("{}; brief", brief_metadata(&self.0)))
+    }
+    fn render_body(&self, ctx: &RenderContext<'_>) {
+        render_brief(self, ctx);
+    }
+    /// The brief's counts carry the reported severities, so the verdict
+    /// color still reflects the highest-severity finding of the full set.
+    fn update_summary_status(&self, status: &mut SummaryStatus) {
+        for key in ["findings", "risks"] {
+            let Some(group) = self.0["counts"].get(key) else {
+                continue;
+            };
+            for severity in ["error", "warning", "info"] {
+                if group[severity].as_u64().unwrap_or(0) > 0 {
+                    *status = (*status).max(SummaryStatus::from_finding_severity(severity));
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// Detail bound for one query answer (#446): a listed or graphed result shows
 /// at most this many entries before the remainder folds into a count, and
 /// `--format json` is always the complete-output path.
@@ -767,15 +823,38 @@ fn symbol_kind_heading(kind: &str) -> &str {
     }
 }
 
+/// The item array of a semantic query payload (#531): the bare array of an
+/// unselected request, or the `<key>` member of a `{<key>: [...], selection:
+/// {...}}` selected result.
+fn query_items<'a>(value: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
+    value
+        .as_array()
+        .or_else(|| value.get(key).and_then(serde_json::Value::as_array))
+        .map_or(&[][..], Vec::as_slice)
+}
+
+/// Report the count a selected query payload withheld, when there is one.
+fn print_query_withheld(value: &serde_json::Value, noun: &str) {
+    if let Some(withheld) = value["selection"]["withheld"]
+        .as_u64()
+        .filter(|withheld| *withheld > 0)
+    {
+        println!("  ... {withheld} {noun} withheld (--max)");
+    }
+}
+
 impl ResultPresentation for SymbolsResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!("{} symbol(s)", array_len(&self.0)))
+        Some(format!(
+            "{} symbol(s)",
+            query_items(&self.0, "symbols").len()
+        ))
     }
     /// One section per symbol kind, in encounter order, so a mixed list stays
     /// scannable; each entry is identity plus primary location on one line,
     /// and a section bounds at `MAX_DETAIL_ENTRIES` (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let symbols = self.0.as_array().map_or(&[][..], Vec::as_slice);
+        let symbols = query_items(&self.0, "symbols");
         println!("\nSymbols");
         if symbols.is_empty() {
             println!("  none");
@@ -807,6 +886,7 @@ impl ResultPresentation for SymbolsResult {
                 "symbol(s)",
             );
         }
+        print_query_withheld(&self.0, "symbol(s)");
     }
 }
 
@@ -860,6 +940,7 @@ impl ResultPresentation for RefsResult {
             references.len().saturating_sub(MAX_DETAIL_ENTRIES),
             "reference(s)",
         );
+        print_query_withheld(&self.0, "reference(s)");
     }
 }
 
@@ -973,18 +1054,19 @@ impl ResultPresentation for CfgResult {
             blocks.len().saturating_sub(MAX_DETAIL_ENTRIES),
             "block(s)",
         );
+        print_query_withheld(&self.0, "block(s)");
     }
 }
 
 impl ResultPresentation for CallGraphResult {
     fn metadata(&self) -> Option<String> {
-        Some(format!("{} edge(s)", array_len(&self.0)))
+        Some(format!("{} edge(s)", query_items(&self.0, "edges").len()))
     }
     /// The shape summary leads (calling rules are the graph's roots, since
     /// edges are rule → subroutine), then notable fan-in/fan-out, then the
     /// bounded edge list (#446).
     fn render_body(&self, _ctx: &RenderContext<'_>) {
-        let edges = self.0.as_array().map_or(&[][..], Vec::as_slice);
+        let edges = query_items(&self.0, "edges");
         println!("\nCall graph");
         if edges.is_empty() {
             println!("  none");
@@ -1044,6 +1126,7 @@ impl ResultPresentation for CallGraphResult {
             edges.len().saturating_sub(MAX_DETAIL_ENTRIES),
             "edge(s)",
         );
+        print_query_withheld(&self.0, "edge(s)");
     }
 }
 
@@ -1641,6 +1724,42 @@ fn render_lint(result: &LintResult, ctx: &RenderContext<'_>) {
     let parts = lint_footer_parts(files.len(), array_len(&result.skipped), ctx);
     if !parts.is_empty() {
         println!("  {}", dim(&parts.join(" · "), ctx.presentation.color));
+    }
+}
+
+/// The `--brief` body (#532): the summary's highest-priority items, then
+/// the expansion hint. Finding items render through the lint finding
+/// style; rule/fact items render as `name — N element(s) --> location`.
+fn render_brief(result: &BriefResult, ctx: &RenderContext<'_>) {
+    let items = result.0["items"].as_array().map_or(&[][..], Vec::as_slice);
+    let heading = if items.iter().any(|item| item["severity"].is_string()) {
+        "Top findings"
+    } else {
+        "Top items"
+    };
+    println!("\n{heading}");
+    if items.is_empty() {
+        println!("  none");
+    }
+    for item in items {
+        if item["severity"].is_string() {
+            render_finding_group(std::slice::from_ref(item), ctx);
+            continue;
+        }
+        let name = item["name"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("<unnamed>");
+        let elements = item["elements"]
+            .as_u64()
+            .map_or(String::new(), |count| format!(", {count} element(s)"));
+        match item.get("span").and_then(inline_location) {
+            Some(location) => println!("  {name}{elements} --> {location}"),
+            None => println!("  {name}{elements}"),
+        }
+    }
+    if let Some(expand) = result.0["expand"].as_str() {
+        println!("  {}", dim(expand, ctx.presentation.color));
     }
 }
 

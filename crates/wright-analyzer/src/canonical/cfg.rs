@@ -4,6 +4,10 @@ use workshop_rs::{Action, Program};
 use super::symbols::RuleId;
 use crate::service::{ErrorInfo, Response};
 
+/// Every `blocks[].kind` value a `cfg` result can carry: selection validates
+/// a `kind` filter against this domain (#531).
+pub const BLOCK_KINDS: &[&str] = &["entry", "exit", "block", "if", "while", "for"];
+
 pub(super) fn is_wait(action: &Action, minimum: bool) -> bool {
     matches!(action, Action::Call { name, args } if name == "wait" && (!minimum || matches!(args.first(), Some(workshop_rs::Value::Number(value)) if *value <= 0.016)))
 }

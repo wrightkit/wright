@@ -384,42 +384,91 @@ impl CompilerSession {
     }
 
     /// `symbols` (#429): the `symbols` operation's payload; `kind` narrows to
-    /// one symbol kind.
-    pub fn symbols(&mut self, kind: Option<String>) -> Envelope<SymbolsResult> {
+    /// one symbol kind and `file`/`max` bound the reported set (#531).
+    pub fn symbols(
+        &mut self,
+        kind: Option<String>,
+        file: Option<String>,
+        max: Option<usize>,
+    ) -> Envelope<SymbolsResult> {
         self.service_query("symbols", move |service| {
-            tool_result(service.handle(&ToolRequest::Symbols { kind })).map(SymbolsResult)
+            tool_result(service.handle(&ToolRequest::Symbols { kind, file, max }))
+                .map(SymbolsResult)
         })
     }
 
     /// `refs` (#429): the `usage` operation's payload — the header counts —
     /// plus the `references` operation's payload under `references`, for one
-    /// symbol addressed by name.
-    pub fn refs(&mut self, name: &str) -> Envelope<RefsResult> {
+    /// symbol addressed by name. The reference selection fields (`kind`,
+    /// `rule`, `file`, `max`; #531) narrow the `references` member and merge
+    /// its `selection` summary at the top level.
+    pub fn refs(
+        &mut self,
+        name: &str,
+        kind: Option<String>,
+        rule: Option<String>,
+        file: Option<String>,
+        max: Option<usize>,
+    ) -> Envelope<RefsResult> {
         let symbol = Address::Name(name.to_string());
+        let rule = rule.map(Address::Name);
         self.service_query("refs", move |service| {
             let references = tool_result(service.handle(&ToolRequest::References {
                 symbol: symbol.clone(),
+                kind,
+                rule,
+                file,
+                max,
             }))?;
             let usage = tool_result(service.handle(&ToolRequest::Usage { symbol }))?;
             let mut result = usage.as_object().cloned().unwrap_or_default();
-            result.insert("references".to_string(), references);
+            match references {
+                serde_json::Value::Object(mut selected) => {
+                    result.insert(
+                        "references".to_string(),
+                        selected.remove("references").unwrap_or_default(),
+                    );
+                    if let Some(selection) = selected.remove("selection") {
+                        result.insert("selection".to_string(), selection);
+                    }
+                }
+                other => {
+                    result.insert("references".to_string(), other);
+                }
+            }
             Ok(RefsResult(serde_json::Value::Object(result)))
         })
     }
 
     /// `cfg` (#429): the `cfg` operation's payload for one rule, addressed by
-    /// name.
-    pub fn cfg(&mut self, rule: &str) -> Envelope<CfgResult> {
+    /// name; `kind`/`max` bound the reported blocks (#531).
+    pub fn cfg(
+        &mut self,
+        rule: &str,
+        kind: Option<String>,
+        max: Option<usize>,
+    ) -> Envelope<CfgResult> {
         let rule = Address::Name(rule.to_string());
         self.service_query("cfg", move |service| {
-            tool_result(service.handle(&ToolRequest::Cfg { rule })).map(CfgResult)
+            tool_result(service.handle(&ToolRequest::Cfg { rule, kind, max })).map(CfgResult)
         })
     }
 
-    /// `callgraph` (#429): the `callGraph` operation's payload.
-    pub fn callgraph(&mut self) -> Envelope<CallGraphResult> {
-        self.service_query("callgraph", |service| {
-            tool_result(service.handle(&ToolRequest::CallGraph)).map(CallGraphResult)
+    /// `callgraph` (#429): the `callGraph` operation's payload; `caller`/
+    /// `callee`/`max` bound the reported edges (#531).
+    pub fn callgraph(
+        &mut self,
+        caller: Option<String>,
+        callee: Option<String>,
+        max: Option<usize>,
+    ) -> Envelope<CallGraphResult> {
+        self.service_query("callgraph", move |service| {
+            tool_result(service.handle(&ToolRequest::CallGraph {
+                caller,
+                callee,
+                max,
+            }))
+            .map(CallGraphResult)
         })
     }
 
