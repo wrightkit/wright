@@ -738,6 +738,7 @@ fn capability_require_refuses_unnegotiated_capabilities() {
         references: true,
         rename: true,
         edit_validation: true,
+        lookup: false,
     };
     assert!(capabilities.require(Capability::Check).is_ok());
     let error = capabilities
@@ -783,10 +784,13 @@ fn capability_ids_and_methods_match_the_spec_table() {
     assert_eq!(Capability::References.method(), "lpp/references");
     assert_eq!(Capability::Rename.method(), "lpp/rename");
     assert_eq!(Capability::EditValidation.method(), "lpp/validateEdits");
+    assert_eq!(Capability::Lookup.as_str(), "lookup");
+    assert_eq!(Capability::Lookup.method(), "lpp/lookup");
     assert_eq!(
         Capability::parse("editValidation"),
         Some(Capability::EditValidation)
     );
+    assert_eq!(Capability::parse("lookup"), Some(Capability::Lookup));
     assert_eq!(
         Capability::parse("projectLoading"),
         Some(Capability::ProjectLoading)

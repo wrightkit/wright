@@ -311,6 +311,25 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
     ordered.sort_by_key(|diagnostic| severity_rank(diagnostic.severity));
     for diagnostic in ordered {
         render_diagnostic(diagnostic, pres.color);
+        // ADR-0021 decision 6: text `check`/`compile` points an agent at
+        // `wright lookup` after a rejected-name diagnostic. Owner codes are
+        // namespaced (`workshop.unknown-value.futurevaluething`), so any
+        // code segment carrying the `unknown-` kind qualifies. The
+        // structured result is unchanged; the pointer lives in text only.
+        if matches!(envelope.command.as_str(), "check" | "compile")
+            && diagnostic
+                .code
+                .split('.')
+                .any(|segment| segment.starts_with("unknown-"))
+        {
+            eprintln!(
+                "  {}",
+                dim(
+                    "hint: run 'wright lookup' with the rejected name to find its spelling and signature",
+                    pres.color
+                )
+            );
+        }
     }
     if let Some(selection) = &envelope.selection {
         if selection.withheld > 0 {

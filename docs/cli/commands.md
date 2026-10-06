@@ -42,6 +42,7 @@ result.
 | `wright inspect callgraph [INPUT]` | Subroutine call graph (caller rules → callee subroutines) | call edges |
 | `wright inspect cost [INPUT]` | Exact generated-resource counts plus static findings | resource counts and findings |
 | `wright rename <NAME> <NEW_NAME> [INPUT]` | Semantically rename a Workshop variable or subroutine | per-source diff of the validated edits; `--write` applies them |
+| `wright lookup [QUERY]` | Resolve a Workshop or OverPy display name, near spelling, or guess to the owner-accepted spelling and signature (#529); takes no input | one line per entry — signature or spelling, kind, identity |
 | `wright serve [INPUT]` | Serve `wright-agent/v1` over stdio, JSON-RPC 2.0, or MCP | one structured response per request |
 | `wright completion <SHELL>` | Generate static completion script for bash, zsh, fish, or powershell | the generated completion script |
 | `wright completion install [SHELL]` | Install generated completion into standard user-local directory | installation progress and guidance |
@@ -54,8 +55,9 @@ authoritative workspace implementation version and is also reported inside
 every `wright-result/v1` envelope. `wright --help` is the canonical help
 surface.
 
-All commands accept a file path, a project directory, or `-` for stdin. An
-omitted input uses the current directory. Input kind is detected from the
+Commands that take input accept a file path, a project directory, or `-` for
+stdin (`wright lookup`, `wright completion`, `wright update`, and `wright
+agent install` take none). An omitted input uses the current directory. Input kind is detected from the
 extension (`.opy`, `.ostw`/`.del`, `.json`, `.txt`/`.ws`) or, for a directory,
 from the source files it contains; mixed source kinds fail with structured
 ambiguity guidance. Stdin content is auto-detected (protocol JSON starts with
@@ -224,6 +226,33 @@ references no longer bind to the renamed symbol, refuses with
 * Other source kinds are provider surfaces: OPY input refuses with
   `edit-requires-provider` naming `providerSemanticRename`, and kinds without
   a shipped provider keep their `source-provider-unavailable` refusal.
+
+## `wright lookup` — owner name and signature lookup (#529)
+
+`wright lookup [QUERY]` runs the agent contract's `lookup` operation
+(ADR-0021): it resolves a display name, a near spelling, or a guess to the
+language owner's accepted spelling and signature, answering from language
+vocabulary alone — it takes no `INPUT` and never loads or requires a
+project. Agents should use it before writing in an unfamiliar language and
+when `check`/`compile` rejects a name; text output of those commands
+prints a one-line hint after each `unknown-*` diagnostic pointing here
+(the structured result is unchanged).
+
+* `--language workshop|opy` (default `workshop`) selects the owner:
+  Workshop answers from the in-process `workshop-rs` catalog; OverPy
+  answers through the configured `opy-rs` provider's LPP lookup
+  capability, and reports an explicit `unavailable` payload — exit 3 —
+  when the provider does not negotiate it. Wright never guesses locally.
+* `--kind action|value|event|enumMember|setting` narrows the entry kinds.
+* `--within <IDENTITY>` lists what an identity contains: an enum domain's
+  members, a callable's parameters, or a settings path's child segments.
+  An unmatched scope identity refuses with `lookup.unknownWithin`.
+* `--locale <LOCALE>` selects the Workshop display-name locale;
+  `--limit <N>` bounds the entry count (default 3, maximum 10).
+* Text mode prints one line per entry — the rendered signature for a
+  callable, else the accepted spelling — with its kind and owner identity.
+  `-f json` prints the same `result` payload `serve` returns
+  (`language`, `owner`, `entries[]`, or `unavailable`).
 
 ## `wright convert` and the reconstruction surface (#126)
 

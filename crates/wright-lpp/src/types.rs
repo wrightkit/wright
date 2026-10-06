@@ -188,6 +188,39 @@ pub struct RenameResult {
     pub edits: Vec<DocumentEdits>,
 }
 
+/// `lpp/lookup` params (LPP 1.5 `name-lookup.md` §21.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LookupParams {
+    pub language_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub within: Option<LookupWithin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+}
+
+/// One `within` selector: `{ "kind": "...", "value": "..." }` — the closed
+/// kind set is `callable`, `enum`, `settings` (§21.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LookupWithin {
+    pub kind: String,
+    pub value: String,
+}
+
+/// `lpp/lookup` result (§21.2): the provider's ranked entries in
+/// provider-defined shapes. The client stays language-neutral here; entry
+/// fields are facts owned by the provider.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LookupResult {
+    pub entries: Vec<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidateEditsResult {
     pub valid: bool,
@@ -213,10 +246,11 @@ pub enum Capability {
     References,
     Rename,
     EditValidation,
+    Lookup,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 9] = [
+    pub const ALL: [Capability; 10] = [
         Capability::Check,
         Capability::Compile,
         Capability::ProjectLoading,
@@ -226,6 +260,7 @@ impl Capability {
         Capability::References,
         Capability::Rename,
         Capability::EditValidation,
+        Capability::Lookup,
     ];
 
     fn metadata(self) -> (&'static str, &'static str) {
@@ -239,6 +274,7 @@ impl Capability {
             Self::References => ("references", "lpp/references"),
             Self::Rename => ("rename", "lpp/rename"),
             Self::EditValidation => ("editValidation", "lpp/validateEdits"),
+            Self::Lookup => ("lookup", "lpp/lookup"),
         }
     }
 
@@ -270,6 +306,9 @@ pub struct Capabilities {
     pub rename: bool,
     #[serde(rename = "editValidation")]
     pub edit_validation: bool,
+    /// `lpp/lookup` (LPP 1.5). Absent in pre-1.5 sessions.
+    #[serde(default)]
+    pub lookup: bool,
 }
 
 impl Capabilities {
@@ -284,6 +323,7 @@ impl Capabilities {
             Capability::References => self.references,
             Capability::Rename => self.rename,
             Capability::EditValidation => self.edit_validation,
+            Capability::Lookup => self.lookup,
         }
     }
 

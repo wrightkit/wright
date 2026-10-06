@@ -206,6 +206,33 @@ pub enum ToolRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_root: Option<String>,
     },
+    /// Resolve a free-text name guess — a display name, a near spelling, or
+    /// a guess — to the owner's accepted vocabulary (ADR-0021, #529):
+    /// spellings, enum domains and members, settings keys, and
+    /// Wright-rendered callable signatures. Answers from the language
+    /// vocabulary alone: the loaded program is never required, consulted,
+    /// or triggered to load.
+    Lookup {
+        /// `workshop` or `opy`, the ids `capabilities.languages` reports.
+        language: String,
+        /// Free text: a display name, a near spelling, or a guess.
+        #[serde(default)]
+        query: Option<String>,
+        /// Entry kind filter: `action`, `value`, `event`, `enumMember`, or
+        /// `setting`.
+        #[serde(default)]
+        kind: Option<String>,
+        /// The identity of an enum domain, a callable, or a settings path
+        /// prefix; the result lists its members, parameters, or children.
+        #[serde(default)]
+        within: Option<String>,
+        /// The locale used to read Workshop display names.
+        #[serde(default)]
+        locale: Option<String>,
+        /// Maximum entries: default 3, maximum 10.
+        #[serde(default)]
+        limit: Option<usize>,
+    },
 }
 
 /// The capability/version contract of the service.
@@ -339,6 +366,7 @@ impl<'a> ToolService<'a> {
                 "semanticRename",
                 "providerSemanticRename",
                 "providerValidateEdit",
+                "lookup",
             ]
             .into_iter()
             .map(str::to_string)
@@ -385,6 +413,7 @@ impl<'a> ToolService<'a> {
                 | ToolRequest::TargetMetadata
                 | ToolRequest::ProviderSemanticRename { .. }
                 | ToolRequest::ProviderValidateEdit { .. }
+                | ToolRequest::Lookup { .. }
         )
     }
 
@@ -646,6 +675,22 @@ impl<'a> ToolService<'a> {
                     .expect("serializes"),
                 )
             }
+            ToolRequest::Lookup {
+                language,
+                query,
+                kind,
+                within,
+                locale,
+                limit,
+            } => crate::lookup::lookup(
+                self.session,
+                language,
+                query.as_deref(),
+                kind.as_deref(),
+                within.as_deref(),
+                locale.as_deref(),
+                *limit,
+            ),
         }
     }
 
@@ -1007,6 +1052,7 @@ fn request_label(request: &ToolRequest) -> &'static str {
         ToolRequest::SemanticRename { .. } => "req::semanticRename",
         ToolRequest::ProviderSemanticRename { .. } => "req::providerSemanticRename",
         ToolRequest::ProviderValidateEdit { .. } => "req::providerValidateEdit",
+        ToolRequest::Lookup { .. } => "req::lookup",
     }
 }
 

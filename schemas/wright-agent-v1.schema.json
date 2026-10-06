@@ -26,7 +26,8 @@
         { "$ref": "#/$defs/ValidateEditTransactionRequest" },
         { "$ref": "#/$defs/SemanticRenameRequest" },
         { "$ref": "#/$defs/ProviderSemanticRenameRequest" },
-        { "$ref": "#/$defs/ProviderValidateEditRequest" }
+        { "$ref": "#/$defs/ProviderValidateEditRequest" },
+        { "$ref": "#/$defs/LookupRequest" }
       ]
     },
     "ToolResponse": {
@@ -82,7 +83,8 @@
         { "$ref": "#/$defs/ValidateEditTransactionResult" },
         { "$ref": "#/$defs/SemanticRenameResult" },
         { "$ref": "#/$defs/ProviderSemanticRenameResult" },
-        { "$ref": "#/$defs/ProviderValidateEditResult" }
+        { "$ref": "#/$defs/ProviderValidateEditResult" },
+        { "$ref": "#/$defs/LookupResult" }
       ]
     },
     "WorkflowEnvelope": {
@@ -534,6 +536,44 @@
     "SemanticRenameResult": { "$ref": "#/$defs/SemanticRenamePayload" },
     "ProviderSemanticRenameResult": { "$ref": "#/$defs/ProviderMutationPayload" },
     "ProviderValidateEditResult": { "$ref": "#/$defs/ProviderMutationPayload" },
+    "LookupEntry": {
+      "type": "object",
+      "required": ["identity", "kind", "spelling", "displayName"],
+      "properties": {
+        "identity": { "type": "string" },
+        "kind": { "type": "string" },
+        "spelling": { "type": "string" },
+        "displayName": { "type": "string" },
+        "signature": { "type": "string" },
+        "callable": { "type": "object" },
+        "enum": { "type": "object" },
+        "parameter": { "type": "object" },
+        "setting": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "LookupResult": {
+      "type": "object",
+      "required": ["language", "owner", "entries"],
+      "properties": {
+        "language": { "type": "string" },
+        "owner": { "type": "string" },
+        "entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LookupEntry" }
+        },
+        "unavailable": {
+          "type": "object",
+          "required": ["capability", "message"],
+          "properties": {
+            "capability": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "CompilePayload": {
       "type": "object",
       "properties": {
@@ -854,6 +894,22 @@
         "project_root": { "type": ["string", "null"] }
       },
       "required": ["op", "language_id", "documents", "transaction", "sources"],
+      "additionalProperties": false
+    },
+    "LookupRequest": {
+      "type": "object",
+      "properties": {
+        "op": { "const": "lookup" },
+        "language": { "enum": ["workshop", "opy"] },
+        "query": { "type": ["string", "null"] },
+        "kind": {
+          "enum": ["action", "value", "event", "enumMember", "setting", null]
+        },
+        "within": { "type": ["string", "null"] },
+        "locale": { "type": ["string", "null"] },
+        "limit": { "type": ["integer", "null"], "minimum": 1, "maximum": 10 }
+      },
+      "required": ["op", "language"],
       "additionalProperties": false
     }
   },

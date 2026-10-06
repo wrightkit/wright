@@ -1353,7 +1353,7 @@ fn version_and_help_are_documented_contract_surfaces() {
     assert!(output.status.success());
     let help = String::from_utf8_lossy(&output.stdout);
     for command in [
-        "compile", "convert", "check", "analyze", "lint", "inspect", "agent",
+        "compile", "convert", "check", "analyze", "lint", "inspect", "agent", "lookup",
     ] {
         assert!(help.contains(command), "help documents {command}");
     }
@@ -2575,4 +2575,134 @@ fn agent_install_mcp_configures_a_project_whose_server_answers_mcp() {
     assert_eq!(install(&["--no-guide"]).status.code(), Some(2));
     let _ = std::fs::remove_dir_all(&project);
     let _ = std::fs::remove_dir_all(&elsewhere);
+}
+
+// ── `wright lookup` (#529) ─────────────────────────────────────────────────
+// The command is the agent contract's `lookup` operation on argv: vocabulary
+// answers need no input and never load a project.
+
+#[test]
+fn lookup_help_carries_the_agent_guidance() {
+    let output = run(&["lookup", "--help"]);
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        help.contains("unfamiliar language") && help.contains("when a name is rejected"),
+        "help tells agents when to reach for lookup: {help}"
+    );
+    for option in ["--language", "--kind", "--within", "--locale", "--limit"] {
+        assert!(help.contains(option), "lookup help documents {option}");
+    }
+}
+
+#[test]
+fn lookup_resolves_a_display_name_to_a_rendered_signature() {
+    let output = run(&["lookup", "create hud text"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[action]"), "{stdout}");
+    assert!(stdout.contains("createHudText"), "{stdout}");
+    assert!(
+        stdout.contains("Create HUD Text("),
+        "a callable renders its signature: {stdout}"
+    );
+}
+
+#[test]
+fn lookup_json_matches_the_agent_result() {
+    let output = run(&["lookup", "wait", "-f", "json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty(), "JSON mode: no stderr");
+    let result = parse_json(&output.stdout);
+    assert_eq!(result["language"], "workshop");
+    assert_eq!(result["owner"], "workshop-rs");
+    let entries = result["entries"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["signature"] == "Wait(time: Any, waitBehavior=Ignore Condition)"),
+        "the Wait signature renders from catalog facts: {result}"
+    );
+}
+
+#[test]
+fn lookup_within_lists_an_enums_members() {
+    let output = run(&["lookup", "--within", "Team", "--kind", "enum-member"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("All Teams [enumMember]"), "{stdout}");
+    assert!(stdout.contains("Team 1 [enumMember]"), "{stdout}");
+}
+
+#[test]
+fn lookup_within_rejects_an_unknown_scope() {
+    let output = run(&["lookup", "--within", "nope"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("lookup.unknownWithin"), "{stderr}");
+}
+
+#[test]
+fn lookup_names_opy_rs_when_the_provider_cannot_answer() {
+    // A provider that cannot run never produces a Wright-side guess: the
+    // result is the explicit `unavailable` payload naming the owner.
+    let output = run(&[
+        "lookup",
+        "--language",
+        "opy",
+        "--opy-provider",
+        "/nonexistent",
+        "wait",
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    let result = parse_json(&output.stdout);
+    assert_eq!(result["owner"], "opy-rs");
+    assert_eq!(result["entries"], serde_json::json!([]));
+    assert_eq!(result["unavailable"]["capability"], "lookup");
+}
+
+#[test]
+fn check_text_points_unknown_names_at_lookup() {
+    // ADR-0021 decision 6: a rejected name in text output ends with a
+    // one-line pointer to the lookup surface.
+    let path = temp_file("lookup-hint.txt", MIXED_CHECK_SOURCE);
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "plain",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("hint: run 'wright lookup'"),
+        "the unknown-value diagnostic carries the pointer: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn check_and_compile_json_keep_their_envelope_after_unknown_names() {
+    // The hint lives only in text presentation: JSON mode's envelope and
+    // stderr are untouched for the same rejected-name input.
+    let path = temp_file("lookup-hint-json.txt", MIXED_CHECK_SOURCE);
+    for command in ["check", "compile"] {
+        let output = run(&[command, path.to_str().unwrap(), "-f", "json"]);
+        assert_eq!(output.status.code(), Some(1), "{command}: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("wright lookup"),
+            "{command} JSON mode carries no hint: {stderr}"
+        );
+        let envelope = parse_json(&output.stdout);
+        assert!(
+            !envelope.to_string().contains("wright lookup"),
+            "{command} payload is unchanged: {envelope}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

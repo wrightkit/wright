@@ -23,8 +23,9 @@ reserved for requests, so `-` is not a valid source input. The server binds
 the configured project and processes requests until standard input closes.
 Starting does not require the project to load successfully (#512): a project
 that is missing, unreadable, or malformed is retried by the next
-program-reading request, while `capabilities`, `targetMetadata`, and the
-`provider*` operations answer regardless. The default transport is one JSON
+program-reading request, while `capabilities`, `targetMetadata`, `lookup`,
+and the `provider*` operations answer regardless. The default transport is
+one JSON
 request per line on stdio:
 
 ```json
@@ -84,6 +85,7 @@ ADR-0020). The adapter speaks newline-delimited JSON-RPC 2.0 and implements
 | `validateEditTransaction` | `wright_validate_edit_transaction` |
 | `providerSemanticRename` | `wright_provider_semantic_rename` |
 | `providerValidateEdit` | `wright_provider_validate_edit` |
+| `lookup` | `wright_lookup` |
 
 `tools/list` contains a tool only when its operation is in this set and
 advertised by `capabilities.operations`. `initialize`, `tools/list`, and the
@@ -137,14 +139,15 @@ the successful `result` payload.
 | `semanticRename` | `target`, optional `sources` | Validated rename transaction or structured refusal |
 | `providerSemanticRename` | `language_id`, `documents`, `position_document_uri`, `position`, `new_name`, optional `project_root`, `sources` | Provider-resolved rename transaction or structured refusal |
 | `providerValidateEdit` | `language_id`, `documents`, `transaction`, `sources`, optional `project_root` | Provider-validated transaction or structured refusal |
+| `lookup` | required `language`; optional `query`, `kind`, `within`, `locale`, `limit` | Owner vocabulary entries with accepted spellings and rendered signatures, or an explicit `unavailable` payload naming the owner |
 
 ### Freshness and id validity (#471, #512)
 
 The service may exist without a program snapshot: construction over a
 project that cannot load succeeds, and `capabilities`, `targetMetadata`
-(the static catalog), and `provider*` operations (caller-supplied
-documents) answer without consulting the project at all — they neither
-require nor trigger its load.
+(the static catalog), `lookup` (the language vocabulary), and `provider*`
+operations (caller-supplied documents) answer without consulting the
+project at all — they neither require nor trigger its load.
 
 A request that consults the program needs a valid current snapshot at
 request time. When none exists, the request performs the deferred initial
@@ -283,6 +286,48 @@ owns the source semantics and Wright orchestrates the transaction:
 on the CLI: it prints the validated diff by default and applies it
 atomically with `--write`, refusing `edit-stale-source` when the file
 changed since validation.
+
+### Name and signature lookup (#529, ADR-0021)
+
+`lookup` resolves a free-text query — a display name, a near spelling, or a
+guess — against the language owner's vocabulary, so an agent can learn the
+accepted spelling and signature of a Workshop or OverPy name without
+external documentation, source inspection, or `wright convert`. The
+request's `language` selects the owner (`workshop` or `opy`, the ids
+`capabilities.languages` reports); the remaining fields narrow the answer:
+
+* `query`: the free text to resolve.
+* `kind`: `action`, `value`, `event`, `enumMember`, or `setting`.
+* `within`: the identity of an enum domain, a callable, or a settings path
+  prefix. The result then lists its members, parameters, or child segments
+  — this is how a caller enumerates an enum's accepted member spellings or
+  a callable's parameters.
+* `locale`: the Workshop display-name locale (session configuration, then
+  the catalog's primary locale when omitted).
+* `limit`: default 3, maximum 10.
+
+Each entry carries its owner `identity`, `kind`, accepted `spelling`, and
+`displayName`, plus the owner fact that describes it (`callable`, `enum`,
+`parameter`, or `setting`). Callables additionally carry `signature`, a
+human-readable call shape Wright renders from the owner's parameter facts:
+required parameters name their type, optional parameters show `name?` or
+`name=default`, and an enum domain lists its members inline (a domain
+above the member bound renders as `Domain(count members)`).
+
+Workshop answers come from the `workshop-rs` catalog in process. OverPy
+answers come from the configured `opy-rs` provider's LPP lookup
+capability; when the provider does not negotiate it, the result is an
+explicit `unavailable` payload naming `opy-rs` — never a Wright-side
+textual guess. An unmatched scope identity refuses with
+`lookup.unknownWithin`; an unknown `language` or `kind` is a usage error.
+The operation reads vocabulary alone, so it works over a session whose
+project cannot load.
+
+`wright lookup [QUERY]` exposes the same request on the CLI
+(`--language`, `--kind`, `--within`, `--locale`, `--limit`): text mode
+prints one signature or spelling per line, and `-f json` prints this
+result payload. Text `check`/`compile` output points at the command after
+an `unknown-*` diagnostic; structured payloads are unchanged.
 
 ## Results, diagnostics, and errors
 

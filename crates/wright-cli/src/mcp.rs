@@ -113,6 +113,12 @@ const TOOLS: &[ToolSpec] = &[
         drop_fields: &[],
         description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. `documents` and `sources` are supplied by the caller.",
     },
+    ToolSpec {
+        op: "lookup",
+        request_def: "LookupRequest",
+        drop_fields: &[],
+        description: "Resolve a display name, near spelling, or guess to the language owner's accepted spelling and signature. Use it before writing in an unfamiliar language and when a name is rejected.",
+    },
 ];
 
 /// A tool definition as listed by `tools/list`.
@@ -373,6 +379,7 @@ mod tests {
         assert_eq!(names[9], "wright_validate_edit_transaction");
         assert_eq!(names[10], "wright_provider_semantic_rename");
         assert_eq!(names[11], "wright_provider_validate_edit");
+        assert_eq!(names[12], "wright_lookup");
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
@@ -395,6 +402,11 @@ mod tests {
         let input = input_schema(defs, project);
         assert!(input["required"].is_null());
         assert_eq!(input["properties"], json!({}));
+        let lookup = TOOLS.iter().find(|spec| spec.op == "lookup").unwrap();
+        let input = input_schema(defs, lookup);
+        assert_eq!(input["required"], json!(["language"]));
+        assert!(input["properties"].get("op").is_none());
+        assert!(input["properties"].get("within").is_some());
     }
 
     #[test]

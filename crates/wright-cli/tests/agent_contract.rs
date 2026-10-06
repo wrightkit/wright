@@ -31,6 +31,7 @@ const EXPECTED_V1_OPERATIONS: &[&str] = &[
     "semanticRename",
     "providerSemanticRename",
     "providerValidateEdit",
+    "lookup",
 ];
 
 fn workspace_root() -> PathBuf {
@@ -124,6 +125,15 @@ fn requests() -> Vec<Value> {
             }]},
             "sources":{"file:///project.opy":"rule(\"Example\") {}"},
             "project_root":null
+        }),
+        json!({
+            "op":"lookup",
+            "language":"workshop",
+            "query":"wait",
+            "kind":null,
+            "within":null,
+            "locale":null,
+            "limit":null
         }),
     ]
 }
@@ -344,6 +354,7 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         ("semanticRename", "SemanticRenameResult"),
         ("providerSemanticRename", "ProviderSemanticRenameResult"),
         ("providerValidateEdit", "ProviderValidateEditResult"),
+        ("lookup", "LookupResult"),
     ];
     let live_responses = service_responses();
     assert_eq!(live_responses.len(), operation_results.len());
