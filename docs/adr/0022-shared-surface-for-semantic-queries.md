@@ -20,7 +20,7 @@ Concrete case that motivated it: `smallMessag` reported `unknown action` with no
 
 ## Superseded record
 
-The same comment recorded "No MCP transport in 1.0". That is superseded by [ADR-0020](0020-native-agent-tool-adapter.md) (Accepted 2026-10-01). The revisit conditions it named, agent failures that are discovery failures unfixable through help and error text, or a capability that needs cross-call state, are the conditions ADR-0020 and ADR-0021 address. The shared-surface rule above still holds for MCP: it adapts `ToolService` and does not define a second tier with different results or defaults.
+The same comment recorded "No MCP transport in 1.0". That record is superseded by [ADR-0020](0020-native-agent-tool-adapter.md). An MCP adapter stays under the rule above: it adapts `ToolService` and does not define a second tier with different results or defaults.
 
 ## Consequences
 
