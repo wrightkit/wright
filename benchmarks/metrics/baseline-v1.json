@@ -1,0 +1,2178 @@
+{
+  "contract": "wright-agent-metrics/v1",
+  "corpusVersion": "v1",
+  "opyProvider": "0.3.0",
+  "projects": {
+    "bastion": {
+      "kind": "opy",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 327239,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 82,
+            "facts.risks": 19,
+            "facts.rules": 307,
+            "facts.symbols": 503,
+            "program.files": 0,
+            "program.globalVariables": 72,
+            "program.playerVariables": 99,
+            "program.rules": 307,
+            "program.subroutines": 25
+          },
+          "latencyMs": 184.1,
+          "tokens": 81809.8
+        },
+        "agent:callGraph": {
+          "bytes": 9466,
+          "counts": {
+            "items": 121
+          },
+          "latencyMs": 21.1,
+          "tokens": 2366.5
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.0,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 227,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 20.8,
+          "tokens": 56.8
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 22.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 441484,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 418243
+          },
+          "latencyMs": 175.4,
+          "tokens": 110371.0
+        },
+        "agent:costEstimate": {
+          "bytes": 3919,
+          "counts": {
+            "finding.expensive-loop-check": 3,
+            "finding.ongoing-condition-hot-path": 12,
+            "finding.repeated-value": 4,
+            "items": 19,
+            "programActions": 3297,
+            "programRules": 307,
+            "waitActions": 304
+          },
+          "latencyMs": 102.3,
+          "tokens": 979.8
+        },
+        "agent:findings": {
+          "bytes": 5696,
+          "counts": {
+            "items": 19
+          },
+          "latencyMs": 20.8,
+          "tokens": 1424.0
+        },
+        "agent:inspect": {
+          "bytes": 442812,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 0,
+            "program.findings": 19,
+            "program.globalVariables": 72,
+            "program.playerVariables": 99,
+            "program.rules": 307,
+            "program.subroutines": 25,
+            "references": 503,
+            "rules": 307,
+            "symbols": 503
+          },
+          "latencyMs": 56.5,
+          "tokens": 110703.0
+        },
+        "agent:lint": {
+          "bytes": 6608,
+          "counts": {
+            "finding.expensive-loop-check": 3,
+            "finding.ongoing-condition-hot-path": 12,
+            "finding.repeated-value": 4,
+            "items": 19
+          },
+          "latencyMs": 21.0,
+          "tokens": 1652.0
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 20.7,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 26923,
+          "counts": {
+            "item.effect": 42,
+            "item.hud-text": 35,
+            "item.in-world-text": 5,
+            "items": 82
+          },
+          "latencyMs": 25.7,
+          "tokens": 6730.8
+        },
+        "agent:project": {
+          "bytes": 247,
+          "counts": {
+            "files": 197,
+            "findings": 19,
+            "globalVariables": 72,
+            "playerVariables": 99,
+            "rules": 307,
+            "subroutines": 25,
+            "symbols": 503
+          },
+          "latencyMs": 243.6,
+          "tokens": 61.8
+        },
+        "agent:references": {
+          "bytes": 4587,
+          "counts": {
+            "items": 70,
+            "reference.declaration": 1,
+            "reference.read": 22,
+            "reference.write": 47
+          },
+          "latencyMs": 21.9,
+          "tokens": 1146.8
+        },
+        "agent:rules": {
+          "bytes": 38595,
+          "counts": {
+            "items": 307
+          },
+          "latencyMs": 26.1,
+          "tokens": 9648.8
+        },
+        "agent:symbols": {
+          "bytes": 84666,
+          "counts": {
+            "items": 503,
+            "symbol.globalVariable": 72,
+            "symbol.playerVariable": 99,
+            "symbol.rule": 307,
+            "symbol.subroutine": 25
+          },
+          "latencyMs": 36.9,
+          "tokens": 21166.5
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 114,
+          "counts": {
+            "calls": 0,
+            "reads": 22,
+            "rules": 47,
+            "writes": 47
+          },
+          "latencyMs": 21.7,
+          "tokens": 28.5
+        },
+        "cli:analyze": {
+          "bytes": 765372,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 82,
+            "facts.risks": 19,
+            "facts.rules": 307,
+            "facts.symbols": 503,
+            "program.files": 0,
+            "program.globalVariables": 72,
+            "program.playerVariables": 99,
+            "program.rules": 307,
+            "program.subroutines": 25
+          },
+          "latencyMs": 6205.5,
+          "tokens": 191343.0
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 2468.8,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 441568,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 418243
+          },
+          "latencyMs": 5908.8,
+          "tokens": 110392.0
+        },
+        "cli:inspect": {
+          "bytes": 535,
+          "counts": {
+            "diagnostics": 1
+          },
+          "latencyMs": 251.6,
+          "tokens": 133.8
+        },
+        "cli:lint": {
+          "bytes": 10118,
+          "counts": {
+            "diagnostics": 0,
+            "lint.finding.expensive-loop-check": 3,
+            "lint.finding.ongoing-condition-hot-path": 12,
+            "lint.finding.repeated-value": 4,
+            "lint.items": 19
+          },
+          "latencyMs": 5921.7,
+          "tokens": 2529.5
+        }
+      },
+      "status": "ok"
+    },
+    "overwatch-ai-pve": {
+      "kind": "opy",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 421138,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 8,
+            "facts.risks": 55,
+            "facts.rules": 369,
+            "facts.symbols": 576,
+            "program.files": 0,
+            "program.globalVariables": 65,
+            "program.playerVariables": 72,
+            "program.rules": 369,
+            "program.subroutines": 70
+          },
+          "latencyMs": 186.5,
+          "tokens": 105284.5
+        },
+        "agent:callGraph": {
+          "bytes": 8627,
+          "counts": {
+            "items": 95
+          },
+          "latencyMs": 25.1,
+          "tokens": 2156.8
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.1,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 231,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 25.1,
+          "tokens": 57.8
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 24.5,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 365870,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 341405
+          },
+          "latencyMs": 320.3,
+          "tokens": 91467.5
+        },
+        "agent:costEstimate": {
+          "bytes": 13068,
+          "counts": {
+            "finding.ongoing-condition-hot-path": 55,
+            "items": 55,
+            "programActions": 1978,
+            "programRules": 369,
+            "waitActions": 233
+          },
+          "latencyMs": 260.3,
+          "tokens": 3267.0
+        },
+        "agent:findings": {
+          "bytes": 17797,
+          "counts": {
+            "items": 55
+          },
+          "latencyMs": 24.8,
+          "tokens": 4449.2
+        },
+        "agent:inspect": {
+          "bytes": 314414,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 0,
+            "program.findings": 55,
+            "program.globalVariables": 65,
+            "program.playerVariables": 72,
+            "program.rules": 369,
+            "program.subroutines": 70,
+            "references": 576,
+            "rules": 369,
+            "symbols": 576
+          },
+          "latencyMs": 53.1,
+          "tokens": 78603.5
+        },
+        "agent:lint": {
+          "bytes": 18709,
+          "counts": {
+            "finding.ongoing-condition-hot-path": 55,
+            "items": 55
+          },
+          "latencyMs": 25.1,
+          "tokens": 4677.2
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 24.3,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 2713,
+          "counts": {
+            "item.effect": 1,
+            "item.hud-text": 7,
+            "items": 8
+          },
+          "latencyMs": 25.0,
+          "tokens": 678.2
+        },
+        "agent:project": {
+          "bytes": 247,
+          "counts": {
+            "files": 313,
+            "findings": 55,
+            "globalVariables": 65,
+            "playerVariables": 72,
+            "rules": 369,
+            "subroutines": 70,
+            "symbols": 576
+          },
+          "latencyMs": 176.3,
+          "tokens": 61.8
+        },
+        "agent:references": {
+          "bytes": 414,
+          "counts": {
+            "items": 3,
+            "reference.declaration": 1,
+            "reference.read": 1,
+            "reference.write": 1
+          },
+          "latencyMs": 25.0,
+          "tokens": 103.5
+        },
+        "agent:rules": {
+          "bytes": 46966,
+          "counts": {
+            "items": 369
+          },
+          "latencyMs": 30.8,
+          "tokens": 11741.5
+        },
+        "agent:symbols": {
+          "bytes": 101201,
+          "counts": {
+            "items": 576,
+            "symbol.globalVariable": 65,
+            "symbol.playerVariable": 72,
+            "symbol.rule": 369,
+            "symbol.subroutine": 70
+          },
+          "latencyMs": 45.0,
+          "tokens": 25300.2
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.7,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 100,
+          "counts": {
+            "calls": 0,
+            "reads": 1,
+            "rules": 2,
+            "writes": 1
+          },
+          "latencyMs": 25.4,
+          "tokens": 25.0
+        },
+        "cli:analyze": {
+          "bytes": 1008029,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 8,
+            "facts.risks": 55,
+            "facts.rules": 369,
+            "facts.symbols": 576,
+            "program.files": 0,
+            "program.globalVariables": 65,
+            "program.playerVariables": 72,
+            "program.rules": 369,
+            "program.subroutines": 70
+          },
+          "latencyMs": 14025.6,
+          "tokens": 252007.2
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 4855.7,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 365954,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 341405
+          },
+          "latencyMs": 13800.1,
+          "tokens": 91488.5
+        },
+        "cli:inspect": {
+          "bytes": 535,
+          "counts": {
+            "diagnostics": 1
+          },
+          "latencyMs": 256.0,
+          "tokens": 133.8
+        },
+        "cli:lint": {
+          "bytes": 25423,
+          "counts": {
+            "diagnostics": 0,
+            "lint.finding.ongoing-condition-hot-path": 55,
+            "lint.items": 55
+          },
+          "latencyMs": 13864.0,
+          "tokens": 6355.8
+        }
+      },
+      "status": "ok"
+    },
+    "seed-modify-opy-project": {
+      "kind": "opy",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 4231,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 1,
+            "facts.risks": 0,
+            "facts.rules": 5,
+            "facts.symbols": 8,
+            "program.files": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 2,
+            "program.rules": 5,
+            "program.subroutines": 0
+          },
+          "latencyMs": 1.3,
+          "tokens": 1057.8
+        },
+        "agent:callGraph": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.1,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 227,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 56.8
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 2021,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1563
+          },
+          "latencyMs": 0.5,
+          "tokens": 505.2
+        },
+        "agent:costEstimate": {
+          "bytes": 293,
+          "counts": {
+            "items": 0,
+            "programActions": 7,
+            "programRules": 5,
+            "waitActions": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 73.2
+        },
+        "agent:findings": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:inspect": {
+          "bytes": 3534,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 0,
+            "program.findings": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 2,
+            "program.rules": 5,
+            "program.subroutines": 0,
+            "references": 8,
+            "rules": 5,
+            "symbols": 8
+          },
+          "latencyMs": 0.4,
+          "tokens": 883.5
+        },
+        "agent:lint": {
+          "bytes": 925,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 231.2
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 0.3,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 326,
+          "counts": {
+            "item.hud-text": 1,
+            "items": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 81.5
+        },
+        "agent:project": {
+          "bytes": 237,
+          "counts": {
+            "files": 1,
+            "findings": 0,
+            "globalVariables": 1,
+            "playerVariables": 2,
+            "rules": 5,
+            "subroutines": 0,
+            "symbols": 8
+          },
+          "latencyMs": 0.2,
+          "tokens": 59.2
+        },
+        "agent:references": {
+          "bytes": 288,
+          "counts": {
+            "items": 3,
+            "reference.declaration": 1,
+            "reference.read": 1,
+            "reference.write": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 72.0
+        },
+        "agent:rules": {
+          "bytes": 554,
+          "counts": {
+            "items": 5
+          },
+          "latencyMs": 0.2,
+          "tokens": 138.5
+        },
+        "agent:symbols": {
+          "bytes": 1135,
+          "counts": {
+            "items": 8,
+            "symbol.globalVariable": 1,
+            "symbol.playerVariable": 2,
+            "symbol.rule": 5
+          },
+          "latencyMs": 0.3,
+          "tokens": 283.8
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 105,
+          "counts": {
+            "calls": 0,
+            "reads": 1,
+            "rules": 1,
+            "writes": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 26.2
+        },
+        "cli:analyze": {
+          "bytes": 10057,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 1,
+            "facts.risks": 0,
+            "facts.rules": 5,
+            "facts.symbols": 8,
+            "program.files": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 2,
+            "program.rules": 5,
+            "program.subroutines": 0
+          },
+          "latencyMs": 378.2,
+          "tokens": 2514.2
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 300.7,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 2105,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1563
+          },
+          "latencyMs": 378.4,
+          "tokens": 526.2
+        },
+        "cli:inspect": {
+          "bytes": 535,
+          "counts": {
+            "diagnostics": 1
+          },
+          "latencyMs": 254.6,
+          "tokens": 133.8
+        },
+        "cli:lint": {
+          "bytes": 1908,
+          "counts": {
+            "diagnostics": 0,
+            "lint.items": 0
+          },
+          "latencyMs": 376.3,
+          "tokens": 477.0
+        }
+      },
+      "status": "ok"
+    },
+    "seed-modify-target-score": {
+      "kind": "workshop",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 4997,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 0,
+            "facts.rules": 6,
+            "facts.symbols": 11,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0
+          },
+          "latencyMs": 1.5,
+          "tokens": 1249.2
+        },
+        "agent:callGraph": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.0,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 229,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 57.2
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 2041,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1583
+          },
+          "latencyMs": 0.5,
+          "tokens": 510.2
+        },
+        "agent:costEstimate": {
+          "bytes": 293,
+          "counts": {
+            "items": 0,
+            "programActions": 9,
+            "programRules": 6,
+            "waitActions": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 73.2
+        },
+        "agent:findings": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:inspect": {
+          "bytes": 5536,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 0,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0,
+            "references": 11,
+            "rules": 6,
+            "symbols": 11
+          },
+          "latencyMs": 0.6,
+          "tokens": 1384.0
+        },
+        "agent:lint": {
+          "bytes": 925,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 231.2
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 0.3,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:project": {
+          "bytes": 243,
+          "counts": {
+            "files": 1,
+            "findings": 0,
+            "globalVariables": 2,
+            "playerVariables": 3,
+            "rules": 6,
+            "subroutines": 0,
+            "symbols": 11
+          },
+          "latencyMs": 0.2,
+          "tokens": 60.8
+        },
+        "agent:references": {
+          "bytes": 445,
+          "counts": {
+            "items": 3,
+            "reference.declaration": 1,
+            "reference.read": 1,
+            "reference.write": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 111.2
+        },
+        "agent:rules": {
+          "bytes": 660,
+          "counts": {
+            "items": 6
+          },
+          "latencyMs": 0.2,
+          "tokens": 165.0
+        },
+        "agent:symbols": {
+          "bytes": 1548,
+          "counts": {
+            "items": 11,
+            "symbol.globalVariable": 2,
+            "symbol.playerVariable": 3,
+            "symbol.rule": 6
+          },
+          "latencyMs": 0.5,
+          "tokens": 387.0
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 108,
+          "counts": {
+            "calls": 0,
+            "reads": 1,
+            "rules": 2,
+            "writes": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 27.0
+        },
+        "cli:analyze": {
+          "bytes": 12138,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 0,
+            "facts.rules": 6,
+            "facts.symbols": 11,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0
+          },
+          "latencyMs": 259.1,
+          "tokens": 3034.5
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 256.8,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 2125,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1583
+          },
+          "latencyMs": 256.6,
+          "tokens": 531.2
+        },
+        "cli:inspect": {
+          "bytes": 14324,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 0,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0,
+            "references": 11,
+            "rules": 6,
+            "symbols": 11
+          },
+          "latencyMs": 256.9,
+          "tokens": 3581.0
+        },
+        "cli:lint": {
+          "bytes": 1913,
+          "counts": {
+            "diagnostics": 0,
+            "lint.items": 0
+          },
+          "latencyMs": 257.2,
+          "tokens": 478.2
+        }
+      },
+      "status": "ok"
+    },
+    "seed-repair-opy-runaway-loop": {
+      "kind": "opy",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 2821,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 1,
+            "facts.rules": 3,
+            "facts.symbols": 5,
+            "program.files": 0,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0
+          },
+          "latencyMs": 0.8,
+          "tokens": 705.2
+        },
+        "agent:callGraph": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.0,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 227,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 56.8
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 1240,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 822
+          },
+          "latencyMs": 0.2,
+          "tokens": 310.0
+        },
+        "agent:costEstimate": {
+          "bytes": 597,
+          "counts": {
+            "finding.while-without-wait": 1,
+            "items": 1,
+            "programActions": 8,
+            "programRules": 3,
+            "waitActions": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 149.2
+        },
+        "agent:findings": {
+          "bytes": 508,
+          "counts": {
+            "items": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 127.0
+        },
+        "agent:inspect": {
+          "bytes": 2270,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 0,
+            "program.findings": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0,
+            "references": 5,
+            "rules": 3,
+            "symbols": 5
+          },
+          "latencyMs": 0.3,
+          "tokens": 567.5
+        },
+        "agent:lint": {
+          "bytes": 1420,
+          "counts": {
+            "finding.while-without-wait": 1,
+            "items": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 355.0
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 0.2,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:project": {
+          "bytes": 237,
+          "counts": {
+            "files": 1,
+            "findings": 1,
+            "globalVariables": 2,
+            "playerVariables": 0,
+            "rules": 3,
+            "subroutines": 0,
+            "symbols": 5
+          },
+          "latencyMs": 0.1,
+          "tokens": 59.2
+        },
+        "agent:references": {
+          "bytes": 407,
+          "counts": {
+            "items": 5,
+            "reference.declaration": 1,
+            "reference.read": 2,
+            "reference.write": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 101.8
+        },
+        "agent:rules": {
+          "bytes": 326,
+          "counts": {
+            "items": 3
+          },
+          "latencyMs": 0.1,
+          "tokens": 81.5
+        },
+        "agent:symbols": {
+          "bytes": 702,
+          "counts": {
+            "items": 5,
+            "symbol.globalVariable": 2,
+            "symbol.rule": 3
+          },
+          "latencyMs": 0.2,
+          "tokens": 175.5
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 105,
+          "counts": {
+            "calls": 0,
+            "reads": 2,
+            "rules": 2,
+            "writes": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 26.2
+        },
+        "cli:analyze": {
+          "bytes": 6077,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 1,
+            "facts.rules": 3,
+            "facts.symbols": 5,
+            "program.files": 0,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0
+          },
+          "latencyMs": 377.6,
+          "tokens": 1519.2
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 303.4,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 1324,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 822
+          },
+          "latencyMs": 377.6,
+          "tokens": 331.0
+        },
+        "cli:inspect": {
+          "bytes": 535,
+          "counts": {
+            "diagnostics": 1
+          },
+          "latencyMs": 250.9,
+          "tokens": 133.8
+        },
+        "cli:lint": {
+          "bytes": 2647,
+          "counts": {
+            "diagnostics": 0,
+            "lint.finding.while-without-wait": 1,
+            "lint.items": 1
+          },
+          "latencyMs": 377.8,
+          "tokens": 661.8
+        }
+      },
+      "status": "ok"
+    },
+    "seed-repair-runaway-loop": {
+      "kind": "workshop",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 2927,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 1,
+            "facts.rules": 3,
+            "facts.symbols": 5,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0
+          },
+          "latencyMs": 0.8,
+          "tokens": 731.8
+        },
+        "agent:callGraph": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.0,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 227,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 56.8
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 1055,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 650
+          },
+          "latencyMs": 0.2,
+          "tokens": 263.8
+        },
+        "agent:costEstimate": {
+          "bytes": 597,
+          "counts": {
+            "finding.while-without-wait": 1,
+            "items": 1,
+            "programActions": 7,
+            "programRules": 3,
+            "waitActions": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 149.2
+        },
+        "agent:findings": {
+          "bytes": 507,
+          "counts": {
+            "items": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 126.8
+        },
+        "agent:inspect": {
+          "bytes": 2646,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0,
+            "references": 5,
+            "rules": 3,
+            "symbols": 5
+          },
+          "latencyMs": 0.3,
+          "tokens": 661.5
+        },
+        "agent:lint": {
+          "bytes": 1419,
+          "counts": {
+            "finding.while-without-wait": 1,
+            "items": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 354.8
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 0.2,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:project": {
+          "bytes": 242,
+          "counts": {
+            "files": 1,
+            "findings": 1,
+            "globalVariables": 2,
+            "playerVariables": 0,
+            "rules": 3,
+            "subroutines": 0,
+            "symbols": 5
+          },
+          "latencyMs": 0.1,
+          "tokens": 60.5
+        },
+        "agent:references": {
+          "bytes": 725,
+          "counts": {
+            "items": 5,
+            "reference.declaration": 1,
+            "reference.read": 2,
+            "reference.write": 2
+          },
+          "latencyMs": 0.2,
+          "tokens": 181.2
+        },
+        "agent:rules": {
+          "bytes": 324,
+          "counts": {
+            "items": 3
+          },
+          "latencyMs": 0.1,
+          "tokens": 81.0
+        },
+        "agent:symbols": {
+          "bytes": 695,
+          "counts": {
+            "items": 5,
+            "symbol.globalVariable": 2,
+            "symbol.rule": 3
+          },
+          "latencyMs": 0.2,
+          "tokens": 173.8
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 105,
+          "counts": {
+            "calls": 0,
+            "reads": 2,
+            "rules": 2,
+            "writes": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 26.2
+        },
+        "cli:analyze": {
+          "bytes": 6469,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 1,
+            "facts.rules": 3,
+            "facts.symbols": 5,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0
+          },
+          "latencyMs": 257.9,
+          "tokens": 1617.2
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 255.8,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 1139,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 650
+          },
+          "latencyMs": 256.5,
+          "tokens": 284.8
+        },
+        "cli:inspect": {
+          "bytes": 6693,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 0,
+            "program.rules": 3,
+            "program.subroutines": 0,
+            "references": 5,
+            "rules": 3,
+            "symbols": 5
+          },
+          "latencyMs": 256.6,
+          "tokens": 1673.2
+        },
+        "cli:lint": {
+          "bytes": 2651,
+          "counts": {
+            "diagnostics": 0,
+            "lint.finding.while-without-wait": 1,
+            "lint.items": 1
+          },
+          "latencyMs": 258.0,
+          "tokens": 662.8
+        }
+      },
+      "status": "ok"
+    },
+    "seed-understand-opy-project": {
+      "kind": "opy",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 5118,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 1,
+            "facts.risks": 0,
+            "facts.rules": 6,
+            "facts.symbols": 11,
+            "program.files": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 1
+          },
+          "latencyMs": 1.5,
+          "tokens": 1279.5
+        },
+        "agent:callGraph": {
+          "bytes": 67,
+          "counts": {
+            "items": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 16.8
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.0,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 229,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 57.2
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 2220,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1746
+          },
+          "latencyMs": 0.5,
+          "tokens": 555.0
+        },
+        "agent:costEstimate": {
+          "bytes": 293,
+          "counts": {
+            "items": 0,
+            "programActions": 8,
+            "programRules": 6,
+            "waitActions": 0
+          },
+          "latencyMs": 0.3,
+          "tokens": 73.2
+        },
+        "agent:findings": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:inspect": {
+          "bytes": 4622,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 0,
+            "program.findings": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 1,
+            "references": 11,
+            "rules": 6,
+            "symbols": 11
+          },
+          "latencyMs": 0.5,
+          "tokens": 1155.5
+        },
+        "agent:lint": {
+          "bytes": 925,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 231.2
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 0.3,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 326,
+          "counts": {
+            "item.hud-text": 1,
+            "items": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 81.5
+        },
+        "agent:project": {
+          "bytes": 238,
+          "counts": {
+            "files": 2,
+            "findings": 0,
+            "globalVariables": 1,
+            "playerVariables": 3,
+            "rules": 6,
+            "subroutines": 1,
+            "symbols": 11
+          },
+          "latencyMs": 0.2,
+          "tokens": 59.5
+        },
+        "agent:references": {
+          "bytes": 164,
+          "counts": {
+            "items": 1,
+            "reference.declaration": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 41.0
+        },
+        "agent:rules": {
+          "bytes": 670,
+          "counts": {
+            "items": 6
+          },
+          "latencyMs": 0.2,
+          "tokens": 167.5
+        },
+        "agent:symbols": {
+          "bytes": 1571,
+          "counts": {
+            "items": 11,
+            "symbol.globalVariable": 1,
+            "symbol.playerVariable": 3,
+            "symbol.rule": 6,
+            "symbol.subroutine": 1
+          },
+          "latencyMs": 0.5,
+          "tokens": 392.8
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 108,
+          "counts": {
+            "calls": 0,
+            "reads": 0,
+            "rules": 0,
+            "writes": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 27.0
+        },
+        "cli:analyze": {
+          "bytes": 12027,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 1,
+            "facts.risks": 0,
+            "facts.rules": 6,
+            "facts.symbols": 11,
+            "program.files": 0,
+            "program.globalVariables": 1,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 1
+          },
+          "latencyMs": 381.6,
+          "tokens": 3006.8
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 303.0,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 2304,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1746
+          },
+          "latencyMs": 384.5,
+          "tokens": 576.0
+        },
+        "cli:inspect": {
+          "bytes": 535,
+          "counts": {
+            "diagnostics": 1
+          },
+          "latencyMs": 254.4,
+          "tokens": 133.8
+        },
+        "cli:lint": {
+          "bytes": 1908,
+          "counts": {
+            "diagnostics": 0,
+            "lint.items": 0
+          },
+          "latencyMs": 383.7,
+          "tokens": 477.0
+        }
+      },
+      "status": "ok"
+    },
+    "seed-understand-score-flow": {
+      "kind": "workshop",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 4997,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 0,
+            "facts.rules": 6,
+            "facts.symbols": 11,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0
+          },
+          "latencyMs": 1.6,
+          "tokens": 1249.2
+        },
+        "agent:callGraph": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.1,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 229,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 57.2
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 2041,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1583
+          },
+          "latencyMs": 0.5,
+          "tokens": 510.2
+        },
+        "agent:costEstimate": {
+          "bytes": 293,
+          "counts": {
+            "items": 0,
+            "programActions": 9,
+            "programRules": 6,
+            "waitActions": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 73.2
+        },
+        "agent:findings": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:inspect": {
+          "bytes": 5536,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 0,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0,
+            "references": 11,
+            "rules": 6,
+            "symbols": 11
+          },
+          "latencyMs": 0.7,
+          "tokens": 1384.0
+        },
+        "agent:lint": {
+          "bytes": 925,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.2,
+          "tokens": 231.2
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 0.3,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:project": {
+          "bytes": 243,
+          "counts": {
+            "files": 1,
+            "findings": 0,
+            "globalVariables": 2,
+            "playerVariables": 3,
+            "rules": 6,
+            "subroutines": 0,
+            "symbols": 11
+          },
+          "latencyMs": 0.2,
+          "tokens": 60.8
+        },
+        "agent:references": {
+          "bytes": 445,
+          "counts": {
+            "items": 3,
+            "reference.declaration": 1,
+            "reference.read": 1,
+            "reference.write": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 111.2
+        },
+        "agent:rules": {
+          "bytes": 660,
+          "counts": {
+            "items": 6
+          },
+          "latencyMs": 0.2,
+          "tokens": 165.0
+        },
+        "agent:symbols": {
+          "bytes": 1548,
+          "counts": {
+            "items": 11,
+            "symbol.globalVariable": 2,
+            "symbol.playerVariable": 3,
+            "symbol.rule": 6
+          },
+          "latencyMs": 0.4,
+          "tokens": 387.0
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 108,
+          "counts": {
+            "calls": 0,
+            "reads": 1,
+            "rules": 2,
+            "writes": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 27.0
+        },
+        "cli:analyze": {
+          "bytes": 12138,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 0,
+            "facts.rules": 6,
+            "facts.symbols": 11,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0
+          },
+          "latencyMs": 258.8,
+          "tokens": 3034.5
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 255.9,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 2125,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1583
+          },
+          "latencyMs": 257.4,
+          "tokens": 531.2
+        },
+        "cli:inspect": {
+          "bytes": 14324,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 0,
+            "program.globalVariables": 2,
+            "program.playerVariables": 3,
+            "program.rules": 6,
+            "program.subroutines": 0,
+            "references": 11,
+            "rules": 6,
+            "symbols": 11
+          },
+          "latencyMs": 258.1,
+          "tokens": 3581.0
+        },
+        "cli:lint": {
+          "bytes": 1913,
+          "counts": {
+            "diagnostics": 0,
+            "lint.items": 0
+          },
+          "latencyMs": 257.1,
+          "tokens": 478.2
+        }
+      },
+      "status": "ok"
+    },
+    "small-workshop": {
+      "kind": "workshop",
+      "metrics": {
+        "agent:analyze": {
+          "bytes": 6096,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 1,
+            "facts.rules": 7,
+            "facts.symbols": 12,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 2,
+            "program.rules": 7,
+            "program.subroutines": 1
+          },
+          "latencyMs": 1.8,
+          "tokens": 1524.0
+        },
+        "agent:callGraph": {
+          "bytes": 69,
+          "counts": {
+            "items": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 17.2
+        },
+        "agent:capabilities": {
+          "bytes": 505,
+          "counts": {},
+          "latencyMs": 0.1,
+          "tokens": 126.2
+        },
+        "agent:cfg": {
+          "bytes": 229,
+          "counts": {
+            "blocks": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 57.2
+        },
+        "agent:check": {
+          "bytes": 138,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 34.5
+        },
+        "agent:compile": {
+          "bytes": 2341,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1862
+          },
+          "latencyMs": 0.5,
+          "tokens": 585.2
+        },
+        "agent:costEstimate": {
+          "bytes": 599,
+          "counts": {
+            "finding.while-without-wait": 1,
+            "items": 1,
+            "programActions": 13,
+            "programRules": 7,
+            "waitActions": 0
+          },
+          "latencyMs": 0.3,
+          "tokens": 149.8
+        },
+        "agent:findings": {
+          "bytes": 507,
+          "counts": {
+            "items": 1
+          },
+          "latencyMs": 0.1,
+          "tokens": 126.8
+        },
+        "agent:inspect": {
+          "bytes": 6534,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 2,
+            "program.rules": 7,
+            "program.subroutines": 1,
+            "references": 12,
+            "rules": 7,
+            "symbols": 12
+          },
+          "latencyMs": 0.7,
+          "tokens": 1633.5
+        },
+        "agent:lint": {
+          "bytes": 1419,
+          "counts": {
+            "finding.while-without-wait": 1,
+            "items": 1
+          },
+          "latencyMs": 0.2,
+          "tokens": 354.8
+        },
+        "agent:lintRules": {
+          "bytes": 8131,
+          "counts": {
+            "rules": 6
+          },
+          "latencyMs": 0.3,
+          "tokens": 2032.8
+        },
+        "agent:persistentObjects": {
+          "bytes": 13,
+          "counts": {
+            "items": 0
+          },
+          "latencyMs": 0.1,
+          "tokens": 3.2
+        },
+        "agent:project": {
+          "bytes": 243,
+          "counts": {
+            "files": 1,
+            "findings": 1,
+            "globalVariables": 2,
+            "playerVariables": 2,
+            "rules": 7,
+            "subroutines": 1,
+            "symbols": 12
+          },
+          "latencyMs": 0.2,
+          "tokens": 60.8
+        },
+        "agent:references": {
+          "bytes": 726,
+          "counts": {
+            "items": 5,
+            "reference.declaration": 1,
+            "reference.read": 2,
+            "reference.write": 2
+          },
+          "latencyMs": 0.3,
+          "tokens": 181.5
+        },
+        "agent:rules": {
+          "bytes": 769,
+          "counts": {
+            "items": 7
+          },
+          "latencyMs": 0.2,
+          "tokens": 192.2
+        },
+        "agent:symbols": {
+          "bytes": 1690,
+          "counts": {
+            "items": 12,
+            "symbol.globalVariable": 2,
+            "symbol.playerVariable": 2,
+            "symbol.rule": 7,
+            "symbol.subroutine": 1
+          },
+          "latencyMs": 0.4,
+          "tokens": 422.5
+        },
+        "agent:targetMetadata": {
+          "bytes": 15527,
+          "counts": {},
+          "latencyMs": 0.6,
+          "tokens": 3881.8
+        },
+        "agent:usage": {
+          "bytes": 108,
+          "counts": {
+            "calls": 0,
+            "reads": 2,
+            "rules": 3,
+            "writes": 2
+          },
+          "latencyMs": 0.1,
+          "tokens": 27.0
+        },
+        "cli:analyze": {
+          "bytes": 14483,
+          "counts": {
+            "diagnostics": 0,
+            "facts.persistentObjects": 0,
+            "facts.risks": 1,
+            "facts.rules": 7,
+            "facts.symbols": 12,
+            "program.files": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 2,
+            "program.rules": 7,
+            "program.subroutines": 1
+          },
+          "latencyMs": 259.9,
+          "tokens": 3620.8
+        },
+        "cli:check": {
+          "bytes": 193,
+          "counts": {
+            "diagnostics": 0
+          },
+          "latencyMs": 256.1,
+          "tokens": 48.2
+        },
+        "cli:compile": {
+          "bytes": 2425,
+          "counts": {
+            "diagnostics": 0,
+            "emittedBytes": 1862
+          },
+          "latencyMs": 256.9,
+          "tokens": 606.2
+        },
+        "cli:inspect": {
+          "bytes": 17006,
+          "counts": {
+            "diagnostics": 0,
+            "program.files": 1,
+            "program.findings": 1,
+            "program.globalVariables": 2,
+            "program.playerVariables": 2,
+            "program.rules": 7,
+            "program.subroutines": 1,
+            "references": 12,
+            "rules": 7,
+            "symbols": 12
+          },
+          "latencyMs": 258.5,
+          "tokens": 4251.5
+        },
+        "cli:lint": {
+          "bytes": 2651,
+          "counts": {
+            "diagnostics": 0,
+            "lint.finding.while-without-wait": 1,
+            "lint.items": 1
+          },
+          "latencyMs": 260.0,
+          "tokens": 662.8
+        }
+      },
+      "status": "ok"
+    }
+  },
+  "wright": "wright 0.10.0 (wright-driver 0.10.0)"
+}

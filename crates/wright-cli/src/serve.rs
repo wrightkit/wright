@@ -5,6 +5,7 @@ use clap::Args;
 use serde_json::{Value, json};
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::service::{ToolRequest, ToolService};
+use wright_driver::source_provider::SourceBackend;
 
 #[derive(Debug, Args)]
 pub(crate) struct ServeArgs {
@@ -33,6 +34,7 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
     }
     let config = SessionConfig {
         kind: SourceKind::parse(&args.kind).unwrap_or(SourceKind::Auto),
+        source_backend: SourceBackend::Auto,
         locale: args.locale,
         profile: args
             .profile

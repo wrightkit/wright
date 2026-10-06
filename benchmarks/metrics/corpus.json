@@ -1,0 +1,62 @@
+{
+  "contract": "wright-agent-metrics-corpus/v1",
+  "version": "v1",
+  "projects": [
+    {
+      "id": "small-workshop",
+      "kind": "workshop",
+      "path": "corpus/small-workshop",
+      "entry": "main.ws"
+    },
+    {
+      "id": "seed-modify-target-score",
+      "kind": "workshop",
+      "path": "../agent/scenarios/modify-target-score/seed",
+      "entry": "mode.ws"
+    },
+    {
+      "id": "seed-repair-runaway-loop",
+      "kind": "workshop",
+      "path": "../agent/scenarios/repair-runaway-loop/seed",
+      "entry": "mode.ws"
+    },
+    {
+      "id": "seed-understand-score-flow",
+      "kind": "workshop",
+      "path": "../agent/scenarios/understand-score-flow/seed",
+      "entry": "mode.ws"
+    },
+    {
+      "id": "seed-modify-opy-project",
+      "kind": "opy",
+      "path": "../agent/scenarios/modify-opy-project/seed",
+      "entry": "mode.opy"
+    },
+    {
+      "id": "seed-repair-opy-runaway-loop",
+      "kind": "opy",
+      "path": "../agent/scenarios/repair-opy-runaway-loop/seed",
+      "entry": "mode.opy"
+    },
+    {
+      "id": "seed-understand-opy-project",
+      "kind": "opy",
+      "path": "../agent/scenarios/understand-opy-project/seed",
+      "entry": "mode.opy"
+    },
+    {
+      "id": "bastion",
+      "kind": "opy",
+      "repository": "https://github.com/OWBastion/Bastion.git",
+      "commit": "6b930ab132f8f8eb7aca7d4db081c65e5b937237",
+      "entry": "src/main.opy"
+    },
+    {
+      "id": "overwatch-ai-pve",
+      "kind": "opy",
+      "repository": "https://github.com/Teakowa/Overwatch-AI-PVE.git",
+      "commit": "2a2f115b508d3b1d50dff00d629cc41661c1ff69",
+      "entry": "src/main.opy"
+    }
+  ]
+}

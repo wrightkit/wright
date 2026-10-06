@@ -1194,3 +1194,110 @@ fn mcp_transport_bootstraps_over_a_broken_project_and_recovers() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[cfg(unix)]
+#[test]
+fn stdio_transport_routes_opy_inputs_to_the_provider_backend() {
+    // #530: `wright serve` must serve OPY inputs like the one-shot commands —
+    // through the provider backend — instead of refusing every request with
+    // `source-provider-unavailable`. The provider is a staged LPP-conforming
+    // script so the test stays hermetic.
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+artifact = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifact.ws")).read()
+initialized = False
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+def lpp_error(id, kind, details, text):
+    reply(id, error={"code": -32000, "message": text, "data": {"lpp": {"kind": kind, "details": details}}})
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        first = not initialized
+        initialized = True
+        if not first:
+            lpp_error(id, "alreadyInitialized", {}, "already initialized")
+        elif request["params"]["protocolVersion"] != "1.1":
+            lpp_error(id, "protocolVersionMismatch", {"supportedProtocolVersions": ["1.1"]}, "unsupported")
+        else:
+            reply(id, {"protocolVersion": "1.1", "serverInfo": {"name": "fake", "version": "0"},
+                       "languages": [{"id": "opy", "extensions": ["opy"]}],
+                       "capabilities": {"check": True, "compile": True, "reconstruct": False, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": False, "projectLoading": True}})
+    elif method == "lpp/compile":
+        reply(id, {"diagnostics": [], "artifact": {"format": "workshop-rs/text-v1", "content": artifact}})
+    else:
+        reply(id, {})
+"#;
+
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        (os, arch) => panic!("unsupported OPY provider target {os}/{arch}"),
+    };
+    let dir = std::env::temp_dir().join(format!("wright-serve-opy-{}", std::process::id()));
+    let provider_dir = dir.join("providers/opy/9.9.9").join(target);
+    std::fs::create_dir_all(&provider_dir).unwrap();
+    let script = provider_dir.join("opy-provider");
+    std::fs::write(&script, PROVIDER).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        provider_dir.join("artifact.ws"),
+        std::fs::read_to_string(
+            workspace_root().join("tests/fixtures/workshop/synthetic/basic-rule.ws"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(dir.join("providers/opy/active"), "9.9.9").unwrap();
+    let input = dir.join("main.opy");
+    std::fs::write(&input, "# fake OPY entry; the staged provider ignores it").unwrap();
+
+    let mut child = Command::new(wright())
+        .args(["serve", "--transport", "stdio"])
+        .arg(&input)
+        .env("WRIGHT_PROVIDER_DATA_DIR", &dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright serve spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut exchange = |request: &str| -> serde_json::Value {
+        writeln!(stdin, "{request}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        assert_ne!(
+            stdout.read_line(&mut line).unwrap(),
+            0,
+            "the session answered {request}"
+        );
+        serde_json::from_str(&line).expect("JSON response")
+    };
+
+    let check = exchange(r#"{"op":"check"}"#);
+    assert_eq!(
+        check["result"]["command"], "check",
+        "OPY input must reach the provider backend: {check}"
+    );
+    assert_eq!(check["result"]["ok"], true, "{check}");
+    let project = exchange(r#"{"op":"project"}"#);
+    assert_eq!(project["result"]["origin"]["kind"], "opy", "{project}");
+
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "serve exited: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

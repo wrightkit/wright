@@ -474,6 +474,12 @@ jobs:
           python3 -m pip install -r benchmarks/agent/requirements-publish.txt
           python3 -m unittest discover -s benchmarks/agent
 
+      - name: Check agent-facing metrics drift
+        run: |
+          python3 -m unittest discover -s benchmarks/metrics
+          target/debug/wright update provider opy
+          python3 benchmarks/metrics/metrics.py check --wright target/debug/wright
+
       - name: Upload benchmark report
         if: always()
         uses: actions/upload-artifact@v7

@@ -41,6 +41,9 @@ Issue contract.
   transport mappings for coding agents and embedding consumers.
 - [Agent benchmark](agent-benchmark.md): product-level benchmark contract for
   general coding agents working with Wright.
+- [Agent-facing metrics](agent-metrics.md): drift metrics over the
+  `wright-agent/v1` surface and common CLI commands against a versioned
+  corpus and committed baseline.
 - [Agent benchmark how-to](agent-benchmark-howto.md): run the benchmark and
   publish the results page.
 - [Agent benchmark comparison spec](specs/SPEC-414-agent-benchmark-comparison.md):
