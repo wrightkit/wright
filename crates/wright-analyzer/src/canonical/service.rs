@@ -10,9 +10,7 @@ use workshop_rs::{Event, Program};
 use super::analysis::Finding;
 use super::cfg::cfg_response;
 use super::facts::persistent_objects;
-use super::symbols::{
-    Reference, ReferenceKind, RuleId, SemanticIndex, Symbol, SymbolId, SymbolKind,
-};
+use super::symbols::{Reference, RuleId, SemanticIndex, Symbol, SymbolId, SymbolKind};
 use crate::analysis::Boundedness;
 use crate::registry::{LintConfig, SkippedRule};
 use crate::service::{ErrorInfo, Origin, Request, Response};
@@ -381,21 +379,11 @@ fn finding_json(finding: &Finding) -> JsonValue {
     tests::BUILDS.with(|count| count.set(count.get() + 1));
     json!({"code": finding.code, "severity": finding.severity.as_str(), "message": finding.message, "span": span_json(finding.span), "rule": finding.rule, "action": finding.action, "value": finding.value, "evidence": finding.evidence.as_str(), "boundedness": finding.boundedness.map(Boundedness::as_str)})
 }
-fn reference_kind_name(kind: ReferenceKind) -> &'static str {
-    match kind {
-        ReferenceKind::Declaration => "declaration",
-        ReferenceKind::Definition => "definition",
-        ReferenceKind::Read => "read",
-        ReferenceKind::Write => "write",
-        ReferenceKind::Call => "call",
-    }
-}
-
 fn reference_json(reference: &Reference) -> JsonValue {
     #[cfg(test)]
     tests::BUILDS.with(|count| count.set(count.get() + 1));
     json!({
-        "kind": reference_kind_name(reference.kind),
+        "kind": reference.kind.as_str(),
         "span": span_json(reference.span),
         "rule": reference.rule,
         "action": reference.action,

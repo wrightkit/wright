@@ -62,16 +62,23 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     }
     for request in [
         ToolRequest::Project,
-        ToolRequest::Rules,
+        ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
         ToolRequest::Findings(FindingSelection::default()),
-        ToolRequest::Lint(FindingSelection::default()),
+        ToolRequest::Lint {
+            selection: FindingSelection::default(),
+            brief: false,
+        },
         ToolRequest::LintRules,
         ToolRequest::CostEstimate(FindingSelection::default()),
         ToolRequest::TargetMetadata,
     ] {
         match service.handle(&request) {
             wright_driver::service::ToolResponse::Ok { result } => {
-                if matches!(request, ToolRequest::Lint(_)) {
+                if matches!(request, ToolRequest::Lint { .. }) {
                     for finding in result["findings"].as_array().unwrap() {
                         assert!(
                             finding.get("evidence").is_some(),
@@ -92,6 +99,8 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
     if input.ends_with(".ws") {
         let renamed = match service.handle(&ToolRequest::Symbols {
             kind: Some("globalVariable".to_string()),
+            file: None,
+            max: None,
         }) {
             wright_driver::service::ToolResponse::Ok { result } => result
                 .as_array()

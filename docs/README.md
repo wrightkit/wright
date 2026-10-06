@@ -41,6 +41,9 @@ Issue contract.
   transport mappings for coding agents and embedding consumers.
 - [Agent benchmark](agent-benchmark.md): product-level benchmark contract for
   general coding agents working with Wright.
+- [Agent-facing metrics](agent-metrics.md): drift metrics over the
+  `wright-agent/v1` surface and common CLI commands against a versioned
+  corpus and committed baseline.
 - [Agent benchmark how-to](agent-benchmark-howto.md): run the benchmark and
   publish the results page.
 - [Agent benchmark comparison spec](specs/SPEC-414-agent-benchmark-comparison.md):
@@ -51,6 +54,8 @@ Issue contract.
   Wright-owned tests.
 - [Licensing/provenance boundary](licensing.md): third-party reference and
   licensing constraints.
+- [Seeded defect injection](specs/SPEC-534-seeded-defect-injection.md):
+  scenario families generated from a seed project and a defect class
 - [Extensible lint rules](specs/SPEC-309-extensible-lint-rules.md): canonical
   facts, local declarative rules, metadata, and project configuration.
 - [Release/distribution](release.md): packaging and publication contract.

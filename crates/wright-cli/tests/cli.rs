@@ -957,6 +957,78 @@ fn lint_max_reports_the_withheld_count_in_text_and_json() {
 }
 
 #[test]
+fn brief_bounds_lint_analyze_and_inspect_results() {
+    // #532: `--brief` returns counts, the highest-priority items, and an
+    // expansion path — the same small shape on every command, in text and
+    // JSON, with the full result one flag away.
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+
+    let output = run(&["lint", path.to_str().unwrap(), "--brief"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("10 findings"), "counts line: {stdout}");
+    assert!(stdout.contains("brief"), "counts name the form: {stdout}");
+    assert!(stdout.contains("Top findings"), "{stdout}");
+    assert!(
+        stdout.contains("expand") || stdout.contains("drop"),
+        "{stdout}"
+    );
+
+    for command in ["lint", "analyze", "inspect"] {
+        let output = run(&[command, path.to_str().unwrap(), "--brief", "-f", "json"]);
+        assert!(
+            output.status.success(),
+            "{command}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result = parse_json(&output.stdout)["result"].clone();
+        assert_eq!(result["brief"], true, "{command}");
+        assert!(
+            result["items"].as_array().unwrap().len() <= 5,
+            "{command} items bounded: {result}"
+        );
+        assert!(
+            result["counts"].is_object() && result["expand"].is_string(),
+            "{command} counts+expand: {result}"
+        );
+    }
+
+    let lint = parse_json(&run(&["lint", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout)
+        ["result"]
+        .clone();
+    assert_eq!(lint["counts"]["findings"]["total"], 10);
+    assert!(lint["findings"].is_null(), "full findings withheld: {lint}");
+
+    let analyze = parse_json(
+        &run(&["analyze", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout,
+    )["result"]
+        .clone();
+    assert_eq!(analyze["counts"]["risks"]["total"], 10);
+    assert!(analyze["facts"].is_null(), "full facts withheld: {analyze}");
+
+    let inspect = parse_json(
+        &run(&["inspect", path.to_str().unwrap(), "--brief", "-f", "json"]).stdout,
+    )["result"]
+        .clone();
+    assert_eq!(inspect["counts"]["references"], 58);
+    assert!(inspect["symbols"].is_null(), "detail withheld: {inspect}");
+
+    // `--brief` is the bare-inspect form; the detail queries keep their own
+    // options and reject the combination.
+    let output = run(&["inspect", "--brief", "symbols", path.to_str().unwrap()]);
+    assert!(
+        !output.status.success(),
+        "brief+subcommand is a usage error"
+    );
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn lint_text_collapses_identical_findings_into_one_entry() {
     let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
     let output = run(&["lint", path.to_str().unwrap()]);
@@ -1513,6 +1585,42 @@ fn agent_install_writes_the_guide_and_refreshes_it() {
 }
 
 #[test]
+fn agent_tools_emits_messages_and_json_schema_forms_deterministically() {
+    let messages = run(&["agent", "tools"]);
+    assert!(
+        messages.status.success(),
+        "{}",
+        String::from_utf8_lossy(&messages.stderr)
+    );
+    let doc: serde_json::Value = serde_json::from_slice(&messages.stdout).unwrap();
+    assert_eq!(doc["contract"], "wright-agent/v1");
+    let tools = doc["tools"].as_array().unwrap();
+    assert!(!tools.is_empty());
+    for tool in tools {
+        assert!(tool["name"].as_str().unwrap().starts_with("wright_"));
+        assert!(tool["description"].as_str().unwrap().contains("Result:"));
+        assert_eq!(tool["input_schema"]["type"], "object");
+        assert_eq!(
+            tool["allowed_callers"],
+            serde_json::json!(["code_execution_20260120"])
+        );
+    }
+    // Identical input emits identical bytes.
+    assert_eq!(run(&["agent", "tools"]).stdout, messages.stdout);
+
+    let plain = run(&["agent", "tools", "--format", "json-schema"]);
+    assert!(plain.status.success());
+    let doc: serde_json::Value = serde_json::from_slice(&plain.stdout).unwrap();
+    assert_eq!(doc["contract"], "wright-agent/v1");
+    let schemas = doc["schemas"].as_object().unwrap();
+    assert_eq!(schemas.len(), tools.len());
+    for (op, schema) in schemas {
+        assert_eq!(schema["type"], "object", "{op}");
+        assert!(schema["description"].is_string(), "{op}");
+    }
+}
+
+#[test]
 fn completion_install_dry_run() {
     let dir = temp_dir();
     let output = run(&[
@@ -1925,11 +2033,22 @@ fn symbols_lists_program_symbols_and_filters_by_kind() {
     assert_eq!(rule["span"]["path"], "cake.txt");
 
     // --only narrows to one symbol kind; --kind stays the input frontend.
+    // `kind` predates #531: alone it keeps the bare array, while --max (or
+    // --file) wraps the list in `{symbols, selection}` (#531).
     let output = run(&["inspect", "symbols", path, "--only", "rule", "-f", "json"]);
     let envelope = parse_json(&output.stdout);
     let symbols = envelope["result"].as_array().unwrap();
     assert_eq!(symbols.len(), 2);
     assert!(symbols.iter().all(|symbol| symbol["kind"] == "rule"));
+
+    let output = run(&[
+        "inspect", "symbols", path, "--only", "rule", "--max", "1", "-f", "json",
+    ]);
+    let envelope = parse_json(&output.stdout);
+    let symbols = envelope["result"]["symbols"].as_array().unwrap();
+    assert_eq!(symbols.len(), 1);
+    assert!(symbols.iter().all(|symbol| symbol["kind"] == "rule"));
+    assert_eq!(envelope["result"]["selection"]["total"], 5);
 
     let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
 }

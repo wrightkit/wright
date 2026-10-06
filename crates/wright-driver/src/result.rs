@@ -35,6 +35,23 @@ pub struct Envelope<T: Serialize> {
     pub result: T,
 }
 
+impl<T: Serialize> Envelope<T> {
+    /// Rebuild this envelope around a transformed result: verdict, exit
+    /// code, diagnostics, and any finding selection carry over unchanged
+    /// (the `brief` result forms, #532).
+    pub fn map_result<U: Serialize>(self, f: impl FnOnce(T) -> U) -> Envelope<U> {
+        Envelope {
+            wright: self.wright,
+            command: self.command,
+            ok: self.ok,
+            exit: self.exit,
+            diagnostics: self.diagnostics,
+            selection: self.selection,
+            result: f(self.result),
+        }
+    }
+}
+
 pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
     let mut has_source_error = false;
     for d in diagnostics {
@@ -121,6 +138,14 @@ pub struct CallGraphResult(pub serde_json::Value);
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(transparent)]
 pub struct CostResult(pub serde_json::Value);
+
+/// The `brief` form of `analyze`/`inspect`/`lint` (#532): a small
+/// `{brief, program?, counts, items, expand}` payload — counts, the
+/// highest-priority items, and how to expand. The full result stays one
+/// option away; `crate::brief` builds the payload from the full result.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct BriefResult(pub serde_json::Value);
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct LintResult {

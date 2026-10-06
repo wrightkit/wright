@@ -1,0 +1,86 @@
+{
+  "id": "renamed-callable-payload-race",
+  "family": "diagnostics",
+  "language": "opy",
+  "split": "train",
+  "entry": "main.opy",
+  "writable": [
+    "answer.json",
+    "helpers.opy",
+    "main.opy",
+    "scoring.opy"
+  ],
+  "checks": [
+    {
+      "id": "valid-project",
+      "kind": "check",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "upstream-valid",
+      "kind": "oracle",
+      "layer": "agent"
+    },
+    {
+      "id": "compiles",
+      "kind": "wright-compile",
+      "layer": "opy-rs"
+    },
+    {
+      "id": "callable-still-called",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Call Subroutine\\(tallyRound\\w*\\)"
+      ]
+    },
+    {
+      "id": "rules-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "rule \\(\"tallyRound\"\\)",
+        "rule \\(\"clearTags\"\\)",
+        "rule \\(\"overtime\\ nudge\"\\)",
+        "rule \\(\"reset\\ on\\ death\"\\)",
+        "rule \\(\"tag\\ carrier\"\\)",
+        "rule \\(\"round\\ ticks\"\\)",
+        "rule \\(\"declare\\ winner\"\\)"
+      ]
+    },
+    {
+      "id": "body-preserved",
+      "kind": "compiled-contains",
+      "layer": "agent",
+      "all": [
+        "Modify\\ Global\\ Variable\\(round,\\ Add,\\ 1\\);"
+      ]
+    },
+    {
+      "id": "missing-name",
+      "kind": "answer",
+      "layer": "agent",
+      "key": "missing",
+      "expected": "tallyRound"
+    }
+  ],
+  "negatives": {
+    "deleted-def": {
+      "fails": [
+        "body-preserved",
+        "callable-still-called",
+        "missing-name",
+        "rules-preserved"
+      ]
+    }
+  },
+  "generated": {
+    "defect": "renamed-callable",
+    "site": {
+      "file": "helpers.opy",
+      "symbol": "tallyRound"
+    },
+    "seedHash": "8d964632aa8f81f689d9485eba4557d47427c3714aa0dd578299f8179b6f5a58"
+  },
+  "canary": "WRIGHT_BENCH_CANARY_499_v2"
+}

@@ -157,8 +157,40 @@ def levels(runs: list[dict]) -> tuple[list[str], list[dict]]:
     return lines, records
 
 
-def paired(runs: list[dict], reference: str = BASELINE) -> list[str]:
+def discrimination(runs: list[dict]) -> dict[str, dict]:
+    """Per-scenario `discrimination` flag (#533), computed from results — never stored in a scenario file. A scenario is
+    `smoke` when every condition that ran it got the same 0% or 100% usable rate; it cannot separate conditions. It is
+    `indeterminate` with fewer than two conditions (a single condition cannot tell). Anything else is `discriminating`;
+    `differingConditions` names the conditions whose usable rate departs from the rest."""
+    groups: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
+    for r in runs:
+        groups[r["scenario"]][label(r)].append(r)
+    out = {}
+    for scenario, conditions in groups.items():
+        rates = {cell: sum(1 for r in g if r.get("usable")) / len(g) for cell, g in conditions.items()}
+        if len(conditions) < 2:
+            flag, differs = "indeterminate", []
+        elif len(set(rates.values())) == 1 and next(iter(rates.values())) in (0.0, 1.0):
+            flag, differs = "smoke", []
+        else:
+            flag = "discriminating"
+            by_rate: dict[float, list[str]] = defaultdict(list)
+            for cell, value in rates.items():
+                by_rate[value].append(cell)
+            majority = max(len(v) for v in by_rate.values())
+            differs = sorted(cell for tied in by_rate.values() if len(tied) < majority for cell in tied) or sorted(rates)
+        out[scenario] = {
+            "discrimination": flag,
+            "conditions": {cell: {"usable": sum(1 for r in g if r.get("usable")), "runs": len(g), "rate": round(rates[cell], 3)}
+                           for cell, g in sorted(conditions.items())},
+            "differingConditions": differs,
+        }
+    return out
+
+
+def paired(runs: list[dict], reference: str = BASELINE, flags: dict[str, dict] | None = None) -> list[str]:
     by_key: dict[tuple, dict] = {(r["scenario"], r["agent"]["id"], r["_trial"], label(r)): r for r in runs}
+    discriminating = {s for s, f in (flags or {}).items() if f["discrimination"] == "discriminating"}
     lines = []
     cells = sorted({label(r) for r in runs} - {reference})
     for agent in sorted({r["agent"]["id"] for r in runs}):
@@ -168,9 +200,12 @@ def paired(runs: list[dict], reference: str = BASELINE) -> list[str]:
                 continue
             gain = sum(1 for b, r in pairs if r.get("usable") and not b.get("usable"))
             loss = sum(1 for b, r in pairs if b.get("usable") and not r.get("usable"))
+            narrow = [(b, r) for b, r in pairs if r["scenario"] in discriminating]
+            narrow_gain = sum(1 for b, r in narrow if r.get("usable") and not b.get("usable"))
+            narrow_loss = sum(1 for b, r in narrow if b.get("usable") and not r.get("usable"))
             both = [(total_tokens(b), total_tokens(r)) for b, r in pairs if b.get("usable") and r.get("usable") and total_tokens(b) and total_tokens(r)]
             saving = f"{mean(1 - r / b for b, r in both):+.0%} tokens (n={len(both)})" if both else "no both-usable pairs"
-            lines.append(f"| {agent} | {cell} vs {reference} | {len(pairs)} | +{gain} / -{loss} | {saving} |")
+            lines.append(f"| {agent} | {cell} vs {reference} | {len(pairs)} | +{gain} / -{loss} | +{narrow_gain} / -{narrow_loss} (n={len(narrow)}) | {saving} |")
     return lines
 
 
@@ -254,7 +289,7 @@ def public_result(result: dict) -> dict:
     public["agentInfo"] = {k: v for k, v in (result.get("agentInfo") or {}).items() if k in ("agent", "version", "model", "effort")}
     public["context"] = {"reported": (result.get("context") or {}).get("reported")}
     public["toolCalls"] = {k: v for k, v in (result.get("toolCalls") or {}).items() if k in ("bash", "wright", "mcp")}
-    public["toolUse"] = {k: {"invocations": v.get("invocations", 0)} for k, v in (result.get("toolUse") or {}).items() if k in ("wright", "overpy")}
+    public["toolUse"] = {k: {f: v.get(f, 0) for f in ("invocations", "boundedUses")} for k, v in (result.get("toolUse") or {}).items() if k in ("wright", "overpy")}
     return public
 
 
@@ -286,6 +321,18 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
         groups[(r["scenario"], r["agent"]["id"], label(r))].append(r)
     for (scenario, agent, cell), g in sorted(groups.items()):
         out.append(f"| {scenario} | {agent} | {cell} | {rate(sum(1 for r in g if r.get('usable')), len(g))} |")
+    flags = discrimination(runs)
+    if flags:
+        out += ["", "## Scenario discrimination", "",
+                "`smoke` means every condition that ran the scenario got the same 0% or 100% usable rate — it cannot "
+                "separate conditions; `indeterminate` means fewer than two conditions ran it. Smoke scenarios still "
+                "count in the canonical score.", "",
+                "| scenario | discrimination | usable rate by condition | differing conditions |",
+                "| --- | --- | --- | --- |"]
+        for scenario, entry in sorted(flags.items()):
+            cells = " · ".join(f"{cell} {c['usable']}/{c['runs']}" for cell, c in entry["conditions"].items())
+            differs = ", ".join(entry["differingConditions"]) or "—"
+            out.append(f"| {scenario} | {entry['discrimination']} | {cells} | {differs} |")
     out += ["", "## By language", "", "| language | condition | usable |", "| --- | --- | --- |"]
     for language in sorted({r["language"] for r in runs}):
         for cell in sorted({label(r) for r in runs}):
@@ -308,10 +355,20 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
                 "search/read shell command (a `bash` call invoking the wright CLI counts once, as a wright call).", "",
                 "| agent | cell | level | runs | usable | passed | search/read | wright calls | bash calls | tool calls | turns | tokens/run |",
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |", *level_lines]
+    smoke = sorted(s for s, f in flags.items() if f["discrimination"] == "smoke")
+    key_set = {(r["scenario"], r["agent"]["id"], r["_trial"], label(r)) for r in runs}
     for reference in references or [BASELINE]:
-        pairs = paired(runs, reference)
+        pairs = paired(runs, reference, flags)
         if pairs:
-            out += ["", f"## Paired against `{reference}` (same scenario, agent, trial)", "", "| agent | comparison | pairs | usable gained/lost | tokens where both usable |", "| --- | --- | --- | --- | --- |", *pairs]
+            out += ["", f"## Paired against `{reference}` (same scenario, agent, trial)", "",
+                    "Lift is reported over all paired scenarios and over discriminating scenarios only; smoke "
+                    "scenarios cannot show a difference but stay in the canonical score.", "",
+                    "| agent | comparison | pairs | usable gained/lost (all) | usable gained/lost (discriminating) | tokens where both usable |",
+                    "| --- | --- | --- | --- | --- | --- |", *pairs]
+            paired_scenarios = {s for (s, a, t, c) in key_set if c != reference and (s, a, t, reference) in key_set}
+            named = [s for s in smoke if s in paired_scenarios]
+            if named:
+                out += ["", f"Smoke scenarios kept out of the discriminating column: {', '.join(named)}."]
     exp = expectations(runs)
     if exp:
         out += ["", "## Expectation rates (pass/(pass+fail); n/a and unavailable excluded)", "", "| condition | expectations |", "| --- | --- |", *exp]
@@ -336,6 +393,21 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     if tok:
         out += ["", "## Tool output size per command (estimated tokens per run that used it)", "", "| command | runs | mean | max |", "| --- | --- | --- | --- |"]
         out += [f"| {cmd} | {len(v['tokens'])} | {mean(v['tokens']):.0f} | {max(v['tokens'])} |" for cmd, v in sorted(tok.items())]
+    # #532: how often runs adopt a bounded form — `--brief` or the
+    # selection flags/fields — as a share of wright uses per condition.
+    bounded: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for r in runs:
+        use = (r.get("toolUse") or {}).get("wright") or {}
+        bounded[label(r)][0] += use.get("boundedUses", 0)
+        bounded[label(r)][1] += use.get("invocations", 0)
+    if any(n for _b, n in bounded.values()):
+        summary["boundedAdoption"] = {
+            cell: {"boundedUses": b, "invocations": n, "share": round(b / n, 4) if n else None}
+            for cell, (b, n) in sorted(bounded.items())
+        }
+        out += ["", "## Bounded output adoption (`--brief` or selection fields; #532)", "",
+                "| condition | bounded uses | wright uses | share |", "| --- | --- | --- | --- |"]
+        out += [f"| {cell} | {b} | {n} | {f'{b / n:.1%}' if n else 'n/a'} |" for cell, (b, n) in sorted(bounded.items())]
     notes = diagnostics(runs, invalid) + ([] if has_private else (regrade or []))
     if infrastructure:
         notes.append(f"INFRASTRUCTURE: {len(infrastructure)} provider/infrastructure failures (exit 75) excluded from outcome metrics.")
@@ -345,7 +417,10 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     if missing_context:
         notes.append(f"CONTEXT: {missing_context} run(s) lack observed loaded-context data; installed skills are not proof of loading.")
     out += ["", "## Diagnostics", ""] + ([f"- {n}" for n in notes] or ["- none"])
-    summary["scenarios"] = [{"id": scenario, "runs": sum(len(g) for (s, _a, _c), g in groups.items() if s == scenario)} for scenario in sorted({s for s, _a, _c in groups})]
+    summary["scenarios"] = [
+        {"id": scenario, "runs": sum(len(g) for (s, _a, _c), g in groups.items() if s == scenario), **flags[scenario]}
+        for scenario in sorted({s for s, _a, _c in groups})
+    ]
     summary["diagnostics"] = notes
     summary["stdev"] = {k: pstdev([r["agent"]["seconds"] for r in runs if f"{r['agent']['id']}|{label(r)}" == k]) for k in summary["cells"]} if runs else {}
     return "\n".join(out) + "\n", summary

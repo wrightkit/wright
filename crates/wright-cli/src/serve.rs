@@ -5,6 +5,7 @@ use clap::Args;
 use serde_json::{Value, json};
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::service::{ToolRequest, ToolService};
+use wright_driver::source_provider::SourceBackend;
 
 #[derive(Debug, Args)]
 pub(crate) struct ServeArgs {
@@ -33,6 +34,7 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
     }
     let config = SessionConfig {
         kind: SourceKind::parse(&args.kind).unwrap_or(SourceKind::Auto),
+        source_backend: SourceBackend::Auto,
         locale: args.locale,
         profile: args
             .profile
@@ -148,8 +150,8 @@ fn jsonrpc_dispatch_request(service: &mut ToolService<'_>, value: Value) -> Opti
         }
         "compile" => operation_result(service, ToolRequest::Compile),
         "check" => operation_result(service, ToolRequest::Check),
-        "analyze" => operation_result(service, ToolRequest::Analyze),
-        "inspect" => operation_result(service, ToolRequest::Inspect),
+        "analyze" => operation_result(service, ToolRequest::Analyze { brief: false }),
+        "inspect" => operation_result(service, ToolRequest::Inspect { brief: false }),
         other => {
             return has_id.then(|| jsonrpc_error(id, -32601, format!("Method not found: {other}")));
         }

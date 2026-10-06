@@ -342,6 +342,49 @@ jobs:
           path: attach/*
           if-no-files-found: error
 
+  release-metrics:
+    name: Generate agent-facing metrics
+    needs:
+      - release-identity
+      - release-assets
+    if: needs.release-identity.outputs.channel == 'stable'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.release-identity.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-identity.outputs.commit }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-metrics-stable
+          cache-all-crates: false
+          cache-workspace-crates: false
+          cache-bin: false
+          save-if: false
+          cache-on-failure: false
+      - name: Build wright
+        run: cargo build --locked --release -p wright-cli
+      - name: Install OPY provider
+        run: target/release/wright update provider opy
+      - name: Generate agent-facing metrics
+        run: >-
+          python3 benchmarks/metrics/metrics.py run
+          --wright target/release/wright
+          --out "wright-agent-metrics-$RELEASE_VERSION.json"
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-metrics
+          path: wright-agent-metrics-*.json
+          if-no-files-found: error
+
   publish-tap:
     name: Publish formula to homebrew-tap
     needs:
@@ -384,6 +427,7 @@ jobs:
       - release-assets
       - package-manifests
       - publish-r2
+      - release-metrics
     if: needs.release-identity.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     environment: release
@@ -398,6 +442,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: release-manifests
+          path: attach
+
+      - name: Download agent-facing metrics
+        uses: actions/download-artifact@v8
+        with:
+          name: agent-metrics
           path: attach
 
       - name: Publish GitHub Release

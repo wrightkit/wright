@@ -125,7 +125,11 @@ class ScoreTest(unittest.TestCase):
         self.assertNotIn(marker, published)
         self.assertIn("private-1", published)
         self.assertEqual(summary["mode"], "official")
-        self.assertEqual(summary["scenarios"], [{"id": "private-1", "runs": 1}])
+        self.assertEqual(summary["scenarios"], [{
+            "id": "private-1", "runs": 1, "discrimination": "indeterminate",
+            "conditions": {"wright+wright-skill/none/off": {"usable": 0, "runs": 1, "rate": 0.0}},
+            "differingConditions": [],
+        }])
 
 
     def test_main_writes_the_machine_readable_card_and_exit_status(self):

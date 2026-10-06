@@ -281,14 +281,35 @@ fn semantic_query_trial(
         let initialization = start.elapsed();
 
         let requests = [
-            ToolRequest::Rules,
-            ToolRequest::Symbols { kind: None },
-            ToolRequest::References { symbol: 0.into() },
+            ToolRequest::Rules {
+                name: None,
+                file: None,
+                max: None,
+            },
+            ToolRequest::Symbols {
+                kind: None,
+                file: None,
+                max: None,
+            },
+            ToolRequest::References {
+                symbol: 0.into(),
+                kind: None,
+                rule: None,
+                file: None,
+                max: None,
+            },
             ToolRequest::Usage { symbol: 0.into() },
-            ToolRequest::Cfg { rule: 0.into() },
+            ToolRequest::Cfg {
+                rule: 0.into(),
+                kind: None,
+                max: None,
+            },
             ToolRequest::Findings(FindingSelection::default()),
             ToolRequest::PersistentObjects,
-            ToolRequest::Lint(FindingSelection::default()),
+            ToolRequest::Lint {
+                selection: FindingSelection::default(),
+                brief: false,
+            },
             ToolRequest::LintRules,
         ];
         let start = Instant::now();

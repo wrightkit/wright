@@ -78,6 +78,8 @@ ADR-0020). The adapter speaks newline-delimited JSON-RPC 2.0 and implements
 | `usage` | `wright_usage` |
 | `callGraph` | `wright_call_graph` |
 | `check` | `wright_check` |
+| `analyze` | `wright_analyze` |
+| `inspect` | `wright_inspect` |
 | `lint` | `wright_lint` |
 | `costEstimate` | `wright_cost_estimate` |
 | `semanticRename` | `wright_semantic_rename` |
@@ -106,6 +108,34 @@ protocol errors (unknown tool or method, malformed arguments) are JSON-RPC
 The released `wright` binary includes `serve`, so each supported installation
 channel can use the session contract without a separate runtime.
 
+### Client tool definitions for code-executing agents (#535)
+
+`wright agent tools` emits every operation `capabilities` advertises as
+client tool definitions for code-executing agents. The output is versioned
+with `wright-agent/v1` and deterministic: identical input produces identical
+bytes.
+
+`--format messages` (the default) emits
+`{"contract": "wright-agent/v1", "tools": [...]}` in the Anthropic Messages
+API client tool shape: each tool carries `name` (`wright_` plus the
+snake-case operation), a `description` that also describes the result in
+text, an `input_schema` derived from the operation's request schema with
+`op` removed, and `allowed_callers: ["code_execution_20260120"]` so the
+tools are callable from the code execution tool. Emitted schemas keep every
+caller-meaningful field — including `sources`, which the MCP surface drops —
+and ship their `$ref` targets under a local `$defs` with no recursive
+reference, which the Messages API rejects.
+
+`--format json-schema` emits
+`{"contract": "wright-agent/v1", "schemas": {...}}`: operation name to the
+same standalone request schema with its description inside, for harnesses
+that consume plain JSON Schema.
+
+The emitted set is generated from one catalog shared with `capabilities`
+and the MCP adapter, so the definitions cannot drift from the advertised
+operation set; a catalog change that drops a description, a request schema,
+or introduces a recursive `$ref` fails the tests.
+
 ## Operations
 
 All requests are JSON objects with a required `op` string. Request fields and
@@ -115,22 +145,22 @@ the successful `result` payload.
 
 | Operation | Request fields | Successful `result` |
 | --- | --- | --- |
-| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, languages, and profiles |
+| `capabilities` | none | Service name/version, `wright-agent/v1`, result contract, operation names, `result_schemas` (operation → committed-schema definition), languages, and profiles |
 | `compile` | none | `wright-result/v1` compile envelope |
 | `check` | none | `wright-result/v1` check envelope |
-| `analyze` | none | `wright-result/v1` analysis envelope |
-| `inspect` | none | `wright-result/v1` inspection envelope |
+| `analyze` | optional `brief` | `wright-result/v1` analysis envelope; the brief form when `brief` is true |
+| `inspect` | optional `brief` | `wright-result/v1` inspection envelope; the brief form when `brief` is true |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
-| `rules` | none | Canonical Workshop rules |
-| `symbols` | optional `kind` | Symbols, optionally filtered by kind |
-| `references` | required `symbol` (id or name) | References for the symbol |
+| `rules` | optional selection | Canonical Workshop rules; `{"rules": [...], "selection": {...}}` when a selection is applied |
+| `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
+| `references` | required `symbol` (id or name), optional selection | References for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
-| `cfg` | required `rule` (index or name) | Control-flow graph for the rule |
+| `cfg` | required `rule` (index or name), optional selection | Control-flow graph for the rule, plus `selection` when a selection is applied |
 | `findings` | optional selection | Wright static-analysis findings; `{"findings": [...], "selection": {...}}` when a selection is applied |
 | `persistentObjects` | none | Persistent Workshop object facts |
-| `lint` | optional selection | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied |
+| `lint` | optional selection, optional `brief` | Lint findings, per-rule id/effective severity, effective configuration, and `selection` when applied; the brief form when `brief` is true |
 | `lintRules` | none | Registered lint rules with full metadata and effective configuration |
-| `callGraph` | none | Subroutine call graph |
+| `callGraph` | optional selection | Subroutine call graph; `{"edges": [...], "selection": {...}}` when a selection is applied |
 | `costEstimate` | optional selection | Exact generated-resource counts, findings, and `selection` when applied |
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
@@ -232,6 +262,61 @@ When a request applies any selection field, the result reports
 `findings` becomes `{"findings": [...], "selection": {...}}`, while `lint`
 and `costEstimate` add a `selection` member to their existing result objects.
 Requests without selection fields receive the previous shapes unchanged.
+
+### Semantic query selection (#531)
+
+`rules`, `symbols`, `references`, `cfg`, and `callGraph` accept optional
+selection fields with the same semantics as finding selection: filters narrow
+first, `max` bounds after, and a `selection` member reports `{"total":
+<set before selection>, "withheld": <dropped by max>}`. An unknown filter
+value — a kind outside the listed domain, or a `name`/`rule`/`caller`/`callee`
+that matches nothing in the loaded program — is a structured
+`invalid-selection` error, never a silent empty result.
+
+* `rules`: `name` (a declared rule name), `file`, `max`.
+* `symbols`: `file`, `max`, plus the pre-existing `kind` (`globalVariable`,
+  `playerVariable`, `subroutine`, `rule`). `kind` predates this selection
+  contract: a request carrying only `kind` keeps the previous filtered bare
+  array; `file`/`max` wrap the result, and a `kind` sent alongside them
+  counts inside the reported selection.
+* `references`: `kind` (`declaration`, `definition`, `read`, `write`,
+  `call`), `rule` (only references inside this rule, addressed by index or
+  declared name), `file`, `max`.
+* `cfg`: `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`), `max`.
+  Selection filters `blocks`, which keep their original `id`s, so
+  `successors` — and the `entry`/`exit` fields — still address the full
+  graph's block numbering.
+* `callGraph`: `caller` (a declared rule name), `callee` (a declared
+  subroutine name), `max`.
+
+The `file` field resolves like finding selection: any spelling that resolves
+to the same source file selects it. Requests without selection fields receive
+the previous shapes unchanged (bare arrays for `rules`, `symbols`,
+`references`, `callGraph`; the unextended object for `cfg`) — including
+`symbols` requests carrying only the pre-existing `kind` field. The CLI options
+`--only`, `--rule`, `--file`, `--caller`, `--callee`, and `--max` on `inspect`
+subcommands drive the same `wright-driver` selection.
+
+### Brief results (#532)
+
+`analyze`, `inspect`, and `lint` accept an optional `brief` field (the CLI's
+`--brief`; defaults preserve the full result on every surface). A brief
+result is the small object `{"brief": true, "program"?, "counts", "items",
+"expand", "selection"?}`: `program` repeats the operation's program summary
+when one exists, `counts` totals the collections the full result reports
+(findings/risks by severity, rules, symbols, references, elements, skipped),
+`items` carries at most five highest-priority entries — highest-severity
+findings for `lint`, the costliest rules for `analyze`, the leading rules for
+`inspect` — and `expand` names the way back to the full result. `lint`
+composes `brief` with finding selection: selection narrows the finding set
+first, the counts and items describe the selected set, and the `selection`
+member keeps the pre-selection total.
+
+CLI (`--brief`), `serve` (`"brief": true`), and the MCP tools
+(`wright_analyze`, `wright_inspect`, `wright_lint` with `brief` in their
+generated input schemas) return the same brief payload for the same input and
+form. `capabilities.result_schemas` names the `$defs` definition describing
+each advertised operation's result, including the brief form for these three.
 
 Edit transactions use source identities and half-open, 1-based line/column
 ranges. Provider positions use 0-based line/character coordinates. Wright

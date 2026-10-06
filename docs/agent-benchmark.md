@@ -251,6 +251,7 @@ to form a passing solution), and optional `negative/<name>/` overlays.
 | `source`, `referenceNote` | Optional provenance of the requirement and of the reference solution; the reference only calibrates the checks and is never shown to agents |
 | `negatives` | `{name: {"fails": [check ids]}}`; the overlay must fail exactly those checks |
 | `checks` | Deterministic checks, each with `id`, `kind`, and `layer` |
+| `generated` | Present on seeded-defect instances: `{defect, site, seedHash}` provenance |
 
 Check kinds: `check` (`wright check` reports no errors), `lint` (at most `max`
 findings with lint `code`), `symbols` (at least `min` symbols of `symbolKind`
@@ -264,6 +265,19 @@ text needs a `reference` that matches and a `negative` that does not. `layer`
 names what a failure implicates: `agent` for a requirement the produced work
 does not meet, or `workshop-rs` / `opy-rs` / `deltin-rs` / `wright` for
 validity or analysis results owned by that layer.
+
+## Generated scenarios
+
+Families that need Wright are produced by seeded defect injection
+([`SPEC-534`](specs/SPEC-534-seeded-defect-injection.md)): a defect class in
+[`benchmarks/defects/`](../benchmarks/defects/) finds injectable sites in a
+pristine seed project, injects one deterministic site, and emits the ordinary
+scenario directory above — a defective `seed/`, a `reference/` overlay that
+restores the pristine files, `negative/` overlays, and checks derived from
+the seed's own compiled output so any correct fix passes, not just the
+reference. `python3 benchmarks/defects/generate.py --all` rewrites the
+committed instances and `--check` reports drift; both need the Wright binary
+and, for OverPy seeds, the installed oracle.
 
 ## Grading authorities
 
@@ -360,10 +374,23 @@ counts with scenario-clustered 95% intervals (resampling scenarios, then trials)
 context, mean correction rounds per condition, paired comparison against each `--reference` (repeatable for
 lift against several named references; default `none/none/off`) (same scenario, agent, and
 trial; token comparison only where both are usable), per-scenario and per-split
-tables, expectation rates, friction, output size per command, and diagnostics.
+tables, expectation rates, friction, output size per command, bounded-output
+adoption (the share of Wright uses carrying `--brief` or a selection
+flag/field, per condition), and diagnostics.
 Diagnostics flag headroom (baseline usable rate of at least 95%), infrastructure
 failures, invalid runs, trial variance, and, with `--regrade`, a grader that
 gives different verdicts on the same stored workspace.
+
+The report also computes a per-scenario `discrimination` flag from the results
+(never stored in a scenario file): `smoke` when every condition that ran the
+scenario got the same 0% or 100% usable rate — a scenario every condition
+passes or every condition fails says nothing about Wright — `indeterminate`
+when fewer than two conditions ran it, and `discriminating` otherwise, with
+the conditions whose usable rate differs. Smoke scenarios stay in the
+canonical score (it is a fixed contract), and the paired-comparison tables
+report lift over all scenarios and over discriminating scenarios side by
+side, naming the smoke scenarios kept out of the discriminating figure.
+`summary.json` carries the flag and per-condition usable rate per scenario.
 
 When a directory holds both `wright` and `wright-mcp` cells, a level-comparison
 section pairs `mcp` with `bin` runs of the same scenario, agent, and trial and
