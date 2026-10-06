@@ -196,7 +196,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "ProviderSemanticRenameRequest",
         drop_fields: &[],
         mcp: true,
-        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. `documents` and `sources` are supplied by the caller.",
+        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. The caller owns the document set: `documents` maps each document URI to {uri, languageId, version, text}, `position_document_uri` must be one of those URIs, `position` is 0-based line/UTF-16-character, and `sources` maps every URI the rename may edit to its current text.",
         result: "the provider-resolved rename transaction or a structured refusal",
     },
     ToolSpec {
@@ -204,7 +204,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "ProviderValidateEditRequest",
         drop_fields: &[],
         mcp: true,
-        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. `documents` and `sources` are supplied by the caller.",
+        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. The caller owns the document set: `documents` maps each document URI to {uri, languageId, version, text}, every `edits[].source` must be one of those URIs, and `sources` maps every edited URI to the current text its `source_identity` verifies — errors in any supplied document block the transaction.",
         result: "the provider-validated transaction or a structured refusal",
     },
     ToolSpec {

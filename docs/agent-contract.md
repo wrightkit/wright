@@ -372,6 +372,38 @@ on the CLI: it prints the validated diff by default and applies it
 atomically with `--write`, refusing `edit-stale-source` when the file
 changed since validation.
 
+### Provider-backed edits
+
+`providerValidateEdit` and `providerSemanticRename` run the same
+validated-edit pipeline through the configured source-language provider
+(`opy` today): Wright checks the caller's preconditions and translates
+coordinates, the provider validates each edited document, and the edited
+document set is rechecked before `ok: true`. The caller owns the document
+set:
+
+* `language_id` names the provider (`opy`); `capabilities.languages`
+  reports the configured set.
+* `documents` is a URI → `{uri, languageId, version, text}` map describing
+  the project as the provider sees it. Every `edits[].source` — and
+  `providerSemanticRename`'s `position_document_uri` — must be a key of
+  this set; an edit outside it refuses `edit-unknown-source`.
+* `sources` is a URI → current-text map covering every source the
+  transaction edits: it is the precondition each `source_identity`
+  verifies against (SHA-256 hex of the text, the same identity
+  `project.inputIdentity` reports) and the text the edits apply to.
+* `providerValidateEdit`'s post-edit check blocks on errors in any
+  supplied document, so the set should cover the project documents whose
+  diagnostics may break.
+* `providerSemanticRename`'s `position` is the provider convention —
+  0-based line and UTF-16 character — while `transaction` ranges are the
+  `EditRange` 1-based half-open columns every edit operation shares. The
+  returned transaction's `source` fields are document URIs and each
+  `source_identity` is the identity of that document's current text, so
+  the caller can replay or apply the edits itself.
+
+Both operations answer without consulting the session's loaded project
+(#471) and refuse cleanly when no provider is configured.
+
 ### Name and signature lookup (#529, ADR-0021)
 
 `lookup` resolves a free-text query — a display name, a near spelling, or a

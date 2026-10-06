@@ -279,18 +279,6 @@
       },
       "additionalProperties": true
     },
-    "SourceEdit": {
-      "type": "object",
-      "required": ["kind", "source", "source_identity", "range", "new_text"],
-      "properties": {
-        "kind": { "type": "string" },
-        "source": { "type": "string" },
-        "source_identity": { "type": "string" },
-        "range": { "$ref": "#/$defs/EditRange" },
-        "new_text": { "type": "string" }
-      },
-      "additionalProperties": true
-    },
     "SourcePreview": {
       "type": "object",
       "required": ["source", "source_identity", "new_text"],
@@ -763,10 +751,12 @@
     },
     "Sources": {
       "type": "object",
+      "description": "Source name → full current text. On `validateEditTransaction`/`semanticRename` the key is the loaded input's source spelling and the field may be omitted (the service reads the named files from disk, #472); on the provider operations the keys are `documents` URIs covering every `edits[].source`. The text is the precondition each edit's `source_identity` verifies against and the text the edits apply to.",
       "additionalProperties": { "type": "string" }
     },
     "EditRange": {
       "type": "object",
+      "description": "A half-open source range in 1-based lines and character columns; `end` is exclusive and a column may point one past the line's last character. A zero-width range inserts `new_text`.",
       "required": ["start_line", "start_col", "end_line", "end_col"],
       "properties": {
         "start_line": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
@@ -780,11 +770,11 @@
       "type": "object",
       "required": ["kind", "source", "source_identity", "range", "new_text"],
       "properties": {
-        "kind": { "type": "string" },
-        "source": { "type": "string" },
-        "source_identity": { "type": "string" },
+        "kind": { "type": "string", "description": "The edit kind: `edit` for a caller-proposed replacement; other kinds such as `rename` appear only on service-computed results." },
+        "source": { "type": "string", "description": "The source this edit applies to: the loaded input's spelling on `validateEditTransaction`, or a `documents` URI key on the provider operations." },
+        "source_identity": { "type": "string", "description": "The SHA-256 hex digest of the source's current text — the identity `project.inputIdentity` and previews report; a text that hashes differently refuses `edit-stale-source`." },
         "range": { "$ref": "#/$defs/EditRange" },
-        "new_text": { "type": "string" }
+        "new_text": { "type": "string", "description": "The replacement text; empty deletes the range." }
       },
       "additionalProperties": false
     },
@@ -792,7 +782,7 @@
       "type": "object",
       "required": ["edits"],
       "properties": {
-        "edits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SourceEdit" } }
+        "edits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SourceEdit" }, "description": "The transaction's edits, applied atomically; edits in one source must not overlap, and two zero-width edits at the same position refuse `edit-zero-width-conflict`." }
       },
       "additionalProperties": false
     },
@@ -809,7 +799,7 @@
         "source": { "type": "string", "description": "Position addressing: the source file the position is interpreted in; requires `line` and `col`." },
         "line": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Position addressing: the 1-based line of a character inside one identifier occurrence." },
         "col": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Position addressing: the 1-based column of a character inside one identifier occurrence." },
-        "to": { "type": "string" }
+        "to": { "type": "string", "description": "The replacement identifier." }
       },
       "additionalProperties": false
     },
@@ -817,19 +807,21 @@
       "type": "object",
       "required": ["uri", "languageId", "version", "text"],
       "properties": {
-        "uri": { "type": "string" },
-        "languageId": { "type": "string" },
-        "version": { "type": "integer" },
-        "text": { "type": "string" }
+        "uri": { "type": "string", "description": "The document's URI — also its key in `documents`; provider edit results address documents by it." },
+        "languageId": { "type": "string", "description": "The document's language id (`opy`)." },
+        "version": { "type": "integer", "description": "The document's current version; provider-computed edits validated against another version refuse `edit-stale-source`." },
+        "text": { "type": "string", "description": "The document's full current text." }
       },
       "additionalProperties": false
     },
     "DocumentSet": {
       "type": "object",
+      "description": "URI → `Document` map: the caller-owned project document set the provider operates on. `position_document_uri` and every `edits[].source` must be keys of this set — an edit outside it refuses `edit-unknown-source`.",
       "additionalProperties": { "$ref": "#/$defs/Document" }
     },
     "Position": {
       "type": "object",
+      "description": "A 0-based line and UTF-16 character offset — the provider convention, unlike `EditRange`'s 1-based columns.",
       "required": ["line", "character"],
       "properties": {
         "line": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
@@ -973,7 +965,7 @@
       "type": "object",
       "properties": {
         "op": { "const": "validateEditTransaction" },
-        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }] },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }], "description": "Optional current texts for the edited sources; omitted or null reads the named files from disk (#472)." },
         "transaction": { "$ref": "#/$defs/EditTransaction" }
       },
       "required": ["op", "transaction"],
@@ -983,7 +975,7 @@
       "type": "object",
       "properties": {
         "op": { "const": "semanticRename" },
-        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }] },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }], "description": "Optional current texts for the edited sources; omitted or null reads the named files from disk (#472)." },
         "target": { "$ref": "#/$defs/RenameTarget" }
       },
       "required": ["op", "target"],
@@ -993,12 +985,12 @@
       "type": "object",
       "properties": {
         "op": { "const": "providerSemanticRename" },
-        "language_id": { "type": "string" },
+        "language_id": { "type": "string", "description": "The provider's language id (`opy`); `capabilities.languages` reports the configured set." },
         "documents": { "$ref": "#/$defs/DocumentSet" },
-        "position_document_uri": { "type": "string" },
+        "position_document_uri": { "type": "string", "description": "URI of the `documents` document holding the rename position." },
         "position": { "$ref": "#/$defs/Position" },
-        "new_name": { "type": "string" },
-        "project_root": { "type": ["string", "null"] },
+        "new_name": { "type": "string", "description": "The replacement identifier." },
+        "project_root": { "type": ["string", "null"], "description": "Optional project root the provider resolves the project from." },
         "sources": { "$ref": "#/$defs/Sources" }
       },
       "required": ["op", "language_id", "documents", "position_document_uri", "position", "new_name", "sources"],
@@ -1008,11 +1000,11 @@
       "type": "object",
       "properties": {
         "op": { "const": "providerValidateEdit" },
-        "language_id": { "type": "string" },
+        "language_id": { "type": "string", "description": "The provider's language id (`opy`); `capabilities.languages` reports the configured set." },
         "documents": { "$ref": "#/$defs/DocumentSet" },
         "transaction": { "$ref": "#/$defs/EditTransaction" },
         "sources": { "$ref": "#/$defs/Sources" },
-        "project_root": { "type": ["string", "null"] }
+        "project_root": { "type": ["string", "null"], "description": "Optional project root the provider resolves the project from." }
       },
       "required": ["op", "language_id", "documents", "transaction", "sources"],
       "additionalProperties": false
