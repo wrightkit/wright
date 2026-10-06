@@ -12,11 +12,11 @@
 //!
 //! Owners match and rank and supply facts; Wright renders the `signature`
 //! string from those facts under its own presentation rules (ADR-0021
-//! decision 4). Wright performs no fuzzy matching of its own beyond the
-//! scoped `within` listing, stores no names, and does not translate between
-//! languages.
+//! decision 4). Wright performs no matching of its own — a scoped `within`
+//! query is the owner's ranked matches intersected with the scope's
+//! children — stores no names, and does not translate between languages.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
 use workshop_rs::catalog::{Catalog, Kind, Locale};
@@ -139,7 +139,7 @@ fn workshop_lookup(
     };
     let entries = match within {
         Some(within) => match workshop_within(catalog, &locale, within, query, kind) {
-            Ok(entries) => entries,
+            Ok(entries) => entries.into_iter().take(limit).collect(),
             Err(error) => return error,
         },
         None => {
@@ -173,21 +173,34 @@ fn workshop_locale(
     catalog.supports(&locale).then_some(locale)
 }
 
+/// The owner-issued identity of one `lookup` match — the `identity` an
+/// entry carries and the key a scoped query intersects on.
+fn match_identity(found: &LookupMatch) -> Option<String> {
+    match found {
+        LookupMatch::Builtin { id, .. } => Some(id.clone()),
+        LookupMatch::EnumMember { domain, member, .. } => Some(format!("{domain}.{member}")),
+        LookupMatch::EnumDomain { domain, .. } => Some(domain.clone()),
+        LookupMatch::Setting { definition, .. } => Some(definition.path().to_string()),
+        _ => None,
+    }
+}
+
 /// One `lookup` match projected to the contract entry: owner identity and
 /// kind, the accepted spelling, the display name, and a Wright-rendered
 /// `signature` for callables (plus the structured `callable`/`enum`/
 /// `setting` facts the owner supplies).
 fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Option<Value> {
+    let identity = match_identity(&found)?;
     Some(match found {
         LookupMatch::Builtin {
             kind,
-            id,
             display_name,
             signature,
+            ..
         } => {
-            let head = display_name.unwrap_or_else(|| id.clone());
+            let head = display_name.unwrap_or_else(|| identity.clone());
             let mut entry = json!({
-                "identity": id,
+                "identity": identity,
                 "kind": kind.as_str(),
                 "spelling": head.clone(),
                 "displayName": head,
@@ -211,13 +224,13 @@ fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Opt
             entry
         }
         LookupMatch::EnumMember {
-            domain,
             member,
             display_name,
+            ..
         } => {
             let display = display_name.unwrap_or_else(|| member.clone());
             json!({
-                "identity": format!("{domain}.{member}"),
+                "identity": identity,
                 "kind": "enumMember",
                 "spelling": display.clone(),
                 "displayName": display,
@@ -230,7 +243,7 @@ fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Opt
         } => {
             let display = display_name.unwrap_or_else(|| domain.clone());
             json!({
-                "identity": domain.clone(),
+                "identity": identity,
                 "kind": "enum",
                 "spelling": display.clone(),
                 "displayName": display,
@@ -252,9 +265,9 @@ fn workshop_entry(catalog: &Catalog, locale: &Locale, found: LookupMatch) -> Opt
             definition,
             display_name,
         } => json!({
-            "identity": definition.path().to_string(),
+            "identity": identity,
             "kind": "setting",
-            "spelling": definition.path().to_string(),
+            "spelling": identity,
             "displayName": display_name,
             "setting": setting_facts(&definition),
         }),
@@ -389,20 +402,23 @@ fn workshop_within(
                 message: format!("within names no known Workshop scope: {within:?}"),
             },
         })?;
-    let query = query.unwrap_or_default().to_lowercase();
-    if !query.is_empty() {
-        entries.retain(|entry| {
-            entry["identity"]
-                .as_str()
-                .unwrap_or_default()
-                .to_lowercase()
-                .contains(&query)
-                || entry["spelling"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_lowercase()
-                    .contains(&query)
-        });
+    if let Some(query) = query.filter(|query| !query.is_empty()) {
+        // Matching and ranking stay with the owner (ADR-0021 decision 4):
+        // a scoped query is the owner's ranked unscoped matches intersected
+        // with the scope's children by identity. Children outside the
+        // owner's match vocabulary — parameters and path segments — drop,
+        // exactly as they cannot answer an unscoped request.
+        let matches = catalog
+            .lookup(locale, query)
+            .map_err(|error| refusal("lookup-failed", error.to_string()))?;
+        let mut rank = HashMap::new();
+        for (index, found) in matches.iter().enumerate() {
+            if let Some(identity) = match_identity(found) {
+                rank.entry(identity).or_insert(index);
+            }
+        }
+        entries.retain(|entry| rank.contains_key(entry["identity"].as_str().unwrap_or_default()));
+        entries.sort_by_key(|entry| rank[entry["identity"].as_str().unwrap_or_default()]);
     }
     entries.retain(|entry| kind.is_none_or(|k| entry["kind"] == k));
     Ok(entries)
@@ -669,25 +685,18 @@ fn opy_lookup(
     };
     // A `within` identity selects the scope the provider resolves it as:
     // an enum domain, a callable, or a settings prefix, tried in that
-    // order. `settings` takes a raw path, so an `opy:setting*` identity is
-    // unwrapped to the path it names first. When every kind refuses with
-    // `lookup.unknownWithin`, the last refusal is the answer.
+    // order. The identity is opaque and passed through unchanged: the
+    // protocol requires a provider to accept the identities it issued as
+    // `within` values for the matching selector kinds, so Wright never
+    // interprets them. When every kind refuses with `lookup.unknownWithin`,
+    // the last refusal is the answer.
     let outcome = match within {
         Some(within) => {
             let mut outcome = None;
             for kind in WITHIN_KINDS {
-                let value = if kind == "settings" {
-                    within
-                        .strip_prefix("opy:setting/")
-                        .or_else(|| within.strip_prefix("opy:setting-path/"))
-                        .unwrap_or(within)
-                        .to_string()
-                } else {
-                    within.to_string()
-                };
                 let response = provider.lookup(&request(Some(LookupWithin {
                     kind: kind.to_string(),
-                    value,
+                    value: within.to_string(),
                 })));
                 let unknown = matches!(
                     &response,
@@ -833,9 +842,13 @@ fn lpp_signature(entry: &Value, callable: &Value) -> Option<String> {
                 required: param["required"].as_bool().unwrap_or(true),
                 default,
                 domain: param.get("enum").map(|domain| DomainView {
-                    name: domain["domain"]
+                    // The rendered domain name is the parameter's declared
+                    // type; the enum fact's `domain` is an opaque
+                    // provider-issued identity, shown whole only as a
+                    // fallback — never parsed (`name-lookup.md` §21.4).
+                    name: param["type"]
                         .as_str()
-                        .map(identity_tail)
+                        .or_else(|| domain["domain"].as_str())
                         .unwrap_or_default()
                         .to_string(),
                     members: domain["members"]
@@ -861,11 +874,4 @@ fn lpp_default_text(value: &Value) -> String {
         Value::String(text) => text.clone(),
         other => other.to_string(),
     }
-}
-
-/// The display tail of an owner-issued identity (`opy:enum/Hero` → `Hero`).
-/// Identities are opaque by contract; stripping the prefix is a
-/// presentation convenience, never structural.
-fn identity_tail(identity: &str) -> &str {
-    identity.rsplit('/').next().unwrap_or(identity)
 }

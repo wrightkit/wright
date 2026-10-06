@@ -193,6 +193,80 @@ fn workshop_lookup_filters_by_kind_and_bounds_the_limit() {
 }
 
 #[test]
+fn workshop_lookup_bounds_scoped_results_by_limit() {
+    let mut owned = session(workshop_path());
+    let mut service = ToolService::new(&mut owned).unwrap();
+    // `within` listings obey the same bound as unscoped results: the
+    // default of 3 caps a wider scope without an explicit limit.
+    let entries = entries_of(service.handle(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: None,
+        kind: None,
+        within: Some("lobby".to_string()),
+        locale: None,
+        limit: None,
+    }));
+    assert_eq!(entries.len(), 3, "default limit bounds a scoped listing");
+
+    let entries = entries_of(service.handle(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: None,
+        kind: None,
+        within: Some("Team".to_string()),
+        locale: None,
+        limit: Some(2),
+    }));
+    assert_eq!(entries.len(), 2, "explicit limit bounds a scoped listing");
+    assert_eq!(entries[0]["identity"], "Team.ALL");
+}
+
+#[test]
+fn workshop_lookup_filters_scoped_children_by_the_owner_matcher() {
+    let mut owned = session(workshop_path());
+    let mut service = ToolService::new(&mut owned).unwrap();
+    // `within` + `query` routes matching and ranking through workshop-rs:
+    // the result is the owner's ranked unscoped matches intersected with
+    // the scope's children, so "team 1" resolves the members the owner
+    // scored — never a Wright-side substring filter.
+    let entries = entries_of(service.handle(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: Some("team 1".to_string()),
+        kind: None,
+        within: Some("Team".to_string()),
+        locale: None,
+        limit: Some(10),
+    }));
+    assert!(!entries.is_empty(), "the owner matched scoped children");
+    assert!(
+        entries.iter().all(|entry| entry["identity"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("Team.")),
+        "every matched child belongs to the scope: {entries:?}"
+    );
+    assert_eq!(
+        entries[0]["identity"], "Team.TEAM_1",
+        "owner ranking puts the closest match first"
+    );
+
+    // Parameters are outside the owner's match vocabulary — an unscoped
+    // request never returns them — so a scoped query drops them rather
+    // than guessing at a spelling.
+    let entries = entries_of(service.handle(&ToolRequest::Lookup {
+        language: "workshop".to_string(),
+        query: Some("text".to_string()),
+        kind: None,
+        within: Some("createHudText".to_string()),
+        locale: None,
+        limit: None,
+    }));
+    assert!(
+        entries.is_empty(),
+        "parameters are not matchable vocabulary: {entries:?}"
+    );
+}
+
+#[test]
 fn workshop_lookup_answers_without_a_loadable_project() {
     // A session whose configured project cannot load: lookup is a
     // vocabulary query and neither requires nor triggers a load (#512).
@@ -290,8 +364,14 @@ for line in sys.stdin:
                                     "projectLoading": False, "lookup": True}})
     elif method == "lpp/lookup":
         within = request["params"].get("within")
-        if within is not None and within["kind"] == "enum" and within["value"] != "opy:enum/RoundingMode":
-            reply(id, error={"code": -32001, "message": "within selector names no known scope",
+        # The provider accepts the identities it issued only verbatim, for
+        # the matching selector kind — a client that rewrote them (e.g.
+        # stripped the `opy:setting/` prefix) gets `lookup.unknownWithin`.
+        known = (within is None
+                 or (within["kind"] == "enum" and within["value"] == "opy:enum/RoundingMode")
+                 or (within["kind"] == "settings" and within["value"] == "opy:setting/heroes"))
+        if not known:
+            reply(id, error={"code": -32000, "message": "within selector names no known scope",
                              "data": {"lpp": {"kind": "refusal",
                                       "details": {"refusalCode": "lookup.unknownWithin"}}}})
         else:
@@ -399,6 +479,31 @@ fn opy_lookup_resolves_a_within_identity_through_the_provider() {
     }));
     let entries = result["entries"].as_array().expect("entries");
     assert_eq!(entries.len(), 2, "the canned provider's entries");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn opy_lookup_passes_scoped_identities_through_unchanged() {
+    let (dir, mut service) = service_with_provider(LOOKUP_PROVIDER);
+    // The provider accepts `opy:setting/heroes` only verbatim under the
+    // `settings` selector: a client that rewrote the opaque identity —
+    // stripping `opy:setting/` to "expose" the path — would earn
+    // `lookup.unknownWithin` here instead (`name-lookup.md` §21.3).
+    let result = result_of(service.handle(&ToolRequest::Lookup {
+        language: "opy".to_string(),
+        query: None,
+        kind: None,
+        within: Some("opy:setting/heroes".to_string()),
+        locale: None,
+        limit: None,
+    }));
+    let entries = result["entries"].as_array().expect("entries");
+    assert!(
+        !entries.is_empty(),
+        "the provider-issued identity passed through unchanged: {result:?}"
+    );
 
     let _ = std::fs::remove_dir_all(dir);
 }

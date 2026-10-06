@@ -291,6 +291,18 @@ impl Capability {
             .into_iter()
             .find(|capability| capability.as_str() == name)
     }
+
+    /// The LPP protocol version that introduced the capability (`"1.0"` for
+    /// the base set). A session negotiated at an older version never
+    /// advertises it, so version-gated capabilities are expected only on
+    /// newer sessions.
+    pub fn since(self) -> &'static str {
+        match self {
+            Self::ProjectLoading => crate::LPP_PROJECT_LOADING_PROTOCOL_VERSION,
+            Self::Lookup => crate::LPP_LOOKUP_PROTOCOL_VERSION,
+            _ => crate::LPP_PROTOCOL_VERSION,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

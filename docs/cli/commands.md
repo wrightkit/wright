@@ -243,7 +243,7 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
   answers through the configured `opy-rs` provider's LPP lookup
   capability, and reports an explicit `unavailable` payload — exit 3 —
   when the provider does not negotiate it. Wright never guesses locally.
-* `--kind action|value|event|enumMember|setting` narrows the entry kinds.
+* `--kind action|value|event|enum-member|setting` narrows the entry kinds.
 * `--within <IDENTITY>` lists what an identity contains: an enum domain's
   members, a callable's parameters, or a settings path's child segments.
   An unmatched scope identity refuses with `lookup.unknownWithin`.
