@@ -127,6 +127,7 @@ fn canonical_diagnostic(error: &workshop_rs::WorkshopError, path: &Path) -> Prov
 fn workshop_error_span(error: &workshop_rs::WorkshopError) -> Option<workshop_rs::source::Span> {
     match error {
         workshop_rs::WorkshopError::Unknown { span, .. }
+        | workshop_rs::WorkshopError::UnknownWithCandidates { span, .. }
         | workshop_rs::WorkshopError::Malformed { span, .. }
         | workshop_rs::WorkshopError::Unsupported { span, .. } => *span,
         _ => None,
