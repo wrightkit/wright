@@ -7,7 +7,10 @@ in a fixed corpus (``corpus.json``). Recorded per metric:
 
 - ``bytes``: response/stdout size in bytes;
 - ``tokens``: ``bytes / 4`` (the benchmark's estimate);
-- ``latencyMs``: median wall time over ``--repeats`` runs;
+- ``latencyMs``: median wall time over ``--repeats`` runs (agent operations)
+  or ``--cli-repeats`` runs (CLI commands; each run is a full pipeline). The
+  CLI ``--brief`` forms run the same pipeline as their plain command, so they
+  run once and record no latency;
 - ``counts``: result-shape counts (items, per-kind, per-finding-code).
 
 Commands:
@@ -335,14 +338,18 @@ def cli_counts(command: str, envelope: dict) -> dict:
     return counts
 
 
-def metric_record(payloads_bytes: list[int], latencies_ms: list[float], counts: dict) -> dict:
+def metric_record(
+    payloads_bytes: list[int], latencies_ms: list[float] | None, counts: dict
+) -> dict:
     raw = statistics.median(payloads_bytes)
-    return {
+    record = {
         "bytes": raw,
         "tokens": round(raw / TOKEN_BYTES, 1),
-        "latencyMs": round(statistics.median(latencies_ms), 1),
         "counts": counts,
     }
+    if latencies_ms:
+        record["latencyMs"] = round(statistics.median(latencies_ms), 1)
+    return record
 
 
 def run_agent_ops(
@@ -448,6 +455,9 @@ def brief_counts(payload) -> dict:
 def run_cli_commands(
     wright: str, entry: Path, kind: str, project_dir: Path, repeats: int
 ) -> dict:
+    """Measure each CLI command. The ``--brief`` form shares the plain
+    command's pipeline, so its latency is not measured: it runs once for
+    size and shape only."""
     metrics: dict[str, dict] = {}
     for command in CLI_COMMANDS + [f"{command}?brief" for command in BRIEF_OPS]:
         outputs_bytes: list[int] = []
@@ -457,7 +467,8 @@ def run_cli_commands(
         argv = [wright, name, str(entry), "--kind", kind, "-f", "json"]
         if form == "brief":
             argv.append("--brief")
-        for _ in range(repeats):
+        runs = 1 if form else repeats
+        for _ in range(runs):
             start = time.monotonic()
             completed = subprocess.run(
                 argv,
@@ -473,7 +484,9 @@ def run_cli_commands(
                 )
             except json.JSONDecodeError:
                 counts = {"unparsedStdout": len(completed.stdout)}
-        metrics[f"cli:{command}"] = metric_record(outputs_bytes, latencies, counts)
+        metrics[f"cli:{command}"] = metric_record(
+            outputs_bytes, None if form else latencies, counts
+        )
     return metrics
 
 
@@ -515,7 +528,13 @@ def provider_version() -> str | None:
     return None
 
 
-def run_metrics(wright: str, corpus: dict, repeats: int, only: set[str] | None) -> dict:
+def run_metrics(
+    wright: str,
+    corpus: dict,
+    repeats: int,
+    only: set[str] | None,
+    cli_repeats: int | None = None,
+) -> dict:
     projects: dict[str, dict] = {}
     for project in corpus["projects"]:
         pid = project["id"]
@@ -538,7 +557,13 @@ def run_metrics(wright: str, corpus: dict, repeats: int, only: set[str] | None) 
             continue
         metrics = run_agent_ops(wright, entry, project["kind"], directory, repeats)
         metrics.update(
-            run_cli_commands(wright, entry, project["kind"], directory, repeats)
+            run_cli_commands(
+                wright,
+                entry,
+                project["kind"],
+                directory,
+                repeats if cli_repeats is None else cli_repeats,
+            )
         )
         failed = all("error" in m or "skipped" in m for m in metrics.values())
         projects[pid] = {
@@ -797,7 +822,16 @@ def main() -> int:
         help="metrics output file for `run` (default: stdout)",
     )
     parser.add_argument(
-        "--repeats", type=int, default=5, help="measurements per metric (median)"
+        "--repeats",
+        type=int,
+        default=5,
+        help="measurements per agent-operation metric (median)",
+    )
+    parser.add_argument(
+        "--cli-repeats",
+        type=int,
+        default=3,
+        help="measurements per CLI-command metric (median); each is a full pipeline run",
     )
     parser.add_argument(
         "--project",
@@ -824,7 +858,7 @@ def main() -> int:
         return 0
 
     if args.command == "run":
-        metrics = run_metrics(wright, corpus, args.repeats, only)
+        metrics = run_metrics(wright, corpus, args.repeats, only, args.cli_repeats)
         text = json.dumps(metrics, indent=2, sort_keys=True) + "\n"
         if args.out:
             args.out.write_text(text)
@@ -844,7 +878,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    current = run_metrics(wright, corpus, args.repeats, only)
+    current = run_metrics(wright, corpus, args.repeats, only, args.cli_repeats)
     violations, warnings = compare_metrics(baseline, current)
     print_report(violations, warnings)
     return 1 if violations else 0

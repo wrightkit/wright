@@ -10,7 +10,11 @@ The metrics harness measures the surface a coding agent actually pays for:
 for every `wright-agent/v1` read operation and every common CLI command, per
 corpus project, it records output size in bytes and estimated tokens
 (`bytes / 4`), median latency over repeated runs, and result-shape counts
-(items, per-kind breakdowns, findings per rule code). Correctness stays
+(items, per-kind breakdowns, findings per rule code). Agent operations repeat
+`--repeats` times (default 5) and CLI commands `--cli-repeats` times
+(default 3), since each CLI run is a full pipeline. The CLI `--brief` forms
+share their plain command's pipeline, so they run once and record size and
+shape but no latency. Correctness stays
 assertion-based in the owning test suites — these metrics watch drift in the
 agent-facing cost, not behavior.
 
