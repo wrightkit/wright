@@ -1,6 +1,6 @@
 # ADR-0023: LSP scope for 1.0
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-06
 - Related: [Issue #421](https://github.com/wrightkit/wright/issues/421), [Issue #429](https://github.com/wrightkit/wright/issues/429), [Product contract](../architecture/product-contract.md), [Language services](../language-services.md)
 
