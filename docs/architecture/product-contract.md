@@ -1,6 +1,6 @@
 # Product contract: the path to 1.0
 
-Moved unchanged from `wrightkit/wright#134` on 2026-10-06, where it was maintained as an issue body. This document is the current contract; the execution state is tracked in `wrightkit/wright#537` and the live issues it links, never here.
+Moved from `wrightkit/wright#134` on 2026-10-06, where it was maintained as an issue body, then deduplicated against the documents that already own parts of it (the first commit of that change is the unchanged move). This document is the current contract; the execution state is tracked in `wrightkit/wright#537` and the live issues it links, never here.
 
 ## Goal
 
@@ -8,27 +8,13 @@ Define Wright's path to 1.0 by stable product capabilities, semantic ownership, 
 
 ## Product direction
 
-Wright is the unified tooling/product layer over independently owned Workshop language engines. Product priority is:
-
-1. check / diagnostics
-2. lint / static analysis
-3. inspect / semantic query
-4. validated source edits / refactoring
-5. agent / embedding / native-tool workflows
-6. CI / language services
-7. Workshop stability / cost analysis
-8. compilation / conversion where required by real workflows
-
-Compiler and conversion work are product-enabling infrastructure, not the sole progress metric. A Wright surface must not claim language behavior beyond what its owning implementation actually supports.
+The product priority order is in [`ownership.md`](ownership.md#product-priority). Compiler and conversion work are product-enabling infrastructure, not the sole progress metric ([ADR-0008](../adr/0008-tooling-first-semantic-platform.md)).
 
 ## Ownership and dependency rules
 
-- Raw Workshop semantics, canonical Program/WIR behavior, catalog, settings, localization, validation, emission, and Workshop-domain facts belong to `workshop-rs`.
-- OPY syntax, preprocessing/macros, project loading, semantics, HIR, diagnostics/source mapping, lowering, compiler behavior, and scoped reconstruction belong to `opy-rs`.
-- DEL/OSTW project loading, syntax/type/runtime semantics, HIR, diagnostics/source mapping, lowering, compiler behavior, and scoped reconstruction belong to `deltin-rs`.
-- Wright owns cross-language diagnostics, lint/analyze/inspect, validated-edit product behavior, CLI/LSP/agent surfaces, embedding, CI, and orchestration. Editor-facing LSP and agent-facing native-tool adapters are consumer surfaces over shared Wright/owner capabilities; neither protocol owns source-language semantics.
-- `language-provider-protocol` owns the provider process/data contract, not source-language or Workshop semantics.
-- Missing semantics must be fixed in the owning repository rather than approximated or duplicated in Wright.
+Repository ownership and dependency direction are in [`ownership.md`](ownership.md). Missing semantics are fixed in the owning repository, never approximated or duplicated in Wright.
+
+Editor-facing LSP and agent-facing native-tool adapters are consumer surfaces over shared Wright/owner capabilities; neither protocol owns source-language semantics.
 
 Cross-repository work follows:
 
@@ -36,7 +22,7 @@ Cross-repository work follows:
 
 ## Readiness model
 
-Surface area is not support. A command, adapter, parser entry point, README claim, or isolated passing test does not establish a capability by itself.
+Surface area is not support ([`ownership.md`](ownership.md#capability-ceiling)): a command, adapter, parser entry point, README claim, or isolated passing test does not establish a capability by itself.
 
 Readiness depends on the workflow:
 
@@ -51,24 +37,13 @@ Compatibility is capability-specific. Observable semantic correctness is always 
 
 ## Source transformation
 
-- Source mutation follows `semantic understanding -> validated source edits -> original source`; full-file regeneration is not the default editing model.
-- Preserve comments, trivia, formatting, and unrelated source whenever practical.
-- Unsafe or unsupported edits must fail explicitly rather than fall back to destructive textual rewriting.
+The mutation model (semantic understanding, validated edits, the original source, explicit refusal of unsafe edits) is in [`tooling.md`](tooling.md#source-edits).
+
 - Workshop -> OPY/DEL reconstruction targets semantic equivalence and useful recoverable structure, with explicit information-loss boundaries rather than literal source recovery.
 
 ## Verification
 
-Tests are the primary durable verification mechanism.
-
-Use the smallest verification surface appropriate to the claim:
-
-- focused unit/regression tests for local behavior;
-- compatibility/differential tests against pinned reference implementations where external behavior matters;
-- integration/real-project tests for interactions not economically covered by focused tests;
-- runtime/client validation only for claims that cannot be established statically;
-- source mapping/source-location checks for diagnostics and validated editing.
-
-Fixtures, corpora, snapshots, goldens, and reference outputs are test-support mechanisms, not parallel project-status or verification databases. Current support claims must reflect current implementation and tests.
+Verification follows [ADR-0018](../adr/0018-tests-first-integration-verification.md) and the WrightKit testing policy: tests are the primary durable mechanism, and fixtures, corpora, snapshots, and reference outputs are test support, not parallel status or verification databases. Current support claims must reflect the current implementation and tests.
 
 ## Wright 1.0 product contract
 
@@ -104,18 +79,15 @@ This is dependency-driven, not a rigid release-phase sequence. Higher-level work
 
 ## Planning rules
 
-- Real user workflows outrank roadmap neatness, support-matrix completion, documentation volume, feature counts, or architecture cleanup.
-- Fix root capabilities in the owning implementation before integration-layer workarounds.
-- Inspect existing tests before adding new ones; protect observable behavior and meaningful failure modes rather than incidental implementation details.
-- Do not weaken diagnostics, validation, compatibility expectations, or tests to make CI pass.
-- Keep near-term executable work in owner Issues. Keep this roadmap focused on durable product, ownership, readiness, and prioritization contracts.
+The general decision priorities are in the WrightKit `docs/goal.md`. The rules specific to Wright's roadmap:
+
+- Keep near-term executable work in owner Issues. Keep this document focused on durable product, ownership, readiness, and prioritization contracts.
 - Do not split catalog-scale work into per-symbol Issues.
-- Infrastructure, protocol, release, or cleanup work is justified when it unlocks or protects a concrete workflow.
 - Keep agent integration thin: Wright may expose and register its own capabilities, while the harness owns model runtime, tool-exposure/discovery policy, and process startup. Do not turn Wright into a generic agent configuration framework without a separate approved requirement.
 
 ## Non-goals
 
-- Maintaining a current-progress dashboard in this Issue body.
+- Maintaining a current-progress dashboard in this document.
 - Encoding transient release versions, active blockers, current child-Issue state, or near-term execution ordering here.
 - Treating roadmap completion, Issue closure, README claims, or historical CI results as proof that a capability is currently supported.
 - Replacing owner-specific language or compatibility contracts with Wright-side policy.
