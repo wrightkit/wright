@@ -33,6 +33,7 @@ jobs:
   paths:
     name: Detect paths
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
       opy: ${{ steps.filter.outputs.rust_core }}
@@ -99,6 +100,7 @@ jobs:
     needs: paths
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -147,6 +149,7 @@ jobs:
     needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.opy == 'true' || needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -199,6 +202,7 @@ jobs:
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.rust_core == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: true
       matrix:
@@ -302,6 +306,7 @@ jobs:
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -340,8 +345,8 @@ jobs:
           -p wright-cli --test cli --test diagnostics_schema --test serve
           && cargo test --locked -p wright-consumer --test consumer
 
-      - name: Install pinned OPY provider
-        run: target/debug/wright update provider opy --version 0.1.38
+      - name: Install OPY provider
+        run: target/debug/wright update provider opy
 
       - name: Compile OPY via provider
         run: >-
@@ -356,6 +361,7 @@ jobs:
     needs: [paths, rust-quality, rust-msrv]
     if: needs.paths.outputs.lpp == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout Wright
         uses: actions/checkout@v7
@@ -409,6 +415,7 @@ jobs:
     needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.cli == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -437,9 +444,10 @@ jobs:
   # -------------------------------------------------------------------------
   benchmark:
     name: Benchmarks
-    needs: [paths, rust-quality, rust-msrv]
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
     if: needs.paths.outputs.opy == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -466,20 +474,22 @@ jobs:
         id: bench
         run: target/debug/wright-bench
 
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
+
       - name: Validate agent benchmark scenarios
         run: |
-          cargo build --locked -p wright-cli
           python3 benchmarks/agent/agent_bench.py setup-oracle
           python3 benchmarks/agent/agent_bench.py validate
           python3 -m pip install -r benchmarks/agent/requirements-publish.txt
           python3 -m unittest discover -s benchmarks/agent
           python3 -m unittest discover -s benchmarks/defects
-
-      - name: Check agent-facing metrics drift
-        run: |
-          python3 -m unittest discover -s benchmarks/metrics
-          target/debug/wright update provider opy
-          python3 benchmarks/metrics/metrics.py check --wright target/debug/wright
 
       - name: Upload benchmark report
         if: always()
@@ -487,6 +497,38 @@ jobs:
         with:
           name: benchmark-report
           path: target/wright-bench-report.json
+
+  # -------------------------------------------------------------------------
+  # [5a] AGENT-FACING METRICS DRIFT  (real-project latency and result shape)
+  # Runs apart from the benchmarks so its multi-minute wall time does not
+  # extend them. It measures the current-run debug CLI against the latest
+  # provider: pinning an old provider would measure a snapshot nobody uses,
+  # and the report records both versions so drift can be attributed.
+  # -------------------------------------------------------------------------
+  metrics-drift:
+    name: Metrics drift
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
+    if: needs.paths.outputs.opy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
+
+      - name: Check agent-facing metrics drift
+        run: |
+          python3 -m unittest discover -s benchmarks/metrics
+          target/debug/wright update provider opy
+          python3 benchmarks/metrics/metrics.py check --wright target/debug/wright
 
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)
@@ -509,6 +551,7 @@ jobs:
       (needs.opy-integration.result == 'success' || needs.paths.outputs.opy != 'true') &&
       (needs.lpp-integration.result == 'success' || needs.paths.outputs.lpp != 'true')
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -569,6 +612,7 @@ jobs:
       (needs.lpp-integration.result == 'success' || needs.paths.outputs.lpp != 'true') &&
       needs.dist-cli-build.result == 'success'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

@@ -226,7 +226,10 @@ class RunTest(unittest.TestCase):
                 continue
             self.assertIn("bytes", record, key)
             self.assertIn("tokens", record, key)
-            self.assertIn("latencyMs", record, key)
+            if key.startswith("cli:") and key.endswith("?brief"):
+                self.assertNotIn("latencyMs", record, key)
+            else:
+                self.assertIn("latencyMs", record, key)
 
     def test_check_never_rewrites_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
