@@ -258,7 +258,18 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
         .any(|c| c.is_file());
     let ostw_project =
         path.join("ds.toml").is_file() || !direct_source_files(path, SourceKind::Ostw).is_empty();
-    let workshop_project = !direct_source_files(path, SourceKind::Workshop).is_empty();
+    // A bare `.txt` is too weak a signal to claim Workshop ownership of a
+    // directory: `version.txt`, `requirements.txt`, `notes.txt` are ambient
+    // in any project root and would misroute discovery into a Workshop parse
+    // of unrelated content. `.ow`/`.ws`/`.workshop` still detect; an explicit
+    // `--kind workshop` or file path still accepts `.txt`.
+    let workshop_project = direct_source_files(path, SourceKind::Workshop)
+        .iter()
+        .any(|file| {
+            file.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| !extension.eq_ignore_ascii_case("txt"))
+        });
     let mut kinds = Vec::new();
     if opy_project {
         kinds.push(SourceKind::Opy);
@@ -449,9 +460,9 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("create test directory");
         std::fs::write(directory.join("main.opy"), "rule \"main\":\n    pass\n")
             .expect("write OPY source");
-        std::fs::write(directory.join("generated.txt"), "rule (\"generated\") {}\n")
+        std::fs::write(directory.join("generated.ws"), "rule (\"generated\") {}\n")
             .expect("write Workshop source");
-        std::fs::write(directory.join("another.txt"), "rule (\"another\") {}\n")
+        std::fs::write(directory.join("another.ws"), "rule (\"another\") {}\n")
             .expect("write second Workshop source");
 
         let mut config = SessionConfig {
@@ -467,6 +478,28 @@ mod tests {
         config.kind = SourceKind::Workshop;
         let error = resolve(&config).expect_err("multiple Workshop files must be ambiguous");
         assert_eq!(error.code, "input-kind-ambiguous");
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn directory_detection_ignores_a_stray_txt() {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let directory = std::env::temp_dir().join(format!(
+            "wright-input-stray-txt-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&directory).expect("create test directory");
+        std::fs::write(directory.join("version.txt"), "0.11.0\n").expect("write text file");
+
+        let config = SessionConfig {
+            input: InputSpec::Path(directory.clone()),
+            kind: SourceKind::Auto,
+            ..SessionConfig::default()
+        };
+        let error = resolve(&config).expect_err("a lone .txt must not claim the directory");
+        assert_eq!(error.code, "input-kind-unknown");
 
         std::fs::remove_dir_all(directory).expect("remove test directory");
     }

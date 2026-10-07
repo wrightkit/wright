@@ -316,11 +316,15 @@ fn render_text<T: serde::Serialize + ResultPresentation>(
         // namespaced (`workshop.unknown-value.futurevaluething`), so any
         // code segment carrying the `unknown-` kind qualifies. The
         // structured result is unchanged; the pointer lives in text only.
+        // A `'<none>'` spelling means no name was rejected (e.g.
+        // `unknown-language` when detection finds no markers), so there is
+        // nothing `wright lookup` could resolve — skip the hint.
         if matches!(envelope.command.as_str(), "check" | "compile")
             && diagnostic
                 .code
                 .split('.')
                 .any(|segment| segment.starts_with("unknown-"))
+            && !diagnostic.message.contains("'<none>'")
         {
             eprintln!(
                 "  {}",
