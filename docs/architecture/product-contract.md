@@ -33,7 +33,7 @@ Readiness depends on the workflow:
 - agent/native-tool readiness requires semantic equivalence with the underlying Wright contract, discoverable project setup for supported harnesses, and representative workflow evidence for task effectiveness and context/tool overhead; shipping a transport adapter alone is not sufficient.
 - language-service readiness requires correct document lifecycle/current-buffer behavior and advertises only editor capabilities backed by the owning implementation; agent-native tools do not substitute for editor document synchronization.
 
-Compatibility is capability-specific. Observable semantic correctness is always required. An owning language engine may additionally define a stricter compiler-output contract, such as canonical structural convergence with a pinned reference implementation; Wright consumes that owner contract rather than redefining it.
+Compatibility is capability-specific. Observable semantic correctness is always required. Source-language compilation additionally converges structurally on the established upstream compiler output (WrightKit `docs/goal.md` principle 7); the owning language engine implements and tests that contract, and Wright consumes it rather than redefining it.
 
 ## Source transformation
 
