@@ -290,8 +290,9 @@ pub fn validate_transaction(
 }
 
 /// Resolve the session input for an edit operation without consuming stdin:
-/// stdin carries no source identity, so edit operations refuse it outright.
-fn resolve_edit_input(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
+/// an input with no path carries no source identity, so edit operations
+/// refuse it outright.
+pub(crate) fn resolve_edit_input(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     if config.input.path().is_none() {
         return Err(edit_stdin_refusal());
     }
@@ -302,7 +303,7 @@ fn edit_stdin_refusal() -> Diagnostic {
     Diagnostic::error(
         "edit-input-stdin",
         Stage::Discovery,
-        "edit operations require a path-based input; stdin has no source identity",
+        "edit operations require a path-based input; the input has no source identity",
     )
 }
 
@@ -715,7 +716,7 @@ fn symbol_at_position<'a>(
 }
 
 /// Whether the 1-based `line`/`col` falls inside the half-open span.
-fn position_in_span(span: workshop_rs::source::Span, line: u32, col: u32) -> bool {
+pub fn position_in_span(span: workshop_rs::source::Span, line: u32, col: u32) -> bool {
     (line > span.start.line || (line == span.start.line && col >= span.start.col))
         && (line < span.end.line || (line == span.end.line && col < span.end.col))
 }

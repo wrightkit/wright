@@ -1,12 +1,13 @@
-//! The editor-neutral language service (#63, #65, #66).
+//! The editor-neutral language service (#63, #65, #66, #555).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::Serialize;
-use wright_driver::{CompilerSession, SessionConfig};
+use wright_analyzer::canonical::{ReferenceKind, SemanticIndex, Symbol};
+use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
 
-use crate::document::{DocumentStore, Position, Range, line_col_position};
+use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceDiagnostic {
@@ -41,6 +42,21 @@ pub enum RenameOutcome {
     Refused { code: String, message: String },
 }
 
+/// A resolved source location — a `definition` or `references` target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SourceLocation {
+    pub uri: String,
+    pub range: Range,
+}
+
+/// The hover answer for a position: the resolved symbol's identity over the
+/// identifier occurrence that matched.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HoverInfo {
+    pub contents: String,
+    pub range: Range,
+}
+
 pub struct LanguageService {
     pub store: DocumentStore,
     pub root: PathBuf,
@@ -70,20 +86,101 @@ impl LanguageService {
         let Some(document) = self.store.document(uri) else {
             return Vec::new();
         };
-        if !is_source_document(uri) {
+        if is_source_document(uri) {
+            return vec![SourceDiagnostic {
+                source: document.uri.clone(),
+                range: empty_range(),
+                severity: "error".to_string(),
+                code: "source-provider-unavailable".to_string(),
+                message:
+                    "source-language analysis is provider-owned; diagnostics are not yet negotiated"
+                        .to_string(),
+                source_version: document.version,
+                document_version: document.version,
+            }];
+        }
+        if !is_workshop_document(document) {
             return Vec::new();
         }
-        vec![SourceDiagnostic {
-            source: document.uri.clone(),
-            range: empty_range(),
-            severity: "error".to_string(),
-            code: "source-provider-unavailable".to_string(),
-            message:
-                "source-language analysis is provider-owned; diagnostics are not yet negotiated"
-                    .to_string(),
-            source_version: document.version,
-            document_version: document.version,
-        }]
+        // Raw Workshop diagnostics run the session's check pipeline over the
+        // open buffer's text — the same diagnostics `wright check` reports
+        // for that text (#555), including the empty set for a clean buffer.
+        match self.workshop_session(document) {
+            Ok(mut session) => session
+                .check()
+                .diagnostics
+                .iter()
+                .map(|diagnostic| source_diagnostic(document, diagnostic))
+                .collect(),
+            Err(diagnostic) => vec![source_diagnostic(document, &diagnostic)],
+        }
+    }
+
+    /// Hover over an identifier occurrence in a raw Workshop document
+    /// (#555): the resolved symbol's `kind name` — the identity `inspect`
+    /// reports — over the occurrence that matched. Anything that is not an
+    /// identifier occurrence, or a document that fails to load, is `None`.
+    pub fn hover(&self, uri: &str, position: Position) -> Option<HoverInfo> {
+        let document = self.workshop_document(uri)?;
+        let index = self.workshop_index(document)?;
+        let (symbol, occurrence) = symbol_at(&index, document, position)?;
+        Some(HoverInfo {
+            contents: format!("`{} {}`", symbol.kind.as_str(), symbol.name),
+            range: document.from_span(&occurrence),
+        })
+    }
+
+    /// Go-to-definition over an identifier occurrence in a raw Workshop
+    /// document: the resolved symbol's declared span — the location
+    /// `inspect` reports for the symbol.
+    pub fn definition(&self, uri: &str, position: Position) -> Option<SourceLocation> {
+        let document = self.workshop_document(uri)?;
+        let index = self.workshop_index(document)?;
+        let (symbol, _) = symbol_at(&index, document, position)?;
+        let span = symbol.span.or(symbol.occurrence)?;
+        Some(SourceLocation {
+            uri: document.uri.clone(),
+            range: document.from_span(&span),
+        })
+    }
+
+    /// References to the symbol an identifier occurrence resolves to in a
+    /// raw Workshop document — the same occurrence spans `inspect`
+    /// reports for the symbol. `include_declaration` maps the LSP
+    /// `includeDeclaration` flag onto the declaration reference kind.
+    pub fn references(
+        &self,
+        uri: &str,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<SourceLocation>> {
+        let document = self.workshop_document(uri)?;
+        let index = self.workshop_index(document)?;
+        let (symbol, _) = symbol_at(&index, document, position)?;
+        let mut seen = BTreeSet::new();
+        Some(
+            index
+                .references(symbol.id)
+                .into_iter()
+                .filter(|reference| {
+                    include_declaration || reference.kind != ReferenceKind::Declaration
+                })
+                .filter_map(|reference| reference.occurrence)
+                .filter(|occurrence| {
+                    seen.insert((
+                        occurrence.file.index(),
+                        occurrence.start.line,
+                        occurrence.start.col,
+                        occurrence.end.line,
+                        occurrence.end.col,
+                    ))
+                })
+                .map(|occurrence| SourceLocation {
+                    uri: document.uri.clone(),
+                    range: document.from_span(&occurrence),
+                })
+                .collect(),
+        )
     }
 
     pub fn dependent_documents(&self, uri: &str) -> Vec<String> {
@@ -230,6 +327,46 @@ impl LanguageService {
         }
         RenameOutcome::Applied(applied)
     }
+
+    /// The document when it is a raw Workshop buffer this service backs:
+    /// a source-language document keeps its provider boundary regardless
+    /// of its tag.
+    fn workshop_document(&self, uri: &str) -> Option<&Document> {
+        let document = self.store.document(uri)?;
+        if is_source_document(uri) || !is_workshop_document(document) {
+            return None;
+        }
+        Some(document)
+    }
+
+    /// A driver session over the document's current buffer text
+    /// (#555): `InputSpec::Text` resolves the text in place of a disk read
+    /// under the document's file identity, so `check` and `load` run the
+    /// same pipeline `wright check` and `wright inspect` run for the same
+    /// text.
+    fn workshop_session(
+        &self,
+        document: &Document,
+    ) -> Result<CompilerSession, wright_driver::Diagnostic> {
+        CompilerSession::new(SessionConfig {
+            input: InputSpec::Text {
+                text: document.text.clone(),
+                path: uri_to_path(&document.uri),
+            },
+            kind: SourceKind::Workshop,
+            root: Some(document.root.clone()),
+            ..self.config.clone()
+        })
+    }
+
+    /// The canonical `SemanticIndex` over the document's current buffer —
+    /// the same index `inspect` serves — or `None` when the text does not
+    /// load to a validated program.
+    fn workshop_index(&self, document: &Document) -> Option<SemanticIndex> {
+        let mut session = self.workshop_session(document).ok()?;
+        let loaded = session.load().ok()?;
+        Some(SemanticIndex::build(&loaded.program))
+    }
 }
 
 /// Map a document URI to its provider language id when it is a
@@ -251,6 +388,67 @@ fn source_language_id(uri: &str) -> Option<String> {
 
 fn is_source_document(uri: &str) -> bool {
     source_language_id(uri).is_some()
+}
+
+/// A document is raw Workshop when the editor tagged it `workshop`, or —
+/// untagged — when its extension is one `wright check` accepts as Workshop
+/// input. An explicit non-Workshop language id stays quiet even on a
+/// `.txt` URI.
+fn is_workshop_document(document: &Document) -> bool {
+    if let Some(language_id) = document.language_id.as_deref() {
+        return language_id == "workshop";
+    }
+    let Some(path) = uri_to_path(&document.uri) else {
+        return false;
+    };
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "txt" | "ow" | "ws" | "workshop"
+            )
+        })
+}
+
+/// The symbol whose identifier occurrence covers `position`, and that
+/// occurrence — the same addressability `semanticRename` applies (#434).
+fn symbol_at<'index>(
+    index: &'index SemanticIndex,
+    document: &Document,
+    position: Position,
+) -> Option<(&'index Symbol, workshop_rs::source::Span)> {
+    let (line, col) = document.to_line_col(position);
+    index.symbols().find_map(|symbol| {
+        index
+            .references(symbol.id)
+            .iter()
+            .filter_map(|reference| reference.occurrence)
+            .find(|occurrence| wright_driver::edit::position_in_span(*occurrence, line, col))
+            .map(|occurrence| (symbol, occurrence))
+    })
+}
+
+/// One driver `Diagnostic` as a `SourceDiagnostic` on the open document.
+fn source_diagnostic(
+    document: &Document,
+    diagnostic: &wright_driver::Diagnostic,
+) -> SourceDiagnostic {
+    SourceDiagnostic {
+        source: document.uri.clone(),
+        range: diagnostic
+            .span
+            .as_ref()
+            .map_or_else(empty_range, |span| Range {
+                start: line_col_position(&document.text, span.start.line, span.start.col),
+                end: line_col_position(&document.text, span.end.line, span.end.col),
+            }),
+        severity: diagnostic.severity.as_str().to_string(),
+        code: diagnostic.code.clone(),
+        message: diagnostic.message.clone(),
+        source_version: document.version,
+        document_version: document.version,
+    }
 }
 
 /// Convert a driver [`wright_driver::edit::EditRange`] (1-based line and

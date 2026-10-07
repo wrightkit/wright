@@ -21,6 +21,11 @@ pub struct Document {
     pub text: String,
     pub version: i32,
     pub root: PathBuf,
+    /// The editor-declared language id (`textDocument.languageId`), when the
+    /// host reported one: a `workshop` id marks the buffer as raw Workshop
+    /// regardless of its extension, and any other explicit id keeps an
+    /// ambiguous extension (`.txt`) out of the Workshop path.
+    pub language_id: Option<String>,
 }
 
 impl Document {
@@ -35,11 +40,17 @@ impl Document {
             text: text.into(),
             version,
             root,
+            language_id: None,
         }
     }
 
     pub fn new(uri: impl Into<String>, text: impl Into<String>, root: PathBuf) -> Document {
         Self::with_version(uri, text, root, 0)
+    }
+
+    pub fn with_language_id(mut self, language_id: impl Into<String>) -> Document {
+        self.language_id = Some(language_id.into());
+        self
     }
 
     pub fn to_line_col(&self, position: Position) -> (u32, u32) {

@@ -285,10 +285,10 @@ impl CompilerSession {
             }
         }
         if self.config.source_backend == SourceBackend::Provider
-            && matches!(self.config.input, InputSpec::Stdin)
+            && !matches!(self.config.input, InputSpec::Path(_))
         {
             return Err(SourceProviderError::Unsupported {
-                message: "provider-backed source workflows require an entry path; stdin has no entry identity".to_string(),
+                message: "provider-backed source workflows require a path input; the provider resolves the project sources itself, so stdin and in-memory text have no entry identity it can load".to_string(),
             }
             .diagnostic());
         }
@@ -298,7 +298,12 @@ impl CompilerSession {
         let provider_backend = match self.config.source_backend {
             SourceBackend::Native => false,
             SourceBackend::Provider => true,
-            SourceBackend::Auto => resolved.kind == SourceKind::Opy,
+            // A caller-held text is not a provider input: the provider would
+            // resolve the entry from disk and answer for different bytes.
+            SourceBackend::Auto => {
+                resolved.kind == SourceKind::Opy
+                    && !matches!(self.config.input, InputSpec::Text { .. })
+            }
         };
         if resolved.kind == SourceKind::Ostw {
             return Err(source_provider_unavailable());

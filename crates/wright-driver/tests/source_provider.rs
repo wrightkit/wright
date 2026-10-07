@@ -654,6 +654,27 @@ fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
     assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
 }
 
+/// #555: caller-held text is not a provider input either — the provider
+/// resolves the project from disk itself, so it cannot answer for a buffer
+/// only the caller holds.
+#[test]
+fn provider_backend_rejects_text_input_without_fabricating_an_entry() {
+    let config = SessionConfig {
+        input: InputSpec::Text {
+            text: "globalvar score = 0\n".to_string(),
+            path: Some(PathBuf::from("entry.opy")),
+        },
+        kind: SourceKind::Opy,
+        source_backend: SourceBackend::Provider,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::new(config).expect("session");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.exit, 3);
+    assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
+}
+
 #[test]
 fn unmapped_provider_artifact_errors_do_not_claim_the_opy_entry() {
     let (dir, entry) = temp_entry();

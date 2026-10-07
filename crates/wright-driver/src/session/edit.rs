@@ -8,10 +8,8 @@
 use std::collections::BTreeMap;
 
 use super::CompilerSession;
-use crate::config::InputSpec;
-use crate::diag::{Diagnostic, Stage};
+use crate::diag::Diagnostic;
 use crate::edit::{EditTransaction, EditValidation, RenameResult, RenameTarget, SemanticRename};
-use crate::input;
 use crate::result::Envelope;
 use crate::service::Address;
 
@@ -62,24 +60,15 @@ impl CompilerSession {
         if let Err(diagnostic) = self.verify_fixed_config() {
             return refuse(vec![diagnostic]);
         }
-        match &self.config.input {
-            InputSpec::Stdin => {
-                return refuse(vec![Diagnostic::error(
-                    "edit-input-stdin",
-                    Stage::Discovery,
-                    "edit operations require a path-based input; stdin has no source identity",
-                )]);
-            }
-            InputSpec::Path(_) => match input::resolve(&self.config) {
-                Ok(resolved) => {
-                    if let Some(diagnostic) =
-                        crate::edit::edit_kind_gate(resolved.kind, "providerSemanticRename")
-                    {
-                        return refuse(vec![diagnostic]);
-                    }
+        match crate::edit::resolve_edit_input(&self.config) {
+            Ok(resolved) => {
+                if let Some(diagnostic) =
+                    crate::edit::edit_kind_gate(resolved.kind, "providerSemanticRename")
+                {
+                    return refuse(vec![diagnostic]);
                 }
-                Err(diagnostic) => return refuse(vec![diagnostic]),
-            },
+            }
+            Err(diagnostic) => return refuse(vec![diagnostic]),
         }
         match self.load() {
             Ok(loaded) => crate::edit::semantic_rename(&loaded, &self.catalog, sources, target),
@@ -98,29 +87,19 @@ impl CompilerSession {
             self.diagnostics.push(diagnostic);
             return self.finish("rename", result);
         }
-        match &self.config.input {
-            InputSpec::Stdin => {
-                self.diagnostics.push(Diagnostic::error(
-                    "edit-input-stdin",
-                    Stage::Discovery,
-                    "rename requires a path-based input; stdin has no source identity",
-                ));
-                return self.finish("rename", result);
-            }
-            InputSpec::Path(_) => match input::resolve(&self.config) {
-                Ok(resolved) => {
-                    if let Some(diagnostic) =
-                        crate::edit::edit_kind_gate(resolved.kind, "providerSemanticRename")
-                    {
-                        self.diagnostics.push(diagnostic);
-                        return self.finish("rename", result);
-                    }
-                }
-                Err(diagnostic) => {
+        match crate::edit::resolve_edit_input(&self.config) {
+            Ok(resolved) => {
+                if let Some(diagnostic) =
+                    crate::edit::edit_kind_gate(resolved.kind, "providerSemanticRename")
+                {
                     self.diagnostics.push(diagnostic);
                     return self.finish("rename", result);
                 }
-            },
+            }
+            Err(diagnostic) => {
+                self.diagnostics.push(diagnostic);
+                return self.finish("rename", result);
+            }
         }
         let loaded = match self.load() {
             Ok(loaded) => loaded,
