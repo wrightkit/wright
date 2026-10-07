@@ -170,3 +170,53 @@ finding:
 ```
 
 Non-`while-without-wait` findings carry `"boundedness": null`.
+
+## Validated automated fixes (#556)
+
+An `exact`-evidence finding whose correction is mechanically unambiguous
+carries a `fix` member — on `lint` findings and on the agent `findings`/`lint`
+operations identically:
+
+```json
+{
+  "code": "repeated-value",
+  "fix": {
+    "kind": "evaluate-once",
+    "summary": "wrap each duplicated occurrence in Evaluate Once so it evaluates once per action",
+    "transaction": { "edits": [ { "kind": "fix", "source": "...", "source_identity": "...", "range": { "...": "..." }, "new_text": "Evaluate Once(...)" } ] }
+  }
+}
+```
+
+`fix.transaction` is the same `EditTransaction` `semanticRename` produces:
+the agent path previews it through `validateEditTransaction` and applies it
+through the caller's own write path — there is no separate fix operation.
+On the CLI, `wright lint --fix` renders each offered fix's validated diff,
+and `wright lint --fix --write` applies fixes one at a time — reloading and
+re-linting after each write so every fix is planned and validated against
+the source version it edits. `--write` requires `--fix` and a path-based
+input, and `--fix` conflicts with `--brief`. When `--fix` runs, the result
+adds a `fixes` list with each offered fix's `status` (`preview`, `applied`,
+or `refused`), its `preview`, and any refusal `diagnostics`.
+
+The current fixable rules and their corrections:
+
+* `duplicate-condition` (`remove-dead-branch`): delete the unreachable
+  `Else If` branch — the marker and its body, through the next `Else If`,
+  `Else`, or `End` marker. The fix is withheld when the repeated condition
+  can evaluate differently inside one synchronous pass (random numbers,
+  advancing clocks, server load, live payload motion): the branch may be
+  reachable after all.
+* `repeated-value` (`evaluate-once`): wrap each duplicated occurrence in
+  `Evaluate Once`. Occurrences the engine re-evaluates — the loop's own
+  `While` condition, `Wait Until` arguments, and persistent-object actions
+  whose reevaluation mode is enabled — are never wrapped; when more than
+  one occurrence must stay live the family carries no fix, because a
+  partial wrap would leave the finding standing.
+
+Every offered fix edits only the reported spans, carries the input identity
+as a precondition, and is validated by reparsing the edited source before
+any write; a stale or malformed precondition refuses with
+`edit-stale-source` (or the real parse/validation diagnostic) and writes
+nothing. Fixes exist only on raw Workshop input — provider-backed findings
+have spans in generated text and carry no `fix`.

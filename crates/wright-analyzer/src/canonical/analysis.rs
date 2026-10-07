@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
-use workshop_rs::source::Span;
+use workshop_rs::source::{FileId, Position, SourceDocument, Span};
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
 use super::cfg::{is_wait, matching_end};
@@ -20,6 +21,25 @@ pub struct Finding {
     pub value: Option<ValueId>,
     pub evidence: EvidenceClass,
     pub boundedness: Option<Boundedness>,
+    /// The mechanically determined correction for this finding, when one
+    /// exists and its safety preconditions hold (#556). The plan names the
+    /// spans to rewrite; the driver materializes it into a validated
+    /// source-edit transaction.
+    pub fix: Option<LintFix>,
+}
+
+/// A mechanically determined correction for a lint finding (#556): the
+/// semantic plan a consumer turns into a validated source-edit transaction.
+/// Fixes exist only for `exact` findings whose correction is unambiguous;
+/// every plan carries the exact spans it may touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LintFix {
+    /// Delete the dead `Else If` branch this span covers — from the `Else
+    /// If` marker through the start of the next chain marker.
+    RemoveDeadBranch { span: Span },
+    /// Wrap each occurrence of the duplicated expression in `Evaluate Once`,
+    /// freezing it for the enclosing action's evaluation.
+    EvaluateOnce { occurrences: Vec<Span> },
 }
 
 pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
@@ -41,7 +61,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             let body = &rule.actions[start..end];
             if config.is_enabled("min-wait-loop") && body.iter().any(|action| is_wait(action, true))
             {
-                findings.push(Finding { code: "min-wait-loop".into(), severity: Severity::Warning, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: EvidenceClass::StaticIndicator, boundedness: None });
+                findings.push(Finding { code: "min-wait-loop".into(), severity: Severity::Warning, message: "loop body waits at the workshop minimum rate; the loop runs at maximum frequency".into(), span: program.action_span(rule_id, action_id), rule: rule_id, action: Some(action_id), value: None, evidence: EvidenceClass::StaticIndicator, boundedness: None, fix: None });
             }
             if config.is_enabled("expensive-loop-check") {
                 for (offset, body_action) in body.iter().enumerate() {
@@ -73,6 +93,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                             value: value_ids.get(&(value as *const Value as usize)).copied(),
                             evidence: EvidenceClass::Heuristic,
                             boundedness: None,
+                            fix: None,
                         });
                     }
                 }
@@ -96,6 +117,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                         value: None,
                         evidence: EvidenceClass::StaticIndicator,
                         boundedness: Some(boundedness),
+                        fix: None,
                     });
                 }
             }
@@ -237,6 +259,7 @@ fn ongoing_condition_findings(
                 value: value_ids.get(&(value as *const Value as usize)).copied(),
                 evidence: EvidenceClass::Heuristic,
                 boundedness: None,
+                fix: None,
             });
         }
     }
@@ -293,6 +316,7 @@ fn duplicate_condition_findings(
                         value: value_ids.get(&(condition as *const Value as usize)).copied(),
                         evidence: EvidenceClass::Exact,
                         boundedness: None,
+                        fix: dead_branch_fix(program, rule_id, rule, action_id, condition),
                     });
                 } else {
                     seen.push(condition);
@@ -321,6 +345,512 @@ fn duplicate_condition_findings(
     findings
 }
 
+/// The mechanically determined fix for a `duplicate-condition` finding
+/// (#556): delete the dead `Else If` branch — the marker line plus its body,
+/// through the next `Else If`/`Else`/`End` chain marker. The fix is offered
+/// only when the repeated condition cannot yield a different result when the
+/// chain re-evaluates it: values that move with the evaluation moment rather
+/// than the tick snapshot (random numbers, advancing clocks, server load,
+/// live payload motion) keep the branch reachable, so it stays.
+///
+/// Provenance alone cannot bound the branch: `Else If`, `Else`, and `End`
+/// markers carry no action span, so the marker extents are derived
+/// textually against the retained source — see [`SourceScan`].
+fn dead_branch_fix(
+    program: &Program,
+    rule_id: RuleId,
+    rule: &Rule,
+    action_id: ActionId,
+    condition: &Value,
+) -> Option<LintFix> {
+    if contains_volatile_call(condition) {
+        return None;
+    }
+    let boundary = elseif_branch_end(&rule.actions, action_id)?;
+    let file = program
+        .action_argument_span(rule_id, action_id, 0)
+        .or_else(|| program.action_span(rule_id, action_id))?
+        .file;
+    let scan = SourceScan::new(program.source(file)?, file);
+    let condition_end = expr_extent_end(
+        condition,
+        &mut |path| program.action_argument_value_span(rule_id, action_id, 0, path),
+        &scan,
+    )?;
+    let start = chain_marker_start(&scan, condition_end, "If")?;
+    let end = match &rule.actions[boundary] {
+        Action::ElseIf { condition } => {
+            let end = expr_extent_end(
+                condition,
+                &mut |path| program.action_argument_value_span(rule_id, boundary, 0, path),
+                &scan,
+            )?;
+            chain_marker_start(&scan, end, "If")?
+        }
+        Action::Else => {
+            let anchor = program.action_span(rule_id, boundary + 1)?;
+            let anchor = scan.byte(anchor.start)?;
+            keyword_marker_start(&scan, "Else", anchor)?
+        }
+        Action::End => {
+            let chain = chain_if_index(&rule.actions, action_id)?;
+            let anchor = program.action_span(rule_id, chain)?;
+            let anchor = scan.byte(anchor.end)?;
+            keyword_marker_start(&scan, "End", anchor)?
+        }
+        _ => return None,
+    };
+    dead_branch_span(&scan, start, end).map(|span| LintFix::RemoveDeadBranch { span })
+}
+
+/// The branch-removal span between a dead `Else If` marker and the next
+/// chain marker, rounded to whole lines. `EditRange`s are half-open
+/// line/column positions applied over a split-line model, so whole-line
+/// deletion anchors at the *end* of the line before the marker — the
+/// newline's own column — and at the boundary marker's line start; either
+/// side keeps its exact extent when the marker shares its line with other
+/// statements.
+fn dead_branch_span(scan: &SourceScan, marker: usize, boundary: usize) -> Option<Span> {
+    let text = scan.document.text();
+    let marker_line = scan.line_start(marker);
+    let start = if marker_line > 0 && text[marker_line..marker].chars().all(char::is_whitespace) {
+        marker_line - 1
+    } else {
+        marker
+    };
+    let boundary_line = scan.line_start(boundary);
+    let end = if boundary_line > start
+        && text[boundary_line..boundary]
+            .chars()
+            .all(char::is_whitespace)
+    {
+        boundary_line
+    } else {
+        boundary
+    };
+    (start < end).then(|| scan.span(start, end))
+}
+
+/// The position of the chain marker (`Else If`, `Else`, or `End`) that ends
+/// the `Else If` branch opened at `elseif` — nested blocks are skipped by
+/// the same opener/`End` accounting the chain scan uses.
+fn elseif_branch_end(actions: &[Action], elseif: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, action) in actions.iter().enumerate().skip(elseif + 1) {
+        match action {
+            Action::ElseIf { .. } | Action::Else if depth == 0 => return Some(index),
+            Action::End => {
+                if depth == 0 {
+                    return Some(index);
+                }
+                depth -= 1;
+            }
+            _ => {
+                let mut current = action;
+                while let Action::Disabled { action } = current {
+                    current = action;
+                }
+                if matches!(
+                    current,
+                    Action::If { .. }
+                        | Action::While { .. }
+                        | Action::ForGlobalVariable { .. }
+                        | Action::ForPlayerVariable { .. }
+                ) {
+                    depth += 1;
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The `If` that opens the chain containing the `Else If` at `elseif` —
+/// nested blocks are skipped by the same depth accounting, walked backward.
+fn chain_if_index(actions: &[Action], elseif: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for index in (0..elseif).rev() {
+        let mut action = &actions[index];
+        while let Action::Disabled { action: inner } = action {
+            action = inner;
+        }
+        match action {
+            Action::End => depth += 1,
+            Action::If { .. } if depth == 0 => return Some(index),
+            Action::If { .. }
+            | Action::While { .. }
+            | Action::ForGlobalVariable { .. }
+            | Action::ForPlayerVariable { .. } => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether `value` contains a call whose result can move between two
+/// evaluations in one synchronous pass — the `Random *` family, advancing
+/// clocks, server-load counters, and the live payload position. Everything
+/// else reads the per-tick snapshot, so a duplicated condition stays equal.
+fn contains_volatile_call(value: &Value) -> bool {
+    const VOLATILE: &[&str] = &[
+        "randomInteger",
+        "randomReal",
+        "randomValueInArray",
+        "randomizedArray",
+        "getTotalTimeElapsed",
+        "getMatchTime",
+        "getServerLoad",
+        "getAverageServerLoad",
+        "getPeakServerLoad",
+        "getPayloadPosition",
+        "getPayloadProgressPercentage",
+    ];
+    let mut volatile = false;
+    visit_value_tree(value, None, &mut |value, _, _| {
+        volatile |= matches!(value, Value::Call { name, .. } if VOLATILE.contains(&name.as_str()));
+        0
+    });
+    volatile
+}
+
+/// A byte-oriented view over one retained source document for deriving
+/// authored extents that provenance does not record (#556): value-call
+/// spans cover only the callee phrase, and `Else If`/`Else`/`End` markers
+/// carry no span at all. Positions inside `//` comments are trivia; every
+/// derived extent is re-verified by the edit transaction's reparse before
+/// any write, so a wrong derivation refuses rather than writes.
+struct SourceScan<'a> {
+    document: &'a SourceDocument,
+    comments: Vec<Range<usize>>,
+    line_starts: Vec<usize>,
+    file: FileId,
+}
+
+impl<'a> SourceScan<'a> {
+    fn new(document: &'a SourceDocument, file: FileId) -> Self {
+        let mut comments: Vec<Range<usize>> =
+            document.comments().map(|comment| comment.range()).collect();
+        comments.sort_by_key(|comment| comment.start);
+        let mut line_starts = vec![0];
+        line_starts.extend(
+            document
+                .text()
+                .match_indices('\n')
+                .map(|(index, _)| index + 1),
+        );
+        SourceScan {
+            document,
+            comments,
+            line_starts,
+            file,
+        }
+    }
+
+    /// The byte offset of a 1-based line/column position.
+    fn byte(&self, position: Position) -> Option<usize> {
+        self.document
+            .byte_range(Span::new(self.file, position, position))
+            .map(|range| range.start)
+    }
+
+    /// The first non-trivia character at or after `pos`.
+    fn next(&self, mut pos: usize) -> Option<(usize, char)> {
+        let text = self.document.text();
+        loop {
+            if let Some(comment) = self
+                .comments
+                .iter()
+                .find(|comment| comment.start <= pos && pos < comment.end)
+            {
+                pos = comment.end;
+                continue;
+            }
+            let c = text.get(pos..)?.chars().next()?;
+            if c.is_whitespace() {
+                pos += c.len_utf8();
+                continue;
+            }
+            return Some((pos, c));
+        }
+    }
+
+    /// The last non-trivia character before `pos`.
+    fn prev(&self, mut pos: usize) -> Option<(usize, char)> {
+        let text = self.document.text();
+        loop {
+            if pos == 0 {
+                return None;
+            }
+            if let Some(comment) = self
+                .comments
+                .iter()
+                .find(|comment| comment.start < pos && pos <= comment.end)
+            {
+                pos = comment.start;
+                continue;
+            }
+            let c = text.get(..pos)?.chars().next_back()?;
+            if c.is_whitespace() {
+                pos -= c.len_utf8();
+                continue;
+            }
+            return Some((pos - c.len_utf8(), c));
+        }
+    }
+
+    /// The position a byte offset lands at, recomputed from the line index.
+    fn position(&self, byte: usize) -> Position {
+        let line = match self.line_starts.binary_search(&byte) {
+            Ok(line) => line + 1,
+            Err(after) => after,
+        } as u32;
+        let start = self.line_starts[(line - 1) as usize];
+        let col = self.document.text()[start..byte].chars().count() as u32 + 1;
+        Position::new(line, col)
+    }
+
+    /// The byte a byte offset's line begins at.
+    fn line_start(&self, byte: usize) -> usize {
+        match self.line_starts.binary_search(&byte) {
+            Ok(line) => self.line_starts[line],
+            Err(after) => self.line_starts[after - 1],
+        }
+    }
+
+    fn span(&self, start: usize, end: usize) -> Span {
+        Span::new(self.file, self.position(start), self.position(end))
+    }
+}
+
+/// The direct children of `value`, in [`visit_value_tree`] order.
+fn value_children(value: &Value) -> Vec<&Value> {
+    match value {
+        Value::Array(values) | Value::Call { args: values, .. } => values.iter().collect(),
+        Value::Vector { x, y, z } => vec![x, y, z],
+        Value::PlayerVariable { player, .. } => vec![player],
+        _ => Vec::new(),
+    }
+}
+
+/// The full authored extent of `value` as a byte range: spans record the
+/// callee phrase (`Compare`), not the `(...)` the expression occupies, so
+/// the end is completed from the last child's extent through the call's
+/// closing bracket. A derived/infix-shaped node — `a + b`, `a[i]`, `x ?
+/// y : z` — begins before its own token and is anchored backward to the
+/// `(` or `,` that starts its argument position. Returns `None` when the
+/// extent cannot be derived exactly.
+fn expr_extent_bytes(
+    value: &Value,
+    span_of: &mut dyn FnMut(&[usize]) -> Option<Span>,
+    scan: &SourceScan,
+) -> Option<Range<usize>> {
+    let node = scan.document.byte_range(span_of(&[])?)?;
+    let children = value_children(value);
+    let mut kids = Vec::with_capacity(children.len());
+    for (index, child) in children.iter().enumerate() {
+        let extent = expr_extent_bytes(
+            child,
+            &mut |path| {
+                let mut full = Vec::with_capacity(path.len() + 1);
+                full.push(index);
+                full.extend_from_slice(path);
+                span_of(&full)
+            },
+            scan,
+        )?;
+        kids.push(extent);
+    }
+    let infix = kids.iter().any(|kid| kid.start < node.start);
+    let start = if infix {
+        expr_start_anchor(scan, kids.iter().map(|kid| kid.start).min()?)?
+    } else {
+        node.start
+    };
+    let contains_children = kids
+        .iter()
+        .all(|kid| kid.start >= node.start && kid.end <= node.end);
+    let closer = match value {
+        Value::Call { .. } | Value::Vector { .. } | Value::PlayerVariable { .. } => ')',
+        Value::Array(_) => ']',
+        _ => return (start < node.end).then_some(start..node.end),
+    };
+    let end = if children.is_empty() {
+        // Zero-argument call: `Name` alone, or `Name()` spelled out.
+        let (index, char) = scan.next(node.end)?;
+        if char == '(' {
+            let (close, ')') = scan.next(index + 1)? else {
+                return None;
+            };
+            close + 1
+        } else {
+            node.end
+        }
+    } else if contains_children {
+        node.end
+    } else if infix {
+        kids.iter().map(|kid| kid.end).max()?.max(node.end)
+    } else {
+        let (index, char) = scan.next(kids.last()?.end)?;
+        (char == closer).then_some(index + 1)?
+    };
+    (start < end).then_some(start..end)
+}
+
+/// The end byte of `value`'s authored extent — see [`expr_extent_bytes`].
+fn expr_extent_end(
+    value: &Value,
+    span_of: &mut dyn FnMut(&[usize]) -> Option<Span>,
+    scan: &SourceScan,
+) -> Option<usize> {
+    Some(expr_extent_bytes(value, span_of, scan)?.end)
+}
+
+/// The byte a derived/infix-shaped expression begins at: from the earliest
+/// child position, walk back over the leftmost token's characters to the
+/// `(` or `,` that separates it from the previous argument, then forward
+/// past trivia.
+fn expr_start_anchor(scan: &SourceScan, mut pos: usize) -> Option<usize> {
+    let text = scan.document.text();
+    loop {
+        pos = scan.prev(pos)?.0;
+        if text[pos..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.'))
+        {
+            continue;
+        }
+        return match text[pos..].chars().next()? {
+            '(' | ',' => Some(scan.next(pos + 1)?.0),
+            _ => None,
+        };
+    }
+}
+
+/// The start byte of the `Else If (<condition>);` marker statement whose
+/// condition's authored extent ends at `condition_end`: forward to the
+/// marker's `;` through its `)`s, back to the matching `(`, then over the
+/// `Else If` phrase.
+fn chain_marker_start(scan: &SourceScan, condition_end: usize, phrase: &str) -> Option<usize> {
+    let mut pos = condition_end;
+    let semi = loop {
+        let (index, char) = scan.next(pos)?;
+        match char {
+            ')' => pos = index + 1,
+            ';' => break index,
+            _ => return None,
+        }
+    };
+    let (close, ')') = scan.prev(semi)? else {
+        return None;
+    };
+    let open = paren_match_back(scan, close)?;
+    let (phrase_start, phrase_end) = word_back(scan, open)?;
+    if &scan.document.text()[phrase_start..phrase_end] != phrase {
+        return None;
+    }
+    let (else_start, else_end) = word_back(scan, phrase_start)?;
+    (&scan.document.text()[else_start..else_end] == "Else").then_some(else_start)
+}
+
+/// The start byte of the `keyword;` marker ending before `anchor` — an
+/// `Else` or `End` statement carries no span, so it is found by its `;`
+/// directly before the next authored position.
+fn keyword_marker_start(scan: &SourceScan, keyword: &str, anchor: usize) -> Option<usize> {
+    let (semi, ';') = scan.prev(anchor)? else {
+        return None;
+    };
+    let (start, end) = word_back(scan, semi)?;
+    (&scan.document.text()[start..end] == keyword).then_some(start)
+}
+
+/// The `(` matching the `)` at `close`, scanning backward over trivia and
+/// balanced parens. Strings refuse outright — a paren inside a string
+/// would confuse the depth count, and a rare shape the transaction's
+/// reparse would catch anyway.
+fn paren_match_back(scan: &SourceScan, close: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut pos = close + 1;
+    loop {
+        let (index, char) = scan.prev(pos)?;
+        match char {
+            ')' => depth += 1,
+            '(' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            '"' | ';' | '{' | '}' => return None,
+            _ => {}
+        }
+        pos = index;
+    }
+}
+
+/// The word ending immediately before `pos`, skipping trivia.
+fn word_back(scan: &SourceScan, pos: usize) -> Option<(usize, usize)> {
+    let text = scan.document.text();
+    let (end_pos, c) = scan.prev(pos)?;
+    if !c.is_alphabetic() {
+        return None;
+    }
+    let end = end_pos + c.len_utf8();
+    let mut start = end_pos;
+    while start > 0
+        && text[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+    {
+        start = text[..start]
+            .chars()
+            .next_back()
+            .map_or(start, |c| start - c.len_utf8());
+    }
+    Some((start, end))
+}
+
+/// Where a collected value node sits inside the loop scope. The
+/// `Evaluate Once` remediation is only offered for positions the engine
+/// evaluates once per action execution; re-evaluating positions must keep
+/// their live read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OccurrenceOrigin {
+    /// The loop's own `While` condition: re-evaluated every iteration, so
+    /// freezing it would change loop semantics.
+    LoopCondition,
+    /// A body action's argument position, by index into the body slice.
+    BodyAction(usize),
+}
+
+/// What the collector records for every gathered value node.
+struct Collected<'a> {
+    values: Vec<&'a Value>,
+    parents: Vec<Option<usize>>,
+    /// The reported node span (`identifier.or(span)` — a callee phrase,
+    /// not the full expression extent).
+    spans: Vec<Option<Span>>,
+    /// The node's path from its argument root, for span lookups.
+    paths: Vec<Vec<usize>>,
+    /// The argument index the node was collected under.
+    arguments: Vec<usize>,
+    origins: Vec<OccurrenceOrigin>,
+}
+
+impl<'a> Collected<'a> {
+    fn new() -> Self {
+        Collected {
+            values: Vec::new(),
+            parents: Vec::new(),
+            spans: Vec::new(),
+            paths: Vec::new(),
+            arguments: Vec::new(),
+            origins: Vec::new(),
+        }
+    }
+}
+
 fn repeated_value_findings(
     program: &Program,
     rule_id: RuleId,
@@ -330,17 +860,15 @@ fn repeated_value_findings(
     body: &[Action],
     value_ids: &HashMap<usize, ValueId>,
 ) -> Vec<Finding> {
-    let mut values = Vec::new();
-    let mut parents = Vec::new();
-    let mut spans = Vec::new();
+    let mut collected = Collected::new();
     if let Action::While { condition } = &rule.actions[loop_action] {
         collect_value_tree(
             condition,
+            0,
             None,
             &mut |path| program.action_argument_value_span(rule_id, loop_action, 0, path),
-            &mut values,
-            &mut parents,
-            &mut spans,
+            &mut collected,
+            OccurrenceOrigin::LoopCondition,
         );
     }
     let mut action = 0;
@@ -359,20 +887,20 @@ fn repeated_value_findings(
             visit_action_roots(&body[action], &mut |argument, value| {
                 collect_value_tree(
                     value,
+                    argument,
                     None,
                     &mut |path| {
                         program.action_argument_value_span(rule_id, action_id, argument, path)
                     },
-                    &mut values,
-                    &mut parents,
-                    &mut spans,
+                    &mut collected,
+                    OccurrenceOrigin::BodyAction(action),
                 );
             });
         }
         action += 1;
     }
 
-    duplicated_value_families(&values, &parents)
+    duplicated_value_families(&collected.values, &collected.parents)
         .into_iter()
         .map(|family| {
             let first = family[0];
@@ -383,34 +911,157 @@ fn repeated_value_findings(
                     "this value expression is evaluated {} times within the same loop scope",
                     family.len()
                 ),
-                span: spans[first].or_else(|| program.action_span(rule_id, loop_action)),
+                span: collected.spans[first].or_else(|| program.action_span(rule_id, loop_action)),
                 rule: rule_id,
                 action: Some(loop_action),
                 value: value_ids
-                    .get(&(values[first] as *const Value as usize))
+                    .get(&(collected.values[first] as *const Value as usize))
                     .copied(),
                 evidence: EvidenceClass::Exact,
                 boundedness: None,
+                fix: evaluate_once_fix(
+                    program,
+                    rule_id,
+                    loop_action,
+                    body_start,
+                    body,
+                    &collected,
+                    &family,
+                ),
             }
         })
         .collect()
 }
 
+/// Collect a value tree for `repeated-value`, treating `Evaluate Once`
+/// subtrees as opaque leaves: their contents evaluate at most once per
+/// action evaluation, so they can never be the repeated-evaluation defect —
+/// and the rule must not re-flag code the remediation already wrapped
+/// (#556).
 fn collect_value_tree<'a>(
     value: &'a Value,
+    argument: usize,
     parent: Option<usize>,
     span_at: &mut impl FnMut(&[usize]) -> Option<Span>,
-    values: &mut Vec<&'a Value>,
-    parents: &mut Vec<Option<usize>>,
-    spans: &mut Vec<Option<Span>>,
+    collected: &mut Collected<'a>,
+    origin: OccurrenceOrigin,
 ) {
-    visit_value_tree(value, parent, &mut |value, parent, path| {
-        let index = values.len();
-        values.push(value);
-        parents.push(parent);
-        spans.push(span_at(path));
-        index
-    });
+    collect_value_at(
+        value,
+        argument,
+        parent,
+        &mut Vec::new(),
+        span_at,
+        collected,
+        origin,
+    );
+}
+
+fn collect_value_at<'a>(
+    value: &'a Value,
+    argument: usize,
+    parent: Option<usize>,
+    path: &mut Vec<usize>,
+    span_at: &mut impl FnMut(&[usize]) -> Option<Span>,
+    collected: &mut Collected<'a>,
+    origin: OccurrenceOrigin,
+) {
+    if matches!(value, Value::Call { name, .. } if name == "evaluateOnce") {
+        return;
+    }
+    let index = collected.values.len();
+    collected.values.push(value);
+    collected.parents.push(parent);
+    collected.spans.push(span_at(path));
+    collected.paths.push(path.clone());
+    collected.arguments.push(argument);
+    collected.origins.push(origin);
+    let parent = Some(index);
+    for (child_index, child) in value_children(value).into_iter().enumerate() {
+        path.push(child_index);
+        collect_value_at(child, argument, parent, path, span_at, collected, origin);
+        path.pop();
+    }
+}
+
+/// Whether the `Evaluate Once` remediation applies to one duplicated
+/// family (#556): every occurrence must resolve to an exact authored
+/// extent, and after wrapping the once-evaluated occurrences at most one
+/// unwrappable occurrence may keep the shape — otherwise the family (and
+/// its finding) survives.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_once_fix(
+    program: &Program,
+    rule_id: RuleId,
+    loop_action: ActionId,
+    body_start: usize,
+    body: &[Action],
+    collected: &Collected,
+    family: &[usize],
+) -> Option<LintFix> {
+    let mut occurrences = Vec::new();
+    let mut unwrappable = 0usize;
+    for &member in family {
+        let (action, wrappable) = match collected.origins[member] {
+            OccurrenceOrigin::LoopCondition => (loop_action, false),
+            OccurrenceOrigin::BodyAction(index) => {
+                (body_start + index, !action_reevaluates(&body[index]))
+            }
+        };
+        let extent = wrappable.then(|| {
+            let file = collected.spans[member]?.file;
+            let scan = SourceScan::new(program.source(file)?, file);
+            let base = &collected.paths[member];
+            let extent = expr_extent_bytes(
+                collected.values[member],
+                &mut |path| {
+                    let mut full = base.clone();
+                    full.extend_from_slice(path);
+                    program.action_argument_value_span(
+                        rule_id,
+                        action,
+                        collected.arguments[member],
+                        &full,
+                    )
+                },
+                &scan,
+            )?;
+            Some(scan.span(extent.start, extent.end))
+        });
+        match extent {
+            Some(Some(span)) => occurrences.push(span),
+            _ => unwrappable += 1,
+        }
+    }
+    (unwrappable <= 1 && !occurrences.is_empty()).then_some(LintFix::EvaluateOnce { occurrences })
+}
+
+/// Whether executing `action` can evaluate an argument more than once:
+/// `Wait Until`'s polled condition, or a persistent-object action whose
+/// reevaluation-mode enum selects fields to re-evaluate (any `*Reeval` /
+/// `Reevaluation` domain member other than the literal `None` mode).
+/// `If`/`Else If` conditions and assignment arguments evaluate once per
+/// action execution, so only `Call` actions can re-evaluate.
+fn action_reevaluates(action: &Action) -> bool {
+    let Action::Call { name, args } = action else {
+        return false;
+    };
+    if name == "waitUntil" {
+        return true;
+    }
+    args.iter().any(|arg| {
+        let mut reevaluates = false;
+        visit_value_tree(arg, None, &mut |value, _, _| {
+            reevaluates |= matches!(
+                value,
+                Value::Enum { value_type, value }
+                    if (value_type.ends_with("Reeval") || value_type == "Reevaluation")
+                        && value != "NONE"
+            );
+            0
+        });
+        reevaluates
+    })
 }
 
 fn duplicated_value_families(values: &[&Value], parents: &[Option<usize>]) -> Vec<Vec<usize>> {

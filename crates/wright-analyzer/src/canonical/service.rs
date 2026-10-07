@@ -160,6 +160,13 @@ impl<'a> SemanticService<'a> {
         }
     }
 
+    /// The lint findings this service's registry run produced, in
+    /// [`Request::GetFindings`] order — the typed view backing the
+    /// serialized array for callers that attach per-finding data (#556).
+    pub fn findings(&self) -> &[Finding] {
+        &self.findings
+    }
+
     #[hotpath::measure]
     pub fn references_for_all_symbols(&self) -> JsonValue {
         JsonValue::Array(self.references_json().clone())

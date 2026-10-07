@@ -202,6 +202,11 @@ fn run_workflow(command: Command) -> ExitCode {
                     brief_envelope(session.lint(), wright_driver::brief::lint)
                 });
             }
+            if args.fix {
+                return run_configured(config, presentation, None, move |session| {
+                    session.lint_fix(args.write)
+                });
+            }
             run_configured(
                 config,
                 presentation,

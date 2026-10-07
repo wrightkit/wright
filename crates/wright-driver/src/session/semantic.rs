@@ -591,10 +591,17 @@ impl CompilerSession {
                 ));
                 let mut findings = service_response(service, &Request::GetFindings);
                 resolve_span_paths(&mut findings, &loaded);
-                let findings = match findings {
+                let mut findings = match findings {
                     serde_json::Value::Array(findings) => findings,
                     _ => Vec::new(),
                 };
+                crate::fix::attach_fixes(
+                    &mut findings,
+                    service.findings(),
+                    &loaded,
+                    session.catalog(),
+                    &Self::locale_for(&loaded),
+                );
                 let (findings, selection) = session
                     .config
                     .selection
@@ -625,6 +632,7 @@ impl CompilerSession {
                     findings: serde_json::Value::Array(findings),
                     skipped,
                     selection,
+                    fixes: None,
                 }
             },
         )

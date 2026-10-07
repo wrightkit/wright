@@ -160,6 +160,56 @@ pub struct LintResult {
     /// Present when a finding selection was applied to `findings` (#430).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<crate::select::SelectionOutcome>,
+    /// Per-fix dispositions under `lint --fix` / `lint --write` (#556):
+    /// what each offered fix validated to, and whether it applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixes: Option<Vec<LintFixOutcome>>,
+}
+
+/// What the validated-edit path did with one finding's fix (#556): the fix
+/// the finding carried, the diff it validated to, and whether it applied
+/// or was refused.
+#[derive(Debug, Clone, Serialize)]
+pub struct LintFixOutcome {
+    /// The finding code the fix remediates.
+    pub code: String,
+    /// The fix `kind` from the finding's `fix` contract.
+    pub kind: String,
+    /// The fix's one-line description.
+    pub summary: String,
+    /// The finding's span, as reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<serde_json::Value>,
+    pub status: LintFixStatus,
+    /// The before/after text per source the transaction validated to —
+    /// self-contained so a consumer renders the diff without joining an
+    /// originals map. Present for `preview` and `applied` outcomes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Vec<LintFixPreview>>,
+    /// The structured refusal when `status` is `refused`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub diagnostics: Vec<crate::diag::Diagnostic>,
+}
+
+/// One lint fix's disposition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LintFixStatus {
+    /// `--fix` validated the transaction; nothing was written.
+    Preview,
+    /// `--write` validated and applied the transaction.
+    Applied,
+    /// The transaction refused — a structured reason rides in
+    /// `diagnostics`; nothing was written.
+    Refused,
+}
+
+/// One source's before/after text in a fix preview.
+#[derive(Debug, Clone, Serialize)]
+pub struct LintFixPreview {
+    pub source: String,
+    pub original: String,
+    pub new_text: String,
 }
 
 /// `lint` results keep only the per-rule identity needed to interpret a

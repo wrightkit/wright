@@ -373,6 +373,19 @@ owns the source semantics and Wright orchestrates the transaction:
   `edit-requires-provider` naming `providerValidateEdit` /
   `providerSemanticRename`, and kinds without a shipped provider keep their
   `source-provider-unavailable` refusal.
+* Findings on `lint` and `findings` carry a `fix` member when a rule offers
+  a mechanically determined correction (#556): `fix.kind` names the
+  remediation, `fix.summary` describes it, and `fix.transaction` is the
+  same `EditTransaction` shape `semanticRename` produces — preview it
+  through `validateEditTransaction` and apply it through the caller's own
+  write path; there is no separate apply operation. Fixes exist only on raw
+  Workshop input for `exact`-evidence findings whose correction is
+  unambiguous — currently `duplicate-condition` (`remove-dead-branch`:
+  delete the unreachable `Else If` branch) and `repeated-value`
+  (`evaluate-once`: wrap each duplicated occurrence in `Evaluate Once`).
+  Shapes the correction cannot safely cover — a condition that can move
+  between evaluations, an occurrence the engine re-evaluates — withhold the
+  `fix` entirely rather than offer a risky edit.
 
 `wright rename <NAME> <NEW_NAME> [INPUT]` exposes the same semantic rename
 on the CLI: it prints the validated diff by default and applies it

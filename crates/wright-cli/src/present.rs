@@ -684,10 +684,37 @@ impl ResultPresentation for LintResult {
             parts.join(", ")
         };
         metadata.push_str(&format!(" across {rules} rule(s)"));
+        if let Some(fixes) = &self.fixes {
+            let mut applied = 0usize;
+            let mut previewed = 0usize;
+            let mut refused = 0usize;
+            for fix in fixes {
+                match fix.status {
+                    wright_driver::result::LintFixStatus::Applied => applied += 1,
+                    wright_driver::result::LintFixStatus::Preview => previewed += 1,
+                    wright_driver::result::LintFixStatus::Refused => refused += 1,
+                }
+            }
+            let mut fixes_part = Vec::new();
+            if applied > 0 {
+                fixes_part.push(format!("{applied} applied"));
+            }
+            if previewed > 0 {
+                fixes_part.push(format!("{previewed} previewed"));
+            }
+            if refused > 0 {
+                fixes_part.push(format!("{refused} refused"));
+            }
+            metadata.push_str(&format!("; {} fix(es)", fixes.len()));
+            if !fixes_part.is_empty() {
+                metadata.push_str(&format!(" ({})", fixes_part.join(", ")));
+            }
+        }
         Some(metadata)
     }
     fn render_body(&self, ctx: &RenderContext<'_>) {
         render_lint(self, ctx);
+        render_lint_fixes(self, ctx);
     }
     fn render_github_findings(&self) {
         if let Some(findings) = self.findings.as_array() {
@@ -1312,25 +1339,31 @@ fn render_rename(result: &RenameResult) {
             .originals
             .get(&preview.source)
             .map_or("", String::as_str);
-        let original_lines: Vec<&str> = original.split('\n').collect();
-        let edited_lines: Vec<&str> = preview.new_text.split('\n').collect();
-        let rows = original_lines.len().max(edited_lines.len());
-        for index in 0..rows {
-            match (original_lines.get(index), edited_lines.get(index)) {
-                (Some(old), Some(new)) if old == new => {}
-                (old, new) => {
-                    if let Some(old) = old {
-                        println!("  {:>4} - {}", index + 1, old);
-                    }
-                    if let Some(new) = new {
-                        println!("  {:>4} + {}", index + 1, new);
-                    }
-                }
-            }
-        }
+        render_diff_lines(original, &preview.new_text, "  ");
     }
     for written in &result.written {
         println!("wrote {written}");
+    }
+}
+
+/// A line diff of `new_text` against `original`: changed lines print as
+/// `-`/`+` pairs with their line numbers, unchanged lines are elided.
+fn render_diff_lines(original: &str, new_text: &str, indent: &str) {
+    let original_lines: Vec<&str> = original.split('\n').collect();
+    let edited_lines: Vec<&str> = new_text.split('\n').collect();
+    let rows = original_lines.len().max(edited_lines.len());
+    for index in 0..rows {
+        match (original_lines.get(index), edited_lines.get(index)) {
+            (Some(old), Some(new)) if old == new => {}
+            (old, new) => {
+                if let Some(old) = old {
+                    println!("{indent}{:>4} - {}", index + 1, old);
+                }
+                if let Some(new) = new {
+                    println!("{indent}{:>4} + {}", index + 1, new);
+                }
+            }
+        }
     }
 }
 
@@ -1684,6 +1717,38 @@ fn finding_severity_rank(finding: &serde_json::Value) -> u8 {
         Some("error") => 0,
         Some("info") | Some("notice") => 2,
         _ => 1,
+    }
+}
+
+/// The `lint --fix [--write]` fix report (#556): each offered fix's
+/// disposition — its summary, location, validated diff, or the structured
+/// refusal — under the findings it remediates.
+fn render_lint_fixes(result: &LintResult, ctx: &RenderContext<'_>) {
+    let Some(fixes) = &result.fixes else {
+        return;
+    };
+    println!("\nLint fixes");
+    if fixes.is_empty() {
+        println!("  none offered");
+        return;
+    }
+    for fix in fixes {
+        let status = match fix.status {
+            wright_driver::result::LintFixStatus::Preview => "fix",
+            wright_driver::result::LintFixStatus::Applied => "applied",
+            wright_driver::result::LintFixStatus::Refused => "refused",
+        };
+        println!("  {status}[{}]: {}", fix.code, fix.summary);
+        if let Some(span) = fix.span.as_ref().filter(|span| span.is_object()) {
+            render_finding_location(span, ctx, "    ", false);
+        }
+        for preview in fix.preview.iter().flatten() {
+            println!("    {}", preview.source);
+            render_diff_lines(&preview.original, &preview.new_text, "      ");
+        }
+        for diagnostic in &fix.diagnostics {
+            println!("    refused — {}: {}", diagnostic.code, diagnostic.message);
+        }
     }
 }
 
