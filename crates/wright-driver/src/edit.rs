@@ -930,6 +930,11 @@ pub(crate) fn source_precondition(
     })
 }
 
+/// Apply one edit as a standard half-open splice: positions resolve to byte
+/// offsets and `source[..start] + new_text + source[end..]` is the result.
+/// A range covering whole lines — start at a line's first column, end at a
+/// later line's first column — removes the covered newlines with the lines,
+/// the same interpretation any consumer of the `EditRange` contract uses.
 fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
     let lines: Vec<&str> = source.split('\n').collect();
     let (sl, sc, el, ec) = (
@@ -959,24 +964,24 @@ fn apply_edit(source: &str, edit: &SourceEdit) -> Result<String, Diagnostic> {
             ),
         ));
     }
-    let mut out = Vec::new();
-    for (idx, line) in lines.iter().enumerate() {
-        let ln = (idx + 1) as u32;
-        if ln < sl || ln > el {
-            out.push((*line).to_string());
-        } else if ln == sl && ln == el {
-            let s = char_col(line, sc);
-            let e = char_col(line, ec);
-            out.push(format!("{}{}{}", &line[..s], edit.new_text, &line[e..]));
-        } else if ln == sl {
-            let s = char_col(line, sc);
-            out.push(format!("{}{}", &line[..s], edit.new_text));
-        } else if ln == el {
-            let e = char_col(line, ec);
-            out.push(line[e..].to_string());
-        }
-    }
-    Ok(out.join("\n"))
+    let start = position_byte(&lines, sl, sc);
+    let end = position_byte(&lines, el, ec);
+    Ok(format!(
+        "{}{}{}",
+        &source[..start],
+        edit.new_text,
+        &source[end..]
+    ))
+}
+
+/// The byte offset a 1-based line/column position splices at: the preceding
+/// lines and their newlines, plus the column's byte inside its own line.
+fn position_byte(lines: &[&str], line: u32, col: u32) -> usize {
+    lines[..line as usize - 1]
+        .iter()
+        .map(|line| line.len() + 1)
+        .sum::<usize>()
+        + char_col(lines[line as usize - 1], col)
 }
 
 fn char_count(line: &str) -> usize {

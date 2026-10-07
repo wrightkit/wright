@@ -101,7 +101,7 @@ fn materialize(
             "remove the unreachable Else If branch, keeping the rest of the chain"
         }
         LintFix::EvaluateOnce { .. } => {
-            "wrap each duplicated occurrence in Evaluate Once so it evaluates once per action"
+            "mark each duplicated occurrence with Evaluate Once, the idiom for an intentional repeated evaluation"
         }
     };
     Some(LintFixProposal {

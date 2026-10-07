@@ -75,10 +75,156 @@ fn duplicate_condition_offers_a_dead_branch_fix_over_the_branch_extent() {
         !removed.contains("Else If(Compare(Global.index, ==, 1))") && !removed.contains("Else;"),
         "the fix stops before the next chain marker: {removed:?}"
     );
-    // The deletion is the two dead lines exactly: it begins at the end of
-    // the previous line (the line-column model keeps that line's text) and
-    // ends where `Else;`'s line begins.
-    assert_eq!((span.start.line, span.end.line), (14, 17));
+    // The deletion is the two dead lines exactly: it begins at the marker
+    // line's start and ends where `Else;`'s line begins, so the standard
+    // half-open splice removes them with their newlines.
+    assert_eq!(
+        (span.start.line, span.start.col, span.end.line, span.end.col),
+        (15, 1, 17, 1)
+    );
+}
+
+#[test]
+fn duplicate_condition_fix_spans_a_nested_block_inside_the_dead_branch() {
+    // A dead branch containing its own `If … End` block must not stop at
+    // the nested `End`: the removal runs through the real chain boundary.
+    let nested = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("nested") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        Else If(Compare(Global.index, ==, 0));
+            If(Compare(Global.other, >, 1));
+                Set Global Variable(other, 2);
+            End;
+            Set Global Variable(other, 3);
+        Else;
+            Set Global Variable(other, 4);
+        End;
+    }
+}
+"#;
+    let (program, findings) = analyze_source(nested);
+    let [finding] = coded(&findings, "duplicate-condition")[..] else {
+        panic!("one duplicate-condition finding: {findings:?}")
+    };
+    let Some(LintFix::RemoveDeadBranch { span }) = &finding.fix else {
+        panic!("the finding carries a dead-branch fix: {finding:?}")
+    };
+    let removed = span_text(&program, nested, *span);
+    assert!(
+        removed.contains("Else If(Compare(Global.index, ==, 0))")
+            && removed.contains("Set Global Variable(other, 3)"),
+        "the fix covers the whole dead branch: {removed:?}"
+    );
+    assert!(
+        removed.matches("End;").count() == 1,
+        "the nested block's End is inside the removal, the chain's is not: {removed:?}"
+    );
+    assert!(
+        !removed.contains("Else;") && !removed.contains("Set Global Variable(other, 4)"),
+        "the fix stops at the Else marker: {removed:?}"
+    );
+}
+
+#[test]
+fn duplicate_condition_fix_ignores_disabled_markers_inside_the_dead_branch() {
+    // `disabled` statements inside the dead branch delete with it, and a
+    // disabled `If` block still counts toward depth — its `End` is not the
+    // chain boundary.
+    let disabled = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("disabled") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        Else If(Compare(Global.index, ==, 0));
+            disabled If(Compare(Global.other, >, 1));
+                Set Global Variable(other, 2);
+            End;
+            disabled Set Global Variable(other, 3);
+        Else;
+            Set Global Variable(other, 4);
+        End;
+    }
+}
+"#;
+    let (program, findings) = analyze_source(disabled);
+    let [finding] = coded(&findings, "duplicate-condition")[..] else {
+        panic!("one duplicate-condition finding: {findings:?}")
+    };
+    let Some(LintFix::RemoveDeadBranch { span }) = &finding.fix else {
+        panic!("the finding carries a dead-branch fix: {finding:?}")
+    };
+    let removed = span_text(&program, disabled, *span);
+    assert!(
+        removed.contains("disabled If")
+            && removed.contains("disabled Set Global Variable(other, 3)"),
+        "disabled statements inside the branch delete with it: {removed:?}"
+    );
+    assert!(
+        removed.matches("End;").count() == 1 && !removed.contains("Else;"),
+        "the disabled block's End is inside the removal: {removed:?}"
+    );
+}
+
+#[test]
+fn duplicate_condition_fix_materializes_for_a_localized_source() {
+    // Fix spans resolve through the retained source bytes, so a zh-CN
+    // document plans the same dead-branch removal on its own spellings.
+    let localized = r#"变量 {
+    全局:
+        0: index
+        1: other
+}
+规则 ("duplicates") {
+    事件 {
+        持续 - 全局;
+    }
+    动作 {
+        If(比较(全局.index, ==, 0));
+            设置全局变量(other, 1);
+        Else If(比较(全局.index, ==, 0));
+            设置全局变量(other, 2);
+        Else;
+            设置全局变量(other, 3);
+        End;
+    }
+}
+"#;
+    let catalog = wright_analyzer::catalog::builtin().unwrap();
+    let program = parser::parse_with_context(localized, &catalog, &Locale::new("zh-CN"), &*catalog)
+        .unwrap_or_else(|error| panic!("zh-CN source must parse: {error}"));
+    let findings = analyze(&program, &LintConfig::default());
+    let [finding] = coded(&findings, "duplicate-condition")[..] else {
+        panic!("one duplicate-condition finding: {findings:?}")
+    };
+    let Some(LintFix::RemoveDeadBranch { span }) = &finding.fix else {
+        panic!("the finding carries a dead-branch fix: {finding:?}")
+    };
+    let removed = span_text(&program, localized, *span);
+    assert!(
+        removed.contains("Else If(比较(全局.index, ==, 0))")
+            && removed.contains("设置全局变量(other, 2)"),
+        "the removal covers the localized dead branch: {removed:?}"
+    );
+    assert!(
+        !removed.contains("Else;") && !removed.contains("设置全局变量(other, 3)"),
+        "the fix stops at the Else marker: {removed:?}"
+    );
 }
 
 #[test]
@@ -219,6 +365,51 @@ fn repeated_value_treats_evaluate_once_as_already_resolved() {
 }
 
 #[test]
+fn repeated_value_fix_wraps_a_multiline_expression_extent() {
+    // The wrap inserts `Evaluate Once(` at the expression's start byte and
+    // `)` at its end byte under standard splice semantics — an extent that
+    // spans lines must cover the whole expression, not one line.
+    let multiline = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("multiline") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Set Global Variable(other, Distance Between(
+                Position Of(Event Player),
+                Vector(0, 0, 0)));
+            Set Global Variable(index, Distance Between(
+                Position Of(Event Player),
+                Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let (program, findings) = analyze_source(multiline);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
+        panic!("both occurrences carry authored extents: {finding:?}")
+    };
+    assert_eq!(occurrences.len(), 2);
+    for occurrence in occurrences {
+        let text = span_text(&program, multiline, *occurrence);
+        assert_eq!(
+            text,
+            "Distance Between(\n                Position Of(Event Player),\n                Vector(0, 0, 0))",
+            "the extent covers the whole multiline call: {text:?}"
+        );
+    }
+}
+
+#[test]
 fn repeated_value_never_wraps_the_loop_condition() {
     let in_condition = r#"variables {
     global:
@@ -303,4 +494,165 @@ rule ("poll") {
             .all(|occurrence| occurrence.start.line != polled_line),
         "Wait Until's polled arguments are never wrapped"
     );
+}
+
+#[test]
+fn repeated_value_never_wraps_update_every_frame() {
+    // `Update Every Frame` re-evaluates its argument every tick; freezing
+    // inside it — or the call itself — would stale the live read it exists
+    // to keep. The finding still reports; no fix is offered.
+    let framed = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("frames") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Set Global Variable(other, Update Every Frame(Distance Between(Position Of(Event Player), Vector(0, 0, 0))));
+            Set Global Variable(index, Update Every Frame(Distance Between(Position Of(Event Player), Vector(0, 0, 0))));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let (_, findings) = analyze_source(framed);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    assert!(
+        finding.fix.is_none(),
+        "both occurrences live inside Update Every Frame: {finding:?}"
+    );
+
+    // One framed occurrence still leaves a fix over the others.
+    let mixed = framed.replacen(
+        "Update Every Frame(Distance Between(Position Of(Event Player), Vector(0, 0, 0)))",
+        "Distance Between(Position Of(Event Player), Vector(0, 0, 0))",
+        1,
+    );
+    let (program, findings) = analyze_source(&mixed);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
+        panic!("the plain occurrence still wraps: {finding:?}")
+    };
+    assert_eq!(occurrences.len(), 1);
+    assert_eq!(
+        span_text(&program, &mixed, occurrences[0]),
+        "Distance Between(Position Of(Event Player), Vector(0, 0, 0))"
+    );
+}
+
+#[test]
+fn repeated_value_never_wraps_a_shape_containing_update_every_frame() {
+    // The duplicated shape itself contains `Update Every Frame`: wrapping
+    // the whole expression would freeze its per-tick update.
+    let containing = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("containing") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Set Global Variable(other, Compare(Update Every Frame(Distance Between(Position Of(Event Player), Vector(0, 0, 0))), >, 4));
+            Set Global Variable(index, Compare(Update Every Frame(Distance Between(Position Of(Event Player), Vector(0, 0, 0))), >, 4));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let (_, findings) = analyze_source(containing);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    assert!(
+        finding.fix.is_none(),
+        "an occurrence containing Update Every Frame is not wrappable: {finding:?}"
+    );
+}
+
+#[test]
+fn repeated_value_never_wraps_a_reevaluating_persistent_object() {
+    // A persistent-object action whose reevaluation mode is enabled —
+    // spelled as a non-`None` literal, or computed so it cannot be proven
+    // `None` — re-evaluates the fields its mode selects; the catalog pins
+    // which parameter carries the mode. A literal `None` mode does not
+    // re-evaluate, so its occurrence still wraps.
+    for (mode, wraps) in [
+        ("Visible To and String", false),
+        ("Global.mode", false),
+        ("None", true),
+    ] {
+        let reevaluating = format!(
+            r#"variables {{
+    global:
+        0: index
+        1: other
+        2: mode
+}}
+rule ("reevaluating") {{
+    event {{
+        Ongoing - Global;
+    }}
+    actions {{
+        While(Compare(Global.index, <, 3));
+            Set Objective Description(All Players(All Teams), Distance Between(Position Of(Event Player), Vector(0, 0, 0)), {mode});
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }}
+}}
+"#,
+        );
+        let (_, findings) = analyze_source(&reevaluating);
+        let [finding] = coded(&findings, "repeated-value")[..] else {
+            panic!("one repeated-value finding for mode {mode}: {findings:?}")
+        };
+        let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
+            panic!("one unwrappable occurrence still leaves a fix for mode {mode}: {finding:?}")
+        };
+        let wrapped_on_objective = occurrences.iter().any(|occurrence| {
+            reevaluating
+                .lines()
+                .nth(occurrence.start.line as usize - 1)
+                .is_some_and(|line| line.trim_start().starts_with("Set Objective Description"))
+        });
+        assert_eq!(
+            wrapped_on_objective, wraps,
+            "mode {mode}: occurrences {occurrences:?}"
+        );
+        assert_eq!(
+            occurrences.len(),
+            if wraps { 2 } else { 1 },
+            "mode {mode}: {occurrences:?}"
+        );
+    }
+}
+
+#[test]
+fn duplicate_condition_fix_applies_to_tick_snapshot_objective_reads() {
+    // Positions and objective state are per-tick snapshot reads — they
+    // cannot differ between the two synchronous evaluations, so the dead
+    // branch fix still applies (unlike randoms, clocks, or sampled load).
+    let snapshot = DUPLICATE.replace(
+        "Compare(Global.index, ==, 0)",
+        "Compare(Flag Position(Team 1), !=, Vector(0, 0, 0))",
+    );
+    let (program, findings) = analyze_source(&snapshot);
+    let [finding] = coded(&findings, "duplicate-condition")[..] else {
+        panic!("one duplicate-condition finding: {findings:?}")
+    };
+    let Some(LintFix::RemoveDeadBranch { span }) = &finding.fix else {
+        panic!("snapshot-state duplicates still fix: {finding:?}")
+    };
+    assert!(span_text(&program, &snapshot, *span).contains("Flag Position"));
 }

@@ -182,7 +182,7 @@ operations identically:
   "code": "repeated-value",
   "fix": {
     "kind": "evaluate-once",
-    "summary": "wrap each duplicated occurrence in Evaluate Once so it evaluates once per action",
+    "summary": "mark each duplicated occurrence with Evaluate Once, the idiom for an intentional repeated evaluation",
     "transaction": { "edits": [ { "kind": "fix", "source": "...", "source_identity": "...", "range": { "...": "..." }, "new_text": "Evaluate Once(...)" } ] }
   }
 }
@@ -204,15 +204,20 @@ The current fixable rules and their corrections:
 * `duplicate-condition` (`remove-dead-branch`): delete the unreachable
   `Else If` branch — the marker and its body, through the next `Else If`,
   `Else`, or `End` marker. The fix is withheld when the repeated condition
-  can evaluate differently inside one synchronous pass (random numbers,
-  advancing clocks, server load, live payload motion): the branch may be
+  can evaluate differently inside one synchronous pass — calls evaluated
+  fresh per call rather than read from the tick snapshot (random numbers,
+  advancing clocks, sampled server-load metrics): the branch may be
   reachable after all.
-* `repeated-value` (`evaluate-once`): wrap each duplicated occurrence in
+* `repeated-value` (`evaluate-once`): mark each duplicated occurrence with
   `Evaluate Once`. Occurrences the engine re-evaluates — the loop's own
-  `While` condition, `Wait Until` arguments, and persistent-object actions
-  whose reevaluation mode is enabled — are never wrapped; when more than
-  one occurrence must stay live the family carries no fix, because a
-  partial wrap would leave the finding standing.
+  `While` condition, `Wait Until` and `Loop If` conditions, `Update Every
+  Frame` subtrees, and persistent-object actions whose reevaluation mode is
+  enabled — are never wrapped; when more than one occurrence must stay live
+  the family carries no fix, because a partial wrap would leave the finding
+  standing. `Evaluate Once` is the ecosystem idiom for an acknowledged
+  repeated evaluation: at positions the engine already evaluates once per
+  action it changes nothing — the fix retires the finding by marking the
+  duplication as intentional, it does not reduce the evaluation count.
 
 Every offered fix edits only the reported spans, carries the input identity
 as a precondition, and is validated by reparsing the edited source before

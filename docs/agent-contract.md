@@ -382,10 +382,15 @@ owns the source semantics and Wright orchestrates the transaction:
   Workshop input for `exact`-evidence findings whose correction is
   unambiguous — currently `duplicate-condition` (`remove-dead-branch`:
   delete the unreachable `Else If` branch) and `repeated-value`
-  (`evaluate-once`: wrap each duplicated occurrence in `Evaluate Once`).
+  (`evaluate-once`: mark each duplicated occurrence with `Evaluate Once`).
   Shapes the correction cannot safely cover — a condition that can move
-  between evaluations, an occurrence the engine re-evaluates — withhold the
-  `fix` entirely rather than offer a risky edit.
+  between evaluations, an occurrence the engine re-evaluates (the loop's
+  `While` condition, `Wait Until`/`Loop If` conditions, `Update Every
+  Frame` subtrees, enabled reevaluation modes) — withhold the `fix`
+  entirely rather than offer a risky edit. `evaluate-once` is an
+  acknowledgment idiom, not a cost reduction: at once-per-execution
+  positions it freezes nothing, it marks the repeated evaluation as
+  intentional so the finding retires.
 
 `wright rename <NAME> <NEW_NAME> [INPUT]` exposes the same semantic rename
 on the CLI: it prints the validated diff by default and applies it

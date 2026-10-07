@@ -742,6 +742,45 @@ fn lint_fix_previews_and_writes_validated_fixes() {
 }
 
 #[test]
+fn lint_fix_refuses_stdin_without_rereading_it() {
+    // stdin has no reloadable source: fix preview refuses each finding's
+    // transaction with `edit-input-stdin` instead of resolving stdin a
+    // second time (EOF on a pipe, a block on a terminal), and `--write`
+    // refuses the input up front.
+    let output = run_with_stdin(&["lint", "-", "--fix", "-f", "json"], FIXABLE_WORKSHOP);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    let fixes = envelope["result"]["fixes"].as_array().unwrap();
+    assert!(!fixes.is_empty(), "fix outcomes are reported: {envelope}");
+    for fix in fixes {
+        assert_eq!(fix["status"], "refused", "{fix}");
+        assert!(
+            fix["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|diagnostic| diagnostic["code"] == "edit-input-stdin"),
+            "each fix refuses with edit-input-stdin: {fix}"
+        );
+    }
+
+    let output = run_with_stdin(
+        &["lint", "-", "--fix", "--write", "-f", "json"],
+        FIXABLE_WORKSHOP,
+    );
+    assert!(!output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "edit-input-stdin"),
+        "write refuses stdin up front: {envelope}"
+    );
+}
+
+#[test]
 fn span_path_is_consistent_across_input_spellings() {
     // Lint resolves the same root-relative `span.path` for the absolute,
     // bare-name (cwd), and dir-relative spellings of the same Workshop file.

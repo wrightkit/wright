@@ -177,7 +177,14 @@ impl CompilerSession {
     pub fn lint_fix(&mut self, write: bool) -> Envelope<LintResult> {
         let mut envelope = self.lint();
         if !write {
-            let sources = current_sources(&self.config);
+            // stdin was already consumed by the lint pass; a second resolve
+            // would read EOF or block. Fixes still refuse directly: absent
+            // sources let `validate_transaction` answer `edit-input-stdin`.
+            let sources = if self.config.input.path().is_some() {
+                current_sources(&self.config)
+            } else {
+                None
+            };
             let outcomes = fix_outcomes(
                 &self.config,
                 &self.catalog,

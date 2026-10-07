@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use workshop_rs::catalog::{Catalog, Kind};
 use workshop_rs::source::{FileId, Position, SourceDocument, Span};
 use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 
@@ -349,9 +350,9 @@ fn duplicate_condition_findings(
 /// (#556): delete the dead `Else If` branch — the marker line plus its body,
 /// through the next `Else If`/`Else`/`End` chain marker. The fix is offered
 /// only when the repeated condition cannot yield a different result when the
-/// chain re-evaluates it: values that move with the evaluation moment rather
-/// than the tick snapshot (random numbers, advancing clocks, server load,
-/// live payload motion) keep the branch reachable, so it stays.
+/// chain re-evaluates it: calls evaluated fresh per evaluation rather than
+/// read from the tick snapshot (random numbers, advancing clocks, sampled
+/// server load) keep the branch reachable, so it stays.
 ///
 /// Provenance alone cannot bound the branch: `Else If`, `Else`, and `End`
 /// markers carry no action span, so the marker extents are derived
@@ -405,16 +406,16 @@ fn dead_branch_fix(
 
 /// The branch-removal span between a dead `Else If` marker and the next
 /// chain marker, rounded to whole lines. `EditRange`s are half-open
-/// line/column positions applied over a split-line model, so whole-line
-/// deletion anchors at the *end* of the line before the marker — the
-/// newline's own column — and at the boundary marker's line start; either
-/// side keeps its exact extent when the marker shares its line with other
+/// line/column positions applied as a standard text splice, so whole-line
+/// deletion covers the marker's line start through the boundary marker's
+/// line start — the newline-terminated dead lines entirely; either side
+/// keeps its exact extent when the marker shares its line with other
 /// statements.
 fn dead_branch_span(scan: &SourceScan, marker: usize, boundary: usize) -> Option<Span> {
     let text = scan.document.text();
     let marker_line = scan.line_start(marker);
-    let start = if marker_line > 0 && text[marker_line..marker].chars().all(char::is_whitespace) {
-        marker_line - 1
+    let start = if text[marker_line..marker].chars().all(char::is_whitespace) {
+        marker_line
     } else {
         marker
     };
@@ -488,9 +489,12 @@ fn chain_if_index(actions: &[Action], elseif: usize) -> Option<usize> {
 }
 
 /// Whether `value` contains a call whose result can move between two
-/// evaluations in one synchronous pass — the `Random *` family, advancing
-/// clocks, server-load counters, and the live payload position. Everything
-/// else reads the per-tick snapshot, so a duplicated condition stays equal.
+/// evaluations in one synchronous pass — the `Random *` family, the
+/// advancing clocks, and the sampled server-load metrics, which are
+/// evaluated fresh per call. Every other call reads the per-tick snapshot
+/// the engine updates between passes — positions and objective state
+/// included (`Update Every Frame` exists precisely because position reads
+/// refresh only every few ticks) — so a duplicated condition stays equal.
 fn contains_volatile_call(value: &Value) -> bool {
     const VOLATILE: &[&str] = &[
         "randomInteger",
@@ -502,8 +506,6 @@ fn contains_volatile_call(value: &Value) -> bool {
         "getServerLoad",
         "getAverageServerLoad",
         "getPeakServerLoad",
-        "getPayloadPosition",
-        "getPayloadProgressPercentage",
     ];
     let mut volatile = false;
     visit_value_tree(value, None, &mut |value, _, _| {
@@ -820,6 +822,11 @@ enum OccurrenceOrigin {
     /// The loop's own `While` condition: re-evaluated every iteration, so
     /// freezing it would change loop semantics.
     LoopCondition,
+    /// An `Update Every Frame` call or one of its descendants: the call
+    /// exists to re-evaluate its argument every tick, so freezing it —
+    /// directly, or by wrapping a containing occurrence — would stale the
+    /// value it keeps live.
+    Reevaluating,
     /// A body action's argument position, by index into the body slice.
     BodyAction(usize),
 }
@@ -969,6 +976,11 @@ fn collect_value_at<'a>(
     if matches!(value, Value::Call { name, .. } if name == "evaluateOnce") {
         return;
     }
+    let origin = if matches!(value, Value::Call { name, .. } if name == "updateEveryFrame") {
+        OccurrenceOrigin::Reevaluating
+    } else {
+        origin
+    };
     let index = collected.values.len();
     collected.values.push(value);
     collected.parents.push(parent);
@@ -999,14 +1011,19 @@ fn evaluate_once_fix(
     collected: &Collected,
     family: &[usize],
 ) -> Option<LintFix> {
+    let catalog = crate::catalog::builtin().ok()?;
     let mut occurrences = Vec::new();
     let mut unwrappable = 0usize;
     for &member in family {
         let (action, wrappable) = match collected.origins[member] {
-            OccurrenceOrigin::LoopCondition => (loop_action, false),
-            OccurrenceOrigin::BodyAction(index) => {
-                (body_start + index, !action_reevaluates(&body[index]))
+            OccurrenceOrigin::LoopCondition | OccurrenceOrigin::Reevaluating => {
+                (loop_action, false)
             }
+            OccurrenceOrigin::BodyAction(index) => (
+                body_start + index,
+                !action_reevaluates(&catalog, &body[index])
+                    && !contains_update_every_frame(collected.values[member]),
+            ),
         };
         let extent = wrappable.then(|| {
             let file = collected.spans[member]?.file;
@@ -1036,31 +1053,60 @@ fn evaluate_once_fix(
     (unwrappable <= 1 && !occurrences.is_empty()).then_some(LintFix::EvaluateOnce { occurrences })
 }
 
+/// Whether `value` holds a live `Update Every Frame` subtree — one not
+/// already frozen inside `Evaluate Once`. Wrapping such an expression in
+/// `Evaluate Once` would freeze a value the engine re-evaluates every tick.
+fn contains_update_every_frame(value: &Value) -> bool {
+    match value {
+        Value::Call { name, .. } if name == "evaluateOnce" => false,
+        Value::Call { name, .. } if name == "updateEveryFrame" => true,
+        _ => value_children(value)
+            .iter()
+            .any(|child| contains_update_every_frame(child)),
+    }
+}
+
 /// Whether executing `action` can evaluate an argument more than once:
-/// `Wait Until`'s polled condition, or a persistent-object action whose
-/// reevaluation-mode enum selects fields to re-evaluate (any `*Reeval` /
-/// `Reevaluation` domain member other than the literal `None` mode).
-/// `If`/`Else If` conditions and assignment arguments evaluate once per
-/// action execution, so only `Call` actions can re-evaluate.
-fn action_reevaluates(action: &Action) -> bool {
+/// `Wait Until`'s polled condition and the `Loop If` family's condition
+/// are re-evaluated per pass (the condition `Loop` itself never polls),
+/// and a persistent-object action's reevaluation-mode parameter selects
+/// fields to re-evaluate. The mode is catalog-pinned: its parameter's
+/// domain ends in `Reeval`, and any mode other than the domain's `None`
+/// member — spelled as a non-`None` literal, computed, or omitted where no
+/// explicit `None` default is declared — re-evaluates. `If`/`Else If`
+/// conditions and assignment arguments evaluate once per action execution,
+/// so only `Call` actions can re-evaluate.
+fn action_reevaluates(catalog: &Catalog, action: &Action) -> bool {
     let Action::Call { name, args } = action else {
         return false;
     };
-    if name == "waitUntil" {
+    if matches!(
+        name.as_str(),
+        "waitUntil" | "loopIf" | "loopIfConditionIsTrue" | "__loopIfConditionIsFalse__"
+    ) {
         return true;
     }
-    args.iter().any(|arg| {
-        let mut reevaluates = false;
-        visit_value_tree(arg, None, &mut |value, _, _| {
-            reevaluates |= matches!(
-                value,
-                Value::Enum { value_type, value }
-                    if (value_type.ends_with("Reeval") || value_type == "Reevaluation")
-                        && value != "NONE"
-            );
-            0
-        });
-        reevaluates
+    let Some(entry) = catalog.entry(Kind::Action, name) else {
+        return false;
+    };
+    (0..entry.param_count()).any(|index| {
+        let Some(domain) = entry.param_domain(index) else {
+            return false;
+        };
+        if !domain.ends_with("Reeval") {
+            return false;
+        }
+        match args.get(index) {
+            Some(Value::Enum { value, .. }) => value != "NONE",
+            Some(_) => true,
+            // Omitted means the engine's implicit mode applies — and the
+            // catalog only records a declared default when there is one —
+            // so only an explicit `NONE` default proves the field evaluates
+            // once; anything else stays live.
+            None => !entry
+                .param_default(index)
+                .is_some_and(|default| default.rsplit('.').next() == Some("NONE")),
+        }
     })
 }
 
