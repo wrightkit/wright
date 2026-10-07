@@ -986,7 +986,7 @@
       "properties": {
         "op": { "const": "providerSemanticRename" },
         "language_id": { "type": "string", "description": "The configured source provider's language id — `opy` for the shipped provider." },
-        "documents": { "$ref": "#/$defs/DocumentSet", "description": "The caller-owned document set; must contain `position_document_uri` and every document the provider's rename may edit." },
+        "documents": { "$ref": "#/$defs/DocumentSet", "description": "The caller-owned document set; must contain `position_document_uri`, the project entry document (the provider resolves the analyzable view from a supplied entry — a member file alone can refuse `rename.noSymbolAtPosition`), and every document the rename may edit." },
         "position_document_uri": { "type": "string", "description": "URI of the `documents` document holding the rename position." },
         "position": { "$ref": "#/$defs/Position" },
         "new_name": { "type": "string", "description": "The replacement identifier." },

@@ -398,6 +398,11 @@ set:
 * `providerValidateEdit`'s post-edit check blocks on errors in any
   supplied document, so the set should cover the project documents whose
   diagnostics may break.
+* `providerSemanticRename` resolves the analyzable project from the
+  supplied documents themselves — include the project entry document
+  (e.g. `main.opy`), not only the position file. A member file alone can
+  refuse `rename.noSymbolAtPosition` even when the position is valid;
+  supply the entry plus every file the rename may touch.
 * `providerSemanticRename`'s `position` is the provider convention —
   0-based line and UTF-16 character — while `transaction` ranges are the
   `EditRange` 1-based half-open columns every edit operation shares. The
