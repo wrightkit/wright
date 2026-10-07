@@ -233,13 +233,15 @@ fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
     serde_json::Value::Array(risks)
 }
 
-/// The `Request::Program` summary for `loaded`. The analyzer counts retained
-/// source documents, but a mapped provider program's file table entries carry
-/// no text — `files` reports the loaded source-file table like `project` does.
+/// The `Request::Program` summary for `loaded`, with `files` from the loaded
+/// source-file table like `project` reports.
 fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json::Value {
     let mut program = service_response(service, &Request::Program);
     if let serde_json::Value::Object(object) = &mut program {
-        object["files"] = serde_json::json!(loaded.source_files.len().max(1));
+        object.insert(
+            "files".to_string(),
+            serde_json::json!(loaded.source_files.len().max(1)),
+        );
     }
     program
 }

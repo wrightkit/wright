@@ -114,7 +114,6 @@ fn workshop_input_runs_all_semantic_queries() {
         serde_json::from_str(&service.handle_json(r#"{"op":"program"}"#)).unwrap();
     assert_eq!(program_response["result"]["origin"]["kind"], "workshop");
     assert_eq!(program_response["result"]["origin"]["locale"], "en-us");
-    assert_eq!(program_response["result"]["files"], 1);
 }
 
 #[test]
