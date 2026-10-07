@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use workshop_rs::catalog::{Catalog, Locale};
-use wright_analyzer::canonical::{ReferenceKind, SemanticIndex, Symbol, SymbolId, SymbolKind};
+use wright_analyzer::canonical::{
+    PositionResolution, ReferenceKind, SemanticIndex, Symbol, SymbolId, SymbolKind,
+};
 
 use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Stage, source_provider_unavailable};
@@ -683,42 +685,26 @@ fn symbol_at_position<'a>(
             ),
         ));
     }
-    let mut hits = Vec::new();
-    for symbol in index.symbols() {
-        let hit = index.references(symbol.id).iter().any(|reference| {
-            reference
-                .occurrence
-                .is_some_and(|span| position_in_span(span, line, col))
-        });
-        if hit {
-            hits.push(symbol);
-        }
-    }
-    match hits.as_slice() {
-        [symbol] => Ok(symbol),
-        [] => Err(Diagnostic::error(
+    match index.symbol_at(line, col) {
+        PositionResolution::Resolved { symbol, .. } => Ok(symbol),
+        PositionResolution::Miss => Err(Diagnostic::error(
             "rename-invalid-target",
             Stage::Discovery,
             format!("no symbol identifier covers {source}:{line}:{col}"),
         )),
-        _ => Err(Diagnostic::error(
+        PositionResolution::Ambiguous(symbols) => Err(Diagnostic::error(
             "ambiguous-symbol",
             Stage::Discovery,
             format!(
                 "more than one symbol covers {source}:{line}:{col}: {}",
-                hits.iter()
+                symbols
+                    .iter()
                     .map(|symbol| format!("{} {}", symbol.kind.as_str(), symbol.id.index()))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
         )),
     }
-}
-
-/// Whether the 1-based `line`/`col` falls inside the half-open span.
-pub fn position_in_span(span: workshop_rs::source::Span, line: u32, col: u32) -> bool {
-    (line > span.start.line || (line == span.start.line && col >= span.start.col))
-        && (line < span.end.line || (line == span.end.line && col < span.end.col))
 }
 
 /// A provenance gap on one reference: either no authored identifier span

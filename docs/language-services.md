@@ -106,8 +106,9 @@ from the canonical `SemanticIndex` `wright inspect` serves:
 - definition targets the symbol's declared span;
 - references return every occurrence span `inspect` reports for the
   symbol, and `includeDeclaration: false` drops the declaration;
-- a position outside any identifier occurrence, a buffer that fails to
-  load, and any non-Workshop document answer `null`.
+- a position outside any identifier occurrence, a position covered by
+  more than one symbol, a buffer that fails to load, and any non-Workshop
+  document answer `null`.
 
 No LSP-specific resolution layer exists: spans, symbols, and reference
 kinds are the analyzer's canonical data, converted to UTF-16 ranges at the

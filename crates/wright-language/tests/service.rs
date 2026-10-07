@@ -267,6 +267,32 @@ fn workshop_semantic_queries_match_inspect_for_the_same_text() {
         .expect("hover on a rule name");
     assert_eq!(rule_hover.contents, "`rule main`");
 
+    // A variable occurrence resolves through the same shared rule.
+    let score = symbol_id("globalVariable", "score");
+    let variable_definition = service
+        .definition(
+            &uri,
+            Position {
+                line: 15,
+                character: 30,
+            },
+        )
+        .expect("definition on a variable write");
+    assert_eq!(
+        variable_definition.range,
+        inspect_span(WORKSHOP_SOURCE, &symbols[score]["span"])
+    );
+    let variable_hover = service
+        .hover(
+            &uri,
+            Position {
+                line: 15,
+                character: 30,
+            },
+        )
+        .expect("hover on a variable write");
+    assert_eq!(variable_hover.contents, "`globalVariable score`");
+
     // Positions outside any identifier occurrence resolve nothing.
     for position in [
         Position {

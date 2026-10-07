@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::Serialize;
-use wright_analyzer::canonical::{ReferenceKind, SemanticIndex, Symbol};
+use wright_analyzer::canonical::{PositionResolution, ReferenceKind, SemanticIndex, Symbol};
 use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
 
 use crate::document::{Document, DocumentStore, Position, Range, line_col_position, uri_to_path};
@@ -412,21 +412,20 @@ fn is_workshop_document(document: &Document) -> bool {
 }
 
 /// The symbol whose identifier occurrence covers `position`, and that
-/// occurrence — the same addressability `semanticRename` applies (#434).
+/// occurrence — resolved through the index's shared `symbol_at` rule, the
+/// same addressability `semanticRename` applies (#434, #555). A miss and an
+/// ambiguous position both map to `None`: the editor surfaces only a
+/// resolved symbol.
 fn symbol_at<'index>(
     index: &'index SemanticIndex,
     document: &Document,
     position: Position,
 ) -> Option<(&'index Symbol, workshop_rs::source::Span)> {
     let (line, col) = document.to_line_col(position);
-    index.symbols().find_map(|symbol| {
-        index
-            .references(symbol.id)
-            .iter()
-            .filter_map(|reference| reference.occurrence)
-            .find(|occurrence| wright_driver::edit::position_in_span(*occurrence, line, col))
-            .map(|occurrence| (symbol, occurrence))
-    })
+    match index.symbol_at(line, col) {
+        PositionResolution::Resolved { symbol, occurrence } => Some((symbol, occurrence)),
+        PositionResolution::Miss | PositionResolution::Ambiguous(_) => None,
+    }
 }
 
 /// One driver `Diagnostic` as a `SourceDiagnostic` on the open document.
