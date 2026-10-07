@@ -213,6 +213,13 @@ exception: ids issued by the last served program do not silently validate
 against the repaired one. Name addressing resolves against the current
 program in both states and is never stale.
 
+`inputIdentity` labels the input, not its freshness: it is the SHA-256
+digest of the input's primary entry source (the provider's
+`sourceIdentity` per LPP ADR-0003). For a single-file input that covers
+the whole input; for a provider directory project it hashes only the
+entry file, so editing a member file leaves `inputIdentity` unchanged —
+the `stale-id` refusals above, not this value, report freshness.
+
 The responses that issue numeric ids or indexes into the loaded program are
 `symbols` (symbol ids), `rules` (rule indexes), `usage` (the resolved `id`),
 `references`, `findings`, `lint`, `persistentObjects`, `inspect`, `analyze`,
@@ -393,8 +400,8 @@ set:
   transaction may edit — each `edits[].source` on `providerValidateEdit`,
   every document the provider's rename may touch on
   `providerSemanticRename`: it is the precondition each `source_identity`
-  verifies against (SHA-256 hex of the text, the same identity
-  `project.inputIdentity` reports) and the text the edits apply to.
+  verifies against (SHA-256 hex of the text — for the entry document this
+  equals `project.inputIdentity`) and the text the edits apply to.
 * `providerValidateEdit`'s post-edit check blocks on errors in any
   supplied document, so the set should cover the project documents whose
   diagnostics may break.
