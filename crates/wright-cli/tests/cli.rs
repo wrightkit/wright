@@ -2805,6 +2805,33 @@ fn check_text_points_unknown_names_at_lookup() {
 }
 
 #[test]
+fn check_text_skips_the_lookup_hint_when_no_name_was_rejected() {
+    // `unknown-language` fires when the input holds no Workshop language
+    // markers at all — the rejected "name" is `<none>`, which lookup cannot
+    // resolve, so the pointer must not appear.
+    let path = temp_file("lookup-hint-none.txt", "0.11.0\n");
+    let output = run(&[
+        "check",
+        path.to_str().unwrap(),
+        "--renderer",
+        "plain",
+        "--color",
+        "never",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown-language"),
+        "the detection diagnostic still reports: {stderr}"
+    );
+    assert!(
+        !stderr.contains("wright lookup"),
+        "no rejected name means no lookup pointer: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn check_and_compile_json_keep_their_envelope_after_unknown_names() {
     // The hint lives only in text presentation: JSON mode's envelope and
     // stderr are untouched for the same rejected-name input.
