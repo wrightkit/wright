@@ -354,7 +354,7 @@
       "required": ["origin", "inputIdentity", "files", "globalVariables", "playerVariables", "subroutines", "rules", "symbols", "findings"],
       "properties": {
         "origin": { "$ref": "#/$defs/Origin" },
-        "inputIdentity": { "type": "string" },
+        "inputIdentity": { "type": "string", "description": "SHA-256 hex digest of the input's primary entry source (the provider's `sourceIdentity` for provider projects). For a single-file input it covers the whole input; for a provider directory project it hashes only the entry file, so member-file edits do not change it — use `stale-id` refusals for freshness, not this value." },
         "files": { "type": "integer", "minimum": 0 },
         "globalVariables": { "type": "integer", "minimum": 0 },
         "playerVariables": { "type": "integer", "minimum": 0 },
@@ -511,7 +511,7 @@
       "type": "object",
       "required": ["inputIdentity", "rules", "config", "findings", "skipped"],
       "properties": {
-        "inputIdentity": { "type": "string" },
+        "inputIdentity": { "type": "string", "description": "The loaded input's primary entry source digest — same semantics as `project.inputIdentity`; member-file edits in a provider project do not change it." },
         "rules": { "type": "array", "items": { "$ref": "#/$defs/LintRuleSummary" } },
         "config": { "$ref": "#/$defs/LintConfiguration" },
         "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
@@ -652,7 +652,7 @@
             "sha256": { "type": "string" },
             "locale": { "type": "string" },
             "written_to": { "type": "string" },
-            "input_identity": { "type": "string" }
+            "input_identity": { "type": "string", "description": "The loaded input's primary entry source digest — same semantics as `project.inputIdentity`." }
           },
           "additionalProperties": true
         }
@@ -772,7 +772,7 @@
       "properties": {
         "kind": { "type": "string", "description": "The edit kind: `edit` for a caller-proposed replacement; other kinds such as `rename` appear only on service-computed results." },
         "source": { "type": "string", "description": "The source this edit applies to: the loaded input's spelling on `validateEditTransaction`, or a `documents` URI key on the provider operations." },
-        "source_identity": { "type": "string", "description": "The SHA-256 hex digest of the source's current text — the identity `project.inputIdentity` and previews report; a text that hashes differently refuses `edit-stale-source`." },
+        "source_identity": { "type": "string", "description": "The SHA-256 hex digest of the source's current text — the same digest `project.inputIdentity` reports for the entry source; a text that hashes differently refuses `edit-stale-source`." },
         "range": { "$ref": "#/$defs/EditRange" },
         "new_text": { "type": "string", "description": "The replacement text; empty deletes the range." }
       },
