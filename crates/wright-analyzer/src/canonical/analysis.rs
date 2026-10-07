@@ -845,7 +845,7 @@ struct Collected<'a> {
     origins: Vec<OccurrenceOrigin>,
 }
 
-impl<'a> Collected<'a> {
+impl Collected<'_> {
     fn new() -> Self {
         Collected {
             values: Vec::new(),
@@ -1103,9 +1103,9 @@ fn action_reevaluates(catalog: &Catalog, action: &Action) -> bool {
             // catalog only records a declared default when there is one —
             // so only an explicit `NONE` default proves the field evaluates
             // once; anything else stays live.
-            None => !entry
+            None => entry
                 .param_default(index)
-                .is_some_and(|default| default.rsplit('.').next() == Some("NONE")),
+                .is_none_or(|default| default.rsplit('.').next() != Some("NONE")),
         }
     })
 }

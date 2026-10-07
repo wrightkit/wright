@@ -212,6 +212,7 @@ impl CompilerSession {
         // after each application. A fix that never removes its finding
         // cannot loop forever: the initial fixable count bounds the passes.
         let mut applied = Vec::new();
+        let mut aborted = None;
         let mut budget = envelope.result.findings.as_array().map_or(0, |findings| {
             findings
                 .iter()
@@ -241,6 +242,11 @@ impl CompilerSession {
                     )],
                     ..outcome
                 });
+                aborted = Some(Diagnostic::error(
+                    "edit-aborted",
+                    Stage::Discovery,
+                    "a fix that kept its finding stopped the run; this fix was not attempted",
+                ));
                 break;
             }
             let resolved = resolved.expect("a previewed outcome resolves");
@@ -254,6 +260,11 @@ impl CompilerSession {
                     match self.reload() {
                         Ok(_) => envelope = self.lint(),
                         Err(diagnostic) => {
+                            aborted = Some(Diagnostic::error(
+                                "edit-aborted",
+                                Stage::Discovery,
+                                "re-linting the edited source failed; this fix was not attempted",
+                            ));
                             envelope.diagnostics.push(diagnostic);
                             retune(&mut envelope);
                             break;
@@ -261,6 +272,11 @@ impl CompilerSession {
                     }
                 }
                 Err(diagnostic) => {
+                    aborted = Some(Diagnostic::error(
+                        "edit-aborted",
+                        Stage::Discovery,
+                        "an earlier fix's write failed; this fix was not attempted",
+                    ));
                     envelope.diagnostics.push(diagnostic);
                     retune(&mut envelope);
                     break;
@@ -268,18 +284,34 @@ impl CompilerSession {
             }
         }
         // The final pass reports what remains: offered fixes that were not
-        // applied get their validated preview or structured refusal.
+        // applied get their validated preview or structured refusal. Fixes
+        // already reported by the write loop are not re-reported, and fixes
+        // that would have applied after an aborted run report a refusal —
+        // they were never attempted, not merely previewed.
         let sources = current_sources(&self.config);
-        applied.extend(
-            fix_outcomes(
-                &self.config,
-                &self.catalog,
-                &envelope.result.findings,
-                sources.as_ref(),
-            )
-            .into_iter()
-            .map(|(outcome, _)| outcome),
-        );
+        let mut seen: std::collections::HashSet<(String, String)> = applied
+            .iter()
+            .map(|outcome| (outcome.code.clone(), format!("{:?}", outcome.span)))
+            .collect();
+        for (outcome, _) in fix_outcomes(
+            &self.config,
+            &self.catalog,
+            &envelope.result.findings,
+            sources.as_ref(),
+        ) {
+            if !seen.insert((outcome.code.clone(), format!("{:?}", outcome.span))) {
+                continue;
+            }
+            applied.push(match (&aborted, outcome.status) {
+                (Some(reason), LintFixStatus::Preview) => LintFixOutcome {
+                    status: LintFixStatus::Refused,
+                    preview: None,
+                    diagnostics: vec![reason.clone()],
+                    ..outcome
+                },
+                _ => outcome,
+            });
+        }
         envelope.result.fixes = Some(applied);
         envelope
     }
