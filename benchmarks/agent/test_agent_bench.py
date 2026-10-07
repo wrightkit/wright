@@ -1135,5 +1135,56 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("Level comparison", text)
 
 
+class TrackingDefinitionTest(unittest.TestCase):
+    """#540: the committed per-release tracking definition must only name cells and models the harness can run."""
+
+    def definition(self, **overrides) -> dict:
+        base = {
+            "contract": agent_bench.TRACKING_CONTRACT,
+            "suite": bench_grade.SUITE_VERSION,
+            "models": [{"adapter": "devin", "model": "swe-2-max"}],
+            "cells": [dict(agent_bench.CANONICAL_CELL), {"tool": "none", "skills": [], "knowledge": "none", "network": "off"}],
+            "split": "test", "trials": 3, "parallel": 1, "seed": 1,
+        }
+        base.update(overrides)
+        return base
+
+    def load(self, definition: dict) -> dict:
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
+        directory = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        path = directory / "tracking.json"
+        path.write_text(json.dumps(definition))
+        return agent_bench.load_tracking(path)
+
+    def test_committed_definition_is_runnable(self):
+        definition = agent_bench.load_tracking()
+        self.assertEqual(definition["suite"], bench_grade.SUITE_VERSION)
+        for model in definition["models"]:
+            self.assertIn(model["adapter"], agent_bench.ADAPTERS)
+            self.assertTrue(model["model"])
+        labels = [agent_bench.cell_label(agent_bench.normalize_cell(cell)) for cell in definition["cells"]]
+        canonical = agent_bench.cell_label(agent_bench.normalize_cell(agent_bench.CANONICAL_CELL))
+        self.assertIn(canonical, labels)
+        self.assertGreater(len(labels), 1)  # the canonical cell alone cannot produce a lift figure
+
+    def test_unrunnable_cell_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.load(self.definition(cells=[{"tool": "bogomips", "skills": [], "knowledge": "none", "network": "off"}]))
+
+    def test_unrunnable_model_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.load(self.definition(models=[{"adapter": "bogomips", "model": "x"}]))
+
+    def test_foreign_suite_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.load(self.definition(suite="v0"))
+
+    def test_canonical_cell_is_required(self):
+        cells = [{"tool": "none", "skills": [], "knowledge": "none", "network": "off"}, {"tool": "wright", "skills": [], "knowledge": "none", "network": "off"}]
+        with self.assertRaises(SystemExit):
+            self.load(self.definition(cells=cells))
+
+
 if __name__ == "__main__":
     unittest.main()

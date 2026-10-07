@@ -480,6 +480,27 @@ binary, skills, and scenarios unchanged between runs; changes to the rest of the
 harness are disclosed in each card's `Harness` line and do not block comparison.
 An interrupted run resumes by repeating the same command with the same `--name`.
 
+## Per-release tracking set
+
+`benchmarks/agent/tracking.json` (contract `wright-agent-tracking/v1`) is the committed
+definition of what each release records: the reference models (adapter, model, and effort),
+the cells (the canonical cell and the lift references), the split, the trials per cell, and
+the suite version the results hold for. It is refused when it names a cell or model the
+harness cannot run, or a suite other than this harness's.
+
+```sh
+python3 benchmarks/agent/agent_bench.py track --wright BIN --name wright-X.Y.Z --dry-run
+python3 benchmarks/agent/agent_bench.py track --wright BIN --name wright-X.Y.Z --wait-for-limits
+```
+
+`track` evaluates every model in the definition under `<out>/<name>/`, then writes the
+publishable results page into `<out>/<name>/leaderboard/` and prints the `publish` command
+for its run directories. The models, cells, trials, and split come from the definition, not
+the command line, so a change to the tracking set is a reviewed change to that file. Repeating
+the same `--name` resumes the run where it stopped; `--wait-for-limits` keeps waiting out
+provider limits (`--limits-poll`, default 2100 seconds) instead of stopping, so a release run
+may take more than a day.
+
 ## Cadence
 
 The benchmark does not gate pull requests. Run it manually or on a schedule once

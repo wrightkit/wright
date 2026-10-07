@@ -57,6 +57,20 @@ The results are in `~/.local/share/wright-agent-bench/runs/results/leaderboard/`
 
 Use `--only devin codex:gpt-6-luna` to run some entries only.
 
+## Run the release tracking set
+
+```sh
+python3 benchmarks/agent/agent_bench.py track --name wright-X.Y.Z --dry-run
+python3 benchmarks/agent/agent_bench.py track --name wright-X.Y.Z --wait-for-limits
+```
+
+`track` runs the committed `benchmarks/agent/tracking.json` — the reference models, cells,
+trials, and suite version — under `runs/wright-X.Y.Z/`, and leaves the results page in
+`runs/wright-X.Y.Z/leaderboard/` plus the publish command for its run directories. The
+release procedure uses it; see [release.md](release.md). `--wait-for-limits` waits out
+provider limits and resumes, so a run may take more than a day. Run it again with the same
+`--name` to continue an interrupted run.
+
 ## Run one model
 
 ```sh
