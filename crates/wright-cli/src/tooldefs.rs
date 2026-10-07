@@ -196,7 +196,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "ProviderSemanticRenameRequest",
         drop_fields: &[],
         mcp: true,
-        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. The caller owns the document set: `documents` maps each document URI to {uri, languageId, version, text}, `position_document_uri` must be one of those URIs, `position` is 0-based line/UTF-16-character, and `sources` maps every URI the rename may edit to its current text.",
+        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. The caller owns the document set: `documents` maps each document URI to {uri, languageId, version, text}, must include the project entry document plus `position_document_uri`, and should cover every URI the rename may edit — a member file alone can refuse `rename.noSymbolAtPosition` even on a valid position. `position` is 0-based line/UTF-16-character, and `sources` maps every URI the rename may edit to its current text.",
         result: "the provider-resolved rename transaction or a structured refusal",
     },
     ToolSpec {
