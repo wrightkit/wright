@@ -986,14 +986,14 @@
       "properties": {
         "op": { "const": "providerSemanticRename" },
         "language_id": { "type": "string", "description": "The configured source provider's language id — `opy` for the shipped provider." },
-        "documents": { "$ref": "#/$defs/DocumentSet", "description": "The caller-owned document set; must contain `position_document_uri`, the project entry document (the provider resolves the analyzable view from a supplied entry — a member file alone can refuse `rename.noSymbolAtPosition`), and every document the rename may edit." },
+        "documents": { "anyOf": [{ "$ref": "#/$defs/DocumentSet" }, { "type": "null" }], "description": "Optional: the caller-owned document set — must contain `position_document_uri`, the project entry document (the provider resolves the analyzable view from a supplied entry — a member file alone can refuse `rename.noSymbolAtPosition`), and every document the rename may edit. Omitted or null: the session's loaded project supplies the set — every member read from disk at version 0, keyed by `file://` URI." },
         "position_document_uri": { "type": "string", "description": "URI of the `documents` document holding the rename position." },
         "position": { "$ref": "#/$defs/Position" },
         "new_name": { "type": "string", "description": "The replacement identifier." },
         "project_root": { "type": ["string", "null"], "description": "Optional project root the provider resolves the project from." },
-        "sources": { "$ref": "#/$defs/Sources", "description": "URI → current text covering every document the provider's rename may edit; a returned edit into an unsupplied or mismatched source refuses `edit-unknown-source`/`edit-stale-source`." }
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }], "description": "Optional URI → current text covering every document the provider's rename may edit (omitted or null defaults to each document's text); a returned edit into an unsupplied or mismatched source refuses `edit-unknown-source`/`edit-stale-source`." }
       },
-      "required": ["op", "language_id", "documents", "position_document_uri", "position", "new_name", "sources"],
+      "required": ["op", "language_id", "position_document_uri", "position", "new_name"],
       "additionalProperties": false
     },
     "ProviderValidateEditRequest": {
@@ -1001,12 +1001,12 @@
       "properties": {
         "op": { "const": "providerValidateEdit" },
         "language_id": { "type": "string", "description": "The configured source provider's language id — `opy` for the shipped provider." },
-        "documents": { "$ref": "#/$defs/DocumentSet", "description": "The caller-owned document set; every `edits[].source` must be a key, and errors in any supplied document block the post-edit check." },
+        "documents": { "anyOf": [{ "$ref": "#/$defs/DocumentSet" }, { "type": "null" }], "description": "Optional: the caller-owned document set — every `edits[].source` must be a key, and errors in any supplied document block the post-edit check. Omitted or null: the session's loaded project supplies the set — every member read from disk at version 0, keyed by `file://` URI." },
         "transaction": { "$ref": "#/$defs/EditTransaction" },
-        "sources": { "$ref": "#/$defs/Sources", "description": "URI → current text covering every `edits[].source`; each edit's `source_identity` verifies against it." },
+        "sources": { "anyOf": [{ "$ref": "#/$defs/Sources" }, { "type": "null" }], "description": "Optional URI → current text covering every `edits[].source` (omitted or null defaults to each document's text); each edit's `source_identity` verifies against it." },
         "project_root": { "type": ["string", "null"], "description": "Optional project root the provider resolves the project from." }
       },
-      "required": ["op", "language_id", "documents", "transaction", "sources"],
+      "required": ["op", "language_id", "transaction"],
       "additionalProperties": false
     },
     "LookupRequest": {

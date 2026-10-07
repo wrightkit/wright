@@ -194,17 +194,17 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
     ToolSpec {
         op: "providerSemanticRename",
         request_def: "ProviderSemanticRenameRequest",
-        drop_fields: &[],
+        drop_fields: &["documents", "sources"],
         mcp: true,
-        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. The caller owns the document set: `documents` maps each document URI to {uri, languageId, version, text}, must include the project entry document plus `position_document_uri`, and should cover every URI the rename may edit — a member file alone can refuse `rename.noSymbolAtPosition` even on a valid position. `position` is 0-based line/UTF-16-character, and `sources` maps every URI the rename may edit to its current text.",
+        description: "Provider-owned rename for source-language projects (e.g. OverPy): the configured provider computes the edits, Wright verifies document versions and source preconditions, the provider validates the transaction, and the edited project is rechecked — returning validated edits or a structured refusal. The document set defaults to the session's loaded project (every member's disk text at version 0, keyed by `file://` URI); `position_document_uri` must be one of those URIs. `position` is 0-based line/UTF-16-character.",
         result: "the provider-resolved rename transaction or a structured refusal",
     },
     ToolSpec {
         op: "providerValidateEdit",
         request_def: "ProviderValidateEditRequest",
-        drop_fields: &[],
+        drop_fields: &["documents", "sources"],
         mcp: true,
-        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. The caller owns the document set: `documents` maps each document URI to {uri, languageId, version, text}, every `edits[].source` must be one of those URIs, and `sources` maps every edited URI to the current text its `source_identity` verifies — errors in any supplied document block the transaction.",
+        description: "Validate a caller-proposed source-edit transaction for a provider-owned language through the same provider-backed pipeline as providerSemanticRename; no filesystem writes. The document set defaults to the session's loaded project (every member's disk text at version 0, keyed by `file://` URI), so every `edits[].source` must be one of those URIs and each `source_identity` verifies against the member's disk text — errors in any member document block the transaction.",
         result: "the provider-validated transaction or a structured refusal",
     },
     ToolSpec {

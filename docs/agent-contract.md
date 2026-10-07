@@ -95,8 +95,9 @@ tool set itself are independent of whether the configured project currently
 loads — a broken project never hides tools (#512). Each tool's `inputSchema`
 is derived from the operation's request schema with `op` removed (the tool
 name carries it); the Workshop edit tools also omit `sources`, which then
-defaults to the on-disk text (#472). The provider tools keep `documents` and
-`sources` required — the caller owns the document set. `tools/call`
+defaults to the on-disk text (#472), and the provider tools likewise omit
+`documents` and `sources`, which then default to the session's loaded
+project (#548). `tools/call`
 arguments are the request fields.
 
 A successful service `result` is returned unchanged as the tool result's JSON
@@ -167,8 +168,8 @@ the successful `result` payload.
 | `targetMetadata` | none | Canonical target/catalog metadata |
 | `validateEditTransaction` | `transaction`, optional `sources` | Atomic validation status, diagnostics, and previews when valid |
 | `semanticRename` | `target`, optional `sources` | Validated rename transaction or structured refusal |
-| `providerSemanticRename` | `language_id`, `documents`, `position_document_uri`, `position`, `new_name`, optional `project_root`, `sources` | Provider-resolved rename transaction or structured refusal |
-| `providerValidateEdit` | `language_id`, `documents`, `transaction`, `sources`, optional `project_root` | Provider-validated transaction or structured refusal |
+| `providerSemanticRename` | `language_id`, `position_document_uri`, `position`, `new_name`, optional `documents`, `sources`, `project_root` | Provider-resolved rename transaction or structured refusal |
+| `providerValidateEdit` | `language_id`, `transaction`, optional `documents`, `sources`, `project_root` | Provider-validated transaction or structured refusal |
 | `lookup` | required `language`; optional `query`, `kind`, `within`, `locale`, `limit` | Owner vocabulary entries with accepted spellings and rendered signatures, or an explicit `unavailable` payload naming the owner |
 
 ### Freshness and id validity (#471, #512)
@@ -176,8 +177,10 @@ the successful `result` payload.
 The service may exist without a program snapshot: construction over a
 project that cannot load succeeds, and `capabilities`, `targetMetadata`
 (the static catalog), `lookup` (the language vocabulary), and `provider*`
-operations (caller-supplied documents) answer without consulting the
-project at all — they neither require nor trigger its load.
+operations carrying caller-supplied documents answer without consulting the
+project at all — they neither require nor trigger its load. A `provider*`
+request that omits `documents` derives the set from the loaded project
+(#548) and so loads like any other program-reading request.
 
 A request that consults the program needs a valid current snapshot at
 request time. When none exists, the request performs the deferred initial
@@ -385,23 +388,30 @@ changed since validation.
 validated-edit pipeline through the configured source-language provider
 (`opy` today): Wright checks the caller's preconditions and translates
 coordinates, the provider validates each edited document, and the edited
-document set is rechecked before `ok: true`. The caller owns the document
-set:
+document set is rechecked before `ok: true`. The document set is
+caller-supplied or session-derived:
 
 * `language_id` names the configured provider — `opy` for the shipped
   provider.
-* `documents` is a URI → `{uri, languageId, version, text}` map describing
-  the project as the provider sees it. A `providerValidateEdit`
-  `edits[].source` outside the set refuses `edit-unknown-source`;
-  `providerSemanticRename` requires `position_document_uri` inside the set
-  and refuses provider-returned edits outside it with
-  `provider-edit-outside-set`.
-* `sources` is a URI → current-text map covering every source the
-  transaction may edit — each `edits[].source` on `providerValidateEdit`,
-  every document the provider's rename may touch on
-  `providerSemanticRename`: it is the precondition each `source_identity`
-  verifies against (SHA-256 hex of the text — for the entry document this
-  equals `project.inputIdentity`) and the text the edits apply to.
+* `documents` is optional (#548). When supplied, it is a URI → `{uri,
+  languageId, version, text}` map describing the project as the provider
+  sees it. When omitted, the session's loaded project supplies the set:
+  every member file read from disk at `version` 0, keyed by `file://` URI —
+  the same project view the session serves, so an agent never reconstructs
+  the document set the session already holds. The omitted-set request reads
+  the program like any other program-reading operation (#471): it triggers
+  the deferred load and refuses with the loader's diagnostic on an
+  unloadable project. A `providerValidateEdit` `edits[].source` outside
+  the set refuses `edit-unknown-source`; `providerSemanticRename` requires
+  `position_document_uri` inside the set and refuses provider-returned
+  edits outside it with `provider-edit-outside-set`.
+* `sources` is optional (#548) and defaults to each document's text. It is
+  a URI → current-text map covering every source the transaction may edit
+  — each `edits[].source` on `providerValidateEdit`, every document the
+  provider's rename may touch on `providerSemanticRename`: it is the
+  precondition each `source_identity` verifies against (SHA-256 hex of the
+  text — for the entry document this equals `project.inputIdentity`) and
+  the text the edits apply to.
 * `providerValidateEdit`'s post-edit check blocks on errors in any
   supplied document, so the set should cover the project documents whose
   diagnostics may break.
@@ -409,7 +419,8 @@ set:
   supplied documents themselves — include the project entry document
   (e.g. `main.opy`), not only the position file. A member file alone can
   refuse `rename.noSymbolAtPosition` even when the position is valid;
-  supply the entry plus every file the rename may touch.
+  supply the entry plus every file the rename may touch. The session-
+  derived set already contains every loaded member, entry included.
 * `providerSemanticRename`'s `position` is the provider convention —
   0-based line and UTF-16 character — while `transaction` ranges are the
   `EditRange` 1-based half-open columns every edit operation shares. The
@@ -417,8 +428,9 @@ set:
   `source_identity` is the identity of that document's current text, so
   the caller can replay or apply the edits itself.
 
-Both operations answer without consulting the session's loaded project
-(#471) and refuse cleanly when no provider is configured.
+Operations carrying caller-supplied documents answer without consulting
+the session's loaded project (#471); both refuse cleanly when no provider
+is configured.
 
 ### Name and signature lookup (#529, ADR-0021)
 
@@ -501,7 +513,10 @@ is served once by `lintRules`.
 
 ADR-0020 records a second pre-freeze exception (#472): `sources` is optional
 on `validateEditTransaction` and `semanticRename` rather than required, so
-agent callers stop resending whole files.
+agent callers stop resending whole files. The same exception extends to the
+provider operations (#548): `documents` and `sources` are optional on
+`providerSemanticRename` and `providerValidateEdit`, defaulting to the
+session's loaded project and each document's text.
 
 The optional guide installed by `wright agent install` (and distributed by
 `wrightkit/skills`) teaches clients to discover and use these capabilities. It

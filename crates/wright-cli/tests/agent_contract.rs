@@ -338,6 +338,33 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
     }
 
+    // #548: `documents`/`sources` are optional on the provider operations —
+    // a request without them, or with explicit nulls, validates and
+    // deserializes; the service then derives the set from the loaded project.
+    for request in [
+        json!({"op":"providerSemanticRename","language_id":"opy",
+            "position_document_uri":"file:///main.opy",
+            "position":{"line":0,"character":0},"new_name":"Renamed"}),
+        json!({"op":"providerSemanticRename","language_id":"opy","documents":null,"sources":null,
+            "position_document_uri":"file:///main.opy",
+            "position":{"line":0,"character":0},"new_name":"Renamed"}),
+        json!({"op":"providerValidateEdit","language_id":"opy","transaction":{"edits":[{
+            "kind":"edit","source":"file:///main.opy","source_identity":"sha256:x",
+            "range":{"start_line":1,"start_col":1,"end_line":1,"end_col":1},
+            "new_text":"x"}]}}),
+        json!({"op":"providerValidateEdit","language_id":"opy","documents":null,"sources":null,
+            "transaction":{"edits":[{
+            "kind":"edit","source":"file:///main.opy","source_identity":"sha256:x",
+            "range":{"start_line":1,"start_col":1,"end_line":1,"end_col":1},
+            "new_text":"x"}]}}),
+    ] {
+        assert!(
+            request_schema.is_valid(&request),
+            "invalid request: {request}"
+        );
+        serde_json::from_value::<ToolRequest>(request).expect("request deserializes");
+    }
+
     let capabilities_response = json!({"result":current});
     assert!(response_schema.is_valid(&capabilities_response));
     assert!(response_schema.is_valid(&json!({

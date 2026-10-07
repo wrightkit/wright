@@ -143,12 +143,12 @@ fn rename_request(
 ) -> ToolRequest {
     ToolRequest::ProviderSemanticRename {
         language_id: DEMO_LANGUAGE_ID.to_string(),
-        documents,
+        documents: Some(documents),
         position_document_uri: position_document_uri.to_string(),
         position,
         new_name: new_name.to_string(),
         project_root: Some("file:///project".to_string()),
-        sources,
+        sources: Some(sources),
     }
 }
 
@@ -522,9 +522,9 @@ fn caller_transaction_validates_through_the_provider() {
     let documents = single_document_set();
     let request = ToolRequest::ProviderValidateEdit {
         language_id: DEMO_LANGUAGE_ID.to_string(),
-        documents,
+        documents: Some(documents),
         transaction: rename_all_occurrences_transaction(),
-        sources: sources_of(&single_document_set()),
+        sources: Some(sources_of(&single_document_set())),
         project_root: Some("file:///project".to_string()),
     };
     let mutation = handle(&mut service, &request);
@@ -562,9 +562,9 @@ fn caller_transaction_that_breaks_the_source_refuses() {
     .expect("transaction");
     let request = ToolRequest::ProviderValidateEdit {
         language_id: DEMO_LANGUAGE_ID.to_string(),
-        documents,
+        documents: Some(documents),
         transaction,
-        sources: sources_of(&single_document_set()),
+        sources: Some(sources_of(&single_document_set())),
         project_root: None,
     };
     let mutation = handle(&mut service, &request);
@@ -628,9 +628,9 @@ fn provider_mutations_do_not_require_the_session_project() {
         &mut service,
         &ToolRequest::ProviderValidateEdit {
             language_id: DEMO_LANGUAGE_ID.to_string(),
-            documents: single_document_set(),
+            documents: Some(single_document_set()),
             transaction: rename_all_occurrences_transaction(),
-            sources: sources_of(&single_document_set()),
+            sources: Some(sources_of(&single_document_set())),
             project_root: None,
         },
     );
@@ -641,5 +641,231 @@ fn provider_mutations_do_not_require_the_session_project() {
     );
     // Neither flow triggered the unrelated session-project load.
     assert!(service.loaded().is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// Session-derived document sets (#548)
+// ---------------------------------------------------------------------------
+
+/// An LPP fake provider that accepts the mutation surface unconditionally:
+/// `lpp/rename` answers one five-character edit on the first document,
+/// `lpp/validateEdits` accepts every edit, `lpp/check` is clean. It records
+/// every document URI it is shown so the test can prove which set the
+/// session supplied.
+#[cfg(unix)]
+const SESSION_DOCS_PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys
+
+CAPTURE = "@CAPTURE@"
+
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": "1.0", "serverInfo": {"name": "fake", "version": "0"},
+                   "languages": [{"id": "x-demo-lang", "extensions": ["xdl"]}],
+                   "capabilities": {"check": True, "compile": True, "reconstruct": False,
+                                    "symbols": False, "definition": False, "references": False,
+                                    "rename": True, "editValidation": True,
+                                    "projectLoading": False, "lookup": False}})
+    elif method == "lpp/rename":
+        documents = request["params"]["documents"]
+        with open(CAPTURE, "a") as capture:
+            capture.write("\n".join(sorted(documents)) + "\n")
+        uri = sorted(documents)[0]
+        reply(id, {"edits": [{"documentUri": uri,
+                              "version": documents[uri]["version"],
+                              "textEdits": [{"range": {"start": {"line": 0, "character": 0},
+                                                       "end": {"line": 0, "character": 5}},
+                                             "newText": "RENAMED"}]}]})
+    elif method == "lpp/validateEdits":
+        reply(id, {"valid": True, "version": request["params"]["document"]["version"]})
+    elif method == "lpp/check":
+        reply(id, {"documents": [{"uri": uri, "version": doc["version"], "diagnostics": []}
+                                 for uri, doc in request["params"]["documents"].items()]})
+    else:
+        reply(id, {})
+"#;
+
+/// A tool service over a loaded Workshop session with the session-docs fake
+/// provider registered, plus the file the provider records the shown
+/// document URIs into.
+#[cfg(unix)]
+fn session_docs_service() -> (PathBuf, PathBuf, ToolService<'static>) {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wright-provider-548-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let capture = dir.join("documents.txt");
+    let provider_path = dir.join("fake-provider");
+    std::fs::write(
+        &provider_path,
+        SESSION_DOCS_PROVIDER.replace("@CAPTURE@", &capture.display().to_string()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut registry = wright_lpp::ProviderRegistry::new();
+    registry
+        .register(wright_lpp::ProviderConfig::new(
+            DEMO_LANGUAGE_ID,
+            provider_path,
+            Vec::new(),
+        ))
+        .expect("registered");
+    let session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        providers: registry,
+        ..SessionConfig::default()
+    })
+    .expect("session");
+    let session = Box::leak(Box::new(session));
+    (dir, capture, ToolService::new(session).expect("service"))
+}
+
+/// The session member's identity in the defaulted document set: the
+/// input's `file://` URI.
+fn member_uri() -> String {
+    url::Url::from_file_path(workshop_path())
+        .expect("file uri")
+        .to_string()
+}
+
+/// `documents`/`sources` may be omitted (#548): the operation then derives
+/// the provider's document view from the session's loaded project — member
+/// disk text at version 0 under `file://` URIs — and `sources` defaults to
+/// each document's text.
+#[cfg(unix)]
+#[test]
+fn an_omitted_document_set_derives_from_the_loaded_project() {
+    let (dir, capture, mut service) = session_docs_service();
+    let member_uri = member_uri();
+    let member_text = std::fs::read_to_string(workshop_path()).unwrap();
+
+    let mutation = handle(
+        &mut service,
+        &ToolRequest::ProviderSemanticRename {
+            language_id: DEMO_LANGUAGE_ID.to_string(),
+            documents: None,
+            position_document_uri: member_uri.clone(),
+            position: Position {
+                line: 0,
+                character: 0,
+            },
+            new_name: "renamed".to_string(),
+            project_root: None,
+            sources: None,
+        },
+    );
+    assert!(
+        mutation.ok,
+        "the session-derived rename succeeds: {:?}",
+        mutation.diagnostics
+    );
+    let transaction = mutation.transaction.expect("transaction");
+    assert_eq!(transaction.edits[0].source, member_uri);
+    assert_eq!(
+        transaction.edits[0].source_identity,
+        wright_driver::input_identity(&member_text),
+        "`sources` defaulted to the member's disk text"
+    );
+    let preview = mutation.preview.expect("preview");
+    assert!(
+        preview[0].new_text.starts_with("RENAMED"),
+        "{}",
+        preview[0].new_text
+    );
+    // The provider was shown exactly the session's member set at version 0.
+    let shown = std::fs::read_to_string(&capture).unwrap();
+    assert_eq!(shown.trim(), member_uri);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The same defaulting serves `providerValidateEdit`: a transaction naming
+/// a session member by its `file://` URI applies against the derived set.
+#[cfg(unix)]
+#[test]
+fn an_omitted_document_set_validates_a_session_member_edit() {
+    let (dir, _capture, mut service) = session_docs_service();
+    let member_text = std::fs::read_to_string(workshop_path()).unwrap();
+    let transaction = EditTransaction::new(vec![SourceEdit {
+        edit_kind: "edit".to_string(),
+        source: member_uri(),
+        source_identity: wright_driver::input_identity(&member_text),
+        range: EditRange {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 6,
+        },
+        new_text: "RENAMED".to_string(),
+    }])
+    .expect("transaction");
+
+    let mutation = handle(
+        &mut service,
+        &ToolRequest::ProviderValidateEdit {
+            language_id: DEMO_LANGUAGE_ID.to_string(),
+            documents: None,
+            transaction,
+            sources: None,
+            project_root: None,
+        },
+    );
+    assert!(
+        mutation.ok,
+        "the session-derived validation succeeds: {:?}",
+        mutation.diagnostics
+    );
+    let preview = mutation.preview.expect("preview");
+    assert!(
+        preview[0].new_text.starts_with("RENAMED"),
+        "{}",
+        preview[0].new_text
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `sources` alone may be omitted (#548): it defaults to each supplied
+/// document's text.
+#[cfg(unix)]
+#[test]
+fn omitted_sources_default_to_each_documents_text() {
+    let (dir, _capture, mut service) = session_docs_service();
+    let mutation = handle(
+        &mut service,
+        &ToolRequest::ProviderSemanticRename {
+            language_id: DEMO_LANGUAGE_ID.to_string(),
+            documents: Some(single_document_set()),
+            position_document_uri: URI.to_string(),
+            position: DOUBLE_POSITION,
+            new_name: "renamed".to_string(),
+            project_root: None,
+            sources: None,
+        },
+    );
+    assert!(
+        mutation.ok,
+        "the rename succeeds with defaulted sources: {:?}",
+        mutation.diagnostics
+    );
+    let transaction = mutation.transaction.expect("transaction");
+    assert_eq!(
+        transaction.edits[0].source_identity,
+        wright_driver::input_identity(CLEAN_PUZZLE),
+        "`sources` defaulted to the document text"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

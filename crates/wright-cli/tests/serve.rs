@@ -855,6 +855,19 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
             "{name} omits sources"
         );
     }
+    // #548: the provider tools omit `documents`/`sources` — the service
+    // derives them from the session's loaded project.
+    for name in [
+        "wright_provider_semantic_rename",
+        "wright_provider_validate_edit",
+    ] {
+        let tool = tools.iter().find(|t| t["name"] == name).unwrap();
+        assert!(
+            tool["inputSchema"]["properties"].get("documents").is_none()
+                && tool["inputSchema"]["properties"].get("sources").is_none(),
+            "{name} omits documents and sources"
+        );
+    }
     // #532: the report tools expose `brief` in their derived input schemas.
     for name in ["wright_analyze", "wright_inspect", "wright_lint"] {
         let tool = tools.iter().find(|t| t["name"] == name).unwrap();
