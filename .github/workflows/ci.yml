@@ -499,11 +499,13 @@ jobs:
           path: target/wright-bench-report.json
 
   # -------------------------------------------------------------------------
-  # [5a] AGENT-FACING METRICS DRIFT  (real-project latency and result shape)
-  # Runs apart from the benchmarks so its multi-minute wall time does not
-  # extend them. It measures the current-run debug CLI against the latest
-  # provider: pinning an old provider would measure a snapshot nobody uses,
-  # and the report records both versions so drift can be attributed.
+  # [5a] AGENT-FACING METRICS DRIFT  (real-project result size and shape)
+  # Blocking and deterministic: every metric runs once and only tokens, bytes
+  # and counts are compared. Wall time on shared runners varies by a factor of
+  # two between runs, so latency is not a PR gate (see metrics-latency below).
+  # It measures the current-run debug CLI against the latest provider:
+  # pinning an old provider would measure a snapshot nobody uses, and the
+  # report records both versions so drift can be attributed.
   # -------------------------------------------------------------------------
   metrics-drift:
     name: Metrics drift
@@ -528,7 +530,46 @@ jobs:
         run: |
           python3 -m unittest discover -s benchmarks/metrics
           target/debug/wright update provider opy
-          python3 benchmarks/metrics/metrics.py check --wright target/debug/wright
+          python3 benchmarks/metrics/metrics.py check --skip-latency --wright target/debug/wright
+
+  # -------------------------------------------------------------------------
+  # [5b] AGENT-FACING LATENCY TREND  (main only, never blocking)
+  # Full repeated measurement against the baseline's latency bands, recorded
+  # as an artifact. A failure here is a signal to look at the trend, not a
+  # verdict: hosted-runner speed is too variable to gate on.
+  # -------------------------------------------------------------------------
+  metrics-latency:
+    name: Metrics latency (trend)
+    needs: [paths, rust-quality, rust-msrv, wright-cli-build]
+    if: github.event_name == 'push' && needs.paths.outputs.opy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: wright-cli-linux-stable-debug
+          path: target/debug
+
+      - name: Prepare CLI executable
+        run: chmod +x target/debug/wright
+
+      - name: Measure latency against the baseline
+        run: |
+          target/debug/wright update provider opy
+          python3 benchmarks/metrics/metrics.py check --wright target/debug/wright --out target/metrics-latency.json
+
+      - name: Upload latency record
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: metrics-latency
+          path: target/metrics-latency.json
+          if-no-files-found: ignore
 
   # -------------------------------------------------------------------------
   # [8] DISTRIBUTION VALIDATION  (cross-platform package/binary smoke)

@@ -24,6 +24,10 @@ Commands:
   Improvements are reported alongside regressions. ``check`` never rewrites
   the baseline; accepting a change means editing ``baseline-<version>.json``
   in a reviewed PR that documents old/new values and the reason.
+  ``--skip-latency`` compares size and shape only: every metric runs once and
+  latency is neither measured for nor compared. Wall time on shared CI hosts
+  varies by a factor of two between runs, so a blocking gate uses this form.
+  ``--out`` also writes the measured run, for trend records.
 
 Repository corpus entries are cloned shallow at their pinned commit; their
 source is never vendored. Derived metrics are the only stored artifact.
@@ -528,6 +532,15 @@ def provider_version() -> str | None:
     return None
 
 
+def strip_latency(document: dict) -> dict:
+    """Copy of a metrics document without any ``latencyMs`` field."""
+    stripped = json.loads(json.dumps(document))
+    for project in (stripped.get("projects") or {}).values():
+        for record in (project.get("metrics") or {}).values():
+            record.pop("latencyMs", None)
+    return stripped
+
+
 def run_metrics(
     wright: str,
     corpus: dict,
@@ -819,7 +832,12 @@ def main() -> int:
         "--out",
         type=Path,
         default=None,
-        help="metrics output file for `run` (default: stdout)",
+        help="metrics output file for `run` (default: stdout); `check` also writes it",
+    )
+    parser.add_argument(
+        "--skip-latency",
+        action="store_true",
+        help="`check` only: measure each metric once and compare size and shape, not latency",
     )
     parser.add_argument(
         "--repeats",
@@ -878,7 +896,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    current = run_metrics(wright, corpus, args.repeats, only, args.cli_repeats)
+    repeats, cli_repeats = (1, 1) if args.skip_latency else (args.repeats, args.cli_repeats)
+    current = run_metrics(wright, corpus, repeats, only, cli_repeats)
+    if args.out:
+        args.out.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
+    if args.skip_latency:
+        baseline, current = strip_latency(baseline), strip_latency(current)
     violations, warnings = compare_metrics(baseline, current)
     print_report(violations, warnings)
     return 1 if violations else 0

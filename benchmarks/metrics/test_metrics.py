@@ -243,10 +243,24 @@ class RunTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(baseline_path.read_bytes(), before)
 
+    def test_skip_latency_ignores_latency_but_not_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline_path = Path(tmp) / "baseline.json"
+            baseline = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000)}}})
+            baseline_path.write_text(json.dumps(baseline))
+            slower = _doc({"p": {"status": "ok", "metrics": {"m": _metric(1000, latency_ms=900.0)}}})
+            with mock.patch.object(metrics, "run_metrics", return_value=slower) as run:
+                self.assertEqual(_check_main(baseline_path), 1)
+                self.assertEqual(_check_main(baseline_path, "--skip-latency"), 0)
+            self.assertEqual(run.call_args.args[2:], (1, None, 1))
+            bigger = _doc({"p": {"status": "ok", "metrics": {"m": _metric(4000)}}})
+            with mock.patch.object(metrics, "run_metrics", return_value=bigger):
+                self.assertEqual(_check_main(baseline_path, "--skip-latency"), 1)
 
-def _check_main(baseline_path: Path) -> int:
+
+def _check_main(baseline_path: Path, *extra: str) -> int:
     """Invoke `check` against a canned baseline without touching wright."""
-    argv = ["metrics.py", "check", "--baseline", str(baseline_path)]
+    argv = ["metrics.py", "check", "--baseline", str(baseline_path), *extra]
     with mock.patch("sys.argv", argv):
         return metrics.main()
 

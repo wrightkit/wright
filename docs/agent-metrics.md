@@ -42,7 +42,7 @@ python3 benchmarks/metrics/metrics.py check                  # compare vs baseli
 `baseline-<corpusVersion>.json`, exiting 1 when anything leaves its band:
 
 - **tokens and counts**: |delta| > 15% **and** > 30 absolute;
-- **latencyMs**: machine-relative — `check` derives a machine factor as the
+- **latencyMs** (not part of the blocking CI gate; see below): machine-relative — `check` derives a machine factor as the
   median run/baseline latency ratio across every comparable metric (≥10
   pairs) and bands each metric against `baseline * factor`; |delta| > 50%
   AND > 1 ms absolute. A uniformly slower or faster host therefore passes,
@@ -65,6 +65,19 @@ do not fail.
 `baseline-<corpusVersion>.json` in a reviewed PR that documents the old/new
 values and the reason. Bumping `corpus.json`'s `version` opens a new baseline
 file so old bands stay auditable.
+
+## In CI
+
+The blocking `Metrics drift` job runs `check --skip-latency`: each metric runs
+once and only tokens, bytes, and counts are compared. Wall time on shared
+hosted runners varies by about a factor of two between runs, and the machine
+factor cannot cancel a shift that differs by operation (small agent
+operations and CLI commands moved in opposite directions on the same run), so
+a latency band would fail unrelated changes. On pushes to `main`, a separate
+non-blocking `Metrics latency (trend)` job runs the full repeated measurement
+against the baseline's latency bands and uploads the run as the
+`metrics-latency` artifact. Read it as a trend, and run `check` without
+`--skip-latency` on a quiet host when timing matters.
 
 ## Release metrics
 
