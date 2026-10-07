@@ -4,7 +4,7 @@ use std::{
 };
 
 use serde_json::{Value as JsonValue, json};
-use workshop_rs::source::{FileId, Span};
+use workshop_rs::source::Span;
 use workshop_rs::{Event, Program};
 
 use super::analysis::Finding;
@@ -263,7 +263,7 @@ impl<'a> SemanticService<'a> {
     fn dispatch(&self, request: &Request) -> Response {
         match request {
             Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": env!("CARGO_PKG_VERSION"), "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
-            Request::Program => Response::Ok { result: json!({"origin": self.origin, "files": file_count(self.program.as_ref()), "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
+            Request::Program => Response::Ok { result: json!({"origin": self.origin, "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
             Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
             Request::ListSymbols { kind } => Response::Ok { result: JsonValue::Array(self.symbols_json().iter().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol["kind"].as_str() == Some(kind))).cloned().collect()) },
@@ -358,13 +358,6 @@ fn lint_rules(
         "config": {"rules": config_rules},
         "skipped": skipped,
     })
-}
-fn file_count(program: &Program) -> usize {
-    let mut count = 0;
-    while program.source(FileId::from_index(count)).is_some() {
-        count += 1;
-    }
-    count
 }
 pub(super) fn span_json(span: Option<Span>) -> JsonValue {
     span.map_or(JsonValue::Null, |span| json!({"file": span.file.index(), "start": {"line": span.start.line, "col": span.start.col}, "end": {"line": span.end.line, "col": span.end.col}}))

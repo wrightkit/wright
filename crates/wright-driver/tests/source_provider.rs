@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use wright_driver::service::{ToolRequest, ToolResponse, ToolService};
 use wright_driver::source_provider::{
     SourceCompilation, SourceLanguage, SourceProvider, SourceProviderError, SourceTarget,
     SourceTargetKind,
@@ -422,6 +423,40 @@ fn mapped_analyze_locations_resolve_to_authored_source() {
     collect_spans(&analyze.result.facts, &mut spans);
     assert!(!spans.is_empty(), "analyze facts carry spans");
     assert!(spans.iter().all(|span| span["path"] == "main.opy"));
+    cleanup(dir);
+}
+
+/// A mapped provider program's file table entries carry no retained source
+/// text, so the analyzer's document count reports 0 for a real source
+/// project. `program.files` reports the loaded source-file table instead,
+/// matching `project` (#536).
+#[test]
+fn mapped_provider_project_reports_its_source_file_count() {
+    let (dir, entry) = temp_entry();
+    let member = dir.join("member.opy");
+    let mut session = mapped_lint_session(&dir, entry, |artifact| {
+        artifact["files"]
+            .as_array_mut()
+            .expect("file table")
+            .push(serde_json::json!({
+                "path": url::Url::from_file_path(&member).expect("file URI").to_string(),
+            }));
+    });
+
+    // `inspect` is not available on the injected-provider backend; `analyze`
+    // and `lint` compose the same `program` summary it reports.
+    let analyze = session.analyze();
+    assert!(analyze.ok, "mapped analyze: {:?}", analyze.diagnostics);
+    assert_eq!(analyze.result.program["files"], 2);
+    let lint = session.lint();
+    assert!(lint.ok, "mapped lint: {:?}", lint.diagnostics);
+    assert_eq!(lint.result.program["files"], 2);
+
+    let mut service = ToolService::new(&mut session).expect("service loads");
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Project) else {
+        panic!("project failed");
+    };
+    assert_eq!(result["files"], 2, "project and program summaries agree");
     cleanup(dir);
 }
 

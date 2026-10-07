@@ -233,10 +233,23 @@ fn risk_facts(service: &SemanticService<'_>) -> serde_json::Value {
     serde_json::Value::Array(risks)
 }
 
+/// The `Request::Program` summary for `loaded`, with `files` from the loaded
+/// source-file table like `project` reports.
+fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json::Value {
+    let mut program = service_response(service, &Request::Program);
+    if let serde_json::Value::Object(object) = &mut program {
+        object.insert(
+            "files".to_string(),
+            serde_json::json!(loaded.source_files.len().max(1)),
+        );
+    }
+    program
+}
+
 #[hotpath::measure]
-fn inspect_result(service: &SemanticService<'_>) -> InspectResult {
+fn inspect_result(service: &SemanticService<'_>, loaded: &Loaded) -> InspectResult {
     InspectResult {
-        program: service_response(service, &Request::Program),
+        program: program_summary(service, loaded),
         rules: service_response(service, &Request::ListRules),
         symbols: service_response(service, &Request::ListSymbols { kind: None }),
         references: service.references_for_all_symbols(),
@@ -254,7 +267,7 @@ fn analyze_result(
     loaded: &Loaded,
     catalog: &Catalog,
 ) -> AnalyzeResult {
-    let mut program = service_response(service, &Request::Program);
+    let mut program = program_summary(service, loaded);
     if let serde_json::Value::Object(object) = &mut program {
         object.remove("findings");
     }
@@ -378,7 +391,7 @@ impl CompilerSession {
             |session, loaded| {
                 let service = session.shared_semantic(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                inspect_result(&service)
+                inspect_result(&service, &loaded)
             },
         )
     }
@@ -529,9 +542,9 @@ impl CompilerSession {
         self.with_loaded(
             "inspect",
             |_| Ok(loaded),
-            |session, _loaded| {
+            |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                inspect_result(service)
+                inspect_result(service, &loaded)
             },
         )
     }
@@ -565,7 +578,7 @@ impl CompilerSession {
                     &configured
                 };
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                let program = service_response(service, &Request::Program);
+                let program = program_summary(service, &loaded);
                 let lint_rules = service_response(service, &Request::LintRules);
                 let lint_rule_count = lint_rules
                     .pointer("/rules")
