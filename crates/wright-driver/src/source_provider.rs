@@ -275,9 +275,15 @@ impl SourceProvider for LppSourceProvider {
     fn compile(&mut self, target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
         let entry = self.entry(target)?;
         let root_uri = Self::project_root_uri(target);
-        let negotiates_artifacts = self.provider.capabilities().is_ok_and(|c| {
-            c.protocol_version == wright_lpp::LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION
-        });
+        // A failed capability query is a provider failure, not a legacy
+        // version signal: propagate it instead of silently choosing the
+        // unnegotiated compile path (#571).
+        let negotiates_artifacts = self
+            .provider
+            .capabilities()
+            .map_err(|error| provider_error(error, &request_context("compile", target)))?
+            .protocol_version
+            == wright_lpp::LPP_ARTIFACT_NEGOTIATION_PROTOCOL_VERSION;
         let res = if negotiates_artifacts {
             self.provider.compile_target_accepting(
                 &entry,
