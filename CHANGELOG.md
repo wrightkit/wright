@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.14.0](https://github.com/wrightkit/wright/compare/v0.13.0...v0.14.0) (2026-10-08)
+
+
+### Features
+
+* **analyzer:** refuse evaluate-once only inside reevaluated parameters ([#577](https://github.com/wrightkit/wright/issues/577)) ([4c6f3d4](https://github.com/wrightkit/wright/commit/4c6f3d47d567c0b85284eca1717316ed2a326f31))
+
+
+### Bug Fixes
+
+* **analyzer:** name the nearest declared names on unknown-symbol and unknown-rule ([#574](https://github.com/wrightkit/wright/issues/574)) ([ab5c71a](https://github.com/wrightkit/wright/commit/ab5c71aa684d11b01232e337a85c241a6fd8492d))
+* **driver:** preserve typed provider failure classification at the source-provider boundary ([#569](https://github.com/wrightkit/wright/issues/569)) ([#575](https://github.com/wrightkit/wright/issues/575)) ([9ef33f2](https://github.com/wrightkit/wright/commit/9ef33f21d3ecfe8bbb76a3b67223903d3e5b2b50))
+* **serve:** accept every emitted entry kind in lookup's kind filter ([#573](https://github.com/wrightkit/wright/issues/573)) ([5ad308c](https://github.com/wrightkit/wright/commit/5ad308c2d64738cd346e2d8074d51b7af42dd6d4))
+* **serve:** resolve rules span paths in every selection form ([#572](https://github.com/wrightkit/wright/issues/572)) ([574f738](https://github.com/wrightkit/wright/commit/574f7385549cf9a5f42e427182ae071c15813b05))
+
 ## [0.13.0](https://github.com/wrightkit/wright/compare/v0.12.0...v0.13.0) (2026-10-08)
 
 
