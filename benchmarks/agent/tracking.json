@@ -1,0 +1,51 @@
+{
+  "contract": "wright-agent-tracking/v1",
+  "suite": "v2",
+  "models": [
+    {
+      "adapter": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "medium"
+    },
+    {
+      "adapter": "devin",
+      "model": "swe-2-max"
+    }
+  ],
+  "cells": [
+    {
+      "tool": "none",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "wright",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "wright",
+      "skills": ["wright-skill"],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "overpy",
+      "skills": [],
+      "knowledge": "none",
+      "network": "off"
+    },
+    {
+      "tool": "overpy",
+      "skills": ["opy-skill"],
+      "knowledge": "none",
+      "network": "off"
+    }
+  ],
+  "split": "test",
+  "trials": 3,
+  "parallel": 1,
+  "seed": 1
+}

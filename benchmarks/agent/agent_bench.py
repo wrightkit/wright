@@ -192,7 +192,8 @@ def overpy_launcher(out: Path, host_path: str) -> Path:
     return launcher
 
 
-def check_cell(cell: dict, args: argparse.Namespace) -> None:
+def valid_cell(cell: dict) -> None:
+    """Vocabulary-level validity of a cell: what the harness can express, before what this host provides."""
     level = cell.get("level") or "bin"  # `normalize_cell` fills this; a hand-built cell defaults to `bin` the same way
     if cell["tool"] not in TOOLS or level not in LEVELS or cell["knowledge"] not in KNOWLEDGE_LEVELS or cell["network"] not in ("off", "on") or any(s not in SKILLS for s in cell["skills"]):
         raise SystemExit(f"invalid condition {cell_label(cell)}")
@@ -200,6 +201,10 @@ def check_cell(cell: dict, args: argparse.Namespace) -> None:
         raise SystemExit(f"invalid condition {cell_label(cell)}: level '{level}' is a `wright` level")
     if cell["knowledge"] == "web" and cell["network"] != "on":
         raise SystemExit("knowledge 'web' requires network 'on'")
+
+
+def check_cell(cell: dict, args: argparse.Namespace) -> None:
+    valid_cell(cell)
     for name in cell["skills"]:
         directory = (args.skill_dirs or {}).get(name)
         if not directory or not (Path(directory) / "SKILL.md").is_file():
@@ -773,7 +778,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     effort = f"BENCH_THINKING={shlex.quote(args.effort)} " if args.effort else ""
     agent_id = model_slug({"adapter": args.adapter, "model": args.model, "effort": args.effort})
     cmd = f"BENCH_MODEL={shlex.quote(args.model)} {effort}{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
-    wanted = [CANONICAL_CELL] if args.cells == "score" else CONTROL_CELLS
+    wanted = getattr(args, "cell_list", None) or ([CANONICAL_CELL] if args.cells == "score" else CONTROL_CELLS)
     cells = [c for c in wanted if all(s in args.skill_dirs for s in c["skills"])]
     dropped = [cell_label(normalize_cell(c)) for c in wanted if c not in cells]
     if dropped:
@@ -853,6 +858,86 @@ def cmd_suite(args: argparse.Namespace) -> int:
     return 0 if all(state == "done" for state in outcome.values()) else 1
 
 
+TRACKING = HERE / "tracking.json"
+TRACKING_CONTRACT = "wright-agent-tracking/v1"
+
+
+def load_tracking(path: Path = TRACKING) -> dict:
+    """The committed per-release tracking definition (#540): reference models, cells, trials, and the suite they hold for.
+
+    The definition is refused when it names a cell or model the harness cannot run, a suite other than this
+    harness's, or no cell set that can produce the canonical score and a lift reference."""
+    definition = json.loads(Path(path).read_text())
+    if definition.get("contract") != TRACKING_CONTRACT:
+        raise SystemExit(f"{path}: contract must be {TRACKING_CONTRACT}")
+    if definition.get("suite") != bench_grade.SUITE_VERSION:
+        raise SystemExit(f"{path}: suite {definition.get('suite')!r} is not this harness's suite {bench_grade.SUITE_VERSION!r}")
+    cells = definition.get("cells") or []
+    labels = []
+    for cell in cells:
+        normalized = normalize_cell(cell)
+        valid_cell(normalized)  # what the harness can run; this host's own needs (skills, oracle, wiki) are checked per trial
+        labels.append(cell_label(normalized))
+    canonical = cell_label(normalize_cell(CANONICAL_CELL))
+    if canonical not in labels or len(labels) < 2:
+        raise SystemExit(f"{path}: cells must include the canonical cell {canonical} and at least one lift reference")
+    models = definition.get("models") or []
+    for i, model in enumerate(models):
+        if not isinstance(model, dict) or model.get("adapter") not in ADAPTERS or not model.get("model"):
+            raise SystemExit(f"{path}: models[{i}] needs an adapter in {sorted(ADAPTERS)} and a model")
+    if not models:
+        raise SystemExit(f"{path}: at least one model is required")
+    for key in ("trials", "parallel"):
+        if not isinstance(definition.get(key), int) or definition[key] < 1:
+            raise SystemExit(f"{path}: {key} must be a positive integer")
+    if not isinstance(definition.get("seed"), int):
+        raise SystemExit(f"{path}: seed must be an integer")
+    if definition.get("split") not in ("test", "train", "all"):
+        raise SystemExit(f"{path}: split must be test, train, or all")
+    return definition
+
+
+def cmd_track(args: argparse.Namespace) -> int:
+    """Run the committed tracking definition against one Wright binary, then write the publishable results page.
+
+    Each model is an `evaluate`-shaped run under <out>/<name>/<model-slug>; finished trials are skipped, so the
+    same command resumes an interrupted run. `--wait-for-limits` waits out provider limits instead of stopping,
+    so a release run may take more than a day. Exit 3 when models are still waiting for a rerun, 1 on other errors."""
+    definition = load_tracking()
+    root = args.out / args.name
+    outcome: dict[str, str] = {}
+    pending = list(definition["models"])
+    while pending:
+        waiting = []
+        for entry in pending:
+            slug = model_slug(entry)
+            print(f"\n=== {slug}", flush=True)
+            sub = argparse.Namespace(**{**vars(args), "adapter": entry["adapter"], "model": entry["model"], "effort": entry.get("effort"),
+                                        "name": slug, "out": root, "cells": "controls", "cell_list": definition["cells"],
+                                        "split": definition["split"], "scenarios": None, "trials": definition["trials"],
+                                        "parallel": definition["parallel"], "seed": definition["seed"], "reference": None})
+            try:
+                status = cmd_evaluate(sub)
+                outcome[slug] = {0: "done", 3: "waiting: provider limit or outage, rerun later"}.get(status, "finished with errors")
+                if status == 3:
+                    waiting.append(entry)
+            except SystemExit as stop:
+                outcome[slug] = f"skipped: {stop.code}"
+        pending = waiting
+        if pending and args.wait_for_limits and not args.dry_run:
+            print(f"{len(pending)} model(s) hit a provider limit; waiting {args.limits_poll}s and resuming where the run stopped", flush=True)
+            time.sleep(args.limits_poll)
+        else:
+            break
+    print("\n" + "\n".join(f"{slug}: {state}" for slug, state in outcome.items()))
+    if not args.dry_run:
+        bench_leaderboard.main(sorted(root.glob("*/")), root / "leaderboard")
+        runs = [str(p) for p in sorted(root.glob("*/")) if (p / "score.json").is_file()]
+        if runs:
+            print(f"publishable result: {root / 'leaderboard'}\npublish: python3 {Path(__file__).resolve()} publish {' '.join(runs)} --out DIR")
+    return 3 if any(s.startswith("waiting") for s in outcome.values()) else 0 if all(s == "done" for s in outcome.values()) else 1
+
+
 def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
     record = bench_wiki.snapshot(args.base, args.dir, tuple(args.categories))
     print(f"{len(record['documents'])} document(s) from {record['source']} into {args.dir}\nsnapshotSha256 {record['snapshotSha256']}")
@@ -873,11 +958,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("suite", help="evaluate every model listed in the user config in turn, then write the results page")
-    for name in ("validate", "run", "matrix", "evaluate", "suite"):
-        p = sub.choices[name] if name == "suite" else sub.add_parser(name)
+    sub.add_parser("track", help="run the committed per-release tracking definition against one Wright binary, then write the results page")
+    for name in ("validate", "run", "matrix", "evaluate", "suite", "track"):
+        p = sub.choices[name] if name in ("suite", "track") else sub.add_parser(name)
         p.add_argument("--wright", default=str(ROOT / "target/debug/wright"), help="Wright binary under test")
         p.add_argument("--out", type=Path, default=BENCH_HOME / "runs", help="outside any repository, so agents cannot discover its instruction files")
-    for name in ("run", "matrix", "evaluate", "suite"):
+    for name in ("run", "matrix", "evaluate", "suite", "track"):
         p = sub.choices[name]
         p.add_argument("--skill-dir", action="append", default=[], metavar="NAME=DIR", help=f"pinned skill directory for one of {', '.join(SKILLS)}; repeatable")
         p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked as ./wiki for knowledge 'wiki'; content hashes are verified")
@@ -918,6 +1004,12 @@ def main() -> int:
     su.add_argument("--seed", type=int, default=1)
     su.add_argument("--dry-run", action="store_true")
     su.add_argument("--no-file-sandbox", action="store_true")
+    tr = sub.choices["track"]
+    tr.add_argument("--name", default=time.strftime("track-%Y%m%d"), help="run directory under --out; repeating the same name resumes that run")
+    tr.add_argument("--wait-for-limits", action="store_true", help="when a provider limit interrupts a model, wait --limits-poll seconds and resume until the definition is complete")
+    tr.add_argument("--limits-poll", type=int, default=2100, help="seconds between resume attempts under --wait-for-limits")
+    tr.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
+    tr.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox")
     publish = sub.add_parser("publish", help="build allow-listed hosted results and upload to the release bucket")
     publish.add_argument("dirs", nargs="+", type=Path, help="evaluation directories containing score.json and result.json files")
     publish.add_argument("--out", type=Path, required=True, help="bundle output directory")
@@ -955,13 +1047,13 @@ def main() -> int:
     score = sub.add_parser("score", help="compute the Wright Agent Score card of each language track from canonical test runs")
     score.add_argument("dirs", nargs="+", type=Path)
     score.add_argument("--language", choices=("workshop", "opy"), action="append", help="track to score; both when omitted")
-    for name in ("validate", "run", "matrix", "evaluate", "suite", "report", "score"):
+    for name in ("validate", "run", "matrix", "evaluate", "suite", "track", "report", "score"):
         sub.choices[name].add_argument("--private-suite", type=Path, help="private versioned suite directory, kept unreadable by the agent")
     defaults = user_defaults()
     for choice in sub.choices.values():
         known = {a.dest for a in choice._actions}
         choice.set_defaults(**{k: v for k, v in defaults.items() if k in known})
-    for name in ("evaluate", "suite"):
+    for name in ("evaluate", "suite", "track"):
         sub.choices[name].set_defaults(wright=defaults.get("wright") or shutil.which("wright") or str(ROOT / "target/debug/wright"))
     sub.choices["suite"].set_defaults(models=defaults.get("models"))
     args = parser.parse_args()
@@ -976,7 +1068,7 @@ def main() -> int:
             if name not in SKILLS or not directory:
                 raise SystemExit(f"--skill-dir expects NAME=DIR with NAME one of {', '.join(SKILLS)}: {item}")
             args.skill_dirs[name] = Path(directory)
-    if getattr(args, "deny_read", None) and not getattr(args, "file_sandbox", False) and args.command not in ("evaluate", "suite"):
+    if getattr(args, "deny_read", None) and not getattr(args, "file_sandbox", False) and args.command not in ("evaluate", "suite", "track"):
         raise SystemExit("--deny-read needs --file-sandbox")
     if args.command == "validate":
         return 0 if validate(args.wright, args.out, args.private_suite) else 1
@@ -1002,7 +1094,7 @@ def main() -> int:
         languages = args.language or ["workshop", "opy"]
         expected = {lang: [s for s in all_scenario_ids(getattr(args, "private_suite", None)) if load_scenario(s, getattr(args, "private_suite", None))["language"] == lang and load_scenario(s, getattr(args, "private_suite", None)).get("split") == "test"] for lang in languages}
         return bench_score.main(args.dirs, languages, expected, None)
-    return {"run": cmd_run, "matrix": cmd_matrix, "evaluate": cmd_evaluate, "suite": cmd_suite}[args.command](args)
+    return {"run": cmd_run, "matrix": cmd_matrix, "evaluate": cmd_evaluate, "suite": cmd_suite, "track": cmd_track}[args.command](args)
 
 
 if __name__ == "__main__":

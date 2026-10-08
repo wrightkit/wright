@@ -104,6 +104,44 @@ head before building, so a stale, out-of-order completion cannot advance the
 nightly pointer. Manual runs use the ref selected in the Actions UI; automatic
 nightly runs use the exact `workflow_run.head_sha`.
 
+### Agent capability tracking
+
+Once the release candidate's binary exists — a `scripts/release.sh` archive of
+the release commit, or the workflow-built archive for the host platform — the
+maintainer runs the committed tracking set and the drift metrics against it,
+then publishes both results. The step is report-only for the first three
+releases that run it: a moved number does not block the release; the release
+notes state what moved and the owner decides.
+
+```sh
+python3 benchmarks/agent/agent_bench.py track --wright <candidate>/wright --name wright-<version> --wait-for-limits
+python3 benchmarks/metrics/metrics.py run --wright <candidate>/wright --out ~/.local/share/wright-agent-bench/runs/wright-<version>/metrics.json
+```
+
+`track` reads its definition from `benchmarks/agent/tracking.json`: the two
+reference models (`gpt-6.1-sol` at medium effort, `swe-2-max`), the canonical
+cell and the lift cells, the trials per cell, and the suite version the results
+hold for. `--dry-run` lists what would run without running it. A provider limit
+interrupts a model with exit 3; `--wait-for-limits` waits it out and resumes, so
+the step may take more than a day, and repeating the same command resumes where
+it stopped. `metrics.py` needs its corpus fetched once
+(`python3 benchmarks/metrics/metrics.py fetch`).
+
+The results page lands in
+`~/.local/share/wright-agent-bench/runs/wright-<version>/leaderboard/`; the
+command prints the `publish` invocation for its run directories:
+
+```sh
+python3 benchmarks/agent/agent_bench.py publish <printed run directories> --out target/publish
+```
+
+which uploads the allow-listed score data under the release bucket's `bench/`
+prefix for the public results page ([`agent-benchmark.md`](agent-benchmark.md#held-out-suite-and-publishing)).
+The release notes link the hosted results and the metrics output. Results of one
+Wright version are compared only with results recorded on the same suite version
+and skill version; a change to either starts a new baseline, and the release
+notes name the change.
+
 ### Dependency boundaries and updates
 
 `workshop-rs` is a normal compile-time Cargo dependency. Wright declares its
