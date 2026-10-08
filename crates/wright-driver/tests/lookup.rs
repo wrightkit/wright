@@ -389,6 +389,76 @@ fn lookup_kind_filter_accepts_every_kind_the_service_emits() {
 }
 
 #[test]
+fn lookup_accepts_every_kind_any_response_emits() {
+    // Drift guard (#563): the `kind` allowlist must cover every kind the
+    // service can emit. Exercise the unscoped query and each `within`
+    // selector form, then replay every emitted `kind` back as a filter —
+    // a kind the owners start emitting but the allowlist rejects would
+    // fail here instead of regressing `invalid-kind` silently.
+    let mut owned = session(workshop_path());
+    let mut service = ToolService::new(&mut owned).unwrap();
+
+    let mut emitted = std::collections::BTreeSet::new();
+    for within in [None, Some("Team"), Some("createHudText"), Some("heroes")] {
+        let entries = entries_of(service.handle(&ToolRequest::Lookup {
+            language: "workshop".to_string(),
+            query: within.is_none().then(|| "a".to_string()),
+            kind: None,
+            within: within.map(str::to_string),
+            locale: None,
+            limit: Some(10),
+        }));
+        for entry in entries {
+            emitted.insert(
+                entry["kind"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("entry has no kind: {entry}"))
+                    .to_string(),
+            );
+        }
+    }
+    assert!(!emitted.is_empty(), "the probes emitted entries");
+    for kind in &emitted {
+        match service.handle(&ToolRequest::Lookup {
+            language: "workshop".to_string(),
+            query: Some("a".to_string()),
+            kind: Some(kind.clone()),
+            within: None,
+            locale: None,
+            limit: None,
+        }) {
+            ToolResponse::Ok { .. } => {}
+            ToolResponse::Error { error } => {
+                panic!("emitted kind '{kind}' refused as {error:?}")
+            }
+        }
+    }
+
+    // The canned `opy` provider emits `action` and `enum` entries; replay
+    // them the same way against the provider-backed path.
+    #[cfg(unix)]
+    {
+        let (dir, mut opy) = service_with_provider(LOOKUP_PROVIDER);
+        for kind in ["action", "enum", "memberAction"] {
+            match opy.handle(&ToolRequest::Lookup {
+                language: "opy".to_string(),
+                query: Some("hud".to_string()),
+                kind: Some(kind.to_string()),
+                within: None,
+                locale: None,
+                limit: None,
+            }) {
+                ToolResponse::Ok { .. } => {}
+                ToolResponse::Error { error } => {
+                    panic!("opy kind '{kind}' refused as {error:?}")
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
 fn lookup_refuses_an_unknown_within_scope() {
     let mut owned = session(workshop_path());
     let mut service = ToolService::new(&mut owned).unwrap();
