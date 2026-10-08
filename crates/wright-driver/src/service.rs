@@ -1084,10 +1084,9 @@ impl<'a> ToolService<'a> {
         self.ok(json!({ key: kept, "selection": outcome }))
     }
 
-    /// `rules`: every rule. The selection fields are `name` (a declared
-    /// rule name), `file`, and `max` (#531); span paths resolve only when
-    /// `file` selection needs them, so a `name`/`max`-selected result stays
-    /// the bare response's subset.
+    /// `rules`: every rule with resolved span paths, like `symbols` — a
+    /// `file` id without its path is unusable to a caller. The selection
+    /// fields are `name` (a declared rule name), `file`, and `max` (#531).
     fn rules(
         &self,
         name: &Option<String>,
@@ -1106,11 +1105,7 @@ impl<'a> ToolService<'a> {
             }
         }
         let selected = name.is_some() || file.is_some() || max.is_some();
-        let response = if file.is_some() {
-            self.semantic_query_with_resolved_span_paths(Request::ListRules)
-        } else {
-            self.semantic_query(Request::ListRules)
-        };
+        let response = self.semantic_query_with_resolved_span_paths(Request::ListRules);
         match response {
             ToolResponse::Ok { result } => self.select_result(
                 "rules",

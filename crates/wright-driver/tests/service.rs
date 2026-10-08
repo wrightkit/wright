@@ -730,7 +730,9 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     assert!(elsewhere["symbols"].as_array().unwrap().is_empty());
     assert_eq!(elsewhere["selection"]["total"], total);
 
-    // `rules`: `name` narrows, `file`/`max` behave like `symbols`.
+    // `rules`: `name` narrows, `file`/`max` behave like `symbols`. Spans
+    // resolve their `path` in every selection form, as `symbols` spans do —
+    // a `file` id without its path is unusable.
     let rules = result_of(
         &mut service,
         &ToolRequest::Rules {
@@ -741,6 +743,14 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     );
     assert!(rules.is_array());
     let rule_total = rules.as_array().unwrap().len();
+    for rule in rules.as_array().unwrap() {
+        if rule["span"].is_object() {
+            assert!(
+                rule["span"]["path"].is_string(),
+                "rule span carries no path: {rule}"
+            );
+        }
+    }
     let named = result_of(
         &mut service,
         &ToolRequest::Rules {
