@@ -2274,6 +2274,8 @@ dependencies = [
  "hotpath",
  "serde",
  "serde_json",
+ "strsim",
+ "unicode-normalization",
  "workshop-rs",
  "yaml_serde",
 ]

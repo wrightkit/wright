@@ -1,6 +1,7 @@
 mod analysis;
 mod cfg;
 mod facts;
+mod resolve;
 mod service;
 mod symbols;
 mod traversal;

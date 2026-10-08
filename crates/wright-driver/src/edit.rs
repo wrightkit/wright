@@ -621,41 +621,10 @@ fn resolve_rename_target<'a>(
                     )
                 })
         }
-        Some(Address::Name(name)) => resolve_named_symbol(index, name),
+        Some(Address::Name(name)) => index
+            .resolve_symbol(name)
+            .map_err(|error| Diagnostic::error(error.code, Stage::Discovery, error.message)),
         None => symbol_at_position(index, loaded, input_path, target),
-    }
-}
-
-/// Resolve a declared name to one symbol — the same resolution `references`
-/// and `usage` apply: unmatched names are `unknown-symbol`, names shared by
-/// more than one symbol are `ambiguous-symbol` listing candidate ids.
-fn resolve_named_symbol<'a>(
-    index: &'a SemanticIndex,
-    name: &str,
-) -> Result<&'a Symbol, Diagnostic> {
-    let matches: Vec<&Symbol> = index
-        .symbols()
-        .filter(|symbol| symbol.name == name)
-        .collect();
-    match matches.as_slice() {
-        [symbol] => Ok(symbol),
-        [] => Err(Diagnostic::error(
-            "unknown-symbol",
-            Stage::Discovery,
-            format!("unknown symbol '{name}'"),
-        )),
-        _ => Err(Diagnostic::error(
-            "ambiguous-symbol",
-            Stage::Discovery,
-            format!(
-                "ambiguous symbol '{name}': {}",
-                matches
-                    .iter()
-                    .map(|symbol| format!("{} {}", symbol.kind.as_str(), symbol.id.index()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        )),
     }
 }
 
@@ -1580,6 +1549,28 @@ mod tests {
         );
         assert!(!rule.ok);
         assert_eq!(rule.diagnostics[0].code, "rename-unsupported-kind");
+        // A mistyped name refuses with the same candidates `usage` reports.
+        let typo = semantic_rename(
+            &loaded,
+            session.catalog(),
+            Some(&sources),
+            &RenameTarget {
+                symbol: Some(Address::Name("scor".to_string())),
+                source: None,
+                line: None,
+                col: None,
+                to: "renamed".to_string(),
+            },
+        );
+        assert!(!typo.ok);
+        assert_eq!(typo.diagnostics[0].code, "unknown-symbol");
+        assert!(
+            typo.diagnostics[0]
+                .message
+                .contains("nearest declared: 'score'"),
+            "{:?}",
+            typo.diagnostics[0]
+        );
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(dir2);
     }

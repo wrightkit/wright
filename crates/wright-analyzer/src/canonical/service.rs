@@ -10,7 +10,7 @@ use workshop_rs::{Event, Program};
 use super::analysis::Finding;
 use super::cfg::cfg_response;
 use super::facts::persistent_objects;
-use super::symbols::{Reference, RuleId, SemanticIndex, Symbol, SymbolId, SymbolKind};
+use super::symbols::{Reference, RuleId, SemanticIndex, Symbol, SymbolId};
 use crate::analysis::Boundedness;
 use crate::registry::{LintConfig, SkippedRule};
 use crate::service::{ErrorInfo, Origin, Request, Response};
@@ -189,65 +189,18 @@ impl<'a> SemanticService<'a> {
         })
     }
 
-    /// Resolve a symbol by its exact declared name (#429). A name matching no
-    /// symbol is `unknown-symbol`; a name shared by more than one symbol is
-    /// `ambiguous-symbol` with each candidate's kind and numeric id — callers
-    /// may fall back to the numeric form. No match is ever guessed.
+    /// Resolve a symbol by its exact declared name (#429); see
+    /// [`SemanticIndex::resolve_symbol`].
     pub fn resolve_symbol(&self, name: &str) -> Result<&Symbol, ErrorInfo> {
-        let matches: Vec<&Symbol> = self
-            .index
-            .symbols()
-            .filter(|symbol| symbol.name == name)
-            .collect();
-        match matches.as_slice() {
-            [symbol] => Ok(symbol),
-            [] => Err(ErrorInfo {
-                code: "unknown-symbol".to_string(),
-                message: format!("unknown symbol '{name}'"),
-            }),
-            _ => Err(ErrorInfo {
-                code: "ambiguous-symbol".to_string(),
-                message: format!(
-                    "ambiguous symbol '{name}': {}",
-                    matches
-                        .iter()
-                        .map(|symbol| format!("{} {}", symbol.kind.as_str(), symbol.id.index()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            }),
-        }
+        self.index.resolve_symbol(name)
     }
 
-    /// Resolve a rule by its exact declared name to its rule index (#429).
-    /// Only rule symbols participate: a rule named `x` stays reachable even
-    /// when a variable or subroutine is also named `x`. Unmatched and
-    /// duplicate rule names are `unknown-rule`/`ambiguous-rule`.
+    /// Resolve a rule by its exact declared name to its rule index (#429);
+    /// see [`SemanticIndex::resolve_rule`].
     pub fn resolve_rule(&self, name: &str) -> Result<RuleId, ErrorInfo> {
-        let matches: Vec<&Symbol> = self
-            .index
-            .symbols()
-            .filter(|symbol| symbol.kind == SymbolKind::Rule && symbol.name == name)
-            .collect();
-        match matches.as_slice() {
-            [symbol] => Ok(symbol.rule.expect("rule symbols carry their rule index")),
-            [] => Err(ErrorInfo {
-                code: "unknown-rule".to_string(),
-                message: format!("unknown rule '{name}'"),
-            }),
-            _ => Err(ErrorInfo {
-                code: "ambiguous-rule".to_string(),
-                message: format!(
-                    "ambiguous rule '{name}': {}",
-                    matches
-                        .iter()
-                        .map(|symbol| format!("rule {}", symbol.rule.expect("rule symbol")))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            }),
-        }
+        self.index.resolve_rule(name)
     }
+
     pub fn handle_json(&self, request_json: &str) -> String {
         let request: Request = match serde_json::from_str(request_json) {
             Ok(req) => req,
