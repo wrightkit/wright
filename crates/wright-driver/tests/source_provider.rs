@@ -928,9 +928,12 @@ fn wright_originated_refusal_keeps_its_verbatim_code() {
 // ---------------------------------------------------------------------
 
 /// A `LanguageProvider` that fails the entry-scoped requests with a scripted
-/// typed error; every other method is unreachable on these paths.
+/// typed error; every other method is unreachable on these paths. When
+/// `capabilities_failure` is `Some`, `capabilities()` fails with that error
+/// instead of being unreachable.
 struct FailingLppProvider {
     failure: wright_lpp::ProviderError,
+    capabilities_failure: Option<wright_lpp::ProviderError>,
 }
 
 impl wright_lpp::LanguageProvider for FailingLppProvider {
@@ -943,7 +946,10 @@ impl wright_lpp::LanguageProvider for FailingLppProvider {
     fn capabilities(
         &self,
     ) -> Result<&wright_lpp::NegotiatedCapabilities, wright_lpp::ProviderError> {
-        unreachable!()
+        match &self.capabilities_failure {
+            Some(error) => Err(error.clone()),
+            None => unreachable!(),
+        }
     }
     fn check(
         &mut self,
@@ -1041,6 +1047,7 @@ fn lpp_source_provider_keeps_refusal_code_and_request_context() {
                 serde_json::json!({"refusalCode": "compile.tooLarge"}),
                 "the project exceeds the provider limit",
             ),
+            capabilities_failure: None,
         }),
         None,
     );
@@ -1081,6 +1088,7 @@ fn lpp_source_provider_timeout_is_internal_with_typed_detail_in_text() {
                 method: "lpp/check".to_string(),
                 duration: std::time::Duration::from_millis(1500),
             },
+            capabilities_failure: None,
         }),
         None,
     );
@@ -1127,6 +1135,7 @@ fn lpp_source_provider_distinguishes_failure_classes() {
         let mut provider = wright_driver::source_provider::LppSourceProvider::new(
             Box::new(FailingLppProvider {
                 failure: failure.clone(),
+                capabilities_failure: None,
             }),
             None,
         );
@@ -1137,6 +1146,45 @@ fn lpp_source_provider_distinguishes_failure_classes() {
         assert_eq!(error.code(), code, "{failure:?} lost its classification");
         cleanup(dir);
     }
+}
+
+/// #571: a failed capability query is a provider failure, not a legacy
+/// negotiation signal — `compile` propagates the typed error with its
+/// classification instead of silently dispatching the unnegotiated
+/// `lpp/compile` request. `failure` answers `compile_entry`, so a distinct
+/// capabilities failure reaching the caller proves no compile request was
+/// attempted.
+#[test]
+fn lpp_source_provider_propagates_a_capability_query_failure() {
+    let (dir, entry) = temp_entry();
+    let mut provider = wright_driver::source_provider::LppSourceProvider::new(
+        Box::new(FailingLppProvider {
+            failure: wright_lpp::ProviderError::lpp(
+                wright_lpp::LppErrorKind::Refusal,
+                serde_json::json!({"refusalCode": "compile.unreachable"}),
+                "the compile request must not be reached",
+            ),
+            capabilities_failure: Some(wright_lpp::ProviderError::NotInitialized {
+                method: "capabilities".to_string(),
+            }),
+        }),
+        None,
+    );
+    let error = provider
+        .compile(&SourceTarget::new(SourceLanguage::Opy, &entry, &dir))
+        .expect_err("the capability query failed");
+    assert_eq!(error.code(), "provider-not-initialized");
+    assert_eq!(error.diagnostic().stage, Stage::Internal);
+    let message = error.to_string();
+    assert!(
+        message.contains("compile"),
+        "the operation is named: {message}"
+    );
+    assert!(
+        message.contains(&entry.display().to_string()),
+        "the entry is named: {message}"
+    );
+    cleanup(dir);
 }
 
 #[test]
