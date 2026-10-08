@@ -64,6 +64,9 @@ pub fn exit_code_from(diagnostics: &[Diagnostic]) -> u8 {
         if d.stage == crate::diag::Stage::Reconstruction
             || d.code == "adapter-stdin-unsupported"
             || d.code == "source-provider-unsupported"
+            // #569: a provider-declared capability gap is a recognized but
+            // unsupported operation, not a source error.
+            || d.code == "capability-unavailable"
         {
             return exit::UNSUPPORTED;
         }

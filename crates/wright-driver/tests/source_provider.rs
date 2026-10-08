@@ -763,6 +763,382 @@ fn provider_backend_provider_resolution_failure_is_explicit() {
     cleanup(dir);
 }
 
+/// #569: a provider refusal surfaces at the frontend stage (exit 1) with
+/// the refusal code machine-readable in the diagnostic code — it is a
+/// deliberate decline of the request, not an internal failure.
+#[test]
+fn provider_refusal_is_a_frontend_failure_with_its_refusal_code() {
+    let (dir, entry) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: None,
+        failure: Some(SourceProviderError::Failed {
+            code: "provider-refusal-compile.tooLarge".to_string(),
+            message: "the compile request failed: the provider refused (compile.tooLarge)"
+                .to_string(),
+        }),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.exit, 1);
+    assert_eq!(
+        result.diagnostics[0].code,
+        "provider-refusal-compile.tooLarge"
+    );
+    assert_eq!(result.diagnostics[0].stage, Stage::Frontend);
+    cleanup(dir);
+}
+
+/// #569: a negotiated-capability gap is a recognized but unsupported
+/// operation (exit 3), not a source error and not an internal failure.
+#[test]
+fn provider_capability_unavailable_exits_as_unsupported() {
+    let (dir, entry) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: None,
+        failure: Some(SourceProviderError::Failed {
+            code: "capability-unavailable".to_string(),
+            message: "the check request failed: capability 'projectLoading' was not negotiated"
+                .to_string(),
+        }),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.exit, 3);
+    assert_eq!(result.diagnostics[0].code, "capability-unavailable");
+    assert_eq!(result.diagnostics[0].stage, Stage::Frontend);
+    cleanup(dir);
+}
+
+/// #569: owner-side project loading failures are source-side request
+/// failures (exit 1), not internal errors.
+#[test]
+fn provider_project_load_failure_is_a_source_side_failure() {
+    let (dir, entry) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: None,
+        failure: Some(SourceProviderError::Failed {
+            code: "project-load-failed".to_string(),
+            message: "the check request failed: a required source file could not be loaded"
+                .to_string(),
+        }),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.exit, 1);
+    assert_eq!(result.diagnostics[0].code, "project-load-failed");
+    cleanup(dir);
+}
+
+/// #569: transport-level failures (timeout, exit, malformed traffic) stay
+/// internal (exit 4) and keep their structured codes.
+#[test]
+fn provider_transport_failures_stay_internal() {
+    for code in ["provider-timeout", "provider-exited", "provider-malformed"] {
+        let (dir, entry) = temp_entry();
+        let provider = RecordingProvider {
+            target: Arc::new(Mutex::new(None)),
+            operations: Arc::new(Mutex::new(Vec::new())),
+            check_compilation: None,
+            compilation: None,
+            failure: Some(SourceProviderError::Failed {
+                code: code.to_string(),
+                message: format!("the compile request failed: {code}"),
+            }),
+        };
+        let config = SessionConfig {
+            input: InputSpec::Path(entry),
+            kind: SourceKind::Opy,
+            ..SessionConfig::default()
+        };
+        let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+            .expect("provider session");
+        let result = session.compile();
+        assert!(!result.ok, "{code}");
+        assert_eq!(result.exit, 4, "{code}");
+        assert_eq!(result.diagnostics[0].code, code);
+        assert_eq!(result.diagnostics[0].stage, Stage::Internal);
+        cleanup(dir);
+    }
+}
+
+/// #569: a Wright-originated refusal (`session-config-changed`) keeps its
+/// verbatim code and discovery stage on this path too, matching the direct
+/// workflow refusal.
+#[test]
+fn wright_originated_refusal_keeps_its_verbatim_code() {
+    let (dir, entry) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: None,
+        failure: Some(SourceProviderError::Failed {
+            code: "session-config-changed".to_string(),
+            message: "the check request failed: session configuration is fixed".to_string(),
+        }),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let result = session.check();
+    assert!(!result.ok);
+    assert_eq!(result.exit, 1);
+    assert_eq!(result.diagnostics[0].code, "session-config-changed");
+    assert_eq!(result.diagnostics[0].stage, Stage::Discovery);
+    cleanup(dir);
+}
+
+// ---------------------------------------------------------------------
+// #569: the real `LppSourceProvider` maps a typed `ProviderError` to a
+// classified `SourceProviderError` carrying the operation/entry context.
+// ---------------------------------------------------------------------
+
+/// A `LanguageProvider` that fails the entry-scoped requests with a scripted
+/// typed error; every other method is unreachable on these paths.
+struct FailingLppProvider {
+    failure: wright_lpp::ProviderError,
+}
+
+impl wright_lpp::LanguageProvider for FailingLppProvider {
+    fn initialize(
+        &mut self,
+        _client_info: Option<&wright_lpp::ClientInfo>,
+    ) -> Result<wright_lpp::InitializeResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn capabilities(
+        &self,
+    ) -> Result<&wright_lpp::NegotiatedCapabilities, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn check(
+        &mut self,
+        _documents: &wright_lpp::DocumentSet,
+        _project_root: Option<&str>,
+    ) -> Result<wright_lpp::CheckResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn check_entry(
+        &mut self,
+        _entry: &wright_lpp::ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
+    ) -> Result<wright_lpp::CheckResult, wright_lpp::ProviderError> {
+        Err(self.failure.clone())
+    }
+    fn compile(
+        &mut self,
+        _documents: &wright_lpp::DocumentSet,
+        _project_root: Option<&str>,
+    ) -> Result<wright_lpp::CompileResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn compile_entry(
+        &mut self,
+        _entry: &wright_lpp::ProjectEntry,
+        _project_root: Option<&str>,
+        _locale: Option<&str>,
+    ) -> Result<wright_lpp::CompileResult, wright_lpp::ProviderError> {
+        Err(self.failure.clone())
+    }
+    fn reconstruct(
+        &mut self,
+        _artifact: &wright_lpp::WorkshopArtifact,
+    ) -> Result<wright_lpp::ReconstructResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn symbols(
+        &mut self,
+        _documents: &wright_lpp::DocumentSet,
+        _project_root: Option<&str>,
+    ) -> Result<wright_lpp::SymbolsResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn definition(
+        &mut self,
+        _document: &wright_lpp::Document,
+        _position: wright_lpp::Position,
+    ) -> Result<wright_lpp::LocationsResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn references(
+        &mut self,
+        _document: &wright_lpp::Document,
+        _position: wright_lpp::Position,
+        _include_declaration: bool,
+    ) -> Result<wright_lpp::LocationsResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn rename(
+        &mut self,
+        _documents: &wright_lpp::DocumentSet,
+        _position_document_uri: &str,
+        _position: wright_lpp::Position,
+        _new_name: &str,
+        _project_root: Option<&str>,
+    ) -> Result<wright_lpp::RenameResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn validate_edits(
+        &mut self,
+        _document: &wright_lpp::Document,
+        _edits: &[wright_lpp::TextEdit],
+    ) -> Result<wright_lpp::ValidateEditsResult, wright_lpp::ProviderError> {
+        unreachable!()
+    }
+    fn shutdown(&mut self) -> Result<(), wright_lpp::ProviderError> {
+        Ok(())
+    }
+    fn exit_status(&self) -> Option<i32> {
+        None
+    }
+}
+
+/// #569: an LPP refusal reaches the `SourceProvider` consumer as a
+/// classified frontend failure that still names its `refusalCode`, with the
+/// failing operation and entry in the message.
+#[test]
+fn lpp_source_provider_keeps_refusal_code_and_request_context() {
+    let (dir, entry) = temp_entry();
+    let mut provider = wright_driver::source_provider::LppSourceProvider::new(
+        Box::new(FailingLppProvider {
+            failure: wright_lpp::ProviderError::lpp(
+                wright_lpp::LppErrorKind::Refusal,
+                serde_json::json!({"refusalCode": "compile.tooLarge"}),
+                "the project exceeds the provider limit",
+            ),
+        }),
+        None,
+    );
+    let error = provider
+        .check(&SourceTarget::new(SourceLanguage::Opy, &entry, &dir))
+        .expect_err("the provider refused");
+    assert_eq!(error.code(), "provider-refusal-compile.tooLarge");
+    let diagnostic = error.diagnostic();
+    assert_eq!(diagnostic.stage, Stage::Frontend);
+    assert!(
+        diagnostic.message.contains("check"),
+        "the operation is named: {}",
+        diagnostic.message
+    );
+    assert!(
+        diagnostic.message.contains(&entry.display().to_string()),
+        "the entry is named: {}",
+        diagnostic.message
+    );
+    assert!(
+        diagnostic
+            .message
+            .contains("the project exceeds the provider limit"),
+        "the provider reason survives: {}",
+        diagnostic.message
+    );
+    cleanup(dir);
+}
+
+/// #569: a timeout stays internal and keeps the method/duration detail in
+/// the message of the classified error.
+#[test]
+fn lpp_source_provider_timeout_is_internal_with_typed_detail_in_text() {
+    let (dir, entry) = temp_entry();
+    let mut provider = wright_driver::source_provider::LppSourceProvider::new(
+        Box::new(FailingLppProvider {
+            failure: wright_lpp::ProviderError::Timeout {
+                method: "lpp/check".to_string(),
+                duration: std::time::Duration::from_millis(1500),
+            },
+        }),
+        None,
+    );
+    let error = provider
+        .check(&SourceTarget::new(SourceLanguage::Opy, &entry, &dir))
+        .expect_err("the provider timed out");
+    assert_eq!(error.code(), "provider-timeout");
+    assert_eq!(error.diagnostic().stage, Stage::Internal);
+    let message = error.to_string();
+    assert!(message.contains("'lpp/check'"), "{message}");
+    assert!(message.contains("1500ms"), "{message}");
+    cleanup(dir);
+}
+
+/// #569: a capability gap stays `capability-unavailable` (unsupported), a
+/// process exit and malformed traffic stay internal — each class keeps a
+/// distinct code a consumer can branch on without parsing `message`.
+#[test]
+fn lpp_source_provider_distinguishes_failure_classes() {
+    for (failure, code) in [
+        (
+            wright_lpp::ProviderError::lpp(
+                wright_lpp::LppErrorKind::CapabilityUnavailable,
+                serde_json::json!({"capability": "projectLoading", "method": "lpp/check"}),
+                "capability was not negotiated",
+            ),
+            "capability-unavailable",
+        ),
+        (
+            wright_lpp::ProviderError::Exited {
+                status: Some(9),
+                message: "the provider exited".to_string(),
+            },
+            "provider-exited",
+        ),
+        (
+            wright_lpp::ProviderError::Malformed {
+                detail: "missing result".to_string(),
+            },
+            "provider-malformed",
+        ),
+    ] {
+        let (dir, entry) = temp_entry();
+        let mut provider = wright_driver::source_provider::LppSourceProvider::new(
+            Box::new(FailingLppProvider {
+                failure: failure.clone(),
+            }),
+            None,
+        );
+        let error = provider
+            .check(&SourceTarget::new(SourceLanguage::Opy, &entry, &dir))
+            .err()
+            .unwrap_or_else(|| panic!("{failure:?} produced no error"));
+        assert_eq!(error.code(), code, "{failure:?} lost its classification");
+        cleanup(dir);
+    }
+}
+
 #[test]
 fn provider_backend_inspect_remains_explicitly_unsupported() {
     let (dir, entry) = temp_entry();
