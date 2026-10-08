@@ -191,6 +191,10 @@
       "properties": {
         "id": { "type": "integer", "minimum": 0 },
         "name": { "type": "string" },
+        "event": {
+          "type": "string",
+          "description": "The rule's event binding: a canonical event id, or `subroutine:<name>` for a subroutine rule."
+        },
         "span": { "$ref": "#/$defs/Span" }
       },
       "additionalProperties": true

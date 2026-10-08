@@ -160,7 +160,7 @@ the successful `result` payload.
 | `analyze` | optional `brief` | `wright-result/v1` analysis envelope; the brief form when `brief` is true |
 | `inspect` | optional `brief` | `wright-result/v1` inspection envelope; the brief form when `brief` is true |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
-| `rules` | optional selection | Canonical Workshop rules; `{"rules": [...], "selection": {...}}` when a selection is applied |
+| `rules` | optional selection | Canonical Workshop rules — each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied |
 | `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
 | `references` | required `symbol` (id or name), optional selection | References for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |

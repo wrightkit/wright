@@ -804,6 +804,7 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
     let kept = named["rules"].as_array().unwrap();
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0]["name"], "player starts");
+    assert_eq!(kept[0]["event"], "eachPlayer");
     assert_eq!(named["selection"]["total"], rule_total);
     let bounded_rules = result_of(
         &mut service,

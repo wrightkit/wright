@@ -224,7 +224,7 @@ impl<'a> SemanticService<'a> {
         match request {
             Request::Version => Response::Ok { result: json!({"name": "wright-tool", "version": env!("CARGO_PKG_VERSION"), "capabilities": ["program", "rules", "symbols", "references", "usage", "cfg", "findings", "persistentObjects", "lintRules"]}) },
             Request::Program => Response::Ok { result: json!({"origin": self.origin, "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
-            Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
+            Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "event": event_name(&rule.event), "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
             Request::ListSymbols { kind } => Response::Ok { result: JsonValue::Array(self.symbols_json().iter().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol["kind"].as_str() == Some(kind))).cloned().collect()) },
             Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: self.symbols_json()[symbol.id.index()].clone() }),
