@@ -1451,6 +1451,14 @@ fn provider_member(
     member: &str,
     cwd: &std::path::Path,
 ) -> Result<(String, std::path::PathBuf), ToolErrorInfo> {
+    // A Windows drive-absolute spelling (`C:\...`, `C:/...`) must be handled
+    // before URI parsing: `url::Url::parse` accepts it as a URI whose scheme
+    // is the drive letter, and `to_file_path` then refuses. The provider
+    // emits these spellings on Windows hosts; treat them as disk paths on
+    // every host so the refusal contract stays about URI kind, not host OS.
+    if let Some(pair) = windows_drive_member(member) {
+        return Ok(pair);
+    }
     if let Ok(url) = url::Url::parse(member) {
         let path = url.to_file_path().map_err(|()| ToolErrorInfo {
             code: "provider-document-uri".to_string(),
@@ -1477,6 +1485,23 @@ fn provider_member(
                 "loaded project member '{member}' cannot be expressed as a file:// URI"
             ),
         })
+}
+
+/// `C:\dir\file.opy` or `C:/dir/file.opy` → `(file:///C:/dir/file.opy, path)`.
+/// `file:` is a special scheme, so `Url::parse` percent-encodes the path the
+/// same way `Url::from_file_path` would on a Windows host.
+fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
+    let bytes = member.as_bytes();
+    let drive_absolute = bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    if !drive_absolute {
+        return None;
+    }
+    let path = std::path::PathBuf::from(member);
+    let url = url::Url::parse(&format!("file:///{}", member.replace('\\', "/"))).ok()?;
+    Some((url.to_string(), path))
 }
 
 /// The hotpath measurement label for one request's dispatch.
@@ -1520,4 +1545,47 @@ fn diagnostics_list_code(result: &serde_json::Value, code: &str) -> bool {
                 .iter()
                 .any(|d| d.get("code").and_then(serde_json::Value::as_str) == Some(code))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::provider_member;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn windows_drive_member_is_a_disk_path_not_a_uri_scheme() {
+        // `url::Url::parse` accepts `C:\...` as a URI with scheme `c`; the
+        // provider member helper must classify it as a filesystem path first.
+        let (uri, path) = provider_member("C:\\project\\main.opy", Path::new("/cwd"))
+            .expect("windows drive member resolves");
+        assert_eq!(uri, "file:///C:/project/main.opy");
+        assert_eq!(path, PathBuf::from("C:\\project\\main.opy"));
+
+        let (uri, _) = provider_member("D:/work/lib.opy", Path::new("/cwd"))
+            .expect("forward-slash drive member resolves");
+        assert_eq!(uri, "file:///D:/work/lib.opy");
+    }
+
+    #[test]
+    fn file_uri_member_keeps_its_spelling() {
+        let (uri, path) =
+            provider_member("file:///project/main.opy", Path::new("/cwd")).expect("file URI");
+        assert_eq!(uri, "file:///project/main.opy");
+        assert_eq!(path, PathBuf::from("/project/main.opy"));
+    }
+
+    #[test]
+    fn non_file_uri_member_refuses() {
+        let error = provider_member("untitled:main.opy", Path::new("/cwd"))
+            .expect_err("non-file scheme refuses");
+        assert_eq!(error.code, "provider-document-uri");
+    }
+
+    #[test]
+    fn relative_member_resolves_against_input_cwd() {
+        let (uri, path) = provider_member("src/lib.opy", Path::new("/project"))
+            .expect("relative member resolves");
+        assert_eq!(path, PathBuf::from("/project/src/lib.opy"));
+        assert_eq!(uri, "file:///project/src/lib.opy");
+    }
 }
