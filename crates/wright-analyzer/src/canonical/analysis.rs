@@ -83,7 +83,8 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                             severity: Severity::Info,
                             message: "geometry predicate evaluated inside a loop body may be expensive per iteration"
                                 .into(),
-                            span: program.action_argument_value_span(
+                            span: argument_value_or_ancestor_span(
+                                program,
                                 rule_id,
                                 body_action_id,
                                 argument,
@@ -207,6 +208,38 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         _ => false,
     }
 }
+/// The tightest span on the path to a condition value: the value's own span
+/// when provenance records it, otherwise the nearest recorded ancestor —
+/// provider-backed programs that carry only rule/condition-level spans still
+/// locate the finding instead of reporting `null`.
+fn condition_value_or_ancestor_span(
+    program: &Program,
+    rule: RuleId,
+    condition: usize,
+    path: &[usize],
+) -> Option<Span> {
+    (0..=path.len())
+        .rev()
+        .find_map(|len| program.condition_value_span(rule, condition, &path[..len]))
+        .or_else(|| program.rule_span(rule))
+}
+
+/// The same ancestor walk for a value nested inside a direct action argument:
+/// the argument's own span, then the action's, then the rule's.
+fn argument_value_or_ancestor_span(
+    program: &Program,
+    rule: RuleId,
+    action: usize,
+    argument: usize,
+    path: &[usize],
+) -> Option<Span> {
+    (0..=path.len())
+        .rev()
+        .find_map(|len| program.action_argument_value_span(rule, action, argument, &path[..len]))
+        .or_else(|| program.action_span(rule, action))
+        .or_else(|| program.rule_span(rule))
+}
+
 fn ongoing_condition_findings(
     program: &Program,
     rule_id: RuleId,
@@ -246,7 +279,7 @@ fn ongoing_condition_findings(
                     if later == 1 { "" } else { "s" }
                 )
             };
-            let span = program.condition_value_span(rule_id, source_index, &path);
+            let span = condition_value_or_ancestor_span(program, rule_id, source_index, &path);
             findings.push(Finding {
                 code: "ongoing-condition-hot-path".into(),
                 severity: Severity::Info,
