@@ -505,12 +505,12 @@
           "tokens": 103.5
         },
         "agent:rules": {
-          "bytes": 60721,
+          "bytes": 70213,
           "counts": {
             "items": 369
           },
           "latencyMs": 30.1,
-          "tokens": 15180.2
+          "tokens": 17553.2
         },
         "agent:symbols": {
           "bytes": 101201,
@@ -809,12 +809,12 @@
           "tokens": 72.0
         },
         "agent:rules": {
-          "bytes": 554,
+          "bytes": 762,
           "counts": {
             "items": 5
           },
           "latencyMs": 0.2,
-          "tokens": 138.5
+          "tokens": 190.5
         },
         "agent:symbols": {
           "bytes": 1135,
@@ -1110,12 +1110,12 @@
           "tokens": 111.2
         },
         "agent:rules": {
-          "bytes": 660,
+          "bytes": 897,
           "counts": {
             "items": 6
           },
           "latencyMs": 0.2,
-          "tokens": 165.0
+          "tokens": 224.2
         },
         "agent:symbols": {
           "bytes": 1548,
@@ -2034,12 +2034,12 @@
           "tokens": 41.0
         },
         "agent:rules": {
-          "bytes": 670,
+          "bytes": 931,
           "counts": {
             "items": 6
           },
           "latencyMs": 0.3,
-          "tokens": 167.5
+          "tokens": 232.8
         },
         "agent:symbols": {
           "bytes": 1571,
@@ -2336,12 +2336,12 @@
           "tokens": 111.2
         },
         "agent:rules": {
-          "bytes": 660,
+          "bytes": 897,
           "counts": {
             "items": 6
           },
           "latencyMs": 0.2,
-          "tokens": 165.0
+          "tokens": 224.2
         },
         "agent:symbols": {
           "bytes": 1548,
@@ -2648,12 +2648,12 @@
           "tokens": 181.5
         },
         "agent:rules": {
-          "bytes": 769,
+          "bytes": 1052,
           "counts": {
             "items": 7
           },
           "latencyMs": 0.2,
-          "tokens": 192.2
+          "tokens": 263.0
         },
         "agent:symbols": {
           "bytes": 1690,
