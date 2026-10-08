@@ -97,12 +97,14 @@ CLI_COMMANDS = ["check", "lint", "analyze", "inspect", "compile"]
 
 # #532: the brief result form is the recommended agent-facing shape; both
 # surfaces are measured on it. `briefTokenBudget` bounds the JSON output of
-# any brief metric per surface — the `brief` request payload at 500
+# any brief metric per surface — the `brief` request payload at 600
 # estimated tokens, the CLI `--brief` envelope (which adds pretty-printing
-# and diagnostics framing) at 800. Exceeding the budget is a drift
-# violation, not a band check.
+# and diagnostics framing) at 900. Exceeding the budget is a drift
+# violation, not a band check. The budgets moved from 500/800 to 600/900
+# when lint findings started carrying `span` on provider-backed projects:
+# a located top-5 needs roughly 15% more envelope (#578).
 BRIEF_OPS = ["lint", "analyze", "inspect"]
-BRIEF_TOKEN_BUDGET = {"agent": 500, "cli": 800}
+BRIEF_TOKEN_BUDGET = {"agent": 600, "cli": 900}
 
 
 class ServeSession:

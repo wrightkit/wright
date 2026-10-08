@@ -52,7 +52,7 @@ python3 benchmarks/metrics/metrics.py check                  # compare vs baseli
   comparable pairs the factor is not trusted and the absolute band applies;
 - **brief budget**: every `*?brief` metric — the `brief` request form and the
   CLI `--brief` form (#532) for `lint`, `analyze`, and `inspect` — must stay
-  within `briefTokenBudget` (500 estimated tokens on the agent surface, 800
+  within `briefTokenBudget` (600 estimated tokens on the agent surface, 900
   in the CLI envelope; recorded in each run and baseline); exceeding it is a
   violation regardless of the band.
 
