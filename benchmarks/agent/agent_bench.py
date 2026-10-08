@@ -773,13 +773,13 @@ def non_negative_int(value: str) -> int:
 
 def matrix_waiting_for_limits(args: argparse.Namespace) -> int:
     """Run the matrix; with --wait-for-limits, wait out each provider limit or outage that stops it and continue, instead of exiting to be repeated by hand."""
-    status = cmd_matrix(args)
-    waited = 0
     waiting = bool(getattr(args, "wait_for_limits", False))
     poll = getattr(args, "limits_poll", 2100)
     max_waits = getattr(args, "max_waits", 48)
     if waiting and (poll < 0 or max_waits < 0):
         raise SystemExit("--limits-poll and --max-waits must not be negative")
+    status = cmd_matrix(args)
+    waited = 0
     while status == 3 and waiting and waited < max_waits:
         waited += 1
         print(f"waiting {poll} seconds for the provider limit to reset (wait {waited} of {max_waits}), then continuing", flush=True)
