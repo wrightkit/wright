@@ -180,15 +180,21 @@ mod tests {
             .collect();
         for name in [
             "wright_project",
+            "wright_rules",
             "wright_symbols",
             "wright_references",
             "wright_usage",
+            "wright_cfg",
+            "wright_findings",
+            "wright_persistent_objects",
             "wright_call_graph",
             "wright_check",
             "wright_analyze",
             "wright_inspect",
             "wright_lint",
+            "wright_lint_rules",
             "wright_cost_estimate",
+            "wright_target_metadata",
             "wright_semantic_rename",
             "wright_validate_edit_transaction",
             "wright_provider_semantic_rename",
@@ -197,7 +203,7 @@ mod tests {
         ] {
             assert!(names.iter().any(|n| n == name), "missing {name}");
         }
-        assert_eq!(names.len(), 15);
+        assert_eq!(names.len(), 21);
         assert!(names.iter().all(|name| name.starts_with("wright_")));
     }
 
