@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0](https://github.com/wrightkit/wright/compare/v0.12.0...v0.13.0) (2026-10-08)
+
+
+### Features
+
+* **serve:** expose the approved read operations over MCP ([#566](https://github.com/wrightkit/wright/issues/566)) ([4f8a1d5](https://github.com/wrightkit/wright/commit/4f8a1d59ae8706311823e34dcd7be88ab5dcda3b))
+
+
+### Bug Fixes
+
+* **cli:** keep wright lookup from blocking on terminal stdin ([#568](https://github.com/wrightkit/wright/issues/568)) ([41011a9](https://github.com/wrightkit/wright/commit/41011a9f3bce5a86531a5cac82fd27a1ed651877))
+* **serve:** name the accepted values in closed-vocabulary selection errors ([#564](https://github.com/wrightkit/wright/issues/564)) ([225a809](https://github.com/wrightkit/wright/commit/225a809b9ef85ca50ee66936b1e0eed9b338c723))
+
 ## [0.12.0](https://github.com/wrightkit/wright/compare/v0.11.0...v0.12.0) (2026-10-08)
 
 
