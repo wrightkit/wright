@@ -1488,9 +1488,23 @@ fn provider_member(
 }
 
 /// `C:\dir\file.opy` or `C:/dir/file.opy` → `(file:///C:/dir/file.opy, path)`.
-/// `file:` is a special scheme, so `Url::parse` percent-encodes the path the
-/// same way `Url::from_file_path` would on a Windows host.
+/// The path is percent-encoded before parsing so literal `#`, `%`, `?`, and
+/// friends are not reinterpreted as URL syntax — `Url::parse` alone would
+/// treat `#` as a fragment delimiter and `%xx` as existing escapes.
 fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
+    const PATH_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'#')
+        .add(b'%')
+        .add(b'<')
+        .add(b'>')
+        .add(b'?')
+        .add(b'`')
+        .add(b'{')
+        .add(b'|')
+        .add(b'}')
+        .add(b'^');
     let bytes = member.as_bytes();
     let drive_absolute = bytes.len() > 2
         && bytes[0].is_ascii_alphabetic()
@@ -1500,7 +1514,9 @@ fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
         return None;
     }
     let path = std::path::PathBuf::from(member);
-    let url = url::Url::parse(&format!("file:///{}", member.replace('\\', "/"))).ok()?;
+    let normalized = member.replace('\\', "/");
+    let encoded = percent_encoding::utf8_percent_encode(&normalized, PATH_ENCODE);
+    let url = url::Url::parse(&format!("file:///{encoded}")).ok()?;
     Some((url.to_string(), path))
 }
 
@@ -1564,6 +1580,25 @@ mod tests {
         let (uri, _) = provider_member("D:/work/lib.opy", Path::new("/cwd"))
             .expect("forward-slash drive member resolves");
         assert_eq!(uri, "file:///D:/work/lib.opy");
+
+        // Literal `#`/`%`/`?` in the path are encoded, not parsed as URL
+        // syntax, and decode back to the same spelling.
+        for (member, uri) in [
+            ("C:\\project#1\\main.opy", "file:///C:/project%231/main.opy"),
+            (
+                "C:\\project%20name\\main.opy",
+                "file:///C:/project%2520name/main.opy",
+            ),
+        ] {
+            let (produced, _) =
+                provider_member(member, Path::new("/cwd")).expect("member resolves");
+            assert_eq!(produced, uri);
+            let url = url::Url::parse(&produced).expect("uri parses");
+            let decoded = percent_encoding::percent_decode_str(url.path())
+                .decode_utf8()
+                .expect("utf8");
+            assert_eq!(decoded, format!("/{}", member.replace('\\', "/")));
+        }
     }
 
     #[test]
