@@ -276,7 +276,11 @@ prints a one-line hint after each `unknown-*` diagnostic pointing here
   answers through the configured `opy-rs` provider's LPP lookup
   capability, and reports an explicit `unavailable` payload — exit 3 —
   when the provider does not negotiate it. Wright never guesses locally.
-* `--kind action|value|event|enum-member|setting` narrows the entry kinds.
+* `--kind` narrows the entry kinds — `action`, `value`, `event`,
+  `enum-member`, `enum`, `setting`, `parameter`, `setting-path`,
+  `member-action`, `member-value`, `structural`, `operator`: the union of
+  the kinds both owners emit (#563). A kind one language never emits
+  answers `[]` on it.
 * `--within <IDENTITY>` lists what an identity contains: an enum domain's
   members, a callable's parameters, or a settings path's child segments.
   An unmatched scope identity refuses with `lookup.unknownWithin`.

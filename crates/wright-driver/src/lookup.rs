@@ -41,6 +41,24 @@ const INLINE_MEMBER_LIMIT: usize = 32;
 const OWNER_WORKSHOP: &str = "workshop-rs";
 const OWNER_OPY: &str = "opy-rs";
 const LOOKUP_CAPABILITY: &str = "lookup";
+/// The entry kinds `kind` accepts — exactly the union of the kinds both
+/// owners emit (#563): the five originally admitted plus the emitted kinds
+/// the filter used to reject. A kind valid for one language answers `[]`
+/// on the other, and a true typo still refuses `invalid-kind`.
+const KINDS: [&str; 12] = [
+    "action",
+    "value",
+    "event",
+    "enumMember",
+    "enum",
+    "setting",
+    "parameter",
+    "settingPath",
+    "memberAction",
+    "memberValue",
+    "structural",
+    "operator",
+];
 /// The LPP refusal code an owner returns when `within` names no known
 /// scope; Wright's `within` identity tries each selector kind in order and
 /// this refusal is what moves resolution to the next kind.
@@ -60,14 +78,16 @@ pub(crate) fn lookup(
 ) -> ToolResponse {
     let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     if let Some(kind) = kind {
-        if !matches!(
-            kind,
-            "action" | "value" | "event" | "enumMember" | "setting"
-        ) {
+        if !KINDS.contains(&kind) {
             return refusal(
                 "invalid-kind",
                 format!(
-                    "kind must be one of 'action', 'value', 'event', 'enumMember', 'setting'; got '{kind}'"
+                    "kind must be one of {}; got '{kind}'",
+                    KINDS
+                        .iter()
+                        .map(|kind| format!("'{kind}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             );
         }
