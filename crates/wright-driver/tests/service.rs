@@ -975,6 +975,46 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             "{request:?}"
         );
     }
+
+    // A closed-vocabulary error names the accepted values — the caller
+    // must not have to guess the namespace.
+    for (request, expected) in [
+        (
+            ToolRequest::Symbols {
+                kind: Some("nope".to_string()),
+                file: None,
+                max: None,
+            },
+            "globalVariable, playerVariable, subroutine, rule",
+        ),
+        (
+            ToolRequest::References {
+                symbol: "score".into(),
+                kind: Some("nope".to_string()),
+                rule: None,
+                file: None,
+                max: None,
+            },
+            "declaration, definition, read, write, call",
+        ),
+        (
+            ToolRequest::Cfg {
+                rule: "player starts".into(),
+                kind: Some("nope".to_string()),
+                max: None,
+            },
+            "entry, exit, block, if, while, for",
+        ),
+    ] {
+        let ToolResponse::Error { error } = service.handle(&request) else {
+            panic!("{request:?} must refuse")
+        };
+        assert!(
+            error.message.contains(expected),
+            "{request:?} names its accepted values: {}",
+            error.message
+        );
+    }
 }
 
 #[test]
