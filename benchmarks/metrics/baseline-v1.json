@@ -196,12 +196,12 @@
           "tokens": 1146.8
         },
         "agent:rules": {
-          "bytes": 38595,
+          "bytes": 49458,
           "counts": {
             "items": 307
           },
           "latencyMs": 25.3,
-          "tokens": 9648.8
+          "tokens": 12364.5
         },
         "agent:symbols": {
           "bytes": 84666,
@@ -505,12 +505,12 @@
           "tokens": 103.5
         },
         "agent:rules": {
-          "bytes": 46966,
+          "bytes": 60721,
           "counts": {
             "items": 369
           },
           "latencyMs": 30.1,
-          "tokens": 11741.5
+          "tokens": 15180.2
         },
         "agent:symbols": {
           "bytes": 101201,
