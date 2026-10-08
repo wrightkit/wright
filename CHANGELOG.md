@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.0](https://github.com/wrightkit/wright/compare/v0.11.0...v0.12.0) (2026-10-08)
+
+
+### Features
+
+* **agent:** default provider-op document sets from the loaded session ([#561](https://github.com/wrightkit/wright/issues/561)) ([b1af278](https://github.com/wrightkit/wright/commit/b1af278ff42bceeaf7ddeb04ee9e8ed197dcff56))
+* **bench:** run the per-release agent tracking set ([#559](https://github.com/wrightkit/wright/issues/559)) ([73453b4](https://github.com/wrightkit/wright/commit/73453b412762a6c4943509bd6b38f74a15ad0726))
+* **lint:** validated automated fixes for exact findings ([#560](https://github.com/wrightkit/wright/issues/560)) ([25fe9e5](https://github.com/wrightkit/wright/commit/25fe9e5dda5cf23d7fdc881270c36e107d901cab))
+* **lsp:** back raw Workshop diagnostics and semantic queries ([#558](https://github.com/wrightkit/wright/issues/558)) ([bf0fb38](https://github.com/wrightkit/wright/commit/bf0fb388808bd5cf641bf286b463fd721f17bb46))
+
+
+### Bug Fixes
+
+* **agent:** a stray .txt no longer claims Workshop ownership of a directory ([#552](https://github.com/wrightkit/wright/issues/552)) ([093a242](https://github.com/wrightkit/wright/commit/093a242a912e17c02ccb11d2215a03d2254340aa))
+* **agent:** program.files counts the loaded source files on provider projects ([#546](https://github.com/wrightkit/wright/issues/546)) ([d40f6d1](https://github.com/wrightkit/wright/commit/d40f6d1d0f99b291ce4ecb6ad10f6bf04597d702))
+
+
+### Performance Improvements
+
+* **ci:** split metrics drift from benchmarks and cut redundant metrics runs ([#544](https://github.com/wrightkit/wright/issues/544)) ([d48977f](https://github.com/wrightkit/wright/commit/d48977f8421be5e31e76de3e3fa5a5ca0692617f))
+
 ## [0.11.0](https://github.com/wrightkit/wright/compare/v0.10.0...v0.11.0) (2026-10-06)
 
 
