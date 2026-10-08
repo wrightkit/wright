@@ -1,7 +1,7 @@
 //! The operation catalog client surfaces share (#535): one entry per
 //! operation in `capabilities.operations`, in the contract's order. MCP lists
-//! the `mcp` subset (ADR-0020's initial set); `wright agent tools` emits the
-//! whole catalog as Messages API tool definitions or plain JSON Schema.
+//! the `mcp` subset (ADR-0020's evidence-gated set); `wright agent tools` emits
+//! the whole catalog as Messages API tool definitions or plain JSON Schema.
 
 use serde_json::{Map, Value, json};
 
