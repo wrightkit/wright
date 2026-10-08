@@ -639,6 +639,48 @@ rule ("dup") {
             }
         }
     }
+
+    // A near miss names the declared spelling once; a far miss names the
+    // listing operation instead (#567).
+    for (request, needle) in [
+        (
+            ToolRequest::Usage {
+                symbol: "dupp".into(),
+            },
+            "unknown symbol 'dupp'; nearest declared: 'dup'",
+        ),
+        (
+            ToolRequest::Cfg {
+                rule: "Dup".into(),
+                kind: None,
+                max: None,
+            },
+            "unknown rule 'Dup'; nearest declared: 'dup'",
+        ),
+        (
+            ToolRequest::Usage {
+                symbol: "nope".into(),
+            },
+            "the 'symbols' operation lists them",
+        ),
+        (
+            ToolRequest::Cfg {
+                rule: "nope".into(),
+                kind: None,
+                max: None,
+            },
+            "the 'rules' operation lists them",
+        ),
+    ] {
+        match service.handle(&request) {
+            ToolResponse::Error { error } => {
+                assert!(error.message.ends_with(needle), "{request:?}: {error:?}");
+            }
+            ToolResponse::Ok { result } => {
+                panic!("{request:?} must not return a result: {result}")
+            }
+        }
+    }
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
