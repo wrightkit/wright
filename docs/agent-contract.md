@@ -466,7 +466,10 @@ request's `language` selects the owner (`workshop` or `opy`, the ids
 `capabilities.languages` reports); the remaining fields narrow the answer:
 
 * `query`: the free text to resolve.
-* `kind`: `action`, `value`, `event`, `enumMember`, or `setting`.
+* `kind`: any entry kind an owner emits (#563) — `action`, `value`,
+  `event`, `enumMember`, `enum`, `setting`, `parameter`, `settingPath`,
+  `memberAction`, `memberValue`, `structural`, or `operator`. A kind one
+  language never emits answers `[]` on it.
 * `within`: the identity of an enum domain, a callable, or a settings path
   prefix. The result then lists its members, parameters, or child segments
   — this is how a caller enumerates an enum's accepted member spellings or

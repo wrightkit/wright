@@ -1016,7 +1016,11 @@
         "language": { "enum": ["workshop", "opy"] },
         "query": { "type": ["string", "null"] },
         "kind": {
-          "enum": ["action", "value", "event", "enumMember", "setting", null]
+          "enum": [
+            "action", "value", "event", "enumMember", "enum", "setting",
+            "parameter", "settingPath", "memberAction", "memberValue",
+            "structural", "operator", null
+          ]
         },
         "within": { "type": ["string", "null"] },
         "locale": { "type": ["string", "null"] },

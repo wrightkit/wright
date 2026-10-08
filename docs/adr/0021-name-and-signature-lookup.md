@@ -29,7 +29,7 @@ Reaching the owners differs by language. Raw Workshop is in-process through `wor
 2. **Request.**
    - `language`: `workshop` or `opy`, the ids `capabilities.languages` already reports. One language per request; Wright does not merge results across languages.
    - `query`: free text. It may be a display name, a near spelling, or a guess.
-   - `kind` (optional): `action`, `value`, `event`, `enumMember`, or `setting`.
+   - `kind` (optional): `action`, `value`, `event`, `enumMember`, or `setting`. Amended by #563: the accepted set is the union of every kind either owner emits — `action`, `value`, `event`, `enumMember`, `enum`, `setting`, `parameter`, `settingPath`, `memberAction`, `memberValue`, `structural`, `operator` — so the filter never rejects a kind a prior response emitted.
    - `within` (optional): the identity of a callable, an enum domain, or a settings path prefix, to list its parameters, members, or children.
    - `locale` (optional): the locale used to read Workshop display names.
    - `limit` (optional): the default is 3 and the maximum is 10. Both are defined by this contract and do not depend on `capabilities`, which carries no per-operation metadata.

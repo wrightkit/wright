@@ -287,14 +287,24 @@ impl LookupLanguageArg {
     }
 }
 
-/// Entry kinds the `lookup` operation filters on (ADR-0021).
+/// Entry kinds the `lookup` operation filters on (ADR-0021): the union of
+/// the kinds both owners emit (#563), so a kind a previous response taught
+/// the caller is always filterable. A kind one language never emits
+/// answers `[]` there.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum LookupKindArg {
     Action,
     Value,
     Event,
     EnumMember,
+    Enum,
     Setting,
+    Parameter,
+    SettingPath,
+    MemberAction,
+    MemberValue,
+    Structural,
+    Operator,
 }
 
 impl LookupKindArg {
@@ -304,7 +314,14 @@ impl LookupKindArg {
             Self::Value => "value",
             Self::Event => "event",
             Self::EnumMember => "enumMember",
+            Self::Enum => "enum",
             Self::Setting => "setting",
+            Self::Parameter => "parameter",
+            Self::SettingPath => "settingPath",
+            Self::MemberAction => "memberAction",
+            Self::MemberValue => "memberValue",
+            Self::Structural => "structural",
+            Self::Operator => "operator",
         }
     }
 }

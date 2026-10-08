@@ -317,8 +317,11 @@ pub enum ToolRequest {
         /// Free text: a display name, a near spelling, or a guess.
         #[serde(default)]
         query: Option<String>,
-        /// Entry kind filter: `action`, `value`, `event`, `enumMember`, or
-        /// `setting`.
+        /// Entry kind filter — any kind either owner emits (#563):
+        /// `action`, `value`, `event`, `enumMember`, `enum`, `setting`,
+        /// `parameter`, `settingPath`, `memberAction`, `memberValue`,
+        /// `structural`, or `operator`. A kind one language never emits
+        /// answers `[]` there.
         #[serde(default)]
         kind: Option<String>,
         /// The identity of an enum domain, a callable, or a settings path
