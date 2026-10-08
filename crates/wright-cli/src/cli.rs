@@ -432,6 +432,15 @@ pub(crate) struct LintArgs {
     /// highest-severity findings, and how to expand (#532).
     #[arg(long)]
     pub(crate) brief: bool,
+    /// Show the automated fixes lint offers for fixable findings as a
+    /// validated diff, without writing (#556).
+    #[arg(long, conflicts_with = "brief")]
+    pub(crate) fix: bool,
+    /// Apply the fixes `--fix` previews: each fix is re-validated against
+    /// the current source before writing; a stale source refuses and
+    /// writes nothing (#556).
+    #[arg(long, requires = "fix")]
+    pub(crate) write: bool,
     /// Read project lint configuration YAML.
     #[arg(long = "lint-config", value_name = "PATH")]
     pub(crate) lint_config: Option<PathBuf>,

@@ -637,6 +637,149 @@ fn lint_over_workshop_input_reports_findings_in_text_and_json() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+// ── Validated lint fixes (#556) ──────────────────────────────────────────────
+
+const FIXABLE_WORKSHOP: &str = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("duplicates") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 1);
+        Else If(Compare(Global.index, ==, 0));
+            Set Global Variable(other, 2);
+        End;
+        While(Compare(Global.index, <, 3));
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Set Global Variable(index, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+
+#[test]
+fn lint_fix_previews_and_writes_validated_fixes() {
+    let path = temp_file("fixable.ws", FIXABLE_WORKSHOP);
+    let path = path.to_str().unwrap();
+
+    // Findings carry the materialized fix transaction.
+    let output = run(&["lint", path, "-f", "json"]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let findings = parse_json(&output.stdout)["result"]["findings"]
+        .as_array()
+        .unwrap()
+        .clone();
+    for code in ["duplicate-condition", "repeated-value"] {
+        let fix = findings
+            .iter()
+            .find(|finding| finding["code"] == code)
+            .and_then(|finding| finding.get("fix"))
+            .unwrap_or_else(|| panic!("{code} carries a fix"));
+        assert!(
+            fix["transaction"]["edits"]
+                .as_array()
+                .is_some_and(|edits| !edits.is_empty()),
+            "the fix carries a source-edit transaction: {fix}"
+        );
+    }
+
+    // `--fix` previews each fix's validated diff without writing.
+    let output = run(&["lint", path, "--fix"]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("fix[duplicate-condition]"), "{stdout}");
+    assert!(stdout.contains("fix[repeated-value]"), "{stdout}");
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        FIXABLE_WORKSHOP,
+        "preview writes nothing"
+    );
+
+    // `--fix --write` applies through the validated edit path; the resolved
+    // findings are gone and the source still checks clean.
+    let output = run(&["lint", path, "--fix", "--write"]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("applied[duplicate-condition]"), "{stdout}");
+    assert!(stdout.contains("applied[repeated-value]"), "{stdout}");
+    let applied = std::fs::read_to_string(path).unwrap();
+    assert!(
+        !applied.contains("Else If(Compare(Global.index, ==, 0));"),
+        "the dead branch is gone: {applied}"
+    );
+    assert_eq!(
+        applied
+            .matches("Evaluate Once(Distance Between(Position Of(Event Player), Vector(0, 0, 0)))")
+            .count(),
+        2,
+        "each duplicated occurrence wraps: {applied}"
+    );
+    let output = run(&["check", path]);
+    assert!(
+        output.status.success(),
+        "check passes after the fixes: {}",
+        command_result(&output)
+    );
+    let output = run(&["lint", path, "-f", "json"]);
+    let remaining = parse_json(&output.stdout)["result"]["findings"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(
+        remaining.iter().all(|finding| !matches!(
+            finding["code"].as_str(),
+            Some("duplicate-condition") | Some("repeated-value")
+        )),
+        "applied fixes remove their findings: {remaining:?}"
+    );
+    let _ = std::fs::remove_dir_all(Path::new(path).parent().unwrap());
+}
+
+#[test]
+fn lint_fix_refuses_stdin_without_rereading_it() {
+    // stdin has no reloadable source: fix preview refuses each finding's
+    // transaction with `edit-input-stdin` instead of resolving stdin a
+    // second time (EOF on a pipe, a block on a terminal), and `--write`
+    // refuses the input up front.
+    let output = run_with_stdin(&["lint", "-", "--fix", "-f", "json"], FIXABLE_WORKSHOP);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    let fixes = envelope["result"]["fixes"].as_array().unwrap();
+    assert!(!fixes.is_empty(), "fix outcomes are reported: {envelope}");
+    for fix in fixes {
+        assert_eq!(fix["status"], "refused", "{fix}");
+        assert!(
+            fix["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|diagnostic| diagnostic["code"] == "edit-input-stdin"),
+            "each fix refuses with edit-input-stdin: {fix}"
+        );
+    }
+
+    let output = run_with_stdin(
+        &["lint", "-", "--fix", "--write", "-f", "json"],
+        FIXABLE_WORKSHOP,
+    );
+    assert!(!output.status.success(), "{}", command_result(&output));
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "edit-input-stdin"),
+        "write refuses stdin up front: {envelope}"
+    );
+}
+
 #[test]
 fn span_path_is_consistent_across_input_spellings() {
     // Lint resolves the same root-relative `span.path` for the absolute,

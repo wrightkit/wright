@@ -974,10 +974,18 @@ impl<'a> ToolService<'a> {
         }
         match self.semantic_query_with_resolved_span_paths(Request::GetFindings) {
             ToolResponse::Ok { result } => {
-                let findings = match result {
+                let mut findings = match result {
                     serde_json::Value::Array(findings) => findings,
                     _ => Vec::new(),
                 };
+                let loaded = self.snapshot();
+                crate::fix::attach_fixes(
+                    &mut findings,
+                    self.semantic().findings(),
+                    loaded,
+                    self.session.catalog(),
+                    &CompilerSession::locale_for(loaded),
+                );
                 let (findings, outcome) = selection
                     .apply_findings(findings, &crate::select::file_bases(&self.snapshot().input));
                 match outcome {
@@ -1299,10 +1307,18 @@ impl<'a> ToolService<'a> {
             Response::Error { .. } => serde_json::json!([]),
         };
         crate::session::resolve_span_paths(&mut findings, self.snapshot());
-        let findings = match findings {
+        let mut findings = match findings {
             serde_json::Value::Array(findings) => findings,
             _ => Vec::new(),
         };
+        let loaded = self.snapshot();
+        crate::fix::attach_fixes(
+            &mut findings,
+            service.findings(),
+            loaded,
+            self.session.catalog(),
+            &CompilerSession::locale_for(loaded),
+        );
         let (findings, outcome) =
             selection.apply_findings(findings, &crate::select::file_bases(&self.snapshot().input));
         let mut result = json!({
