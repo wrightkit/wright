@@ -1139,6 +1139,9 @@ pub(crate) fn workshop_diag(
         | workshop_rs::WorkshopError::UnknownWithCandidates { kind, span, .. } => {
             (format!("unknown-{kind}"), Stage::Frontend, to_span(*span))
         }
+        workshop_rs::WorkshopError::NotDetected { kind, span, .. } => {
+            (format!("unknown-{kind}"), Stage::Frontend, to_span(*span))
+        }
         workshop_rs::WorkshopError::Malformed { span, .. } => {
             ("parse-error".to_string(), Stage::Frontend, to_span(*span))
         }
@@ -1152,11 +1155,21 @@ pub(crate) fn workshop_diag(
         }
         _ => ("workshop-error".to_string(), Stage::Internal, None),
     };
+    let message = match &error {
+        // A zero-marker detection has no rejected spelling; text
+        // `check`/`compile` skips its `wright lookup` hint on the
+        // `'<none>'` marker the old `Unknown` spelling carried, so the
+        // message keeps that marker for the same suppression.
+        workshop_rs::WorkshopError::NotDetected { .. } => {
+            format!("{error} (rejected name: '<none>')")
+        }
+        _ => error.to_string(),
+    };
     Diagnostic {
         code,
         stage,
         severity: crate::diag::Severity::Error,
-        message: error.to_string(),
+        message,
         status: None,
         span,
         source: Some(resolved.origin.clone()),

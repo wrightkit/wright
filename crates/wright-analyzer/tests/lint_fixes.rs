@@ -639,6 +639,127 @@ rule ("reevaluating") {{
 }
 
 #[test]
+fn repeated_value_wraps_args_the_reevaluation_mode_does_not_cover() {
+    // #562: `Create Beam Effect` under `Reevaluation = Color` reevaluates
+    // only its `Color` parameter; occurrences in `Visible To`,
+    // `StartPosition`, or `EndPosition` still evaluate once per action and
+    // wrap. The per-parameter coverage is catalog data, so the gate is
+    // reviewed, not guessed.
+    let per_param = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("per-param") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Create Beam Effect(All Players(All Teams), Bad Beam, Distance Between(Position Of(Event Player), Vector(0, 0, 0)), Vector(0, 0, 0), Red, Color);
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let (program, findings) = analyze_source(per_param);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
+        panic!("both occurrences sit outside the reevaluated Color input: {finding:?}")
+    };
+    assert_eq!(occurrences.len(), 2);
+    for occurrence in occurrences {
+        assert_eq!(
+            span_text(&program, per_param, *occurrence),
+            "Distance Between(Position Of(Event Player), Vector(0, 0, 0))"
+        );
+    }
+}
+
+#[test]
+fn repeated_value_still_refuses_args_the_reevaluation_mode_keeps_live() {
+    // `Visible To Position and Radius` keeps `VisibleTo`, `StartPosition`,
+    // and `EndPosition` live: an occurrence inside `StartPosition` must not
+    // wrap, while a duplicated occurrence inside `Color` — which the member
+    // does not cover — may.
+    let live = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("live") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Create Beam Effect(All Players(All Teams), Bad Beam, Distance Between(Position Of(Event Player), Vector(0, 0, 0)), Vector(0, 0, 0), Distance Between(Position Of(Event Player), Vector(0, 0, 0)), Visible To Position and Radius);
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let (_program, findings) = analyze_source(live);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    let Some(LintFix::EvaluateOnce { occurrences }) = &finding.fix else {
+        panic!("the once-evaluated occurrences still wrap: {finding:?}")
+    };
+    // The live `StartPosition` argument keeps its read; the Color argument
+    // and the ordinary body occurrence wrap.
+    assert_eq!(occurrences.len(), 2);
+    for occurrence in occurrences {
+        let line = live
+            .lines()
+            .nth(occurrence.start.line as usize - 1)
+            .unwrap();
+        assert!(
+            line.trim_start().starts_with("Set Global Variable")
+                || line.contains("Visible To Position and Radius"),
+            "wrapped occurrence is the Color arg or the plain body occurrence: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn repeated_value_withholds_the_fix_when_two_live_args_keep_the_family() {
+    // Two occurrences inside parameters the mode keeps live stay
+    // duplicated after any partial wrap, so the family carries no fix —
+    // the surviving finding would stand regardless.
+    let live = r#"variables {
+    global:
+        0: index
+        1: other
+}
+rule ("two-live") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Create Beam Effect(All Players(All Teams), Bad Beam, Distance Between(Position Of(Event Player), Vector(0, 0, 0)), Distance Between(Position Of(Event Player), Vector(0, 0, 0)), Red, Visible To Position and Radius);
+            Set Global Variable(other, Distance Between(Position Of(Event Player), Vector(0, 0, 0)));
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let (_, findings) = analyze_source(live);
+    let [finding] = coded(&findings, "repeated-value")[..] else {
+        panic!("one repeated-value finding: {findings:?}")
+    };
+    assert!(
+        finding.fix.is_none(),
+        "two live occurrences keep the family: {finding:?}"
+    );
+}
+
+#[test]
 fn duplicate_condition_fix_applies_to_tick_snapshot_objective_reads() {
     // Positions and objective state are per-tick snapshot reads — they
     // cannot differ between the two synchronous evaluations, so the dead
