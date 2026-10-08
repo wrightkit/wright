@@ -319,12 +319,19 @@ fn run_configured<T: serde::Serialize + present::ResultPresentation>(
 }
 
 /// Run `wright lookup` (#529): the same `ToolRequest::Lookup` the agent
-/// contract serves, over a session that never loads a project. Text mode
-/// prints one line per entry — the rendered signature for a callable, else
-/// the accepted spelling — with its kind and identity; JSON mode prints the
-/// result `wright serve` returns for the same request.
+/// contract serves, over a session that never loads a project. The
+/// anonymous text input gives the service's warm load nothing to read —
+/// the `InputSpec::Stdin` default would block on a terminal's stdin to
+/// EOF before the lookup ever runs. Text mode prints one line per entry —
+/// the rendered signature for a callable, else the accepted spelling —
+/// with its kind and identity; JSON mode prints the result `wright serve`
+/// returns for the same request.
 fn run_lookup(args: &cli::LookupArgs) -> ExitCode {
     let config = SessionConfig {
+        input: InputSpec::Text {
+            text: String::new(),
+            path: None,
+        },
         opy_provider: wright_driver::OpyProviderConfig {
             executable: args.opy_provider.clone(),
             ..wright_driver::OpyProviderConfig::default()
