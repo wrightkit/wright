@@ -60,7 +60,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "SymbolsRequest",
         drop_fields: &[],
         mcp: true,
-        description: "Every symbol in the loaded program, optionally narrowed by `kind`, `file`, or `max`. Issues the numeric ids other tools accept.",
+        description: "Every symbol in the loaded program, optionally narrowed by `kind` (`globalVariable`, `playerVariable`, `subroutine`, `rule`), `file`, or `max`. Issues the numeric ids other tools accept.",
         result: "the program's symbols, selection-wrapped when `file`/`max` was sent (`kind` alone keeps the bare array)",
     },
     ToolSpec {
@@ -68,7 +68,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "ReferencesRequest",
         drop_fields: &[],
         mcp: true,
-        description: "References to a symbol, addressed by its numeric id or its declared name, optionally narrowed by `kind`, `rule`, `file`, or `max`.",
+        description: "References to a symbol, addressed by its numeric id or its declared name, optionally narrowed by `kind` (`declaration`, `definition`, `read`, `write`, `call`), `rule`, `file`, or `max`.",
         result: "the symbol's references, selection-wrapped when a selector was sent",
     },
     ToolSpec {
@@ -84,7 +84,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "CfgRequest",
         drop_fields: &[],
         mcp: false,
-        description: "The control-flow graph of one rule, addressed by its index or name, optionally narrowed by `kind` or `max`.",
+        description: "The control-flow graph of one rule, addressed by its index or name, optionally narrowed by `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`) or `max`.",
         result: "the rule's control-flow graph plus selection when a selector was sent",
     },
     ToolSpec {
@@ -92,7 +92,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "FindingsRequest",
         drop_fields: &[],
         mcp: false,
-        description: "The project's check and analysis findings, optionally narrowed by `severity`, `rule`, `file`, or `max`.",
+        description: "The project's check and analysis findings, optionally narrowed by `severity` (`info`, `warning`, `error`), `rule`, `file`, or `max`.",
         result: "the project's findings, selection-wrapped when a selector was sent",
     },
     ToolSpec {
@@ -108,7 +108,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "LintRequest",
         drop_fields: &[],
         mcp: true,
-        description: "Lint findings with effective severities, optionally narrowed by severity, rule, file, or max; `brief` returns the counts-and-top-findings summary.",
+        description: "Lint findings with effective severities, optionally narrowed by `severity` (`info`, `warning`, `error`), `rule`, `file`, or `max`; `brief` returns the counts-and-top-findings summary.",
         result: "lint findings with effective severities and configuration; the brief summary when `brief` is true",
     },
     ToolSpec {

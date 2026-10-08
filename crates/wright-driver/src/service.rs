@@ -1135,7 +1135,14 @@ impl<'a> ToolService<'a> {
     fn symbols(&self, kind: Option<&str>, file: Option<&str>, max: Option<usize>) -> ToolResponse {
         if let Some(kind) = kind {
             if !SymbolKind::ALL.iter().any(|known| known.as_str() == kind) {
-                return invalid_selection(format!("unknown symbol kind '{kind}'"));
+                return invalid_selection(format!(
+                    "unknown symbol kind '{kind}' (expected one of: {})",
+                    SymbolKind::ALL
+                        .iter()
+                        .map(|known| known.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
             }
         }
         match self.semantic_query_with_resolved_span_paths(Request::ListSymbols { kind: None }) {
@@ -1167,7 +1174,14 @@ impl<'a> ToolService<'a> {
                 .iter()
                 .any(|known| known.as_str() == kind)
             {
-                return invalid_selection(format!("unknown reference kind '{kind}'"));
+                return invalid_selection(format!(
+                    "unknown reference kind '{kind}' (expected one of: {})",
+                    ReferenceKind::ALL
+                        .iter()
+                        .map(|known| known.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
             }
         }
         let rule_id = match rule {
@@ -1211,7 +1225,10 @@ impl<'a> ToolService<'a> {
     fn cfg(&self, rule: u32, kind: Option<&str>, max: Option<usize>) -> ToolResponse {
         if let Some(kind) = kind {
             if !BLOCK_KINDS.contains(&kind) {
-                return invalid_selection(format!("unknown cfg block kind '{kind}'"));
+                return invalid_selection(format!(
+                    "unknown cfg block kind '{kind}' (expected one of: {})",
+                    BLOCK_KINDS.join(", ")
+                ));
             }
         }
         match self.semantic_query(Request::GetCfg { rule }) {
