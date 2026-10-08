@@ -252,8 +252,8 @@ its rule index). Numeric ids keep their established meaning, and both
 addressings return the same payload for the same target.
 
 An unmatched name returns a structured `unknown-symbol` or `unknown-rule`
-error whose message names up to three nearest declared names (case- and
-accent-folded edit distance of at most 1 for names shorter than six
+error whose message names up to three nearest declared names (case-insensitive edit
+distance of at most 1 for names shorter than six
 characters and 2 otherwise, ties in declaration order), or the `symbols` /
 `rules` operation when none is near (#567). The candidates travel in the
 message only, as ADR-0021 decision 6 does for owner vocabulary. A name shared

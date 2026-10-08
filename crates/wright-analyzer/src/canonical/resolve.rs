@@ -5,9 +5,6 @@
 //! nearest declared names so the caller can retry, using the closeness rules
 //! `workshop-rs` applies to its unknown-spelling diagnostics.
 
-use unicode_normalization::UnicodeNormalization;
-use unicode_normalization::char::is_combining_mark;
-
 use super::symbols::{RuleId, SemanticIndex, Symbol, SymbolKind};
 use crate::service::ErrorInfo;
 
@@ -102,17 +99,17 @@ fn unknown<'a>(
 }
 
 /// Up to [`CANDIDATE_LIMIT`] distinct names nearest to `name`, ranked by
-/// folded edit distance, ties in declaration order. A name of fewer than six
-/// folded characters admits one edit, a longer one two.
+/// case-insensitive edit distance, ties in declaration order. A name of fewer
+/// than six characters admits one edit, a longer one two.
 fn nearest<'a>(name: &str, declared: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
-    let folded = fold(name);
-    let max = if folded.chars().count() >= 6 { 2 } else { 1 };
+    let name = name.to_lowercase();
+    let max = if name.chars().count() >= 6 { 2 } else { 1 };
     let mut ranked: Vec<(usize, &str)> = Vec::new();
     for candidate in declared {
         if ranked.iter().any(|(_, seen)| *seen == candidate) {
             continue;
         }
-        let distance = strsim::levenshtein(&folded, &fold(candidate));
+        let distance = strsim::levenshtein(&name, &candidate.to_lowercase());
         if distance <= max {
             ranked.push((distance, candidate));
         }
@@ -122,20 +119,12 @@ fn nearest<'a>(name: &str, declared: impl Iterator<Item = &'a str>) -> Vec<&'a s
     ranked.into_iter().map(|(_, candidate)| candidate).collect()
 }
 
-/// Comparison fold: accents and case are insignificant.
-fn fold(name: &str) -> String {
-    name.nfd()
-        .filter(|character| !is_combining_mark(*character))
-        .collect::<String>()
-        .to_lowercase()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn nearest_ranks_by_folded_distance_within_the_window() {
+    fn nearest_ranks_by_case_insensitive_distance_within_the_window() {
         let declared = [
             "progressionDeathCounter",
             "Progression",
@@ -146,7 +135,7 @@ mod tests {
             nearest("progressionDeathCounte", declared.into_iter()),
             ["progressionDeathCounter"]
         );
-        // Case and accents fold away; short names admit one edit only.
+        // Case is insignificant; short names admit one edit only.
         assert_eq!(nearest("ZZ", declared.into_iter()), ["zzz"]);
         assert!(nearest("zz_x", declared.into_iter()).is_empty());
         assert_eq!(
