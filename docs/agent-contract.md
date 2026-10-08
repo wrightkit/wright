@@ -395,8 +395,8 @@ owns the source semantics and Wright orchestrates the transaction:
   Shapes the correction cannot safely cover — a condition that can move
   between evaluations, an occurrence the engine re-evaluates (the loop's
   `While` condition, `Wait Until`/`Loop If` conditions, `Update Every
-  Frame` subtrees, enabled reevaluation modes) — withhold the `fix`
-  entirely rather than offer a risky edit. `evaluate-once` is an
+  Frame` subtrees, parameters an enabled reevaluation mode keeps live) —
+  withhold the `fix` entirely rather than offer a risky edit. `evaluate-once` is an
   acknowledgment idiom, not a cost reduction: at once-per-execution
   positions it freezes nothing, it marks the repeated evaluation as
   intentional so the finding retires.

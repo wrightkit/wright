@@ -211,13 +211,16 @@ The current fixable rules and their corrections:
 * `repeated-value` (`evaluate-once`): mark each duplicated occurrence with
   `Evaluate Once`. Occurrences the engine re-evaluates — the loop's own
   `While` condition, `Wait Until` and `Loop If` conditions, `Update Every
-  Frame` subtrees, and persistent-object actions whose reevaluation mode is
-  enabled — are never wrapped; when more than one occurrence must stay live
-  the family carries no fix, because a partial wrap would leave the finding
-  standing. `Evaluate Once` is the ecosystem idiom for an acknowledged
-  repeated evaluation: at positions the engine already evaluates once per
-  action it changes nothing — the fix retires the finding by marking the
-  duplication as intentional, it does not reduce the evaluation count.
+  Frame` subtrees, and parameters a persistent-object action's
+  reevaluation mode keeps live — are never wrapped; the mode's coverage is
+  catalog-pinned per parameter, so an argument the selected member does
+  not re-evaluate still wraps. When more than one occurrence must stay
+  live the family carries no fix, because a partial wrap would leave the
+  finding standing. `Evaluate Once` is the ecosystem idiom for an
+  acknowledged repeated evaluation: at positions the engine already
+  evaluates once per action it changes nothing — the fix retires the
+  finding by marking the duplication as intentional, it does not reduce
+  the evaluation count.
 
 Every offered fix edits only the reported spans, carries the input identity
 as a precondition, and is validated by reparsing the edited source before

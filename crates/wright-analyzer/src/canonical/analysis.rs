@@ -1021,7 +1021,7 @@ fn evaluate_once_fix(
             }
             OccurrenceOrigin::BodyAction(index) => (
                 body_start + index,
-                !action_reevaluates(&catalog, &body[index])
+                !action_argument_reevaluates(&catalog, &body[index], collected.arguments[member])
                     && !contains_update_every_frame(collected.values[member]),
             ),
         };
@@ -1066,17 +1066,24 @@ fn contains_update_every_frame(value: &Value) -> bool {
     }
 }
 
-/// Whether executing `action` can evaluate an argument more than once:
-/// `Wait Until`'s polled condition and the `Loop If` family's condition
-/// are re-evaluated per pass (the condition `Loop` itself never polls),
-/// and a persistent-object action's reevaluation-mode parameter selects
-/// fields to re-evaluate. The mode is catalog-pinned: its parameter's
-/// domain ends in `Reeval`, and any mode other than the domain's `None`
-/// member — spelled as a non-`None` literal, computed, or omitted where no
-/// explicit `None` default is declared — re-evaluates. `If`/`Else If`
-/// conditions and assignment arguments evaluate once per action execution,
-/// so only `Call` actions can re-evaluate.
-fn action_reevaluates(catalog: &Catalog, action: &Action) -> bool {
+/// Whether executing `action` can evaluate `argument` — the call's
+/// parameter position — more than once (#562): `Wait Until`'s polled
+/// condition and the `Loop If` family's condition are re-evaluated per
+/// pass (the condition `Loop` itself never polls), and a persistent-object
+/// action's reevaluation-mode parameter selects which fields stay live.
+/// The mode is catalog-pinned: its parameter's domain ends in `Reeval`,
+/// and the selected member's `reevaluation_coverage` names the parameter
+/// positions it re-evaluates. `If`/`Else If` conditions and assignment
+/// arguments evaluate once per action execution, so only `Call` actions
+/// can re-evaluate.
+///
+/// The gate stays conservative whenever coverage is unknown: a member that
+/// is not a reviewed literal (computed, or a non-`Enum` value), a `None`
+/// mode omitted where the catalog declares no explicit `NONE` default, an
+/// action without `reevaluation_coverage`, or a member absent from that
+/// map all keep their argument live — a wrong `Evaluate Once` freezes a
+/// value the engine reevaluates, which is a silent behavior change.
+fn action_argument_reevaluates(catalog: &Catalog, action: &Action, argument: usize) -> bool {
     let Action::Call { name, args } = action else {
         return false;
     };
@@ -1084,7 +1091,10 @@ fn action_reevaluates(catalog: &Catalog, action: &Action) -> bool {
         name.as_str(),
         "waitUntil" | "loopIf" | "loopIfConditionIsTrue" | "__loopIfConditionIsFalse__"
     ) {
-        return true;
+        // `Wait Until` polls only its condition argument; the `Loop If`
+        // family's only input is the condition. Their other positions
+        // evaluate once per action execution.
+        return argument == 0;
     }
     let Some(entry) = catalog.entry(Kind::Action, name) else {
         return false;
@@ -1097,7 +1107,16 @@ fn action_reevaluates(catalog: &Catalog, action: &Action) -> bool {
             return false;
         }
         match args.get(index) {
-            Some(Value::Enum { value, .. }) => value != "NONE",
+            Some(Value::Enum { value, .. }) if value == "NONE" => false,
+            Some(Value::Enum { value, .. }) => {
+                // Reviewed coverage names the live positions; an
+                // unreviewed member keeps the conservative refusal.
+                entry
+                    .reevaluation_coverage(value)
+                    .is_none_or(|coverage| coverage.contains(&argument))
+            }
+            // A computed mode cannot be proven `NONE`, so every argument
+            // stays live — matching the previous whole-action refusal.
             Some(_) => true,
             // Omitted means the engine's implicit mode applies — and the
             // catalog only records a declared default when there is one —
