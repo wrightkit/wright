@@ -230,3 +230,62 @@ fn a_fix_refuses_a_stale_source_and_writes_nothing() {
     assert_eq!(error.code, "edit-stale-source");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), moved);
 }
+
+#[test]
+fn lint_fix_write_refuses_a_caller_held_text_input() {
+    // A `Text` session's buffer is its source: writing the named file and
+    // reloading resolves the unchanged buffer, so the batch would apply one
+    // fix then fail its own stale-source precondition. Refuse before the
+    // first write instead.
+    let path = temp_workshop(SOURCE);
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: SOURCE.to_string(),
+            path: Some(path.clone()),
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+
+    let preview = session.lint_fix(false);
+    assert!(preview.ok, "preview still runs on the buffer");
+
+    let written = session.lint_fix(true);
+    assert!(!written.ok);
+    assert!(
+        written
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "edit-input-stdin"),
+        "the write refuses a non-path input: {:?}",
+        written.diagnostics
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        SOURCE,
+        "the refusal writes nothing"
+    );
+
+    // rename --write carries the same boundary.
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: SOURCE.to_string(),
+            path: Some(path.clone()),
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let renamed = session.rename("index", "renamed", true);
+    assert!(
+        renamed
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "edit-input-stdin"),
+        "rename --write refuses a non-path input: {:?}",
+        renamed.diagnostics
+    );
+    assert!(renamed.result.written.is_empty(), "nothing is written");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), SOURCE);
+}

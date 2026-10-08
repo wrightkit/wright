@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use super::CompilerSession;
+use crate::config::InputSpec;
 use crate::diag::{Diagnostic, Stage};
 use crate::edit::{EditTransaction, EditValidation, RenameResult, RenameTarget, SemanticRename};
 use crate::input;
@@ -132,15 +133,18 @@ impl CompilerSession {
             return self.finish("rename", result);
         }
         if write {
-            match crate::edit::write_previews(
-                result.preview.as_deref().unwrap_or_default(),
-                result
-                    .transaction
-                    .as_ref()
-                    .expect("a successful rename carries its transaction"),
-            ) {
-                Ok(written) => result.written = written,
-                Err(diagnostic) => self.diagnostics.push(diagnostic),
+            match write_input_refusal(&self.config.input, "rename --write") {
+                Some(diagnostic) => self.diagnostics.push(diagnostic),
+                None => match crate::edit::write_previews(
+                    result.preview.as_deref().unwrap_or_default(),
+                    result
+                        .transaction
+                        .as_ref()
+                        .expect("a successful rename carries its transaction"),
+                ) {
+                    Ok(written) => result.written = written,
+                    Err(diagnostic) => self.diagnostics.push(diagnostic),
+                },
             }
         }
         self.finish("rename", result)
@@ -177,12 +181,8 @@ impl CompilerSession {
             envelope.result.fixes = Some(outcomes);
             return envelope;
         }
-        if self.config.input.path().is_none() {
-            envelope.diagnostics.push(Diagnostic::error(
-                "edit-input-stdin",
-                Stage::Discovery,
-                "lint --write requires a path-based input; stdin has no writable source",
-            ));
+        if let Some(diagnostic) = write_input_refusal(&self.config.input, "lint --write") {
+            envelope.diagnostics.push(diagnostic);
             retune(&mut envelope);
             return envelope;
         }
@@ -390,6 +390,24 @@ fn fix_outcome(
             transaction,
             previews,
         }),
+    ))
+}
+
+/// A write run needs a disk-backed input: writing updates the file, but
+/// `reload`/`resolve` hands a `Text` session its caller-held buffer back, so
+/// the next pass would plan against bytes the write did not produce — the
+/// first fix applies and the retry fails `edit-stale-source` mid-batch.
+/// Refuse before the first write rather than partially apply the run.
+fn write_input_refusal(input: &InputSpec, operation: &str) -> Option<Diagnostic> {
+    let reason = match input {
+        InputSpec::Path(_) => return None,
+        InputSpec::Stdin => "stdin has no writable source",
+        InputSpec::Text { .. } => "the session's source is caller-held text, not a writable file",
+    };
+    Some(Diagnostic::error(
+        "edit-input-stdin",
+        Stage::Discovery,
+        format!("{operation} requires a path-based input; {reason}"),
     ))
 }
 
