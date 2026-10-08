@@ -70,7 +70,7 @@ pub const OPERATIONS: &[&str] = &[
 /// program's semantic index: unmatched or ambiguous names produce a
 /// structured error, never a guess.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, expecting = "a numeric id or a declared name string")]
 pub enum Address {
     /// The numeric id assigned by the loaded program's semantic addressing.
     Id(u32),

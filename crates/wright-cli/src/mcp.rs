@@ -309,4 +309,37 @@ mod tests {
         assert_eq!(response["id"], Value::Null);
         assert_eq!(response["error"]["code"], -32600);
     }
+
+    #[test]
+    fn malformed_address_arguments_name_the_expected_shape() {
+        // An object-shaped `symbol` used to surface serde's generic "did not
+        // match any variant of untagged enum" — useless to an agent. The
+        // refusal now names the two accepted forms.
+        use wright_driver::{CompilerSession, InputSpec, SessionConfig, SourceKind};
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests/fixtures/workshop/synthetic/basic-rule.ws");
+        let mut session = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(input),
+            kind: SourceKind::Workshop,
+            ..SessionConfig::default()
+        })
+        .unwrap();
+        let mut service = ToolService::new(&mut session).unwrap();
+        let (tools, name, version) = build_tools(&service);
+        let response = dispatch_message(
+            &mut service,
+            &tools,
+            &name,
+            &version,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wright_references","arguments":{"symbol":{"id":0}}}}"#,
+        )
+        .unwrap();
+        let message = response["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains("a numeric id or a declared name string"),
+            "the refusal names the accepted shapes: {message}"
+        );
+    }
 }
