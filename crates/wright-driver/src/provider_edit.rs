@@ -42,12 +42,6 @@ pub struct ProviderValidateRequest {
     pub project_root: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProviderInfo {
-    code: String,
-    message: String,
-}
-
 pub fn semantic_rename(
     provider: &mut dyn wright_lpp::LanguageProvider,
     request: &ProviderRenameRequest,
@@ -66,36 +60,30 @@ pub fn semantic_rename(
     let mut edits: Vec<SourceEdit> = Vec::new();
     for doc_edits in &result.edits {
         let Some(document) = request.documents.get(&doc_edits.document_uri) else {
-            return refusal(
-                vec![Diagnostic::error(
-                    "provider-edit-outside-set",
-                    Stage::Discovery,
-                    format!(
-                        "the provider returned edits for '{}', which is not in the request document set",
-                        doc_edits.document_uri
-                    ),
-                )],
-                None,
-            );
+            return refusal(vec![Diagnostic::error(
+                "provider-edit-outside-set",
+                Stage::Discovery,
+                format!(
+                    "the provider returned edits for '{}', which is not in the request document set",
+                    doc_edits.document_uri
+                ),
+            )]);
         };
         if doc_edits.version != document.version {
-            return refusal(
-                vec![Diagnostic::error(
-                    "edit-stale-source",
-                    Stage::Discovery,
-                    format!(
-                        "the provider computed edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
-                        doc_edits.document_uri, doc_edits.version, document.version
-                    ),
-                )],
-                None,
-            );
+            return refusal(vec![Diagnostic::error(
+                "edit-stale-source",
+                Stage::Discovery,
+                format!(
+                    "the provider computed edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
+                    doc_edits.document_uri, doc_edits.version, document.version
+                ),
+            )]);
         }
         let identity = crate::input_identity(&document.text);
         for text_edit in &doc_edits.text_edits {
             let range = match to_edit_range(&document.text, text_edit.range) {
                 Ok(r) => r,
-                Err(diag) => return refusal(vec![diag], None),
+                Err(diag) => return refusal(vec![diag]),
             };
             edits.push(SourceEdit {
                 edit_kind: "rename".to_string(),
@@ -109,7 +97,7 @@ pub fn semantic_rename(
 
     let transaction = match EditTransaction::new(edits) {
         Ok(tx) => tx,
-        Err(diag) => return refusal(vec![diag], None),
+        Err(diag) => return refusal(vec![diag]),
     };
 
     // The supplied document set is deliberately wider than the target
@@ -144,7 +132,7 @@ pub fn validate_transaction(
 ) -> ProviderMutation {
     let transaction = match EditTransaction::new(request.transaction.edits.clone()) {
         Ok(transaction) => transaction,
-        Err(diagnostic) => return refusal(vec![diagnostic], None),
+        Err(diagnostic) => return refusal(vec![diagnostic]),
     };
     // A caller-supplied document set is the declared project: every
     // supplied document's errors stay blocking, including unedited
@@ -170,14 +158,14 @@ fn finish_transaction(
 ) -> ProviderMutation {
     for edit in &transaction.edits {
         if let Some(diagnostic) = crate::edit::source_precondition(edit, sources) {
-            return refusal(vec![diagnostic], None);
+            return refusal(vec![diagnostic]);
         }
     }
     let previews = match transaction.apply(sources) {
         Ok(previews) => previews,
-        Err(diag) => return refusal(vec![diag], None),
+        Err(diag) => return refusal(vec![diag]),
     };
-    if let Err((diagnostics, provider)) = validate_pipeline(
+    if let Err(mutation) = validate_pipeline(
         provider,
         documents,
         &transaction,
@@ -185,7 +173,7 @@ fn finish_transaction(
         project_root,
         edit_scope,
     ) {
-        return refusal(diagnostics, provider);
+        return mutation;
     }
     ProviderMutation {
         ok: true,
@@ -197,6 +185,11 @@ fn finish_transaction(
     }
 }
 
+/// The provider-side validation gates a mutation passes after Wright's own
+/// preconditions: `lpp/validateEdits` per edited document, then `lpp/check`
+/// over the edited project. The `Err` arm is the finished non-ok result —
+/// a Wright-side edit rejection from [`refusal`] or a provider request
+/// failure from [`provider_failure`], each carrying its own classification.
 fn validate_pipeline(
     provider: &mut dyn wright_lpp::LanguageProvider,
     documents: &wright_lpp::DocumentSet,
@@ -204,7 +197,7 @@ fn validate_pipeline(
     previews: &[SourcePreview],
     project_root: Option<&str>,
     edit_scope: &BTreeSet<String>,
-) -> Result<(), (Vec<Diagnostic>, Option<ProviderInfo>)> {
+) -> Result<(), ProviderMutation> {
     let mut by_source: BTreeMap<&str, Vec<&SourceEdit>> = BTreeMap::new();
     for edit in &transaction.edits {
         by_source.entry(&edit.source).or_default().push(edit);
@@ -212,38 +205,32 @@ fn validate_pipeline(
 
     for (source, edits) in by_source {
         let Some(document) = documents.get(source) else {
-            return Err((
-                vec![Diagnostic::error(
-                    "edit-unknown-source",
-                    Stage::Discovery,
-                    format!(
-                        "the transaction targets '{}' but the request document set has no current text for it",
-                        source
-                    ),
-                )],
-                None,
-            ));
+            return Err(refusal(vec![Diagnostic::error(
+                "edit-unknown-source",
+                Stage::Discovery,
+                format!(
+                    "the transaction targets '{}' but the request document set has no current text for it",
+                    source
+                ),
+            )]));
         };
         let mut text_edits = Vec::new();
         for edit in edits {
-            let te = to_text_edit(&document.text, edit).map_err(|d| (vec![d], None))?;
+            let te = to_text_edit(&document.text, edit).map_err(|d| refusal(vec![d]))?;
             text_edits.push(te);
         }
         let res = provider
             .validate_edits(document, &text_edits)
-            .map_err(provider_failure_tuple)?;
+            .map_err(|error| provider_failure(&error))?;
         if res.version != document.version {
-            return Err((
-                vec![Diagnostic::error(
-                    "edit-stale-source",
-                    Stage::Discovery,
-                    format!(
-                        "the provider validated edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
-                        source, res.version, document.version
-                    ),
-                )],
-                None,
-            ));
+            return Err(refusal(vec![Diagnostic::error(
+                "edit-stale-source",
+                Stage::Discovery,
+                format!(
+                    "the provider validated edits for '{}' against version {}, but the current version is {}; re-fetch the source and retry",
+                    source, res.version, document.version
+                ),
+            )]));
         }
         if !res.valid {
             let reason = res.reason.as_deref().unwrap_or("invalid");
@@ -253,14 +240,11 @@ fn validate_pipeline(
             if let Some(idx) = res.failing_edit_index {
                 msg.push_str(&format!(" (failing edit {idx})"));
             }
-            return Err((
-                vec![Diagnostic::error(
-                    "provider-validation-failed",
-                    Stage::Discovery,
-                    msg,
-                )],
-                None,
-            ));
+            return Err(refusal(vec![Diagnostic::error(
+                "provider-validation-failed",
+                Stage::Discovery,
+                msg,
+            )]));
         }
     }
 
@@ -288,7 +272,7 @@ fn validate_pipeline(
 
     let checked = provider
         .check(&edited, project_root)
-        .map_err(provider_failure_tuple)?;
+        .map_err(|error| provider_failure(&error))?;
     for doc in &checked.documents {
         // Only documents the mutation is allowed to affect can block it:
         // the request set may intentionally carry unrelated open documents
@@ -299,55 +283,57 @@ fn validate_pipeline(
         }
         for diag in &doc.diagnostics {
             if diag.severity == wright_lpp::DiagnosticSeverity::Error {
-                return Err((
-                    vec![Diagnostic::error(
-                        "provider-semantic-error",
-                        Stage::Discovery,
-                        format!(
-                            "the edited project is semantically invalid in '{}': {}",
-                            doc.uri, diag.message
-                        ),
-                    )],
-                    None,
-                ));
+                return Err(refusal(vec![Diagnostic::error(
+                    "provider-semantic-error",
+                    Stage::Discovery,
+                    format!(
+                        "the edited project is semantically invalid in '{}': {}",
+                        doc.uri, diag.message
+                    ),
+                )]));
             }
         }
     }
     Ok(())
 }
 
+/// A provider's `Err` outcome as the finished non-ok mutation. The
+/// diagnostic keeps the shared provider-failure classification
+/// (`crate::source_provider::provider_failure_code`/`provider_failure_stage`):
+/// a deliberate refusal reports `provider-refusal-<refusalCode>` at the
+/// frontend stage, a capability gap `capability-unavailable`, and
+/// transport/process failures their typed `provider-*` code at the
+/// internal stage (#570). `provider_code` carries the refusal's
+/// `refusalCode` verbatim or the failure's typed code; nothing is applied.
 pub fn provider_failure(error: &wright_lpp::ProviderError) -> ProviderMutation {
-    let (diags, info) = provider_failure_tuple(error.clone());
-    refusal(diags, info)
-}
-
-fn provider_failure_tuple(
-    error: wright_lpp::ProviderError,
-) -> (Vec<Diagnostic>, Option<ProviderInfo>) {
-    (
-        vec![provider_diagnostic(&error)],
-        Some(ProviderInfo {
-            code: error
+    ProviderMutation {
+        ok: false,
+        transaction: None,
+        diagnostics: vec![provider_diagnostic(error)],
+        preview: None,
+        provider_code: Some(
+            error
                 .refusal_code()
                 .map(str::to_string)
                 .unwrap_or_else(|| error.code().to_string()),
-            message: error.to_string(),
-        }),
-    )
+        ),
+        provider_message: Some(error.to_string()),
+    }
 }
 
-fn refusal(diagnostics: Vec<Diagnostic>, provider: Option<ProviderInfo>) -> ProviderMutation {
-    let (code, msg) = match provider {
-        Some(info) => (Some(info.code), Some(info.message)),
-        None => (None, None),
-    };
+/// A Wright-side edit rejection as the finished non-ok mutation: stale
+/// sources, invalid ranges, unknown sources, and the provider's semantic
+/// refusals report their own diagnostic code at the discovery stage, and
+/// no provider fields are set — the failure is about the edit, not the
+/// provider's execution.
+fn refusal(diagnostics: Vec<Diagnostic>) -> ProviderMutation {
     ProviderMutation {
         ok: false,
         transaction: None,
         diagnostics,
         preview: None,
-        provider_code: code,
-        provider_message: msg,
+        provider_code: None,
+        provider_message: None,
     }
 }
 
@@ -453,22 +439,25 @@ fn edit_invalid_range(range: wright_lpp::Range) -> Diagnostic {
     )
 }
 
+/// The diagnostic for one provider `Err`: code and stage come from the
+/// shared provider-failure classification every `ProviderError` consumer
+/// uses (#569), so a refusal, a capability gap, and a transport fault are
+/// distinguishable from `code`/`stage` alone.
 fn provider_diagnostic(error: &wright_lpp::ProviderError) -> Diagnostic {
-    match error.refusal_code() {
-        Some(code) => Diagnostic::error(
-            "provider-refusal",
-            Stage::Discovery,
-            format!("the provider refused the request ({code}): {error}"),
-        ),
-        None => Diagnostic::error(
-            "provider-error",
-            Stage::Discovery,
-            format!(
-                "the provider failed the request ({}): {error}",
-                error.code()
-            ),
-        ),
-    }
+    let code = crate::source_provider::provider_failure_code(error);
+    let stage = crate::source_provider::provider_failure_stage(error);
+    let refused = matches!(
+        error,
+        wright_lpp::ProviderError::Lpp(error) if error.kind == wright_lpp::LppErrorKind::Refusal
+    );
+    let message = match (refused, error.refusal_code()) {
+        (true, Some(refusal)) => {
+            format!("the provider refused the edit request ({refusal}): {error}")
+        }
+        (true, None) => format!("the provider refused the edit request: {error}"),
+        (false, _) => format!("the provider failed the edit request: {error}"),
+    };
+    Diagnostic::error(code, stage, message)
 }
 
 #[cfg(test)]
@@ -838,7 +827,8 @@ mod tests {
     #[test]
     fn provider_failure_mid_rename_refuses_without_partial_application() {
         // The provider computes the rename but dies before the flow
-        // completes: the refusal is structured and nothing is applied.
+        // completes: a process exit is an internal failure, not an edit
+        // refusal, and nothing is applied.
         let mut provider = ScriptedProvider {
             rename: Ok(clean_rename_result()),
             validate_edits: Err(ProviderError::Exited {
@@ -849,10 +839,74 @@ mod tests {
         };
         let mutation = semantic_rename(&mut provider, &rename_request());
         assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "provider-error");
+        assert_eq!(mutation.diagnostics[0].code, "provider-exited");
+        assert_eq!(mutation.diagnostics[0].stage, Stage::Internal);
         assert_eq!(mutation.provider_code.as_deref(), Some("provider-exited"));
         assert!(mutation.transaction.is_none());
         assert!(mutation.preview.is_none());
+    }
+
+    /// #570: every provider execution failure class keeps its typed code at
+    /// the internal stage — a consumer can tell a broken provider from a
+    /// deliberate refusal or a source-level edit rejection without parsing
+    /// the message.
+    #[test]
+    fn provider_transport_failures_keep_their_typed_classification() {
+        for (error, code) in [
+            (
+                ProviderError::Timeout {
+                    method: "lpp/validateEdits".to_string(),
+                    duration: std::time::Duration::from_millis(500),
+                },
+                "provider-timeout",
+            ),
+            (
+                ProviderError::Malformed {
+                    detail: "missing result".to_string(),
+                },
+                "provider-malformed",
+            ),
+            (
+                ProviderError::Io {
+                    message: "broken pipe".to_string(),
+                },
+                "provider-io",
+            ),
+            (
+                ProviderError::JsonRpc {
+                    code: -32600,
+                    message: "invalid request".to_string(),
+                },
+                "jsonrpc-error",
+            ),
+        ] {
+            let mutation = provider_failure(&error);
+            assert!(!mutation.ok);
+            assert_eq!(mutation.diagnostics[0].code, code, "{error:?}");
+            assert_eq!(
+                mutation.diagnostics[0].stage,
+                Stage::Internal,
+                "{error:?} is an internal failure, not a discovery/source problem"
+            );
+            assert_eq!(mutation.provider_code.as_deref(), Some(code), "{error:?}");
+            assert!(mutation.transaction.is_none());
+            assert!(mutation.preview.is_none());
+        }
+    }
+
+    /// #570: a `refusal` kind whose details carry no `refusalCode` is still
+    /// a deliberate decline (frontend), never an internal provider fault.
+    #[test]
+    fn a_refusal_without_a_code_is_not_a_process_failure() {
+        let mutation = provider_failure(&ProviderError::lpp(
+            wright_lpp::LppErrorKind::Refusal,
+            serde_json::json!({}),
+            "the provider declined the request",
+        ));
+        assert!(!mutation.ok);
+        assert_eq!(mutation.diagnostics[0].code, "provider-refusal");
+        assert_eq!(mutation.diagnostics[0].stage, Stage::Frontend);
+        assert_eq!(mutation.provider_code.as_deref(), Some("refusal"));
     }
 
     #[test]
@@ -873,7 +927,15 @@ mod tests {
         };
         let mutation = semantic_rename(&mut provider, &rename_request());
         assert!(!mutation.ok);
-        assert_eq!(mutation.diagnostics[0].code, "provider-refusal");
+        assert_eq!(
+            mutation.diagnostics[0].code, "provider-refusal-rename.nameCollision",
+            "the refusal code is machine-readable in the diagnostic code"
+        );
+        assert_eq!(
+            mutation.diagnostics[0].stage,
+            Stage::Frontend,
+            "a deliberate refusal is a request outcome, not an internal failure"
+        );
         assert_eq!(
             mutation.provider_code.as_deref(),
             Some("rename.nameCollision")
@@ -903,6 +965,8 @@ mod tests {
         };
         let mutation = semantic_rename(&mut provider, &rename_request());
         assert!(!mutation.ok);
+        assert_eq!(mutation.diagnostics[0].code, "capability-unavailable");
+        assert_eq!(mutation.diagnostics[0].stage, Stage::Frontend);
         assert_eq!(
             mutation.provider_code.as_deref(),
             Some("capability-unavailable")

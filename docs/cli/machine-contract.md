@@ -74,13 +74,17 @@ analyzer's codes — including the name-addressing refusals `unknown-symbol`,
 `ambiguous-symbol`, `unknown-rule`, and `ambiguous-rule` (#429) — and
 `*-internal` / `*-unavailable` (internal).
 `source-provider-unavailable` marks the explicit DEL/OSTW provider boundary
-and is reported at the internal stage. Source-provider failures keep the
-provider's typed classification in the diagnostic code: an LPP refusal is
+and is reported at the internal stage. Provider failures keep the
+provider's typed classification in the diagnostic code, on the
+source-provider seam and in `providerSemanticRename`/`providerValidateEdit`
+mutation results alike: an LPP refusal is
 `provider-refusal-<refusalCode>` (a Wright-originated refusal keeps its own
 code, e.g. `session-config-changed`), a capability gap is
 `capability-unavailable`, and transport/process failures keep their
 `provider-*` codes — a consumer classifies the failure from `code`/`stage`
-without parsing `message` (#569).
+without parsing `message` (#569, #570). Provider-edit mutation results also
+carry the refusal's `refusalCode` or the failure's typed code verbatim in
+`provider_code`.
 A `convert`
 reconstruction rejection carries the language-owned reconstructor's stable
 code (e.g. `unsupported-per-player-loop` from `wright-opy`,

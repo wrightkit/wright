@@ -295,7 +295,14 @@ fn rename_collision_is_a_structured_atomic_refusal() {
         ),
     );
     assert!(!mutation.ok);
-    assert_eq!(mutation.diagnostics[0].code, "provider-refusal");
+    // #570: a deliberate refusal is a request outcome (frontend), not a
+    // provider process failure — the refusalCode rides in the diagnostic
+    // code under the `provider-refusal-` namespace and verbatim in
+    // `provider_code`.
+    assert_eq!(
+        mutation.diagnostics[0].code,
+        "provider-refusal-rename.nameCollision"
+    );
     assert_eq!(
         mutation.provider_code.as_deref(),
         Some("rename.nameCollision"),
@@ -375,7 +382,7 @@ fn missing_rename_capability_refuses_explicitly() {
         ),
     );
     assert!(!mutation.ok);
-    assert_eq!(mutation.diagnostics[0].code, "provider-error");
+    assert_eq!(mutation.diagnostics[0].code, "capability-unavailable");
     assert_eq!(
         mutation.provider_code.as_deref(),
         Some("capability-unavailable"),
@@ -407,7 +414,7 @@ fn provider_failure_mid_rename_applies_nothing() {
         ),
     );
     assert!(!mutation.ok);
-    assert_eq!(mutation.diagnostics[0].code, "provider-error");
+    assert_eq!(mutation.diagnostics[0].code, "capability-unavailable");
     assert_eq!(
         mutation.provider_code.as_deref(),
         Some("capability-unavailable"),
