@@ -68,21 +68,27 @@ divergent semantics. The in-process embedding API can call
 Use `wright serve --transport mcp [INPUT]` for MCP over stdio (#473,
 ADR-0020). The adapter speaks newline-delimited JSON-RPC 2.0 and implements
 `initialize` (with protocol-version negotiation), `ping`, `tools/list`, and
-`tools/call`. Each operation in the initial set below is one tool named
-`wright_` plus the operation in snake case:
+`tools/call`. Each operation in the set below is one tool named `wright_`
+plus the operation in snake case:
 
 | Operation | Tool |
 | --- | --- |
 | `project` | `wright_project` |
+| `rules` | `wright_rules` |
 | `symbols` | `wright_symbols` |
 | `references` | `wright_references` |
 | `usage` | `wright_usage` |
+| `cfg` | `wright_cfg` |
+| `findings` | `wright_findings` |
+| `persistentObjects` | `wright_persistent_objects` |
 | `callGraph` | `wright_call_graph` |
 | `check` | `wright_check` |
 | `analyze` | `wright_analyze` |
 | `inspect` | `wright_inspect` |
 | `lint` | `wright_lint` |
+| `lintRules` | `wright_lint_rules` |
 | `costEstimate` | `wright_cost_estimate` |
+| `targetMetadata` | `wright_target_metadata` |
 | `semanticRename` | `wright_semantic_rename` |
 | `validateEditTransaction` | `wright_validate_edit_transaction` |
 | `providerSemanticRename` | `wright_provider_semantic_rename` |

@@ -1,7 +1,7 @@
 //! The operation catalog client surfaces share (#535): one entry per
 //! operation in `capabilities.operations`, in the contract's order. MCP lists
-//! the `mcp` subset (ADR-0020's initial set); `wright agent tools` emits the
-//! whole catalog as Messages API tool definitions or plain JSON Schema.
+//! the `mcp` subset (ADR-0020's evidence-gated set); `wright agent tools` emits
+//! the whole catalog as Messages API tool definitions or plain JSON Schema.
 
 use serde_json::{Map, Value, json};
 
@@ -51,7 +51,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         op: "rules",
         request_def: "RulesRequest",
         drop_fields: &[],
-        mcp: false,
+        mcp: true,
         description: "The canonical Workshop rules in the loaded program, optionally narrowed by `name`, `file`, or `max`.",
         result: "the program's rules, selection-wrapped when a selector was sent",
     },
@@ -83,7 +83,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         op: "cfg",
         request_def: "CfgRequest",
         drop_fields: &[],
-        mcp: false,
+        mcp: true,
         description: "The control-flow graph of one rule, addressed by its index or name, optionally narrowed by `kind` (`entry`, `exit`, `block`, `if`, `while`, `for`) or `max`.",
         result: "the rule's control-flow graph plus selection when a selector was sent",
     },
@@ -91,7 +91,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         op: "findings",
         request_def: "FindingsRequest",
         drop_fields: &[],
-        mcp: false,
+        mcp: true,
         description: "The project's check and analysis findings, optionally narrowed by `severity` (`info`, `warning`, `error`), `rule`, `file`, or `max`.",
         result: "the project's findings, selection-wrapped when a selector was sent",
     },
@@ -99,7 +99,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         op: "persistentObjects",
         request_def: "PersistentObjectsRequest",
         drop_fields: &[],
-        mcp: false,
+        mcp: true,
         description: "The program's persistent Workshop object facts.",
         result: "the program's persistent object facts",
     },
@@ -115,7 +115,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         op: "lintRules",
         request_def: "LintRulesRequest",
         drop_fields: &[],
-        mcp: false,
+        mcp: true,
         description: "The registered lint rules with full metadata and the effective configuration for this project.",
         result: "the registered lint rules and effective configuration",
     },
@@ -139,7 +139,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         op: "targetMetadata",
         request_def: "TargetMetadataRequest",
         drop_fields: &[],
-        mcp: false,
+        mcp: true,
         description: "Canonical target and catalog metadata used to address edit targets.",
         result: "the canonical target/catalog metadata",
     },

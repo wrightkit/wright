@@ -803,12 +803,18 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
         names,
         [
             "wright_project",
+            "wright_rules",
             "wright_symbols",
             "wright_references",
             "wright_usage",
+            "wright_cfg",
+            "wright_findings",
+            "wright_persistent_objects",
             "wright_lint",
+            "wright_lint_rules",
             "wright_call_graph",
             "wright_cost_estimate",
+            "wright_target_metadata",
             "wright_check",
             "wright_analyze",
             "wright_inspect",
@@ -830,8 +836,11 @@ fn mcp_transport_lists_the_initial_tool_set_within_capabilities() {
     for tool in tools {
         let op = tool["name"].as_str().unwrap().trim_start_matches("wright_");
         let op = match op {
+            "persistent_objects" => "persistentObjects",
+            "lint_rules" => "lintRules",
             "call_graph" => "callGraph",
             "cost_estimate" => "costEstimate",
+            "target_metadata" => "targetMetadata",
             "semantic_rename" => "semanticRename",
             "validate_edit_transaction" => "validateEditTransaction",
             "provider_semantic_rename" => "providerSemanticRename",

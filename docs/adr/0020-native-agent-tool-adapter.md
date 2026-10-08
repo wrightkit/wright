@@ -73,16 +73,20 @@ edit), not by mirroring the contract:
 | --- | --- |
 | Overview | `project`, `symbols` |
 | Navigate | `references`, `usage`, `callGraph` |
-| Validate | `check`, `lint`, `costEstimate` |
-| Edit | `semanticRename`, `validateEditTransaction` |
+| Validate | `check`, `lint`, `costEstimate`, `findings`, `lintRules`, `analyze`, `inspect` |
+| Edit | `semanticRename`, `validateEditTransaction`, `providerSemanticRename`, `providerValidateEdit` (provider ops joined when #548/#561 defaulted their document set to the loaded session) |
 | Vocabulary | `lookup` (added by #529 / ADR-0021: agent evidence showed unknown-name and rejected-name failures dominating authoring sessions) |
 
-Not exposed initially: `rules`, `cfg`, `findings`, `persistentObjects`,
-`lintRules`, `targetMetadata`, `inspect`, `analyze`, `compile`, and the
-`provider*` operations. The `provider*` operations need a provider document set
-and LSP coordinates that a model cannot reasonably construct. An operation joins
-the set only on benchmark or workflow evidence, and its description cost is
-counted when it does.
+`rules`, `cfg`, `persistentObjects`, and `targetMetadata` joined the set under
+#550: dogfooding a real agent workflow showed `references` reporting rule ids
+no exposed tool could resolve to a file, and no MCP path to per-rule metadata
+or control flow.
+
+Not exposed: `compile`, `capabilities`, and any operation not advertised by
+`capabilities.operations`. `capabilities` duplicates `tools/list`, and
+`compile` stays a CLI convenience. An operation joins the set only on
+benchmark or workflow evidence, and its description cost is counted when it
+does.
 
 ### Contract changes made first, in `ToolService`
 
