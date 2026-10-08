@@ -254,8 +254,13 @@ pub enum ToolRequest {
         /// The opaque language id of the configured provider.
         language_id: String,
         /// The document set the rename is computed against (the provider's
-        /// view: text, language id, version).
-        documents: wright_lpp::DocumentSet,
+        /// view: text, language id, version). Optional (#548): when omitted,
+        /// the session's loaded project supplies it — every member file read
+        /// from disk at `version` 0, keyed by `file://` URI. An omitted set
+        /// therefore reads the program the way the other program-reading
+        /// operations do.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        documents: Option<wright_lpp::DocumentSet>,
         /// The URI (a key of `documents`) in which `position` is
         /// interpreted.
         position_document_uri: String,
@@ -269,7 +274,9 @@ pub enum ToolRequest {
         project_root: Option<String>,
         /// The caller's current text for every source the rename may edit,
         /// keyed by document URI (the identity/version precondition view).
-        sources: std::collections::BTreeMap<String, String>,
+        /// Optional (#548): defaults to each document's text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sources: Option<std::collections::BTreeMap<String, String>>,
     },
     /// Provider-driven edit validation (#139): validate a caller-proposed
     /// source-edit transaction against the provider's project semantics
@@ -282,13 +289,18 @@ pub enum ToolRequest {
     ProviderValidateEdit {
         /// The opaque language id of the configured provider.
         language_id: String,
-        /// The unmodified project as the provider sees it.
-        documents: wright_lpp::DocumentSet,
+        /// The unmodified project as the provider sees it. Optional (#548):
+        /// when omitted, the session's loaded project supplies it — every
+        /// member file read from disk at `version` 0, keyed by `file://` URI.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        documents: Option<wright_lpp::DocumentSet>,
         /// The caller-proposed transaction (Wright-owned edit contract).
         transaction: crate::edit::EditTransaction,
         /// The caller's current text for every edited source, keyed by
-        /// document URI (the identity/version precondition view).
-        sources: std::collections::BTreeMap<String, String>,
+        /// document URI (the identity/version precondition view). Optional
+        /// (#548): defaults to each document's text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sources: Option<std::collections::BTreeMap<String, String>>,
         /// The project the documents belong to (informational).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_root: Option<String>,
@@ -382,9 +394,10 @@ impl<'a> ToolService<'a> {
     /// The configured project is loaded eagerly when it can be, but a load
     /// failure does not fail construction (#512): the service exists without
     /// a program snapshot, project-independent operations (`capabilities`,
-    /// `targetMetadata`, the `provider*` mutations) stay available, and each
-    /// program-reading request retries the load — surfacing the loader's
-    /// structured diagnostic until the project heals.
+    /// `targetMetadata`, the `provider*` mutations carrying their own
+    /// document set) stay available, and each program-reading request
+    /// retries the load — surfacing the loader's structured diagnostic
+    /// until the project heals.
     #[hotpath::measure]
     pub fn new(session: &'a mut CompilerSession) -> Result<ToolService<'a>, Diagnostic> {
         session.verify_fixed_config()?;
@@ -468,8 +481,10 @@ impl<'a> ToolService<'a> {
     /// session serves the project as it exists now. Either failure is the
     /// request's structured refusal — the previous snapshot is never served
     /// silently. `capabilities` reports service metadata, `targetMetadata`
-    /// the static catalog, and `provider*` operations carry their own
-    /// documents, so none of them consult or trigger the project load.
+    /// the static catalog, and `provider*` operations carrying their own
+    /// document set consult neither — a `provider*` request that omits its
+    /// document set derives it from the loaded project (#548) and so
+    /// triggers the load like any other program-reading operation.
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
         if Self::reads_program(request) {
             if let Err(error) = self.refresh() {
@@ -484,14 +499,23 @@ impl<'a> ToolService<'a> {
         response
     }
 
-    /// Whether the request consults the loaded program (#471).
+    /// Whether the request consults the loaded program (#471). A provider
+    /// operation carrying its own document set does not; one that omits it
+    /// derives the set from the loaded project (#548) and so reads the
+    /// program like every other program-reading operation.
     fn reads_program(request: &ToolRequest) -> bool {
         !matches!(
             request,
             ToolRequest::Capabilities
                 | ToolRequest::TargetMetadata
-                | ToolRequest::ProviderSemanticRename { .. }
-                | ToolRequest::ProviderValidateEdit { .. }
+                | ToolRequest::ProviderSemanticRename {
+                    documents: Some(_),
+                    ..
+                }
+                | ToolRequest::ProviderValidateEdit {
+                    documents: Some(_),
+                    ..
+                }
                 | ToolRequest::Lookup { .. }
         )
     }
@@ -580,6 +604,45 @@ impl<'a> ToolService<'a> {
         self.loaded
             .as_ref()
             .expect("the refresh gate guarantees a snapshot")
+    }
+
+    /// The document set a provider mutation runs against (#548): the
+    /// caller's set when supplied, otherwise the loaded project's members —
+    /// each member read from disk at `version` 0 and keyed by `file://` URI,
+    /// so the provider sees the same project the session serves. The
+    /// omitted-set path only runs after the refresh gate, so `snapshot` is
+    /// guaranteed; a member that is not a readable disk file is a structured
+    /// refusal, never a silently partial set.
+    fn provider_documents(
+        &self,
+        language_id: &str,
+        documents: &Option<wright_lpp::DocumentSet>,
+    ) -> Result<wright_lpp::DocumentSet, ToolErrorInfo> {
+        if let Some(documents) = documents {
+            return Ok(documents.clone());
+        }
+        let loaded = self.snapshot();
+        let mut set = wright_lpp::DocumentSet::new();
+        for member in loaded.source_files.iter() {
+            let (uri, path) = provider_member(member, &loaded.input.cwd)?;
+            let text = std::fs::read_to_string(&path).map_err(|error| ToolErrorInfo {
+                code: "provider-document-unreadable".to_string(),
+                message: format!(
+                    "cannot read loaded project member '{}' for the provider document set: {error}",
+                    path.display()
+                ),
+            })?;
+            set.insert(
+                uri.clone(),
+                wright_lpp::Document {
+                    uri,
+                    language_id: language_id.to_string(),
+                    version: 0,
+                    text,
+                },
+            );
+        }
+        Ok(set)
     }
 
     /// The semantic service over the current snapshot — built in `adopt`.
@@ -738,13 +801,19 @@ impl<'a> ToolService<'a> {
                 project_root,
                 sources,
             } => {
+                let documents = match self.provider_documents(language_id, documents) {
+                    Ok(documents) => documents,
+                    Err(error) => return ToolResponse::Error { error },
+                };
                 let req = crate::provider_edit::ProviderRenameRequest {
-                    documents: documents.clone(),
                     position_document_uri: position_document_uri.clone(),
                     position: *position,
                     new_name: new_name.clone(),
                     project_root: project_root.clone(),
-                    sources: sources.clone(),
+                    sources: sources
+                        .clone()
+                        .unwrap_or_else(|| document_sources(&documents)),
+                    documents,
                 };
                 self.ok(
                     serde_json::to_value(self.run_provider_flow(language_id, |p| {
@@ -760,11 +829,17 @@ impl<'a> ToolService<'a> {
                 sources,
                 project_root,
             } => {
+                let documents = match self.provider_documents(language_id, documents) {
+                    Ok(documents) => documents,
+                    Err(error) => return ToolResponse::Error { error },
+                };
                 let req = crate::provider_edit::ProviderValidateRequest {
-                    documents: documents.clone(),
                     transaction: transaction.clone(),
-                    sources: sources.clone(),
+                    sources: sources
+                        .clone()
+                        .unwrap_or_else(|| document_sources(&documents)),
                     project_root: project_root.clone(),
+                    documents,
                 };
                 self.ok(
                     serde_json::to_value(self.run_provider_flow(language_id, |p| {
@@ -1356,6 +1431,95 @@ fn json_span_path(item: &serde_json::Value) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
 }
 
+/// The identity/version precondition view a defaulted `sources` mirrors
+/// (#548): every document's own text under its URI.
+fn document_sources(
+    documents: &wright_lpp::DocumentSet,
+) -> std::collections::BTreeMap<String, String> {
+    documents
+        .values()
+        .map(|document| (document.uri.clone(), document.text.clone()))
+        .collect()
+}
+
+/// A loaded project member as `(file:// URI, absolute disk path)` (#548): a
+/// URI spelling keeps its identity and converts back to its path; a bare
+/// path absolutizes against the session's input cwd and converts to a
+/// `file://` URI. A member that is not a disk file refuses — the defaulted
+/// document set covers only sources the session read from disk.
+fn provider_member(
+    member: &str,
+    cwd: &std::path::Path,
+) -> Result<(String, std::path::PathBuf), ToolErrorInfo> {
+    // A Windows drive-absolute spelling (`C:\...`, `C:/...`) must be handled
+    // before URI parsing: `url::Url::parse` accepts it as a URI whose scheme
+    // is the drive letter, and `to_file_path` then refuses. The provider
+    // emits these spellings on Windows hosts; treat them as disk paths on
+    // every host so the refusal contract stays about URI kind, not host OS.
+    if let Some(pair) = windows_drive_member(member) {
+        return Ok(pair);
+    }
+    if let Ok(url) = url::Url::parse(member) {
+        let path = url.to_file_path().map_err(|()| ToolErrorInfo {
+            code: "provider-document-uri".to_string(),
+            message: format!(
+                "loaded project member '{member}' is not a disk file and cannot serve the \
+                 provider document set"
+            ),
+        })?;
+        return Ok((url.to_string(), path));
+    }
+    let path = {
+        let path = std::path::PathBuf::from(member);
+        if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        }
+    };
+    url::Url::from_file_path(&path)
+        .map(|url| (url.to_string(), path))
+        .map_err(|()| ToolErrorInfo {
+            code: "provider-document-uri".to_string(),
+            message: format!(
+                "loaded project member '{member}' cannot be expressed as a file:// URI"
+            ),
+        })
+}
+
+/// `C:\dir\file.opy` or `C:/dir/file.opy` → `(file:///C:/dir/file.opy, path)`.
+/// The path is percent-encoded before parsing so literal `#`, `%`, `?`, and
+/// friends are not reinterpreted as URL syntax — `Url::parse` alone would
+/// treat `#` as a fragment delimiter and `%xx` as existing escapes.
+fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
+    const PATH_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'#')
+        .add(b'%')
+        .add(b'<')
+        .add(b'>')
+        .add(b'?')
+        .add(b'`')
+        .add(b'{')
+        .add(b'|')
+        .add(b'}')
+        .add(b'^');
+    let bytes = member.as_bytes();
+    let drive_absolute = bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    if !drive_absolute {
+        return None;
+    }
+    let path = std::path::PathBuf::from(member);
+    let normalized = member.replace('\\', "/");
+    let encoded = percent_encoding::utf8_percent_encode(&normalized, PATH_ENCODE);
+    let url = url::Url::parse(&format!("file:///{encoded}")).ok()?;
+    Some((url.to_string(), path))
+}
+
 /// The hotpath measurement label for one request's dispatch.
 #[cfg_attr(not(feature = "hotpath"), allow(dead_code))]
 fn request_label(request: &ToolRequest) -> &'static str {
@@ -1397,4 +1561,66 @@ fn diagnostics_list_code(result: &serde_json::Value, code: &str) -> bool {
                 .iter()
                 .any(|d| d.get("code").and_then(serde_json::Value::as_str) == Some(code))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::provider_member;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn windows_drive_member_is_a_disk_path_not_a_uri_scheme() {
+        // `url::Url::parse` accepts `C:\...` as a URI with scheme `c`; the
+        // provider member helper must classify it as a filesystem path first.
+        let (uri, path) = provider_member("C:\\project\\main.opy", Path::new("/cwd"))
+            .expect("windows drive member resolves");
+        assert_eq!(uri, "file:///C:/project/main.opy");
+        assert_eq!(path, PathBuf::from("C:\\project\\main.opy"));
+
+        let (uri, _) = provider_member("D:/work/lib.opy", Path::new("/cwd"))
+            .expect("forward-slash drive member resolves");
+        assert_eq!(uri, "file:///D:/work/lib.opy");
+
+        // Literal `#`/`%`/`?` in the path are encoded, not parsed as URL
+        // syntax, and decode back to the same spelling.
+        for (member, uri) in [
+            ("C:\\project#1\\main.opy", "file:///C:/project%231/main.opy"),
+            (
+                "C:\\project%20name\\main.opy",
+                "file:///C:/project%2520name/main.opy",
+            ),
+        ] {
+            let (produced, _) =
+                provider_member(member, Path::new("/cwd")).expect("member resolves");
+            assert_eq!(produced, uri);
+            let url = url::Url::parse(&produced).expect("uri parses");
+            let decoded = percent_encoding::percent_decode_str(url.path())
+                .decode_utf8()
+                .expect("utf8");
+            assert_eq!(decoded, format!("/{}", member.replace('\\', "/")));
+        }
+    }
+
+    #[test]
+    fn file_uri_member_keeps_its_spelling() {
+        let (uri, path) =
+            provider_member("file:///project/main.opy", Path::new("/cwd")).expect("file URI");
+        assert_eq!(uri, "file:///project/main.opy");
+        assert_eq!(path, PathBuf::from("/project/main.opy"));
+    }
+
+    #[test]
+    fn non_file_uri_member_refuses() {
+        let error = provider_member("untitled:main.opy", Path::new("/cwd"))
+            .expect_err("non-file scheme refuses");
+        assert_eq!(error.code, "provider-document-uri");
+    }
+
+    #[test]
+    fn relative_member_resolves_against_input_cwd() {
+        let (uri, path) = provider_member("src/lib.opy", Path::new("/project"))
+            .expect("relative member resolves");
+        assert_eq!(path, PathBuf::from("/project/src/lib.opy"));
+        assert_eq!(uri, "file:///project/src/lib.opy");
+    }
 }

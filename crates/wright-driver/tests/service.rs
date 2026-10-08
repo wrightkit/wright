@@ -2057,12 +2057,13 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
     );
     assert_eq!(rename["ok"], true, "{rename}");
 
-    // Provider operations carry their own documents; an unconfigured
-    // language id is the usual structured provider refusal, not `stale-id`.
+    // Provider operations carrying their own documents do not consult the
+    // program; an unconfigured language id is the usual structured provider
+    // refusal, not `stale-id`.
     for request in [
         ToolRequest::ProviderSemanticRename {
             language_id: "not-a-language".to_string(),
-            documents: Default::default(),
+            documents: Some(Default::default()),
             position_document_uri: String::new(),
             position: wright_lpp::Position {
                 line: 0,
@@ -2070,13 +2071,13 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
             },
             new_name: String::new(),
             project_root: None,
-            sources: Default::default(),
+            sources: None,
         },
         ToolRequest::ProviderValidateEdit {
             language_id: "not-a-language".to_string(),
-            documents: Default::default(),
+            documents: Some(Default::default()),
             transaction: wright_driver::edit::EditTransaction { edits: vec![] },
-            sources: Default::default(),
+            sources: None,
             project_root: None,
         },
     ] {
@@ -2143,19 +2144,35 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
         );
     }
 
-    // A provider mutation carries its own documents: an unconfigured
-    // language is the provider refusal result, not the load failure.
+    // A provider mutation carrying its own documents does not trigger the
+    // load: an unconfigured language is the provider refusal result, not the
+    // load failure. One that omits `documents` derives the set from the
+    // loaded project (#548) and so surfaces the same `input-io` refusal the
+    // program-reading requests do.
     let mutation = result_of(
         &mut service,
         &ToolRequest::ProviderValidateEdit {
             language_id: "not-a-language".to_string(),
-            documents: Default::default(),
+            documents: Some(Default::default()),
             transaction: wright_driver::edit::EditTransaction { edits: vec![] },
-            sources: Default::default(),
+            sources: None,
             project_root: None,
         },
     );
     assert_eq!(mutation["ok"], false, "{mutation}");
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::ProviderValidateEdit {
+                language_id: "not-a-language".to_string(),
+                documents: None,
+                transaction: wright_driver::edit::EditTransaction { edits: vec![] },
+                sources: None,
+                project_root: None,
+            },
+        ),
+        "input-io"
+    );
     // None of the above triggered the project load.
     assert!(service.loaded().is_none());
 

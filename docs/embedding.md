@@ -104,8 +104,10 @@ cannot load at construction does not fail the service (#512): the service
 exists without a program snapshot — `loaded()` returns `None` rather than a
 placeholder program — and each program-reading request retries the load,
 refusing with the loader's structured diagnostic until the project heals on
-disk. `capabilities`, `targetMetadata`, and the `provider*` operations carry
-their own data and answer without consulting the project at all. Repairing
+disk. `capabilities`, `targetMetadata`, and the `provider*` operations
+carrying caller-supplied documents answer without consulting the project at
+all (a `provider*` request that omits `documents` derives it from the loaded
+project, #548). Repairing
 the input recovers the same running service on the next program-reading
 request; no restart or explicit reload is needed.
 `Capabilities` negotiates the

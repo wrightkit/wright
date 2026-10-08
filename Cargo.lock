@@ -2323,6 +2323,7 @@ version = "0.11.0"
 dependencies = [
  "flate2",
  "hotpath",
+ "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",
