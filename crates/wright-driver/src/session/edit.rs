@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use super::CompilerSession;
-use crate::diag::Diagnostic;
+use crate::diag::{Diagnostic, Stage};
 use crate::edit::{EditTransaction, EditValidation, RenameResult, RenameTarget, SemanticRename};
 use crate::input;
 use crate::result::{
