@@ -126,6 +126,7 @@ fn digest_files(files: Vec<PathBuf>) -> DiskFingerprint {
 pub fn resolve(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     match &config.input {
         InputSpec::Path(path) => resolve_path(path, config),
+        InputSpec::Text { text, path } => resolve_text(text, path.as_deref(), config),
         InputSpec::Stdin => resolve_stdin(config),
     }
 }
@@ -371,6 +372,62 @@ fn kind_from_extension(path: &Path) -> Result<SourceKind, Diagnostic> {
             ),
         )),
     }
+}
+
+/// Resolve caller-held text into an input (#555): the buffer replaces the
+/// disk read, so an open document whose file is unsaved or absent still
+/// loads — diagnostics and spans keep the file identity `path` provides.
+fn resolve_text(
+    text: &str,
+    path: Option<&Path>,
+    config: &SessionConfig,
+) -> Result<ResolvedInput, Diagnostic> {
+    let cwd = std::env::current_dir().map_err(|e| {
+        Diagnostic::error(
+            "cwd-io",
+            Stage::Discovery,
+            format!("cannot determine the invocation working directory: {e}"),
+        )
+    })?;
+    let path = path.map(|path| absolute_from(&cwd, path));
+    let kind = match config.kind {
+        SourceKind::Auto => match &path {
+            Some(path) => kind_from_extension(path)?,
+            None => {
+                return Err(Diagnostic::error(
+                    "input-kind-unknown",
+                    Stage::Discovery,
+                    "cannot detect the input kind of an anonymous document; pass `--kind opy|ostw|workshop|protocol` to override",
+                ));
+            }
+        },
+        other => other,
+    };
+    let root = config
+        .root
+        .as_deref()
+        .map(|root| absolute_from(&cwd, root))
+        .or_else(|| {
+            path.as_deref()
+                .and_then(|path| path.parent().map(Path::to_path_buf))
+        })
+        .unwrap_or_else(|| cwd.clone());
+    let display = path
+        .as_deref()
+        .map(display_path)
+        .unwrap_or_else(|| "<document>".to_string());
+    let origin = origin_for(kind, config.locale.as_deref());
+    Ok(ResolvedInput {
+        kind,
+        text: text.to_string(),
+        path,
+        target: InputTarget::File,
+        root,
+        cwd,
+        display,
+        identity: sha256_hex(text.as_bytes()),
+        origin,
+    })
 }
 
 fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {

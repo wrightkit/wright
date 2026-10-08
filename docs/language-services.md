@@ -1,7 +1,7 @@
 # Wright Language Services and LSP
 
-Status: current scope — document synchronization, diagnostics, and
-provider-backed rename
+Status: current scope — document synchronization, diagnostics, raw
+Workshop hover/definition/references, and provider-backed rename
 Scope: editor-neutral language services (`wright-language`) and the thin LSP
 adapter (`wright-lsp`)
 
@@ -10,7 +10,8 @@ adapter (`wright-lsp`)
 ```text
 document/workspace model (Document, DocumentStore)
    → LanguageService (editor-neutral, no LSP types)
-       └─ diagnostics (provider refusal for source documents)
+       └─ diagnostics + semantic queries (provider refusal for source
+          documents, canonical check/index for raw Workshop)
             ↓
   wright-lsp (thin protocol adapter, Content-Length stdio framing)
 ```
@@ -28,22 +29,30 @@ analyzer contracts.
   `textDocument/didChange`, `textDocument/didClose` (`didSave` is an explicit
   no-op under full sync);
 - `textDocument/publishDiagnostics`: versioned, grouped by source identity,
-  with didClose cleanup.
+  with didClose cleanup;
+- raw Workshop semantic queries (#555): `textDocument/hover`,
+  `textDocument/definition`, `textDocument/references`.
 
-The `initialize` result advertises `textDocumentSync` and the UTF-16
-position encoding unconditionally, plus `renameProvider` when the client
-negotiates `workspace.workspaceEdit.documentChanges` — applied renames are
-returned as versioned `TextDocumentEdit`s, and a client that cannot receive
-the validated document version cannot be handed an edit safely. The result
-contains no provider entry for hover, definition, references, completion,
-or semantic tokens: those capabilities have no backing implementation and
-are never advertised. A request for an unadvertised or unknown method
-receives a `result: null` response and the server keeps running.
+The `initialize` result advertises `textDocumentSync`, the UTF-16 position
+encoding, and `hoverProvider`/`definitionProvider`/`referencesProvider`
+unconditionally — they are backed for raw Workshop documents — plus
+`renameProvider` when the client negotiates
+`workspace.workspaceEdit.documentChanges` (applied renames are returned as
+versioned `TextDocumentEdit`s, and a client that cannot receive the
+validated document version cannot be handed an edit safely). The result
+contains no provider entry for completion or semantic tokens: those
+capabilities have no backing implementation and are never advertised. A
+request for an unadvertised or unknown method receives a `result: null`
+response and the server keeps running, as does a semantic request on a
+document that is not raw Workshop.
 
-Diagnostics: opening a source-language document (`.opy`, `.del`, `.ostw`)
-publishes an explicit `source-provider-unavailable` error while no provider
-language-service capability is negotiated. A raw Workshop document (or any
-document without a source language) publishes no diagnostics.
+Diagnostics: opening or changing a raw Workshop document publishes the same
+diagnostics `wright check` reports for the buffer text — code, severity,
+and span carried through, an empty list for a clean buffer (#555). Opening
+a source-language document (`.opy`, `.del`, `.ostw`) publishes an explicit
+`source-provider-unavailable` error while no provider language-service
+capability is negotiated. A document that is neither publishes no
+diagnostics.
 
 `textDocument/rename` on a source-language document routes through the same
 provider-owned mutation path as the CLI and agent surfaces (#156): the
@@ -69,16 +78,47 @@ search/replace fallback. `--opy-provider <PATH>` points the session at an
 explicit OPY provider executable; by default the resolver locates or
 downloads the released provider like the CLI does.
 
-Provider-backed editor capabilities beyond rename — hover, definition,
-references, completion, and semantic tokens — are future work tracked under
-#156 and the owning implementations (for example `opy-rs` language-service
-capabilities). They arrive through provider capability negotiation, not
-through Wright-side reimplementation or static fallbacks.
+For source-language documents, editor capabilities beyond rename — hover,
+definition, references, completion, and semantic tokens — are future work
+tracked under #156 and the owning implementations (for example `opy-rs`
+language-service capabilities). They arrive through provider capability
+negotiation, not through Wright-side reimplementation or static fallbacks;
+a source-language document answers `null` to hover/definition/references.
+
+## Raw Workshop language services (#555)
+
+ADR-0023 scoped raw Workshop to diagnostics, hover, definition, and
+references for Wright 1.0. The service recognizes a raw Workshop document
+by the editor's `workshop` language id, or — untagged — by a Workshop
+extension `wright check` accepts (`.txt`, `.ow`, `.ws`, `.workshop`); a
+source-language extension or an explicit non-Workshop language id stays
+out of this path.
+
+Each query parses the current buffer text through the same driver session
+pipeline the CLI runs (`InputSpec::Text` carries the buffer under the
+document's file identity, so an unsaved file still resolves), and answers
+from the canonical `SemanticIndex` `wright inspect` serves:
+
+- diagnostics are `check`'s diagnostics verbatim — code, severity, and
+  span, at the buffer's document version;
+- hover names the resolved symbol as `` `kind name` `` over the identifier
+  occurrence that matched;
+- definition targets the symbol's declared span;
+- references return every occurrence span `inspect` reports for the
+  symbol, and `includeDeclaration: false` drops the declaration;
+- a position outside any identifier occurrence, a position covered by
+  more than one symbol, a buffer that fails to load, and any non-Workshop
+  document answer `null`.
+
+No LSP-specific resolution layer exists: spans, symbols, and reference
+kinds are the analyzer's canonical data, converted to UTF-16 ranges at the
+protocol boundary.
 
 ## Editor-neutral contracts
 
 * `Document`: URI identity, current text, monotonic internal `version`,
-  project root (include base).
+  project root (include base), and the editor-declared `language_id` when
+  the host reports one.
 * `DocumentStore`: open/change/close lifecycle with version bumping.
 * Positions and ranges are 0-based editor conventions; the service converts to
   the compiler's 1-based spans at the boundary. UTF-16 ↔ character conversion
@@ -126,10 +166,11 @@ suppression is the authoritative contract.
 
 ## Diagnostics
 
-The service produces source-aware `SourceDiagnostic`s. Today the only
-diagnostic is the explicit `source-provider-unavailable` refusal for
-source-language documents, which marks where a negotiated provider
-capability would attach; it is never a static fallback result.
+The service produces source-aware `SourceDiagnostic`s. Raw Workshop
+documents publish the session `check` diagnostics for the buffer text
+(#555); source-language documents publish the explicit
+`source-provider-unavailable` refusal, which marks where a negotiated
+provider capability would attach — it is never a static fallback result.
 
 ## DEL/OSTW documents (#120)
 
