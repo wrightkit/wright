@@ -598,3 +598,98 @@ fn session_config_mutation_refuses_provider_workflows() {
         "{mutation:?}"
     );
 }
+
+/// #555: an open editor buffer enters the session as `InputSpec::Text` —
+/// the buffer text replaces the disk read while `path` still carries the
+/// file identity, so `check` answers for the text exactly as it would for
+/// the same bytes on disk.
+#[test]
+fn workshop_text_input_replaces_the_disk_read() {
+    let path = workshop_fixture("synthetic/raw-settings");
+    let text = std::fs::read_to_string(&path).expect("fixture");
+    let codes_and_spans = |diagnostics: &[Diagnostic]| {
+        diagnostics
+            .iter()
+            .map(|d| (d.code.clone(), d.severity, d.span.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    let mut on_disk = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(path.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("path session");
+    let mut in_memory = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text,
+            path: Some(path.clone()),
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("text session");
+
+    assert_eq!(
+        codes_and_spans(&in_memory.check().diagnostics),
+        codes_and_spans(&on_disk.check().diagnostics),
+        "the buffer text yields the check diagnostics its bytes on disk yield"
+    );
+
+    // The buffer wins even when the disk has different bytes: an unsaved
+    // document at a path that does not exist still loads from its text.
+    let unsaved_source = concat!(
+        "rule (\"unsaved\") {\n",
+        "    event {\n",
+        "        Ongoing - Global;\n",
+        "    }\n",
+        "}\n",
+    );
+    let mut unsaved = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: unsaved_source.to_string(),
+            path: Some(PathBuf::from("unsaved-buffer.ws")),
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("unsaved session");
+    let unsaved_check = unsaved.check();
+    assert!(
+        unsaved_check.ok,
+        "unsaved buffer: {:?}",
+        unsaved_check.diagnostics
+    );
+
+    // An anonymous document carries no identity for kind detection; an
+    // explicit kind keeps it loadable.
+    let mut kindless = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: String::new(),
+            path: None,
+        },
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    let error = match kindless.load() {
+        Ok(_) => panic!("anonymous text cannot detect a kind"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "input-kind-unknown");
+
+    let mut anonymous = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: unsaved_source.to_string(),
+            path: None,
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("anonymous session");
+    let anonymous_check = anonymous.check();
+    assert!(
+        anonymous_check.ok,
+        "anonymous buffer: {:?}",
+        anonymous_check.diagnostics
+    );
+}

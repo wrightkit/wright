@@ -9,11 +9,13 @@ use lsp_types::notification::{Notification, PublishDiagnostics};
 use lsp_types::{
     AnnotatedTextEdit, Diagnostic as LspDiagnostic, DiagnosticSeverity,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentChanges, InitializeParams, InitializeResult, OneOf,
-    OptionalVersionedTextDocumentIdentifier, Position as LspPosition, PositionEncodingKind,
-    PublishDiagnosticsParams, Range as LspRange, RenameParams, ServerCapabilities, ServerInfo,
-    TextDocumentEdit, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextEdit, Uri, WorkspaceEdit,
+    DocumentChanges, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
+    MarkupContent, MarkupKind, OneOf, OptionalVersionedTextDocumentIdentifier,
+    Position as LspPosition, PositionEncodingKind, PublishDiagnosticsParams, Range as LspRange,
+    ReferenceParams, RenameParams, ServerCapabilities, ServerInfo, TextDocumentEdit,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Uri,
+    WorkspaceEdit,
 };
 use serde_json::Value;
 
@@ -121,7 +123,8 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                     params.text_document.text,
                     root.clone(),
                     params.text_document.version,
-                );
+                )
+                .with_language_id(params.text_document.language_id);
                 service.store.open(document);
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
@@ -161,6 +164,83 @@ fn run(opy_provider: Option<PathBuf>) -> Result<(), String> {
                 publish_affected_diagnostics(&mut writer, &service, &mut ownership, &uri)?;
             }
             "textDocument/didSave" => {}
+            "textDocument/hover" => {
+                let Some(params) = read_params::<HoverParams>(&mut writer, &id, params)? else {
+                    continue;
+                };
+                if id.is_none() {
+                    continue;
+                }
+                let position_params = params.text_document_position_params;
+                let hover = service
+                    .hover(
+                        position_params.text_document.uri.as_str(),
+                        Position {
+                            line: position_params.position.line,
+                            character: position_params.position.character,
+                        },
+                    )
+                    .map(|info| Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: info.contents,
+                        }),
+                        range: Some(convert_range(info.range)),
+                    });
+                write_response(&mut writer, id, serde_json::to_value(hover).unwrap())?;
+            }
+            "textDocument/definition" => {
+                let Some(params) = read_params::<GotoDefinitionParams>(&mut writer, &id, params)?
+                else {
+                    continue;
+                };
+                if id.is_none() {
+                    continue;
+                }
+                let position_params = params.text_document_position_params;
+                let definition = service
+                    .definition(
+                        position_params.text_document.uri.as_str(),
+                        Position {
+                            line: position_params.position.line,
+                            character: position_params.position.character,
+                        },
+                    )
+                    .map(|location| {
+                        GotoDefinitionResponse::Scalar(Location {
+                            uri: Uri::from_str(&location.uri).unwrap_or_else(|_| fallback_uri()),
+                            range: convert_range(location.range),
+                        })
+                    });
+                write_response(&mut writer, id, serde_json::to_value(definition).unwrap())?;
+            }
+            "textDocument/references" => {
+                let Some(params) = read_params::<ReferenceParams>(&mut writer, &id, params)? else {
+                    continue;
+                };
+                if id.is_none() {
+                    continue;
+                }
+                let position_params = params.text_document_position;
+                let locations = service.references(
+                    position_params.text_document.uri.as_str(),
+                    Position {
+                        line: position_params.position.line,
+                        character: position_params.position.character,
+                    },
+                    params.context.include_declaration,
+                );
+                let locations = locations.map(|locations| {
+                    locations
+                        .into_iter()
+                        .map(|location| Location {
+                            uri: Uri::from_str(&location.uri).unwrap_or_else(|_| fallback_uri()),
+                            range: convert_range(location.range),
+                        })
+                        .collect::<Vec<_>>()
+                });
+                write_response(&mut writer, id, serde_json::to_value(locations).unwrap())?;
+            }
             "textDocument/rename" => {
                 let Some(params) = read_params::<RenameParams>(&mut writer, &id, params)? else {
                     continue;
@@ -271,6 +351,12 @@ fn initialize_result(versioned_workspace_edits: bool) -> InitializeResult {
             // a client that cannot receive the validated document version
             // cannot be handed an edit safely, so rename stays unadvertised.
             rename_provider: versioned_workspace_edits.then_some(OneOf::Left(true)),
+            // Raw Workshop hover/definition/references are backed by the
+            // session's canonical check/index pipeline (#555); documents
+            // outside that scope still answer `null`.
+            hover_provider: Some(HoverProviderCapability::Simple(true)),
+            definition_provider: Some(OneOf::Left(true)),
+            references_provider: Some(OneOf::Left(true)),
             ..Default::default()
         },
         server_info: Some(ServerInfo {

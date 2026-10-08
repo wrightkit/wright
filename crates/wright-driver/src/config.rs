@@ -63,6 +63,15 @@ impl OutputFormat {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum InputSpec {
     Path(PathBuf),
+    /// Caller-held text resolved without a disk read (#555): `path` gives
+    /// the input its file identity — kind detection, root resolution, and
+    /// span paths behave exactly like `Path` — while `text` replaces the
+    /// file's bytes. `None` is an anonymous document with no filesystem
+    /// identity.
+    Text {
+        text: String,
+        path: Option<PathBuf>,
+    },
     #[default]
     Stdin,
 }
@@ -71,6 +80,7 @@ impl InputSpec {
     pub fn path(&self) -> Option<&PathBuf> {
         match self {
             Self::Path(path) => Some(path),
+            Self::Text { path, .. } => path.as_ref(),
             Self::Stdin => None,
         }
     }

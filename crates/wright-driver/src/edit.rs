@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use workshop_rs::catalog::{Catalog, Locale};
-use wright_analyzer::canonical::{ReferenceKind, SemanticIndex, Symbol, SymbolId, SymbolKind};
+use wright_analyzer::canonical::{
+    PositionResolution, ReferenceKind, SemanticIndex, Symbol, SymbolId, SymbolKind,
+};
 
 use crate::config::{SessionConfig, SourceKind};
 use crate::diag::{Diagnostic, Stage, source_provider_unavailable};
@@ -290,8 +292,9 @@ pub fn validate_transaction(
 }
 
 /// Resolve the session input for an edit operation without consuming stdin:
-/// stdin carries no source identity, so edit operations refuse it outright.
-fn resolve_edit_input(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
+/// an input with no path carries no source identity, so edit operations
+/// refuse it outright.
+pub(crate) fn resolve_edit_input(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
     if config.input.path().is_none() {
         return Err(edit_stdin_refusal());
     }
@@ -302,7 +305,7 @@ fn edit_stdin_refusal() -> Diagnostic {
     Diagnostic::error(
         "edit-input-stdin",
         Stage::Discovery,
-        "edit operations require a path-based input; stdin has no source identity",
+        "edit operations require a path-based input; the input has no source identity",
     )
 }
 
@@ -682,42 +685,26 @@ fn symbol_at_position<'a>(
             ),
         ));
     }
-    let mut hits = Vec::new();
-    for symbol in index.symbols() {
-        let hit = index.references(symbol.id).iter().any(|reference| {
-            reference
-                .occurrence
-                .is_some_and(|span| position_in_span(span, line, col))
-        });
-        if hit {
-            hits.push(symbol);
-        }
-    }
-    match hits.as_slice() {
-        [symbol] => Ok(symbol),
-        [] => Err(Diagnostic::error(
+    match index.symbol_at(line, col) {
+        PositionResolution::Resolved { symbol, .. } => Ok(symbol),
+        PositionResolution::Miss => Err(Diagnostic::error(
             "rename-invalid-target",
             Stage::Discovery,
             format!("no symbol identifier covers {source}:{line}:{col}"),
         )),
-        _ => Err(Diagnostic::error(
+        PositionResolution::Ambiguous(symbols) => Err(Diagnostic::error(
             "ambiguous-symbol",
             Stage::Discovery,
             format!(
                 "more than one symbol covers {source}:{line}:{col}: {}",
-                hits.iter()
+                symbols
+                    .iter()
                     .map(|symbol| format!("{} {}", symbol.kind.as_str(), symbol.id.index()))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
         )),
     }
-}
-
-/// Whether the 1-based `line`/`col` falls inside the half-open span.
-fn position_in_span(span: workshop_rs::source::Span, line: u32, col: u32) -> bool {
-    (line > span.start.line || (line == span.start.line && col >= span.start.col))
-        && (line < span.end.line || (line == span.end.line && col < span.end.col))
 }
 
 /// A provenance gap on one reference: either no authored identifier span

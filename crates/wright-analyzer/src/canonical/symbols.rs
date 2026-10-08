@@ -139,6 +139,25 @@ pub struct UsageSummary {
     pub rules: u32,
 }
 
+/// The outcome of resolving a 1-based source position to the symbol whose
+/// identifier occurrence covers it (#429, #555). Every surface — CLI/agent
+/// rename targeting and editor hover/definition/references — shares this
+/// one resolution rule, so a position resolves to exactly one symbol, to
+/// none, or reports the ambiguity; no surface guesses by iteration order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PositionResolution<'a> {
+    /// No symbol's identifier occurrence covers the position.
+    Miss,
+    /// Exactly one symbol covers the position; `occurrence` is the
+    /// identifier span that matched.
+    Resolved {
+        symbol: &'a Symbol,
+        occurrence: Span,
+    },
+    /// Distinct symbols' occurrences cover the position.
+    Ambiguous(Vec<&'a Symbol>),
+}
+
 #[derive(Debug, Clone)]
 pub struct SemanticIndex {
     symbols: Vec<Symbol>,
@@ -324,6 +343,35 @@ impl SemanticIndex {
             .iter()
             .filter(|reference| reference.symbol == symbol)
             .collect()
+    }
+
+    /// Resolve a 1-based `line`/`col` to the symbol whose identifier
+    /// occurrence covers it — the shared position→symbol rule. Every
+    /// reference kind counts, including declarations, and several
+    /// references of one symbol collapsing onto the same position still
+    /// resolve that symbol once.
+    pub fn symbol_at(&self, line: u32, col: u32) -> PositionResolution<'_> {
+        let mut hits = Vec::new();
+        for symbol in self.symbols() {
+            let occurrence = self
+                .references(symbol.id)
+                .into_iter()
+                .filter_map(|reference| reference.occurrence)
+                .find(|occurrence| position_in_span(*occurrence, line, col));
+            if let Some(occurrence) = occurrence {
+                hits.push((symbol, occurrence));
+            }
+        }
+        match hits.as_slice() {
+            [] => PositionResolution::Miss,
+            [(symbol, occurrence)] => PositionResolution::Resolved {
+                symbol,
+                occurrence: *occurrence,
+            },
+            _ => {
+                PositionResolution::Ambiguous(hits.into_iter().map(|(symbol, _)| symbol).collect())
+            }
+        }
     }
     pub(super) fn references_for_all_symbols(&self) -> Vec<Vec<&Reference>> {
         let mut grouped = (0..self.symbols.len())
@@ -734,4 +782,97 @@ fn is_code_position(chars: &[char], position: usize) -> bool {
         }
     }
     !quoted
+}
+
+/// Whether the 1-based `line`/`col` falls inside the half-open span.
+fn position_in_span(span: Span, line: u32, col: u32) -> bool {
+    (line > span.start.line || (line == span.start.line && col >= span.start.col))
+        && (line < span.end.line || (line == span.end.line && col < span.end.col))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn index(text: &str) -> (Program, SemanticIndex) {
+        let catalog = crate::catalog::builtin().expect("builtin catalog");
+        let program = workshop_rs::parser::parse_with_context(
+            text,
+            &catalog,
+            &workshop_rs::catalog::Locale::new("en-US"),
+            &*catalog,
+        )
+        .expect("Workshop source must parse");
+        let index = SemanticIndex::build(&program);
+        (program, index)
+    }
+
+    /// #555: variable, subroutine, and rule-name positions all resolve
+    /// through the one shared position→symbol rule, and positions outside
+    /// every identifier occurrence miss rather than resolving a neighbor.
+    #[test]
+    fn symbol_at_resolves_each_symbol_kind_and_misses_outside_occurrences() {
+        let text = concat!(
+            "variables {\n",
+            "    global:\n",
+            "        0: score\n",
+            "}\n",
+            "\n",
+            "subroutines {\n",
+            "    0: shared\n",
+            "}\n",
+            "\n",
+            "rule (\"main\") {\n",
+            "    event {\n",
+            "        Ongoing - Global;\n",
+            "    }\n",
+            "    actions {\n",
+            "        Call Subroutine(shared);\n",
+            "        Set Global Variable(score, 1);\n",
+            "    }\n",
+            "}\n",
+        );
+        let (_program, index) = index(text);
+        let resolved = |line: u32, col: u32| match index.symbol_at(line, col) {
+            PositionResolution::Resolved { symbol, occurrence } => {
+                assert!(position_in_span(occurrence, line, col));
+                (symbol.kind.as_str(), symbol.name.clone())
+            }
+            other => panic!("expected one symbol at {line}:{col}, got {other:?}"),
+        };
+
+        // A declaration occurrence resolves.
+        assert_eq!(resolved(3, 14), ("globalVariable", "score".to_string()));
+        // A write occurrence resolves the same symbol.
+        assert_eq!(resolved(16, 31), ("globalVariable", "score".to_string()));
+        // A subroutine call resolves.
+        assert_eq!(resolved(15, 27), ("subroutine", "shared".to_string()));
+        // A rule name resolves its rule symbol.
+        assert_eq!(resolved(10, 9), ("rule", "main".to_string()));
+
+        for (line, col) in [(1, 1), (5, 1), (11, 2)] {
+            assert!(
+                matches!(index.symbol_at(line, col), PositionResolution::Miss),
+                "no identifier occurrence covers {line}:{col}"
+            );
+        }
+    }
+
+    /// Occurrences are half-open: the start column resolves, the end
+    /// column does not.
+    #[test]
+    fn symbol_at_honors_half_open_occurrence_spans() {
+        let text = concat!(
+            "variables {\n",
+            "    global:\n",
+            "        0: score\n",
+            "}\n",
+        );
+        let (_program, index) = index(text);
+        assert!(matches!(
+            index.symbol_at(3, 12),
+            PositionResolution::Resolved { .. }
+        ));
+        assert!(matches!(index.symbol_at(3, 17), PositionResolution::Miss));
+    }
 }

@@ -13,7 +13,12 @@ workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 url = "2"
+# Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
+wright-analyzer.workspace = true
 wright-driver.workspace = true
 wright-lpp = { path = "../wright-lpp" }
 # Single pinned reference: `[workspace.dependencies]` in the root Cargo.toml.
 workshop-rs.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
