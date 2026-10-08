@@ -156,6 +156,11 @@ def cell_label(cell: dict) -> str:
     return f"{'+'.join([tool, *cell['skills']])}/{cell['knowledge']}/{cell['network']}"
 
 
+def allowed_cli_tool(cell: dict) -> str:
+    """The CLI a cell legitimately provides; `mcp` gives wright's MCP server without the CLI, so it withholds both tools."""
+    return cell["tool"] if cell.get("level", "bin") == "bin" else "none"
+
+
 def applicable(scenario: dict, cell: dict) -> bool:
     """The `overpy` tool and the language skills apply to their own language only; a raw Workshop scenario has no OverPy cell."""
     if cell["tool"] == "overpy" and scenario["language"] != "opy":
@@ -218,7 +223,7 @@ def check_cell(cell: dict, args: argparse.Namespace) -> None:
         bench_wiki.identity(Path(args.wiki_dir))
 
 
-NETWORK_TOOLS = ("npm", "npx", "pnpm", "yarn", "bun", "bunx", "pip", "pip3", "pipx", "uv", "uvx", "cargo", "brew", "gem", "curl", "wget")
+NETWORK_TOOLS = ("npm", "npx", "pnpm", "yarn", "bun", "bunx", "pip", "pip3", "pipx", "uv", "uvx", "cargo", "brew", "gem", "gh", "curl", "wget")
 
 
 def build_env(cell: dict, args: argparse.Namespace, out: Path, workspace: Path) -> dict:
@@ -521,8 +526,8 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     result["toolUse"] = bench_trace.summarize_trace(events)
     if cell.get("level") == "mcp" and agent_exit != INFRA_EXIT and not any(e.get("type") == "serve" for e in bench_trace.tool_events(events, "wright")):
         reasons.append("level 'mcp' but the adapter never started the wright MCP server (BENCH_MCP_CMD)")
-    for tool, command in bench_trace.contraband_installs(out / "transcript.jsonl", cell["tool"])[:1]:
-        reasons.append(f"fetched '{tool}' from a package manager although the tool is '{cell['tool']}': {command}")
+    for tool, command in bench_trace.contraband_installs(out / "transcript.jsonl", allowed_cli_tool(cell))[:1]:
+        reasons.append(f"fetched '{tool}' from a package manager although condition '{cell_label(cell)}' withholds it: {command}")
     if calls := bench_trace.call_counts(out / "transcript.jsonl"):
         result["toolCalls"] = calls
     result.update(bench_grade.grade(scenario, workspace, args.wright, out / "grading"))

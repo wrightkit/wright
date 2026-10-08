@@ -663,20 +663,39 @@ class AgentBenchTest(unittest.TestCase):
     def test_every_blocked_tool_has_a_matching_fetch_pattern_and_every_call_shape_is_read(self):
         fetched = [
             "npm install overpy", "npm i overpy", "npm pack overpy", "pnpm add overpy", "pnpm dlx overpy", "yarn add overpy",
-            "bun add overpy", "npx overpy --help", "bunx overpy", "pip install overpy", "pip3 install overpy",
-            "python3 -m pip install overpy", "pip download overpy", "pipx install overpy", "pipx run overpy",
-            "uv tool install overpy", "uvx overpy", "cargo install overpy", "cargo add overpy", "brew install overpy",
-            "gem install overpy", "go install overpy.dev/cmd/overpy@latest", "apt install overpy", "apt-get install overpy",
-            "composer require overpy/cli", "git clone https://example.com/overpy.git",
-            "wget https://example.com/overpy.tgz", "curl -fsSLo overpy https://example.com/o", "curl https://example.com/o > overpy",
+            "yarn global add overpy", "bun add overpy", "bun x overpy", "npx overpy --help", "npx -y overpy", "bunx overpy",
+            "pip install overpy", "pip3 install overpy", "python3 -m pip install overpy", "pip download overpy",
+            "pipx install overpy", "pipx run overpy", "uv add overpy", "uv pip install overpy", "uv tool install overpy",
+            "uv tool run overpy", "uv run --with overpy python app.py", "uvx overpy",
+            "cargo install overpy", "cargo add overpy", "brew install overpy", "gem install overpy",
+            "go install overpy.dev/cmd/overpy@latest", "go run overpy.dev/cmd/overpy@latest",
+            "apt install overpy", "apt-get install overpy", "apt download overpy", "composer require overpy/cli",
+            "docker pull example.io/overpy:latest", "podman pull example.io/overpy:latest",
+            "git clone https://example.com/overpy.git", "git clone https://github.com/wrightkit/opy-rs",
+            "wget https://example.com/overpy.tgz",
+            "curl -fsSLo out https://example.com/overpy.tar.gz", "curl https://example.com/overpy.tar.gz > out",
+            "gh release download -R wrightkit/opy-rs", "gh repo clone wrightkit/opy-rs",
+            "rsync host:/srv/overpy.tar.gz .", "scp host:overpy .",
         ]
         path = self.out / "transcript.jsonl"
         calls = [{"type": "toolCall", "arguments": {"command": c}} for c in fetched]
         path.write_text("".join(json.dumps(c) + "\n" for c in calls))
         self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "wright")], ["overpy"] * len(fetched))
-        clean = ["apt update", "cargo build", "npm test", "go build ./...", "composer dump-autoload", "git fetch origin", "curl -s https://api.example.com/overpy-docs | jq ."]
+        # `overpy` as a path/document/repo token is not a fetch — only install-verb arguments and fetch targets count
+        clean = ["apt update", "cargo build", "npm test", "go build ./...", "composer dump-autoload", "git fetch origin",
+                 "curl -s https://api.example.com/overpy-docs | jq .",
+                 "npx prettier --write docs/overpy-notes.md", "uv run report.py --project overpy",
+                 "wget https://site.example/overpy-guide.html", "git clone https://example.com/overpy-docs",
+                 "gh repo clone wrightkit/wright-docs", "pipx run black --check .",
+                 "curl -o page.html https://site.example/overpy-notes.html"]
         path.write_text("".join(json.dumps({"type": "toolCall", "arguments": {"command": c}}) + "\n" for c in clean))
         self.assertEqual(bench_trace.contraband_installs(path, "wright"), [])
+
+    def test_mcp_level_withholds_the_cli_so_either_tool_is_contraband(self):
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "wright", "level": "bin"}), "wright")
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "overpy", "level": "bin"}), "overpy")
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "wright", "level": "mcp"}), "none")  # the MCP server gives wright without its CLI
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "none", "level": "bin"}), "none")
 
     def test_quoted_or_malformed_payloads_are_not_shell_commands(self):
         lines = [
