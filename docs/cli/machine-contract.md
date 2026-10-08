@@ -7,10 +7,10 @@
 | Code | Meaning | Examples |
 | --- | --- | --- |
 | 0 | success | clean check, compiled artifact produced, reconstructed source produced |
-| 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade, non-Workshop `convert` input |
+| 1 | source/user error | parse error, validation error, ambiguous input, unknown input kind, unreadable input, refused downgrade, non-Workshop `convert` input, a deliberate LPP provider refusal (`provider-refusal-<refusalCode>`), an owner-side project load failure (`project-load-failed`) |
 | 2 | usage error | unknown command/flag, missing option value, missing/unknown `convert --target` |
-| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation for `update self`, unsupported platform for `update self`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface) |
-| 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure |
+| 3 | recognized but unsupported | `.opy` stdin via the explicit adapter fallback (default path is native), package-manager-managed installation for `update self`, unsupported platform for `update self`, a `convert` reconstruction rejection (a construct outside the declared OPY/OSTW reconstruction surface), an LPP capability the provider did not negotiate (`capability-unavailable`) |
+| 4 | internal/environment failure | catalog corruption, adapter bridge missing, I/O failure writing output, `update` network/checksum/extraction failure, provider transport/process failures (`provider-spawn`, `provider-io`, `provider-timeout`, `provider-exited`, `provider-malformed`, `jsonrpc-error`), provider resolution failures (`provider-missing`, `provider-offline`, `provider-download`, `provider-integrity`, `provider-install`, `provider-unsupported-platform`) |
 
 Exit codes are deterministic for identical inputs and configuration and are
 also carried inside the JSON envelope (`exit` field), so agents never need to
@@ -74,7 +74,13 @@ analyzer's codes — including the name-addressing refusals `unknown-symbol`,
 `ambiguous-symbol`, `unknown-rule`, and `ambiguous-rule` (#429) — and
 `*-internal` / `*-unavailable` (internal).
 `source-provider-unavailable` marks the explicit DEL/OSTW provider boundary
-and is reported at the internal stage.
+and is reported at the internal stage. Source-provider failures keep the
+provider's typed classification in the diagnostic code: an LPP refusal is
+`provider-refusal-<refusalCode>` (a Wright-originated refusal keeps its own
+code, e.g. `session-config-changed`), a capability gap is
+`capability-unavailable`, and transport/process failures keep their
+`provider-*` codes — a consumer classifies the failure from `code`/`stage`
+without parsing `message` (#569).
 A `convert`
 reconstruction rejection carries the language-owned reconstructor's stable
 code (e.g. `unsupported-per-player-loop` from `wright-opy`,

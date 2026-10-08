@@ -123,6 +123,38 @@ pub enum SourceProviderError {
     Failed { code: String, message: String },
 }
 
+/// The diagnostic code prefix carrying a provider's typed LPP refusal
+/// (`refusalCode`): `provider-refusal-<refusalCode>`. Wright-originated
+/// refusal codes (currently `session-config-changed`, #511) pass through
+/// verbatim instead, so they keep the same code as the direct diagnostic
+/// path. Other refusals are provider-owned opaque strings (LPP §18.4);
+/// namespacing them keeps the refusal class distinguishable without
+/// parsing `message`.
+const PROVIDER_REFUSAL_CODE_PREFIX: &str = "provider-refusal-";
+
+/// A refusal code Wright itself generated (as opposed to a provider-defined
+/// one); it stays verbatim so all of its surfaces report the same code.
+fn wright_refusal_code(code: &str) -> bool {
+    code == "session-config-changed"
+}
+
+/// The stage a `Failed` code reports at. This is the classification the
+/// typed `wright_lpp::ProviderError` was carrying when `provider_error`
+/// reduced it: deliberate refusals and request-level LPP failures are
+/// frontend-stage request outcomes, while transport, environment, and
+/// session-state failures are internal. `capability-unavailable` stays a
+/// distinct code here; `exit_code_from` maps it to the unsupported exit.
+fn failed_stage(code: &str) -> Stage {
+    match code {
+        "session-config-changed" => Stage::Discovery,
+        "provider-refusal" | "refusal" | "capability-unavailable" | "project-load-failed" => {
+            Stage::Frontend
+        }
+        code if code.starts_with(PROVIDER_REFUSAL_CODE_PREFIX) => Stage::Frontend,
+        _ => Stage::Internal,
+    }
+}
+
 impl SourceProviderError {
     pub fn code(&self) -> &str {
         match self {
@@ -135,7 +167,8 @@ impl SourceProviderError {
     pub fn diagnostic(&self) -> Diagnostic {
         let stage = match self {
             Self::Unsupported { .. } => Stage::Frontend,
-            Self::NotConfigured { .. } | Self::Failed { .. } => Stage::Internal,
+            Self::NotConfigured { .. } => Stage::Internal,
+            Self::Failed { code, .. } => failed_stage(code),
         };
         Diagnostic::error(self.code(), stage, self.to_string())
     }
@@ -229,7 +262,7 @@ impl SourceProvider for LppSourceProvider {
             self.provider
                 .check_entry(&entry, root_uri.as_deref(), self.locale.as_deref())
         }
-        .map_err(provider_error)?;
+        .map_err(|error| provider_error(error, &request_context("check", target)))?;
         Ok(SourceCompilation {
             workshop_text: None,
             locale: self.locale.clone(),
@@ -259,7 +292,7 @@ impl SourceProvider for LppSourceProvider {
             self.provider
                 .compile_entry(&entry, root_uri.as_deref(), self.locale.as_deref())
         }
-        .map_err(provider_error)?;
+        .map_err(|error| provider_error(error, &request_context("compile", target)))?;
         let (workshop_text, provenance) = match res.artifact {
             Some(a) if a.format == TEXT_V1 => (Some(a.content), SourceProvenance::Unmapped),
             Some(a) if negotiates_artifacts && a.format == MAPPED_TEXT_V1 => {
@@ -294,10 +327,53 @@ impl SourceProvider for LppSourceProvider {
     }
 }
 
-pub(crate) fn provider_error(error: wright_lpp::ProviderError) -> SourceProviderError {
+/// The human-facing context of one provider request: the operation and the
+/// entry it ran against (`{operation}` for `{entry}`).
+fn request_context(operation: &str, target: &SourceTarget) -> String {
+    format!(
+        "the source provider {operation} request for '{}' failed",
+        target.entry_path().display()
+    )
+}
+
+/// The code a `wright_lpp::ProviderError` carries across the
+/// source-provider boundary. Transport and session failures keep their
+/// `ProviderError::code()`; a typed LPP refusal carries its `refusalCode`
+/// under the `provider-refusal-` namespace so consumers can still classify
+/// the refusal without parsing `message` (LPP §18.4 makes refusal codes
+/// machine-readable). A Wright-originated refusal code stays verbatim.
+pub(crate) fn provider_failure_code(error: &wright_lpp::ProviderError) -> String {
+    match error.refusal_code() {
+        Some(code) if wright_refusal_code(code) => code.to_string(),
+        Some(code) => format!("{PROVIDER_REFUSAL_CODE_PREFIX}{code}"),
+        // A `refusal` kind whose details carry no `refusalCode` is still a
+        // deliberate decline, not a generic `refusal`-coded session error.
+        None if error.code() == "refusal" => "provider-refusal".to_string(),
+        None => error.code().to_string(),
+    }
+}
+
+/// Classify one provider failure into the stage its diagnostic reports at:
+/// the same mapping `SourceProviderError::diagnostic` applies to the code
+/// `provider_failure_code` produced. Keeping this on the typed error lets
+/// every `ProviderError` consumer share the source-provider classification
+/// rules instead of re-deriving them.
+pub(crate) fn provider_failure_stage(error: &wright_lpp::ProviderError) -> Stage {
+    failed_stage(&provider_failure_code(error))
+}
+
+/// Reduce a typed `wright_lpp::ProviderError` to the source-provider error
+/// contract, preserving the machine-usable classification in `code` and the
+/// failing operation/entry context in the human message. Classification
+/// happens here, while the typed error is still available; downstream
+/// consumers only see the resulting code and stage.
+pub(crate) fn provider_error(
+    error: wright_lpp::ProviderError,
+    context: &str,
+) -> SourceProviderError {
     SourceProviderError::Failed {
-        code: error.code().to_string(),
-        message: error.to_string(),
+        code: provider_failure_code(&error),
+        message: format!("{context}: {error}"),
     }
 }
 
@@ -356,6 +432,7 @@ fn provider_position(pos: wright_lpp::Position) -> Position {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wright_lpp::{LppErrorKind, ProviderError};
 
     #[test]
     fn relative_entry_is_resolved_from_the_invocation_directory() {
@@ -374,5 +451,118 @@ mod tests {
         assert_eq!(diagnostic.code, "provider-exited");
         assert_eq!(diagnostic.stage, Stage::Internal);
         assert!(diagnostic.span.is_none());
+    }
+
+    /// #569: each typed `ProviderError` keeps a machine-usable
+    /// classification across the source-provider boundary instead of
+    /// collapsing into one generic internal failure.
+    #[test]
+    fn provider_error_classification_distinguishes_typed_causes() {
+        let cases: &[(ProviderError, &str, Stage)] = &[
+            (
+                ProviderError::Timeout {
+                    method: "lpp/compile".to_string(),
+                    duration: std::time::Duration::from_secs(5),
+                },
+                "provider-timeout",
+                Stage::Internal,
+            ),
+            (
+                ProviderError::Exited {
+                    status: Some(1),
+                    message: "the provider exited".to_string(),
+                },
+                "provider-exited",
+                Stage::Internal,
+            ),
+            (
+                ProviderError::Malformed {
+                    detail: "missing id".to_string(),
+                },
+                "provider-malformed",
+                Stage::Internal,
+            ),
+            (
+                ProviderError::lpp(
+                    LppErrorKind::CapabilityUnavailable,
+                    serde_json::json!({"capability": "projectLoading", "method": "lpp/check"}),
+                    "capability not negotiated",
+                ),
+                "capability-unavailable",
+                Stage::Frontend,
+            ),
+            (
+                ProviderError::lpp(
+                    LppErrorKind::ProjectLoadFailed,
+                    serde_json::json!({"entryUri": "file:///p/main.opy", "reason": "unreadable"}),
+                    "could not load the project",
+                ),
+                "project-load-failed",
+                Stage::Frontend,
+            ),
+            (
+                ProviderError::lpp(
+                    LppErrorKind::Refusal,
+                    serde_json::json!({"refusalCode": "compile.tooLarge"}),
+                    "the project is too large",
+                ),
+                "provider-refusal-compile.tooLarge",
+                Stage::Frontend,
+            ),
+            (
+                ProviderError::lpp(
+                    LppErrorKind::Refusal,
+                    serde_json::json!({"refusalCode": "session-config-changed"}),
+                    "the session configuration changed",
+                ),
+                "session-config-changed",
+                Stage::Discovery,
+            ),
+        ];
+        for (error, code, stage) in cases {
+            let mapped = provider_error(error.clone(), "the request failed");
+            assert_eq!(
+                mapped.code(),
+                *code,
+                "{error:?} kept the wrong classification code"
+            );
+            assert_eq!(
+                mapped.diagnostic().stage,
+                *stage,
+                "{error:?} reports at the wrong stage"
+            );
+            assert!(
+                mapped.to_string().starts_with("the request failed: "),
+                "{error:?} lost its operation context"
+            );
+        }
+    }
+
+    /// #569: a refusal without a `refusalCode` detail still classifies as a
+    /// refusal rather than an internal failure.
+    #[test]
+    fn refusal_without_a_detail_code_stays_a_refusal() {
+        let mapped = provider_error(
+            ProviderError::lpp(LppErrorKind::Refusal, serde_json::json!({}), "declined"),
+            "the request failed",
+        );
+        assert_eq!(mapped.code(), "provider-refusal");
+        assert_eq!(mapped.diagnostic().stage, Stage::Frontend);
+    }
+
+    /// #569: timeout method/duration and the typed refusal reason stay in
+    /// the message; nothing on this path reads `message` back for decisions.
+    #[test]
+    fn provider_error_message_keeps_the_typed_detail_in_text() {
+        let mapped = provider_error(
+            ProviderError::Timeout {
+                method: "lpp/compile".to_string(),
+                duration: std::time::Duration::from_millis(2500),
+            },
+            "the compile request failed",
+        );
+        let message = mapped.to_string();
+        assert!(message.contains("'lpp/compile'"), "{message}");
+        assert!(message.contains("2500ms"), "{message}");
     }
 }

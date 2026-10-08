@@ -390,7 +390,13 @@ impl CompilerSession {
             let spawn = |session: &Self| {
                 session
                     .language_provider(opy_provider::OPY_LANGUAGE_ID)
-                    .map_err(|error| crate::source_provider::provider_error(error).diagnostic())
+                    .map_err(|error| {
+                        crate::source_provider::provider_error(
+                            error,
+                            "the 'opy' source provider could not be started",
+                        )
+                        .diagnostic()
+                    })
             };
             let mut provider = spawn(self)?;
             let client_info = wright_lpp::ClientInfo {
@@ -415,8 +421,13 @@ impl CompilerSession {
                     }
                 };
             }
-            initialize
-                .map_err(|error| crate::source_provider::provider_error(error).diagnostic())?;
+            initialize.map_err(|error| {
+                crate::source_provider::provider_error(
+                    error,
+                    "the 'opy' source provider could not be initialized",
+                )
+                .diagnostic()
+            })?;
             self.source_provider = Some(Box::new(crate::source_provider::LppSourceProvider::new(
                 provider,
                 self.config.locale.clone(),
@@ -800,7 +811,7 @@ impl CompilerSession {
         let mut provider = self
             .language_provider(opy_provider::OPY_LANGUAGE_ID)
             .map_err(|e| {
-                self.diagnostics.push(provider_error_diagnostic(e));
+                self.diagnostics.push(provider_error_diagnostic(e, "start"));
             })?;
         provider
             .initialize(Some(&wright_lpp::ClientInfo {
@@ -808,7 +819,8 @@ impl CompilerSession {
                 version: crate::result::DRIVER_VERSION.to_string(),
             }))
             .map_err(|e| {
-                self.diagnostics.push(provider_error_diagnostic(e));
+                self.diagnostics
+                    .push(provider_error_diagnostic(e, "initialize"));
             })?;
         let result = provider
             .reconstruct(&wright_lpp::WorkshopArtifact {
@@ -816,7 +828,8 @@ impl CompilerSession {
                 content: artifact,
             })
             .map_err(|e| {
-                self.diagnostics.push(provider_error_diagnostic(e));
+                self.diagnostics
+                    .push(provider_error_diagnostic(e, "reconstruct"));
             })?;
         let _ = provider.shutdown();
         Ok(result.source)
@@ -1187,22 +1200,15 @@ fn workshop_diag_for_provider_artifact(
     diagnostic
 }
 
-fn provider_error_diagnostic(error: wright_lpp::ProviderError) -> Diagnostic {
-    let unsupported = matches!(
-        &error,
-        wright_lpp::ProviderError::Lpp(lpp)
-            if matches!(
-                lpp.kind,
-                wright_lpp::LppErrorKind::CapabilityUnavailable | wright_lpp::LppErrorKind::Refusal
-            )
-    );
+/// One provider failure on the `convert` reconstruction path (#569): the
+/// same classification the source-provider seam applies, with the failed
+/// operation named in the human message. The refusal code survives in the
+/// diagnostic code (`provider-refusal-<refusalCode>`) so consumers can
+/// classify it without parsing the message.
+fn provider_error_diagnostic(error: wright_lpp::ProviderError, operation: &str) -> Diagnostic {
     Diagnostic::error(
-        error.code(),
-        if unsupported {
-            Stage::Frontend
-        } else {
-            Stage::Internal
-        },
-        error.to_string(),
+        crate::source_provider::provider_failure_code(&error),
+        crate::source_provider::provider_failure_stage(&error),
+        format!("the provider could not {operation} the artifact: {error}"),
     )
 }
