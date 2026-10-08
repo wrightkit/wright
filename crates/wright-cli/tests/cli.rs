@@ -2905,6 +2905,36 @@ fn lookup_within_rejects_an_unknown_scope() {
 }
 
 #[test]
+fn lookup_never_reads_stdin() {
+    // `lookup` takes no input: a stdin that never reaches EOF (a held-open
+    // pipe, like a terminal's) must not block the command — the session's
+    // warm load resolving the default `InputSpec::Stdin` would read stdin
+    // to EOF before the lookup ever runs.
+    let mut child = Command::new(wright())
+        .args(["lookup", "create hud text"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("wright runs");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if child.try_wait().expect("child status").is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("wright lookup blocked on an open stdin");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let output = child.wait_with_output().expect("child output");
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("createHudText"), "{stdout}");
+}
+
+#[test]
 fn lookup_names_opy_rs_when_the_provider_cannot_answer() {
     // A provider that cannot run never produces a Wright-side guess: the
     // result is the explicit `unavailable` payload naming the owner.
