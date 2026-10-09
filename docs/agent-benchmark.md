@@ -237,7 +237,7 @@ or run through a package manager, a repo/release CLI, or a downloader (including
 that stay unshimmed, such as `git clone`, `docker pull`, or `scp`) marks the run `invalid`.
 Detection keys on the fetch target — a path token like `docs/overpy-notes.md` is not a
 fetch; arbitrary code like `python -c 'urllib...'` is outside its scope. This was added
-after a baseline run installed `@wrightkit/wright` and `overpy` from npm. Model
+after a baseline run fetched the withheld OverPy tool from npm. Model
 account usage, CPU and disk consumption remain shared with the host. Provider
 failures returned as exit 75 are listed separately and excluded from outcome
 metrics. The harness never edits the task prompt: network `off` and the workspace

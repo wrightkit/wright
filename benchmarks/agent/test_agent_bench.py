@@ -694,18 +694,18 @@ class AgentBenchTest(unittest.TestCase):
 
     def test_a_withheld_tool_fetched_through_a_package_manager_is_detected_in_native_transcripts(self):
         lines = [
-            {"source": "agent", "tool_calls": [{"function_name": "exec", "arguments": {"command": "npm init -y && npm install --save-dev @wrightkit/wright overpy"}}]},
+            {"source": "agent", "tool_calls": [{"function_name": "exec", "arguments": {"command": "npm init -y && npm install --save-dev overpy"}}]},
             {"payload": {"type": "function_call", "arguments": json.dumps({"cmd": "pip3 install overpy"})}},
-            {"type": "toolCall", "arguments": {"command": "npx wright check mode.opy"}},
+            {"type": "toolCall", "arguments": {"command": "npx overpy check mode.opy"}},
             {"source": "user", "message": "skill text mentioning `npm install -g overpy` is not a command"},
-            {"source": "agent", "tool_calls": [{"function_name": "exec", "arguments": {"command": "wright check mode.ws"}}]},
+            {"source": "agent", "tool_calls": [{"function_name": "exec", "arguments": {"command": "git clone https://github.com/wrightkit/wright"}}]},
         ]
         path = self.out / "transcript.jsonl"
         path.write_text("".join(json.dumps(line) + "\n" for line in lines))
         found = bench_trace.contraband_installs(path, "none")
-        self.assertEqual([tool for tool, _ in found], ["wright", "overpy", "overpy", "wright"])
-        self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "wright")], ["overpy", "overpy"])  # wright is the condition's own tool
-        self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "overpy")], ["wright", "wright"])
+        self.assertEqual([tool for tool, _ in found], ["overpy", "overpy", "overpy", "wright"])
+        self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "wright")], ["overpy", "overpy", "overpy"])  # wright is the condition's own tool
+        self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "overpy")], ["wright"])
 
     def test_every_blocked_tool_has_a_matching_fetch_pattern_and_every_call_shape_is_read(self):
         fetched = [
