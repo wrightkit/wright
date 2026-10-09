@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.15.0](https://github.com/wrightkit/wright/compare/v0.14.0...v0.15.0) (2026-10-09)
+
+
+### Features
+
+* **bench:** --wait-for-limits on evaluate and suite waits out provider limits ([#586](https://github.com/wrightkit/wright/issues/586)) ([6aff2ea](https://github.com/wrightkit/wright/commit/6aff2ea0354580943b1e280eccd22177d44b41c3))
+* **bench:** lift cell set; a combined report no longer overwrites a run's own ([#588](https://github.com/wrightkit/wright/issues/588)) ([4b8ed30](https://github.com/wrightkit/wright/commit/4b8ed30d63070e721ae3f573cb66cb1ecf8d983e))
+
+
+### Bug Fixes
+
+* **analyzer:** locate findings at the nearest recorded span ([#578](https://github.com/wrightkit/wright/issues/578)) ([21fdc5e](https://github.com/wrightkit/wright/commit/21fdc5e268e059b81709007135ee4f5598b434ad))
+* **bench:** a run killed at the time limit keeps the model and effort it was launched with ([#587](https://github.com/wrightkit/wright/issues/587)) ([8a115b0](https://github.com/wrightkit/wright/commit/8a115b041709323f4f7b5ceffc3f145646a05c37))
+* **bench:** block package managers under network off and reject runs that fetch a withheld tool ([#585](https://github.com/wrightkit/wright/issues/585)) ([d89c804](https://github.com/wrightkit/wright/commit/d89c8044d31dfb71255025650e1f3967bd120cd2))
+* **driver:** classify provider edit failures by refusal vs execution fault ([#570](https://github.com/wrightkit/wright/issues/570)) ([#582](https://github.com/wrightkit/wright/issues/582)) ([f1d00d3](https://github.com/wrightkit/wright/commit/f1d00d36e1fb9fe1e567eae267fb0e52d95aa44f))
+* **driver:** propagate provider capability-query failure in compile ([#580](https://github.com/wrightkit/wright/issues/580)) ([0454d02](https://github.com/wrightkit/wright/commit/0454d024c3c61aa190c025077ae6c8b97d3a019f)), closes [#571](https://github.com/wrightkit/wright/issues/571)
+* **serve:** carry each rule's event binding in rules results ([#579](https://github.com/wrightkit/wright/issues/579)) ([8badb6a](https://github.com/wrightkit/wright/commit/8badb6a2bc627579d1fc61079382a88626c0e608))
+* **serve:** name the accepted shapes in untagged Address refusals ([#581](https://github.com/wrightkit/wright/issues/581)) ([b218443](https://github.com/wrightkit/wright/commit/b21844347b6b026d452f72705335a7b3a5d9ccb3))
+
+
+### Dependencies
+
+* move workshop-rs to 1.10.1 and render raw-setting suggestions ([#589](https://github.com/wrightkit/wright/issues/589)) ([1c21fea](https://github.com/wrightkit/wright/commit/1c21feaa9baeed94f3cedb095c775d33df6dbde3))
+
 ## [0.14.0](https://github.com/wrightkit/wright/compare/v0.13.0...v0.14.0) (2026-10-08)
 
 
