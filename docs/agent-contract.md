@@ -43,7 +43,16 @@ remapped default:
   `auto`, with the workflow aliases `ws`, `hir`, `json`);
 * `--profile <off|compat|aggressive>`: WIR transformation policy (default
   `off`);
-* `--locale <LOCALE>`: Workshop client locale override.
+* `--locale <LOCALE>`: Workshop client locale override;
+* `--lint-config <PATH>`, `--rule <PATH>`, `--disable-rule <ID>`,
+  `--rule-severity <ID>:<SEVERITY>`: explicit lint policy — the same file,
+  local rule paths, and overrides `wright lint` accepts, applied to every
+  lint-consuming operation the session serves (#594).
+
+A configured session example: `wright serve --lint-config policy.yaml
+--disable-rule repeated-value project.ws` serves `lint`/`lintRules`
+results under `policy.yaml` plus the disabled rule, reporting the same
+effective policy the equivalent `wright lint` invocation prints.
 
 Stdio returns one `ToolResponse` per request. A successful response has a
 `result` member; an application-level refusal has an `error` member containing
