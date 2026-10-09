@@ -71,6 +71,67 @@ fn workshop_check_reports_catalog_residuals() {
     );
 }
 
+/// A settings member the catalog does not declare is a `raw-setting`
+/// residual; when its name is close to one canonical spelling, the
+/// diagnostic keeps the did-you-mean that the owner's former rejection
+/// carried. A name close to nothing gets no suggestion.
+#[test]
+fn workshop_raw_setting_residual_suggests_the_canonical_spelling() {
+    let text = r#"settings
+{
+    main
+    {
+        Mode Nmae: "Synthetic"
+        zzWrightSyntheticUnknownKey: 1
+    }
+    modes
+    {
+        Team Deathmatch
+        {
+            Enabled Mpas
+            {
+                Busan
+            }
+        }
+    }
+}
+"#;
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: text.to_string(),
+            path: None,
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session creates");
+    let result = session.check();
+    assert!(result.ok, "check: {:?}", session.diagnostics());
+    let message = |code: &str| {
+        result
+            .diagnostics
+            .iter()
+            .find(|d| d.code == code)
+            .map(|d| d.message.clone())
+            .unwrap_or_else(|| panic!("{code} is reported: {:?}", result.diagnostics))
+    };
+    assert_eq!(
+        message("workshop.raw-setting.mode-nmae"),
+        "Workshop construct 'Mode Nmae' is partially supported (project-defined-construct) \
+         (did you mean 'Mode Name'?)"
+    );
+    assert_eq!(
+        message("workshop.raw-setting.enabled-mpas"),
+        "Workshop construct 'Enabled Mpas' is partially supported (project-defined-construct) \
+         (did you mean 'enabled maps'?)"
+    );
+    assert_eq!(
+        message("workshop.raw-setting.zzwrightsyntheticunknownkey"),
+        "Workshop construct 'zzWrightSyntheticUnknownKey' is partially supported \
+         (project-defined-construct)"
+    );
+}
+
 /// `sqrt` is a foldable spelling that the canonical catalog does not model, so
 /// it survives parsing as an unknown-value residual; `fold-constants` would
 /// remove it from the transformed program. Completeness diagnostics describe

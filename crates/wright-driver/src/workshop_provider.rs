@@ -67,12 +67,15 @@ pub(crate) fn map_issue(
     };
     let code = diagnostic_code(kind_code, &issue.name);
     let status = status_for_classification(issue.classification);
-    let message = format!(
+    let mut message = format!(
         "Workshop construct '{}' is {} ({})",
         issue.name,
         status_name(status),
         issue.classification.as_str()
     );
+    if let Some(spelling) = &issue.suggestion {
+        message.push_str(&format!(" (did you mean '{spelling}'?)"));
+    }
     ProviderDiagnostic {
         code,
         severity,
