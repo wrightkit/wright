@@ -98,7 +98,7 @@ python3 benchmarks/agent/agent_bench.py evaluate --adapter devin --model swe-2-m
 python3 benchmarks/agent/agent_bench.py report ~/.local/share/wright-agent-bench/runs/<score-run> ~/.local/share/wright-agent-bench/runs/devin-swe-2-max-lift --reference none/none/off --out-dir <where-to-write>
 ```
 
-`--cells lift` runs the baseline (no tools), Wright alone, and, for OverPy tasks, OverPy alone. The canonical cell with Wright and its skill is not rerun: it is the earlier score run. If the paired intervals already exclude zero, you are done. If they do not, repeat the first command with `--trials 2`, then `--trials 3`; only the missing trials run. Use the same Wright binary as the score run (pass `--wright` with it); a different one is refused.
+`--cells lift` runs the baseline (no tools), Wright alone, and, for OverPy tasks, OverPy alone. The canonical cell with Wright and its skill is not rerun: it is the earlier score run. If the paired lift interval (the `paired lift [95% CI]` column: a clustered bootstrap over scenarios of the per-pair usable difference) already excludes zero, you are done. If it does not, repeat the first command with `--trials 2`, then `--trials 3`; only the missing trials run. Use the same Wright binary as the score run (pass `--wright` with it): a matched pair whose recorded environment differs between the two directories — binary, suite, model, protocol, or enforcement — is dropped from the table and reported as non-comparable.
 
 A report over several run directories is printed and written only where `--out-dir` says, so it never replaces a run's own report.
 

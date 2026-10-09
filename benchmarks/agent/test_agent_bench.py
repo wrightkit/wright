@@ -1112,13 +1112,14 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0]["_trial"], 2)
 
-    def result(self, cell, trial, usable, tokens, split=None, scenario="s", language="opy", status="completed"):
+    def result(self, cell, trial, usable, tokens, split=None, scenario="s", language="opy", status="completed", **environment):
         tool = cell.split("/")[0].split("+")[0]
         return {
             "contract": "wright-agent-bench/v3", "scenario": scenario, "family": "diagnosis", "language": language, "split": split, "_trial": trial, "_dir": Path("d"),
             "condition": {"label": cell}, "agent": {"id": "m", "exit": 0, "seconds": 1.0}, "status": status,
             "usable": usable, "passed": usable, "usage": {"totalTokens": tokens, "peakContext": tokens // 2},
             "toolUse": {"wright": {"invocations": 1}} if tool == "wright" else {},
+            "environment": environment,
         }
 
     def test_wilson_interval(self):
@@ -1144,6 +1145,22 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("Paired against `none/wiki/off`", text)
         text, _ = bench_report.render(runs, references=["missing/cell/here"])
         self.assertNotIn("Paired against", text)
+
+    def test_paired_lift_reports_an_interval_and_drops_pairs_from_a_different_environment(self):
+        runs = [
+            self.result("none/none/off", 1, False, 100, scenario="a", wrightSha256="x"),
+            self.result("wright/none/off", 1, True, 80, scenario="a", wrightSha256="x"),
+            self.result("none/none/off", 2, True, 100, scenario="b", wrightSha256="x"),
+            self.result("wright/none/off", 2, True, 90, scenario="b", wrightSha256="y"),  # a different binary: not one experiment
+            self.result("wright+wright-skill/none/off", 1, True, 70, scenario="a", wrightSha256="x", skills={"wright-skill": {"sha256": "s"}}),
+        ]
+        text, _ = bench_report.render(runs)
+        self.assertIn("paired lift [95% CI]", text)
+        self.assertIn("+100pp", text)  # only pair `a` survives: baseline unusable, wright usable
+        self.assertIn("wrightSha256", text)  # the b pair is dropped and reported, not silently mixed
+        self.assertIn("Non-comparable pairs dropped", text)
+        self.assertIn("| wright/none/off vs none/none/off | 1 | +1 / -0 |", text)  # only the comparable `a` pair counts
+        self.assertIn("wright+wright-skill/none/off vs none/none/off", text)  # the skill difference is the variable being measured
 
     def test_scenario_discrimination_flags(self):
         runs = [
