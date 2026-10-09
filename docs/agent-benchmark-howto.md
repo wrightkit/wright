@@ -71,6 +71,8 @@ release procedure uses it; see [release.md](release.md). `--wait-for-limits` wai
 provider limits and resumes, so a run may take more than a day. Run it again with the same
 `--name` to continue an interrupted run.
 
+If a provider limit stops a model on `evaluate` or `suite` (for example a free-tier quota), add `--wait-for-limits`: instead of ending with exit code 3, the run waits `--limits-poll` seconds (2100 — 35 minutes — by default) and continues, up to `--max-waits` times (48 by default, about a day).
+
 ## Run one model
 
 ```sh

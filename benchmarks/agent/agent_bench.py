@@ -787,6 +787,34 @@ def wright_mismatch(run_dir: Path, wright: str) -> str | None:
     return None
 
 
+def non_negative_int(value: str) -> int:
+    """argparse type: reject negative numbers where a duration or count is wanted, instead of failing deep inside the run."""
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer")
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"{value!r} is negative")
+    return parsed
+
+
+def matrix_waiting_for_limits(args: argparse.Namespace) -> int:
+    """Run the matrix; with --wait-for-limits, wait out each provider limit or outage that stops it and continue, instead of exiting to be repeated by hand."""
+    waiting = bool(getattr(args, "wait_for_limits", False))
+    poll = getattr(args, "limits_poll", 2100)
+    max_waits = getattr(args, "max_waits", 48)
+    if waiting and (poll < 0 or max_waits < 0):
+        raise SystemExit("--limits-poll and --max-waits must not be negative")
+    status = cmd_matrix(args)
+    waited = 0
+    while status == 3 and waiting and waited < max_waits:
+        waited += 1
+        print(f"waiting {poll} seconds for the provider limit to reset (wait {waited} of {max_waits}), then continuing", flush=True)
+        time.sleep(poll)
+        status = cmd_matrix(args)
+    return status
+
+
 def cmd_evaluate(args: argparse.Namespace) -> int:
     """One command from agent and model to data and document: run the matrix, then write report, score cards, and RESULTS.md.
 
@@ -840,7 +868,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
                           "wiki_dir": str(args.wiki_dir.expanduser().resolve()) if args.wiki_dir else None}}
     args.config = args.out / "matrix.json"
     args.config.write_text(json.dumps(config, indent=2) + "\n")
-    status = cmd_matrix(args)
+    status = matrix_waiting_for_limits(args)
     if not list(args.out.glob("*/*/*/result.json")):
         return status or 1
     bench_report.main([args.out], args.wright, False, lambda s: load_scenario(s, getattr(args, "private_suite", None)), references_of(args))
@@ -942,7 +970,8 @@ def cmd_track(args: argparse.Namespace) -> int:
             sub = argparse.Namespace(**{**vars(args), "adapter": entry["adapter"], "model": entry["model"], "effort": entry.get("effort"),
                                         "name": slug, "out": root, "cells": "controls", "cell_list": definition["cells"],
                                         "split": definition["split"], "scenarios": None, "trials": definition["trials"],
-                                        "parallel": definition["parallel"], "seed": definition["seed"], "reference": None})
+                                        "parallel": definition["parallel"], "seed": definition["seed"], "reference": None,
+                                        "wait_for_limits": False})  # this loop owns the waiting; an inner wait would multiply it
             try:
                 status = cmd_evaluate(sub)
                 outcome[slug] = {0: "done", 3: "waiting: provider limit or outage, rerun later"}.get(status, "finished with errors")
@@ -981,7 +1010,7 @@ def cmd_setup_oracle(_: argparse.Namespace) -> int:
     return subprocess.call(["npm", "ci", "--silent"], cwd=bench_grade.ORACLE)
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("suite", help="evaluate every model listed in the user config in turn, then write the results page")
@@ -1031,10 +1060,13 @@ def main() -> int:
     su.add_argument("--seed", type=int, default=1)
     su.add_argument("--dry-run", action="store_true")
     su.add_argument("--no-file-sandbox", action="store_true")
+    su.add_argument("--wait-for-limits", action="store_true", help="when a provider limit or outage stops a model, wait --limits-poll seconds and continue, up to --max-waits times")
+    su.add_argument("--limits-poll", type=non_negative_int, default=2100, metavar="SECONDS", help="seconds between resume attempts under --wait-for-limits (35 minutes by default)")
+    su.add_argument("--max-waits", type=non_negative_int, default=48, help="how many times --wait-for-limits waits before giving up")
     tr = sub.choices["track"]
     tr.add_argument("--name", default=time.strftime("track-%Y%m%d"), help="run directory under --out; repeating the same name resumes that run")
     tr.add_argument("--wait-for-limits", action="store_true", help="when a provider limit interrupts a model, wait --limits-poll seconds and resume until the definition is complete")
-    tr.add_argument("--limits-poll", type=int, default=2100, help="seconds between resume attempts under --wait-for-limits")
+    tr.add_argument("--limits-poll", type=non_negative_int, default=2100, metavar="SECONDS", help="seconds between resume attempts under --wait-for-limits")
     tr.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
     tr.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox")
     publish = sub.add_parser("publish", help="build allow-listed hosted results and upload to the release bucket")
@@ -1054,6 +1086,9 @@ def main() -> int:
     ev.add_argument("--reference", action="append", help="condition label the report's paired comparison is made against; repeatable (default: none/none/off)")
     ev.add_argument("--dry-run", action="store_true", help="check the setup and print what would run, without running it")
     ev.add_argument("--no-file-sandbox", action="store_true", help="run without the macOS file sandbox: the agent can then read the scenario answer keys")
+    ev.add_argument("--wait-for-limits", action="store_true", help="when a provider limit or outage stops the run, wait --limits-poll seconds and continue, instead of exiting with code 3")
+    ev.add_argument("--limits-poll", type=non_negative_int, default=2100, metavar="SECONDS", help="seconds between resume attempts under --wait-for-limits (35 minutes by default)")
+    ev.add_argument("--max-waits", type=non_negative_int, default=48, help="how many times --wait-for-limits waits before giving up (48 by default, about a day)")
     sub.add_parser("setup-oracle", help="install the pinned upstream OverPy oracle")
     skill = sub.add_parser("wiki-skill", help="build the progressive-disclosure workshop-skill from a wiki snapshot")
     skill.add_argument("--snapshot", type=Path, required=True)
@@ -1083,7 +1118,11 @@ def main() -> int:
     for name in ("evaluate", "suite", "track"):
         sub.choices[name].set_defaults(wright=defaults.get("wright") or shutil.which("wright") or str(ROOT / "target/debug/wright"))
     sub.choices["suite"].set_defaults(models=defaults.get("models"))
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
     if hasattr(args, "wright"):
         args.wright = str(Path(args.wright).resolve())
     if hasattr(args, "out"):
