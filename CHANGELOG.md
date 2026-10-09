@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/wrightkit/wright/compare/v0.15.0...v0.15.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **driver+cli:** service workflows without snapshot prewarm; validated and configured serve startup ([#596](https://github.com/wrightkit/wright/issues/596)) ([78a3a0e](https://github.com/wrightkit/wright/commit/78a3a0eb5e7d6e2d80fbf51604ed281e33589d9d))
+* **driver:** run service check/compile without a canonical snapshot prewarm ([#599](https://github.com/wrightkit/wright/issues/599)) ([8317ca1](https://github.com/wrightkit/wright/commit/8317ca1ec0b1edbfa68a50b3ac31d365c430f885))
+
 ## [0.15.0](https://github.com/wrightkit/wright/compare/v0.14.0...v0.15.0) (2026-10-09)
 
 
