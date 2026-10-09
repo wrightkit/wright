@@ -1708,11 +1708,17 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
             max: None,
         },
         ToolRequest::Project,
-        ToolRequest::Check,
     ] {
         let code = refusal_code(&mut service, &request);
         assert_eq!(code, "parse-error", "{request:?}");
     }
+    // `check` is a workflow (#591): its own load surfaces the same
+    // `parse-error` inside the envelope, not as a `ToolResponse` refusal.
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+        panic!("check returns the workflow envelope")
+    };
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["diagnostics"][0]["code"], "parse-error");
     assert!(matches!(
         service.handle(&ToolRequest::Capabilities),
         ToolResponse::Ok { .. }
@@ -2221,7 +2227,6 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             file: None,
             max: None,
         },
-        ToolRequest::Check,
         ToolRequest::References {
             symbol: 0.into(),
             kind: None,
@@ -2236,6 +2241,15 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             "{request:?}"
         );
     }
+
+    // `check`/`compile` are workflows (#591): the same loader diagnostic
+    // rides the `wright-result/v1` envelope instead of a `ToolResponse`
+    // refusal, matching the embedding `check`/`compile` methods exactly.
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+        panic!("check returns the workflow envelope")
+    };
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["diagnostics"][0]["code"], "input-io");
 
     // A provider mutation carrying its own documents does not trigger the
     // load: an unconfigured language is the provider refusal result, not the
@@ -2345,7 +2359,6 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
 
     for request in [
         ToolRequest::Project,
-        ToolRequest::Compile,
         ToolRequest::Symbols {
             kind: None,
             file: None,
@@ -2358,6 +2371,12 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
             "{request:?}"
         );
     }
+    // `compile` reports the same diagnostic inside its envelope (#591).
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+        panic!("compile returns the workflow envelope")
+    };
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["diagnostics"][0]["code"], "parse-error");
 
     std::fs::write(&input, FRESHNESS_V1).unwrap();
     let project = result_of(&mut service, &ToolRequest::Project);

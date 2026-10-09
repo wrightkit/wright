@@ -639,6 +639,274 @@ fn pinned_bastion_findings_resolve_to_authored_opy_locations() {
     }
 }
 
+/// A provider that can check but refuses compile — the "check-only provider
+/// path" #591 requires `check` to execute on without a compile prewarm.
+struct CheckOnlyProvider {
+    operations: Arc<Mutex<Vec<&'static str>>>,
+}
+
+impl SourceProvider for CheckOnlyProvider {
+    fn language(&self) -> SourceLanguage {
+        SourceLanguage::Opy
+    }
+
+    fn check(&mut self, _target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
+        self.operations
+            .lock()
+            .expect("operation lock")
+            .push("check");
+        Ok(SourceCompilation {
+            workshop_text: None,
+            locale: Some("en-US".to_string()),
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        })
+    }
+
+    fn compile(
+        &mut self,
+        _target: &SourceTarget,
+    ) -> Result<SourceCompilation, SourceProviderError> {
+        self.operations
+            .lock()
+            .expect("operation lock")
+            .push("compile");
+        Err(SourceProviderError::Unsupported {
+            message: "this provider has no canonical compile capability".to_string(),
+        })
+    }
+}
+
+/// A provider that re-compiles on every call — the repeatable counterpart
+/// of `RecordingProvider`, which takes its scripted result once. Its
+/// operations log lets a test distinguish which provider operation ran.
+struct ReloadableProvider {
+    operations: Arc<Mutex<Vec<&'static str>>>,
+    workshop_text: String,
+}
+
+impl SourceProvider for ReloadableProvider {
+    fn language(&self) -> SourceLanguage {
+        SourceLanguage::Opy
+    }
+
+    fn check(&mut self, _target: &SourceTarget) -> Result<SourceCompilation, SourceProviderError> {
+        self.operations
+            .lock()
+            .expect("operation lock")
+            .push("check");
+        Ok(SourceCompilation {
+            workshop_text: None,
+            locale: Some("en-US".to_string()),
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        })
+    }
+
+    fn compile(
+        &mut self,
+        _target: &SourceTarget,
+    ) -> Result<SourceCompilation, SourceProviderError> {
+        self.operations
+            .lock()
+            .expect("operation lock")
+            .push("compile");
+        Ok(SourceCompilation::success(self.workshop_text.clone()))
+    }
+}
+
+/// #591: `check` and `compile` are workflows, not snapshot queries — the
+/// service must run them through the operation-aware provider calls without
+/// first requiring a canonical compile result.
+#[test]
+fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
+    let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider = CheckOnlyProvider {
+        operations: Arc::clone(&operations),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry.clone()),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let mut service = ToolService::new(&mut session).expect("service constructs");
+
+    // A service over a check-only provider starts with no snapshot — the
+    // construction never compiles just to warm one.
+    assert!(service.loaded().is_none());
+    assert_eq!(service.reload_count(), 0);
+
+    // `check` executes the provider's check operation directly.
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+        panic!("check must return the workflow envelope")
+    };
+    assert_eq!(result["command"], "check");
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(*operations.lock().expect("ops"), vec!["check"]);
+
+    // The direct method is the same workflow: check again, still no
+    // compile-only provider call just to establish a query snapshot.
+    assert!(service.check().ok);
+    assert_eq!(*operations.lock().expect("ops"), vec!["check", "check"]);
+
+    // Canonical queries still refuse explicitly — no compile capability
+    // means no snapshot, not a placeholder program.
+    for request in [
+        ToolRequest::Project,
+        ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+        ToolRequest::LintRules,
+    ] {
+        let ToolResponse::Error { error } = service.handle(&request) else {
+            panic!("{request:?} must refuse on the check-only path")
+        };
+        assert_eq!(error.code, "source-provider-unsupported", "{request:?}");
+    }
+    assert_eq!(
+        *operations.lock().expect("ops"),
+        vec!["check", "check"],
+        "snapshot queries refuse without asking the provider to compile"
+    );
+
+    // `compile` is the provider's own refusal, in the envelope — not the
+    // service's snapshot precondition.
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+        panic!("compile must return the workflow envelope")
+    };
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(
+        result["diagnostics"][0]["code"], "source-provider-unsupported",
+        "the provider's compile refusal rides the envelope: {result}"
+    );
+    assert_eq!(
+        *operations.lock().expect("ops"),
+        vec!["check", "check", "compile"]
+    );
+    cleanup(dir);
+}
+
+/// #591: a successful `compile` establishes the snapshot later queries read,
+/// and an observed disk change re-runs the operation-aware load — recovery
+/// is the same workflow, never a re-prewarm requirement.
+#[test]
+fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
+    let (dir, entry) = temp_entry();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let provider = ReloadableProvider {
+        operations: Arc::clone(&operations),
+        workshop_text: workshop_fixture("synthetic/control-flow"),
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry.clone()),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let mut service = ToolService::new(&mut session).expect("service constructs");
+
+    // A fresh service holds no snapshot until a workflow establishes one.
+    assert!(service.loaded().is_none());
+
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+        panic!("compile must return the workflow envelope")
+    };
+    assert_eq!(result["ok"], true, "{result}");
+    assert!(service.loaded().is_some(), "compile supplied the snapshot");
+
+    // The adopted snapshot serves queries — no second provider compile.
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Project) else {
+        panic!("project reads the established snapshot")
+    };
+    assert!(result["rules"].as_u64().unwrap() > 0, "{result}");
+    assert_eq!(*operations.lock().expect("ops"), vec!["compile"]);
+
+    // A disk change under the session invalidates the snapshot; `compile`
+    // re-resolves through the provider's own operation and re-establishes it.
+    std::fs::write(&entry, "// edited project source").expect("edit entry");
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+        panic!("check must return the workflow envelope")
+    };
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(
+        *operations.lock().expect("ops"),
+        vec!["compile", "check"],
+        "an observed change re-checks instead of serving the stale program"
+    );
+    assert!(
+        service.loaded().is_none(),
+        "a provider check supplies no canonical snapshot"
+    );
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+        panic!("compile must return the workflow envelope")
+    };
+    assert_eq!(result["ok"], true, "{result}");
+    assert!(
+        service.loaded().is_some(),
+        "compile re-supplied the snapshot"
+    );
+    assert_eq!(
+        *operations.lock().expect("ops"),
+        vec!["compile", "check", "compile"]
+    );
+    cleanup(dir);
+}
+
+/// #591: `handle` check/compile and the direct service methods deliver the
+/// same workflow outcome over the same provider session.
+#[test]
+fn service_check_and_compile_match_the_direct_workflow_methods() {
+    for via_request in [true, false] {
+        let (dir, entry) = temp_entry();
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let provider = ReloadableProvider {
+            operations: Arc::clone(&operations),
+            workshop_text: workshop_fixture("synthetic/basic-rule"),
+        };
+        let config = SessionConfig {
+            input: InputSpec::Path(entry.clone()),
+            kind: SourceKind::Opy,
+            ..SessionConfig::default()
+        };
+        let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+            .expect("provider session");
+        let mut service = ToolService::new(&mut session).expect("service constructs");
+
+        let check = if via_request {
+            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+                panic!("check must return the workflow envelope")
+            };
+            result
+        } else {
+            serde_json::to_value(service.check()).expect("envelope serializes")
+        };
+        assert_eq!(check["command"], "check");
+        assert_eq!(check["ok"], true, "{check}");
+        assert_eq!(*operations.lock().expect("ops"), vec!["check"]);
+
+        let compile = if via_request {
+            let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+                panic!("compile must return the workflow envelope")
+            };
+            result
+        } else {
+            serde_json::to_value(service.compile()).expect("envelope serializes")
+        };
+        assert_eq!(compile["command"], "compile");
+        assert_eq!(compile["ok"], true, "{compile}");
+        assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
+        cleanup(dir);
+    }
+}
+
 #[test]
 fn provider_backend_rejects_stdin_without_fabricating_an_entry() {
     let config = SessionConfig {
