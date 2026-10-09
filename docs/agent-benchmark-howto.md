@@ -144,7 +144,7 @@ The agent program runs the model, so the same model scores differently under dif
 
 - The score is the share of tasks an agent finished with a valid, safe result. A bar shows it; the bracketed range is the 95% interval.
 - With 8 tasks per language the range is wide. A row marked "tied with top" cannot be told apart from the first.
-- It is a reference for how an agent behaves with Wright and its guide, not a measure of general ability. Network access is off by instruction; package managers and downloaders are blocked, the network itself is not.
+- It is a reference for how an agent behaves with Wright and its guide, not a measure of general ability. Network access is off by instruction; package managers and downloaders are blocked, the network itself is not. Runs marked `fetch-blocked+canary-checked` also ran `--canary-cmd` on the host `PATH`, so a reachable network would have failed it.
 
 ## When something goes wrong
 
