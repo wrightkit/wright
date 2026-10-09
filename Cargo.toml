@@ -11,7 +11,7 @@ repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
 # Canonical Workshop core.
-workshop-rs = "1.10.1"
+workshop-rs = "1.12.0"
 libc = "0.2"
 serde = "1"
 serde_json = "1"
@@ -56,10 +56,3 @@ debug = 1
 [profile.test.package."*"]
 debug = false
 
-# Canonical Workshop core. The rev is pinned to the workshop-rs commit that
-# adds `Program::set_file_source` and drops stale settings spans when a
-# source map rebinds the file table (wright#583, workshop-rs
-# feat/program-set-file-source); retarget to the crates.io release once the
-# API ships in a published version.
-[patch.crates-io]
-workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "62b20df" }
