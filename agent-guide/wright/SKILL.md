@@ -14,10 +14,11 @@ Wright is the semantic tooling for these projects: it parses, validates, lints, 
 - **Is it risky or expensive?** `lint` for stable-rule findings, `analyze` for element cost, hotspots, and shared state. Run these alongside `check`, before and after a change.
 - **What does this symbol or rule do, and what breaks if I change it?** `inspect` (symbols, refs, cfg, callgraph, cost) resolves by name and follows semantics where grep only matches text. It works on raw Workshop, not OPY (see the language notes).
 - **Many questions about one project?** `wright serve` loads it once.
-- **Calling Wright through code execution or another tool harness?** `wright agent tools` emits every advertised operation as client tool definitions (Anthropic Messages API by default, `--format json-schema` otherwise).
+- **Result too large to read at once?** `--brief` on `analyze`, `lint`, or a bare `inspect` (v0.11.0+) returns the counts and top items with an `expand` pointer back to the full result; use the full result when you need every item.
+- **Unsure of a name, or a name was rejected?** `wright lookup <query> --language workshop|opy` (v0.11.0+) resolves the owner-accepted spelling and signature; `--within <enum or callable>` lists its members or parameters. Check before writing in a language you do not know, and again when `check` rejects a name.
 - **Need Workshop output, or OPY from raw Workshop?** `compile`, `convert`. `convert` reconstructs, it does not recover your source.
 
-Prefer `--format json` when you will act on the result. Reach for `--brief` on `lint`, `analyze`, and `inspect` first: it returns counts, the highest-priority items, and an expansion hint at a fraction of the full result — drop the flag when you need everything. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
+Prefer `--format json` when you will act on the result. Take a baseline before editing and compare after, so you can separate your findings from existing ones.
 
 ## Judgment that is easy to miss
 
