@@ -590,7 +590,8 @@ def base_result(scenario: dict, cell: dict, args: argparse.Namespace, out: Path,
         "language": scenario["language"],
         "split": scenario.get("split"),
         "condition": {**cell, "label": cell_label(cell)},
-        "agent": {"id": args.agent_id, "command": args.agent_cmd, "exit": agent_exit, "seconds": seconds},
+        "agent": {"id": args.agent_id, "command": args.agent_cmd, "exit": agent_exit, "seconds": seconds,
+                  "model": getattr(args, "agent_model", None), "effort": getattr(args, "agent_effort", None)},  # as launched, so a killed run keeps them
         "protocol": {"timeoutSeconds": args.timeout, "infraRetries": args.infra_retries},
         "environment": {
             "os": platform.platform(), "python": platform.python_version(),
@@ -691,7 +692,8 @@ def cmd_matrix(args: argparse.Namespace) -> int:
             if state["streak"] >= STOP_AFTER_INTERRUPTIONS:
                 state["unattempted"] += 1
                 return
-        trial_args = argparse.Namespace(**{**merged, "agent_id": agent["id"], "agent_cmd": agent["cmd"]})
+        trial_args = argparse.Namespace(**{**merged, "agent_id": agent["id"], "agent_cmd": agent["cmd"],
+                                           "agent_model": agent.get("model"), "agent_effort": agent.get("effort")})
         result = run_trial(load_scenario(scenario_id, getattr(trial_args, "private_suite", None)), cell, trial_args, out)
         with lock:
             state["streak"] = state["streak"] + 1 if result["status"] == "provider-interrupted" else 0
@@ -825,7 +827,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     args.out = args.out / args.name
     args.out.mkdir(parents=True, exist_ok=True)
     # every option a trial reads is serialized at its effective value, so `matrix` on this file reproduces the run
-    config = {"agents": [{"id": agent_id, "cmd": cmd}], "cells": cells, "scenarios": scenarios, "trials": args.trials, "parallel": args.parallel, "seed": args.seed,
+    config = {"agents": [{"id": agent_id, "cmd": cmd, "model": args.model, "effort": args.effort}], "cells": cells, "scenarios": scenarios, "trials": args.trials, "parallel": args.parallel, "seed": args.seed,
               "options": {"out": ".", "out_root": "..", "wright": args.wright, "adapter": args.adapter,
                           "private_suite": str(Path(args.private_suite).resolve()) if getattr(args, "private_suite", None) else None,
                           "file_sandbox": args.file_sandbox, "env_pass": args.env_pass, "credentials": args.credentials,

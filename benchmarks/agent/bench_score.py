@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import random
+import shlex
 from collections import defaultdict
 from math import comb
 from pathlib import Path
+
+from adapters.common import split_effort
 
 CONTRACT = "wright-agent-score/v1"
 CANONICAL = "wright+wright-skill/none/off"
@@ -61,9 +64,31 @@ def private_id(run: dict) -> str:
     return name if re.fullmatch(r"private-[0-9]+", name) else "private-" + hashlib.sha256(name.encode()).hexdigest()[:24]
 
 
+def requested_model(command: str) -> tuple[str | None, str | None]:
+    """The model and effort an adapter was launched with, read from the recorded command (BENCH_MODEL=, BENCH_THINKING=)."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None, None
+    values = {w.split("=", 1)[0]: w.split("=", 1)[1] for w in words if w.startswith(("BENCH_MODEL=", "BENCH_THINKING="))}
+    model, effort = values.get("BENCH_MODEL"), values.get("BENCH_THINKING")
+    base, implied = split_effort(model) if model else (None, None)
+    return base, effort or implied
+
+
 def identity_of(run: dict) -> dict:
     env = run["environment"]
-    info = run.get("agentInfo") or {}
+    agent = run.get("agent") or {}
+    info = dict(run.get("agentInfo") or {})
+    # a run killed at the time limit leaves no agent info; its model and effort are what it was launched with — recorded
+    # on the agent entry, or parsed from the recorded command in runs made before that field existed
+    parsed_model, parsed_effort = requested_model(agent.get("command") or "")
+    model = info.get("model") or agent.get("model") or parsed_model
+    effort = info.get("effort") or agent.get("effort") or parsed_effort
+    if model:  # adapters differ on whether the effort is part of the model id; split the same way on both sides of a kill
+        model, implied = split_effort(model)
+        effort = effort or implied
+    info["model"], info["effort"] = model, effort
     return {
         "wrightSha256": env.get("wrightSha256"), "wright": env.get("wright"),
         "skills": {name: s["sha256"] for name, s in sorted((env.get("skills") or {}).items())},
