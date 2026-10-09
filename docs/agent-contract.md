@@ -34,6 +34,17 @@ request per line on stdio:
 {"op":"check"}
 ```
 
+Startup options configure the session before the first request is served;
+an unknown value is a startup usage error (exit 2), never a silently
+remapped default:
+
+* `--transport <stdio|jsonrpc|mcp>`: request transport (default `stdio`);
+* `--kind <auto|opy|ostw|workshop|protocol>`: input frontend (default
+  `auto`, with the workflow aliases `ws`, `hir`, `json`);
+* `--profile <off|compat|aggressive>`: WIR transformation policy (default
+  `off`);
+* `--locale <LOCALE>`: Workshop client locale override.
+
 Stdio returns one `ToolResponse` per request. A successful response has a
 `result` member; an application-level refusal has an `error` member containing
 `code` and `message`. The schema defines supported request fields; current

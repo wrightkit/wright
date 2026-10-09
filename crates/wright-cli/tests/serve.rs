@@ -1411,3 +1411,68 @@ for line in sys.stdin:
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── #593: serve startup arguments reject unknown values ─────────────────────
+// `--kind`/`--profile`/`--transport` share the workflow vocabulary: a typo is
+// a usage error naming the accepted values, never a silently remapped
+// default.
+
+#[test]
+fn unknown_serve_kind_profile_and_transport_are_usage_errors() {
+    let input = corpus_workshop("synthetic/basic-rule");
+    for (flag, value) in [
+        ("--kind", "workshpo"),
+        ("--profile", "compatt"),
+        ("--transport", "pipes"),
+    ] {
+        let output = Command::new(wright())
+            .args(["serve", flag, value])
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "serve {flag} {value} must be a usage error"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("expected one of") || stderr.contains("possible values"),
+            "the usage error names the accepted values: {stderr}"
+        );
+        // Nothing served: the error precedes session startup.
+        assert!(output.stdout.is_empty(), "{flag} served a response");
+    }
+}
+
+#[test]
+fn accepted_serve_kind_profile_and_transport_values_still_work() {
+    let input = corpus_workshop("synthetic/basic-rule");
+    let default = run_lines("stdio", &input, &[r#"{"op":"check"}"#]);
+    assert_eq!(default[0]["result"]["ok"], true, "{default:?}");
+
+    // `--kind` keeps the workflow aliases (`ws` for workshop); `--profile`
+    // accepts the documented spellings.
+    let mut child = Command::new(wright())
+        .args(["serve", "--kind", "ws", "--profile", "compat"])
+        .arg(&input)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("serve --kind ws --profile compat runs");
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(stdin, r#"{{"op":"check"}}"#).unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "serve exited: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
+    // Omitted kind/profile retain auto/off: both sessions serve the same
+    // check envelope for this fixture.
+    assert_eq!(response["result"], default[0]["result"]);
+}
