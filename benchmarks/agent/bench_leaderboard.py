@@ -35,8 +35,16 @@ def reading(data: dict) -> list[str]:
 def limits(data: dict) -> list[str]:
     scenarios, _ = suite_shape(data)
     networks = {n for e in data["entries"] for n in e["network"]}
-    network = ("The harness verified that the network was unreachable on every run." if networks == {"canary-checked"}
-               else "Network access was switched off by instruction only for at least some runs; the harness did not block it.")
+    if networks and networks <= {"canary-checked", "fetch-blocked+canary-checked"}:
+        network = "The harness verified that the network was unreachable on every run."
+    elif networks and networks <= {"fetch-blocked", "fetch-blocked+canary-checked"}:
+        network = "Network access was off by instruction. The harness blocked package managers and downloaders and rejected runs that fetched a withheld tool, but it did not block the network itself."
+    elif networks <= {"declared-only"}:
+        network = "Network access was off by instruction only; the harness neither blocked nor verified it."
+    elif networks == {"unrestricted"}:
+        network = "Network access was unrestricted on these runs."
+    else:
+        network = "Network access was off by instruction; how it was enforced differs between these runs — see each run's networkEnforcement."
     return [
         network,
         "A run that hit the time limit counts as a failure. Runs cut off by provider outages are retried, not counted.",

@@ -146,6 +146,16 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(card["cards"][0]["score"], 100.0)
         self.assertEqual(bench_score.main([root], ["workshop"], {"workshop": SCENARIOS}, None), 2)
 
+    def test_runs_made_before_fetch_blocking_are_not_comparable_with_blocked_runs(self):
+        # the blockers changed what a canonical run can reach: a pre-change 'declared-only' run must not merge with one
+        mixed = runs(set(SCENARIOS)) + [run("s0", 9, True, networkEnforcement="fetch-blocked")]
+        c = bench_score.card(mixed, "opy", SCENARIOS)
+        self.assertIn("networkEnforcement", c["refused"])
+        blocked = runs(set(SCENARIOS), networkEnforcement="fetch-blocked")
+        card = bench_score.card(blocked, "opy", SCENARIOS)
+        self.assertNotIn("declared-only", card["networkEnforcement"])
+        self.assertNotIn("declaration only", bench_score.render(card))
+
     def test_compare_tables_runs_and_warns_when_the_environment_differs(self):
         root = Path(tempfile.mkdtemp(dir=Path(__file__).resolve().parents[2] / "target"))
         self.addCleanup(shutil.rmtree, root, True)

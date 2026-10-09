@@ -298,6 +298,98 @@ def call_counts(path: Path) -> dict[str, int] | None:
     return counts or None
 
 
+COMMAND_KEYS = ("command", "cmd")
+ARG_KEYS = ("arguments", "input", "params", "args")
+NAME_KEYS = ("name", "function_name", "tool_name", "toolName", "function")
+CALL_TYPES = ("tool_use", "tool_call", "toolCall", "function_call", "functionCall", "command_execution", "local_shell_call", "custom_tool_call", "mcp_tool_call", "shell", "bash", "exec")
+
+
+def is_call(node) -> bool:
+    """A dict that records a tool call rather than merely looking like one: a typed call record, or a named entry carrying its arguments."""
+    return isinstance(node, dict) and (
+        node.get("type") in CALL_TYPES
+        or any(key in node for key in NAME_KEYS) and any(key in node for key in (*ARG_KEYS, *COMMAND_KEYS)))
+
+
+def shell_commands(path: Path):
+    """Every shell command a transcript records inside a tool call: the `command`/`cmd` field — or a JSON-encoded
+    `arguments`/`input` payload — of a call-shaped entry. A message that only quotes such a payload is not a command."""
+    def walk(node, in_call: bool):
+        if isinstance(node, dict):
+            in_call = in_call or is_call(node)
+            for key, value in node.items():
+                if in_call and key in COMMAND_KEYS and isinstance(value, str):
+                    yield value
+                elif in_call and key in COMMAND_KEYS and isinstance(value, list) and all(isinstance(part, str) for part in value):
+                    yield " ".join(value)
+                elif in_call and key in ARG_KEYS and isinstance(value, str) and value.startswith(("{", "[")) and len(value) < 200_000:
+                    try:
+                        yield from walk(json.loads(value), True)
+                    except ValueError:
+                        pass
+                else:
+                    yield from walk(value, in_call)
+        elif isinstance(node, list):
+            for item in node:
+                yield from walk(item, in_call)
+    for event in transcript_events(path):
+        yield from walk(event, False)
+
+
+# fetching or running a withheld tool through a package manager or downloader, in three shapes:
+#  - install verbs (npm install, pipx install, apt install, brew install, docker pull, gh repo clone, ...) match the
+#    name anywhere in the same command segment, since install verbs take package specs as arguments;
+#  - run verbs (npx, bunx, uvx, uv tool run, uv run --with, go run, pipx run, npm/pnpm/yarn/bun exec|dlx) require the
+#    name to be the first non-flag argument — the fetched package — so `npx prettier --write docs/overpy.md` or
+#    `uv run report.py --project overpy` is not a fetch;
+#  - downloaders (wget, git clone, gh release download, rsync/scp, curl with -o/--output/>) require the name to be
+#    the basename of the fetched URL or repo (`.../opy-rs`, `.../wright-aarch64-apple-darwin.tar.gz`), so a document
+#    path like `.../overpy-guide.html` is not a fetch.
+_PKGOPS = (
+    r"(?:\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|pack)\b|\byarn\s+global\s+add\b"
+    r"|\b(?:pip3?|pipx)\s+(?:install|download|add)\b|-m\s+pip\s+(?:install|download)\b"
+    r"|\buv\s+(?:add|pip\s+(?:install|download)|tool\s+install)\b"
+    r"|\b(?:cargo|brew|gem|composer|go)\s+(?:install|add|require|create-project|get|update)\b"
+    r"|\bapt(?:-get)?\s+(?:install|download)\b|\b(?:docker|podman)\s+pull\b)[^|;&\n]*")
+_RUNOPS = (
+    r"(?:\b(?:npx|bunx|uvx)\b|\bbun\s+x\b|\bpipx\s+run\b|\buv\s+tool\s+run\b|\bgo\s+run\b"
+    r"|\b(?:npm|pnpm|yarn|bun)\s+(?:exec|dlx)\b|\byarn\s+exec\b|\buv\s+run\b(?:\s+--?[A-Za-z][^\s|;&]*)*\s+--with\b)"
+    r"(?:\s+--?[A-Za-z][^\s|;&]*)*\s+[\"']?(?:[@\w.-]+/)*")
+_DLOPS = (
+    r"(?:\bgit\s+clone\b|\bwget\b|\bgh\s+(?:release\s+download|repo\s+clone)\b|\b(?:rsync|scp)\b"
+    # a downloading curl (`-o`/`-O`/`--output`/`>`) — the URL basename is the fetch target wherever it sits
+    r"|\bcurl\b(?=[^|;&\n]*(?:-[A-Za-z]*[oO]\b|--output[=\s]|>)))[^|;&\n]*?[/:]")
+# a fetch target names the tool, optionally versioned or archived: `overpy`, `overpy@9`, `opy-rs.git`,
+# `wright-aarch64-apple-darwin.tar.gz`; `overpy-guide.html` or `overpy-notes.md` does not qualify
+_TARGET_SUFFIX = (r"(?:@[\w.-]+|:[\w.-]+|\.git\b|\.(?:sh|bin|deb|dmg|whl|zip|tgz|txz|tbz|tar\.(?:gz|xz|bz2))"
+                  r"|[-.](?:[vV]?[0-9]|aarch64|x86_64|arm64|amd64|linux|darwin|windows|apple|unknown|pc|musl)[\w.-]*)*")
+_END = r"(?=[\s'\"|;&,.<>)]|$)"
+
+
+def _contraband(name: str, pipe_names: str) -> re.Pattern:
+    target = name + _TARGET_SUFFIX + _END
+    return re.compile(_PKGOPS + r"(?<![\w-])" + name + r"\b"
+                      + r"|" + _RUNOPS + target
+                      + r"|" + _DLOPS + target
+                      + r"|\bcurl\b[^\n]*(?:" + pipe_names + r")[^\n]*\|\s*(?:sh|bash)\b")
+
+
+INSTALLS = {  # fetching a tool the condition withholds
+    "wright": _contraband(r"wright", r"wright|wrightkit"),
+    "overpy": _contraband(r"(?:overpy|opy-rs)", r"overpy|opy-rs"),
+}
+
+
+def contraband_installs(path: Path, allowed_tool: str) -> list[tuple[str, str]]:
+    """(tool, command) for each command that installs or runs through a package manager a tool the condition withholds."""
+    found = []
+    for command in shell_commands(path):
+        for tool, pattern in INSTALLS.items():
+            if tool != allowed_tool and pattern.search(command):
+                found.append((tool, command.replace("\n", " ")[:120]))
+    return found
+
+
 SEARCH_COMMAND = re.compile(r"(?<![\w./-])(?:rg|grep|find|fd|cat|bat|head|tail|less|more|sed|awk|ls|tree|wc|file|stat|strings|diff|du)\b")
 WRIGHT_IN_SHELL = re.compile(r"(?<![\w./-])wright\b")
 
