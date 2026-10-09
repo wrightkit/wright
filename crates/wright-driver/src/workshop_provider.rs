@@ -93,7 +93,10 @@ pub fn status_for_classification(
         | workshop_rs::rules::ResidualClassification::SourceDeclaredVariable => Status::Partial,
         workshop_rs::rules::ResidualClassification::ProducerExtension
         | workshop_rs::rules::ResidualClassification::LegacyOpaque
-        | workshop_rs::rules::ResidualClassification::UnresolvedIdentifier => Status::Unsupported,
+        | workshop_rs::rules::ResidualClassification::UnresolvedIdentifier
+        | workshop_rs::rules::ResidualClassification::CatalogSpellingNearMiss => {
+            Status::Unsupported
+        }
     }
 }
 

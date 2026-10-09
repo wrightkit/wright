@@ -55,3 +55,10 @@ debug = 1
 
 [profile.test.package."*"]
 debug = false
+
+# Canonical Workshop core. The rev is pinned to the workshop-rs commit that
+# adds `Program::set_file_source` (wright#583, workshop-rs
+# feat/program-set-file-source); retarget to the crates.io release once the
+# API ships in a published version.
+[patch.crates-io]
+workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "6a97b5c" }

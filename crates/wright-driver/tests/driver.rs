@@ -117,12 +117,12 @@ fn workshop_raw_setting_residual_suggests_the_canonical_spelling() {
     };
     assert_eq!(
         message("workshop.raw-setting.mode-nmae"),
-        "Workshop construct 'Mode Nmae' is partially supported (project-defined-construct) \
+        "Workshop construct 'Mode Nmae' is unsupported (catalog-spelling-near-miss) \
          (did you mean 'Mode Name'?)"
     );
     assert_eq!(
         message("workshop.raw-setting.enabled-mpas"),
-        "Workshop construct 'Enabled Mpas' is partially supported (project-defined-construct) \
+        "Workshop construct 'Enabled Mpas' is unsupported (catalog-spelling-near-miss) \
          (did you mean 'enabled maps'?)"
     );
     assert_eq!(
