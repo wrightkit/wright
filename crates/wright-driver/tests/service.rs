@@ -1708,11 +1708,17 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
             max: None,
         },
         ToolRequest::Project,
-        ToolRequest::Check,
     ] {
         let code = refusal_code(&mut service, &request);
         assert_eq!(code, "parse-error", "{request:?}");
     }
+    // `check` is a workflow (#591): its own load surfaces the same
+    // `parse-error` inside the envelope, not as a `ToolResponse` refusal.
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+        panic!("check returns the workflow envelope")
+    };
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["diagnostics"][0]["code"], "parse-error");
     assert!(matches!(
         service.handle(&ToolRequest::Capabilities),
         ToolResponse::Ok { .. }
@@ -1872,6 +1878,189 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             max: None,
         },
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #592: a numeric `references` `rule` filter is a rule-space address under
+/// the same freshness contract as `cfg` — an index issued before a reload
+/// refuses `stale-id` even when it still names a (different) valid rule.
+const REORDER_V1: &str = r#"
+variables {
+    global:
+        0: score
+}
+rule ("first") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(score, 1);
+    }
+}
+rule ("second") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(score, 2);
+    }
+}
+"#;
+
+/// The same program with the rules swapped: index 0 is now "second".
+const REORDER_V2: &str = r#"
+variables {
+    global:
+        0: score
+}
+rule ("second") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(score, 2);
+    }
+}
+rule ("first") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Set Global Variable(score, 1);
+    }
+}
+"#;
+
+#[test]
+fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
+    let dir = freshness_dir("stale-rule-filter");
+    let input = dir.join("program.ws");
+    std::fs::write(&input, REORDER_V1).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+
+    std::fs::write(&input, REORDER_V2).unwrap();
+
+    // Index 0 is a *valid* rule index in the new program — bounds checking
+    // alone cannot catch the stale address; the freshness contract must.
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::References {
+                symbol: "score".into(),
+                kind: None,
+                rule: Some(0.into()),
+                file: None,
+                max: None,
+            }
+        ),
+        "stale-id",
+        "a numeric rule filter issued before the reload is stale"
+    );
+
+    // Name-addressed rule filters resolve against the current snapshot —
+    // no observation is owed. Any filter field wraps the result in a
+    // `{"references": [...], "selection": {...}}` object (#531).
+    let filtered = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "score".into(),
+            kind: None,
+            rule: Some("first".into()),
+            file: None,
+            max: None,
+        },
+    );
+    assert_eq!(
+        filtered["references"]
+            .as_array()
+            .expect("filtered references")
+            .len(),
+        1,
+        "only the write inside 'first' matches: {filtered}"
+    );
+
+    // Numeric symbol and numeric rule filters are each checked, including a
+    // request carrying both.
+    for request in [
+        ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: None,
+            file: None,
+            max: None,
+        },
+        ToolRequest::References {
+            symbol: 0.into(),
+            kind: None,
+            rule: Some(0.into()),
+            file: None,
+            max: None,
+        },
+    ] {
+        assert_eq!(
+            refusal_code(&mut service, &request),
+            "stale-id",
+            "{request:?}"
+        );
+    }
+
+    // Observing only symbols restores symbol ids, not rule indexes.
+    result_of(
+        &mut service,
+        &ToolRequest::Symbols {
+            kind: None,
+            file: None,
+            max: None,
+        },
+    );
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &ToolRequest::References {
+                symbol: "score".into(),
+                kind: None,
+                rule: Some(0.into()),
+                file: None,
+                max: None,
+            }
+        ),
+        "stale-id"
+    );
+
+    // Observing the rules list restores rule-index addressing.
+    result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            file: None,
+            max: None,
+        },
+    );
+    let filtered = result_of(
+        &mut service,
+        &ToolRequest::References {
+            symbol: "score".into(),
+            kind: None,
+            rule: Some(0.into()),
+            file: None,
+            max: None,
+        },
+    );
+    let references = filtered["references"]
+        .as_array()
+        .expect("filtered references");
+    assert_eq!(
+        references.len(),
+        1,
+        "rule 0 is now 'second': {references:?}"
+    );
+    assert_eq!(references[0]["rule"], 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2221,7 +2410,6 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             file: None,
             max: None,
         },
-        ToolRequest::Check,
         ToolRequest::References {
             symbol: 0.into(),
             kind: None,
@@ -2236,6 +2424,15 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             "{request:?}"
         );
     }
+
+    // `check`/`compile` are workflows (#591): the same loader diagnostic
+    // rides the `wright-result/v1` envelope instead of a `ToolResponse`
+    // refusal, matching the embedding `check`/`compile` methods exactly.
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
+        panic!("check returns the workflow envelope")
+    };
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["diagnostics"][0]["code"], "input-io");
 
     // A provider mutation carrying its own documents does not trigger the
     // load: an unconfigured language is the provider refusal result, not the
@@ -2345,7 +2542,6 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
 
     for request in [
         ToolRequest::Project,
-        ToolRequest::Compile,
         ToolRequest::Symbols {
             kind: None,
             file: None,
@@ -2358,6 +2554,12 @@ fn a_malformed_input_defers_the_load_and_recovers_in_place() {
             "{request:?}"
         );
     }
+    // `compile` reports the same diagnostic inside its envelope (#591).
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
+        panic!("compile returns the workflow envelope")
+    };
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["diagnostics"][0]["code"], "parse-error");
 
     std::fs::write(&input, FRESHNESS_V1).unwrap();
     let project = result_of(&mut service, &ToolRequest::Project);

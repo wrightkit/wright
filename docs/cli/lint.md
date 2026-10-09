@@ -11,14 +11,20 @@ available. It reuses the lint registry, so rule enable/disable/severity
 configuration is deterministic and identical across CLI and programmatic
 (`CompilerSession::lint`, tool/agent `lint`) use.
 
-The following lint-only flags configure the registry and are repeatable:
+The following lint-policy flags configure the registry and are repeatable:
 
+* `--lint-config <PATH>`: read project lint configuration YAML.
+* `--rule <PATH>`: load a local YAML rule file or directory.
 * `--disable-rule <ID>`: disable a rule by stable ID (`min-wait-loop`,
   `duplicate-condition`, `expensive-loop-check`, `repeated-value`,
   `ongoing-condition-hot-path`, `while-without-wait`).
 * `--rule-severity <ID>:<off|warn|error>`: override a rule's project policy.
 
-These flags are usage errors on every other command (exit 2).
+These flags are usage errors on every other workflow command (exit 2).
+`wright serve` accepts the same four flags at startup (#594): they configure
+the served session's lint policy identically, so `lint`/`lintRules` over
+stdio, JSON-RPC, or MCP report the same effective enablement, severity,
+options, and findings as the equivalent `wright lint` invocation.
 
 `lint`, `check`, and `analyze` additionally share the finding-selection
 options (#430). They narrow the *reported* findings/diagnostics through the

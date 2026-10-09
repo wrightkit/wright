@@ -262,9 +262,30 @@ impl CompilerSession {
     /// leaves the cache empty — the next `load` retries the same resolution
     /// rather than resurrecting the stale program.
     pub(crate) fn reload(&mut self) -> Result<Loaded, Diagnostic> {
+        self.drop_loaded();
+        self.load()
+    }
+
+    /// Drop the cached program without reloading it (#591): `ToolService`
+    /// calls this when the disk fingerprint changed ahead of a `check` or
+    /// `compile` workflow, whose own operation-aware load must re-resolve
+    /// rather than serve the stale snapshot — including a provider-backed
+    /// `check`, which produces no canonical snapshot at all.
+    /// `loaded_operation` survives: it records the provider operation that
+    /// last produced a canonical snapshot, so a compile-capable provider
+    /// still recompiles on the next `load` where a check-only one refuses.
+    pub(crate) fn drop_loaded(&mut self) {
         self.loaded = None;
         self.semantic = None;
-        self.load()
+    }
+
+    /// The session's cached canonical snapshot, when the last load produced
+    /// one — `None` for a provider check, an unloadable input, or after
+    /// [`Self::drop_loaded`]. `ToolService` adopts this snapshot after a
+    /// successful workflow load (#591); it cannot call `load()` for it
+    /// because a check-only provider backend refuses `load()` outright.
+    pub(crate) fn cached_loaded(&self) -> Option<Loaded> {
+        self.loaded.clone()
     }
 
     #[hotpath::measure]
