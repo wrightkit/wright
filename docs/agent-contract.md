@@ -34,6 +34,26 @@ request per line on stdio:
 {"op":"check"}
 ```
 
+Startup options configure the session's input and lint policy before the
+first request is served; an unknown or unreadable value is a startup usage
+error (exit 2), never a silently remapped default:
+
+* `--transport <stdio|jsonrpc|mcp>`: request transport (default `stdio`);
+* `--kind <auto|opy|ostw|workshop|protocol>`: input frontend (default
+  `auto`, with the workflow aliases `ws`, `hir`, `json`);
+* `--profile <off|compat|aggressive>`: WIR transformation policy (default
+  `off`);
+* `--locale <LOCALE>`: Workshop client locale override;
+* `--lint-config <PATH>`, `--rule <PATH>`, `--disable-rule <ID>`,
+  `--rule-severity <ID>:<SEVERITY>`: explicit lint policy — the same file,
+  local rule paths, and overrides `wright lint` accepts, applied to every
+  lint-consuming operation the session serves (#594).
+
+A configured session example: `wright serve --lint-config policy.yaml
+--disable-rule repeated-value project.ws` serves `lint`/`lintRules`
+results under `policy.yaml` plus the disabled rule, reporting the same
+effective policy the equivalent `wright lint` invocation prints.
+
 Stdio returns one `ToolResponse` per request. A successful response has a
 `result` member; an application-level refusal has an `error` member containing
 `code` and `message`. The schema defines supported request fields; current
@@ -210,6 +230,19 @@ program rather than resurrecting the dropped one. Repairing the input
 recovers the same running session — no restart and no explicit reload
 request.
 
+`check` and `compile` are workflows rather than snapshot queries (#591):
+they run the session's own operation-aware load instead of requiring a
+canonical program snapshot first. A `check` request over a source-language
+provider therefore invokes the provider's check operation without
+compiling — a check-only provider answers it — and a successful `compile`
+supplies the canonical snapshot the later `symbols`, `references`, or
+`findings` requests read. The freshness gate above still applies: an
+observed disk change invalidates the served snapshot, and the next
+workflow re-resolves the input rather than serving it. A failed load
+surfaces inside the `wright-result/v1` envelope's diagnostics (the same
+diagnostic a snapshot query refuses with), matching the embedding API's
+`service.check()`/`service.compile()` outcomes.
+
 Numeric symbol ids and rule indexes are valid only for the program that
 issued them. After a content-changing reload, a request carrying a numeric
 `symbol`, `rule`, or `semanticRename` target id is refused `stale-id` until
@@ -217,10 +250,12 @@ the client observes the new space: a successful `symbols` response
 re-establishes symbol ids, a successful `rules` response re-establishes
 rule indexes, and an `ambiguous-symbol`/`ambiguous-rule` refusal
 re-establishes its own space because it already names the current
-candidates. A reload that succeeds after earlier attempts failed is no
-exception: ids issued by the last served program do not silently validate
-against the repaired one. Name addressing resolves against the current
-program in both states and is never stale.
+candidates. Every numeric address a request carries is checked, including
+a `references` request's numeric `rule` filter (#592). A reload that
+succeeds after earlier attempts failed is no exception: ids issued by the
+last served program do not silently validate against the repaired one.
+Name addressing resolves against the current program in both states and is
+never stale.
 
 `inputIdentity` labels the input, not its freshness: it is the SHA-256
 digest of the input's primary entry source (the provider's

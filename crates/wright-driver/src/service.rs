@@ -488,28 +488,44 @@ impl<'a> ToolService<'a> {
     /// document set consult neither — a `provider*` request that omits its
     /// document set derives it from the loaded project (#548) and so
     /// triggers the load like any other program-reading operation.
+    ///
+    /// `check` and `compile` are workflows, not snapshot queries (#591):
+    /// they run the session's operation-aware load instead of requiring a
+    /// canonical snapshot, so a check-only provider answers `check` without
+    /// ever being asked for a compile, and a successful `compile` supplies
+    /// the snapshot later queries read.
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
-        if Self::reads_program(request) {
-            if let Err(error) = self.refresh() {
-                return ToolResponse::Error { error };
+        match request {
+            ToolRequest::Check | ToolRequest::Compile => self.refresh_workflow(),
+            _ if Self::reads_program(request) => {
+                if let Err(error) = self.refresh() {
+                    return ToolResponse::Error { error };
+                }
+                if let Some(error) = self.stale_id(request) {
+                    return ToolResponse::Error { error };
+                }
             }
-            if let Some(error) = self.stale_id(request) {
-                return ToolResponse::Error { error };
-            }
+            _ => {}
         }
         let response = hotpath::measure_block!(request_label(request), self.dispatch(request));
         self.note_id_space(request, &response);
+        self.adopt_session_snapshot();
         response
     }
 
-    /// Whether the request consults the loaded program (#471). A provider
-    /// operation carrying its own document set does not; one that omits it
-    /// derives the set from the loaded project (#548) and so reads the
-    /// program like every other program-reading operation.
+    /// Whether the request requires a canonical snapshot to answer (#471,
+    /// #591). `check`/`compile` do not: they run their own operation-aware
+    /// load, so a provider without canonical compile capability still
+    /// answers `check`. A provider operation carrying its own document set
+    /// consults no snapshot either; one that omits it derives the set from
+    /// the loaded project (#548) and so requires it like every other
+    /// program-reading operation.
     fn reads_program(request: &ToolRequest) -> bool {
         !matches!(
             request,
-            ToolRequest::Capabilities
+            ToolRequest::Check
+                | ToolRequest::Compile
+                | ToolRequest::Capabilities
                 | ToolRequest::TargetMetadata
                 | ToolRequest::ProviderSemanticRename {
                     documents: Some(_),
@@ -573,13 +589,53 @@ impl<'a> ToolService<'a> {
     /// back to life — and ids issued by the dropped program refuse
     /// `stale-id` until the new space is observed.
     fn invalidate(&mut self) {
+        self.clear_snapshot();
+        self.invalidated = true;
+    }
+
+    /// Drop the served snapshot and mark its numeric id spaces stale.
+    fn clear_snapshot(&mut self) {
         self.loaded = None;
         self.semantic = None;
         self.lint_semantic = None;
         self.fingerprint = None;
         self.symbol_ids_current = false;
         self.rule_ids_current = false;
-        self.invalidated = true;
+    }
+
+    /// The freshness gate for `check`/`compile` (#591): like [`Self::refresh`]
+    /// an observed disk change invalidates the served snapshot, but the
+    /// workflow itself performs the operation-aware load — the session never
+    /// demands a canonical compile just to run `check`, and the load's
+    /// outcome rides in the workflow envelope rather than a `ToolResponse`
+    /// refusal. No snapshot held means there is nothing to invalidate: the
+    /// workflow resolves the input itself.
+    fn refresh_workflow(&mut self) {
+        let Some(loaded) = &self.loaded else {
+            return;
+        };
+        let fingerprint = input::disk_fingerprint(&self.session.config, &loaded.input);
+        if self.fingerprint.as_ref() == Some(&fingerprint) {
+            return;
+        }
+        self.session.drop_loaded();
+        self.clear_snapshot();
+        self.reloads += 1;
+    }
+
+    /// Adopt the canonical snapshot a `check`/`compile` workflow established
+    /// when the service holds none (#591): a successful `compile` makes its
+    /// program the snapshot later queries serve — the same guarantee as a
+    /// session that had already compiled before service construction. A
+    /// provider `check` caches no program (`cached_loaded` is `None`), so
+    /// snapshot queries keep refusing `load()`'s explicit unsupported state
+    /// rather than inheriting a placeholder program.
+    fn adopt_session_snapshot(&mut self) {
+        if self.loaded.is_none() {
+            if let Some(loaded) = self.session.cached_loaded() {
+                self.adopt(loaded);
+            }
+        }
     }
 
     /// The loader's diagnostic carried through the request's structured
@@ -656,11 +712,17 @@ impl<'a> ToolService<'a> {
     }
 
     /// Refuse a numeric id that was issued by an earlier program (#471):
-    /// `stale-id` until the client observes the current space. Name
+    /// `stale-id` until the client observes the current space. Every
+    /// numeric address a request carries is checked — a `references` rule
+    /// filter is the same rule-space address `cfg` consumes (#592). Name
     /// addressing resolves against the loaded index and is always fresh.
     fn stale_id(&self, request: &ToolRequest) -> Option<ToolErrorInfo> {
         let stale = match request {
-            ToolRequest::References { symbol, .. } | ToolRequest::Usage { symbol } => {
+            ToolRequest::References { symbol, rule, .. } => {
+                (matches!(symbol, Address::Id(_)) && !self.symbol_ids_current)
+                    || (matches!(rule, Some(Address::Id(_))) && !self.rule_ids_current)
+            }
+            ToolRequest::Usage { symbol } => {
                 matches!(symbol, Address::Id(_)) && !self.symbol_ids_current
             }
             ToolRequest::Cfg { rule, .. } => {
@@ -872,21 +934,28 @@ impl<'a> ToolService<'a> {
 
     /// Compile through the shared session pipeline.
     ///
-    /// A failed refresh invalidated the service snapshot and emptied the
-    /// session's cache, so `compile`'s own load attempt re-surfaces the
-    /// reload diagnostic as this envelope's refusal; the stale snapshot is
-    /// never consulted (#471, #512).
+    /// A changed input drops the stale snapshot so `compile`'s own load
+    /// re-resolves it (#471); a successful load supplies the snapshot later
+    /// queries read (#591). A failed load surfaces as this envelope's
+    /// diagnostics — the stale snapshot is never consulted (#512).
     pub fn compile(&mut self) -> Envelope<CompileResult> {
-        let _ = self.refresh();
-        self.session.compile()
+        self.refresh_workflow();
+        let envelope = self.session.compile();
+        self.adopt_session_snapshot();
+        envelope
     }
 
     /// Check through the shared session pipeline.
     ///
-    /// The same refresh contract as [`Self::compile`] applies (#471).
+    /// The same freshness contract as [`Self::compile`] applies (#471),
+    /// minus the canonical-snapshot requirement: `check` runs the
+    /// operation-aware load, so a check-only provider answers it directly
+    /// without being asked for a compile (#591).
     pub fn check(&mut self) -> Envelope<CheckResult> {
-        let _ = self.refresh();
-        self.session.check()
+        self.refresh_workflow();
+        let envelope = self.session.check();
+        self.adopt_session_snapshot();
+        envelope
     }
 
     /// Analyze through the shared session pipeline.
