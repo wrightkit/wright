@@ -55,6 +55,10 @@ artifact.
 
 ## Public distribution contract
 
+Wright's former npm binary packages are retired and unsupported. Install Wright
+through the native installers, release archives, or package-manager channels
+described in [`dist/README.md`](../dist/README.md).
+
 Wright has two release channels and one shared native build workflow:
 
 1. Every successful `CI` run on `main` triggers the `workflow_run` path of
