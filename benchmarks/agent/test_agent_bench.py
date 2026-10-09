@@ -635,6 +635,32 @@ class AgentBenchTest(unittest.TestCase):
             bench_report.main([one, two], WRIGHT, False, lambda s: {}, None, combined)
         self.assertIn("Agent benchmark report", (combined / "report.md").read_text())
 
+    def test_wait_for_limits_continues_after_a_provider_limit_and_gives_up_after_max_waits(self):
+        waited = []
+        with patch.object(agent_bench, "cmd_matrix", side_effect=[3, 3, 0]) as matrix, patch.object(agent_bench.time, "sleep", side_effect=waited.append), contextlib.redirect_stdout(io.StringIO()):
+            status = agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=2100, max_waits=5))
+        self.assertEqual((status, matrix.call_count, waited), (0, 3, [2100, 2100]))
+        with patch.object(agent_bench, "cmd_matrix", return_value=3) as matrix, patch.object(agent_bench.time, "sleep"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=1, max_waits=2)), 3)
+        self.assertEqual(matrix.call_count, 3)  # the first run and two waits
+        with patch.object(agent_bench, "cmd_matrix", return_value=3) as matrix:  # without the option the exit code is left for the caller
+            self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=False, max_waits=5)), 3)
+        self.assertEqual(matrix.call_count, 1)
+
+    def test_wait_for_limits_rejects_a_negative_poll_or_wait_count(self):
+        for bad in (argparse.Namespace(wait_for_limits=True, limits_poll=-1, max_waits=5), argparse.Namespace(wait_for_limits=True, limits_poll=2100, max_waits=-1)):
+            with patch.object(agent_bench, "cmd_matrix", return_value=3), self.assertRaises(SystemExit):
+                agent_bench.matrix_waiting_for_limits(bad)
+        with patch.object(agent_bench, "cmd_matrix", return_value=0):  # a namespace without the options takes the defaults and does not wait
+            self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace()), 0)
+        argv = ["evaluate", "--adapter", "devin", "--model", "m"]
+        with self.assertRaises(SystemExit) as neg:
+            with contextlib.redirect_stderr(io.StringIO()):
+                agent_bench.build_parser().parse_args(argv + ["--limits-poll", "-1"])
+        self.assertNotEqual(neg.exception.code, 0)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            agent_bench.build_parser().parse_args(argv + ["--wait-for-limits", "30"])  # the flag takes no argument
+
     def test_network_off_makes_package_managers_and_downloaders_fail(self):
         # no real installs here: PATH resolution shows the shadowing and the blocker itself is the only thing executed
         for network, blocked in (("off", True), ("on", False)):
