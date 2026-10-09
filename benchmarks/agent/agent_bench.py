@@ -287,7 +287,8 @@ def canaries(cell: dict, env: dict, workspace: Path, args: argparse.Namespace) -
         for name in NETWORK_TOOLS:  # a real tool ahead of the blockers on PATH would leave fetching open
             if shutil.which(name, path=env["PATH"]) != f"{blockers}{os.sep}{name}":
                 return f"network 'off' but {name} is not shadowed by its blocker"
-        if args.canary_cmd and subprocess.run(args.canary_cmd, shell=True, cwd=workspace, env=env, capture_output=True).returncode == 0:
+        # the canary probes the host's network, so it resolves real tools on BENCH_HOST_PATH; the agent's PATH would answer with a blocker
+        if args.canary_cmd and subprocess.run(args.canary_cmd, shell=True, cwd=workspace, env={**env, "PATH": env["BENCH_HOST_PATH"]}, capture_output=True).returncode == 0:
             return "network reachable under network 'off'"
     return None
 
@@ -1030,7 +1031,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--wiki-dir", type=Path, help="pinned wiki snapshot, linked as ./wiki for knowledge 'wiki'; content hashes are verified")
         p.add_argument("--env-pass", nargs="*", default=[], help="host variables passed through the environment scrub")
         p.add_argument("--no-ancestor-check", dest="check_ancestors", action="store_false", help="skip the check for instruction files above the workspace")
-        p.add_argument("--canary-cmd", help="shell command that must fail in the agent environment when the network is 'off'")
+        p.add_argument("--canary-cmd", help="shell command that must fail when the network is 'off'; it runs with the host PATH so blocked tools resolve for real")
         p.add_argument("--timeout", type=int, default=1800)
         p.add_argument("--deny-read", nargs="*", default=[], metavar="PATH", help="extra directories hidden from the agent (the home directories and drives already are); needs the file sandbox")
         p.add_argument("--allow-read", nargs="*", default=[], metavar="PATH", help="paths the agent's CLI needs inside the hidden home directories (credentials, installation); `evaluate` adds its adapter's")

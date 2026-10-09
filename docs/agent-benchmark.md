@@ -143,7 +143,9 @@ names host variables to keep), and no host instruction files. Two canaries run
 before the agent; a failed canary marks the run `invalid` and it is excluded
 from results: a tool outside the condition must not be reachable, and
 `--canary-cmd` (a command that must fail when the network is `off`) must fail
-in the agent environment. A determined agent can still find a tool binary
+with the host `PATH`, where the blockers do not shadow real network tools — a
+canary that resolves a blocker could never report a reachable network. A
+determined agent can still find a tool binary
 elsewhere on disk, so run `none` in a clean environment when that matters.
 
 ## Adapters
@@ -211,7 +213,7 @@ agents discover them by walking up; the default `--out` is
 `~/.local/share/wright-agent-bench/runs` for that reason, and a violation marks the run
 `invalid` (`--no-ancestor-check` disables it). Under network `off` the result records
 `networkEnforcement: fetch-blocked`, or `fetch-blocked+canary-checked` when `--canary-cmd`
-is given and fails inside the agent environment; `on` cells record `unrestricted`. The
+is given and fails on the host `PATH`; `on` cells record `unrestricted`. The
 marker is part of the score identity: runs made before the blockers existed (`declared-only`,
 `canary-checked`) do not merge into one score card with blocked runs.
 

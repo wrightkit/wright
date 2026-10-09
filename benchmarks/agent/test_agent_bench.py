@@ -798,6 +798,31 @@ class AgentBenchTest(unittest.TestCase):
         self.assertIn("network reachable", result["invalid"])
         self.assertIsNone(self.trial("true", canary_cmd="false").get("invalid"))
 
+    def test_network_canary_does_not_resolve_a_blocker(self):
+        # a canary on the agent's PATH would hit the blocker and could never report a reachable network
+        out = self.out / "env-canary-net"
+        out.mkdir()
+        (out / "ws").mkdir()
+        cell = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "none", "network": "off"})
+        args = argparse.Namespace(check_ancestors=False, env_pass=[], agent_id="agent", wright=WRIGHT, skill_dirs={},
+                                  canary_cmd='case "$(command -v curl)" in "$BENCH_RUN_DIR/bin/"*) exit 1;; *) exit 0;; esac')
+        env = agent_bench.build_env(cell, args, out, out / "ws")
+        self.assertEqual(agent_bench.canaries(cell, env, out / "ws", args), "network reachable under network 'off'")
+
+    def test_network_canary_calls_a_real_tool_on_the_host_path(self):
+        host_bin = self.out / "host-bin"
+        host_bin.mkdir()
+        (host_bin / "curl").write_text("#!/bin/sh\nexit 0\n")  # a real curl stands in for a reachable network
+        (host_bin / "curl").chmod(0o755)
+        with patch.dict(os.environ, {"PATH": f"{host_bin}{os.pathsep}{os.environ['PATH']}"}):
+            result = self.trial("true", canary_cmd="curl -fsS https://workshop.codes")
+        self.assertIn("network reachable", result["invalid"])
+        (host_bin / "curl").write_text("#!/bin/sh\nexit 1\n")  # the network is unreachable: the canary fails and the marker is recorded
+        with patch.dict(os.environ, {"PATH": f"{host_bin}{os.pathsep}{os.environ['PATH']}"}):
+            blocked = self.trial("true", canary_cmd="curl -fsS https://workshop.codes")
+        self.assertIsNone(blocked.get("invalid"))
+        self.assertEqual(blocked["networkEnforcement"], "fetch-blocked+canary-checked")
+
     def test_environment_is_scrubbed(self):
         os.environ["BENCH_LEAK_PROBE"] = "leak"
         self.addCleanup(os.environ.pop, "BENCH_LEAK_PROBE", None)
