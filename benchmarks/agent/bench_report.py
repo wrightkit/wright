@@ -188,14 +188,39 @@ def discrimination(runs: list[dict]) -> dict[str, dict]:
     return out
 
 
-def paired(runs: list[dict], reference: str = BASELINE, flags: dict[str, dict] | None = None) -> list[str]:
+def pair_identity(run: dict) -> dict:
+    """What the two sides of a matched pair must share — binary, suite, agent, model, protocol, enforcement —
+    minus `skills`, which belongs to the cell difference being measured."""
+    from bench_score import identity_of
+    return {k: v for k, v in identity_of(run).items() if k != "skills"}
+
+
+def paired(runs: list[dict], reference: str = BASELINE, flags: dict[str, dict] | None = None) -> tuple[list[str], list[str]]:
+    """Table lines plus notes on pairs dropped as non-comparable.
+
+    Pairs form on (scenario, agent, trial) — possibly across run directories, so both sides must record the same
+    environment (`wright_mismatch` only guards repeats inside one directory). A pair whose recorded identity
+    differs is dropped and reported, never silently mixed into the lift."""
+    from bench_score import cluster_interval
     by_key: dict[tuple, dict] = {(r["scenario"], r["agent"]["id"], r["_trial"], label(r)): r for r in runs}
     discriminating = {s for s, f in (flags or {}).items() if f["discrimination"] == "discriminating"}
-    lines = []
+    lines, skipped = [], []
     cells = sorted({label(r) for r in runs} - {reference})
     for agent in sorted({r["agent"]["id"] for r in runs}):
         for cell in cells:
-            pairs = [(by_key[(s, a, t, reference)], r) for (s, a, t, c), r in by_key.items() if a == agent and c == cell and (s, a, t, reference) in by_key]
+            pairs, differed, dropped = [], set(), 0
+            for (s, a, t, c), r in by_key.items():
+                if a != agent or c != cell or (s, a, t, reference) not in by_key:
+                    continue
+                b = by_key[(s, a, t, reference)]
+                differs = {k for k in pair_identity(b) if pair_identity(b)[k] != pair_identity(r)[k]}
+                if differs:
+                    differed.update(differs)
+                    dropped += 1
+                else:
+                    pairs.append((b, r))
+            if differed:
+                skipped.append(f"{agent} · `{cell} vs {reference}`: {dropped} pair(s) dropped — differ in {', '.join(sorted(differed))}")
             if not pairs:
                 continue
             gain = sum(1 for b, r in pairs if r.get("usable") and not b.get("usable"))
@@ -203,10 +228,15 @@ def paired(runs: list[dict], reference: str = BASELINE, flags: dict[str, dict] |
             narrow = [(b, r) for b, r in pairs if r["scenario"] in discriminating]
             narrow_gain = sum(1 for b, r in narrow if r.get("usable") and not b.get("usable"))
             narrow_loss = sum(1 for b, r in narrow if b.get("usable") and not r.get("usable"))
+            deltas: dict[str, list[int]] = defaultdict(list)
+            for b, r in pairs:
+                deltas[r["scenario"]].append((1 if r.get("usable") else 0) - (1 if b.get("usable") else 0))
+            lo, hi = cluster_interval(deltas)
+            lift = mean(mean(v) for v in deltas.values()) * 100
             both = [(total_tokens(b), total_tokens(r)) for b, r in pairs if b.get("usable") and r.get("usable") and total_tokens(b) and total_tokens(r)]
             saving = f"{mean(1 - r / b for b, r in both):+.0%} tokens (n={len(both)})" if both else "no both-usable pairs"
-            lines.append(f"| {agent} | {cell} vs {reference} | {len(pairs)} | +{gain} / -{loss} | +{narrow_gain} / -{narrow_loss} (n={len(narrow)}) | {saving} |")
-    return lines
+            lines.append(f"| {agent} | {cell} vs {reference} | {len(pairs)} | +{gain} / -{loss} | +{narrow_gain} / -{narrow_loss} (n={len(narrow)}) | {lift:+.0f}pp [{lo:+.0f}–{hi:+.0f}] | {saving} |")
+    return lines, skipped
 
 
 def expectations(runs: list[dict]) -> list[str]:
@@ -358,13 +388,18 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     smoke = sorted(s for s, f in flags.items() if f["discrimination"] == "smoke")
     key_set = {(r["scenario"], r["agent"]["id"], r["_trial"], label(r)) for r in runs}
     for reference in references or [BASELINE]:
-        pairs = paired(runs, reference, flags)
-        if pairs:
+        pairs, skipped = paired(runs, reference, flags)
+        if pairs or skipped:
             out += ["", f"## Paired against `{reference}` (same scenario, agent, trial)", "",
-                    "Lift is reported over all paired scenarios and over discriminating scenarios only; smoke "
-                    "scenarios cannot show a difference but stay in the canonical score.", "",
-                    "| agent | comparison | pairs | usable gained/lost (all) | usable gained/lost (discriminating) | tokens where both usable |",
-                    "| --- | --- | --- | --- | --- | --- |", *pairs]
+                    "Lift is the paired usable-rate difference in percentage points with a clustered-bootstrap "
+                    "interval over scenarios, reported over all paired scenarios and over discriminating scenarios "
+                    "only; smoke scenarios cannot show a difference but stay in the canonical score. A matched pair "
+                    "whose recorded environment differs (binary, suite, model, protocol, or enforcement) is dropped "
+                    "and reported — the cell difference is the only variable.", "",
+                    "| agent | comparison | pairs | usable gained/lost (all) | usable gained/lost (discriminating) | paired lift [95% CI] | tokens where both usable |",
+                    "| --- | --- | --- | --- | --- | --- | --- |", *pairs]
+            if skipped:
+                out += ["", "Non-comparable pairs dropped:", *[f"- {s}" for s in skipped]]
             paired_scenarios = {s for (s, a, t, c) in key_set if c != reference and (s, a, t, reference) in key_set}
             named = [s for s in smoke if s in paired_scenarios]
             if named:
@@ -426,14 +461,19 @@ def render(results: list[dict], regrade: list[str] | None = None, references: li
     return "\n".join(out) + "\n", summary
 
 
-def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, references: list[str] | None = None) -> int:
+def main(dirs: list[Path], wright: str, regrade: bool, load_scenario, references: list[str] | None = None, out: Path | None = None) -> int:
+    """Print the report; write report.md and summary.json into `out`, or into the run directory when there is exactly one.
+    Several directories without `out` are only printed, so a combined report never overwrites one run's own."""
     results = load(dirs)
     if not results:
         print("no results found")
         return 1
     notes = regrade_notes([r for r in results if r["status"] != "invalid"], wright, load_scenario) if regrade else None
     text, summary = render(results, notes, references)
-    (dirs[0] / "report.md").write_text(text)
-    write_json(dirs[0] / "summary.json", summary)
+    target = out or (dirs[0] if len(dirs) == 1 else None)
+    if target:
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "report.md").write_text(text)
+        write_json(target / "summary.json", summary)
     print(text)
     return 0

@@ -88,6 +88,22 @@ python3 benchmarks/agent/agent_bench.py leaderboard ~/.local/share/wright-agent-
 
 Runs made against a different Wright binary, skills, or task suite are listed as not comparable instead of being ranked.
 
+## Measure what Wright and the skill add, cheaply
+
+The score run (`--cells score`) gives the leaderboard number. To see how much of it comes from Wright and from its skill, run the same agent without them and compare. The full set of controls is 4 times the work of a score run, so do it in layers and stop as soon as the answer is clear:
+
+```sh
+# the same agent and model as an earlier score run, one trial per task and cell (40 trials)
+python3 benchmarks/agent/agent_bench.py evaluate --adapter devin --model swe-2-max --cells lift --trials 1 --name devin-swe-2-max-lift --wait-for-limits
+
+# compare against the score run; paired by task and trial
+python3 benchmarks/agent/agent_bench.py report ~/.local/share/wright-agent-bench/runs/<score-run> ~/.local/share/wright-agent-bench/runs/devin-swe-2-max-lift --reference none/none/off --out-dir <where-to-write>
+```
+
+`--cells lift` runs the baseline (no tools), Wright alone, and, for OverPy tasks, OverPy alone. The canonical cell with Wright and its skill is not rerun: it is the earlier score run. If the paired lift interval (the `paired lift [95% CI]` column: a clustered bootstrap over scenarios of the per-pair usable difference) already excludes zero, you are done. If it does not, repeat the first command with `--trials 2`, then `--trials 3`; only the missing trials run. Use the same Wright binary as the score run (pass `--wright` with it): a matched pair whose recorded environment differs between the two directories — binary, suite, model, protocol, or enforcement — is dropped from the table and reported as non-comparable.
+
+A report over several run directories is printed and written only where `--out-dir` says, so it never replaces a run's own report.
+
 ## Publish the hosted results
 
 Maintainers publish the data the public results page reads (see

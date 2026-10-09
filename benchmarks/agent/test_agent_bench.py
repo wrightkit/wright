@@ -615,6 +615,26 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(agent_bench.model_slug({"adapter": "agy", "model": "gemini-3.8-flash-high", "effort": "high"}), "agy-gemini-3.8-flash-high")
         self.assertEqual(agent_bench.model_slug({"adapter": "codex", "model": "gpt-6-luna", "effort": "xhigh"}), "codex-gpt-6-luna-xhigh")
 
+    def test_the_lift_cells_leave_out_the_canonical_cell_and_the_skill_probe(self):
+        labels = [agent_bench.cell_label(agent_bench.normalize_cell(c)) for c in agent_bench.CELL_SETS["lift"]]
+        self.assertEqual(labels, ["none/none/off", "wright/none/off", "overpy/none/off"])
+        self.assertEqual([agent_bench.cell_label(agent_bench.normalize_cell(c)) for c in agent_bench.CELL_SETS["score"]], ["wright+wright-skill/none/off"])
+
+    def test_a_report_over_several_runs_never_overwrites_a_runs_own_report(self):
+        one, two = self.out / "one", self.out / "two"
+        for run in (one, two):
+            trial = run / "s" / "agent" / "cell-1"
+            trial.mkdir(parents=True)
+            (trial / "result.json").write_text(json.dumps({**ReportTest.result(ReportTest(), "none/none/off", 1, True, 100), "contract": "wright-agent-bench/v3", "environment": {}}, default=str))
+            (run / "report.md").write_text("the run's own report")
+        with contextlib.redirect_stdout(io.StringIO()):
+            bench_report.main([one, two], WRIGHT, False, lambda s: {})
+        self.assertEqual((one / "report.md").read_text(), "the run's own report")
+        combined = self.out / "combined"
+        with contextlib.redirect_stdout(io.StringIO()):
+            bench_report.main([one, two], WRIGHT, False, lambda s: {}, None, combined)
+        self.assertIn("Agent benchmark report", (combined / "report.md").read_text())
+
     def test_wait_for_limits_continues_after_a_provider_limit_and_gives_up_after_max_waits(self):
         waited = []
         with patch.object(agent_bench, "cmd_matrix", side_effect=[3, 3, 0]) as matrix, patch.object(agent_bench.time, "sleep", side_effect=waited.append), contextlib.redirect_stdout(io.StringIO()):
@@ -1118,13 +1138,14 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0]["_trial"], 2)
 
-    def result(self, cell, trial, usable, tokens, split=None, scenario="s", language="opy", status="completed"):
+    def result(self, cell, trial, usable, tokens, split=None, scenario="s", language="opy", status="completed", **environment):
         tool = cell.split("/")[0].split("+")[0]
         return {
             "contract": "wright-agent-bench/v3", "scenario": scenario, "family": "diagnosis", "language": language, "split": split, "_trial": trial, "_dir": Path("d"),
             "condition": {"label": cell}, "agent": {"id": "m", "exit": 0, "seconds": 1.0}, "status": status,
             "usable": usable, "passed": usable, "usage": {"totalTokens": tokens, "peakContext": tokens // 2},
             "toolUse": {"wright": {"invocations": 1}} if tool == "wright" else {},
+            "environment": environment,
         }
 
     def test_wilson_interval(self):
@@ -1150,6 +1171,22 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("Paired against `none/wiki/off`", text)
         text, _ = bench_report.render(runs, references=["missing/cell/here"])
         self.assertNotIn("Paired against", text)
+
+    def test_paired_lift_reports_an_interval_and_drops_pairs_from_a_different_environment(self):
+        runs = [
+            self.result("none/none/off", 1, False, 100, scenario="a", wrightSha256="x"),
+            self.result("wright/none/off", 1, True, 80, scenario="a", wrightSha256="x"),
+            self.result("none/none/off", 2, True, 100, scenario="b", wrightSha256="x"),
+            self.result("wright/none/off", 2, True, 90, scenario="b", wrightSha256="y"),  # a different binary: not one experiment
+            self.result("wright+wright-skill/none/off", 1, True, 70, scenario="a", wrightSha256="x", skills={"wright-skill": {"sha256": "s"}}),
+        ]
+        text, _ = bench_report.render(runs)
+        self.assertIn("paired lift [95% CI]", text)
+        self.assertIn("+100pp", text)  # only pair `a` survives: baseline unusable, wright usable
+        self.assertIn("wrightSha256", text)  # the b pair is dropped and reported, not silently mixed
+        self.assertIn("Non-comparable pairs dropped", text)
+        self.assertIn("| wright/none/off vs none/none/off | 1 | +1 / -0 |", text)  # only the comparable `a` pair counts
+        self.assertIn("wright+wright-skill/none/off vs none/none/off", text)  # the skill difference is the variable being measured
 
     def test_scenario_discrimination_flags(self):
         runs = [
