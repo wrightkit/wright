@@ -2,7 +2,7 @@
 //! expose the same operations and structured results as the in-process tool
 //! service, with capability/version negotiation intact.
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -1409,5 +1409,237 @@ for line in sys.stdin:
         "serve exited: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── #593: serve startup arguments reject unknown values ─────────────────────
+// `--kind`/`--profile`/`--transport` share the workflow vocabulary: a typo is
+// a usage error naming the accepted values, never a silently remapped
+// default.
+
+#[test]
+fn unknown_serve_kind_profile_and_transport_are_usage_errors() {
+    let input = corpus_workshop("synthetic/basic-rule");
+    for (flag, value) in [
+        ("--kind", "workshpo"),
+        ("--profile", "compatt"),
+        ("--transport", "pipes"),
+    ] {
+        let output = Command::new(wright())
+            .args(["serve", flag, value])
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "serve {flag} {value} must be a usage error"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("expected one of") || stderr.contains("possible values"),
+            "the usage error names the accepted values: {stderr}"
+        );
+        // Nothing served: the error precedes session startup.
+        assert!(output.stdout.is_empty(), "{flag} served a response");
+    }
+}
+
+#[test]
+fn accepted_serve_kind_profile_and_transport_values_still_work() {
+    let input = corpus_workshop("synthetic/basic-rule");
+    let default = run_lines("stdio", &input, &[r#"{"op":"check"}"#]);
+    assert_eq!(default[0]["result"]["ok"], true, "{default:?}");
+
+    // `--kind` keeps the workflow aliases (`ws` for workshop); `--profile`
+    // accepts the documented spellings.
+    let mut child = Command::new(wright())
+        .args(["serve", "--kind", "ws", "--profile", "compat"])
+        .arg(&input)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("serve --kind ws --profile compat runs");
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(stdin, r#"{{"op":"check"}}"#).unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "serve exited: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
+    // Omitted kind/profile retain auto/off: both sessions serve the same
+    // check envelope for this fixture.
+    assert_eq!(response["result"], default[0]["result"]);
+}
+
+// ── #594: serve startup accepts explicit lint policy ─────────────────────────
+
+/// Spawn `wright serve` with `args` over `input` and return the child plus
+/// the responses to `lint` and `lintRules`.
+fn serve_with(args: &[&str], input: &Path) -> (std::process::Child, Vec<serde_json::Value>) {
+    let mut child = Command::new(wright())
+        .arg("serve")
+        .args(args)
+        .arg(input)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wright serve spawns");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let responses = [r#"{"op":"lint"}"#, r#"{"op":"lintRules"}"#]
+        .iter()
+        .map(|request| {
+            writeln!(stdin, "{request}").unwrap();
+            stdin.flush().unwrap();
+            let mut line = String::new();
+            stdout.read_line(&mut line).unwrap();
+            serde_json::from_str(&line).expect("JSON response")
+        })
+        .collect();
+    drop(stdin);
+    (child, responses)
+}
+
+/// The lint policy flags configure the served session (#594): `lint` and
+/// `lintRules` report the same effective policy `wright lint` reports for
+/// the same flags, and startup refuses bad policy before serving anything.
+#[test]
+fn serve_applies_the_cli_lint_policy_to_the_session() {
+    let input = corpus_workshop("real-world/overpy-cake");
+
+    // --disable-rule: the served findings match the CLI's configured lint.
+    let (mut child, responses) = serve_with(&["--disable-rule", "repeated-value"], &input);
+    let lint = &responses[0];
+    assert!(
+        lint["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["code"] != "repeated-value"),
+        "the disabled rule produces no served findings: {lint}"
+    );
+    let rules = &responses[1];
+    let repeated = rules["result"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "repeated-value")
+        .expect("repeated-value is reported");
+    assert_eq!(
+        repeated["enabled"], false,
+        "the policy disables it: {rules}"
+    );
+    assert!(child.wait().unwrap().success());
+
+    // CLI lint with the same flag reports the same finding set.
+    let cli = Command::new(wright())
+        .args(["lint"])
+        .arg(&input)
+        .args(["--disable-rule", "repeated-value", "-f", "json"])
+        .output()
+        .unwrap();
+    assert!(cli.status.success());
+    let cli: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(cli.stdout).unwrap()).unwrap();
+    assert_eq!(
+        cli["result"]["findings"].as_array().unwrap(),
+        lint["result"]["findings"].as_array().unwrap(),
+        "CLI and serve findings agree under the same policy"
+    );
+
+    // --rule-severity overrides the effective severity served by lintRules.
+    let (mut child, responses) = serve_with(&["--rule-severity", "min-wait-loop:error"], &input);
+    let rules = &responses[1];
+    let min_wait = rules["result"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .expect("min-wait-loop is reported");
+    assert_eq!(min_wait["effectiveSeverity"], "error", "{rules}");
+    assert!(child.wait().unwrap().success());
+
+    let dir = std::env::temp_dir().join(format!("wright-serve-594-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // --lint-config YAML applies identically.
+    let config_file = dir.join("policy.yaml");
+    std::fs::write(
+        &config_file,
+        "rules:\n  min-wait-loop:\n    severity: error\n",
+    )
+    .unwrap();
+    let (mut child, responses) =
+        serve_with(&["--lint-config", config_file.to_str().unwrap()], &input);
+    let rules = &responses[1];
+    let min_wait = rules["result"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "min-wait-loop")
+        .expect("min-wait-loop is reported");
+    assert_eq!(
+        min_wait["effectiveSeverity"], "error",
+        "the YAML config's severity override reaches lintRules: {rules}"
+    );
+    assert!(child.wait().unwrap().success());
+
+    // A missing config file is a startup usage error, not a default policy.
+    let output = Command::new(wright())
+        .args(["serve", "--lint-config"])
+        .arg(dir.join("missing.yaml"))
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty(), "no request was served");
+
+    // An unreadable --rule path fails session construction identically.
+    let output = Command::new(wright())
+        .args(["serve", "--rule"])
+        .arg(dir.join("missing-rules.yaml"))
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "an unreadable --rule path is a startup usage error"
+    );
+
+    // A malformed --rule-severity is refused before serving.
+    let output = Command::new(wright())
+        .args(["serve", "--rule-severity", "min-wait-loop:hot"])
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty(), "no request was served");
+
+    // A local YAML rule file is discoverable through lintRules.
+    let rule_file = dir.join("smoke.yaml");
+    std::fs::write(
+        &rule_file,
+        "id: community/serve-smoke\nmetadata:\n  summary: summary\n  rationale: rationale\n  documentation: documentation\n  known-limits: limits\n  tags: []\nmatcher: {}\n",
+    )
+    .unwrap();
+    let (mut child, responses) = serve_with(&["--rule", rule_file.to_str().unwrap()], &input);
+    let rules = &responses[1];
+    assert!(
+        rules["result"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| rule["id"] == "community/serve-smoke"),
+        "the --rule file's rule is discoverable: {rules}"
+    );
+    assert!(child.wait().unwrap().success());
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,22 +1,105 @@
 use std::io::{BufRead, Write};
 use std::process::ExitCode;
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 use serde_json::{Value, json};
 use wright_driver::config::{InputSpec, SessionConfig, SourceKind};
 use wright_driver::service::{ToolRequest, ToolService};
 use wright_driver::source_provider::SourceBackend;
 
+/// The `serve` request transports. Every value names a real adapter — an
+/// unknown spelling is a usage error at startup, never a silent fallback
+/// (#593).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum TransportArg {
+    Stdio,
+    Jsonrpc,
+    Mcp,
+}
+
+/// Parse `--kind` against the same vocabulary the workflow commands accept
+/// — a typo is a usage error naming the accepted spellings, not a silent
+/// `auto` (#593).
+fn parse_kind(value: &str) -> Result<SourceKind, String> {
+    SourceKind::parse(value)
+        .ok_or_else(|| "expected one of: auto, opy, ostw, workshop, protocol".to_string())
+}
+
+/// Parse `--profile` against the workflow vocabulary (#593).
+fn parse_profile(value: &str) -> Result<wright_driver::Profile, String> {
+    wright_driver::Profile::parse(value)
+        .ok_or_else(|| "expected one of: off, compat, aggressive".to_string())
+}
+
+/// Explicit lint-policy configuration (`--lint-config`, `--rule`,
+/// `--disable-rule`, `--rule-severity`) shared by `lint` and `serve`
+/// (#594): both surfaces apply the same file, local rule paths, and CLI
+/// overrides to the session's effective policy — the file first, then the
+/// flag overrides in order. This type lives here rather than in `cli.rs`
+/// so the standalone `wright-serve` binary — which `#[path]`-includes this
+/// module — sees it too.
+#[derive(Debug, Args, Default)]
+pub(crate) struct LintPolicyArgs {
+    /// Read project lint configuration YAML.
+    #[arg(long = "lint-config", value_name = "PATH")]
+    pub(crate) lint_config: Option<std::path::PathBuf>,
+    /// Load a local YAML rule file or directory (repeatable).
+    #[arg(long = "rule", value_name = "PATH")]
+    pub(crate) rule: Vec<std::path::PathBuf>,
+    /// Disable a lint rule (repeatable).
+    #[arg(long = "disable-rule", value_name = "ID")]
+    pub(crate) disable_rule: Vec<String>,
+    /// Override a lint rule policy as ID:off, ID:warn, or ID:error (repeatable).
+    #[arg(long = "rule-severity", value_name = "ID:SEVERITY")]
+    pub(crate) rule_severity: Vec<String>,
+}
+
+impl LintPolicyArgs {
+    /// Apply the configured policy to `config`, returning the first usage
+    /// error. Precedence matches `wright lint`: the YAML file establishes
+    /// the base, `--rule` extends the registry's load set, then
+    /// `--disable-rule` and `--rule-severity` override the file's entries.
+    pub(crate) fn apply_to(&self, config: &mut SessionConfig) -> Result<(), String> {
+        if let Some(path) = &self.lint_config {
+            config.lint = wright_driver::config::LintConfig::from_yaml_path(path)
+                .map_err(|error| format!("cannot read lint config {}: {error}", path.display()))?;
+        }
+        config.lint_rule_paths = self.rule.clone();
+        for rule in &self.disable_rule {
+            config.lint.disable(rule);
+        }
+        for value in &self.rule_severity {
+            let Some((rule_id, severity)) = value.split_once(':') else {
+                return Err(format!(
+                    "--rule-severity expects <ID>:<SEVERITY> (got '{value}')"
+                ));
+            };
+            if !config.lint.set_severity_by_name(rule_id, severity) {
+                return Err(format!(
+                    "unknown severity '{severity}' (expected off|warn|error)"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct ServeArgs {
-    #[arg(long, default_value = "stdio")]
-    transport: String,
-    #[arg(long, default_value = "auto")]
-    kind: String,
-    #[arg(long)]
+    /// Request transport.
+    #[arg(long, value_enum, default_value_t = TransportArg::Stdio)]
+    transport: TransportArg,
+    /// Input frontend.
+    #[arg(long, value_parser = parse_kind, default_value = "auto")]
+    kind: SourceKind,
+    /// Workshop client locale override.
+    #[arg(long, value_name = "LOCALE")]
     locale: Option<String>,
-    #[arg(long)]
-    profile: Option<String>,
+    /// WIR transformation policy.
+    #[arg(long, value_parser = parse_profile, default_value = "off")]
+    profile: wright_driver::Profile,
+    #[command(flatten)]
+    policy: LintPolicyArgs,
     #[arg(value_name = "INPUT")]
     input: Option<std::path::PathBuf>,
 }
@@ -32,41 +115,42 @@ pub(crate) fn run(args: ServeArgs) -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    let config = SessionConfig {
-        kind: SourceKind::parse(&args.kind).unwrap_or(SourceKind::Auto),
+    let mut config = SessionConfig {
+        kind: args.kind,
         source_backend: SourceBackend::Auto,
         locale: args.locale,
-        profile: args
-            .profile
-            .as_deref()
-            .map(|profile| wright_driver::Profile::parse(profile).unwrap_or_default())
-            .unwrap_or_default(),
+        profile: args.profile,
         input: InputSpec::Path(args.input.unwrap_or_else(|| ".".into())),
         ..SessionConfig::default()
     };
+    // An invalid lint policy is a startup usage error before any request
+    // is served — never a silent fallback to the default registry (#594).
+    if let Err(message) = args.policy.apply_to(&mut config) {
+        eprintln!("wright: {message}");
+        return ExitCode::from(2);
+    }
     let mut session = match wright_driver::CompilerSession::new(config) {
         Ok(session) => session,
         Err(diagnostic) => {
+            // A rejected configuration (an unreadable `--rule` path, an
+            // unknown `--disable-rule` selection) is a startup usage error,
+            // like the same failure on `wright lint` (#594).
             eprintln!("wright: {}", diagnostic.message);
-            return ExitCode::from(1);
+            return ExitCode::from(2);
         }
     };
     let mut service = match ToolService::new(&mut session) {
         Ok(service) => service,
         Err(diagnostic) => {
             eprintln!("wright: {}", diagnostic.message);
-            return ExitCode::from(1);
+            return ExitCode::from(2);
         }
     };
 
-    match args.transport.as_str() {
-        "stdio" => serve_stdio(&mut service),
-        "jsonrpc" => serve_jsonrpc(&mut service),
-        "mcp" => crate::mcp::serve_mcp(&mut service),
-        other => {
-            eprintln!("wright: unknown transport '{other}'");
-            ExitCode::from(2)
-        }
+    match args.transport {
+        TransportArg::Stdio => serve_stdio(&mut service),
+        TransportArg::Jsonrpc => serve_jsonrpc(&mut service),
+        TransportArg::Mcp => crate::mcp::serve_mcp(&mut service),
     }
 }
 

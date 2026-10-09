@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::serve::ServeArgs;
+use crate::serve::{LintPolicyArgs, ServeArgs};
 use crate::update::UpdateArgs;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -458,18 +458,8 @@ pub(crate) struct LintArgs {
     /// writes nothing (#556).
     #[arg(long, requires = "fix")]
     pub(crate) write: bool,
-    /// Read project lint configuration YAML.
-    #[arg(long = "lint-config", value_name = "PATH")]
-    pub(crate) lint_config: Option<PathBuf>,
-    /// Load a local YAML rule file or directory (repeatable).
-    #[arg(long = "rule", value_name = "PATH")]
-    pub(crate) rule: Vec<PathBuf>,
-    /// Disable a lint rule (repeatable).
-    #[arg(long = "disable-rule", value_name = "ID")]
-    pub(crate) disable_rule: Vec<String>,
-    /// Override a lint rule policy as ID:off, ID:warn, or ID:error (repeatable).
-    #[arg(long = "rule-severity", value_name = "ID:SEVERITY")]
-    pub(crate) rule_severity: Vec<String>,
+    #[command(flatten)]
+    pub(crate) policy: LintPolicyArgs,
 }
 
 #[derive(Debug, Args)]

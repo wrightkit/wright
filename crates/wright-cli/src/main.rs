@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
-use wright_driver::config::{InputSpec, LintConfig, OutputFormat, SessionConfig, SourceKind};
+use wright_driver::config::{InputSpec, OutputFormat, SessionConfig, SourceKind};
 use wright_driver::result::exit;
 use wright_driver::source_provider::SourceBackend;
 
@@ -165,36 +165,9 @@ fn run_workflow(command: Command) -> ExitCode {
         Command::Lint(args) => {
             let mut config = config_from_common(&args.common, true);
             config.selection = selection_from_args(&args.select);
-            if let Some(path) = &args.lint_config {
-                config.lint = match LintConfig::from_yaml_path(path) {
-                    Ok(config) => config,
-                    Err(error) => {
-                        eprintln!(
-                            "wright: cannot read lint config {}: {error}",
-                            path.display()
-                        );
-                        return ExitCode::from(exit::USAGE);
-                    }
-                };
-            }
-            config.lint_rule_paths = args.rule.clone();
-            for rule in &args.disable_rule {
-                config.lint.disable(rule);
-            }
-            for value in &args.rule_severity {
-                let (rule_id, severity) = match value.split_once(':') {
-                    Some(parts) => parts,
-                    None => {
-                        eprintln!(
-                            "wright: --rule-severity expects <ID>:<SEVERITY> (got '{value}')"
-                        );
-                        return ExitCode::from(exit::USAGE);
-                    }
-                };
-                if !config.lint.set_severity_by_name(rule_id, severity) {
-                    eprintln!("wright: unknown severity '{severity}' (expected off|warn|error)");
-                    return ExitCode::from(exit::USAGE);
-                }
+            if let Err(message) = args.policy.apply_to(&mut config) {
+                eprintln!("wright: {message}");
+                return ExitCode::from(exit::USAGE);
             }
             let presentation = present::Presentation::from_common(&args.common);
             if args.brief {
