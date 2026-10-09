@@ -122,6 +122,13 @@ class AgyTransientTest(unittest.TestCase):
         self.assertFalse(agy.transient("the agent wrote an invalid file"))
 
 
+class DevinCatalogOutageTest(unittest.TestCase):
+    def test_model_not_found_with_an_empty_catalog_is_a_provider_failure(self):
+        message = 'Error: session/set_config_option (model) failed: Resource not found: {\n  "uri": "Model not found: swe-2-max. Available models: "\n}'
+        self.assertTrue(devin.transient("", message))
+        self.assertFalse(devin.transient("", message.replace("Available models: ", "Available models: swe-2, swe-2-fast")))
+
+
 class DevinEffortTest(unittest.TestCase):
     def test_effort_is_read_from_the_model_id(self):
         self.assertEqual(devin.split_effort("swe-2-max"), ("swe-2", "max"))

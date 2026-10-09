@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -137,7 +138,7 @@ class AgentBenchTest(unittest.TestCase):
         self.assertIn("bench_trace.py", env["BENCH_MCP_CMD"])
         self.assertIn(str(workspace), env["BENCH_MCP_CMD"])
         self.assertIsNone(shutil.which("wright", path=env["PATH"]))
-        self.assertFalse((self.out / "run/bin").exists())
+        self.assertFalse((self.out / "run/bin/wright").exists())  # no wright CLI shim; the package-manager blockers live in the same directory
         shims = self.out / "shims"
         shims.mkdir()
         (shims / "wright").write_text("#!/bin/sh\nexit 0\n")
@@ -640,6 +641,105 @@ class AgentBenchTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             agent_bench.build_parser().parse_args(argv + ["--wait-for-limits", "30"])  # the flag takes no argument
 
+    def test_network_off_makes_package_managers_and_downloaders_fail(self):
+        # no real installs here: PATH resolution shows the shadowing and the blocker itself is the only thing executed
+        for network, blocked in (("off", True), ("on", False)):
+            out = self.out / f"env-{network}"
+            out.mkdir()
+            cell = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "web" if network == "on" else "none", "network": network})
+            args = argparse.Namespace(wright=WRIGHT, env_pass=[], agent_id="a", skill_dirs={})
+            env = agent_bench.build_env(cell, args, out, out / "ws")
+            shims = out / "bin"
+            self.assertEqual(env["PATH"].split(os.pathsep)[0] == str(shims), blocked)
+            if blocked:
+                for name in agent_bench.NETWORK_TOOLS:
+                    self.assertEqual(shutil.which(name, path=env["PATH"]), str(shims / name), f"{name} is not shadowed")
+                found = subprocess.run([str(shims / "npm"), "install", "overpy"], env=env, capture_output=True, text=True)
+                self.assertEqual(found.returncode, 1)
+                self.assertIn("blocked", found.stderr)
+            else:
+                self.assertFalse(shims.exists())
+                resolved = shutil.which("npm", path=env["PATH"])
+                self.assertTrue(resolved is None or not resolved.startswith(str(out)))  # a real npm or none, never a shim
+
+    def test_the_canary_flags_a_network_tool_the_blockers_do_not_shadow(self):
+        out = self.out / "env-canary"
+        out.mkdir()
+        cell = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "none", "network": "off"})
+        args = argparse.Namespace(check_ancestors=False, canary_cmd=None, env_pass=[], agent_id="agent", wright=WRIGHT, skill_dirs={})
+        env = agent_bench.build_env(cell, args, out, out / "ws")
+        self.assertIsNone(agent_bench.canaries(cell, env, out / "ws", args))
+        env["PATH"] = env["PATH"].split(os.pathsep, 1)[1]  # drop the blocker dir: every blocked name resolves unshadowed or missing
+        self.assertIn("not shadowed", agent_bench.canaries(cell, env, out / "ws", args))
+
+    def test_a_withheld_tool_fetched_through_a_package_manager_is_detected_in_native_transcripts(self):
+        lines = [
+            {"source": "agent", "tool_calls": [{"function_name": "exec", "arguments": {"command": "npm init -y && npm install --save-dev @wrightkit/wright overpy"}}]},
+            {"payload": {"type": "function_call", "arguments": json.dumps({"cmd": "pip3 install overpy"})}},
+            {"type": "toolCall", "arguments": {"command": "npx wright check mode.opy"}},
+            {"source": "user", "message": "skill text mentioning `npm install -g overpy` is not a command"},
+            {"source": "agent", "tool_calls": [{"function_name": "exec", "arguments": {"command": "wright check mode.ws"}}]},
+        ]
+        path = self.out / "transcript.jsonl"
+        path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+        found = bench_trace.contraband_installs(path, "none")
+        self.assertEqual([tool for tool, _ in found], ["wright", "overpy", "overpy", "wright"])
+        self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "wright")], ["overpy", "overpy"])  # wright is the condition's own tool
+        self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "overpy")], ["wright", "wright"])
+
+    def test_every_blocked_tool_has_a_matching_fetch_pattern_and_every_call_shape_is_read(self):
+        fetched = [
+            "npm install overpy", "npm i overpy", "npm pack overpy", "pnpm add overpy", "pnpm dlx overpy", "yarn add overpy",
+            "yarn global add overpy", "bun add overpy", "bun x overpy", "npx overpy --help", "npx -y overpy", "bunx overpy",
+            "pip install overpy", "pip3 install overpy", "python3 -m pip install overpy", "pip download overpy",
+            "pipx install overpy", "pipx run overpy", "uv add overpy", "uv pip install overpy", "uv tool install overpy",
+            "uv tool run overpy", "uv run --with overpy python app.py", "uvx overpy",
+            "cargo install overpy", "cargo add overpy", "brew install overpy", "gem install overpy",
+            "go install overpy.dev/cmd/overpy@latest", "go run overpy.dev/cmd/overpy@latest",
+            "apt install overpy", "apt-get install overpy", "apt download overpy", "composer require overpy/cli",
+            "docker pull example.io/overpy:latest", "podman pull example.io/overpy:latest",
+            "git clone https://example.com/overpy.git", "git clone https://github.com/wrightkit/opy-rs",
+            "wget https://example.com/overpy.tgz",
+            "curl -fsSLo out https://example.com/overpy.tar.gz", "curl https://example.com/overpy.tar.gz > out",
+            "gh release download -R wrightkit/opy-rs", "gh repo clone wrightkit/opy-rs",
+            "rsync host:/srv/overpy.tar.gz .", "scp host:overpy .",
+        ]
+        path = self.out / "transcript.jsonl"
+        calls = [{"type": "toolCall", "arguments": {"command": c}} for c in fetched]
+        path.write_text("".join(json.dumps(c) + "\n" for c in calls))
+        self.assertEqual([tool for tool, _ in bench_trace.contraband_installs(path, "wright")], ["overpy"] * len(fetched))
+        # `overpy` as a path/document/repo token is not a fetch — only install-verb arguments and fetch targets count
+        clean = ["apt update", "cargo build", "npm test", "go build ./...", "composer dump-autoload", "git fetch origin",
+                 "curl -s https://api.example.com/overpy-docs | jq .",
+                 "npx prettier --write docs/overpy-notes.md", "uv run report.py --project overpy",
+                 "wget https://site.example/overpy-guide.html", "git clone https://example.com/overpy-docs",
+                 "gh repo clone wrightkit/wright-docs", "pipx run black --check .",
+                 "curl -o page.html https://site.example/overpy-notes.html"]
+        path.write_text("".join(json.dumps({"type": "toolCall", "arguments": {"command": c}}) + "\n" for c in clean))
+        self.assertEqual(bench_trace.contraband_installs(path, "wright"), [])
+
+    def test_mcp_level_withholds_the_cli_so_either_tool_is_contraband(self):
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "wright", "level": "bin"}), "wright")
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "overpy", "level": "bin"}), "overpy")
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "wright", "level": "mcp"}), "none")  # the MCP server gives wright without its CLI
+        self.assertEqual(agent_bench.allowed_cli_tool({"tool": "none", "level": "bin"}), "none")
+
+    def test_quoted_or_malformed_payloads_are_not_shell_commands(self):
+        lines = [
+            {"source": "agent", "message": "proposed but declined: {\"command\": \"npm install overpy\"}"},
+            {"source": "user", "text": json.dumps({"command": "pip install wright"})},
+            {"note": {"command": "gem install overpy"}},  # a command field outside any tool-call shape
+            {"type": "assistant", "text": "run npm install overpy next"},
+            {"calls": [{"name": "bash", "input": {"command": "npm install overpy"}}]},  # the normalized call shape still counts
+            {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "wget https://x/overpy.tgz"}}]}},
+            {"item": {"type": "command_execution", "command": "go install overpy.dev/cmd/overpy@latest"}},
+            {"type": "function_call", "name": "shell", "arguments": "{\"command\": \"pipx install overpy\"}"},
+        ]
+        path = self.out / "transcript.jsonl"
+        path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+        found = bench_trace.contraband_installs(path, "wright")
+        self.assertEqual([tool for tool, _ in found], ["overpy"] * 4)  # only the real call structures
+
     def test_tools_differ_only_in_availability(self):
         agent = f"cp {reference()}/* . && (wright check mode.ws >/dev/null 2>&1 || echo no-wright > missing-wright.txt)"
         none = self.trial(agent, tool="none")
@@ -652,10 +752,15 @@ class AgentBenchTest(unittest.TestCase):
 
     def test_canary_rejects_a_tool_that_is_not_part_of_the_condition(self):
         cell = agent_bench.normalize_cell({"tool": "none", "skills": [], "knowledge": "none", "network": "off"})
-        args = argparse.Namespace(canary_cmd=None, check_ancestors=False)
-        env = {"PATH": str(Path(WRIGHT).resolve().parent)}
+        args = argparse.Namespace(canary_cmd=None, check_ancestors=False, env_pass=[], agent_id="agent", wright=WRIGHT, skill_dirs={})
+        wright_dir = str(Path(WRIGHT).resolve().parent)
+        env = agent_bench.build_env(cell, args, self.out, self.out / "ws")
+        env["PATH"] = os.pathsep.join([str(self.out / "bin"), wright_dir])  # blockers first, then a dir holding wright
         self.assertIn("reachable", agent_bench.canaries(cell, env, self.out, args))
-        self.assertIsNone(agent_bench.canaries({**cell, "tool": "wright"}, env, self.out, args))
+        out_w = self.out / "with-wright"
+        env_w = agent_bench.build_env({**cell, "tool": "wright"}, args, out_w, out_w / "ws")
+        env_w["PATH"] = os.pathsep.join([str(out_w / "bin"), wright_dir])
+        self.assertIsNone(agent_bench.canaries({**cell, "tool": "wright"}, env_w, self.out, args))
 
     def test_canary_rejects_instruction_files_above_the_workspace(self):
         outside = Path(tempfile.mkdtemp()).resolve()  # outside the repository, whose own AGENTS.md would match
