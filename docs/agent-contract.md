@@ -217,10 +217,12 @@ the client observes the new space: a successful `symbols` response
 re-establishes symbol ids, a successful `rules` response re-establishes
 rule indexes, and an `ambiguous-symbol`/`ambiguous-rule` refusal
 re-establishes its own space because it already names the current
-candidates. A reload that succeeds after earlier attempts failed is no
-exception: ids issued by the last served program do not silently validate
-against the repaired one. Name addressing resolves against the current
-program in both states and is never stale.
+candidates. Every numeric address a request carries is checked, including
+a `references` request's numeric `rule` filter (#592). A reload that
+succeeds after earlier attempts failed is no exception: ids issued by the
+last served program do not silently validate against the repaired one.
+Name addressing resolves against the current program in both states and is
+never stale.
 
 `inputIdentity` labels the input, not its freshness: it is the SHA-256
 digest of the input's primary entry source (the provider's

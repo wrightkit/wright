@@ -656,11 +656,17 @@ impl<'a> ToolService<'a> {
     }
 
     /// Refuse a numeric id that was issued by an earlier program (#471):
-    /// `stale-id` until the client observes the current space. Name
+    /// `stale-id` until the client observes the current space. Every
+    /// numeric address a request carries is checked — a `references` rule
+    /// filter is the same rule-space address `cfg` consumes (#592). Name
     /// addressing resolves against the loaded index and is always fresh.
     fn stale_id(&self, request: &ToolRequest) -> Option<ToolErrorInfo> {
         let stale = match request {
-            ToolRequest::References { symbol, .. } | ToolRequest::Usage { symbol } => {
+            ToolRequest::References { symbol, rule, .. } => {
+                (matches!(symbol, Address::Id(_)) && !self.symbol_ids_current)
+                    || (matches!(rule, Some(Address::Id(_))) && !self.rule_ids_current)
+            }
+            ToolRequest::Usage { symbol } => {
                 matches!(symbol, Address::Id(_)) && !self.symbol_ids_current
             }
             ToolRequest::Cfg { rule, .. } => {
