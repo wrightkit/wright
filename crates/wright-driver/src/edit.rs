@@ -805,8 +805,10 @@ pub fn write_previews(
         expected.insert(edit.source.as_str(), edit.source_identity.as_str());
     }
     for preview in previews {
-        let path = Path::new(&preview.source);
-        let bytes = std::fs::read(path).map_err(|error| {
+        // A provider-mapped edit names its source by `file://` URI (#583);
+        // `provider_uri_path` also passes plain path spellings through.
+        let path = PathBuf::from(crate::source_provider::provider_uri_path(&preview.source));
+        let bytes = std::fs::read(&path).map_err(|error| {
             Diagnostic::error(
                 "input-io",
                 Stage::Discovery,
@@ -830,8 +832,8 @@ pub fn write_previews(
     }
     let mut written = Vec::new();
     for preview in previews {
-        let path = Path::new(&preview.source);
-        let temporary = temporary_path(path);
+        let path = PathBuf::from(crate::source_provider::provider_uri_path(&preview.source));
+        let temporary = temporary_path(&path);
         std::fs::write(&temporary, &preview.new_text).map_err(|error| {
             Diagnostic::error(
                 "output-io",
@@ -839,7 +841,7 @@ pub fn write_previews(
                 format!("cannot write '{}': {error}", temporary.display()),
             )
         })?;
-        std::fs::rename(&temporary, path).map_err(|error| {
+        std::fs::rename(&temporary, &path).map_err(|error| {
             let _ = std::fs::remove_file(&temporary);
             Diagnostic::error(
                 "output-io",

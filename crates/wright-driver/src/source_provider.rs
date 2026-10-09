@@ -428,6 +428,140 @@ pub(crate) fn provider_uri_path(uri: &str) -> String {
         .unwrap_or_else(|| uri.to_string())
 }
 
+/// The identity/version precondition view a defaulted `sources` mirrors
+/// (#548): every document's own text under its URI.
+pub(crate) fn document_sources(
+    documents: &wright_lpp::DocumentSet,
+) -> std::collections::BTreeMap<String, String> {
+    documents
+        .values()
+        .map(|document| (document.uri.clone(), document.text.clone()))
+        .collect()
+}
+
+/// The provider document set a mutation runs against (#548, #583): the
+/// loaded project's members, each read from disk at `version` 0 and keyed
+/// by `file://` URI, so the provider sees the same project the session
+/// serves. A member that is not a readable disk file is a structured
+/// refusal, never a silently partial set.
+pub(crate) fn provider_document_set(
+    members: &[String],
+    cwd: &Path,
+    language_id: &str,
+) -> Result<wright_lpp::DocumentSet, wright_analyzer::service::ErrorInfo> {
+    let mut set = wright_lpp::DocumentSet::new();
+    for member in members {
+        let (uri, path) = provider_member(member, cwd)?;
+        let text = std::fs::read_to_string(&path).map_err(|error| {
+            wright_analyzer::service::ErrorInfo {
+                code: "provider-document-unreadable".to_string(),
+                message: format!(
+                    "cannot read loaded project member '{}' for the provider document set: {error}",
+                    path.display()
+                ),
+            }
+        })?;
+        set.insert(
+            uri.clone(),
+            wright_lpp::Document {
+                uri,
+                language_id: language_id.to_string(),
+                version: 0,
+                text,
+            },
+        );
+    }
+    Ok(set)
+}
+
+/// The `project_root` URI a provider request carries for a resolved input
+/// root — the same directory-URI spelling `LppSourceProvider` sends.
+pub(crate) fn provider_project_root(root: &Path) -> Option<String> {
+    url::Url::from_directory_path(root)
+        .ok()
+        .map(|u| u.to_string())
+}
+
+/// A loaded project member as `(file:// URI, absolute disk path)` (#548): a
+/// URI spelling keeps its identity and converts back to its path; a bare
+/// path absolutizes against the session's input cwd and converts to a
+/// `file://` URI. A member that is not a disk file refuses — the defaulted
+/// document set covers only sources the session read from disk.
+pub(crate) fn provider_member(
+    member: &str,
+    cwd: &std::path::Path,
+) -> Result<(String, std::path::PathBuf), wright_analyzer::service::ErrorInfo> {
+    // A Windows drive-absolute spelling (`C:\...`, `C:/...`) must be handled
+    // before URI parsing: `url::Url::parse` accepts it as a URI whose scheme
+    // is the drive letter, and `to_file_path` then refuses. The provider
+    // emits these spellings on Windows hosts; treat them as disk paths on
+    // every host so the refusal contract stays about URI kind, not host OS.
+    if let Some(pair) = windows_drive_member(member) {
+        return Ok(pair);
+    }
+    if let Ok(url) = url::Url::parse(member) {
+        let path = url
+            .to_file_path()
+            .map_err(|()| wright_analyzer::service::ErrorInfo {
+                code: "provider-document-uri".to_string(),
+                message: format!(
+                    "loaded project member '{member}' is not a disk file and cannot serve the \
+                     provider document set"
+                ),
+            })?;
+        return Ok((url.to_string(), path));
+    }
+    let path = {
+        let path = std::path::PathBuf::from(member);
+        if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        }
+    };
+    url::Url::from_file_path(&path)
+        .map(|url| (url.to_string(), path))
+        .map_err(|()| wright_analyzer::service::ErrorInfo {
+            code: "provider-document-uri".to_string(),
+            message: format!(
+                "loaded project member '{member}' cannot be expressed as a file:// URI"
+            ),
+        })
+}
+
+/// `C:\dir\file.opy` or `C:/dir/file.opy` → `(file:///C:/dir/file.opy, path)`.
+/// The path is percent-encoded before parsing so literal `#`, `%`, `?`, and
+/// friends are not reinterpreted as URL syntax — `Url::parse` alone would
+/// treat `#` as a fragment delimiter and `%xx` as existing escapes.
+fn windows_drive_member(member: &str) -> Option<(String, std::path::PathBuf)> {
+    const PATH_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'#')
+        .add(b'%')
+        .add(b'<')
+        .add(b'>')
+        .add(b'?')
+        .add(b'`')
+        .add(b'{')
+        .add(b'|')
+        .add(b'}')
+        .add(b'^');
+    let bytes = member.as_bytes();
+    let drive_absolute = bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    if !drive_absolute {
+        return None;
+    }
+    let path = std::path::PathBuf::from(member);
+    let normalized = member.replace('\\', "/");
+    let encoded = percent_encoding::utf8_percent_encode(&normalized, PATH_ENCODE);
+    let url = url::Url::parse(&format!("file:///{encoded}")).ok()?;
+    Some((url.to_string(), path))
+}
+
 fn provider_position(pos: wright_lpp::Position) -> Position {
     Position {
         line: pos.line.saturating_add(1),
@@ -439,6 +573,62 @@ fn provider_position(pos: wright_lpp::Position) -> Position {
 mod tests {
     use super::*;
     use wright_lpp::{LppErrorKind, ProviderError};
+
+    #[test]
+    fn windows_drive_member_is_a_disk_path_not_a_uri_scheme() {
+        // `url::Url::parse` accepts `C:\...` as a URI with scheme `c`; the
+        // provider member helper must classify it as a filesystem path first.
+        let (uri, path) = provider_member("C:\\project\\main.opy", Path::new("/cwd"))
+            .expect("windows drive member resolves");
+        assert_eq!(uri, "file:///C:/project/main.opy");
+        assert_eq!(path, PathBuf::from("C:\\project\\main.opy"));
+
+        let (uri, _) = provider_member("D:/work/lib.opy", Path::new("/cwd"))
+            .expect("forward-slash drive member resolves");
+        assert_eq!(uri, "file:///D:/work/lib.opy");
+
+        // Literal `#`/`%`/`?` in the path are encoded, not parsed as URL
+        // syntax, and decode back to the same spelling.
+        for (member, uri) in [
+            ("C:\\project#1\\main.opy", "file:///C:/project%231/main.opy"),
+            (
+                "C:\\project%20name\\main.opy",
+                "file:///C:/project%2520name/main.opy",
+            ),
+        ] {
+            let (produced, _) =
+                provider_member(member, Path::new("/cwd")).expect("member resolves");
+            assert_eq!(produced, uri);
+            let url = url::Url::parse(&produced).expect("uri parses");
+            let decoded = percent_encoding::percent_decode_str(url.path())
+                .decode_utf8()
+                .expect("utf8");
+            assert_eq!(decoded, format!("/{}", member.replace('\\', "/")));
+        }
+    }
+
+    #[test]
+    fn file_uri_member_keeps_its_spelling() {
+        let (uri, path) =
+            provider_member("file:///project/main.opy", Path::new("/cwd")).expect("file URI");
+        assert_eq!(uri, "file:///project/main.opy");
+        assert_eq!(path, PathBuf::from("/project/main.opy"));
+    }
+
+    #[test]
+    fn non_file_uri_member_refuses() {
+        let error = provider_member("untitled:main.opy", Path::new("/cwd"))
+            .expect_err("non-file scheme refuses");
+        assert_eq!(error.code, "provider-document-uri");
+    }
+
+    #[test]
+    fn relative_member_resolves_against_input_cwd() {
+        let (uri, path) = provider_member("src/lib.opy", Path::new("/project"))
+            .expect("relative member resolves");
+        assert_eq!(path, PathBuf::from("/project/src/lib.opy"));
+        assert_eq!(uri, "file:///project/src/lib.opy");
+    }
 
     #[test]
     fn relative_entry_is_resolved_from_the_invocation_directory() {

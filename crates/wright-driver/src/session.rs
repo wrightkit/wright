@@ -542,6 +542,18 @@ impl CompilerSession {
                 Ok(()) => {
                     provenance = Provenance::Mapped;
                     source_files = map.files().iter().map(|f| provider_uri_path(f)).collect();
+                    // Retain each mapped member's authored text so source
+                    // extents (lint fixes, previews) derive against what was
+                    // actually written — the map alone carries only paths
+                    // (#583).
+                    for (index, member) in source_files.iter().enumerate() {
+                        if let Ok(text) = std::fs::read_to_string(member) {
+                            program.set_file_source(
+                                workshop_rs::source::FileId::from_index(index),
+                                text,
+                            );
+                        }
+                    }
                 }
                 Err(error) => self.diagnostics.push(Diagnostic::warning(
                     "source-map-mismatch",
