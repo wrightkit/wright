@@ -57,8 +57,9 @@ debug = 1
 debug = false
 
 # Canonical Workshop core. The rev is pinned to the workshop-rs commit that
-# adds `Program::set_file_source` (wright#583, workshop-rs
+# adds `Program::set_file_source` and drops stale settings spans when a
+# source map rebinds the file table (wright#583, workshop-rs
 # feat/program-set-file-source); retarget to the crates.io release once the
 # API ships in a published version.
 [patch.crates-io]
-workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "6a97b5c" }
+workshop-rs = { git = "https://github.com/wrightkit/workshop-rs.git", rev = "62b20df" }

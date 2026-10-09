@@ -2255,7 +2255,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 [[package]]
 name = "workshop-rs"
 version = "1.11.0"
-source = "git+https://github.com/wrightkit/workshop-rs.git?rev=6a97b5c#6a97b5c2c9a265d9417f54d3778dd68f7ad3e1b0"
+source = "git+https://github.com/wrightkit/workshop-rs.git?rev=62b20df#62b20dfef31106ae55202cc9ce268b05df578065"
 dependencies = [
  "aho-corasick",
  "serde",
