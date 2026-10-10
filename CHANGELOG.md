@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.4](https://github.com/wrightkit/wright/compare/v0.15.3...v0.15.4) (2026-10-10)
+
+
+### Bug Fixes
+
+* **bench:** grade greenfield requirements on canonical output, accepting equivalent forms ([#611](https://github.com/wrightkit/wright/issues/611)) ([5064df5](https://github.com/wrightkit/wright/commit/5064df5186e541cfe341b011c23bf22d25f5e84c))
+* **bench:** retry a provider interruption after 60s before the --limits-poll wait ([#612](https://github.com/wrightkit/wright/issues/612)) ([a7d5b3e](https://github.com/wrightkit/wright/commit/a7d5b3ee8c72eecad7ec9dbb527f9fd63560f35c))
+
 ## [0.15.3](https://github.com/wrightkit/wright/compare/v0.15.2...v0.15.3) (2026-10-10)
 
 
