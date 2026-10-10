@@ -446,12 +446,12 @@ pub(crate) fn document_sources(
 /// refusal, never a silently partial set.
 pub(crate) fn provider_document_set(
     members: &[String],
-    cwd: &Path,
+    root: &Path,
     language_id: &str,
 ) -> Result<wright_lpp::DocumentSet, wright_analyzer::service::ErrorInfo> {
     let mut set = wright_lpp::DocumentSet::new();
     for member in members {
-        let (uri, path) = provider_member(member, cwd)?;
+        let (uri, path) = provider_member(member, root)?;
         let text = std::fs::read_to_string(&path).map_err(|error| {
             wright_analyzer::service::ErrorInfo {
                 code: "provider-document-unreadable".to_string(),
@@ -484,12 +484,13 @@ pub(crate) fn provider_project_root(root: &Path) -> Option<String> {
 
 /// A loaded project member as `(file:// URI, absolute disk path)` (#548): a
 /// URI spelling keeps its identity and converts back to its path; a bare
-/// path absolutizes against the session's input cwd and converts to a
-/// `file://` URI. A member that is not a disk file refuses — the defaulted
-/// document set covers only sources the session read from disk.
+/// path absolutizes against the session's project root — the root the
+/// provider was given — and converts to a `file://` URI. A member that is
+/// not a disk file refuses — the defaulted document set covers only sources
+/// the session read from disk.
 pub(crate) fn provider_member(
     member: &str,
-    cwd: &std::path::Path,
+    root: &std::path::Path,
 ) -> Result<(String, std::path::PathBuf), wright_analyzer::service::ErrorInfo> {
     // A Windows drive-absolute spelling (`C:\...`, `C:/...`) must be handled
     // before URI parsing: `url::Url::parse` accepts it as a URI whose scheme
@@ -516,7 +517,7 @@ pub(crate) fn provider_member(
         if path.is_absolute() {
             path
         } else {
-            cwd.join(path)
+            root.join(path)
         }
     };
     url::Url::from_file_path(&path)
@@ -623,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn relative_member_resolves_against_input_cwd() {
+    fn relative_member_resolves_against_the_project_root() {
         let (uri, path) = provider_member("src/lib.opy", Path::new("/project"))
             .expect("relative member resolves");
         assert_eq!(path, PathBuf::from("/project/src/lib.opy"));

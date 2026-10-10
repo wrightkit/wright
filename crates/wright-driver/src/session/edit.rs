@@ -314,7 +314,7 @@ impl CompilerSession {
         (loaded.provenance == Provenance::Mapped).then(|| {
             crate::source_provider::provider_document_set(
                 &loaded.source_files,
-                &loaded.input.cwd,
+                &loaded.input.root,
                 crate::opy_provider::OPY_LANGUAGE_ID,
             )
             .map(|documents| ProviderFixContext {

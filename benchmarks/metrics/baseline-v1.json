@@ -1,11 +1,11 @@
 {
   "briefTokenBudget": {
     "agent": 600,
-    "cli": 900
+    "cli": 1000
   },
   "contract": "wright-agent-metrics/v1",
   "corpusVersion": "v1",
-  "opyProvider": "0.3.0",
+  "opyProvider": "0.3.6",
   "projects": {
     "bastion": {
       "kind": "opy",
@@ -63,12 +63,12 @@
           "tokens": 56.8
         },
         "agent:check": {
-          "bytes": 138,
+          "bytes": 414,
           "counts": {
-            "diagnostics": 0
+            "diagnostics": 1
           },
           "latencyMs": 21.6,
-          "tokens": 34.5
+          "tokens": 103.5
         },
         "agent:compile": {
           "bytes": 441484,
@@ -309,14 +309,14 @@
           "tokens": 3385.8
         },
         "cli:lint?brief": {
-          "bytes": 2513,
+          "bytes": 3057,
           "counts": {
             "counts.findings.total": 19,
             "counts.rules": 6,
             "counts.skipped": 0,
             "items": 5
           },
-          "tokens": 628.2
+          "tokens": 764.2
         }
       },
       "status": "ok"
@@ -377,12 +377,12 @@
           "tokens": 57.8
         },
         "agent:check": {
-          "bytes": 138,
+          "bytes": 414,
           "counts": {
-            "diagnostics": 0
+            "diagnostics": 1
           },
           "latencyMs": 24.3,
-          "tokens": 34.5
+          "tokens": 103.5
         },
         "agent:compile": {
           "bytes": 365870,
@@ -616,14 +616,14 @@
           "tokens": 9616.2
         },
         "cli:lint?brief": {
-          "bytes": 3509,
+          "bytes": 3830,
           "counts": {
             "counts.findings.total": 55,
             "counts.rules": 6,
             "counts.skipped": 0,
             "items": 5
           },
-          "tokens": 877.2
+          "tokens": 957.5
         }
       },
       "status": "ok"

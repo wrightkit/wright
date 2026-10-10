@@ -136,7 +136,7 @@ fn edit(loaded: &Loaded, span: Span, new_text: String) -> Option<SourceEdit> {
         Provenance::Mapped => {
             let member = loaded.source_files.get(span.file.index())?;
             let (uri, _) =
-                crate::source_provider::provider_member(member, &loaded.input.cwd).ok()?;
+                crate::source_provider::provider_member(member, &loaded.input.root).ok()?;
             let identity = crate::input_identity(loaded.program.source(span.file)?.text());
             Some(SourceEdit {
                 edit_kind: "fix".to_string(),

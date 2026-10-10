@@ -684,7 +684,7 @@ impl<'a> ToolService<'a> {
         let loaded = self.snapshot();
         crate::source_provider::provider_document_set(
             &loaded.source_files,
-            &loaded.input.cwd,
+            &loaded.input.root,
             language_id,
         )
     }
