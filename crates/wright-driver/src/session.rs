@@ -537,6 +537,7 @@ impl CompilerSession {
         .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
         let mut provenance = Provenance::Unmapped;
         let mut source_files = vec![resolved.display.clone()];
+        let mut retained_source = false;
         if let Some(map) = &source_map {
             match map.apply(&mut program) {
                 Ok(()) => {
@@ -545,14 +546,37 @@ impl CompilerSession {
                     // Retain each mapped member's authored text so source
                     // extents (lint fixes, previews) derive against what was
                     // actually written — the map alone carries only paths
-                    // (#583).
+                    // (#583). Relative member spellings resolve against the
+                    // session's project root, not the process working
+                    // directory.
+                    let mut unreadable = Vec::new();
                     for (index, member) in source_files.iter().enumerate() {
-                        if let Ok(text) = std::fs::read_to_string(member) {
-                            program.set_file_source(
-                                workshop_rs::source::FileId::from_index(index),
-                                text,
-                            );
+                        let member_path = Path::new(member);
+                        let member_path = if member_path.is_absolute() {
+                            member_path.to_path_buf()
+                        } else {
+                            resolved.root.join(member_path)
+                        };
+                        match std::fs::read_to_string(&member_path) {
+                            Ok(text) => {
+                                retained_source |= program.set_file_source(
+                                    workshop_rs::source::FileId::from_index(index),
+                                    text,
+                                );
+                            }
+                            Err(error) => unreadable.push(format!("{member} ({error})")),
                         }
+                    }
+                    if !unreadable.is_empty() {
+                        self.diagnostics.push(Diagnostic::warning(
+                            "source-map-member-unreadable",
+                            Stage::Frontend,
+                            format!(
+                                "{} provider source-map member(s) could not be read, so their source extents are unavailable: {}",
+                                unreadable.len(),
+                                unreadable.join(", "),
+                            ),
+                        ));
                     }
                 }
                 Err(error) => self.diagnostics.push(Diagnostic::warning(
@@ -565,17 +589,54 @@ impl CompilerSession {
             }
         }
         self.progress(ProgressEvent::new(ProgressPhase::Validation));
-        program.validate().map_err(|error| {
-            workshop_diag_for_provider_artifact(
-                error,
-                resolved,
-                if provenance == Provenance::Mapped {
-                    &source_files
-                } else {
-                    &[]
-                },
+        if let Err(error) = program.validate() {
+            if !retained_source {
+                return Err(workshop_diag_for_provider_artifact(
+                    error,
+                    resolved,
+                    if provenance == Provenance::Mapped {
+                        &source_files
+                    } else {
+                        &[]
+                    },
+                ));
+            }
+            // A provider map may carry spans that do not resolve inside the
+            // retained authored source (e.g. positions recorded against an
+            // expansion rather than the authored line). Retained-source
+            // validation is a freshness audit, not a load gate: re-parse the
+            // artifact without retained text so the run still serves —
+            // mapped positions survive, authored extents degrade (#583).
+            let mut unretained = workshop_rs::parser::parse_with_context(
+                &workshop_text,
+                &self.catalog,
+                &locale,
+                &*self.catalog,
             )
-        })?;
+            .map_err(|error| workshop_diag_for_provider_artifact(error, resolved, &[]))?;
+            if let Some(map) = &source_map {
+                map.apply(&mut unretained).map_err(|apply_error| {
+                    Diagnostic::error(
+                        "source-map-mismatch",
+                        Stage::Frontend,
+                        format!(
+                            "the provider source map does not match its Workshop artifact ({apply_error})"
+                        ),
+                    )
+                })?;
+            }
+            unretained.validate().map_err(|error| {
+                workshop_diag_for_provider_artifact(error, resolved, &source_files)
+            })?;
+            program = unretained;
+            self.diagnostics.push(Diagnostic::warning(
+                "source-map-span-overflow",
+                Stage::Frontend,
+                format!(
+                    "the provider source map carries spans outside its members' retained sources ({error}); authored source extents are unavailable"
+                ),
+            ));
+        }
         if self.config.profile != wright_transform::Profile::Off {
             self.progress(ProgressEvent::new(ProgressPhase::Lowering));
         }

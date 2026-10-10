@@ -463,6 +463,65 @@ fn mapped_provider_project_reports_its_source_file_count() {
     cleanup(dir);
 }
 
+/// A provider map may carry a span that does not resolve inside the
+/// retained authored source (e.g. a position recorded against an expanded
+/// spelling rather than the authored line). Retained-source validation is a
+/// freshness audit, not a load gate: the run still serves, mapped positions
+/// survive, and authored extents degrade with a warning instead of failing
+/// the load (#583).
+#[test]
+fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |artifact| {
+        let node = artifact["spans"]
+            .as_array_mut()
+            .expect("spans")
+            .iter_mut()
+            .find(|node| node.get("span").is_some_and(|span| span.is_object()))
+            .expect("a node carrying a span");
+        node["span"]["end"] = serde_json::json!({"line": 9999, "column": 1});
+    });
+
+    let lint = session.lint();
+    assert!(lint.ok, "mapped lint: {:?}", lint.diagnostics);
+    assert_eq!(
+        session.load().expect("loaded").provenance,
+        wright_driver::Provenance::Mapped
+    );
+    assert!(
+        lint.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "source-map-span-overflow")
+    );
+    cleanup(dir);
+}
+
+/// A member the provider map names but no readable disk file serves no
+/// retained source; the load warns instead of silently dropping it (#583).
+#[test]
+fn unreadable_mapped_member_warns_instead_of_silently_dropping() {
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |artifact| {
+        artifact["files"]
+            .as_array_mut()
+            .expect("file table")
+            .push(serde_json::json!({
+                "path": url::Url::from_file_path(dir.join("missing.opy"))
+                    .expect("file URI")
+                    .to_string(),
+            }));
+    });
+
+    let lint = session.lint();
+    assert!(lint.ok, "mapped lint: {:?}", lint.diagnostics);
+    assert!(
+        lint.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "source-map-member-unreadable")
+    );
+    cleanup(dir);
+}
+
 /// A conforming pre-1.4 provider allows one `lpp/initialize` per process, so
 /// the fallback after a refused 1.4 negotiation must use a restarted process.
 #[cfg(unix)]
