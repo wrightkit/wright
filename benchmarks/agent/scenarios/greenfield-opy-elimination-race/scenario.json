@@ -30,8 +30,11 @@
       "id": "tracks-score-per-player",
       "kind": "compiled-contains",
       "layer": "agent",
-      "all": [
-        "player:\\s*\\n\\s*0:"
+      "any": [
+        "Modify Player Variable\\(",
+        "Set Player Variable\\(",
+        "Modify Player Score\\(",
+        "Set Player Score\\("
       ]
     },
     {
@@ -56,8 +59,8 @@
       "kind": "compiled-contains",
       "layer": "agent",
       "any": [
-        "Attacker != Victim",
-        "Compare\\(Attacker, !=, Victim\\)"
+        "(?:Attacker|Event Player|Victim)\\s*!=\\s*(?:Attacker|Event Player|Victim)",
+        "Compare\\((?:Attacker|Event Player|Victim),\\s*!=,\\s*(?:Attacker|Event Player|Victim)\\)"
       ]
     },
     {
