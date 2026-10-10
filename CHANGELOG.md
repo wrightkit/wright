@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.2](https://github.com/wrightkit/wright/compare/v0.15.1...v0.15.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **bench:** run the network canary on the host PATH ([#605](https://github.com/wrightkit/wright/issues/605)) ([16b0931](https://github.com/wrightkit/wright/commit/16b09313a5a9cb247c1a7ab4b7282e99859e3aca)), closes [#590](https://github.com/wrightkit/wright/issues/590)
+* **driver:** validate and apply lint fixes through the OPY provider ([#602](https://github.com/wrightkit/wright/issues/602)) ([96f80c8](https://github.com/wrightkit/wright/commit/96f80c8b715882074ede59e1e46d279ec5c4950e))
+
+
+### Dependencies
+
+* **agent:** sync vendored guide to skills@09727d7 ([#607](https://github.com/wrightkit/wright/issues/607)) ([c868b42](https://github.com/wrightkit/wright/commit/c868b4209bd7578a1532f04abece1603aac068b4)), closes [#539](https://github.com/wrightkit/wright/issues/539)
+
 ## [0.15.1](https://github.com/wrightkit/wright/compare/v0.15.0...v0.15.1) (2026-10-09)
 
 
