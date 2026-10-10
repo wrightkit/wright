@@ -42,6 +42,7 @@ struct RecordingProvider {
     operations: Arc<Mutex<Vec<&'static str>>>,
     check_compilation: Option<SourceCompilation>,
     compilation: Option<SourceCompilation>,
+    check_failure: Option<SourceProviderError>,
     failure: Option<SourceProviderError>,
 }
 
@@ -59,7 +60,7 @@ impl SourceProvider for RecordingProvider {
             .expect("operation lock")
             .push("check");
         *self.target.lock().expect("target lock") = Some(target.clone());
-        if let Some(error) = self.failure.take() {
+        if let Some(error) = self.check_failure.take() {
             return Err(error);
         }
         Ok(self.check_compilation.take().expect("check result"))
@@ -90,6 +91,7 @@ fn provider_backend_passes_only_the_selected_entry_and_uses_canonical_workshop_h
         compilation: Some(SourceCompilation::success(workshop_fixture(
             "synthetic/control-flow",
         ))),
+        check_failure: None,
         failure: None,
     };
     let config = SessionConfig {
@@ -135,10 +137,21 @@ fn provider_backend_delegates_directory_discovery_to_the_source_owner() {
     let provider = RecordingProvider {
         target: target.clone(),
         operations: Arc::new(Mutex::new(Vec::new())),
-        check_compilation: None,
-        compilation: Some(SourceCompilation::success(workshop_fixture(
-            "synthetic/basic-rule",
-        ))),
+        check_compilation: Some(SourceCompilation {
+            workshop_text: None,
+            locale: None,
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        }),
+        compilation: Some(SourceCompilation {
+            workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
+            locale: None,
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+            source_identity: Some(wright_driver::input_identity("owner-selected source")),
+        }),
+        check_failure: None,
         failure: None,
     };
     let config = SessionConfig {
@@ -170,6 +183,7 @@ fn directory_provider_compile_uses_the_owner_source_identity() {
             diagnostics: Vec::new(),
             source_identity: Some(wright_driver::input_identity("owner-selected source")),
         }),
+        check_failure: None,
         failure: None,
     };
     let config = SessionConfig {
@@ -192,8 +206,10 @@ fn directory_provider_compile_uses_the_owner_source_identity() {
     cleanup(dir);
 }
 
+/// #617: on a provider that refuses `compile`, `check` still executes the
+/// provider's check operation alone — the documented check-only path.
 #[test]
-fn provider_backend_check_uses_the_provider_check_operation() {
+fn provider_backend_check_falls_back_to_the_check_operation_on_a_check_only_provider() {
     let (dir, entry) = temp_entry();
     let operations = Arc::new(Mutex::new(Vec::new()));
     let provider = RecordingProvider {
@@ -206,8 +222,11 @@ fn provider_backend_check_uses_the_provider_check_operation() {
             diagnostics: Vec::new(),
             source_identity: None,
         }),
-        compilation: Some(SourceCompilation::success("unused")),
-        failure: None,
+        compilation: None,
+        check_failure: None,
+        failure: Some(SourceProviderError::Unsupported {
+            message: "this provider has no canonical compile capability".to_string(),
+        }),
     };
     let config = SessionConfig {
         input: InputSpec::Path(entry),
@@ -218,7 +237,10 @@ fn provider_backend_check_uses_the_provider_check_operation() {
         .expect("provider session");
     let result = session.check();
     assert!(result.ok, "provider check: {:?}", result.diagnostics);
-    assert_eq!(*operations.lock().expect("operation lock"), vec!["check"]);
+    assert_eq!(
+        *operations.lock().expect("operation lock"),
+        vec!["check", "compile"]
+    );
     cleanup(dir);
 }
 
@@ -239,6 +261,7 @@ fn provider_backend_does_not_reuse_a_check_load_for_compile() {
         compilation: Some(SourceCompilation::success(workshop_fixture(
             "synthetic/basic-rule",
         ))),
+        check_failure: None,
         failure: None,
     };
     let config = SessionConfig {
@@ -283,6 +306,7 @@ fn provider_backend_lint_and_analyze_use_the_canonical_artifact_without_opy_span
             }],
             source_identity: None,
         }),
+        check_failure: None,
         failure: None,
     };
     let config = SessionConfig {
@@ -381,6 +405,7 @@ fn mapped_lint_session(
             diagnostics: Vec::new(),
             source_identity: None,
         }),
+        check_failure: None,
         failure: None,
     };
     let config = SessionConfig {
@@ -950,6 +975,197 @@ impl SourceProvider for ReloadableProvider {
     }
 }
 
+/// #617: `check` gates an agent on the same canonical validation `compile`
+/// runs — the issue's reproducer class, where the provider's check op
+/// reports clean but its compile reports a `catalog-validation` error, must
+/// fail `check` with `compile`'s code and span.
+#[test]
+fn check_reports_the_catalog_validation_errors_compile_reports() {
+    let (dir, entry) = temp_entry();
+    let catalog_error = Diagnostic {
+        code: "catalog-validation".to_string(),
+        stage: Stage::Frontend,
+        severity: wright_driver::Severity::Error,
+        message:
+            "action 'playEffect' argument 4 must have semantic type 'Vector|Player', got Array"
+                .to_string(),
+        status: None,
+        span: Some(wright_driver::SourceSpan {
+            file: 0,
+            path: entry.display().to_string(),
+            start: wright_driver::Position { line: 10, col: 85 },
+            end: wright_driver::Position { line: 10, col: 128 },
+        }),
+        source: None,
+    };
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        // The provider's own check op reports clean — the divergence the
+        // issue reproduces.
+        check_compilation: Some(SourceCompilation {
+            workshop_text: None,
+            locale: Some("en-US".to_string()),
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: Vec::new(),
+            source_identity: None,
+        }),
+        compilation: Some(SourceCompilation {
+            workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
+            locale: Some("en-US".to_string()),
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: vec![catalog_error],
+            source_identity: None,
+        }),
+        check_failure: None,
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry.clone()),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+        .expect("provider session");
+    let check = session.check();
+    assert!(
+        !check.ok,
+        "check must fail like compile on a catalog-invalid artifact: {check:?}"
+    );
+    let check_findings: Vec<_> = check
+        .diagnostics
+        .iter()
+        .map(|d| (d.code.as_str(), d.span.clone()))
+        .collect();
+    assert_eq!(
+        check_findings.len(),
+        1,
+        "exactly compile's error, not a synthetic one: {check_findings:?}"
+    );
+    assert_eq!(check_findings[0].0, "catalog-validation");
+    let span = check_findings[0].1.as_ref().expect("error span");
+    assert_eq!((span.start.line, span.start.col), (10, 85));
+
+    // A second session on the same provider shape: `compile` reports the
+    // identical code and span.
+    let (dir2, entry2) = temp_entry();
+    let compile_provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: Some(SourceCompilation {
+            workshop_text: Some(workshop_fixture("synthetic/basic-rule")),
+            locale: Some("en-US".to_string()),
+            provenance: wright_driver::SourceProvenance::Unmapped,
+            diagnostics: vec![Diagnostic {
+                code: "catalog-validation".to_string(),
+                stage: Stage::Frontend,
+                severity: wright_driver::Severity::Error,
+                message: "action 'playEffect' argument 4 must have semantic type 'Vector|Player', got Array"
+                    .to_string(),
+                status: None,
+                span: Some(wright_driver::SourceSpan {
+                    file: 0,
+                    path: entry.display().to_string(),
+                    start: wright_driver::Position { line: 10, col: 85 },
+                    end: wright_driver::Position { line: 10, col: 128 },
+                }),
+                source: None,
+            }],
+            source_identity: None,
+        }),
+        check_failure: None,
+        failure: None,
+    };
+    let config = SessionConfig {
+        input: InputSpec::Path(entry2),
+        kind: SourceKind::Opy,
+        ..SessionConfig::default()
+    };
+    let mut compile_session =
+        CompilerSession::with_source_provider(config, Box::new(compile_provider))
+            .expect("provider session");
+    let compile = compile_session.compile();
+    assert!(!compile.ok, "compile fails on the same input: {compile:?}");
+    assert_eq!(
+        check_findings,
+        compile
+            .diagnostics
+            .iter()
+            .map(|d| (d.code.as_str(), d.span.clone()))
+            .collect::<Vec<_>>(),
+        "check and compile must report the same code and span"
+    );
+    cleanup(dir);
+    cleanup(dir2);
+}
+
+/// #617: over every committed canonical-artifact fixture, `check` and
+/// `compile` agree on whether the run reports an error.
+#[test]
+fn check_and_compile_agree_on_error_presence_across_the_artifact_corpus() {
+    let corpus = workspace_root().join("tests/fixtures/workshop");
+    let mut fixtures: Vec<PathBuf> = Vec::new();
+    let mut stack = vec![corpus];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("fixture directory") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "ws") {
+                fixtures.push(path);
+            }
+        }
+    }
+    fixtures.sort();
+    assert!(!fixtures.is_empty(), "the fixture corpus must not be empty");
+
+    for fixture in fixtures {
+        let (dir, entry) = temp_entry();
+        let artifact = std::fs::read_to_string(&fixture).expect("fixture text");
+        let provider = ReloadableProvider {
+            operations: Arc::new(Mutex::new(Vec::new())),
+            workshop_text: artifact,
+        };
+        let config = SessionConfig {
+            input: InputSpec::Path(entry),
+            kind: SourceKind::Opy,
+            ..SessionConfig::default()
+        };
+        let mut session = CompilerSession::with_source_provider(config, Box::new(provider))
+            .expect("provider session");
+        let check = session.check();
+        let compile = session.compile();
+        assert_eq!(
+            check.ok,
+            compile.ok,
+            "{}: check and compile disagree (check ok={}, compile ok={})",
+            fixture.display(),
+            check.ok,
+            compile.ok
+        );
+        let check_errors: Vec<_> = check
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == wright_driver::Severity::Error)
+            .map(|d| (d.code.as_str(), d.span.clone()))
+            .collect();
+        let compile_errors: Vec<_> = compile
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == wright_driver::Severity::Error)
+            .map(|d| (d.code.as_str(), d.span.clone()))
+            .collect();
+        assert_eq!(
+            check_errors,
+            compile_errors,
+            "{}: check and compile report different errors",
+            fixture.display()
+        );
+        cleanup(dir);
+    }
+}
+
 /// #591: `check` and `compile` are workflows, not snapshot queries — the
 /// service must run them through the operation-aware provider calls without
 /// first requiring a canonical compile result.
@@ -974,18 +1190,23 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     assert!(service.loaded().is_none());
     assert_eq!(service.reload_count(), 0);
 
-    // `check` executes the provider's check operation directly.
+    // `check` executes the provider's check operation, then asks for the
+    // canonical artifact (#617); the provider's compile refusal keeps it on
+    // the check-only path.
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Check) else {
         panic!("check must return the workflow envelope")
     };
     assert_eq!(result["command"], "check");
     assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(*operations.lock().expect("ops"), vec!["check"]);
+    assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
 
     // The direct method is the same workflow: check again, still no
     // compile-only provider call just to establish a query snapshot.
     assert!(service.check().ok);
-    assert_eq!(*operations.lock().expect("ops"), vec!["check", "check"]);
+    assert_eq!(
+        *operations.lock().expect("ops"),
+        vec!["check", "compile", "check", "compile"]
+    );
 
     // Canonical queries still refuse explicitly — no compile capability
     // means no snapshot, not a placeholder program.
@@ -1005,7 +1226,7 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     }
     assert_eq!(
         *operations.lock().expect("ops"),
-        vec!["check", "check"],
+        vec!["check", "compile", "check", "compile"],
         "snapshot queries refuse without asking the provider to compile"
     );
 
@@ -1021,7 +1242,7 @@ fn service_check_and_compile_run_without_a_prewarmed_snapshot() {
     );
     assert_eq!(
         *operations.lock().expect("ops"),
-        vec!["check", "check", "compile"]
+        vec!["check", "compile", "check", "compile", "compile"]
     );
     cleanup(dir);
 }
@@ -1071,12 +1292,12 @@ fn service_compile_establishes_the_snapshot_and_recovers_after_reload() {
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(
         *operations.lock().expect("ops"),
-        vec!["compile", "check"],
+        vec!["compile", "check", "compile"],
         "an observed change re-checks instead of serving the stale program"
     );
     assert!(
-        service.loaded().is_none(),
-        "a provider check supplies no canonical snapshot"
+        service.loaded().is_some(),
+        "a compile-capable provider check supplies the canonical snapshot (#617)"
     );
     let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
         panic!("compile must return the workflow envelope")
@@ -1123,7 +1344,9 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         };
         assert_eq!(check["command"], "check");
         assert_eq!(check["ok"], true, "{check}");
-        assert_eq!(*operations.lock().expect("ops"), vec!["check"]);
+        // `check` consults the provider's check operation and its compile for
+        // canonical validation (#617).
+        assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
 
         let compile = if via_request {
             let ToolResponse::Ok { result } = service.handle(&ToolRequest::Compile) else {
@@ -1135,6 +1358,8 @@ fn service_check_and_compile_match_the_direct_workflow_methods() {
         };
         assert_eq!(compile["command"], "compile");
         assert_eq!(compile["ok"], true, "{compile}");
+        // The `check`-established canonical snapshot serves `compile` — no
+        // second provider round-trip.
         assert_eq!(*operations.lock().expect("ops"), vec!["check", "compile"]);
         cleanup(dir);
     }
@@ -1186,6 +1411,7 @@ fn unmapped_provider_artifact_errors_do_not_claim_the_opy_entry() {
         compilation: Some(SourceCompilation::success(
             "rule (\"broken\") {\n    actions {\n        UnknownAction;\n    }\n}\n",
         )),
+        check_failure: None,
         failure: None,
     };
     let config = SessionConfig {
@@ -1225,6 +1451,7 @@ fn provider_backend_does_not_fall_back_when_the_provider_fails() {
         operations: Arc::new(Mutex::new(Vec::new())),
         check_compilation: None,
         compilation: None,
+        check_failure: None,
         failure: Some(SourceProviderError::Failed {
             code: "provider-exited".to_string(),
             message: "provider exited before compiling the entry".to_string(),
@@ -1275,6 +1502,7 @@ fn provider_refusal_is_a_frontend_failure_with_its_refusal_code() {
         operations: Arc::new(Mutex::new(Vec::new())),
         check_compilation: None,
         compilation: None,
+        check_failure: None,
         failure: Some(SourceProviderError::Failed {
             code: "provider-refusal-compile.tooLarge".to_string(),
             message: "the compile request failed: the provider refused (compile.tooLarge)"
@@ -1309,6 +1537,7 @@ fn provider_capability_unavailable_exits_as_unsupported() {
         operations: Arc::new(Mutex::new(Vec::new())),
         check_compilation: None,
         compilation: None,
+        check_failure: None,
         failure: Some(SourceProviderError::Failed {
             code: "capability-unavailable".to_string(),
             message: "the check request failed: capability 'projectLoading' was not negotiated"
@@ -1340,6 +1569,7 @@ fn provider_project_load_failure_is_a_source_side_failure() {
         operations: Arc::new(Mutex::new(Vec::new())),
         check_compilation: None,
         compilation: None,
+        check_failure: None,
         failure: Some(SourceProviderError::Failed {
             code: "project-load-failed".to_string(),
             message: "the check request failed: a required source file could not be loaded"
@@ -1371,6 +1601,7 @@ fn provider_transport_failures_stay_internal() {
             operations: Arc::new(Mutex::new(Vec::new())),
             check_compilation: None,
             compilation: None,
+            check_failure: None,
             failure: Some(SourceProviderError::Failed {
                 code: code.to_string(),
                 message: format!("the compile request failed: {code}"),
@@ -1403,6 +1634,7 @@ fn wright_originated_refusal_keeps_its_verbatim_code() {
         operations: Arc::new(Mutex::new(Vec::new())),
         check_compilation: None,
         compilation: None,
+        check_failure: None,
         failure: Some(SourceProviderError::Failed {
             code: "session-config-changed".to_string(),
             message: "the check request failed: session configuration is fixed".to_string(),
