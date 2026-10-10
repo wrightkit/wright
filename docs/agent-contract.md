@@ -233,10 +233,16 @@ request.
 `check` and `compile` are workflows rather than snapshot queries (#591):
 they run the session's own operation-aware load instead of requiring a
 canonical program snapshot first. A `check` request over a source-language
-provider therefore invokes the provider's check operation without
-compiling — a check-only provider answers it — and a successful `compile`
-supplies the canonical snapshot the later `symbols`, `references`, or
-`findings` requests read. The freshness gate above still applies: an
+provider invokes the provider's check operation and, when the provider can
+compile, its compile operation too — `check` then runs the same canonical
+validation `compile` surfaces, so an agent gating on `check` sees every
+error `compile` reports, and a successful `check` supplies the canonical
+snapshot the later `symbols`, `references`, or `findings` requests read
+(#617). A provider whose compile returns `Unsupported` keeps the
+check-only path: it answers `check` from its own diagnostics alone, the
+one deliberate difference from `compile`. Any other compile failure —
+including an LPP refusal — fails `check` the way it fails `compile`. The
+freshness gate above still applies: an
 observed disk change invalidates the served snapshot, and the next
 workflow re-resolves the input rather than serving it. A failed load
 surfaces inside the `wright-result/v1` envelope's diagnostics (the same

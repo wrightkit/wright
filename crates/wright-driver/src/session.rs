@@ -270,7 +270,7 @@ impl CompilerSession {
     /// calls this when the disk fingerprint changed ahead of a `check` or
     /// `compile` workflow, whose own operation-aware load must re-resolve
     /// rather than serve the stale snapshot — including a provider-backed
-    /// `check`, which produces no canonical snapshot at all.
+    /// `check`, which compiles to produce its canonical snapshot (#617).
     /// `loaded_operation` survives: it records the provider operation that
     /// last produced a canonical snapshot, so a compile-capable provider
     /// still recompiles on the next `load` where a check-only one refuses.
@@ -280,10 +280,10 @@ impl CompilerSession {
     }
 
     /// The session's cached canonical snapshot, when the last load produced
-    /// one — `None` for a provider check, an unloadable input, or after
-    /// [`Self::drop_loaded`]. `ToolService` adopts this snapshot after a
-    /// successful workflow load (#591); it cannot call `load()` for it
-    /// because a check-only provider backend refuses `load()` outright.
+    /// one — `None` for a check-only provider `check`, an unloadable input,
+    /// or after [`Self::drop_loaded`]. `ToolService` adopts this snapshot
+    /// after a successful workflow load (#591); it cannot call `load()` for
+    /// it because a check-only provider backend refuses `load()` outright.
     pub(crate) fn cached_loaded(&self) -> Option<Loaded> {
         self.loaded.clone()
     }
@@ -469,11 +469,39 @@ impl CompilerSession {
             ));
         }
         let compilation = match operation {
-            ProviderOperation::Check => provider.check(&target),
-            ProviderOperation::Compile => provider.compile(&target),
-        }
-        .map_err(|error| error.diagnostic())?;
-        if operation == ProviderOperation::Compile && resolved.target == InputTarget::Directory {
+            ProviderOperation::Check => {
+                let check = provider
+                    .check(&target)
+                    .map_err(|error| error.diagnostic())?;
+                // A compile-capable provider also produces the canonical
+                // artifact, so `check` runs the same canonical validation
+                // `compile` surfaces — an agent that gates on `check` must see
+                // every error `compile` would report (#617). A provider
+                // without compile capability keeps the check-only path.
+                match provider.compile(&target) {
+                    Ok(mut compilation) => {
+                        for diagnostic in check.diagnostics {
+                            if !compilation.diagnostics.contains(&diagnostic) {
+                                compilation.diagnostics.push(diagnostic);
+                            }
+                        }
+                        compilation
+                    }
+                    Err(SourceProviderError::Unsupported { .. }) => check,
+                    Err(error) => {
+                        self.diagnostics.extend(check.diagnostics);
+                        return Err(error.diagnostic());
+                    }
+                }
+            }
+            ProviderOperation::Compile => provider.compile(&target).map_err(|e| e.diagnostic())?,
+        };
+        // A canonical artifact needs the provider's source identity for a
+        // directory target — whatever operation produced it, including a
+        // `check` that compiled to validate (#617).
+        if (operation == ProviderOperation::Compile || compilation.workshop_text.is_some())
+            && resolved.target == InputTarget::Directory
+        {
             let Some(id) = compilation
                 .source_identity
                 .as_ref()
@@ -510,7 +538,11 @@ impl CompilerSession {
             .or_else(|| resolved.origin.locale.clone())
             .unwrap_or_else(|| "en-US".to_string());
         let locale = workshop_rs::catalog::Locale::new(&locale_name);
-        if operation == ProviderOperation::Check {
+        // The check-only provider path: `provider.check` answered and the
+        // provider declined to compile, so no canonical artifact exists to
+        // validate. `check` then reports only the provider's own diagnostics —
+        // the documented difference from `compile` (#617).
+        if operation == ProviderOperation::Check && compilation.workshop_text.is_none() {
             return Ok(Loaded {
                 program: Arc::new(Program::default()),
                 origin: resolved.origin.clone(),
@@ -651,7 +683,10 @@ impl CompilerSession {
             completeness_issues: None,
         };
         self.loaded = Some(loaded.clone());
-        self.loaded_operation = Some(operation);
+        // Reaching here means a canonical artifact was parsed and validated;
+        // the snapshot serves every later operation — including a `check`
+        // that compiled to validate (#617) — as a compile product.
+        self.loaded_operation = Some(ProviderOperation::Compile);
         Ok(loaded)
     }
 

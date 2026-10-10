@@ -493,9 +493,10 @@ impl<'a> ToolService<'a> {
     ///
     /// `check` and `compile` are workflows, not snapshot queries (#591):
     /// they run the session's operation-aware load instead of requiring a
-    /// canonical snapshot, so a check-only provider answers `check` without
-    /// ever being asked for a compile, and a successful `compile` supplies
-    /// the snapshot later queries read.
+    /// canonical snapshot, so a compile-capable provider's `check` compiles
+    /// for canonical validation and supplies the snapshot later queries
+    /// read (#617); a provider that declines its compile keeps the
+    /// check-only path.
     pub fn handle(&mut self, request: &ToolRequest) -> ToolResponse {
         match request {
             ToolRequest::Check | ToolRequest::Compile => self.refresh_workflow(),
@@ -629,9 +630,9 @@ impl<'a> ToolService<'a> {
     /// when the service holds none (#591): a successful `compile` makes its
     /// program the snapshot later queries serve — the same guarantee as a
     /// session that had already compiled before service construction. A
-    /// provider `check` caches no program (`cached_loaded` is `None`), so
-    /// snapshot queries keep refusing `load()`'s explicit unsupported state
-    /// rather than inheriting a placeholder program.
+    /// check-only provider's `check` caches no program (`cached_loaded` is
+    /// `None`), so snapshot queries keep refusing `load()`'s explicit
+    /// unsupported state rather than inheriting a placeholder program.
     fn adopt_session_snapshot(&mut self) {
         if self.loaded.is_none() {
             if let Some(loaded) = self.session.cached_loaded() {
@@ -939,8 +940,9 @@ impl<'a> ToolService<'a> {
     ///
     /// The same freshness contract as [`Self::compile`] applies (#471),
     /// minus the canonical-snapshot requirement: `check` runs the
-    /// operation-aware load, so a check-only provider answers it directly
-    /// without being asked for a compile (#591).
+    /// operation-aware load, which on a compile-capable provider compiles
+    /// for canonical validation (#617) and on a provider that declines its
+    /// compile answers the check operation alone (#591).
     pub fn check(&mut self) -> Envelope<CheckResult> {
         self.refresh_workflow();
         let envelope = self.session.check();

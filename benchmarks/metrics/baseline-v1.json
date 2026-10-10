@@ -5,7 +5,7 @@
   },
   "contract": "wright-agent-metrics/v1",
   "corpusVersion": "v1",
-  "opyProvider": "0.3.7",
+  "opyProvider": "0.3.8",
   "projects": {
     "bastion": {
       "kind": "opy",
@@ -571,12 +571,12 @@
           "tokens": 658.5
         },
         "cli:check": {
-          "bytes": 193,
+          "bytes": 514,
           "counts": {
-            "diagnostics": 0
+            "diagnostics": 1
           },
-          "latencyMs": 736.8,
-          "tokens": 48.2
+          "latencyMs": 8325.6,
+          "tokens": 128.5
         },
         "cli:compile": {
           "bytes": 366271,
