@@ -3,8 +3,9 @@
 //! edits against the authored source, carrying the input identity, that
 //! `validateEditTransaction` previews and `write_previews` applies. Fixes
 //! exist only for `exact` findings whose correction is unambiguous
-//! (`duplicate-condition`, `repeated-value`), and only for raw Workshop
-//! input whose spans map to authored source.
+//! (`duplicate-condition`, `repeated-value`), and only for input whose
+//! spans map to retained authored source: raw Workshop parses, and
+//! provider-mapped programs whose file table retains source text (#583).
 
 use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
@@ -38,9 +39,9 @@ pub fn attach_fixes(
     catalog: &Catalog,
     locale: &Locale,
 ) {
-    // Fixes rewrite authored Workshop source only: a provider artifact's
-    // spans index generated text, not the caller's files.
-    if loaded.provenance != Provenance::Source {
+    // An unmapped provider artifact's spans index generated text, not the
+    // caller's files; a mapped artifact's spans address authored members.
+    if loaded.provenance == Provenance::Unmapped {
         return;
     }
     for (finding, json) in findings.iter().zip(json.iter_mut()) {
@@ -111,20 +112,40 @@ fn materialize(
     })
 }
 
-/// One plan span as a `SourceEdit` against the loaded input: the span must
-/// map to the parsed text of file 0, the single authored source a raw
-/// Workshop program has.
+/// One plan span as a `SourceEdit` against the loaded input. For a raw
+/// Workshop input the span must map to file 0's parsed text; for a
+/// provider-mapped program the span's file indexes the source map's file
+/// table — the edit names the member's `file://` URI and the identity of
+/// the retained text, so `providerValidateEdits` and the write path
+/// preconditions see the same bytes (#583).
 fn edit(loaded: &Loaded, span: Span, new_text: String) -> Option<SourceEdit> {
-    (span.file.index() == 0).then(|| SourceEdit {
-        edit_kind: "fix".to_string(),
-        source: loaded.input.display.clone(),
-        source_identity: loaded.input.identity.clone(),
-        range: EditRange {
-            start_line: span.start.line,
-            start_col: span.start.col,
-            end_line: span.end.line,
-            end_col: span.end.col,
-        },
-        new_text,
-    })
+    let range = EditRange {
+        start_line: span.start.line,
+        start_col: span.start.col,
+        end_line: span.end.line,
+        end_col: span.end.col,
+    };
+    match loaded.provenance {
+        Provenance::Source => (span.file.index() == 0).then(|| SourceEdit {
+            edit_kind: "fix".to_string(),
+            source: loaded.input.display.clone(),
+            source_identity: loaded.input.identity.clone(),
+            range,
+            new_text,
+        }),
+        Provenance::Mapped => {
+            let member = loaded.source_files.get(span.file.index())?;
+            let (uri, _) =
+                crate::source_provider::provider_member(member, &loaded.input.root).ok()?;
+            let identity = crate::input_identity(loaded.program.source(span.file)?.text());
+            Some(SourceEdit {
+                edit_kind: "fix".to_string(),
+                source: uri,
+                source_identity: identity,
+                range,
+                new_text,
+            })
+        }
+        Provenance::Unmapped => None,
+    }
 }

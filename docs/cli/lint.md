@@ -229,8 +229,11 @@ The current fixable rules and their corrections:
   the evaluation count.
 
 Every offered fix edits only the reported spans, carries the input identity
-as a precondition, and is validated by reparsing the edited source before
-any write; a stale or malformed precondition refuses with
-`edit-stale-source` (or the real parse/validation diagnostic) and writes
-nothing. Fixes exist only on raw Workshop input — provider-backed findings
-have spans in generated text and carry no `fix`.
+as a precondition, and is validated before any write — a raw Workshop fix
+reparses the edited source, while a provider-mapped fix goes through the
+provider's own edit validation and project check. A stale or malformed
+precondition refuses with `edit-stale-source` (or the real diagnostic) and
+writes nothing. Provider-backed findings carry a `fix` when their source
+map records authored positions — a mapped `duplicate-condition` edits the
+authored `elif`/`else` chain directly; unmapped provider artifacts have
+spans in generated text and carry no `fix`.

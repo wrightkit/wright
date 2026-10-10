@@ -387,8 +387,10 @@ fn duplicate_condition_findings(
 /// read from the tick snapshot (random numbers, advancing clocks, sampled
 /// server load) keep the branch reachable, so it stays.
 ///
-/// Provenance alone cannot bound the branch: `Else If`, `Else`, and `End`
-/// markers carry no action span, so the marker extents are derived
+/// Branch extents come from marker provenance when the provider records it
+/// (`Else If`/`Else` keywords and the `End` dedent position are authored
+/// spans in the source language, #583) — [`marker_branch_range`]. Raw
+/// Workshop markers carry no action span, so their extents are derived
 /// textually against the retained source — see [`SourceScan`].
 fn dead_branch_fix(
     program: &Program,
@@ -406,6 +408,10 @@ fn dead_branch_fix(
         .or_else(|| program.action_span(rule_id, action_id))?
         .file;
     let scan = SourceScan::new(program.source(file)?, file);
+    if let Some(range) = marker_branch_range(program, rule_id, rule, action_id, boundary, &scan) {
+        return dead_branch_span(&scan, range.start, range.end)
+            .map(|span| LintFix::RemoveDeadBranch { span });
+    }
     let condition_end = expr_extent_end(
         condition,
         &mut |path| program.action_argument_value_span(rule_id, action_id, 0, path),
@@ -435,6 +441,33 @@ fn dead_branch_fix(
         _ => return None,
     };
     dead_branch_span(&scan, start, end).map(|span| LintFix::RemoveDeadBranch { span })
+}
+
+/// The dead branch's byte range taken from marker provenance: the provider's
+/// recorded position for the dead `Else If` marker through the boundary
+/// marker. Returns `None` unless the chain's `If` opener, the dead marker,
+/// and the boundary marker all carry strictly increasing positions in the
+/// scanned file — provenance where every marker inherits the same position
+/// (or none) fails this check and the caller derives extents textually.
+fn marker_branch_range(
+    program: &Program,
+    rule_id: RuleId,
+    rule: &Rule,
+    marker: usize,
+    boundary: usize,
+    scan: &SourceScan,
+) -> Option<Range<usize>> {
+    let chain = chain_if_index(&rule.actions, marker)?;
+    let start = program.action_span(rule_id, marker)?;
+    let end = program.action_span(rule_id, boundary)?;
+    let head = program.action_span(rule_id, chain)?;
+    if start.file != scan.file || end.file != scan.file || head.file != scan.file {
+        return None;
+    }
+    let head = scan.byte(head.start)?;
+    let start = scan.byte(start.start)?;
+    let end = scan.byte(end.start)?;
+    (head < start && start < end).then_some(start..end)
 }
 
 /// The branch-removal span between a dead `Else If` marker and the next

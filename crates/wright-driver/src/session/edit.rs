@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use super::CompilerSession;
+use super::{CompilerSession, Provenance};
 use crate::config::InputSpec;
 use crate::diag::{Diagnostic, Stage};
 use crate::edit::{EditTransaction, EditValidation, RenameResult, RenameTarget, SemanticRename};
@@ -169,15 +169,11 @@ impl CompilerSession {
             } else {
                 None
             };
-            let outcomes = fix_outcomes(
-                &self.config,
-                &self.catalog,
-                &envelope.result.findings,
-                sources.as_ref(),
-            )
-            .into_iter()
-            .map(|(outcome, _)| outcome)
-            .collect();
+            let outcomes = self
+                .fix_outcomes(&envelope.result.findings, sources.as_ref())
+                .into_iter()
+                .map(|(outcome, _)| outcome)
+                .collect();
             envelope.result.fixes = Some(outcomes);
             return envelope;
         }
@@ -201,14 +197,10 @@ impl CompilerSession {
         });
         loop {
             let sources = current_sources(&self.config);
-            let candidate = fix_outcomes(
-                &self.config,
-                &self.catalog,
-                &envelope.result.findings,
-                sources.as_ref(),
-            )
-            .into_iter()
-            .find(|(outcome, _)| outcome.status == LintFixStatus::Preview);
+            let candidate = self
+                .fix_outcomes(&envelope.result.findings, sources.as_ref())
+                .into_iter()
+                .find(|(outcome, _)| outcome.status == LintFixStatus::Preview);
             let Some((outcome, resolved)) = candidate else {
                 break;
             };
@@ -273,12 +265,7 @@ impl CompilerSession {
             .iter()
             .map(|outcome| (outcome.code.clone(), format!("{:?}", outcome.span)))
             .collect();
-        for (outcome, _) in fix_outcomes(
-            &self.config,
-            &self.catalog,
-            &envelope.result.findings,
-            sources.as_ref(),
-        ) {
+        for (outcome, _) in self.fix_outcomes(&envelope.result.findings, sources.as_ref()) {
             if !seen.insert((outcome.code.clone(), format!("{:?}", outcome.span))) {
                 continue;
             }
@@ -295,6 +282,166 @@ impl CompilerSession {
         envelope.result.fixes = Some(applied);
         envelope
     }
+
+    /// The validated disposition of every finding in `findings` that
+    /// carries a `fix` — in findings order. Each fix's transaction is
+    /// deserialized and validated: raw Workshop fixes through
+    /// `validate_transaction` (input identity, ranges, Workshop reparse),
+    /// provider-mapped fixes through the provider pipeline (#583). A fix
+    /// that fails deserializes or validates to a structured refusal.
+    fn fix_outcomes(
+        &self,
+        findings: &serde_json::Value,
+        sources: Option<&BTreeMap<String, String>>,
+    ) -> Vec<(LintFixOutcome, Option<ResolvedFix>)> {
+        let Some(findings) = findings.as_array() else {
+            return Vec::new();
+        };
+        let provider = self.provider_fix_context();
+        findings
+            .iter()
+            .filter_map(|finding| self.fix_outcome(finding, sources, provider.as_ref()))
+            .collect()
+    }
+
+    /// For a provider-mapped load, the document set and precondition
+    /// sources `providerValidateEdits` runs against — the members' current
+    /// disk text under their `file://` URIs, built once per fix batch.
+    /// `Some(Err)` refuses every fix in the batch with the member-read
+    /// diagnostic; `None` keeps the raw Workshop validation path.
+    fn provider_fix_context(&self) -> Option<Result<ProviderFixContext, Diagnostic>> {
+        let loaded = self.loaded.as_ref()?;
+        (loaded.provenance == Provenance::Mapped).then(|| {
+            crate::source_provider::provider_document_set(
+                &loaded.source_files,
+                &loaded.input.root,
+                crate::opy_provider::OPY_LANGUAGE_ID,
+            )
+            .map(|documents| ProviderFixContext {
+                sources: crate::source_provider::document_sources(&documents),
+                project_root: crate::source_provider::provider_project_root(&loaded.input.root),
+                documents,
+            })
+            .map_err(|info| Diagnostic::error(info.code, Stage::Discovery, info.message))
+        })
+    }
+
+    /// Validate one mapped-source fix transaction through the provider
+    /// pipeline: Wright's preconditions, `lpp/validateEdits` per edited
+    /// document, then `lpp/check` over the edited project (#583).
+    fn provider_fix_validation(
+        &self,
+        context: &ProviderFixContext,
+        transaction: &EditTransaction,
+    ) -> Result<(Vec<crate::edit::SourcePreview>, Vec<Diagnostic>), Vec<Diagnostic>> {
+        let request = crate::provider_edit::ProviderValidateRequest {
+            documents: context.documents.clone(),
+            transaction: transaction.clone(),
+            sources: context.sources.clone(),
+            project_root: context.project_root.clone(),
+        };
+        let mutation = self.run_provider_flow(
+            crate::opy_provider::OPY_LANGUAGE_ID,
+            &wright_lpp::ClientInfo {
+                name: wright_lpp::LPP_CLIENT_NAME.to_string(),
+                version: crate::result::DRIVER_VERSION.to_string(),
+            },
+            |provider| crate::provider_edit::validate_transaction(provider, &request),
+        );
+        if mutation.ok {
+            Ok((mutation.preview.unwrap_or_default(), mutation.diagnostics))
+        } else {
+            Err(mutation.diagnostics)
+        }
+    }
+
+    fn fix_outcome(
+        &self,
+        finding: &serde_json::Value,
+        sources: Option<&BTreeMap<String, String>>,
+        provider: Option<&Result<ProviderFixContext, Diagnostic>>,
+    ) -> Option<(LintFixOutcome, Option<ResolvedFix>)> {
+        let fix = finding.get("fix")?;
+        if !fix.is_object() {
+            return None;
+        }
+        let outcome = |status, preview, diagnostics| LintFixOutcome {
+            code: finding["code"].as_str().unwrap_or_default().to_string(),
+            kind: fix["kind"].as_str().unwrap_or_default().to_string(),
+            summary: fix["summary"].as_str().unwrap_or_default().to_string(),
+            span: finding.get("span").cloned(),
+            status,
+            preview,
+            diagnostics,
+        };
+        let transaction =
+            match serde_json::from_value::<EditTransaction>(fix["transaction"].clone()) {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    return Some((
+                        outcome(
+                            LintFixStatus::Refused,
+                            None,
+                            vec![Diagnostic::error(
+                                "edit-invalid-transaction",
+                                Stage::Discovery,
+                                format!("the finding's fix transaction is malformed: {error}"),
+                            )],
+                        ),
+                        None,
+                    ));
+                }
+            };
+        let validated = match provider {
+            Some(Err(diagnostic)) => Err(vec![diagnostic.clone()]),
+            Some(Ok(context)) => self
+                .provider_fix_validation(context, &transaction)
+                .map(|(previews, diagnostics)| (previews, diagnostics, Some(&context.sources))),
+            None => {
+                let validation = crate::edit::validate_transaction(
+                    &self.config,
+                    &self.catalog,
+                    sources,
+                    &transaction,
+                );
+                if validation.ok {
+                    Ok((
+                        validation.preview.unwrap_or_default(),
+                        validation.diagnostics,
+                        sources,
+                    ))
+                } else {
+                    Err(validation.diagnostics)
+                }
+            }
+        };
+        let (previews, diagnostics, originals) = match validated {
+            Ok(validated) => validated,
+            Err(diagnostics) => {
+                return Some((outcome(LintFixStatus::Refused, None, diagnostics), None));
+            }
+        };
+        let rendered = previews
+            .iter()
+            .map(|preview| LintFixPreview {
+                // A mapped edit's `file://` URI displays as the same member
+                // path spelling the finding's `span.path` resolves to.
+                source: crate::source_provider::provider_uri_path(&preview.source),
+                original: originals
+                    .and_then(|sources| sources.get(&preview.source))
+                    .cloned()
+                    .unwrap_or_default(),
+                new_text: preview.new_text.clone(),
+            })
+            .collect();
+        Some((
+            outcome(LintFixStatus::Preview, Some(rendered), diagnostics),
+            Some(ResolvedFix {
+                transaction,
+                previews,
+            }),
+        ))
+    }
 }
 
 /// A fix that validated: the deserialized transaction and the source
@@ -305,92 +452,13 @@ struct ResolvedFix {
     previews: Vec<crate::edit::SourcePreview>,
 }
 
-/// The validated disposition of every finding in `findings` that carries a
-/// `fix` — in findings order. Each fix's transaction is deserialized and
-/// validated through `validate_transaction` (input identity, ranges,
-/// Workshop reparse); a fix that fails deserializes or validates to a
-/// structured refusal.
-fn fix_outcomes(
-    config: &crate::config::SessionConfig,
-    catalog: &workshop_rs::catalog::Catalog,
-    findings: &serde_json::Value,
-    sources: Option<&BTreeMap<String, String>>,
-) -> Vec<(LintFixOutcome, Option<ResolvedFix>)> {
-    let Some(findings) = findings.as_array() else {
-        return Vec::new();
-    };
-    findings
-        .iter()
-        .filter_map(|finding| fix_outcome(config, catalog, finding, sources))
-        .collect()
-}
-
-fn fix_outcome(
-    config: &crate::config::SessionConfig,
-    catalog: &workshop_rs::catalog::Catalog,
-    finding: &serde_json::Value,
-    sources: Option<&BTreeMap<String, String>>,
-) -> Option<(LintFixOutcome, Option<ResolvedFix>)> {
-    let fix = finding.get("fix")?;
-    if !fix.is_object() {
-        return None;
-    }
-    let outcome = |status, preview, diagnostics| LintFixOutcome {
-        code: finding["code"].as_str().unwrap_or_default().to_string(),
-        kind: fix["kind"].as_str().unwrap_or_default().to_string(),
-        summary: fix["summary"].as_str().unwrap_or_default().to_string(),
-        span: finding.get("span").cloned(),
-        status,
-        preview,
-        diagnostics,
-    };
-    let transaction = match serde_json::from_value::<EditTransaction>(fix["transaction"].clone()) {
-        Ok(transaction) => transaction,
-        Err(error) => {
-            return Some((
-                outcome(
-                    LintFixStatus::Refused,
-                    None,
-                    vec![Diagnostic::error(
-                        "edit-invalid-transaction",
-                        Stage::Discovery,
-                        format!("the finding's fix transaction is malformed: {error}"),
-                    )],
-                ),
-                None,
-            ));
-        }
-    };
-    let validation = crate::edit::validate_transaction(config, catalog, sources, &transaction);
-    if !validation.ok {
-        return Some((
-            outcome(LintFixStatus::Refused, None, validation.diagnostics),
-            None,
-        ));
-    }
-    let previews = validation.preview.unwrap_or_default();
-    let rendered = previews
-        .iter()
-        .map(|preview| LintFixPreview {
-            source: preview.source.clone(),
-            original: sources
-                .and_then(|sources| sources.get(&preview.source))
-                .cloned()
-                .unwrap_or_default(),
-            new_text: preview.new_text.clone(),
-        })
-        .collect();
-    Some((
-        outcome(
-            LintFixStatus::Preview,
-            Some(rendered),
-            validation.diagnostics,
-        ),
-        Some(ResolvedFix {
-            transaction,
-            previews,
-        }),
-    ))
+/// The provider-side context a mapped fix batch validates against (#583):
+/// the loaded project's document set, its precondition sources keyed by
+/// URI, and the project root the session compiled under.
+struct ProviderFixContext {
+    documents: wright_lpp::DocumentSet,
+    sources: BTreeMap<String, String>,
+    project_root: Option<String>,
 }
 
 /// A write run needs a disk-backed input: writing updates the file, but

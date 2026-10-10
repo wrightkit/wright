@@ -11,7 +11,7 @@ repository = "https://github.com/wrightkit/wright"
 
 [workspace.dependencies]
 # Canonical Workshop core.
-workshop-rs = "1.10.1"
+workshop-rs = "1.12.0"
 libc = "0.2"
 serde = "1"
 serde_json = "1"
@@ -55,3 +55,4 @@ debug = 1
 
 [profile.test.package."*"]
 debug = false
+

@@ -99,12 +99,15 @@ CLI_COMMANDS = ["check", "lint", "analyze", "inspect", "compile"]
 # surfaces are measured on it. `briefTokenBudget` bounds the JSON output of
 # any brief metric per surface — the `brief` request payload at 600
 # estimated tokens, the CLI `--brief` envelope (which adds pretty-printing
-# and diagnostics framing) at 900. Exceeding the budget is a drift
+# and diagnostics framing) at 1000. Exceeding the budget is a drift
 # violation, not a band check. The budgets moved from 500/800 to 600/900
 # when lint findings started carrying `span` on provider-backed projects:
-# a located top-5 needs roughly 15% more envelope (#578).
+# a located top-5 needs roughly 15% more envelope (#578). The CLI budget moved
+# to 1000 when provider-backed loads began reporting a retained-source
+# degradation warning — one warning diagnostic costs ~80 envelope tokens
+# (#583).
 BRIEF_OPS = ["lint", "analyze", "inspect"]
-BRIEF_TOKEN_BUDGET = {"agent": 600, "cli": 900}
+BRIEF_TOKEN_BUDGET = {"agent": 600, "cli": 1000}
 
 
 class ServeSession:

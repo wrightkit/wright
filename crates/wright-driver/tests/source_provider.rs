@@ -366,6 +366,9 @@ fn mapped_lint_session(
     edit: impl FnOnce(&mut serde_json::Value),
 ) -> CompilerSession {
     let text = workshop_fixture("synthetic/control-flow");
+    // The fake map's extracted spans carry this text's coordinates; write it
+    // as the member so retained-source validation sees in-range positions.
+    std::fs::write(dir.join("main.opy"), &text).expect("member source");
     let provenance = mapped_provenance(&text, &dir.join("main.opy"), edit);
     let provider = RecordingProvider {
         target: Arc::new(Mutex::new(None)),
@@ -460,6 +463,65 @@ fn mapped_provider_project_reports_its_source_file_count() {
     cleanup(dir);
 }
 
+/// A provider map may carry a span that does not resolve inside the
+/// retained authored source (e.g. a position recorded against an expanded
+/// spelling rather than the authored line). Retained-source validation is a
+/// freshness audit, not a load gate: the run still serves, mapped positions
+/// survive, and authored extents degrade with a warning instead of failing
+/// the load (#583).
+#[test]
+fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |artifact| {
+        let node = artifact["spans"]
+            .as_array_mut()
+            .expect("spans")
+            .iter_mut()
+            .find(|node| node.get("span").is_some_and(|span| span.is_object()))
+            .expect("a node carrying a span");
+        node["span"]["end"] = serde_json::json!({"line": 9999, "column": 1});
+    });
+
+    let lint = session.lint();
+    assert!(lint.ok, "mapped lint: {:?}", lint.diagnostics);
+    assert_eq!(
+        session.load().expect("loaded").provenance,
+        wright_driver::Provenance::Mapped
+    );
+    assert!(
+        lint.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "source-map-span-overflow")
+    );
+    cleanup(dir);
+}
+
+/// A member the provider map names but no readable disk file serves no
+/// retained source; the load warns instead of silently dropping it (#583).
+#[test]
+fn unreadable_mapped_member_warns_instead_of_silently_dropping() {
+    let (dir, entry) = temp_entry();
+    let mut session = mapped_lint_session(&dir, entry, |artifact| {
+        artifact["files"]
+            .as_array_mut()
+            .expect("file table")
+            .push(serde_json::json!({
+                "path": url::Url::from_file_path(dir.join("missing.opy"))
+                    .expect("file URI")
+                    .to_string(),
+            }));
+    });
+
+    let lint = session.lint();
+    assert!(lint.ok, "mapped lint: {:?}", lint.diagnostics);
+    assert!(
+        lint.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "source-map-member-unreadable")
+    );
+    cleanup(dir);
+}
+
 /// A conforming pre-1.4 provider allows one `lpp/initialize` per process, so
 /// the fallback after a refused 1.4 negotiation must use a restarted process.
 #[cfg(unix)]
@@ -544,6 +606,177 @@ fn nodes_without_an_authored_origin_stay_explicitly_unmapped() {
             .all(|finding| finding.get("span") == Some(&serde_json::Value::Null)),
         "action findings lose their span instead of borrowing another location: {findings:?}"
     );
+    cleanup(dir);
+}
+
+/// `lint --fix` on a provider-mapped program materializes the dead-branch
+/// removal against the authored OPY member — marker action spans give the
+/// branch extent — and validates the transaction through the provider edit
+/// pipeline (`lpp/validateEdits` + `lpp/check`) instead of the raw Workshop
+/// reparse (#583). `--write` applies it and re-lints clean.
+#[cfg(unix)]
+#[test]
+fn mapped_lint_fix_validates_and_writes_through_the_provider() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const PROVIDER: &str = r#"#!/usr/bin/env python3
+import json, sys
+def reply(id, result=None, error=None):
+    message = {"jsonrpc": "2.0", "id": id}
+    message.update({"error": error} if error else {"result": result})
+    print(json.dumps(message), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    id, method = request["id"], request["method"]
+    if method == "lpp/initialize":
+        reply(id, {"protocolVersion": "1.0", "serverInfo": {"name": "fake", "version": "0"},
+                   "languages": [{"id": "opy", "extensions": ["opy"]}],
+                   "capabilities": {"check": True, "compile": False, "reconstruct": False, "symbols": False, "definition": False, "references": False, "rename": False, "editValidation": True, "projectLoading": False}})
+    elif method == "lpp/validateEdits":
+        reply(id, {"valid": True, "version": request["params"]["document"]["version"]})
+    elif method == "lpp/check":
+        reply(id, {"documents": []})
+    else:
+        reply(id, {})
+"#;
+
+    // The authored OPY member the fake provider's source map points into.
+    const OPY: &str = "globalvar total\n\nrule \"dup\":\n    @Event global\n    if total == 0:\n        total = 1\n    elif total == 0:\n        total = 3\n    else:\n        total = 4\n";
+    const FIXED_OPY: &str = "globalvar total\n\nrule \"dup\":\n    @Event global\n    if total == 0:\n        total = 1\n    else:\n        total = 4\n";
+
+    // The canonical artifact for each member state: the duplicate `elif`
+    // chain before the fix, the `else`-only chain after it — what a real
+    // provider emits when it recompiles the edited source.
+    const ARTIFACT: &str = "variables {\n    global:\n        0: total\n}\nrule (\"dup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        If(Compare(Global.total, ==, 0));\n            Set Global Variable(total, 1);\n        Else If(Compare(Global.total, ==, 0));\n            Set Global Variable(total, 3);\n        Else;\n            Set Global Variable(total, 4);\n        End;\n    }\n}\n";
+    const ARTIFACT_FIXED: &str = "variables {\n    global:\n        0: total\n}\nrule (\"dup\") {\n    event {\n        Ongoing - Global;\n    }\n    actions {\n        If(Compare(Global.total, ==, 0));\n            Set Global Variable(total, 1);\n        Else;\n            Set Global Variable(total, 4);\n        End;\n    }\n}\n";
+
+    /// Marker action spans the way the owning frontend records them (#583):
+    /// the `if` keyword anchors the chain head, `elif`/`else` keywords mark
+    /// their branches, and the chain `End` sits at the dedent/EOF boundary.
+    fn marker_map(text: &str, authored: &Path) -> wright_driver::SourceProvenance {
+        mapped_provenance(text, authored, |artifact| {
+            let spans = artifact["spans"].as_array_mut().expect("span list");
+            // Every extracted entry carries Workshop-artifact coordinates;
+            // a fake provider's map authors only the marker/condition spans
+            // this test declares (`apply` rejects position-less entries).
+            spans.clear();
+            let span = |sl: u32, sc: u32, el: u32, ec: u32| {
+                serde_json::json!({
+                    "file": 0,
+                    "start": {"line": sl, "column": sc},
+                    "end": {"line": el, "column": ec},
+                })
+            };
+            for (action, sl, sc, el, ec) in [
+                (0usize, 5, 5, 5, 7),
+                (2, 7, 5, 7, 9),
+                (4, 9, 5, 9, 9),
+                (6, 11, 1, 11, 1),
+            ] {
+                spans.push(serde_json::json!({
+                    "node": "action", "rule": 0, "action": action,
+                    "span": span(sl, sc, el, ec),
+                }));
+            }
+            // The dead `elif` condition's authored extent — the finding's
+            // span anchor and the fix's file resolution.
+            spans.push(serde_json::json!({
+                "node": "action_argument", "rule": 0, "action": 2, "argument": 0,
+                "span": span(7, 10, 7, 20),
+            }));
+        })
+    }
+
+    // Re-derives its artifact from the member's current text: the edited
+    // member compiles to the `elif`-free chain on the post-write reload.
+    struct FixProvider {
+        entry: PathBuf,
+    }
+
+    impl SourceProvider for FixProvider {
+        fn language(&self) -> SourceLanguage {
+            SourceLanguage::Opy
+        }
+
+        fn compile(
+            &mut self,
+            _target: &SourceTarget,
+        ) -> Result<SourceCompilation, SourceProviderError> {
+            let edited = !std::fs::read_to_string(&self.entry)
+                .unwrap()
+                .contains("elif");
+            Ok(SourceCompilation {
+                workshop_text: Some(if edited { ARTIFACT_FIXED } else { ARTIFACT }.to_string()),
+                locale: None,
+                provenance: if edited {
+                    wright_driver::SourceProvenance::Unmapped
+                } else {
+                    marker_map(ARTIFACT, &self.entry)
+                },
+                diagnostics: Vec::new(),
+                source_identity: None,
+            })
+        }
+    }
+
+    let (dir, entry) = temp_entry();
+    std::fs::write(&entry, OPY).expect("entry source");
+    let script = dir.join("fake-provider");
+    std::fs::write(&script, PROVIDER).expect("provider script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let mut session = CompilerSession::with_source_provider(
+        SessionConfig {
+            input: InputSpec::Path(entry.clone()),
+            kind: SourceKind::Opy,
+            opy_provider: wright_driver::OpyProviderConfig::with_executable(script),
+            ..SessionConfig::default()
+        },
+        Box::new(FixProvider {
+            entry: entry.clone(),
+        }),
+    )
+    .expect("provider session");
+
+    let preview = session.lint_fix(false);
+    assert!(preview.ok, "preview lint: {:?}", preview.diagnostics);
+    let outcomes = preview.result.fixes.expect("fix outcomes");
+    assert_eq!(outcomes.len(), 1, "{outcomes:?}");
+    let outcome = &outcomes[0];
+    assert_eq!(
+        outcome.status,
+        wright_driver::result::LintFixStatus::Preview
+    );
+    assert_eq!(outcome.code, "duplicate-condition");
+    let rendered = outcome.preview.as_ref().expect("validated preview");
+    assert_eq!(rendered.len(), 1);
+    assert_eq!(rendered[0].new_text, FIXED_OPY);
+    assert_eq!(rendered[0].original, OPY);
+    assert_eq!(
+        rendered[0].source,
+        entry.display().to_string(),
+        "the preview names the authored member, not the artifact"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&entry).unwrap(),
+        OPY,
+        "a preview run writes nothing"
+    );
+
+    let written = session.lint_fix(true);
+    assert!(written.ok, "write lint: {:?}", written.diagnostics);
+    assert!(
+        written
+            .result
+            .fixes
+            .as_ref()
+            .expect("fix outcomes")
+            .iter()
+            .any(|outcome| outcome.status == wright_driver::result::LintFixStatus::Applied),
+        "the dead-branch fix applies: {:?}",
+        written.result.fixes
+    );
+    assert_eq!(std::fs::read_to_string(&entry).unwrap(), FIXED_OPY);
     cleanup(dir);
 }
 
