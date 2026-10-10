@@ -26,6 +26,7 @@ import stat
 
 import bench_grade
 import bench_leaderboard
+import bench_regrade
 import bench_report
 import bench_publish
 import bench_score
@@ -1126,13 +1127,17 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--out-dir", type=Path, help="where report.md and summary.json go; with several run directories they are only printed unless this is given")
     report.add_argument("--regrade", action="store_true", help="re-grade stored workspaces twice and flag unstable graders")
     report.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
+    regrade_cmd = sub.add_parser("regrade", help="copy run directories and re-grade trials whose recorded grader hash differs from the current scenario")
+    regrade_cmd.add_argument("dirs", nargs="+", type=Path)
+    regrade_cmd.add_argument("--wright", default=str(ROOT / "target/debug/wright"))
+    regrade_cmd.add_argument("--out", type=Path, required=True, help="new directory holding the re-graded copies; input directories are never modified")
     report.add_argument("--reference", action="append", help="condition label a paired comparison is made against; repeatable for lift against several references (default: none/none/off)")
     compare = sub.add_parser("compare", help="one table from the score.json of several evaluation runs, warning when they are not comparable")
     compare.add_argument("dirs", nargs="+", type=Path)
     score = sub.add_parser("score", help="compute the Wright Agent Score card of each language track from canonical test runs")
     score.add_argument("dirs", nargs="+", type=Path)
     score.add_argument("--language", choices=("workshop", "opy"), action="append", help="track to score; both when omitted")
-    for name in ("validate", "run", "matrix", "evaluate", "suite", "track", "report", "score"):
+    for name in ("validate", "run", "matrix", "evaluate", "suite", "track", "report", "regrade", "score"):
         sub.choices[name].add_argument("--private-suite", type=Path, help="private versioned suite directory, kept unreadable by the agent")
     defaults = user_defaults()
     for choice in sub.choices.values():
@@ -1169,6 +1174,8 @@ def main() -> int:
         return cmd_wiki_skill(args)
     if args.command == "report":
         return bench_report.main(args.dirs, args.wright, args.regrade, lambda s: load_scenario(s, args.private_suite), references_of(args), args.out_dir)
+    if args.command == "regrade":
+        return bench_regrade.main(args.dirs, args.wright, lambda s: load_scenario(s, args.private_suite), args.out)
     if args.command == "publish":
         try:
             return bench_publish.main(args.dirs, args.out, args.dry_run, args.endpoint)

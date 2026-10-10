@@ -105,6 +105,25 @@ python3 benchmarks/agent/agent_bench.py report ~/.local/share/wright-agent-bench
 
 A report over several run directories is printed and written only where `--out-dir` says, so it never replaces a run's own report.
 
+## Re-grade runs after a scenario's checks change
+
+Fixing a task's checks changes its grader hash, and a run recorded under the
+old hash keeps its old verdict until it is re-graded. Re-grade after editing a
+scenario or the grader, before reporting on older run directories:
+
+```sh
+python3 benchmarks/agent/agent_bench.py regrade ~/.local/share/wright-agent-bench/runs/<run> --out <new-dir>
+```
+
+Every trial is copied under `--out` — the input run directories are never
+written — and only the trials whose recorded grader hash differs are graded
+again with the current scenario and `--wright` binary. A re-graded
+`result.json` keeps everything the agent produced (transcript, trace, usage)
+and records the earlier hash as `grader.regradedFrom`. Point `report`,
+`score`, `leaderboard`, `compare`, or `publish` at `--out` exactly as at a run
+directory. `report --regrade` still only checks grader stability; it never
+writes verdicts back.
+
 ## Publish the hosted results
 
 Maintainers publish the data the public results page reads (see
