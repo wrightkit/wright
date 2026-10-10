@@ -367,6 +367,14 @@ def run_agent_ops(
     metrics: dict[str, dict] = {}
     targets: dict[str, dict] = {}
     with ServeSession(wright, entry, kind, project_dir) as session:
+        # Warm the session once before measuring: the first envelope
+        # response drains diagnostics produced while loading (e.g. the
+        # source-map audit warning), so a repeats=1 run would otherwise
+        # measure a different shape than a repeats=N median.
+        try:
+            session.request("check")
+        except (queue.Empty, TimeoutError):
+            pass
         for op in AGENT_OPS:
             key = f"agent:{op}"
             if op in ("references", "usage", "cfg") and op not in targets:

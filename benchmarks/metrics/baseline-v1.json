@@ -233,7 +233,7 @@
           "tokens": 28.5
         },
         "cli:analyze": {
-          "bytes": 765372,
+          "bytes": 769127,
           "counts": {
             "diagnostics": 0,
             "facts.persistentObjects": 82,
@@ -246,8 +246,8 @@
             "program.rules": 307,
             "program.subroutines": 25
           },
-          "latencyMs": 6092.6,
-          "tokens": 191343.0
+          "latencyMs": 2765.4,
+          "tokens": 192281.8
         },
         "cli:analyze?brief": {
           "bytes": 2488,
@@ -266,17 +266,17 @@
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 2478.6,
+          "latencyMs": 706.6,
           "tokens": 48.2
         },
         "cli:compile": {
-          "bytes": 441568,
+          "bytes": 441564,
           "counts": {
             "diagnostics": 0,
-            "emittedBytes": 418243
+            "emittedBytes": 418239
           },
-          "latencyMs": 5851.8,
-          "tokens": 110392.0
+          "latencyMs": 2486.8,
+          "tokens": 110391.0
         },
         "cli:inspect": {
           "bytes": 535,
@@ -305,7 +305,7 @@
             "lint.finding.repeated-value": 4,
             "lint.items": 19
           },
-          "latencyMs": 5937.1,
+          "latencyMs": 2517.0,
           "tokens": 3385.8
         },
         "cli:lint?brief": {
@@ -377,21 +377,21 @@
           "tokens": 57.8
         },
         "agent:check": {
-          "bytes": 414,
+          "bytes": 138,
           "counts": {
-            "diagnostics": 1
+            "diagnostics": 0
           },
-          "latencyMs": 24.3,
-          "tokens": 103.5
+          "latencyMs": 19.2,
+          "tokens": 34.5
         },
         "agent:compile": {
-          "bytes": 365870,
+          "bytes": 365866,
           "counts": {
             "diagnostics": 0,
-            "emittedBytes": 341405
+            "emittedBytes": 341401
           },
-          "latencyMs": 311.9,
-          "tokens": 91467.5
+          "latencyMs": 676.6,
+          "tokens": 91466.5
         },
         "agent:costEstimate": {
           "bytes": 13068,
@@ -402,7 +402,7 @@
             "programRules": 369,
             "waitActions": 233
           },
-          "latencyMs": 259.7,
+          "latencyMs": 612.4,
           "tokens": 3267.0
         },
         "agent:findings": {
@@ -542,9 +542,9 @@
           "tokens": 25.0
         },
         "cli:analyze": {
-          "bytes": 1008029,
+          "bytes": 1022602,
           "counts": {
-            "diagnostics": 0,
+            "diagnostics": 1,
             "facts.persistentObjects": 8,
             "facts.risks": 55,
             "facts.rules": 369,
@@ -555,8 +555,8 @@
             "program.rules": 369,
             "program.subroutines": 70
           },
-          "latencyMs": 13848.7,
-          "tokens": 252007.2
+          "latencyMs": 12317.0,
+          "tokens": 255650.5
         },
         "cli:analyze?brief": {
           "bytes": 2634,
@@ -575,17 +575,17 @@
           "counts": {
             "diagnostics": 0
           },
-          "latencyMs": 4755.5,
+          "latencyMs": 736.8,
           "tokens": 48.2
         },
         "cli:compile": {
-          "bytes": 365954,
+          "bytes": 366271,
           "counts": {
-            "diagnostics": 0,
-            "emittedBytes": 341405
+            "diagnostics": 1,
+            "emittedBytes": 341401
           },
-          "latencyMs": 13789.7,
-          "tokens": 91488.5
+          "latencyMs": 12549.8,
+          "tokens": 91567.8
         },
         "cli:inspect": {
           "bytes": 535,
@@ -606,14 +606,14 @@
           "tokens": 184.5
         },
         "cli:lint": {
-          "bytes": 38465,
+          "bytes": 38786,
           "counts": {
-            "diagnostics": 0,
+            "diagnostics": 1,
             "lint.finding.ongoing-condition-hot-path": 55,
             "lint.items": 55
           },
-          "latencyMs": 13760.9,
-          "tokens": 9616.2
+          "latencyMs": 12108.4,
+          "tokens": 9696.5
         },
         "cli:lint?brief": {
           "bytes": 3830,
