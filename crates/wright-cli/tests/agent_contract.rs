@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use jsonschema::JSONSchema;
+use jsonschema::validator_for;
 use serde_json::{Value, json};
 use wright_driver::service::{AGENT_CONTRACT, ToolRequest, ToolResponse, ToolService};
 use wright_driver::{CompilerSession, FindingSelection, InputSpec, SessionConfig, SourceKind};
@@ -204,19 +204,17 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         &std::fs::read_to_string(root.join("schemas/wright-agent-v1.schema.json")).unwrap(),
     )
     .unwrap();
-    let request_schema = JSONSchema::compile(&schema).expect("request schema compiles");
+    let request_schema = validator_for(&schema).expect("request schema compiles");
     let mut response_document = schema.clone();
     response_document["$ref"] = Value::String("#/$defs/ToolResponse".to_string());
-    let response_schema =
-        JSONSchema::compile(&response_document).expect("response schema compiles");
+    let response_schema = validator_for(&response_document).expect("response schema compiles");
     let mut capabilities_document = schema.clone();
     capabilities_document["$ref"] = Value::String("#/$defs/Capabilities".to_string());
     let capabilities_schema =
-        JSONSchema::compile(&capabilities_document).expect("capability schema compiles");
+        validator_for(&capabilities_document).expect("capability schema compiles");
     let mut edit_range_document = schema.clone();
     edit_range_document["$ref"] = Value::String("#/$defs/EditRange".to_string());
-    let edit_range_schema =
-        JSONSchema::compile(&edit_range_document).expect("range schema compiles");
+    let edit_range_schema = validator_for(&edit_range_document).expect("range schema compiles");
 
     assert_eq!(AGENT_CONTRACT, "wright-agent/v1");
     assert_eq!(
@@ -407,7 +405,7 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         let mut operation_document = schema.clone();
         operation_document["$ref"] = Value::String(reference.to_string());
         let operation_schema =
-            JSONSchema::compile(&operation_document).expect("operation result schema compiles");
+            validator_for(&operation_document).expect("operation result schema compiles");
         assert!(
             operation_schema.is_valid(result),
             "{operation} result does not match {reference}: {result}"
@@ -437,7 +435,7 @@ fn agent_v1_schema_covers_every_advertised_request_and_response() {
         let mut operation_document = schema.clone();
         operation_document["$ref"] = Value::String(reference.to_string());
         let operation_schema =
-            JSONSchema::compile(&operation_document).expect("operation result schema compiles");
+            validator_for(&operation_document).expect("operation result schema compiles");
         assert!(
             operation_schema.is_valid(&result),
             "{} brief result does not match {reference}: {result}",
