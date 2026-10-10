@@ -804,18 +804,28 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
+INTERRUPTION_RETRY_SECONDS = 60  # the short first resume under --wait-for-limits: an isolated interruption is already over by then (#610)
+
+
 def matrix_waiting_for_limits(args: argparse.Namespace) -> int:
-    """Run the matrix; with --wait-for-limits, wait out each provider limit or outage that stops it and continue, instead of exiting to be repeated by hand."""
+    """Run the matrix; with --wait-for-limits, wait out each provider limit or outage that stops it and continue, instead of exiting to be repeated by hand.
+
+    A status-3 run may have hit a mere interruption, not a real limit, so it first resumes after only
+    INTERRUPTION_RETRY_SECONDS; the --limits-poll waits begin when that retry is interrupted again."""
     waiting = bool(getattr(args, "wait_for_limits", False))
     poll = getattr(args, "limits_poll", 2100)
     max_waits = getattr(args, "max_waits", 48)
     if waiting and (poll < 0 or max_waits < 0):
         raise SystemExit("--limits-poll and --max-waits must not be negative")
     status = cmd_matrix(args)
+    if status == 3 and waiting and max_waits:
+        print(f"a provider interruption stopped the run; retrying in {INTERRUPTION_RETRY_SECONDS} seconds in case it was isolated", flush=True)
+        time.sleep(INTERRUPTION_RETRY_SECONDS)
+        status = cmd_matrix(args)
     waited = 0
     while status == 3 and waiting and waited < max_waits:
         waited += 1
-        print(f"waiting {poll} seconds for the provider limit to reset (wait {waited} of {max_waits}), then continuing", flush=True)
+        print(f"still interrupted; waiting {poll} seconds for the provider limit to reset (wait {waited} of {max_waits}), then continuing", flush=True)
         time.sleep(poll)
         status = cmd_matrix(args)
     return status
@@ -968,6 +978,7 @@ def cmd_track(args: argparse.Namespace) -> int:
     root = args.out / args.name
     outcome: dict[str, str] = {}
     pending = list(definition["models"])
+    retried = False  # the first wait cycle costs only the short retry: a lone interruption is often already over (#610)
     while pending:
         waiting = []
         for entry in pending:
@@ -987,8 +998,13 @@ def cmd_track(args: argparse.Namespace) -> int:
                 outcome[slug] = f"skipped: {stop.code}"
         pending = waiting
         if pending and args.wait_for_limits and not args.dry_run:
-            print(f"{len(pending)} model(s) hit a provider limit; waiting {args.limits_poll}s and resuming where the run stopped", flush=True)
-            time.sleep(args.limits_poll)
+            if retried:
+                print(f"{len(pending)} model(s) still interrupted; waiting {args.limits_poll}s for the provider limit, then resuming where the run stopped", flush=True)
+                time.sleep(args.limits_poll)
+            else:
+                retried = True
+                print(f"{len(pending)} model(s) interrupted; retrying in {INTERRUPTION_RETRY_SECONDS}s in case the interruption is isolated", flush=True)
+                time.sleep(INTERRUPTION_RETRY_SECONDS)
         else:
             break
     print("\n" + "\n".join(f"{slug}: {state}" for slug, state in outcome.items()))

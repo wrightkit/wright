@@ -510,7 +510,8 @@ publishable results page into `<out>/<name>/leaderboard/` and prints the `publis
 for its run directories. The models, cells, trials, and split come from the definition, not
 the command line, so a change to the tracking set is a reviewed change to that file. Repeating
 the same `--name` resumes the run where it stopped; `--wait-for-limits` keeps waiting out
-provider limits (`--limits-poll`, default 2100 seconds) instead of stopping, so a release run
+provider limits instead of stopping — a 60-second retry first in case the interruption was
+isolated, then `--limits-poll` waits (default 2100 seconds) — so a release run
 may take more than a day.
 
 ## Cadence
