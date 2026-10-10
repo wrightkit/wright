@@ -270,7 +270,7 @@ impl CompilerSession {
     /// calls this when the disk fingerprint changed ahead of a `check` or
     /// `compile` workflow, whose own operation-aware load must re-resolve
     /// rather than serve the stale snapshot — including a provider-backed
-    /// `check`, which produces no canonical snapshot at all.
+    /// `check`, which compiles to produce its canonical snapshot (#617).
     /// `loaded_operation` survives: it records the provider operation that
     /// last produced a canonical snapshot, so a compile-capable provider
     /// still recompiles on the next `load` where a check-only one refuses.
@@ -280,10 +280,10 @@ impl CompilerSession {
     }
 
     /// The session's cached canonical snapshot, when the last load produced
-    /// one — `None` for a provider check, an unloadable input, or after
-    /// [`Self::drop_loaded`]. `ToolService` adopts this snapshot after a
-    /// successful workflow load (#591); it cannot call `load()` for it
-    /// because a check-only provider backend refuses `load()` outright.
+    /// one — `None` for a check-only provider `check`, an unloadable input,
+    /// or after [`Self::drop_loaded`]. `ToolService` adopts this snapshot
+    /// after a successful workflow load (#591); it cannot call `load()` for
+    /// it because a check-only provider backend refuses `load()` outright.
     pub(crate) fn cached_loaded(&self) -> Option<Loaded> {
         self.loaded.clone()
     }

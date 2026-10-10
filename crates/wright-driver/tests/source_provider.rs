@@ -244,8 +244,11 @@ fn provider_backend_check_falls_back_to_the_check_operation_on_a_check_only_prov
     cleanup(dir);
 }
 
+/// #617: a compile-capable provider's `check` calls `check` then `compile`
+/// once; the canonical snapshot the check load established serves the later
+/// `compile` from cache — no second provider round-trip.
 #[test]
-fn provider_backend_does_not_reuse_a_check_load_for_compile() {
+fn provider_backend_serves_compile_from_the_check_established_snapshot() {
     let (dir, entry) = temp_entry();
     let operations = Arc::new(Mutex::new(Vec::new()));
     let provider = RecordingProvider {
@@ -275,7 +278,8 @@ fn provider_backend_does_not_reuse_a_check_load_for_compile() {
     assert!(session.compile().ok);
     assert_eq!(
         *operations.lock().expect("operation lock"),
-        vec!["check", "compile"]
+        vec!["check", "compile"],
+        "check compiles once for its canonical snapshot; compile reuses it"
     );
     cleanup(dir);
 }

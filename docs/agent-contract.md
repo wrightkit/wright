@@ -238,10 +238,11 @@ compile, its compile operation too — `check` then runs the same canonical
 validation `compile` surfaces, so an agent gating on `check` sees every
 error `compile` reports, and a successful `check` supplies the canonical
 snapshot the later `symbols`, `references`, or `findings` requests read
-(#617). A provider that declines its compile operation keeps the
+(#617). A provider whose compile returns `Unsupported` keeps the
 check-only path: it answers `check` from its own diagnostics alone, the
-one deliberate difference from `compile`. The freshness gate above still
-applies: an
+one deliberate difference from `compile`. Any other compile failure —
+including an LPP refusal — fails `check` the way it fails `compile`. The
+freshness gate above still applies: an
 observed disk change invalidates the served snapshot, and the next
 workflow re-resolves the input rather than serving it. A failed load
 surfaces inside the `wright-result/v1` envelope's diagnostics (the same
