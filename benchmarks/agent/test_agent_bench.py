@@ -362,6 +362,10 @@ class AgentBenchTest(unittest.TestCase):
             self.assertTrue(bench_grade.matches(text, check), text)
         for text in ("Victim == Event Player;", "Player Variable(Event Player, A) >= 7;"):
             self.assertFalse(bench_grade.matches(text, check), text)
+        scored = next(c for c in agent_bench.load_scenario("greenfield-elimination-race", None)["checks"] if c["id"] == "scores-on-elimination")
+        for text in ("Player Earned Elimination;", "Player Dealt Final Blow;", "Player Died;"):
+            self.assertTrue(bench_grade.matches(text, scored), text)
+        self.assertFalse(bench_grade.matches("Ongoing - Each Player;", scored))
 
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))

@@ -51,7 +51,8 @@
       "layer": "agent",
       "any": [
         "Player Earned Elimination",
-        "Player Dealt Final Blow"
+        "Player Dealt Final Blow",
+        "Player Died"
       ]
     },
     {
