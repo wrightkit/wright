@@ -18,6 +18,7 @@ use serde_json::json;
 use crate::diag::Diagnostic;
 use crate::input;
 use crate::result::{AnalyzeResult, CheckResult, CompileResult, Envelope, InspectResult};
+use crate::session::Provenance;
 use crate::source_provider::document_sources;
 use crate::{CompilerSession, Loaded, RESULT_CONTRACT};
 use wright_analyzer::canonical::{
@@ -682,11 +683,15 @@ impl<'a> ToolService<'a> {
             return Ok(documents.clone());
         }
         let loaded = self.snapshot();
-        crate::source_provider::provider_document_set(
-            &loaded.source_files,
-            &loaded.input.root,
-            language_id,
-        )
+        // Mapped members are provider-file-table spellings relative to the
+        // project root the provider was given; unmapped members are the
+        // input's own display spellings, relative to the invocation cwd.
+        let base = if loaded.provenance == Provenance::Mapped {
+            &loaded.input.root
+        } else {
+            &loaded.input.cwd
+        };
+        crate::source_provider::provider_document_set(&loaded.source_files, base, language_id)
     }
 
     /// The semantic service over the current snapshot — built in `adopt`.
