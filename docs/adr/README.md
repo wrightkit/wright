@@ -43,4 +43,5 @@ its audit date.
 * [ADR-0021: Name and signature lookup for agent authoring](0021-name-and-signature-lookup.md)
 * [ADR-0022: One shared surface for the semantic queries](0022-shared-surface-for-semantic-queries.md)
 * [ADR-0023: LSP scope for 1.0](0023-lsp-scope-for-1-0.md)
+* [ADR-0024: Structured rule content for agents and graders](0024-structured-rule-content.md)
 * [Post-ADR-0010 decision inventory](post-0010-inventory.md)
