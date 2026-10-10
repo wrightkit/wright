@@ -635,17 +635,39 @@ class AgentBenchTest(unittest.TestCase):
             bench_report.main([one, two], WRIGHT, False, lambda s: {}, None, combined)
         self.assertIn("Agent benchmark report", (combined / "report.md").read_text())
 
+    def test_wait_for_limits_resumes_an_isolated_interruption_after_only_the_short_delay(self):
+        # #610: one interruption followed by success costs the 60-second retry, never a --limits-poll wait
+        waited = []
+        with patch.object(agent_bench, "cmd_matrix", side_effect=[3, 0]) as matrix, patch.object(agent_bench.time, "sleep", side_effect=waited.append), contextlib.redirect_stdout(io.StringIO()):
+            status = agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=2100, max_waits=5))
+        self.assertEqual((status, matrix.call_count, waited), (0, 2, [agent_bench.INTERRUPTION_RETRY_SECONDS]))
+
     def test_wait_for_limits_continues_after_a_provider_limit_and_gives_up_after_max_waits(self):
         waited = []
         with patch.object(agent_bench, "cmd_matrix", side_effect=[3, 3, 0]) as matrix, patch.object(agent_bench.time, "sleep", side_effect=waited.append), contextlib.redirect_stdout(io.StringIO()):
             status = agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=2100, max_waits=5))
-        self.assertEqual((status, matrix.call_count, waited), (0, 3, [2100, 2100]))
+        self.assertEqual((status, matrix.call_count, waited), (0, 3, [agent_bench.INTERRUPTION_RETRY_SECONDS, 2100]))
         with patch.object(agent_bench, "cmd_matrix", return_value=3) as matrix, patch.object(agent_bench.time, "sleep"), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=1, max_waits=2)), 3)
-        self.assertEqual(matrix.call_count, 3)  # the first run and two waits
+        self.assertEqual(matrix.call_count, 4)  # the first run, the short retry, and two waits
+        with patch.object(agent_bench, "cmd_matrix", return_value=3) as matrix, patch.object(agent_bench.time, "sleep") as slept:
+            self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=True, limits_poll=1, max_waits=0)), 3)
+        self.assertEqual((matrix.call_count, slept.call_count), (1, 0))  # --max-waits 0 waits nothing, not even the short retry
         with patch.object(agent_bench, "cmd_matrix", return_value=3) as matrix:  # without the option the exit code is left for the caller
             self.assertEqual(agent_bench.matrix_waiting_for_limits(argparse.Namespace(wait_for_limits=False, max_waits=5)), 3)
         self.assertEqual(matrix.call_count, 1)
+
+    def test_track_retries_an_isolated_interruption_before_the_long_wait(self):
+        definition = {"models": [{"adapter": "devin", "model": "m"}], "cells": [], "trials": 1, "parallel": 1, "seed": 1, "split": "test"}
+        args = argparse.Namespace(out=self.out, name="t", wait_for_limits=True, limits_poll=2100, dry_run=False)
+        for effects, expected in (([3, 0], [agent_bench.INTERRUPTION_RETRY_SECONDS]), ([3, 3, 0], [agent_bench.INTERRUPTION_RETRY_SECONDS, 2100])):
+            waited = []
+            with patch.object(agent_bench, "load_tracking", return_value=definition), \
+                 patch.object(agent_bench, "cmd_evaluate", side_effect=effects) as evaluate, \
+                 patch.object(agent_bench.time, "sleep", side_effect=waited.append), \
+                 patch.object(agent_bench.bench_leaderboard, "main"), contextlib.redirect_stdout(io.StringIO()):
+                status = agent_bench.cmd_track(args)
+            self.assertEqual((status, evaluate.call_count, waited), (0, len(effects), expected))
 
     def test_wait_for_limits_rejects_a_negative_poll_or_wait_count(self):
         for bad in (argparse.Namespace(wait_for_limits=True, limits_poll=-1, max_waits=5), argparse.Namespace(wait_for_limits=True, limits_poll=2100, max_waits=-1)):

@@ -68,10 +68,11 @@ python3 benchmarks/agent/agent_bench.py track --name wright-X.Y.Z --wait-for-lim
 trials, and suite version — under `runs/wright-X.Y.Z/`, and leaves the results page in
 `runs/wright-X.Y.Z/leaderboard/` plus the publish command for its run directories. The
 release procedure uses it; see [release.md](release.md). `--wait-for-limits` waits out
-provider limits and resumes, so a run may take more than a day. Run it again with the same
+provider limits and resumes — a short retry first, then the long waits described below —
+so a run may take more than a day. Run it again with the same
 `--name` to continue an interrupted run.
 
-If a provider limit stops a model on `evaluate` or `suite` (for example a free-tier quota), add `--wait-for-limits`: instead of ending with exit code 3, the run waits `--limits-poll` seconds (2100 — 35 minutes — by default) and continues, up to `--max-waits` times (48 by default, about a day).
+If a provider limit stops a model on `evaluate` or `suite` (for example a free-tier quota), add `--wait-for-limits`: instead of ending with exit code 3, the run resumes after 60 seconds in case the interruption was isolated, and only when that retry is interrupted again does it wait `--limits-poll` seconds (2100 — 35 minutes — by default) and continue, up to `--max-waits` times (48 by default, about a day). The output says which stage it is in.
 
 ## Run one model
 
