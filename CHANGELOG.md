@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/wrightkit/wright/compare/v0.15.2...v0.15.3) (2026-10-10)
+
+
+### Bug Fixes
+
+* **bench:** warm the agent session before measuring and accept provider drift ([#608](https://github.com/wrightkit/wright/issues/608)) ([87cce04](https://github.com/wrightkit/wright/commit/87cce0412ca2ccdb1ae984c2bbfaa6cbe4090005))
+
 ## [0.15.2](https://github.com/wrightkit/wright/compare/v0.15.1...v0.15.2) (2026-10-10)
 
 
