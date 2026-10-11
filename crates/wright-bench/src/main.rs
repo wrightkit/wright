@@ -285,6 +285,8 @@ fn semantic_query_trial(
                 name: None,
                 file: None,
                 max: None,
+                rule: None,
+                content: false,
             },
             ToolRequest::Symbols {
                 kind: None,

@@ -101,6 +101,87 @@ def compiled_text(state: dict, source: str) -> str | None:
     return (state["scratch"] / "wright.txt").read_text() if auth["wrightCompile"]["status"] == "ok" else None
 
 
+def compiled_path(state: dict, source: str) -> Path | None:
+    """Path of the compiled Workshop text from `wright` or the upstream `oracle`, when that authority succeeded."""
+    return (state["scratch"] / f"{source}.txt") if compiled_text(state, source) is not None else None
+
+
+def rule_content(wright: str, program: Path, max_rules: int) -> dict:
+    """The program's rules with canonical content (ADR-0024), read from raw Workshop so no `names` are involved."""
+    proc = subprocess.run([wright, "serve", "--kind", "workshop", str(program)],
+                          input=json.dumps({"op": "rules", "content": True, "max": max_rules}) + "\n", capture_output=True, text=True)
+    try:
+        return json.loads(proc.stdout.splitlines()[0])
+    except (IndexError, json.JSONDecodeError):
+        return {"error": {"code": "harness-output", "message": proc.stderr.strip()}}
+
+
+def pattern_matches(pattern, node) -> bool:
+    """A pattern is a rule-content node: numbers compare within 1e-9, objects as a recursive subset, `{"any": [...]}` as alternatives."""
+    if isinstance(pattern, dict) and set(pattern) == {"any"}:
+        return any(pattern_matches(alternative, node) for alternative in pattern["any"])
+    if isinstance(pattern, dict):
+        return isinstance(node, dict) and all(k in node and pattern_matches(v, node[k]) for k, v in pattern.items())
+    if isinstance(pattern, list):
+        return isinstance(node, list) and len(pattern) == len(node) and all(pattern_matches(p, n) for p, n in zip(pattern, node))
+    if isinstance(pattern, bool) or isinstance(node, bool) or pattern is None or node is None:
+        return pattern is node
+    if isinstance(pattern, (int, float)):
+        return isinstance(node, (int, float)) and abs(pattern - node) <= 1e-9
+    return pattern == node
+
+
+def call_nodes(node):
+    """Every call node in one statement or value tree, outermost first."""
+    if isinstance(node, dict) and "call" in node:
+        yield node
+        for argument in node.get("args", []):
+            yield from call_nodes(argument)
+
+
+def count_calls(rules: list[dict], check: dict) -> int:
+    """Calls matching `call` and the positional `args` patterns, across every enabled rule (or those with the `event` id)."""
+    count = 0
+    for rule in rules:
+        content = rule["content"]
+        if content.get("disabled") or "event" in check and content["event"]["id"] != check["event"]:
+            continue
+        statements = [
+            condition["value"] for condition in content["conditions"] if not condition.get("disabled")
+        ] + [action for action in content["actions"] if not action.get("disabled")]
+        for statement in statements:
+            for node in call_nodes(statement):
+                if node["call"] == check["call"] and all(
+                    int(position) < len(node["args"]) and pattern_matches(pattern, node["args"][int(position)])
+                    for position, pattern in check.get("args", {}).items()
+                ):
+                    count += 1
+    return count
+
+
+def program_calls(check: dict, entry: Path, wright: str, state: dict) -> dict:
+    source = check.get("source", "oracle" if entry.suffix == ".opy" else "wright")
+    path = compiled_path(state, source)
+    if path is None:
+        return check_result(check, False, f"no compiled text from {source}", unavailable=source == "oracle" and not oracle_available())
+    max_rules = check.get("maxRules", 200)
+    cache = state.setdefault("ruleContent", {})
+    key = (source, max_rules)
+    if key not in cache:
+        cache[key] = rule_content(wright, path, max_rules)
+    response = cache[key]
+    if "error" in response:
+        # A Wright without the rules `content` field cannot grade this: unavailable, never a pass.
+        return check_result(check, False, f"rule content unavailable: {response['error'].get('message', response['error'])}", unavailable=True)
+    result = response["result"]
+    if not isinstance(result, dict) or any("content" not in rule for rule in result.get("rules", [])):
+        return check_result(check, False, "this wright does not serve rule content", unavailable=True)
+    if result["selection"]["withheld"]:
+        return check_result(check, False, f"incomplete: {result['selection']['withheld']} rule(s) withheld by maxRules")
+    count = count_calls(result["rules"], check)
+    return check_result(check, check.get("min", 1) <= count <= check.get("max", count), f"{count} matching '{check['call']}' call(s) in {source} output")
+
+
 def check_result(check: dict, passed: bool, detail: str, **extra) -> dict:
     return {"id": check["id"], "kind": check["kind"], "layer": check.get("layer", "agent"), "passed": passed, "detail": detail, **extra}
 
@@ -159,6 +240,8 @@ def run_check(check: dict, workspace: Path, entry: Path, wright: str, state: dic
             return check_result(check, False, f"no compiled text from {source}", unavailable=source == "oracle" and not oracle_available())
         found = matches(text, check)
         return check_result(check, found if kind == "compiled-contains" else not found, f"{'matched' if found else 'no match'} in {source} output")
+    if kind == "program-calls":
+        return program_calls(check, entry, wright, state)
     raise SystemExit(f"unknown check kind '{kind}'")
 
 

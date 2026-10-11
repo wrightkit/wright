@@ -20,6 +20,9 @@ pub enum Request {
     ListRules,
     /// Look up one rule by id.
     GetRule { rule: u32 },
+    /// One rule's canonical content in the `workshop-rs/rule-content-v1`
+    /// format, with statement spans (ADR-0024).
+    GetRuleContent { rule: u32 },
     /// List symbols, optionally filtered by kind.
     ListSymbols {
         #[serde(default)]

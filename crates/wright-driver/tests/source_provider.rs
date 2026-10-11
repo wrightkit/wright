@@ -495,9 +495,10 @@ fn mapped_provider_project_reports_its_source_file_count() {
 /// A provider map may carry a span that does not resolve inside the
 /// retained authored source (e.g. a position recorded against an expanded
 /// spelling rather than the authored line). Retained-source validation is a
-/// freshness audit, not a load gate: the run still serves, mapped positions
-/// survive, and authored extents degrade with a warning instead of failing
-/// the load (#583).
+/// freshness audit, not a load gate: the run still serves and mapped
+/// positions survive instead of failing the load (#583). `workshop-rs` prunes
+/// spans that do not resolve in the attached source (1.13), so the load no
+/// longer needs its `source-map-span-overflow` fallback for this input.
 #[test]
 fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
     let (dir, entry) = temp_entry();
@@ -516,11 +517,6 @@ fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
     assert_eq!(
         session.load().expect("loaded").provenance,
         wright_driver::Provenance::Mapped
-    );
-    assert!(
-        lint.diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "source-map-span-overflow")
     );
     cleanup(dir);
 }
@@ -1940,5 +1936,76 @@ fn provider_backend_inspect_remains_explicitly_unsupported() {
     assert_eq!(result.exit, 3);
     assert_eq!(result.diagnostics[0].code, "source-provider-unsupported");
     assert!(result.result.program.is_null());
+    cleanup(dir);
+}
+
+/// ADR-0024 decision 4: until the provider advertises the names capability,
+/// an OverPy program serves its canonical content with `unavailable`
+/// naming `opy-rs` instead of a `names` map. The repel fixture stands in
+/// for the compiled OverPy form; assertions read the content, never text.
+#[test]
+fn opy_rules_content_reports_names_unavailable() {
+    let (dir, entry) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: Some(SourceCompilation::success(
+            std::fs::read_to_string(
+                workspace_root().join("benchmarks/agent/fixtures/program-calls/repel.en-US.ow"),
+            )
+            .expect("repel fixture"),
+        )),
+        check_failure: None,
+        failure: None,
+    };
+    let mut session = CompilerSession::with_source_provider(
+        SessionConfig {
+            input: InputSpec::Path(entry.clone()),
+            kind: SourceKind::Opy,
+            ..SessionConfig::default()
+        },
+        Box::new(provider),
+    )
+    .expect("provider session");
+    // A compile establishes the canonical snapshot semantic queries serve.
+    let compile = session.compile();
+    assert!(compile.ok, "provider compile: {:?}", compile.diagnostics);
+    let mut service = ToolService::new(&mut session).expect("service loads");
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Rules {
+        name: None,
+        rule: None,
+        file: None,
+        max: None,
+        content: true,
+    }) else {
+        panic!("rules with content failed");
+    };
+    assert_eq!(
+        result["unavailable"],
+        serde_json::json!({"names": "opy-rs"})
+    );
+    assert!(result.get("names").is_none());
+
+    let rules = result["rules"].as_array().expect("rules");
+    assert_eq!(rules.len(), 1);
+    let actions = rules[0]["content"]["actions"].as_array().unwrap();
+    let impulses = actions
+        .iter()
+        .filter(|action| {
+            action["call"] == "applyImpulse" && action["args"][2].as_f64() == Some(150.0)
+        })
+        .count();
+    assert_eq!(impulses, 2, "two strength-150 impulses: {actions:?}");
+    let stunned = serde_json::json!({"enum": "Status", "member": "STUNNED"});
+    let stuns = actions
+        .iter()
+        .filter(|action| {
+            action["call"] == "setStatusEffect"
+                && action["args"][2] == stunned
+                && action["args"][3].as_f64() == Some(0.75)
+        })
+        .count();
+    assert_eq!(stuns, 2, "two 0.75s stuns: {actions:?}");
     cleanup(dir);
 }

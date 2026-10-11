@@ -52,8 +52,8 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "RulesRequest",
         drop_fields: &[],
         mcp: true,
-        description: "The canonical Workshop rules in the loaded program, optionally narrowed by `name`, `file`, or `max`.",
-        result: "the program's rules, selection-wrapped when a selector was sent",
+        description: "The canonical Workshop rules in the loaded program, optionally narrowed by `name`, `rule`, `file`, or `max`; `content` adds each rule's conditions and actions as canonical call trees.",
+        result: "the program's rules, selection-wrapped when a selector or `content` was sent",
     },
     ToolSpec {
         op: "symbols",

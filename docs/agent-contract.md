@@ -180,7 +180,7 @@ the successful `result` payload.
 | `analyze` | optional `brief` | `wright-result/v1` analysis envelope; the brief form when `brief` is true |
 | `inspect` | optional `brief` | `wright-result/v1` inspection envelope; the brief form when `brief` is true |
 | `project` | none | Loaded program origin, files, counts, and findings summary |
-| `rules` | optional selection | Canonical Workshop rules — each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied |
+| `rules` | optional selection, optional `content` | Canonical Workshop rules — each entry carries `id`, `name`, `event` (the rule's event binding, `subroutine:<name>` for subroutine rules), and `span`; `{"rules": [...], "selection": {...}}` when a selection is applied. See [Rule content](#rule-content-adr-0024) |
 | `symbols` | optional selection | Symbols; `{"symbols": [...], "selection": {...}}` when `file`/`max` is applied (a `kind`-only request keeps the bare array) |
 | `references` | required `symbol` (id or name), optional selection | References for the symbol; `{"references": [...], "selection": {...}}` when a selection is applied |
 | `usage` | required `symbol` (id or name) | Usage counts for the symbol, plus its resolved `id` and `kind` |
@@ -329,6 +329,26 @@ When a request applies any selection field, the result reports
 and `costEstimate` add a `selection` member to their existing result objects.
 Requests without selection fields receive the previous shapes unchanged.
 
+### Rule content (ADR-0024)
+
+`rules` with `"content": true` adds a `content` member to each returned rule:
+the owner's `workshop-rs/rule-content-v1` document. Every action, value, and
+operator is a `{"call": id, "args": [...]}` node named by its catalog id, and
+`args` lists every argument in catalog parameter order, so an argument is
+identified by its position (`lookup` names the parameter at each position).
+Literals, `{"enum", "member"}`, `{"variable"}`, `{"subroutine"}`, `{"string"}`,
+and `{"localizedString"}` are the other node forms. `actions` is flat: index
+`i` is the same action index `cfg`, `references`, and findings use. Wright adds
+`span` to each condition and action when the program has one. For a source
+language the content is the canonical program after lowering, so assertions are
+independent of spelling and locale.
+
+A `content` request without `max` returns at most 20 rules, always in the
+selection-wrapped shape; `rule` selects exactly one. A selected rule's content
+is never truncated. The CLI form is `wright inspect rules --content`
+(`--rule`, `--only`, `--file`, `--max`). OverPy spellings for the canonical ids
+(`names`) are not served yet: they wait on a provider capability.
+
 ### Semantic query selection (#531)
 
 `rules`, `symbols`, `references`, `cfg`, and `callGraph` accept optional
@@ -339,7 +359,8 @@ value — a kind outside the listed domain, or a `name`/`rule`/`caller`/`callee`
 that matches nothing in the loaded program — is a structured
 `invalid-selection` error, never a silent empty result.
 
-* `rules`: `name` (a declared rule name), `file`, `max`.
+* `rules`: `name` (a declared rule name), `rule` (exactly one rule, by index
+  or declared name), `file`, `max`.
 * `symbols`: `file`, `max`, plus the pre-existing `kind` (`globalVariable`,
   `playerVariable`, `subroutine`, `rule`). `kind` predates this selection
   contract: a request carrying only `kind` keeps the previous filtered bare

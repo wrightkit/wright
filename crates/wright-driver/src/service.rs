@@ -35,6 +35,9 @@ pub const SERVICE_NAME: &str = "wright-tool-service";
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AGENT_CONTRACT: &str = "wright-agent/v1";
 
+/// Rules returned by a `content` request that sets no `max` (ADR-0024).
+const DEFAULT_CONTENT_RULES: usize = 20;
+
 /// Every operation `capabilities.operations` advertises, in contract order —
 /// the catalog client tool definitions are emitted from (#535).
 pub const OPERATIONS: &[&str] = &[
@@ -124,14 +127,19 @@ pub enum ToolRequest {
     /// The loaded canonical program summary (origin, files, counts, findings).
     Project,
     /// Every rule, optionally narrowed by an inline selection (`name`,
-    /// `file`, `max`; #531).
+    /// `rule`, `file`, `max`; #531). `content` adds each selected rule's
+    /// canonical content (ADR-0024).
     Rules {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<Address>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         file: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        content: bool,
     },
     /// Symbols, optionally filtered by `kind` and narrowed by an inline
     /// selection (`file`, `max`; #531).
@@ -719,6 +727,10 @@ impl<'a> ToolService<'a> {
             ToolRequest::Cfg { rule, .. } => {
                 matches!(rule, Address::Id(_)) && !self.rule_ids_current
             }
+            ToolRequest::Rules {
+                rule: Some(Address::Id(_)),
+                ..
+            } => !self.rule_ids_current,
             ToolRequest::SemanticRename { target, .. } => {
                 matches!(target.symbol, Some(Address::Id(_))) && !self.symbol_ids_current
             }
@@ -800,7 +812,13 @@ impl<'a> ToolService<'a> {
                 ToolResponse::Ok { result }
             }
             ToolRequest::Project => self.ok(self.project()),
-            ToolRequest::Rules { name, file, max } => self.rules(name, file, max),
+            ToolRequest::Rules {
+                name,
+                rule,
+                file,
+                max,
+                content,
+            } => self.rules(name, rule.as_ref(), file, max, *content),
             ToolRequest::Symbols { kind, file, max } => {
                 self.symbols(kind.as_deref(), file.as_deref(), *max)
             }
@@ -1150,12 +1168,17 @@ impl<'a> ToolService<'a> {
 
     /// `rules`: every rule with resolved span paths, like `symbols` — a
     /// `file` id without its path is unusable to a caller. The selection
-    /// fields are `name` (a declared rule name), `file`, and `max` (#531).
+    /// fields are `name` (a declared rule name), `rule` (one rule address),
+    /// `file`, and `max` (#531). With `content`, each selected rule carries
+    /// its canonical content, `max` defaults to [`DEFAULT_CONTENT_RULES`],
+    /// and the selection shape is always returned (ADR-0024).
     fn rules(
         &self,
         name: &Option<String>,
+        rule: Option<&Address>,
         file: &Option<String>,
         max: &Option<usize>,
+        content: bool,
     ) -> ToolResponse {
         if let Some(name) = name {
             if !self
@@ -1168,22 +1191,74 @@ impl<'a> ToolService<'a> {
                 return invalid_selection(format!("unknown rule '{name}'"));
             }
         }
-        let selected = name.is_some() || file.is_some() || max.is_some();
+        let rule_id = match rule {
+            Some(address) => match self.rule_address(address) {
+                Ok(id) if (id as usize) < self.snapshot().program.rules.len() => Some(id as u64),
+                Ok(id) => return invalid_selection(format!("unknown rule {id}")),
+                // An unmatched name is a selection error like every other
+                // selection field; a duplicate name keeps the `ambiguous-rule`
+                // refusal `cfg` reports so the caller learns the candidates.
+                Err(error) if error.code == "unknown-rule" => {
+                    return invalid_selection(error.message);
+                }
+                Err(error) => return ToolResponse::Error { error },
+            },
+            None => None,
+        };
+        let max = if content {
+            max.or(Some(DEFAULT_CONTENT_RULES))
+        } else {
+            *max
+        };
+        let selected =
+            content || name.is_some() || rule_id.is_some() || file.is_some() || max.is_some();
         let response = self.semantic_query_with_resolved_span_paths(Request::ListRules);
-        match response {
+        let response = match response {
             ToolResponse::Ok { result } => self.select_result(
                 "rules",
                 result,
                 file.as_deref(),
-                |rule| {
+                |item| {
                     name.as_deref()
-                        .is_none_or(|name| rule["name"].as_str() == Some(name))
+                        .is_none_or(|name| item["name"].as_str() == Some(name))
+                        && rule_id.is_none_or(|id| item["id"].as_u64() == Some(id))
                 },
-                *max,
+                max,
                 selected,
             ),
             other => other,
+        };
+        if content {
+            self.attach_rule_content(response)
+        } else {
+            response
         }
+    }
+
+    /// Add `content` to every rule of a selected `rules` result. A rule
+    /// whose content cannot be rendered fails the whole call: a partial
+    /// result would make an assertion on it silently wrong.
+    fn attach_rule_content(&self, response: ToolResponse) -> ToolResponse {
+        let ToolResponse::Ok { mut result } = response else {
+            return response;
+        };
+        // OverPy spellings for the canonical ids need a provider capability
+        // that no provider advertises yet (ADR-0024 decision 4).
+        if self.snapshot().input.kind == crate::config::SourceKind::Opy {
+            result["unavailable"] = json!({"names": "opy-rs"});
+        }
+        let Some(rules) = result["rules"].as_array_mut() else {
+            return ToolResponse::Ok { result };
+        };
+        for rule in rules {
+            let id = rule["id"].as_u64().unwrap_or_default() as u32;
+            match self.semantic_query_with_resolved_span_paths(Request::GetRuleContent { rule: id })
+            {
+                ToolResponse::Ok { result: content } => rule["content"] = content,
+                other => return other,
+            }
+        }
+        ToolResponse::Ok { result }
     }
 
     /// `symbols`: every symbol with resolved span paths. `kind` predates

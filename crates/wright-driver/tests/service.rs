@@ -34,6 +34,8 @@ fn tool_service_queries_canonical_workshop() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
         ToolRequest::Findings(FindingSelection::default()),
         ToolRequest::CostEstimate(FindingSelection::default()),
@@ -438,6 +440,8 @@ fn name_addressing_matches_numeric_addressing_and_resolves_span_paths() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     let rule_index = |name: &str| {
@@ -781,6 +785,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     assert!(rules.is_array());
@@ -799,6 +805,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             name: Some("player starts".to_string()),
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     let kept = named["rules"].as_array().unwrap();
@@ -812,6 +820,8 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
             name: None,
             file: Some("declarations-rules.ws".to_string()),
             max: Some(1),
+            rule: None,
+            content: false,
         },
     );
     assert_eq!(bounded_rules["rules"].as_array().unwrap().len(), 1);
@@ -979,6 +989,8 @@ fn semantic_query_selection_refuses_unknown_filter_values() {
             name: Some("nope".to_string()),
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
         ToolRequest::Symbols {
             kind: Some("nope".to_string()),
@@ -1513,6 +1525,8 @@ fn a_changed_input_is_reloaded_and_serves_the_new_program() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     assert_eq!(service.reload_count(), 1);
@@ -1538,6 +1552,8 @@ fn an_unchanged_input_is_never_reloaded() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
         ToolRequest::Symbols {
             kind: None,
@@ -1579,6 +1595,8 @@ fn an_unchanged_input_is_never_reloaded() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     assert_eq!(service.reload_count(), 1);
@@ -1604,6 +1622,8 @@ fn directory_inputs_observe_added_and_removed_sources() {
                 name: None,
                 file: None,
                 max: None,
+                rule: None,
+                content: false,
             },
         )
         .as_array()
@@ -1627,6 +1647,8 @@ fn directory_inputs_observe_added_and_removed_sources() {
                 name: None,
                 file: None,
                 max: None,
+                rule: None,
+                content: false,
             }
         ),
         "input-kind-ambiguous"
@@ -1706,6 +1728,8 @@ fn a_failed_reload_refuses_requests_until_the_input_heals() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
         ToolRequest::Project,
     ] {
@@ -1868,6 +1892,8 @@ fn stale_numeric_ids_refuse_until_the_new_space_is_observed() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     result_of(
@@ -2002,6 +2028,13 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             file: None,
             max: None,
         },
+        ToolRequest::Rules {
+            name: None,
+            rule: Some(0.into()),
+            file: None,
+            max: None,
+            content: true,
+        },
     ] {
         assert_eq!(
             refusal_code(&mut service, &request),
@@ -2040,6 +2073,8 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     let filtered = result_of(
@@ -2227,6 +2262,8 @@ fn every_operation_is_fresh_after_a_reload_or_refuses_stale_ids() {
                 name: None,
                 file: None,
                 max: None,
+                rule: None,
+                content: false,
             }
         )
         .as_array()
@@ -2404,6 +2441,8 @@ fn an_unloadable_input_defers_the_load_to_program_reading_requests() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
         ToolRequest::Symbols {
             kind: None,
@@ -2598,6 +2637,8 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     result_of(
@@ -2664,6 +2705,8 @@ fn ids_issued_before_a_failed_load_stay_stale_after_recovery() {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
     );
     result_of(
@@ -3194,5 +3237,168 @@ fn a_reload_rebuilds_the_semantic_service_once() {
     result_of(&mut service, &ToolRequest::Analyze { brief: false });
     result_of(&mut service, &ToolRequest::Inspect { brief: false });
     assert_eq!(service.semantic_build_count(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rules_content_serves_bounded_canonical_call_trees() {
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(declarations_path()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let request = |rule: Option<Address>, max: Option<usize>| ToolRequest::Rules {
+        name: None,
+        rule,
+        file: None,
+        max,
+        content: true,
+    };
+
+    // Without `max` the selection shape is still returned, and every rule
+    // carries the owner's format.
+    let all = result_of(&mut service, &request(None, None));
+    let rules = all["rules"].as_array().unwrap();
+    assert_eq!(all["selection"]["withheld"], 0);
+    assert!(
+        rules
+            .iter()
+            .all(|rule| rule["content"]["format"] == "workshop-rs/rule-content-v1")
+    );
+    // A raw Workshop result carries neither `names` nor `unavailable`.
+    assert!(all.get("names").is_none() && all.get("unavailable").is_none());
+
+    // `rule` selects exactly one, by name or id; the statements are catalog
+    // call trees with positional arguments and Wright's statement spans.
+    let one = result_of(
+        &mut service,
+        &request(Some(Address::Name("player starts".to_string())), None),
+    );
+    let rule = &one["rules"][0];
+    assert_eq!(one["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(rule["name"], "player starts");
+    let condition = &rule["content"]["conditions"][0];
+    assert_eq!(condition["value"]["call"], "==");
+    assert_eq!(condition["value"]["args"][0]["call"], "hasSpawned");
+    assert_eq!(condition["value"]["args"][1], true);
+    assert!(condition["span"]["path"].is_string());
+    let actions = rule["content"]["actions"].as_array().unwrap();
+    assert_eq!(actions[0]["call"], "setPlayerVariable");
+    assert_eq!(
+        actions[0]["args"][1],
+        serde_json::json!({"variable": "hasStarted"})
+    );
+    assert_eq!(
+        actions[1],
+        serde_json::json!({
+            "call": "callSubroutine",
+            "args": [{"subroutine": "showStatus"}],
+            "span": actions[1]["span"],
+        })
+    );
+    let by_id = result_of(&mut service, &request(Some(Address::Id(1)), None));
+    assert_eq!(by_id["rules"][0]["content"], rule["content"]);
+
+    // Every statement carries a resolved span path — never read from text.
+    for statement in rule["content"]["conditions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(rule["content"]["actions"].as_array().unwrap())
+    {
+        assert_eq!(statement["span"]["path"], "declarations-rules.ws");
+    }
+
+    // `max` bounds the rule count and reports what it withheld; a selected
+    // rule's content is never truncated.
+    let bounded = result_of(&mut service, &request(None, Some(1)));
+    assert_eq!(bounded["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(bounded["selection"]["withheld"], rules.len() - 1);
+
+    // An unknown rule, by name or by id, is an `invalid-selection` error.
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &request(Some(Address::Name("nope".to_string())), None)
+        ),
+        "invalid-selection"
+    );
+    assert_eq!(
+        refusal_code(&mut service, &request(Some(Address::Id(99)), None)),
+        "invalid-selection"
+    );
+
+    // Without `content` the previous shape is unchanged.
+    let plain = result_of(
+        &mut service,
+        &ToolRequest::Rules {
+            name: None,
+            rule: None,
+            file: None,
+            max: None,
+            content: false,
+        },
+    );
+    assert!(plain.is_array());
+    assert!(plain[0].get("content").is_none());
+}
+
+/// A `content` request without `max` applies the default bound of 20 rules
+/// (ADR-0024): the selection reports every withheld rule. A `rule` name
+/// shared by two rules refuses `ambiguous-rule`, the refusal `cfg` gives.
+#[test]
+fn rules_content_defaults_to_twenty_rules_and_names_ambiguity() {
+    let dir = freshness_dir("rules-content-bound");
+    let input = dir.join("program.ws");
+    let mut text = "variables {\n    global:\n        0: score\n}\n".to_string();
+    for index in 0..25 {
+        let name = if index < 2 {
+            "dup".to_string()
+        } else {
+            format!("r{index}")
+        };
+        text.push_str(&format!(
+            "rule (\"{name}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(score, {index});\n    }}\n}}\n"
+        ));
+    }
+    std::fs::write(&input, text).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let request = |rule: Option<Address>, max: Option<usize>| ToolRequest::Rules {
+        name: None,
+        rule,
+        file: None,
+        max,
+        content: true,
+    };
+
+    let bounded = result_of(&mut service, &request(None, None));
+    assert_eq!(bounded["rules"].as_array().unwrap().len(), 20);
+    assert_eq!(
+        bounded["selection"],
+        serde_json::json!({"total": 25, "withheld": 5})
+    );
+
+    let one = result_of(
+        &mut service,
+        &request(Some(Address::Name("r3".to_string())), None),
+    );
+    assert_eq!(one["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(one["rules"][0]["name"], "r3");
+
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &request(Some(Address::Name("dup".to_string())), None)
+        ),
+        "ambiguous-rule"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

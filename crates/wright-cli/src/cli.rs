@@ -346,6 +346,8 @@ pub(crate) struct InspectArgs {
 /// small (#439). Agent requests keep their flat operation names.
 #[derive(Debug, Subcommand)]
 pub(crate) enum InspectQuery {
+    /// List rules; `--content` adds each rule's canonical conditions and actions.
+    Rules(RulesArgs),
     /// List semantic symbols; `--only` narrows to one symbol kind.
     Symbols(SymbolsArgs),
     /// Show the references and usage counts of one symbol, addressed by name.
@@ -356,6 +358,32 @@ pub(crate) enum InspectQuery {
     Callgraph(CallgraphArgs),
     /// Report generated-resource counts and static findings.
     Cost(ReportArgs),
+}
+
+/// Arguments of `inspect rules`: shared workflow options plus the rule
+/// selection fields and `--content` (ADR-0024).
+#[derive(Debug, Args)]
+pub(crate) struct RulesArgs {
+    #[command(flatten)]
+    pub(crate) common: CommonArgs,
+    /// Add each selected rule's conditions and actions as canonical call
+    /// trees; without `--max`, at most 20 rules are returned.
+    #[arg(long)]
+    pub(crate) content: bool,
+    /// Report only the rule with this declared name.
+    #[arg(long, value_name = "RULE")]
+    pub(crate) rule: Option<String>,
+    /// Report only rules with this declared name.
+    #[arg(long = "only", value_name = "NAME")]
+    pub(crate) name: Option<String>,
+    /// Report only rules located in this source file; any spelling that
+    /// resolves to the same file selects it.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<String>,
+    /// Report at most N rules; withheld rules are reported, never silently
+    /// dropped.
+    #[arg(long, value_name = "N")]
+    pub(crate) max: Option<usize>,
 }
 
 /// Arguments of `inspect symbols`: shared workflow options plus the

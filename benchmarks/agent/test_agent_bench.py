@@ -368,6 +368,92 @@ class AgentBenchTest(unittest.TestCase):
             self.assertTrue(bench_grade.matches(text, scored), text)
         self.assertFalse(bench_grade.matches("Ongoing - Each Player;", scored))
 
+    def program_calls(self, fixture: str, checks: list[dict], source: str = "wright") -> list[bool]:
+        """Run `program-calls` checks over one committed fixture, compiled by the named authority."""
+        entry = agent_bench.HERE / "fixtures/program-calls" / fixture
+        scratch = self.out / f"program-calls-{fixture}-{source}"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        return [bench_grade.run_check({"id": "c", "kind": "program-calls", "source": source, **check}, entry.parent, entry, WRIGHT, state)["passed"] for check in checks]
+
+    REPEL_CHECKS = (
+        {"call": "applyImpulse", "args": {"2": 150}, "min": 2},
+        {"call": "setStatusEffect", "args": {"2": {"enum": "Status", "member": "STUNNED"}, "3": 0.75}, "min": 2},
+    )
+
+    def test_program_calls_asserts_on_canonical_calls_in_every_surface_form(self):
+        for fixture in ("repel.opy", "repel.en-US.ow", "repel.zh-CN.ow"):
+            self.assertEqual(self.program_calls(fixture, list(self.REPEL_CHECKS)), [True, True], fixture)
+
+    def test_program_calls_rejects_a_missing_or_wrong_argument(self):
+        self.assertEqual(self.program_calls("repel-one-short-stun.opy", list(self.REPEL_CHECKS)), [True, False])
+        self.assertEqual(self.program_calls("repel.opy", [{"call": "applyImpulse", "args": {"2": 151}, "min": 1}, {"call": "applyImpulse", "args": {"2": 150}, "max": 1}]), [False, False])
+
+    def test_program_calls_alternatives_and_event_restriction(self):
+        any_of = {"call": "setStatusEffect", "args": {"3": {"any": [0.5, 0.75]}}, "min": 2}
+        self.assertEqual(self.program_calls("repel.opy", [any_of, {**any_of, "event": "global"}, {**any_of, "event": "eachPlayer"}]), [True, False, True])
+
+    @unittest.skipUnless(bench_grade.oracle_available(), "run `agent_bench.py setup-oracle`")
+    def test_program_calls_reads_the_upstream_oracle_output(self):
+        self.assertEqual(self.program_calls("repel.opy", list(self.REPEL_CHECKS), source="oracle"), [True, True])
+
+    def test_program_calls_fails_an_incomplete_read(self):
+        """`withheld` rules mean the grader saw only part of the program: the check fails, it never passes on half."""
+        entry = agent_bench.HERE / "fixtures/program-calls/repel.opy"
+        scratch = self.out / "program-calls-withheld"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        partial = {"result": {"rules": [{"content": {"event": {"id": "eachPlayer"}, "conditions": [],
+                                                     "actions": [{"call": "applyImpulse", "args": [None, None, 150]}]}}],
+                              "selection": {"withheld": 3}}}
+        check = {"id": "c", "kind": "program-calls", "call": "applyImpulse", "args": {"2": 150}, "min": 2}
+        with patch.object(bench_grade, "rule_content", return_value=partial):
+            result = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(result["passed"])
+        self.assertIn("withheld", result["detail"])
+
+    def test_program_calls_ignores_disabled_calls_and_rules(self):
+        """A disabled statement or rule never runs, so its calls cannot satisfy a check."""
+        entry = agent_bench.HERE / "fixtures/program-calls/repel.opy"
+        scratch = self.out / "program-calls-disabled"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        impulse = {"call": "applyImpulse", "args": [None, None, 150]}
+        rules = [
+            {"content": {"event": {"id": "eachPlayer"}, "disabled": False,
+                         "conditions": [{"value": impulse, "disabled": True}],
+                         "actions": [impulse, {**impulse, "disabled": True}]}},
+            {"content": {"event": {"id": "eachPlayer"}, "disabled": True,
+                         "conditions": [], "actions": [impulse, impulse]}},
+        ]
+        response = {"result": {"rules": rules, "selection": {"withheld": 0}}}
+        check = {"id": "c", "kind": "program-calls", "call": "applyImpulse", "args": {"2": 150}, "min": 2}
+        with patch.object(bench_grade, "rule_content", return_value=response):
+            result = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(result["passed"])
+        self.assertIn("1 matching", result["detail"])
+
+    def test_program_calls_is_unavailable_when_wright_cannot_serve_content(self):
+        """A Wright without the rules `content` field cannot grade: `unavailable`, never a pass (ADR-0024)."""
+        entry = agent_bench.HERE / "fixtures/program-calls/repel.opy"
+        scratch = self.out / "program-calls-unavailable"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        check = {"id": "c", "kind": "program-calls", "call": "applyImpulse"}
+        # A pre-ADR-0024 wright ignores `content` and returns the bare rule list.
+        with patch.object(bench_grade, "rule_content", return_value={"result": [{"id": 0, "name": "r"}]}):
+            bare = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(bare["passed"])
+        self.assertTrue(bare["unavailable"])
+        # A wright that refuses the request errors the same way.
+        with patch.object(bench_grade, "rule_content", return_value={"error": {"code": "invalid-request", "message": "unknown field"}}):
+            refused = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(refused["passed"])
+        self.assertTrue(refused["unavailable"])
+
+    def test_pattern_matching_compares_numbers_by_value_and_never_confuses_booleans(self):
+        self.assertTrue(bench_grade.pattern_matches(0.75, 0.75))
+        self.assertTrue(bench_grade.pattern_matches(150, 150.0))
+        self.assertFalse(bench_grade.pattern_matches(1, True))
+        self.assertTrue(bench_grade.pattern_matches({"enum": "Status"}, {"enum": "Status", "member": "STUNNED"}))
+        self.assertFalse(bench_grade.pattern_matches({"enum": "Status", "member": "HACKED"}, {"enum": "Status", "member": "STUNNED"}))
+
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
 

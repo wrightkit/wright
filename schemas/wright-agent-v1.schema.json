@@ -195,7 +195,19 @@
           "type": "string",
           "description": "The rule's event binding: a canonical event id, or `subroutine:<name>` for a subroutine rule."
         },
-        "span": { "$ref": "#/$defs/Span" }
+        "span": { "$ref": "#/$defs/Span" },
+        "content": {
+          "type": "object",
+          "required": ["format", "event", "conditions", "actions"],
+          "description": "Present when `content` was requested: the owner's `workshop-rs/rule-content-v1` document. Each condition and action also carries `span` when the program has one.",
+          "properties": {
+            "format": { "const": "workshop-rs/rule-content-v1" },
+            "event": { "type": "object" },
+            "conditions": { "type": "array", "items": { "type": "object" } },
+            "actions": { "type": "array", "items": { "type": "object" } }
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": true
     },
@@ -380,7 +392,11 @@
       "required": ["rules", "selection"],
       "properties": {
         "rules": { "type": "array", "items": { "$ref": "#/$defs/RuleSummary" } },
-        "selection": { "$ref": "#/$defs/SelectionSummary" }
+        "selection": { "$ref": "#/$defs/SelectionSummary" },
+        "unavailable": {
+          "type": "object",
+          "description": "ADR-0024: result members the result should carry but cannot for this input. `names` names the owner that must serve target-language spellings (today `opy-rs` for an OverPy input, until its provider capability exists); raw Workshop results carry no `unavailable`."
+        }
       },
       "additionalProperties": true
     },
@@ -844,8 +860,10 @@
       "properties": {
         "op": { "const": "rules" },
         "name": { "type": "string", "description": "Selection (#531): only the rule with this declared name." },
+        "rule": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string" }], "description": "Selection (ADR-0024): exactly this rule, addressed by id or declared name." },
         "file": { "type": "string", "description": "Selection (#531): only rules located in this source file; any spelling that resolves to the same file selects it." },
-        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped." }
+        "max": { "type": "integer", "minimum": 0, "description": "Selection (#531): report at most this many rules; the response's `selection.withheld` counts what the bound dropped." },
+        "content": { "type": "boolean", "description": "ADR-0024: add each returned rule's canonical content (`workshop-rs/rule-content-v1`). Without `max`, at most 20 rules are returned; the selection-wrapped result is always used." }
       },
       "required": ["op"],
       "additionalProperties": false
