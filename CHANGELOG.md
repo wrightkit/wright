@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/wrightkit/wright/compare/v0.16.1...v0.17.0) (2026-10-11)
+
+
+### Features
+
+* serve structured rule content and grade with program-calls (ADR-0024) ([#625](https://github.com/wrightkit/wright/issues/625)) ([222930a](https://github.com/wrightkit/wright/commit/222930ad007e0d856d5cd0d87eeb1434742c8e2f))
+
 ## [0.16.1](https://github.com/wrightkit/wright/compare/v0.16.0...v0.16.1) (2026-10-11)
 
 
