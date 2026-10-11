@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/wrightkit/wright/compare/v0.15.4...v0.16.0) (2026-10-11)
+
+
+### Features
+
+* **bench:** re-grade stored runs when a scenario's checks change ([#621](https://github.com/wrightkit/wright/issues/621)) ([b77f80a](https://github.com/wrightkit/wright/commit/b77f80aa8f151f20698f67dbef5ae5be38939732))
+
+
+### Bug Fixes
+
+* **driver:** run canonical validation on check for compile-capable providers ([#619](https://github.com/wrightkit/wright/issues/619)) ([3ec316d](https://github.com/wrightkit/wright/commit/3ec316df5bdcd66f9545276e6c6502a892ddedf4))
+
 ## [0.15.4](https://github.com/wrightkit/wright/compare/v0.15.3...v0.15.4) (2026-10-10)
 
 
