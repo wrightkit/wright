@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/wrightkit/wright/compare/v0.16.0...v0.16.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **bench:** keep regrade copies faithful and mirror grader availability ([#614](https://github.com/wrightkit/wright/issues/614)) ([#622](https://github.com/wrightkit/wright/issues/622)) ([4ac9183](https://github.com/wrightkit/wright/commit/4ac9183cb6782716fcd0133fdfbf65ad6949da2c))
+
 ## [0.16.0](https://github.com/wrightkit/wright/compare/v0.15.4...v0.16.0) (2026-10-11)
 
 
