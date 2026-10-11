@@ -396,6 +396,37 @@ class AgentBenchTest(unittest.TestCase):
     def test_program_calls_reads_the_upstream_oracle_output(self):
         self.assertEqual(self.program_calls("repel.opy", list(self.REPEL_CHECKS), source="oracle"), [True, True])
 
+    def test_program_calls_fails_an_incomplete_read(self):
+        """`withheld` rules mean the grader saw only part of the program: the check fails, it never passes on half."""
+        entry = agent_bench.HERE / "fixtures/program-calls/repel.opy"
+        scratch = self.out / "program-calls-withheld"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        partial = {"result": {"rules": [{"content": {"event": {"id": "eachPlayer"}, "conditions": [],
+                                                     "actions": [{"call": "applyImpulse", "args": [None, None, 150]}]}}],
+                              "selection": {"withheld": 3}}}
+        check = {"id": "c", "kind": "program-calls", "call": "applyImpulse", "args": {"2": 150}, "min": 2}
+        with patch.object(bench_grade, "rule_content", return_value=partial):
+            result = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(result["passed"])
+        self.assertIn("withheld", result["detail"])
+
+    def test_program_calls_is_unavailable_when_wright_cannot_serve_content(self):
+        """A Wright without the rules `content` field cannot grade: `unavailable`, never a pass (ADR-0024)."""
+        entry = agent_bench.HERE / "fixtures/program-calls/repel.opy"
+        scratch = self.out / "program-calls-unavailable"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        check = {"id": "c", "kind": "program-calls", "call": "applyImpulse"}
+        # A pre-ADR-0024 wright ignores `content` and returns the bare rule list.
+        with patch.object(bench_grade, "rule_content", return_value={"result": [{"id": 0, "name": "r"}]}):
+            bare = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(bare["passed"])
+        self.assertTrue(bare["unavailable"])
+        # A wright that refuses the request errors the same way.
+        with patch.object(bench_grade, "rule_content", return_value={"error": {"code": "invalid-request", "message": "unknown field"}}):
+            refused = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(refused["passed"])
+        self.assertTrue(refused["unavailable"])
+
     def test_pattern_matching_compares_numbers_by_value_and_never_confuses_booleans(self):
         self.assertTrue(bench_grade.pattern_matches(0.75, 0.75))
         self.assertTrue(bench_grade.pattern_matches(150, 150.0))

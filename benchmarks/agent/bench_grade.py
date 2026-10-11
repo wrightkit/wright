@@ -162,10 +162,12 @@ def program_calls(check: dict, entry: Path, wright: str, state: dict) -> dict:
     path = compiled_path(state, source)
     if path is None:
         return check_result(check, False, f"no compiled text from {source}", unavailable=source == "oracle" and not oracle_available())
+    max_rules = check.get("maxRules", 200)
     cache = state.setdefault("ruleContent", {})
-    if source not in cache:
-        cache[source] = rule_content(wright, path, check.get("maxRules", 200))
-    response = cache[source]
+    key = (source, max_rules)
+    if key not in cache:
+        cache[key] = rule_content(wright, path, max_rules)
+    response = cache[key]
     if "error" in response:
         # A Wright without the rules `content` field cannot grade this: unavailable, never a pass.
         return check_result(check, False, f"rule content unavailable: {response['error'].get('message', response['error'])}", unavailable=True)
