@@ -140,13 +140,15 @@ def call_nodes(node):
 
 
 def count_calls(rules: list[dict], check: dict) -> int:
-    """Calls matching `call` and the positional `args` patterns, across every rule (or those with the `event` id)."""
+    """Calls matching `call` and the positional `args` patterns, across every enabled rule (or those with the `event` id)."""
     count = 0
     for rule in rules:
         content = rule["content"]
-        if "event" in check and content["event"]["id"] != check["event"]:
+        if content.get("disabled") or "event" in check and content["event"]["id"] != check["event"]:
             continue
-        statements = [condition["value"] for condition in content["conditions"]] + content["actions"]
+        statements = [
+            condition["value"] for condition in content["conditions"] if not condition.get("disabled")
+        ] + [action for action in content["actions"] if not action.get("disabled")]
         for statement in statements:
             for node in call_nodes(statement):
                 if node["call"] == check["call"] and all(

@@ -410,6 +410,26 @@ class AgentBenchTest(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertIn("withheld", result["detail"])
 
+    def test_program_calls_ignores_disabled_calls_and_rules(self):
+        """A disabled statement or rule never runs, so its calls cannot satisfy a check."""
+        entry = agent_bench.HERE / "fixtures/program-calls/repel.opy"
+        scratch = self.out / "program-calls-disabled"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        impulse = {"call": "applyImpulse", "args": [None, None, 150]}
+        rules = [
+            {"content": {"event": {"id": "eachPlayer"}, "disabled": False,
+                         "conditions": [{"value": impulse, "disabled": True}],
+                         "actions": [impulse, {**impulse, "disabled": True}]}},
+            {"content": {"event": {"id": "eachPlayer"}, "disabled": True,
+                         "conditions": [], "actions": [impulse, impulse]}},
+        ]
+        response = {"result": {"rules": rules, "selection": {"withheld": 0}}}
+        check = {"id": "c", "kind": "program-calls", "call": "applyImpulse", "args": {"2": 150}, "min": 2}
+        with patch.object(bench_grade, "rule_content", return_value=response):
+            result = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+        self.assertFalse(result["passed"])
+        self.assertIn("1 matching", result["detail"])
+
     def test_program_calls_is_unavailable_when_wright_cannot_serve_content(self):
         """A Wright without the rules `content` field cannot grade: `unavailable`, never a pass (ADR-0024)."""
         entry = agent_bench.HERE / "fixtures/program-calls/repel.opy"
