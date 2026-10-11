@@ -226,6 +226,7 @@ impl<'a> SemanticService<'a> {
             Request::Program => Response::Ok { result: json!({"origin": self.origin, "globalVariables": self.program.global_variables.len(), "playerVariables": self.program.player_variables.len(), "subroutines": self.program.subroutines.len(), "rules": self.program.rules.len(), "findings": self.findings.len()}) },
             Request::ListRules => Response::Ok { result: json!(self.program.rules.iter().enumerate().map(|(id, rule)| json!({"id": id, "name": rule.name, "event": event_name(&rule.event), "span": span_json(self.program.rule_span(id))})).collect::<Vec<_>>()) },
             Request::GetRule { rule } => self.rule(*rule as usize),
+            Request::GetRuleContent { rule } => self.rule_content(*rule as usize),
             Request::ListSymbols { kind } => Response::Ok { result: JsonValue::Array(self.symbols_json().iter().filter(|symbol| kind.as_deref().is_none_or(|kind| symbol["kind"].as_str() == Some(kind))).cloned().collect()) },
             Request::GetSymbol { symbol } => self.index.symbol(SymbolId::from_index(*symbol as usize)).map_or_else(|| self.error("invalid-id", format!("unknown symbol {symbol}")), |symbol| Response::Ok { result: self.symbols_json()[symbol.id.index()].clone() }),
             Request::FindReferences { symbol } => { let id = SymbolId::from_index(*symbol as usize); if self.index.symbol(id).is_none() { self.error("invalid-id", format!("unknown symbol {symbol}")) } else { Response::Ok { result: self.references_json()[id.index()].clone() } } }
@@ -246,6 +247,33 @@ impl<'a> SemanticService<'a> {
             result: json!({"id": id, "name": rule.name, "span": span_json(self.program.rule_span(id)), "disabled": rule.disabled, "event": event_name(&rule.event), "conditions": rule.conditions.len(), "actions": rule.actions.len()}),
         }
     }
+    /// The owner's rule-content document with Wright's statement spans added
+    /// to each condition and action (ADR-0024 decision 3).
+    fn rule_content(&self, id: RuleId) -> Response {
+        let Some(rule) = self.program.rules.get(id) else {
+            return self.error("invalid-id", format!("unknown rule {id}"));
+        };
+        let mut content = match rule.content() {
+            Ok(content) => content,
+            Err(error) => return self.error("rule-content-unavailable", error.to_string()),
+        };
+        for (key, span) in [("conditions", true), ("actions", false)] {
+            let Some(statements) = content.get_mut(key).and_then(JsonValue::as_array_mut) else {
+                continue;
+            };
+            for (index, statement) in statements.iter_mut().enumerate() {
+                let found = if span {
+                    self.program.condition_span(id, index)
+                } else {
+                    self.program.action_span(id, index)
+                };
+                if found.is_some() {
+                    statement["span"] = span_json(found);
+                }
+            }
+        }
+        Response::Ok { result: content }
+    }
     fn error(&self, code: &str, message: String) -> Response {
         Response::Error {
             error: ErrorInfo {
@@ -264,6 +292,7 @@ fn request_label(request: &Request) -> &'static str {
         Request::Program => "svc::program",
         Request::ListRules => "svc::listRules",
         Request::GetRule { .. } => "svc::getRule",
+        Request::GetRuleContent { .. } => "svc::getRuleContent",
         Request::ListSymbols { .. } => "svc::listSymbols",
         Request::GetSymbol { .. } => "svc::getSymbol",
         Request::FindReferences { .. } => "svc::findReferences",

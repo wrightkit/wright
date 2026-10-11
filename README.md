@@ -153,7 +153,7 @@ wright check [INPUT]        # correctness diagnostics
 wright lint [INPUT]         # lint findings
 wright analyze [INPUT]      # cost, hotspots, and risk indicators
 wright inspect [INPUT]      # semantic summary
-wright inspect symbols|refs|cfg|callgraph|cost
+wright inspect rules|symbols|refs|cfg|callgraph|cost
 wright rename OLD NEW [INPUT]   # previews a diff; --write applies it
 wright compile [INPUT]      # emit Workshop text
 wright convert [INPUT] --target opy

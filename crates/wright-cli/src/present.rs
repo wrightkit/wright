@@ -16,7 +16,8 @@ use wright_driver::edit::RenameResult;
 use wright_driver::progress::{ProgressEvent, ProgressObserver, ProgressPhase, ProgressUnit};
 use wright_driver::result::{
     AnalyzeResult, BriefResult, CallGraphResult, CfgResult, CheckResult, CompileResult,
-    ConvertResult, CostResult, Envelope, InspectResult, LintResult, RefsResult, SymbolsResult,
+    ConvertResult, CostResult, Envelope, InspectResult, LintResult, RefsResult, RulesResult,
+    SymbolsResult,
 };
 
 use crate::cli::{ColorArg, CommonArgs, OutputFormatArg, RendererArg};
@@ -872,6 +873,58 @@ fn print_query_withheld(value: &serde_json::Value, noun: &str) {
     {
         println!("  ... {withheld} {noun} withheld (--max)");
     }
+}
+
+impl ResultPresentation for RulesResult {
+    fn metadata(&self) -> Option<String> {
+        Some(format!("{} rule(s)", query_items(&self.0, "rules").len()))
+    }
+    /// One entry per rule: identity and location, then — with `--content` —
+    /// the conditions and actions, each statement one call-tree line.
+    fn render_body(&self, _ctx: &RenderContext<'_>) {
+        let rules = query_items(&self.0, "rules");
+        println!("\nRules");
+        if rules.is_empty() {
+            println!("  none");
+            return;
+        }
+        for rule in rules {
+            let name = rule["name"].as_str().unwrap_or("<unnamed>");
+            let event = rule["event"].as_str().unwrap_or("?");
+            match rule.get("span").and_then(inline_location) {
+                Some(location) => println!("  {name} [{event}] --> {location}"),
+                None => println!("  {name} [{event}]"),
+            }
+            let content = &rule["content"];
+            for condition in content["conditions"].as_array().into_iter().flatten() {
+                println!("    if {}", render_node(&condition["value"]));
+            }
+            for action in content["actions"].as_array().into_iter().flatten() {
+                println!("    {}", render_node(action));
+            }
+        }
+        print_query_withheld(&self.0, "rule(s)");
+    }
+}
+
+/// One rule-content node as a single `name(arg, ...)` line.
+fn render_node(node: &serde_json::Value) -> String {
+    if let Some(call) = node["call"].as_str() {
+        let args = node["args"]
+            .as_array()
+            .map(|args| args.iter().map(render_node).collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        return format!("{call}({args})");
+    }
+    if let (Some(domain), Some(member)) = (node["enum"].as_str(), node["member"].as_str()) {
+        return format!("{domain}.{member}");
+    }
+    for key in ["variable", "subroutine", "string", "localizedString"] {
+        if let Some(text) = node[key].as_str() {
+            return format!("{key}:{text}");
+        }
+    }
+    node.to_string()
 }
 
 impl ResultPresentation for SymbolsResult {

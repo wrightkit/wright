@@ -152,6 +152,8 @@ fn service_responses() -> Vec<(String, Value)> {
         name: None,
         file: None,
         max: None,
+        rule: None,
+        content: false,
     }) {
         ToolResponse::Ok { result } => result[0]["id"].as_u64().unwrap(),
         ToolResponse::Error { error } => panic!("rules failed: {error:?}"),
@@ -588,5 +590,48 @@ fn cli_and_agent_selections_return_the_same_set() {
         );
         let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
         assert_eq!(cli, agent, "{request:?} differs between CLI and service");
+    }
+}
+
+#[test]
+fn rule_content_conforms_to_the_owner_schema() {
+    let input = workspace_root().join("tests/fixtures/workshop/synthetic/declarations-rules.ws");
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("session starts");
+    let mut service = ToolService::new(&mut session).expect("service loads the project");
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Rules {
+        name: None,
+        rule: None,
+        file: None,
+        max: None,
+        content: true,
+    }) else {
+        panic!("rules with content failed");
+    };
+    let owner: Value =
+        serde_json::from_str(workshop_rs::rules::content::RULE_CONTENT_V1_SCHEMA).unwrap();
+    let owner = JSONSchema::compile(&owner).expect("owner schema compiles");
+    let wright: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace_root().join("schemas/wright-agent-v1.schema.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let mut response = wright.clone();
+    response["$ref"] = json!("#/$defs/RulesResult");
+    let response = JSONSchema::compile(&response).expect("response schema compiles");
+    assert!(response.is_valid(&result), "{result}");
+    for rule in result["rules"].as_array().unwrap() {
+        // Wright adds `span` to each statement; the owner's document has none.
+        let mut content = rule["content"].clone();
+        for key in ["conditions", "actions"] {
+            for statement in content[key].as_array_mut().unwrap() {
+                statement.as_object_mut().unwrap().remove("span");
+            }
+        }
+        assert!(owner.is_valid(&content), "{content}");
     }
 }

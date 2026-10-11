@@ -36,6 +36,7 @@ result.
 | `wright analyze [INPUT] [--brief]` | Summarize Workshop cost, ranked complexity hotspots, performance/stability risk indicators, and cross-cutting state | bounded semantic report with exact/static/heuristic evidence labels; `--brief` prints the counts-and-costliest-rules form |
 | `wright lint [INPUT] [--brief] [--fix [--write]]` | Parse, lower, lint; report findings | findings, rule id/severity summary, and effective configuration; `--brief` prints the counts-and-top-findings form; `--fix` previews each offered fix's validated diff, `--write` applies them |
 | `wright inspect [INPUT] [--brief]` | Parse, lower, and inspect exhaustive semantic facts | rules, symbols, references summary, and the detail command per area; `--brief` prints the counts-and-leading-rules form |
+| `wright inspect rules [INPUT] [--content] [--rule RULE] [--only NAME] [--file PATH] [--max N]` | List rules; `--content` adds each selected rule's conditions and actions as canonical call trees (ADR-0024) | the rule list, with content when requested |
 | `wright inspect symbols [INPUT] [--only KIND] [--file PATH] [--max N]` | List semantic symbols, optionally narrowed to one kind | the symbol list with resolved locations |
 | `wright inspect refs <NAME> [INPUT] [--only KIND] [--rule RULE] [--file PATH] [--max N]` | References and usage counts for one symbol, addressed by name | usage-count header plus the reference list |
 | `wright inspect cfg <RULE> [INPUT] [--only KIND] [--max N]` | Control-flow graph of one rule, addressed by name | block/edge listing |
@@ -180,10 +181,10 @@ do not take `--brief`.
 ## Semantic query commands (#429)
 
 `inspect` owns the semantic query surface: the bare command prints the
-bounded summary, and its five subcommands — `inspect symbols`,
+bounded summary, and its six subcommands — `inspect rules`, `inspect symbols`,
 `inspect refs`, `inspect cfg`, `inspect callgraph`, `inspect cost` — expose
 each detail area. They run the same operations the agent contract serves
-(`symbols`, `references` + `usage`, `cfg`, `callGraph`, `costEstimate`)
+(`rules`, `symbols`, `references` + `usage`, `cfg`, `callGraph`, `costEstimate`)
 through the session's `ToolService`, so a CLI `result` payload equals the
 agent operation's payload for the same input. Nesting them under `inspect`
 keeps the top-level command surface to distinct user intents (#439); the
@@ -209,7 +210,7 @@ resolution never guesses.
   `--only` predates the selection contract, so used alone it keeps the
   previous bare list; `--file`/`--max` opt into the selection wrapper.
 * The query subcommands accept the same selection fields the agent
-  operations take (#531): `inspect symbols` adds `--file`/`--max`,
+  operations take (#531): `inspect rules` adds `--rule`, `--only` (a declared rule name), `--file`, `--max`, and `--content` (without `--max`, `--content` returns at most 20 rules), `inspect symbols` adds `--file`/`--max`,
   `inspect refs` adds `--only` (a reference kind), `--rule`, `--file`, and
   `--max`, `inspect cfg` adds `--only` (a block kind) and `--max`, and
   `inspect callgraph` adds `--caller`, `--callee`, and `--max`. With any

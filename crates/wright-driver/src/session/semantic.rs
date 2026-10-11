@@ -12,7 +12,7 @@ use crate::diag::{Diagnostic, Stage};
 use crate::progress::{ProgressEvent, ProgressPhase, ProgressUnit};
 use crate::result::{
     AnalyzeResult, CallGraphResult, CfgResult, CostResult, Envelope, InspectResult, LintResult,
-    RefsResult, SymbolsResult,
+    RefsResult, RulesResult, SymbolsResult,
 };
 use crate::service::{Address, ToolErrorInfo, ToolRequest, ToolResponse, ToolService};
 
@@ -394,6 +394,29 @@ impl CompilerSession {
                 inspect_result(&service, &loaded)
             },
         )
+    }
+
+    /// `rules` (ADR-0024): the `rules` operation's payload; `content` adds
+    /// each selected rule's canonical content, `rule` selects one rule by
+    /// name, and `name`/`file`/`max` bound the reported set.
+    pub fn rules(
+        &mut self,
+        name: Option<String>,
+        rule: Option<String>,
+        file: Option<String>,
+        max: Option<usize>,
+        content: bool,
+    ) -> Envelope<RulesResult> {
+        self.service_query("rules", move |service| {
+            tool_result(service.handle(&ToolRequest::Rules {
+                name,
+                rule: rule.map(Address::Name),
+                file,
+                max,
+                content,
+            }))
+            .map(RulesResult)
+        })
     }
 
     /// `symbols` (#429): the `symbols` operation's payload; `kind` narrows to

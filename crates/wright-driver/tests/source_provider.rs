@@ -495,9 +495,10 @@ fn mapped_provider_project_reports_its_source_file_count() {
 /// A provider map may carry a span that does not resolve inside the
 /// retained authored source (e.g. a position recorded against an expanded
 /// spelling rather than the authored line). Retained-source validation is a
-/// freshness audit, not a load gate: the run still serves, mapped positions
-/// survive, and authored extents degrade with a warning instead of failing
-/// the load (#583).
+/// freshness audit, not a load gate: the run still serves and mapped
+/// positions survive instead of failing the load (#583). `workshop-rs` prunes
+/// spans that do not resolve in the attached source (1.13), so the load no
+/// longer needs its `source-map-span-overflow` fallback for this input.
 #[test]
 fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
     let (dir, entry) = temp_entry();
@@ -516,11 +517,6 @@ fn mapped_span_outside_retained_source_degrades_extents_not_the_load() {
     assert_eq!(
         session.load().expect("loaded").provenance,
         wright_driver::Provenance::Mapped
-    );
-    assert!(
-        lint.diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "source-map-span-overflow")
     );
     cleanup(dir);
 }

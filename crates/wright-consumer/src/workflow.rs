@@ -66,6 +66,8 @@ pub fn run_consumer(input: &str) -> Result<(), String> {
             name: None,
             file: None,
             max: None,
+            rule: None,
+            content: false,
         },
         ToolRequest::Findings(FindingSelection::default()),
         ToolRequest::Lint {

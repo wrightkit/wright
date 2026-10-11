@@ -200,6 +200,14 @@ fn run_workflow(command: Command) -> ExitCode {
                 None,
                 wright_driver::CompilerSession::inspect,
             ),
+            Some(cli::InspectQuery::Rules(query)) => run_configured(
+                config_from_common(&query.common, false),
+                present::Presentation::from_common(&query.common),
+                None,
+                move |session| {
+                    session.rules(query.name, query.rule, query.file, query.max, query.content)
+                },
+            ),
             Some(cli::InspectQuery::Symbols(query)) => {
                 let kind = query.only.map(|kind| kind.as_str().to_string());
                 run_configured(

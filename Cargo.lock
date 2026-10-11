@@ -2254,9 +2254,9 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop-rs"
-version = "1.12.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c71ac7ce770b486ecd6ae8b3cc67196ba464339159d9fd48a9de22257e9ccf"
+checksum = "3fc2f390bdb11a77af97123d58e80f700c35a802995ec468beadcc82536132f7"
 dependencies = [
  "aho-corasick",
  "serde",

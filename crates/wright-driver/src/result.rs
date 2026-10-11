@@ -111,6 +111,13 @@ pub struct InspectResult {
     pub references: serde_json::Value,
 }
 
+/// `rules` result (ADR-0024): the `rules` agent operation's payload verbatim
+/// — with `content`, a selection-wrapped list whose entries carry the
+/// owner's canonical rule content.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct RulesResult(pub serde_json::Value);
+
 /// `symbols` result (#429): the `symbols` agent operation's payload verbatim
 /// — an array of `{id, kind, name, span}` entries.
 #[derive(Debug, Clone, Default, Serialize)]
