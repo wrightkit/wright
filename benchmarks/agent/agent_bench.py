@@ -43,7 +43,7 @@ LEVELS = ("bin", "mcp")  # how a `wright` tool reaches the agent: the CLI shim o
 SKILLS = ("wright-skill", "workshop-skill", "opy-skill", "workshop-format-skill")
 SKILL_LANGUAGE = {"opy-skill": "opy", "workshop-format-skill": "workshop"}  # skills that teach one language and apply to its scenarios only
 KNOWLEDGE_LEVELS = ("none", "wiki", "web")
-INFRA_EXIT = 75  # EX_TEMPFAIL: the adapter reports a provider or infrastructure failure, not an agent failure
+INFRA_EXIT = bench_report.INFRA_EXIT  # EX_TEMPFAIL: the adapter reports a provider or infrastructure failure, not an agent failure
 ENV_KEEP = ("LANG", "LC_ALL", "TERM", "TMPDIR", "USER", "LOGNAME")
 
 
@@ -545,21 +545,9 @@ def run_trial(scenario: dict, cell: dict, args: argparse.Namespace, out: Path) -
     result["snapshots"] = snapshot_validity(scenario, snaps, args.wright, out)
     first_valid = next((s["t"] for s in result["snapshots"]["series"] if s["valid"]), None)
     result["usage"] = bench_trace.usage_summary(out / "usage.jsonl", first_valid)
-    result["status"] = run_status(result)
+    result["status"] = bench_report.run_status(result)
     bench_report.write_json(out / "result.json", result)
     return result
-
-
-def run_status(result: dict) -> str:
-    """How the run ended, separate from whether its artifact was usable."""
-    if "invalid" in result:
-        return "invalid"
-    code = result["agent"]["exit"]
-    if code == INFRA_EXIT:
-        return "provider-interrupted"
-    if code is None:
-        return "timeout"
-    return "agent-error" if code else "completed"
 
 
 def snapshot_validity(scenario: dict, snaps: list[dict], wright: str, out: Path) -> dict:

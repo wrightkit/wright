@@ -1059,6 +1059,24 @@ class RegradeTest(unittest.TestCase):
         self.assertNotIn("regradedFrom", result["grader"])
         self.assertFalse((copy / "grading").exists(), "a matching hash never invokes the grader")
 
+    def test_a_pre_hash_archive_regrades_and_reports_the_transition(self):
+        # Archives written before `grader.hash` existed carry no recorded
+        # hash: every such trial is stale and must re-grade, and the
+        # transition summary reads `<none>` instead of crashing (#621).
+        trial = self.stored_trial("1", "unrelated")
+        stored = json.loads((trial / "result.json").read_text())
+        del stored["grader"]
+        (trial / "result.json").write_text(json.dumps(stored))
+        self.write_scenario("no-such-marker")
+        summary = bench_regrade.regrade([self.out / "runs"], WRIGHT, self.scenario, self.out / "regraded")
+        self.assertEqual(summary["regraded"], 1)
+        new_hash = bench_grade.grader_hash(self.scenario("tiny"))
+        self.assertEqual(summary["transitions"], [f"tiny: grader <none> -> {new_hash[:12]}"])
+        copy = self.out / "regraded" / "runs" / "tiny" / "fake" / "none-none_off-1"
+        result = json.loads((copy / "result.json").read_text())
+        self.assertIsNone(result["grader"]["regradedFrom"])
+        self.assertEqual(result["grader"]["hash"], new_hash)
+
     def test_report_regrade_leaves_no_scratch_inside_the_run_directory(self):
         current = bench_grade.grader_hash(self.scenario("tiny"))
         trial = self.stored_trial("1", current)

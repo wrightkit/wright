@@ -12,6 +12,19 @@ from statistics import mean, pstdev
 
 BASELINE = "none/none/off"
 HEADROOM = 0.95
+INFRA_EXIT = 75  # EX_TEMPFAIL: the adapter reports a provider or infrastructure failure, not an agent failure
+
+
+def run_status(result: dict) -> str:
+    """How the run ended, separate from whether its artifact was usable."""
+    if "invalid" in result:
+        return "invalid"
+    code = result["agent"]["exit"]
+    if code == INFRA_EXIT:
+        return "provider-interrupted"
+    if code is None:
+        return "timeout"
+    return "agent-error" if code else "completed"
 
 
 def write_json(path: Path, data: dict) -> None:

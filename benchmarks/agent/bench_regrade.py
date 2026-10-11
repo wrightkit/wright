@@ -9,25 +9,12 @@ never written — and re-grades only the trials whose recorded hash differs.
 from __future__ import annotations
 
 import shutil
-import tempfile
 from pathlib import Path
 
 import bench_grade
 import bench_report
 
 GRADER_UNAVAILABLE = "a required grader was unavailable"
-
-
-def status_of(result: dict) -> str:
-    """`agent_bench.run_status` without the import cycle: the agent outcome, not the verdict."""
-    if "invalid" in result:
-        return "invalid"
-    code = result["agent"]["exit"]
-    if code == 75:
-        return "provider-interrupted"
-    if code is None:
-        return "timeout"
-    return "agent-error" if code else "completed"
 
 
 def regrade_trial(result: dict, dest: Path, scenario: dict, wright: str) -> bool:
@@ -58,7 +45,7 @@ def regrade_trial(result: dict, dest: Path, scenario: dict, wright: str) -> bool
                 result["invalid"] = "; ".join(reasons)
             else:
                 del result["invalid"]
-    result["status"] = status_of(result)
+    result["status"] = bench_report.run_status(result)
     result["_verdictChanged"] = usable_before != result.get("usable")
     bench_report.write_json(dest / "result.json", {k: v for k, v in result.items() if not k.startswith("_")})
     return True
@@ -92,7 +79,9 @@ def regrade(dirs: list[Path], wright: str, load_scenario, out: Path) -> dict:
                 graded += 1
                 changed += bool(result.pop("_verdictChanged", False))
                 grader = result["grader"]
-                transitions.setdefault(scenario_id, set()).add((grader["regradedFrom"], grader["hash"]))
+                # Pre-hash archives have no recorded hash — `regradedFrom`
+                # stays `null` in the result and reads `<none>` here.
+                transitions.setdefault(scenario_id, set()).add((grader["regradedFrom"] or "<none>", grader["hash"]))
             else:
                 copied += 1
     lines = []
