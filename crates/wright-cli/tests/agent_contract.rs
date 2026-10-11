@@ -543,6 +543,63 @@ fn cli_and_agent_selections_return_the_same_set() {
     assert_eq!(cli["symbols"], agent["symbols"], "same selected set");
     assert_eq!(cli["selection"], agent["selection"], "same truncation");
 
+    // ADR-0024: `inspect rules` serves the same driver model `rules`
+    // serves, including `content` and `rule` — each flag maps to the
+    // request field of the same name. A fixture without ambiguous enums:
+    // `rule-content-v1` cannot express `__ambiguous_enum`, so content
+    // fails whole-call there by design.
+    let rules_input =
+        workspace_root().join("tests/fixtures/workshop/synthetic/declarations-rules.ws");
+    let mut rules_session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(rules_input.clone()),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .expect("rules session starts");
+    let mut rules_service = ToolService::new(&mut rules_session).expect("rules service loads");
+    for (request, args) in [
+        (
+            ToolRequest::Rules {
+                name: None,
+                rule: None,
+                file: None,
+                max: Some(1),
+                content: true,
+            },
+            vec!["--content", "--max", "1"],
+        ),
+        (
+            ToolRequest::Rules {
+                name: None,
+                rule: Some("player starts".into()),
+                file: None,
+                max: None,
+                content: true,
+            },
+            vec!["--content", "--rule", "player starts"],
+        ),
+    ] {
+        let agent = match rules_service.handle(&request) {
+            ToolResponse::Ok { result } => result,
+            ToolResponse::Error { error } => panic!("{request:?} failed: {error:?}"),
+        };
+        let output = Command::new(env!("CARGO_BIN_EXE_wright"))
+            .args(["inspect", "rules"])
+            .arg(rules_input.to_str().unwrap())
+            .args(&args)
+            .args(["-f", "json"])
+            .stdin(Stdio::null())
+            .output()
+            .expect("wright inspect rules runs");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cli = serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone();
+        assert_eq!(cli, agent, "{request:?} differs between CLI and service");
+    }
+
     // #532: `--brief` and the `brief` request field produce the same brief
     // payload for the same input — the agent and CLI surfaces share one
     // driver-side form.

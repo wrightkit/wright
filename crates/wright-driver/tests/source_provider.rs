@@ -1938,3 +1938,74 @@ fn provider_backend_inspect_remains_explicitly_unsupported() {
     assert!(result.result.program.is_null());
     cleanup(dir);
 }
+
+/// ADR-0024 decision 4: until the provider advertises the names capability,
+/// an OverPy program serves its canonical content with `unavailable`
+/// naming `opy-rs` instead of a `names` map. The repel fixture stands in
+/// for the compiled OverPy form; assertions read the content, never text.
+#[test]
+fn opy_rules_content_reports_names_unavailable() {
+    let (dir, entry) = temp_entry();
+    let provider = RecordingProvider {
+        target: Arc::new(Mutex::new(None)),
+        operations: Arc::new(Mutex::new(Vec::new())),
+        check_compilation: None,
+        compilation: Some(SourceCompilation::success(
+            std::fs::read_to_string(
+                workspace_root().join("benchmarks/agent/fixtures/program-calls/repel.en-US.ow"),
+            )
+            .expect("repel fixture"),
+        )),
+        check_failure: None,
+        failure: None,
+    };
+    let mut session = CompilerSession::with_source_provider(
+        SessionConfig {
+            input: InputSpec::Path(entry.clone()),
+            kind: SourceKind::Opy,
+            ..SessionConfig::default()
+        },
+        Box::new(provider),
+    )
+    .expect("provider session");
+    // A compile establishes the canonical snapshot semantic queries serve.
+    let compile = session.compile();
+    assert!(compile.ok, "provider compile: {:?}", compile.diagnostics);
+    let mut service = ToolService::new(&mut session).expect("service loads");
+    let ToolResponse::Ok { result } = service.handle(&ToolRequest::Rules {
+        name: None,
+        rule: None,
+        file: None,
+        max: None,
+        content: true,
+    }) else {
+        panic!("rules with content failed");
+    };
+    assert_eq!(
+        result["unavailable"],
+        serde_json::json!({"names": "opy-rs"})
+    );
+    assert!(result.get("names").is_none());
+
+    let rules = result["rules"].as_array().expect("rules");
+    assert_eq!(rules.len(), 1);
+    let actions = rules[0]["content"]["actions"].as_array().unwrap();
+    let impulses = actions
+        .iter()
+        .filter(|action| {
+            action["call"] == "applyImpulse" && action["args"][2].as_f64() == Some(150.0)
+        })
+        .count();
+    assert_eq!(impulses, 2, "two strength-150 impulses: {actions:?}");
+    let stunned = serde_json::json!({"enum": "Status", "member": "STUNNED"});
+    let stuns = actions
+        .iter()
+        .filter(|action| {
+            action["call"] == "setStatusEffect"
+                && action["args"][2] == stunned
+                && action["args"][3].as_f64() == Some(0.75)
+        })
+        .count();
+    assert_eq!(stuns, 2, "two 0.75s stuns: {actions:?}");
+    cleanup(dir);
+}

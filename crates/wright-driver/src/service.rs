@@ -727,6 +727,10 @@ impl<'a> ToolService<'a> {
             ToolRequest::Cfg { rule, .. } => {
                 matches!(rule, Address::Id(_)) && !self.rule_ids_current
             }
+            ToolRequest::Rules {
+                rule: Some(Address::Id(_)),
+                ..
+            } => !self.rule_ids_current,
             ToolRequest::SemanticRename { target, .. } => {
                 matches!(target.symbol, Some(Address::Id(_))) && !self.symbol_ids_current
             }
@@ -1191,7 +1195,13 @@ impl<'a> ToolService<'a> {
             Some(address) => match self.rule_address(address) {
                 Ok(id) if (id as usize) < self.snapshot().program.rules.len() => Some(id as u64),
                 Ok(id) => return invalid_selection(format!("unknown rule {id}")),
-                Err(error) => return invalid_selection(error.message),
+                // An unmatched name is a selection error like every other
+                // selection field; a duplicate name keeps the `ambiguous-rule`
+                // refusal `cfg` reports so the caller learns the candidates.
+                Err(error) if error.code == "unknown-rule" => {
+                    return invalid_selection(error.message);
+                }
+                Err(error) => return ToolResponse::Error { error },
             },
             None => None,
         };

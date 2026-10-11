@@ -2028,6 +2028,13 @@ fn stale_numeric_rule_filters_refuse_in_references_after_a_reload() {
             file: None,
             max: None,
         },
+        ToolRequest::Rules {
+            name: None,
+            rule: Some(0.into()),
+            file: None,
+            max: None,
+            content: true,
+        },
     ] {
         assert_eq!(
             refusal_code(&mut service, &request),
@@ -3260,6 +3267,8 @@ fn rules_content_serves_bounded_canonical_call_trees() {
             .iter()
             .all(|rule| rule["content"]["format"] == "workshop-rs/rule-content-v1")
     );
+    // A raw Workshop result carries neither `names` nor `unavailable`.
+    assert!(all.get("names").is_none() && all.get("unavailable").is_none());
 
     // `rule` selects exactly one, by name or id; the statements are catalog
     // call trees with positional arguments and Wright's statement spans.
@@ -3298,11 +3307,18 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     assert_eq!(bounded["rules"].as_array().unwrap().len(), 1);
     assert_eq!(bounded["selection"]["withheld"], rules.len() - 1);
 
-    // An unknown rule is a structured selection error.
-    assert!(matches!(
-        service.handle(&request(Some(Address::Name("nope".to_string())), None)),
-        ToolResponse::Error { .. }
-    ));
+    // An unknown rule, by name or by id, is an `invalid-selection` error.
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &request(Some(Address::Name("nope".to_string())), None)
+        ),
+        "invalid-selection"
+    );
+    assert_eq!(
+        refusal_code(&mut service, &request(Some(Address::Id(99)), None)),
+        "invalid-selection"
+    );
 
     // Without `content` the previous shape is unchanged.
     let plain = result_of(
@@ -3317,4 +3333,62 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     );
     assert!(plain.is_array());
     assert!(plain[0].get("content").is_none());
+}
+
+/// A `content` request without `max` applies the default bound of 20 rules
+/// (ADR-0024): the selection reports every withheld rule. A `rule` name
+/// shared by two rules refuses `ambiguous-rule`, the refusal `cfg` gives.
+#[test]
+fn rules_content_defaults_to_twenty_rules_and_names_ambiguity() {
+    let dir = freshness_dir("rules-content-bound");
+    let input = dir.join("program.ws");
+    let mut text = "variables {\n    global:\n        0: score\n}\n".to_string();
+    for index in 0..25 {
+        let name = if index < 2 {
+            "dup".to_string()
+        } else {
+            format!("r{index}")
+        };
+        text.push_str(&format!(
+            "rule (\"{name}\") {{\n    event {{\n        Ongoing - Global;\n    }}\n    actions {{\n        Set Global Variable(score, {index});\n    }}\n}}\n"
+        ));
+    }
+    std::fs::write(&input, text).unwrap();
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(input),
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let request = |rule: Option<Address>, max: Option<usize>| ToolRequest::Rules {
+        name: None,
+        rule,
+        file: None,
+        max,
+        content: true,
+    };
+
+    let bounded = result_of(&mut service, &request(None, None));
+    assert_eq!(bounded["rules"].as_array().unwrap().len(), 20);
+    assert_eq!(
+        bounded["selection"],
+        serde_json::json!({"total": 25, "withheld": 5})
+    );
+
+    let one = result_of(
+        &mut service,
+        &request(Some(Address::Name("r3".to_string())), None),
+    );
+    assert_eq!(one["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(one["rules"][0]["name"], "r3");
+
+    assert_eq!(
+        refusal_code(
+            &mut service,
+            &request(Some(Address::Name("dup".to_string())), None)
+        ),
+        "ambiguous-rule"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
