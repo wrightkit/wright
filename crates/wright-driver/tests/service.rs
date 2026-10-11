@@ -3301,6 +3301,16 @@ fn rules_content_serves_bounded_canonical_call_trees() {
     let by_id = result_of(&mut service, &request(Some(Address::Id(1)), None));
     assert_eq!(by_id["rules"][0]["content"], rule["content"]);
 
+    // Every statement carries a resolved span path — never read from text.
+    for statement in rule["content"]["conditions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(rule["content"]["actions"].as_array().unwrap())
+    {
+        assert_eq!(statement["span"]["path"], "declarations-rules.ws");
+    }
+
     // `max` bounds the rule count and reports what it withheld; a selected
     // rule's content is never truncated.
     let bounded = result_of(&mut service, &request(None, Some(1)));
