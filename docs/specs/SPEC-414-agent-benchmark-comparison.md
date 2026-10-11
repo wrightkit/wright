@@ -82,7 +82,8 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
   captured minimal reproducer and the candidate owner, for creation of owner Issues.
 - REQ-010: Requirement checks assert on the compiled Workshop program through Wright's structured surface
   (`inspect` JSON or `serve` operations). A regex over emitted text is allowed only where no structured field
-  exists and ships with a positive and a negative fixture.
+  exists and ships with a positive and a negative fixture. The `program-calls` check kind (ADR-0024) reads the
+  canonical rule content through `rules` with `content` and asserts on calls by catalog id and argument position.
 - REQ-011: Reported outcome metrics are: `usable` (L1a passes, all required requirement checks pass, no
   error-severity lint finding), requirement coverage over all runs and over L1a-passing runs, time to first
   valid snapshot, valid-to-invalid regressions, wall time, and the context and token metrics of REQ-020 to REQ-024. Runtime-only claims are listed as

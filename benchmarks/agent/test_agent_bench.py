@@ -368,6 +368,41 @@ class AgentBenchTest(unittest.TestCase):
             self.assertTrue(bench_grade.matches(text, scored), text)
         self.assertFalse(bench_grade.matches("Ongoing - Each Player;", scored))
 
+    def program_calls(self, fixture: str, checks: list[dict], source: str = "wright") -> list[bool]:
+        """Run `program-calls` checks over one committed fixture, compiled by the named authority."""
+        entry = agent_bench.HERE / "fixtures/program-calls" / fixture
+        scratch = self.out / f"program-calls-{fixture}-{source}"
+        state = {"scratch": scratch, "authorities": bench_grade.authorities(WRIGHT, entry, scratch)}
+        return [bench_grade.run_check({"id": "c", "kind": "program-calls", "source": source, **check}, entry.parent, entry, WRIGHT, state)["passed"] for check in checks]
+
+    REPEL_CHECKS = (
+        {"call": "applyImpulse", "args": {"2": 150}, "min": 2},
+        {"call": "setStatusEffect", "args": {"2": {"enum": "Status", "member": "STUNNED"}, "3": 0.75}, "min": 2},
+    )
+
+    def test_program_calls_asserts_on_canonical_calls_in_every_surface_form(self):
+        for fixture in ("repel.opy", "repel.en-US.ow", "repel.zh-CN.ow"):
+            self.assertEqual(self.program_calls(fixture, list(self.REPEL_CHECKS)), [True, True], fixture)
+
+    def test_program_calls_rejects_a_missing_or_wrong_argument(self):
+        self.assertEqual(self.program_calls("repel-one-short-stun.opy", list(self.REPEL_CHECKS)), [True, False])
+        self.assertEqual(self.program_calls("repel.opy", [{"call": "applyImpulse", "args": {"2": 151}, "min": 1}, {"call": "applyImpulse", "args": {"2": 150}, "max": 1}]), [False, False])
+
+    def test_program_calls_alternatives_and_event_restriction(self):
+        any_of = {"call": "setStatusEffect", "args": {"3": {"any": [0.5, 0.75]}}, "min": 2}
+        self.assertEqual(self.program_calls("repel.opy", [any_of, {**any_of, "event": "global"}, {**any_of, "event": "eachPlayer"}]), [True, False, True])
+
+    @unittest.skipUnless(bench_grade.oracle_available(), "run `agent_bench.py setup-oracle`")
+    def test_program_calls_reads_the_upstream_oracle_output(self):
+        self.assertEqual(self.program_calls("repel.opy", list(self.REPEL_CHECKS), source="oracle"), [True, True])
+
+    def test_pattern_matching_compares_numbers_by_value_and_never_confuses_booleans(self):
+        self.assertTrue(bench_grade.pattern_matches(0.75, 0.75))
+        self.assertTrue(bench_grade.pattern_matches(150, 150.0))
+        self.assertFalse(bench_grade.pattern_matches(1, True))
+        self.assertTrue(bench_grade.pattern_matches({"enum": "Status"}, {"enum": "Status", "member": "STUNNED"}))
+        self.assertFalse(bench_grade.pattern_matches({"enum": "Status", "member": "HACKED"}, {"enum": "Status", "member": "STUNNED"}))
+
     def test_scenarios_are_solvable_and_not_vacuous(self):
         self.assertTrue(agent_bench.validate(WRIGHT, self.out / "validate"))
 

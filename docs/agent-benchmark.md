@@ -272,8 +272,19 @@ of alternatives, `min`/`max` occurrences), `answer` (`answer.json` key equals
 `expected`), `oracle` (the pinned upstream OverPy compiler accepts the entry),
 `wright-compile` (`wright compile` succeeds), and `compiled-contains` /
 `compiled-absent` (regexes `all` and `any` over the compiled Workshop text of
-`source` `oracle` or `wright`). Prefer structural checks; a regex over compiled
-text needs a `reference` that matches and a `negative` that does not. `layer`
+`source` `oracle` or `wright`), and `program-calls` (a structured check, ADR-0024:
+the compiled text of `source` is read through `rules` with `content`, and the
+check counts calls whose catalog id equals `call` and whose positional `args`
+patterns match, across all rules or those with the `event` id, within
+`min`/`max`). A pattern is a rule-content node: numbers compare within 1e-9,
+objects as a recursive subset, and `{"any": [...]}` lists alternatives. The
+check is stable across spelling, locale, and macro expansion, but not across
+restructured equivalents such as a value held in a variable, so list those
+under `any` or assert the pieces separately. A Wright that does not serve
+rule content makes the check `unavailable`, never a pass; `maxRules` (default
+200) bounds the read and an incomplete read fails. Prefer `program-calls` over
+a regex; a regex over compiled text needs a `reference` that matches and a
+`negative` that does not. `layer`
 names what a failure implicates: `agent` for a requirement the produced work
 does not meet, or `workshop-rs` / `opy-rs` / `deltin-rs` / `wright` for
 validity or analysis results owned by that layer.
