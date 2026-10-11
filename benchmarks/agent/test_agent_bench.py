@@ -15,6 +15,7 @@ from pathlib import Path
 
 import agent_bench
 import bench_grade
+import bench_regrade
 import bench_report
 import bench_trace
 import wiki_skill
@@ -980,6 +981,113 @@ class AgentBenchTest(unittest.TestCase):
         self.assertEqual(auth["oracle"]["status"], "error")
         if auth["wrightCompile"]["status"] == "ok":
             self.assertEqual(auth["disagreement"]["kind"], "wright-accepts-oracle-rejects")
+
+
+@unittest.skipUnless(Path(WRIGHT).is_file(), "build wright first or set WRIGHT_BIN")
+class RegradeTest(unittest.TestCase):
+    """#614: `regrade` re-grades stored trials whose scenario checks changed."""
+
+    WORKSPACE = (
+        'variables {\n    global:\n        0: counter\n}\n\n'
+        'rule ("tick") {\n    event {\n        Ongoing - Global;\n    }\n'
+        '    actions {\n        Set Global Variable(counter, 1);\n    }\n}\n'
+    )
+
+    def setUp(self):
+        (agent_bench.ROOT / "target").mkdir(exist_ok=True)
+        self.out = Path(tempfile.mkdtemp(dir=agent_bench.ROOT / "target")).resolve()
+        self.addCleanup(shutil.rmtree, self.out, True)
+        self.scenarios = self.out / "scenarios" / "tiny"
+        self.write_scenario("counter")
+
+    def write_scenario(self, wanted: str) -> Path:
+        (self.scenarios / "seed").mkdir(parents=True, exist_ok=True)
+        (self.scenarios / "seed" / "mode.ws").write_text(self.WORKSPACE)
+        spec = {
+            "canary": agent_bench.CANARY, "id": "tiny", "family": "modification", "language": "workshop",
+            "entry": "mode.ws", "writable": ["mode.ws"],
+            "checks": [{"id": "has-text", "kind": "contains", "file": "mode.ws", "text": wanted}],
+        }
+        (self.scenarios / "scenario.json").write_text(json.dumps(spec))
+        return self.scenarios
+
+    def scenario(self, _scenario_id: str) -> dict:
+        spec = json.loads((self.scenarios / "scenario.json").read_text())
+        return {**spec, "dir": self.scenarios}
+
+    def stored_trial(self, name: str, grader_hash: str, usable: bool = True) -> Path:
+        trial = self.out / "runs" / "tiny" / "fake" / f"none-none_off-{name}"
+        (trial / "workspace").mkdir(parents=True)
+        (trial / "workspace" / "mode.ws").write_text(self.WORKSPACE)
+        (trial / "agent.log").write_text("exit=0\n")
+        result = {
+            "contract": agent_bench.RESULT_CONTRACT, "status": "completed", "language": "workshop",
+            "condition": {"tool": "none", "level": "bin", "skills": [], "knowledge": "none", "network": "off", "label": "none/none/off"},
+            "scenario": "tiny", "agent": {"id": "fake", "command": "true", "exit": 0, "seconds": 0.1},
+            "environment": {"timestamp": "2026-10-11T00:00:00+00:00"},
+            "passed": True, "usable": usable,
+            "checks": [{"id": "has-text", "kind": "contains", "passed": True, "detail": "1 occurrence(s) in mode.ws"}],
+            "grader": {"hash": grader_hash, "oracle": None},
+        }
+        (trial / "result.json").write_text(json.dumps(result))
+        return trial
+
+    def test_a_changed_check_regrades_the_copy_and_preserves_the_original(self):
+        current = bench_grade.grader_hash(self.scenario("tiny"))
+        trial = self.stored_trial("1", current, usable=True)
+        original_result = (trial / "result.json").read_text()
+        self.write_scenario("no-such-marker")  # the check change turns the grader hash over
+        summary = bench_regrade.regrade([self.out / "runs"], WRIGHT, self.scenario, self.out / "regraded")
+        self.assertEqual((summary["regraded"], summary["verdictChanged"], summary["copied"]), (1, 1, 0))
+        self.assertEqual((trial / "result.json").read_text(), original_result)  # the input run is never written
+        copy = self.out / "regraded" / "runs" / "tiny" / "fake" / "none-none_off-1"
+        result = json.loads((copy / "result.json").read_text())
+        self.assertFalse(result["usable"])
+        self.assertFalse(result["checks"][0]["passed"])
+        self.assertEqual(result["grader"]["regradedFrom"], current)
+        self.assertEqual(result["grader"]["hash"], bench_grade.grader_hash(self.scenario("tiny")))
+        self.assertEqual((copy / "agent.log").read_text(), "exit=0\n")  # what the grader did not produce is preserved
+        self.assertEqual(result["agent"]["id"], "fake")
+
+    def test_a_current_hash_is_copied_without_grading(self):
+        current = bench_grade.grader_hash(self.scenario("tiny"))
+        self.stored_trial("1", current)
+        summary = bench_regrade.regrade([self.out / "runs"], WRIGHT, self.scenario, self.out / "regraded")
+        self.assertEqual((summary["regraded"], summary["copied"]), (0, 1))
+        copy = self.out / "regraded" / "runs" / "tiny" / "fake" / "none-none_off-1"
+        result = json.loads((copy / "result.json").read_text())
+        self.assertNotIn("regradedFrom", result["grader"])
+        self.assertFalse((copy / "grading").exists(), "a matching hash never invokes the grader")
+
+    def test_a_pre_hash_archive_regrades_and_reports_the_transition(self):
+        # Archives written before `grader.hash` existed carry no recorded
+        # hash: every such trial is stale and must re-grade, and the
+        # transition summary reads `<none>` instead of crashing (#621).
+        trial = self.stored_trial("1", "unrelated")
+        stored = json.loads((trial / "result.json").read_text())
+        del stored["grader"]
+        (trial / "result.json").write_text(json.dumps(stored))
+        self.write_scenario("no-such-marker")
+        summary = bench_regrade.regrade([self.out / "runs"], WRIGHT, self.scenario, self.out / "regraded")
+        self.assertEqual(summary["regraded"], 1)
+        new_hash = bench_grade.grader_hash(self.scenario("tiny"))
+        self.assertEqual(summary["transitions"], [f"tiny: grader <none> -> {new_hash[:12]}"])
+        copy = self.out / "regraded" / "runs" / "tiny" / "fake" / "none-none_off-1"
+        result = json.loads((copy / "result.json").read_text())
+        self.assertIsNone(result["grader"]["regradedFrom"])
+        self.assertEqual(result["grader"]["hash"], new_hash)
+
+    def test_report_regrade_leaves_no_scratch_inside_the_run_directory(self):
+        current = bench_grade.grader_hash(self.scenario("tiny"))
+        trial = self.stored_trial("1", current)
+        runs = bench_report.load([self.out / "runs"])
+        notes = bench_report.regrade_notes(runs, WRIGHT, self.scenario)
+        self.assertTrue(notes and "GRADER" in notes[0])
+        self.assertEqual([p for p in trial.rglob("regrade-*")], [])
+        self.assertEqual(
+            sorted(p.name for p in trial.iterdir()),
+            ["agent.log", "result.json", "workspace"],
+        )
 
 
 @unittest.skipUnless(sys.platform == "darwin", "file flags are the macOS enforcement")

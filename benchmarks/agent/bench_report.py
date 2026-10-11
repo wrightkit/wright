@@ -12,6 +12,19 @@ from statistics import mean, pstdev
 
 BASELINE = "none/none/off"
 HEADROOM = 0.95
+INFRA_EXIT = 75  # EX_TEMPFAIL: the adapter reports a provider or infrastructure failure, not an agent failure
+
+
+def run_status(result: dict) -> str:
+    """How the run ended, separate from whether its artifact was usable."""
+    if "invalid" in result:
+        return "invalid"
+    code = result["agent"]["exit"]
+    if code == INFRA_EXIT:
+        return "provider-interrupted"
+    if code is None:
+        return "timeout"
+    return "agent-error" if code else "completed"
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -274,17 +287,23 @@ def diagnostics(runs: list[dict], invalid: list[dict]) -> list[str]:
 
 
 def regrade_notes(runs: list[dict], wright: str, load_scenario) -> list[str]:
-    """Grader consistency: grading the same stored workspace twice must give one verdict."""
+    """Grader consistency: grading the same stored workspace twice must give one verdict.
+    The scratch directories live in a temporary directory: a run directory is an archive nothing writes into (#614)."""
     import bench_grade
+    import tempfile
     unstable = []
-    for r in runs:
-        workspace = r["_dir"] / "workspace"
-        if not workspace.is_dir():
-            continue
-        scenario = load_scenario(r["scenario"])
-        first, second = (bench_grade.grade(scenario, workspace, wright, r["_dir"] / f"regrade-{i}") for i in (1, 2))
-        if [(c["id"], c["passed"]) for c in first["checks"]] != [(c["id"], c["passed"]) for c in second["checks"]]:
-            unstable.append(str(r["_dir"]))
+    with tempfile.TemporaryDirectory(prefix="wright-bench-regrade-") as scratch:
+        for index, r in enumerate(runs):
+            workspace = r["_dir"] / "workspace"
+            if not workspace.is_dir():
+                continue
+            scenario = load_scenario(r["scenario"])
+            first, second = (
+                bench_grade.grade(scenario, workspace, wright, Path(scratch) / f"{index}-{i}")
+                for i in (1, 2)
+            )
+            if [(c["id"], c["passed"]) for c in first["checks"]] != [(c["id"], c["passed"]) for c in second["checks"]]:
+                unstable.append(str(r["_dir"]))
     return [f"GRADER: unstable verdict on {len(unstable)} workspace(s): {unstable}"] if unstable else ["GRADER: consistent on every regraded workspace."]
 
 
