@@ -115,9 +115,11 @@ scenario or the grader, before reporting on older run directories:
 python3 benchmarks/agent/agent_bench.py regrade ~/.local/share/wright-agent-bench/runs/<run> --out <new-dir>
 ```
 
-Every trial is copied under `--out` — the input run directories are never
-written — and only the trials whose recorded grader hash differs are graded
-again with the current scenario and `--wright` binary. A re-graded
+Every completed trial — one carrying a parseable contract `result.json` — is
+copied under `--out` (a trial dir without one was never finished and is
+skipped); the input run directories are never written, and only the trials
+whose recorded grader hash differs are graded again with the current
+scenario and `--wright` binary. A re-graded
 `result.json` keeps everything the agent produced (transcript, trace, usage)
 and records the earlier hash as `grader.regradedFrom`. Point `report`,
 `score`, `leaderboard`, `compare`, or `publish` at `--out` exactly as at a run

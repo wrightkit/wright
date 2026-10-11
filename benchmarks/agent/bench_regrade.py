@@ -24,7 +24,9 @@ def regrade_trial(result: dict, dest: Path, scenario: dict, wright: str) -> bool
     `grade` owns are replaced. Returns True when the trial was re-graded.
     """
     source = result["_dir"]
-    shutil.copytree(source, dest)
+    # `symlinks=True` keeps agent-written links as links; dereferencing them
+    # would copy an outside target's contents recursively into `--out`.
+    shutil.copytree(source, dest, symlinks=True)
     current = bench_grade.grader_hash(scenario)
     recorded = (result.get("grader") or {}).get("hash")
     if recorded == current:
@@ -36,15 +38,19 @@ def regrade_trial(result: dict, dest: Path, scenario: dict, wright: str) -> bool
     verdict = bench_grade.grade(scenario, workspace, wright, dest / "grading")
     result.update(verdict)
     result["grader"]["regradedFrom"] = recorded
-    # The agent-side invalid reasons cannot be re-derived, but a grader that
-    # was unavailable then and resolves now stops being a blocking reason.
-    if "invalid" in result and not any(c.get("unavailable") for c in result["checks"]):
-        reasons = [r for r in result["invalid"].split("; ") if r != GRADER_UNAVAILABLE]
-        if reasons != result["invalid"].split("; "):
-            if reasons:
-                result["invalid"] = "; ".join(reasons)
-            else:
-                del result["invalid"]
+    # Grader availability is re-derived like a fresh run: a re-grade that
+    # hits an unavailable check records the reason, and one that resolves it
+    # drops it. Agent-side invalid reasons cannot be re-derived and stay.
+    reasons = result["invalid"].split("; ") if result.get("invalid") else []
+    if any(c.get("unavailable") for c in result["checks"]):
+        if GRADER_UNAVAILABLE not in reasons:
+            reasons.append(GRADER_UNAVAILABLE)
+    else:
+        reasons = [r for r in reasons if r != GRADER_UNAVAILABLE]
+    if reasons:
+        result["invalid"] = "; ".join(reasons)
+    else:
+        result.pop("invalid", None)
     result["status"] = bench_report.run_status(result)
     result["_verdictChanged"] = usable_before != result.get("usable")
     bench_report.write_json(dest / "result.json", {k: v for k, v in result.items() if not k.startswith("_")})
@@ -52,17 +58,22 @@ def regrade_trial(result: dict, dest: Path, scenario: dict, wright: str) -> bool
 
 
 def regrade(dirs: list[Path], wright: str, load_scenario, out: Path) -> dict:
-    """Copy every trial under `dirs` into `out`, re-grading hash-mismatched trials.
+    """Copy every completed trial under `dirs` into `out`, re-grading hash-mismatched trials.
 
     `out` is laid out as `<out>/<run-dir-name>/<trial path>` so the result is
     consumable by `report`, `score`, and `publish` exactly like a run
-    directory. No input directory is modified.
+    directory. A trial dir without a parseable contract `result.json` is not
+    a finished trial and is skipped, as `load` does everywhere. No input
+    directory is modified.
     """
     resolved = [base.resolve() for base in dirs]
     out = out.resolve()
     for base in resolved:
         if base == out or out in base.parents or base in out.parents:
             raise SystemExit("--out must be disjoint from every input directory")
+    names = [base.name for base in resolved]
+    if len(set(names)) != len(names):
+        raise SystemExit("input directories must have distinct names")
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"--out {out} already exists and is not empty")
     scenarios: dict[str, dict] = {}

@@ -1077,6 +1077,59 @@ class RegradeTest(unittest.TestCase):
         self.assertIsNone(result["grader"]["regradedFrom"])
         self.assertEqual(result["grader"]["hash"], new_hash)
 
+    def test_a_symlink_in_the_trial_is_copied_as_a_link(self):
+        # An agent can write a link outside its workspace; dereferencing it
+        # during the copy would pull the target's contents into `--out`.
+        trial = self.stored_trial("1", bench_grade.grader_hash(self.scenario("tiny")))
+        outside = self.out / "outside.txt"
+        outside.write_text("payload")
+        (trial / "workspace" / "link").symlink_to(outside)
+        bench_regrade.regrade([self.out / "runs"], WRIGHT, self.scenario, self.out / "regraded")
+        link = self.out / "regraded" / "runs" / "tiny" / "fake" / "none-none_off-1" / "workspace" / "link"
+        self.assertTrue(link.is_symlink(), "the copy must keep the link, not its target")
+        self.assertEqual(link.read_text(), "payload")
+
+    def test_grader_unavailability_mirrors_a_fresh_run(self):
+        # A fresh `run_trial` appends "a required grader was unavailable" and
+        # marks the result invalid; a re-grade that hits or resolves an
+        # unavailable check mirrors both directions (#621 review).
+        verdict = {
+            "passed": False, "usable": False,
+            "checks": [{"id": "has-text", "kind": "contains", "passed": False, "unavailable": True}],
+            "grader": {"hash": "new-hash", "oracle": None},
+        }
+        with patch.object(bench_regrade.bench_grade, "grade", return_value=verdict):
+            # Hits unavailability -> gains the reason and the invalid status.
+            trial = self.stored_trial("1", "stale")
+            result = json.loads((trial / "result.json").read_text())
+            result["_dir"] = trial
+            bench_regrade.regrade_trial(result, self.out / "dest1", self.scenario("tiny"), WRIGHT)
+            self.assertEqual(result["invalid"], bench_regrade.GRADER_UNAVAILABLE)
+            self.assertEqual(result["status"], "invalid")
+            # Resolves unavailability -> the stored reason is stripped.
+            trial = self.stored_trial("2", "stale")
+            stored = json.loads((trial / "result.json").read_text())
+            stored["invalid"] = "; ".join(["an agent-side reason", bench_regrade.GRADER_UNAVAILABLE])
+            stored["status"] = "invalid"
+            (trial / "result.json").write_text(json.dumps(stored))
+        resolved = {**verdict, "checks": [{"id": "has-text", "kind": "contains", "passed": True}], "usable": True, "passed": True}
+        with patch.object(bench_regrade.bench_grade, "grade", return_value=resolved):
+            stored["_dir"] = trial
+            bench_regrade.regrade_trial(stored, self.out / "dest2", self.scenario("tiny"), WRIGHT)
+            self.assertEqual(stored["invalid"], "an agent-side reason")
+            self.assertEqual(stored["status"], "invalid")
+
+    def test_same_named_inputs_fail_before_any_copy(self):
+        # `<out>/<base.name>/...` collides for same-named inputs; the failure
+        # must fire upfront, not mid-copy into a partial `--out`.
+        self.stored_trial("1", bench_grade.grader_hash(self.scenario("tiny")))
+        second = self.out / "other" / "runs" / "tiny" / "fake" / "none-none_off-1"
+        second.mkdir(parents=True)
+        (second / "result.json").write_text((self.out / "runs" / "tiny" / "fake" / "none-none_off-1" / "result.json").read_text())
+        with self.assertRaises(SystemExit):
+            bench_regrade.regrade([self.out / "runs", self.out / "other" / "runs"], WRIGHT, self.scenario, self.out / "regraded")
+        self.assertFalse((self.out / "regraded").exists())
+
     def test_report_regrade_leaves_no_scratch_inside_the_run_directory(self):
         current = bench_grade.grader_hash(self.scenario("tiny"))
         trial = self.stored_trial("1", current)
