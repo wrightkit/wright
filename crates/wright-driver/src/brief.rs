@@ -73,7 +73,9 @@ fn list<'a>(result: &'a Value, key: &str) -> Vec<&'a Value> {
 /// The `analyze` brief: the program summary, collection counts including
 /// the element total and risk severities, and the costliest rules — the
 /// ranked semantic report's headline. Per-condition element detail is an
-/// expansion concern and is trimmed from the reported items.
+/// expansion concern and is trimmed from the reported items. A `selection`
+/// member, when the request selected `facts.risks`, carries over with its
+/// pre-selection total like `lint`'s.
 pub fn analyze(result: &Value) -> Value {
     let facts = &result["facts"];
     let rules = list(facts, "rules");
@@ -102,6 +104,9 @@ pub fn analyze(result: &Value) -> Value {
     });
     if let Some(program) = result.get("program") {
         brief["program"] = program.clone();
+    }
+    if let Some(selection) = result.get("selection") {
+        brief["selection"] = selection.clone();
     }
     brief
 }

@@ -111,8 +111,12 @@ pub enum ToolRequest {
     Compile,
     /// Check the loaded project.
     Check,
-    /// Analyze the loaded project.
+    /// Analyze the loaded project; optionally narrowed by an inline
+    /// selection (`severity`, `rule`, `file`, `max`; #635) applied to
+    /// `facts.risks`, and optionally returned in the brief form (#532).
     Analyze {
+        #[serde(flatten)]
+        selection: crate::select::FindingSelection,
         /// Return the brief summary form (#532): counts, the
         /// highest-priority items, and how to expand.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -781,7 +785,10 @@ impl<'a> ToolService<'a> {
                     serde_json::to_value(self.session.check()).expect("check result serializes");
                 ToolResponse::Ok { result }
             }
-            ToolRequest::Analyze { brief } => {
+            ToolRequest::Analyze { selection, brief } => {
+                if let Some(error) = self.selection_error(selection) {
+                    return error;
+                }
                 let loaded = self.snapshot().clone();
                 let semantic = Arc::clone(
                     self.semantic
@@ -789,7 +796,7 @@ impl<'a> ToolService<'a> {
                         .expect("the refresh gate guarantees a snapshot"),
                 );
                 let mut result =
-                    serde_json::to_value(self.session.analyze_loaded(loaded, &semantic))
+                    serde_json::to_value(self.session.analyze_loaded(loaded, &semantic, selection))
                         .expect("analyze result serializes");
                 if *brief {
                     result["result"] = crate::brief::analyze(&result["result"]);
@@ -984,7 +991,8 @@ impl<'a> ToolService<'a> {
                 .as_ref()
                 .expect("the refresh gate guarantees a snapshot"),
         );
-        self.session.analyze_loaded(loaded, &semantic)
+        let selection = self.session.config.selection.clone();
+        self.session.analyze_loaded(loaded, &semantic, &selection)
     }
 
     /// Inspect through the shared session pipeline.
@@ -1129,10 +1137,23 @@ impl<'a> ToolService<'a> {
     /// A selection naming an unknown rule id is a usage error, never a
     /// silent empty result (#430).
     fn selection_error(&self, selection: &crate::select::FindingSelection) -> Option<ToolResponse> {
+        self.selection_check(selection)
+            .err()
+            .map(|error| ToolResponse::Error { error })
+    }
+
+    /// The selection's validity as a structured error: an unknown `rule` id
+    /// would silently select nothing and report a clean result (#430).
+    fn selection_check(
+        &self,
+        selection: &crate::select::FindingSelection,
+    ) -> Result<(), ToolErrorInfo> {
         selection
             .validate(self.session.lint_registry())
-            .err()
-            .map(invalid_selection)
+            .map_err(|message| ToolErrorInfo {
+                code: "invalid-selection".to_string(),
+                message,
+            })
     }
 
     /// Bound one list-shaped semantic operation's result (#531): without
@@ -1514,10 +1535,29 @@ impl<'a> ToolService<'a> {
 
     /// `costEstimate`: exact generated-resource counts plus static findings.
     /// The findings subset honors the shared selection (#430); findings carry
-    /// no span, so a `file` selection matches nothing here.
+    /// no span, so a `file` selection can never match one and is rejected
+    /// rather than silently emptying the reported set (#635).
     fn cost_estimate(&self, selection: &crate::select::FindingSelection) -> ToolResponse {
-        if let Some(error) = self.selection_error(selection) {
-            return error;
+        match self.cost_estimate_result(selection) {
+            Ok((result, _)) => self.ok(result),
+            Err(error) => ToolResponse::Error { error },
+        }
+    }
+
+    /// The `costEstimate` payload plus the applied selection's outcome: the
+    /// result body is the wire payload; the outcome travels in-process so
+    /// the session's verdict can reflect the full finding set (#635).
+    pub(crate) fn cost_estimate_result(
+        &self,
+        selection: &crate::select::FindingSelection,
+    ) -> Result<(serde_json::Value, Option<crate::select::SelectionOutcome>), ToolErrorInfo> {
+        self.selection_check(selection)?;
+        if selection.file.is_some() {
+            return Err(ToolErrorInfo {
+                code: "invalid-selection".to_string(),
+                message: "costEstimate findings carry no source location; a 'file' selection cannot apply"
+                    .to_string(),
+            });
         }
         let loaded = self.snapshot();
         let locale = CompilerSession::locale_for(loaded);
@@ -1572,10 +1612,10 @@ impl<'a> ToolService<'a> {
                 "performance": "compiler-host performance is measured by wright-bench, not in-process",
             },
         });
-        if let Some(outcome) = outcome {
+        if let Some(outcome) = &outcome {
             result["selection"] = serde_json::to_value(outcome).expect("selection serializes");
         }
-        self.ok(result)
+        Ok((result, outcome))
     }
 
     fn target_metadata(&self) -> serde_json::Value {

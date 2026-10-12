@@ -253,7 +253,7 @@ fn terminal_renderer_uses_command_specific_hierarchy() {
     for (command, heading, detail) in [
         ("check", "PASS check", "diagnostic(s)"),
         ("lint", "WARN lint", "Lint findings"),
-        ("analyze", "PASS analyze", "Program overview"),
+        ("analyze", "WARN analyze", "Program overview"),
         ("inspect", "PASS inspect", "Detail commands"),
     ] {
         let output = run(&[
@@ -1167,6 +1167,230 @@ fn brief_bounds_lint_analyze_and_inspect_results() {
         !output.status.success(),
         "brief+subcommand is a usage error"
     );
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// ── #635: full/brief verdict parity, risk selection, span paths ──────────────
+
+/// A program whose only risk is the wait-less `While(True)` warning — the
+/// smallest input that separates the verdict paths #635 joined.
+const WAITLESS_LOOP: &str = "rule (\"r\") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(True);
+            Set Global Variable(A, 1);
+        End;
+    }
+}
+";
+
+#[test]
+fn analyze_full_and_brief_report_the_same_verdict() {
+    // The full result's verdict accounts for `facts.risks` severities exactly
+    // like the brief form — the same input reports one verdict.
+    let path = temp_file("waitless.txt", WAITLESS_LOOP);
+    for args in [
+        vec!["analyze", path.to_str().unwrap()],
+        vec!["analyze", path.to_str().unwrap(), "--brief"],
+    ] {
+        let output = run(&args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("WARN analyze"), "{args:?}: {stdout}");
+    }
+
+    // The same parity holds under a selection: `lint --severity error`
+    // reports an empty selected set but the full set's WARN verdict, and the
+    // brief form must agree rather than judging the filtered counts.
+    let lint = run(&["lint", path.to_str().unwrap(), "--severity", "error"]);
+    let lint_stdout = String::from_utf8_lossy(&lint.stdout);
+    assert!(lint_stdout.contains("WARN lint"), "{lint_stdout}");
+    let brief = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--severity",
+        "error",
+        "--brief",
+    ]);
+    let brief_stdout = String::from_utf8_lossy(&brief.stdout);
+    assert!(brief_stdout.contains("WARN lint"), "{brief_stdout}");
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn analyze_selection_narrows_facts_risks() {
+    // `severity`/`rule`/`file`/`max` narrow `facts.risks` and the JSON
+    // `selection` reports the true total — never a 0/0 beside non-empty
+    // risks.
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+
+    let output = run(&[
+        "analyze",
+        path.to_str().unwrap(),
+        "--rule-id",
+        "repeated-value",
+        "--max",
+        "2",
+        "-f",
+        "json",
+    ]);
+    assert!(output.status.success());
+    let envelope = parse_json(&output.stdout);
+    let risks = envelope["result"]["facts"]["risks"].as_array().unwrap();
+    assert_eq!(risks.len(), 2);
+    assert!(risks.iter().all(|risk| risk["code"] == "repeated-value"));
+    assert_eq!(envelope["result"]["selection"]["total"], 10);
+    assert_eq!(envelope["result"]["selection"]["withheld"], 7);
+
+    let output = run(&[
+        "analyze",
+        path.to_str().unwrap(),
+        "--severity",
+        "error",
+        "-f",
+        "json",
+    ]);
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["result"]["facts"]["risks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(envelope["result"]["selection"]["total"], 10);
+
+    // The text verdict still reports the full set's severity, and `--max`
+    // names what it withheld.
+    let output = run(&["analyze", path.to_str().unwrap(), "--severity", "error"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WARN analyze"), "{stdout}");
+    let output = run(&["analyze", path.to_str().unwrap(), "--max", "2"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("8 finding(s) withheld"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn inspect_json_resolves_span_paths() {
+    // `inspect --format json` resolves `path` on every span like
+    // `inspect symbols` and `analyze` already do.
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let output = run(&["inspect", path.to_str().unwrap(), "-f", "json"]);
+    assert!(output.status.success());
+    let result = parse_json(&output.stdout)["result"].clone();
+
+    fn collect(value: &serde_json::Value, spans: &mut Vec<serde_json::Value>) {
+        match value {
+            serde_json::Value::Object(object) => {
+                if let Some(span) = object.get("span") {
+                    if span.is_object() {
+                        spans.push(span.clone());
+                    }
+                }
+                object.values().for_each(|value| collect(value, spans));
+            }
+            serde_json::Value::Array(items) => {
+                items.iter().for_each(|value| collect(value, spans));
+            }
+            _ => {}
+        }
+    }
+    let mut spans = Vec::new();
+    collect(&result, &mut spans);
+    assert!(!spans.is_empty(), "the fixture carries spans");
+    assert!(
+        spans
+            .iter()
+            .all(|span| span["path"].as_str().is_some_and(|p| !p.is_empty())),
+        "every span carries a resolved path: {spans:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn inspect_cost_verdict_and_file_selection() {
+    // Cost findings carry severities, so `inspect cost` judges them like
+    // lint findings — the wait-less loop's warning yields WARN.
+    let path = temp_file("waitless.txt", WAITLESS_LOOP);
+    let output = run(&["inspect", "cost", path.to_str().unwrap()]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WARN cost"), "{stdout}");
+
+    // Cost findings carry no source location, so `--file` can never apply:
+    // the option is a usage error, not a silent empty result.
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--file",
+        "waitless.txt",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--file"), "{stderr}");
+
+    // Selection that can apply still narrows: `--severity error` empties the
+    // warning set while the verdict keeps the full set's severity.
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--severity",
+        "error",
+        "-f",
+        "json",
+    ]);
+    let envelope = parse_json(&output.stdout);
+    assert!(
+        envelope["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(envelope["result"]["selection"]["total"], 1);
+    let output = run(&[
+        "inspect",
+        "cost",
+        path.to_str().unwrap(),
+        "--severity",
+        "error",
+    ]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("WARN cost"), "{stdout}");
+
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn analyze_github_renderer_emits_risk_annotations() {
+    // The GitHub renderer reports analyze risks as workflow annotations like
+    // lint findings.
+    let path = temp_file("waitless.txt", WAITLESS_LOOP);
+    let output = run_with_env(
+        &[
+            "analyze",
+            path.to_str().unwrap(),
+            "--renderer",
+            "github-actions",
+        ],
+        &[("GITHUB_ACTIONS", "true")],
+    );
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("::warning"), "{stderr}");
+    assert!(stderr.contains("title=while-without-wait"), "{stderr}");
+    assert!(stderr.contains("WARN analyze"), "{stderr}");
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -2516,7 +2740,8 @@ fn cost_reports_exact_counts_and_selected_findings() {
     let output = run(&["inspect", "cost", path]);
     assert!(output.status.success(), "{}", command_result(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("PASS cost"), "{stdout}");
+    // The cost verdict counts static finding severities: warnings warn (#635).
+    assert!(stdout.contains("WARN cost"), "{stdout}");
     assert!(stdout.contains("3960 emitted byte(s)"), "{stdout}");
     assert!(stdout.contains("29 action(s)"), "{stdout}");
     // Repeated identical findings collapse into one counted entry (#446).

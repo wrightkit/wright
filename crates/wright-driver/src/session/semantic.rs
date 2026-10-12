@@ -260,13 +260,22 @@ fn program_summary(service: &SemanticService<'_>, loaded: &Loaded) -> serde_json
     program
 }
 
+/// `inspect`: the structural/semantic program model. Every member's spans
+/// resolve to `path` like `analyze`/`lint` findings do — a bare
+/// `{file: <index>}` is unusable outside the session (#635).
 #[hotpath::measure]
 fn inspect_result(service: &SemanticService<'_>, loaded: &Loaded) -> InspectResult {
+    let mut rules = service_response(service, &Request::ListRules);
+    let mut symbols = service_response(service, &Request::ListSymbols { kind: None });
+    let mut references = service.references_for_all_symbols();
+    for value in [&mut rules, &mut symbols, &mut references] {
+        resolve_span_paths(value, loaded);
+    }
     InspectResult {
         program: program_summary(service, loaded),
-        rules: service_response(service, &Request::ListRules),
-        symbols: service_response(service, &Request::ListSymbols { kind: None }),
-        references: service.references_for_all_symbols(),
+        rules,
+        symbols,
+        references,
     }
 }
 
@@ -275,11 +284,14 @@ fn inspect_result(service: &SemanticService<'_>, loaded: &Loaded) -> InspectResu
 /// resolved against the loaded input like `lint` does — mapped or
 /// source-parsed locations become authored paths, while unmapped provider
 /// output resolves to `<provider-artifact>` instead of a fabricated
-/// location (#445).
+/// location (#445). `facts.risks` is finding-shaped, so the session's
+/// finding selection narrows it exactly like `lint` findings and the
+/// outcome rides in `result.selection` (#635).
 fn analyze_result(
     service: &SemanticService<'_>,
     loaded: &Loaded,
     catalog: &Catalog,
+    selection: &crate::select::FindingSelection,
 ) -> AnalyzeResult {
     let mut program = program_summary(service, loaded);
     if let serde_json::Value::Object(object) = &mut program {
@@ -289,7 +301,18 @@ fn analyze_result(
     hotpath::measure_block!("analyze::resolve_span_paths", {
         resolve_span_paths(&mut facts, loaded)
     });
-    AnalyzeResult { program, facts }
+    let risks = match facts["risks"].take() {
+        serde_json::Value::Array(risks) => risks,
+        _ => Vec::new(),
+    };
+    let (risks, outcome) =
+        selection.apply_findings(risks, &crate::select::file_bases(&loaded.input));
+    facts["risks"] = serde_json::Value::Array(risks);
+    AnalyzeResult {
+        program,
+        facts,
+        selection: outcome,
+    }
 }
 
 /// Unwrap a [`ToolResponse`] into its result or its structured error.
@@ -372,7 +395,12 @@ impl CompilerSession {
             |session, loaded| {
                 let service = session.shared_semantic(&loaded);
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                analyze_result(&service, &loaded, session.catalog())
+                analyze_result(
+                    &service,
+                    &loaded,
+                    session.catalog(),
+                    &session.config.selection,
+                )
             },
         )
     }
@@ -380,18 +408,21 @@ impl CompilerSession {
     /// `analyze` over an already-loaded snapshot and its held semantic
     /// service — the ToolService reuse path (#513): the report renders
     /// through the service built once per loaded program rather than
-    /// rebuilding the index per request.
+    /// rebuilding the index per request. `selection` narrows
+    /// `facts.risks`; the request-level selection on the agent surface and
+    /// the session's configured selection on the CLI both feed it (#635).
     pub(crate) fn analyze_loaded(
         &mut self,
         loaded: Loaded,
         service: &SemanticService<'_>,
+        selection: &crate::select::FindingSelection,
     ) -> Envelope<AnalyzeResult> {
         self.with_loaded(
             "analyze",
             |_| Ok(loaded),
             |session, loaded| {
                 session.progress(ProgressEvent::new(ProgressPhase::SemanticAnalysis));
-                analyze_result(service, &loaded, session.catalog())
+                analyze_result(service, &loaded, session.catalog(), selection)
             },
         )
     }
@@ -523,11 +554,18 @@ impl CompilerSession {
     }
 
     /// `cost` (#429): the `costEstimate` operation's payload; the session's
-    /// finding selection applies exactly as on the agent surface.
+    /// finding selection applies exactly as on the agent surface, and its
+    /// outcome is kept in-process so the verdict reflects the full finding
+    /// set (#635).
     pub fn cost(&mut self) -> Envelope<CostResult> {
         let selection = self.config.selection.clone();
         self.service_query("cost", move |service| {
-            tool_result(service.handle(&ToolRequest::CostEstimate(selection))).map(CostResult)
+            service
+                .cost_estimate_result(&selection)
+                .map(|(result, outcome)| CostResult {
+                    result,
+                    selection: outcome,
+                })
         })
     }
 

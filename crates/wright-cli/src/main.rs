@@ -145,7 +145,9 @@ fn run_workflow(command: Command) -> ExitCode {
             let presentation = present::Presentation::from_common(&args.common);
             if args.brief {
                 run_configured(config, presentation, None, |session| {
-                    brief_envelope(session.analyze(), wright_driver::brief::analyze)
+                    brief_envelope(session.analyze(), wright_driver::brief::analyze, |result| {
+                        result.selection.clone()
+                    })
                 })
             } else {
                 run_configured(
@@ -172,7 +174,9 @@ fn run_workflow(command: Command) -> ExitCode {
             let presentation = present::Presentation::from_common(&args.common);
             if args.brief {
                 return run_configured(config, presentation, None, |session| {
-                    brief_envelope(session.lint(), wright_driver::brief::lint)
+                    brief_envelope(session.lint(), wright_driver::brief::lint, |result| {
+                        result.selection.clone()
+                    })
                 });
             }
             if args.fix {
@@ -192,7 +196,9 @@ fn run_workflow(command: Command) -> ExitCode {
                 config_from_common(&args.common, false),
                 present::Presentation::from_common(&args.common),
                 None,
-                |session| brief_envelope(session.inspect(), wright_driver::brief::inspect),
+                |session| {
+                    brief_envelope(session.inspect(), wright_driver::brief::inspect, |_| None)
+                },
             ),
             None => run_configured(
                 config_from_common(&args.common, false),
@@ -247,6 +253,15 @@ fn run_workflow(command: Command) -> ExitCode {
                 move |session| session.callgraph(query.caller, query.callee, query.max),
             ),
             Some(cli::InspectQuery::Cost(query)) => {
+                // Cost findings carry no source location, so `file` can
+                // never match one — the option is a usage error rather than
+                // a silent empty result (#635).
+                if query.select.file.is_some() {
+                    eprintln!(
+                        "wright: 'inspect cost' findings carry no source location; --file cannot apply"
+                    );
+                    return ExitCode::from(exit::USAGE);
+                }
                 let mut config = config_from_common(&query.common, true);
                 config.selection = selection_from_args(&query.select);
                 run_configured(
@@ -271,14 +286,16 @@ fn run_workflow(command: Command) -> ExitCode {
 /// The `--brief` result form of a workflow envelope (#532): the driver's
 /// brief transform builds the same payload the `serve`/`MCP` `brief`
 /// request fields return, so every surface reports the same summary.
+/// `outcome` lifts the result's finding-selection record into the brief so
+/// the verdict reflects the full set, matching the unbriefed result (#635).
 fn brief_envelope<T: serde::Serialize>(
     envelope: wright_driver::Envelope<T>,
     form: impl FnOnce(&serde_json::Value) -> serde_json::Value,
+    outcome: impl FnOnce(&T) -> Option<wright_driver::SelectionOutcome>,
 ) -> wright_driver::Envelope<wright_driver::BriefResult> {
-    envelope.map_result(|result| {
-        wright_driver::BriefResult(form(
-            &serde_json::to_value(result).expect("result serializes"),
-        ))
+    envelope.map_result(|result| wright_driver::BriefResult {
+        result: form(&serde_json::to_value(&result).expect("result serializes")),
+        selection: outcome(&result),
     })
 }
 

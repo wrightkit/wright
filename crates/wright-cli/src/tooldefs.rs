@@ -164,7 +164,7 @@ pub(crate) const TOOL_SPECS: &[ToolSpec] = &[
         request_def: "AnalyzeRequest",
         drop_fields: &[],
         mcp: true,
-        description: "Workshop cost, complexity hotspots, risk indicators, and cross-cutting state; `brief` returns the counts-and-top-items summary.",
+        description: "Workshop cost, complexity hotspots, risk indicators, and cross-cutting state, optionally narrowed by `severity` (`info`, `warning`, `error`), `rule`, `file`, or `max`; `brief` returns the counts-and-top-items summary.",
         result: "the wright-result/v1 analysis envelope; the brief summary when `brief` is true",
     },
     ToolSpec {
