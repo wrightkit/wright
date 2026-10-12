@@ -447,7 +447,7 @@ pub fn semantic_rename(
                 .filter(|source| same_file(source, &input_path))
                 .unwrap_or_else(|| loaded.input.display.clone());
             defaulted_sources =
-                BTreeMap::from([(source, String::from_utf8_lossy(&bytes).into_owned())]);
+                BTreeMap::from([(source, crate::input::decode_source_text(&bytes))]);
             &defaulted_sources
         }
     };
@@ -750,8 +750,8 @@ fn reference_signature(index: &SemanticIndex, id: SymbolId) -> Vec<ReferenceKind
 }
 
 /// Whether a `sources` key names the resolved input file: plain path
-/// spellings compare by canonical identity, and a `file://` URI spelling of
-/// the same path binds too.
+/// spellings compare by canonical identity, and a `file://` URI spelling
+/// of the same path — including a percent-encoded one — binds too.
 fn same_source(source: &str, resolved: &ResolvedInput) -> bool {
     resolved
         .path
@@ -760,10 +760,13 @@ fn same_source(source: &str, resolved: &ResolvedInput) -> bool {
 }
 
 fn same_file(source: &str, path: &Path) -> bool {
-    let source = source.strip_prefix("file://").unwrap_or(source);
+    // `provider_uri_path` decodes `file://` URIs — `my%20dir` names the
+    // same member as `my dir` (#636) — and passes plain path spellings
+    // through.
+    let source = crate::source_provider::provider_uri_path(source);
     source == path.to_string_lossy()
         || matches!(
-            (Path::new(source).canonicalize(), path.canonicalize()),
+            (Path::new(&source).canonicalize(), path.canonicalize()),
             (Ok(a), Ok(b)) if a == b
         )
 }
@@ -815,7 +818,7 @@ pub fn write_previews(
                 format!("cannot read '{}': {error}", preview.source),
             )
         })?;
-        let current = String::from_utf8_lossy(&bytes);
+        let current = crate::input::decode_source_text(&bytes);
         let expected_identity = expected
             .get(preview.source.as_str())
             .expect("previews only cover edited sources");
@@ -1143,6 +1146,16 @@ mod tests {
 
     fn catalog() -> Arc<Catalog> {
         wright_analyzer::catalog::builtin().expect("builtin catalog")
+    }
+
+    #[test]
+    fn same_file_binds_percent_encoded_file_uris() {
+        // #636: `file:///…/my%20dir/main.ws` names the same member as the
+        // decoded path — a space-carrying source spells either way.
+        let path = Path::new("/tmp/my dir/main.ws");
+        assert!(same_file("file:///tmp/my%20dir/main.ws", path));
+        assert!(same_file("/tmp/my dir/main.ws", path));
+        assert!(!same_file("file:///tmp/my%20dir/other.ws", path));
     }
 
     fn temp_workshop(text: &str) -> (PathBuf, PathBuf) {

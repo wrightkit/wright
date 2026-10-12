@@ -28,6 +28,18 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// Decode source bytes into the text every consumer sees (#636): a leading
+/// U+FEFF byte-order mark is a file-encoding artifact, not source text, so
+/// loaded, defaulted, and re-read views all compare and parse the same
+/// BOM-free text.
+pub(crate) fn decode_source_text(bytes: &[u8]) -> String {
+    strip_bom(&String::from_utf8_lossy(bytes)).to_owned()
+}
+
+fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{FEFF}').unwrap_or(text)
+}
+
 /// The disk state a [`ResolvedInput`] was loaded from (#471).
 ///
 /// `ToolService` captures one fingerprint at load time and recomputes it
@@ -100,7 +112,12 @@ fn digest_tree(root: &Path) -> DiskFingerprint {
             }
             if kind.is_dir() {
                 stack.push(entry.path());
-            } else if kind.is_file() {
+            } else if kind.is_file() || entry.path().is_file() {
+                // `file_type` does not traverse a symlink, so a link to a
+                // file would be invisible to the fingerprint while
+                // discovery follows it (#636); `is_file` resolves through
+                // the link. Directories keep the `file_type` test so a
+                // symlinked directory is still never walked.
                 files.push(entry.path());
             }
         }
@@ -166,7 +183,7 @@ fn resolve_file(
             format!("cannot read input '{}': {e}", path.display()),
         )
     })?;
-    let text = String::from_utf8_lossy(&bytes).into_owned();
+    let text = decode_source_text(&bytes);
     let kind = match config.kind {
         SourceKind::Auto => kind_from_extension(path)?,
         other => other,
@@ -259,18 +276,7 @@ fn detect_directory_kind(path: &Path) -> Result<SourceKind, Diagnostic> {
         .any(|c| c.is_file());
     let ostw_project =
         path.join("ds.toml").is_file() || !direct_source_files(path, SourceKind::Ostw).is_empty();
-    // A bare `.txt` is too weak a signal to claim Workshop ownership of a
-    // directory: `version.txt`, `requirements.txt`, `notes.txt` are ambient
-    // in any project root and would misroute discovery into a Workshop parse
-    // of unrelated content. `.ow`/`.ws`/`.workshop` still detect; an explicit
-    // `--kind workshop` or file path still accepts `.txt`.
-    let workshop_project = direct_source_files(path, SourceKind::Workshop)
-        .iter()
-        .any(|file| {
-            file.extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| !extension.eq_ignore_ascii_case("txt"))
-        });
+    let workshop_project = !direct_source_files(path, SourceKind::Workshop).is_empty();
     let mut kinds = Vec::new();
     if opy_project {
         kinds.push(SourceKind::Opy);
@@ -314,13 +320,36 @@ fn direct_source_files(path: &Path, kind: SourceKind) -> Vec<PathBuf> {
         return files;
     };
     for entry in entries.flatten() {
+        // Hidden entries never feed an input — the same convention
+        // `digest_tree` fingerprints by (#636).
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let entry_path = entry.path();
-        if entry_path.is_file() && kind_from_extension(&entry_path).ok() == Some(kind) {
+        if entry_path.is_file() && directory_member(&entry_path, kind) {
             files.push(entry_path);
         }
     }
     files.sort();
     files
+}
+
+/// Whether `path` counts toward a directory's `kind` source set — the
+/// single membership definition discovery and the disk fingerprint share
+/// (#636). A bare `.txt` is too weak a signal to claim Workshop ownership
+/// of a directory: `version.txt`, `requirements.txt`, `notes.txt` are
+/// ambient in any project root and would misroute discovery or force a
+/// spurious ambiguity. An explicit `.txt` file path still resolves through
+/// `kind_from_extension`.
+fn directory_member(path: &Path, kind: SourceKind) -> bool {
+    if kind_from_extension(path).ok() != Some(kind) {
+        return false;
+    }
+    kind != SourceKind::Workshop
+        || path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_none_or(|extension| !extension.eq_ignore_ascii_case("txt"))
 }
 
 fn directory_source_count_error(path: &Path, kind: SourceKind, files: &[PathBuf]) -> Diagnostic {
@@ -382,6 +411,7 @@ fn resolve_text(
     path: Option<&Path>,
     config: &SessionConfig,
 ) -> Result<ResolvedInput, Diagnostic> {
+    let text = strip_bom(text);
     let cwd = std::env::current_dir().map_err(|e| {
         Diagnostic::error(
             "cwd-io",
@@ -440,7 +470,7 @@ fn resolve_stdin(config: &SessionConfig) -> Result<ResolvedInput, Diagnostic> {
             format!("cannot read standard input: {e}"),
         )
     })?;
-    let text = String::from_utf8_lossy(&bytes).into_owned();
+    let text = decode_source_text(&bytes);
     let kind = match config.kind {
         SourceKind::Auto => kind_from_stdin(&text)?,
         other => other,
@@ -505,6 +535,130 @@ fn origin_for(kind: SourceKind, locale: Option<&str>) -> Origin {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let directory = std::env::temp_dir().join(format!(
+            "wright-input-{tag}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&directory).expect("create test directory");
+        directory
+    }
+
+    #[test]
+    fn bom_prefixed_input_resolves_bom_free_text() {
+        // #636: a U+FEFF byte-order mark is a file-encoding artifact, not
+        // source text — the file resolves exactly like the BOM-less file.
+        let directory = temp_dir("bom");
+        let path = directory.join("bom.ws");
+        std::fs::write(&path, b"\xef\xbb\xbfrule (\"r\") {}\n").expect("write BOM source");
+
+        let resolved = resolve(&SessionConfig {
+            input: InputSpec::Path(path),
+            kind: SourceKind::Auto,
+            ..SessionConfig::default()
+        })
+        .expect("a BOM-prefixed file resolves");
+        assert_eq!(resolved.kind, SourceKind::Workshop);
+        assert_eq!(resolved.text, "rule (\"r\") {}\n");
+
+        // The same convention covers caller-held text and stdin bytes.
+        let resolved = resolve(&SessionConfig {
+            input: InputSpec::Text {
+                text: "\u{FEFF}rule (\"r\") {}\n".to_string(),
+                path: Some(PathBuf::from("doc.ws")),
+            },
+            kind: SourceKind::Auto,
+            ..SessionConfig::default()
+        })
+        .expect("a BOM-prefixed document resolves");
+        assert_eq!(resolved.text, "rule (\"r\") {}\n");
+
+        let text = decode_source_text(b"\xef\xbb\xbf{\"op\":\"check\"}");
+        assert_eq!(
+            kind_from_stdin(&text).expect("detected"),
+            SourceKind::Protocol,
+            "a BOM-prefixed JSON stdin is protocol input, not Workshop"
+        );
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn directory_membership_ignores_dotfiles_and_stray_txt() {
+        // #636: discovery and the disk fingerprint share one membership
+        // definition — hidden entries and a bare `.txt` never count.
+        let directory = temp_dir("members");
+        std::fs::write(directory.join("main.ws"), "rule (\"main\") {}\n")
+            .expect("write main source");
+        std::fs::write(directory.join(".notes.ws"), "rule (\"notes\") {}\n")
+            .expect("write hidden source");
+        std::fs::write(directory.join("._main.ws"), "rule (\"apple\") {}\n")
+            .expect("write AppleDouble source");
+        std::fs::write(directory.join("notes.txt"), "not a source\n")
+            .expect("write stray text file");
+
+        let resolved = resolve(&SessionConfig {
+            input: InputSpec::Path(directory.clone()),
+            kind: SourceKind::Auto,
+            ..SessionConfig::default()
+        })
+        .expect("main.ws is the single member");
+        assert_eq!(resolved.kind, SourceKind::Workshop);
+        assert_eq!(
+            resolved.path.as_deref(),
+            Some(directory.join("main.ws").as_path())
+        );
+
+        // A directory whose only matching names are hidden has no member.
+        let hidden = temp_dir("hidden-only");
+        std::fs::write(hidden.join("._main.ws"), "rule (\"r\") {}\n")
+            .expect("write AppleDouble source");
+        let error = resolve(&SessionConfig {
+            input: InputSpec::Path(hidden.clone()),
+            kind: SourceKind::Auto,
+            ..SessionConfig::default()
+        })
+        .expect_err("hidden-only directory has no source member");
+        assert_eq!(error.code, "input-kind-unknown");
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+        std::fs::remove_dir_all(hidden).expect("remove test directory");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn digest_tree_follows_file_symlinks() {
+        // #636: `DirEntry::file_type` does not traverse a symlink, so a
+        // linked file must be fingerprinted through the resolved path or
+        // edits to its target would never read as a change.
+        let directory = temp_dir("links");
+        std::fs::write(directory.join("target.txt"), "v1\n").expect("write target");
+        let without_link = digest_tree(&directory);
+        std::os::unix::fs::symlink(directory.join("target.txt"), directory.join("linked.txt"))
+            .expect("create symlink");
+        let with_link = digest_tree(&directory);
+        assert_ne!(
+            without_link, with_link,
+            "the symlinked file joins the fingerprint"
+        );
+        std::fs::write(directory.join("target.txt"), "v2\n").expect("edit target");
+        assert_ne!(
+            with_link,
+            digest_tree(&directory),
+            "an edit to the link's target is observed"
+        );
+
+        // A symlinked directory is still never walked: a link cycle would
+        // never terminate.
+        std::os::unix::fs::symlink(&directory, directory.join("cycle"))
+            .expect("create dir symlink");
+        let _ = digest_tree(&directory);
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
 
     #[test]
     fn directory_detection_reports_workshop_and_opy_as_ambiguous() {

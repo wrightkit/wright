@@ -1388,6 +1388,41 @@ fn stdin_workshop_works_and_legacy_protocol_is_refused() {
 }
 
 #[test]
+fn bom_prefixed_workshop_behaves_like_the_plain_file() {
+    // #636: a U+FEFF byte-order mark is a file-encoding artifact, not
+    // source text — check and compile see the BOM-less program.
+    let bom = format!("\u{FEFF}{}", corpus_workshop("synthetic/basic-rule"));
+    let plain = temp_file("plain.ws", &corpus_workshop("synthetic/basic-rule"));
+    let bommed = temp_file("bom.ws", &bom);
+
+    let output = run(&["check", bommed.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", command_result(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PASS check"), "{stdout}");
+
+    // Compilation emits byte-identical text to the BOM-less spelling.
+    let bommed_out = run(&["compile", bommed.to_str().unwrap()]);
+    let plain_out = run(&["compile", plain.to_str().unwrap()]);
+    assert!(bommed_out.status.success() && plain_out.status.success());
+    assert_eq!(bommed_out.stdout, plain_out.stdout);
+
+    // A BOM-prefixed Workshop stdin resolves the same way; a BOM-prefixed
+    // JSON stdin is still protocol input, not Workshop text.
+    let output = run_with_stdin(&["check", "-"], &bom);
+    assert_eq!(output.status.code(), Some(0));
+    let output = run_with_stdin(&["check", "-"], "\u{FEFF}{\"protocol\":{}}");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("input-kind-unsupported"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(bommed.parent().unwrap());
+    let _ = std::fs::remove_dir_all(plain.parent().unwrap());
+}
+
+#[test]
 fn stdin_opy_requires_an_entry_for_provider_workflows() {
     let source =
         std::fs::read_to_string(workspace_root().join("tests/fixtures/opy/basic-rule.opy"))
