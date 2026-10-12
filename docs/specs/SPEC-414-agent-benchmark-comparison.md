@@ -84,6 +84,10 @@ Pilot observations that shaped this spec (Sonnet only, 2 scenarios, 18 runs; not
   (`inspect` JSON or `serve` operations). A regex over emitted text is allowed only where no structured field
   exists and ships with a positive and a negative fixture. The `program-calls` check kind (ADR-0024) reads the
   canonical rule content through `rules` with `content` and asserts on calls by catalog id and argument position.
+  A check uses either a single `call`/`args` or `alternatives: [{"call": ..., "args": {...}}, ...]`.
+  Each node matching any alternative counts once toward the shared `min`/`max`; `event` restricts all alternatives.
+  Equivalent forms are listed explicitly, without normalization or dataflow matching. Missing rule content
+  makes the check `unavailable`, never passed. See [the check format](../agent-benchmark.md#scenarios).
 - REQ-011: Reported outcome metrics are: `usable` (L1a passes, all required requirement checks pass, no
   error-severity lint finding), requirement coverage over all runs and over L1a-passing runs, time to first
   valid snapshot, valid-to-invalid regressions, wall time, and the context and token metrics of REQ-020 to REQ-024. Runtime-only claims are listed as

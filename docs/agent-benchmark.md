@@ -276,11 +276,29 @@ of alternatives, `min`/`max` occurrences), `answer` (`answer.json` key equals
 the compiled text of `source` is read through `rules` with `content`, and the
 check counts calls whose catalog id equals `call` and whose positional `args`
 patterns match, across all rules or those with the `event` id, within
-`min`/`max`). A pattern is a rule-content node: numbers compare within 1e-9,
+`min`/`max`). Instead of a single `call`/`args`, a check can list
+`alternatives: [{"call": ..., "args": {...}}, ...]`. Each call node matching
+any alternative counts once toward the shared `min`/`max`, even if several
+alternatives match it. `event` and `maxRules` apply to the whole check.
+A pattern is a rule-content node: numbers compare within 1e-9,
 objects as a recursive subset, and `{"any": [...]}` lists alternatives. The
 check is stable across spelling, locale, and macro expansion, but not across
 restructured equivalents such as a value held in a variable, so list those
-under `any` or assert the pieces separately. A Wright that does not serve
+as call `alternatives` or argument patterns under `any`, or assert the pieces
+separately. For example, excluding the event player can use array removal or
+a filter with either operand order:
+
+```json
+{"kind": "program-calls", "alternatives": [
+  {"call": "removeFromArray", "args": {"1": {"call": "eventPlayer"}}},
+  {"call": "filteredArray", "args": {"1": {"call": "!=", "args": [
+    {"call": "currentArrayElement"}, {"call": "eventPlayer"}]}}},
+  {"call": "filteredArray", "args": {"1": {"call": "!=", "args": [
+    {"call": "eventPlayer"}, {"call": "currentArrayElement"}]}}}
+], "min": 1}
+```
+
+A Wright that does not serve
 rule content makes the check `unavailable`, never a pass; `maxRules` (default
 200) bounds the read and an incomplete read fails. Prefer `program-calls` over
 a regex; a regex over compiled text needs a `reference` that matches and a

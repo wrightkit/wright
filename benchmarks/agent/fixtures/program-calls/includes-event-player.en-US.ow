@@ -1,0 +1,10 @@
+rule ("Includes event player") {
+    event {
+        Ongoing - Each Player;
+        All;
+        All;
+    }
+    actions {
+        Small Message(Filtered Array(All Living Players(Team 2), Current Array Element == Event Player), Custom String("Event player"));
+    }
+}
