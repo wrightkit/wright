@@ -75,11 +75,11 @@ underlying language surface is complete.
 provider advertises that capability. Workshop → DEL/OSTW reconstruction is not
 supported until the owning implementation provides and tests it.
 
-`wright-lsp` currently advertises document synchronization and lifecycle only:
-source-language documents publish an explicit `source-provider-unavailable`
-diagnostic, and editor features such as hover, completion, or rename are not
-advertised until a provider backs them. See
-[`docs/language-services.md`](docs/language-services.md).
+`wright-lsp` provides document synchronization, versioned diagnostics, and
+hover/definition/references for raw Workshop documents, and advertises
+provider-backed rename when the client negotiates versioned workspace edits.
+Source-language documents publish an explicit `source-provider-unavailable`
+diagnostic. See [`docs/language-services.md`](docs/language-services.md).
 
 Compiled output converges structurally on the established upstream compiler
 (rule order, element identities, control flow, conditions, values, variable
@@ -186,8 +186,8 @@ wright lint input.opy --format json
 `wright serve` exposes the `wright-agent/v1` session contract (capabilities,
 findings, queries, workflows, and validated edits); `--transport mcp` serves
 the same contract as native MCP tools to tool-capable harnesses. See
-[`docs/agent-contract.md`](docs/agent-contract.md). `wright-lsp` currently
-provides document synchronization only, as described above.
+[`docs/agent-contract.md`](docs/agent-contract.md). `wright-lsp` provides the
+editor services described above.
 
 ## How it works
 

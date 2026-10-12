@@ -688,7 +688,21 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
             )
             continue
         if run_p.get("status") != "ok":
-            warnings.append(f"{pid}: skipped ({run_p.get('reason', 'unavailable')})")
+            if base_p is not None and base_p.get("status") != "ok":
+                warnings.append(
+                    f"{pid}: still skipped ({run_p.get('reason', 'unavailable')})"
+                )
+            else:
+                violations.append(
+                    {
+                        "project": pid,
+                        "metric": "*",
+                        "field": "status",
+                        "baseline": "ok" if base_p is not None else "absent",
+                        "current": run_p.get("reason") or run_p.get("status"),
+                        "change": "broken-in-run",
+                    }
+                )
             continue
         if base_p is None or base_p.get("status") != "ok":
             violations.append({"project": pid, "metric": "*", "change": "added-to-run"})
@@ -707,10 +721,21 @@ def compare_metrics(baseline: dict, current: dict) -> tuple[list[dict], list[str
                 violations.append({"project": pid, "metric": key, "change": "added"})
                 continue
             if "error" in run_m or "skipped" in run_m:
-                warnings.append(
-                    f"{pid}/{key}: skipped "
-                    f"({run_m.get('error') or run_m.get('skipped')})"
-                )
+                run_state = run_m.get("error") or run_m.get("skipped")
+                base_state = base_m.get("error") or base_m.get("skipped")
+                if base_state is not None and base_state == run_state:
+                    warnings.append(f"{pid}/{key}: still skipped ({run_state})")
+                else:
+                    violations.append(
+                        {
+                            "project": pid,
+                            "metric": key,
+                            "field": "status",
+                            "baseline": base_state or "measured",
+                            "current": run_state,
+                            "change": "broken-in-run",
+                        }
+                    )
                 continue
             if "error" in base_m or "skipped" in base_m:
                 violations.append(

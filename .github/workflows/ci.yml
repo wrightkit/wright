@@ -17,11 +17,13 @@ on:
       - "**/*.md"
       - "docs/**"
       - "!benchmarks/**/*.md"
+      - "!agent-guide/**/*.md"
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
       - "!benchmarks/**/*.md"
+      - "!agent-guide/**/*.md"
 
 permissions:
   contents: read
@@ -62,6 +64,8 @@ jobs:
               - 'tests/fixtures/**'
               - 'scripts/**'
               - 'benchmarks/**'
+              - 'agent-guide/**'
+              - 'schemas/**'
               - '.github/workflows/**'
             dist:
               - 'dist/**'

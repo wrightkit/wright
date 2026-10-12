@@ -52,14 +52,15 @@ python3 benchmarks/metrics/metrics.py check                  # compare vs baseli
   comparable pairs the factor is not trusted and the absolute band applies;
 - **brief budget**: every `*?brief` metric — the `brief` request form and the
   CLI `--brief` form (#532) for `lint`, `analyze`, and `inspect` — must stay
-  within `briefTokenBudget` (600 estimated tokens on the agent surface, 900
+  within `briefTokenBudget` (600 estimated tokens on the agent surface, 1000
   in the CLI envelope; recorded in each run and baseline); exceeding it is a
   violation regardless of the band.
 
 Improvements are reported alongside regressions (a smaller surface is a
 change reviewers should see too), and structural changes — added, removed,
-or newly measurable metrics — flag the same way. Skipped entries warn; they
-do not fail.
+or newly measurable metrics — flag the same way. A run-side `error` or
+`skipped` entry fails `check` unless the baseline recorded the identical
+skip marker — a persistent deterministic skip stays a warning.
 
 `check` never rewrites the baseline. Accepting a change means editing
 `baseline-<corpusVersion>.json` in a reviewed PR that documents the old/new

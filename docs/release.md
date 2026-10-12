@@ -11,7 +11,7 @@ immutable artifact, and latest-pointer contract is recorded in
 
 ## Local release artifact
 
-`scripts/release.sh [version]` (default `0.1.0`) produces
+`scripts/release.sh [version]` (default: the workspace version) produces
 `target/wright-<version>.tar.gz` containing:
 
 * the standalone `wright` and `wright-lsp` release binaries; `wright serve`
@@ -35,8 +35,7 @@ channels.
    (`target/wright-bench-report.json`).
 4. **Standalone proof**: the packaged binaries run `compile`/`check` over the
    retained Wright test inputs with `PATH=/usr/bin:/bin` (Node and OverPy
-   absent), `wright serve` reports the negotiated `wright-agent/v1` contract,
-   and `wright-lsp --version` reports the release version.
+   absent), and `wright-lsp --version` reports the release version.
 
 Any gate failure aborts the release before the version is stamped.
 

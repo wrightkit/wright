@@ -153,12 +153,59 @@ class BandTest(unittest.TestCase):
         self.assertIn(("p", "added"), kinds)
         self.assertIn(("q", "added-to-run"), kinds)
 
-    def test_skipped_project_warns_not_fails(self):
+    def test_skipped_run_project_fails_when_baseline_measured(self):
+        # #643: a run-side project failure is a violation, not a warning —
+        # a broken run must not pass `check`.
         base = _doc({"p": {"status": "ok", "metrics": {"m": _metric()}}})
+        run = _doc({"p": {"status": "skipped", "reason": "no provider"}})
+        violations, _ = metrics.compare_metrics(base, run)
+        self.assertTrue(
+            any(
+                v["project"] == "p" and v["metric"] == "*" and v["change"] == "broken-in-run"
+                for v in violations
+            ),
+            violations,
+        )
+
+    def test_project_skipped_on_both_sides_only_warns(self):
+        base = _doc({"p": {"status": "skipped", "reason": "no provider"}})
         run = _doc({"p": {"status": "skipped", "reason": "no provider"}})
         violations, warnings = metrics.compare_metrics(base, run)
         self.assertEqual(violations, [])
         self.assertTrue(warnings)
+
+    def test_run_side_error_metric_fails(self):
+        base = _doc({"p": {"status": "ok", "metrics": {"m": _metric()}}})
+        run = _doc({"p": {"status": "ok", "metrics": {"m": {"error": "timeout"}}}})
+        violations, _ = metrics.compare_metrics(base, run)
+        self.assertTrue(
+            any(
+                v["project"] == "p" and v["metric"] == "m" and v["change"] == "broken-in-run"
+                for v in violations
+            ),
+            violations,
+        )
+
+    def test_matching_skip_marker_stays_a_warning(self):
+        # A deterministic skip recorded identically in the baseline (for
+        # example "no addressable symbol/rule") is unchanged, not a break.
+        skip = {"skipped": "no addressable symbol/rule"}
+        base = _doc({"p": {"status": "ok", "metrics": {"m": skip}}})
+        run = _doc({"p": {"status": "ok", "metrics": {"m": dict(skip)}}})
+        violations, warnings = metrics.compare_metrics(base, run)
+        self.assertEqual(violations, [])
+        self.assertTrue(any("still skipped" in w for w in warnings), warnings)
+
+    def test_changed_error_marker_fails(self):
+        base = _doc(
+            {"p": {"status": "ok", "metrics": {"m": {"skipped": "provider-refused"}}}}
+        )
+        run = _doc({"p": {"status": "ok", "metrics": {"m": {"error": "timeout"}}}})
+        violations, _ = metrics.compare_metrics(base, run)
+        self.assertTrue(
+            any(v["metric"] == "m" and v["change"] == "broken-in-run" for v in violations),
+            violations,
+        )
 
     def test_brief_budget_is_a_violation_not_a_band(self):
         # #532: a brief result above the stated token budget fails even when
