@@ -973,6 +973,96 @@ fn semantic_query_selection_wraps_filters_and_bounds() {
 }
 
 #[test]
+fn disabled_statements_and_rules_reach_neither_cost_nor_call_graph() {
+    // #633: a `disabled` statement and a `disabled rule` are not live — the
+    // call graph reports no edges for them, and the cost counts agree with
+    // each other instead of disagreeing on the disabled `Wait`.
+    let text = r#"subroutines {
+    0: reset
+}
+
+rule ("caller") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        disabled Call Subroutine(reset);
+        disabled Wait(1, Ignore Condition);
+    }
+}
+
+disabled rule ("disabled caller") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Call Subroutine(reset);
+        Wait(1, Ignore Condition);
+    }
+}
+"#;
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: text.to_string(),
+            path: None,
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let mut result_of = |request| match service.handle(&request) {
+        ToolResponse::Ok { result } => result,
+        ToolResponse::Error { error } => panic!("{error:?}"),
+    };
+
+    // No call edge exists for a disabled call or a disabled rule.
+    let graph = result_of(ToolRequest::CallGraph {
+        caller: None,
+        callee: None,
+        max: None,
+    });
+    assert_eq!(graph.as_array().unwrap(), &Vec::<serde_json::Value>::new());
+
+    // `programActions` and `waitActions` agree: both count zero for a
+    // program whose only wait and call are disabled.
+    let cost = result_of(ToolRequest::CostEstimate(FindingSelection::default()));
+    assert_eq!(
+        cost["exact"],
+        serde_json::json!({
+            "emittedBytes": cost["exact"]["emittedBytes"],
+            "programActions": 0,
+            "programRules": 1,
+            "waitActions": 0,
+        })
+    );
+
+    // `analyze` reports the same counts through `facts.cost.counts`.
+    let analyze = result_of(ToolRequest::Analyze { brief: false });
+    assert_eq!(
+        analyze["result"]["facts"]["cost"]["counts"],
+        serde_json::json!({
+            "rules": 1,
+            "conditions": 0,
+            "actions": 0,
+            "waits": 0,
+        }),
+        "analyze counts agree with costEstimate: {analyze:?}"
+    );
+
+    // `references` stays an authored-occurrence index: it still reports
+    // both call sites, so callGraph is exactly its live-call subset.
+    let references = result_of(ToolRequest::References {
+        symbol: "reset".into(),
+        kind: Some("call".to_string()),
+        rule: None,
+        file: None,
+        max: None,
+    });
+    assert_eq!(references["references"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn semantic_query_selection_refuses_unknown_filter_values() {
     // #531: an unknown filter value is a structured `invalid-selection`
     // error, never a silently empty result.

@@ -2,6 +2,7 @@ use serde_json::json;
 use workshop_rs::{Action, Program};
 
 use super::symbols::RuleId;
+use super::traversal::{dead_actions, opens_block};
 use crate::service::{ErrorInfo, Response};
 
 /// Every `blocks[].kind` value a `cfg` result can carry: selection validates
@@ -13,27 +14,18 @@ pub(super) fn is_wait(action: &Action, minimum: bool) -> bool {
 }
 
 pub(crate) fn matching_end(actions: &[Action], start: usize) -> Option<usize> {
-    if !matches!(
-        actions.get(start),
-        Some(
-            Action::If { .. }
-                | Action::While { .. }
-                | Action::ForGlobalVariable { .. }
-                | Action::ForPlayerVariable { .. }
-        )
-    ) {
+    if !actions.get(start).is_some_and(opens_block) {
         return None;
     }
     let mut depth = 0;
     for (index, action) in actions.iter().enumerate().skip(start + 1) {
-        match action {
-            Action::If { .. }
-            | Action::While { .. }
-            | Action::ForGlobalVariable { .. }
-            | Action::ForPlayerVariable { .. } => depth += 1,
-            Action::End if depth == 0 => return Some(index),
-            Action::End => depth -= 1,
-            _ => {}
+        if opens_block(action) {
+            depth += 1;
+        } else if matches!(action, Action::End) {
+            if depth == 0 {
+                return Some(index);
+            }
+            depth -= 1;
         }
     }
     None
@@ -51,6 +43,11 @@ pub(super) fn cfg_response(program: &Program, rule: RuleId) -> Response {
     let mut builder = CanonicalCfgBuilder {
         program,
         actions: &data.actions,
+        dead: if data.disabled {
+            vec![true; data.actions.len()]
+        } else {
+            dead_actions(&data.actions)
+        },
         blocks: Vec::new(),
     };
     let (entry, terminal) = builder.sequence(0, data.actions.len(), "entry");
@@ -83,6 +80,7 @@ struct CanonicalCfgBlock {
 struct CanonicalCfgBuilder<'a> {
     program: &'a Program,
     actions: &'a [Action],
+    dead: Vec<bool>,
     blocks: Vec<CanonicalCfgBlock>,
 }
 
@@ -120,6 +118,10 @@ impl CanonicalCfgBuilder<'_> {
         let mut current = entry;
         let mut index = start;
         while index < end {
+            if self.dead[index] {
+                index += 1;
+                continue;
+            }
             if matches!(self.actions[index], Action::If { .. }) {
                 if let Some(parts) = if_parts(self.actions, index) {
                     let merge = self.new_block("block");

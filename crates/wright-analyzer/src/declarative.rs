@@ -291,14 +291,16 @@ impl DeclarativeRule {
         let Some(rule_data) = program.rules.get(rule) else {
             return Vec::new();
         };
-        if self
-            .event
-            .as_deref()
-            .is_some_and(|event| event != public_event_id(&rule_data.event))
+        if rule_data.disabled
+            || self
+                .event
+                .as_deref()
+                .is_some_and(|event| event != public_event_id(&rule_data.event))
         {
             return Vec::new();
         }
-        let scopes = public_scopes(program, rule, rule_data, self.scope);
+        let dead = crate::canonical::dead_actions(&rule_data.actions);
+        let scopes = public_scopes(program, rule, rule_data, self.scope, &dead);
         let mut findings = Vec::new();
         for (scope_id, actions, values, anchor) in scopes {
             if let Some(pattern) = &self.conditions {
@@ -365,11 +367,12 @@ fn public_scopes<'a>(
     rule_id: usize,
     rule: &'a workshop_rs::Rule,
     scope: Scope,
+    dead: &[bool],
 ) -> Vec<PublicScope<'a>> {
     if matches!(scope, Scope::Rule) {
         return vec![(
             None,
-            public_scope_actions(&rule.actions, 0, rule.actions.len()),
+            public_scope_actions(&rule.actions, dead, 0, rule.actions.len()),
             rule.conditions
                 .iter()
                 .filter(|condition| !condition.disabled)
@@ -381,6 +384,9 @@ fn public_scopes<'a>(
 
     let mut result = Vec::new();
     for (index, action) in rule.actions.iter().enumerate() {
+        if dead[index] {
+            continue;
+        }
         let matches_scope = matches!(
             (scope, action),
             (Scope::While, PublicAction::While { .. })
@@ -409,7 +415,7 @@ fn public_scopes<'a>(
         };
         result.push((
             Some(index),
-            public_scope_actions(&rule.actions, index + 1, close),
+            public_scope_actions(&rule.actions, dead, index + 1, close),
             values,
             program.action_span(rule_id, index),
         ));
@@ -417,15 +423,23 @@ fn public_scopes<'a>(
     result
 }
 
-fn public_scope_actions(actions: &[PublicAction], start: usize, end: usize) -> Vec<&PublicAction> {
+fn public_scope_actions<'a>(
+    actions: &'a [PublicAction],
+    dead: &[bool],
+    start: usize,
+    end: usize,
+) -> Vec<&'a PublicAction> {
     actions[start..end]
         .iter()
-        .filter(|action| {
-            !matches!(
-                action,
-                PublicAction::Else | PublicAction::ElseIf { .. } | PublicAction::End
-            )
+        .zip(&dead[start..end])
+        .filter(|(action, dead)| {
+            !*dead
+                && !matches!(
+                    action,
+                    PublicAction::Else | PublicAction::ElseIf { .. } | PublicAction::End
+                )
         })
+        .map(|(action, _)| action)
         .collect()
 }
 

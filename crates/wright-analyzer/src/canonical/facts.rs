@@ -1,11 +1,19 @@
 use super::service::span_json;
+use super::traversal::dead_actions;
 use serde_json::{Value as JsonValue, json};
 use workshop_rs::{Action, Event, Program, Value};
 
 pub(super) fn persistent_objects(program: &Program) -> Vec<JsonValue> {
     let mut output = Vec::new();
     for (rule, data) in program.rules.iter().enumerate() {
+        if data.disabled {
+            continue;
+        }
+        let dead = dead_actions(&data.actions);
         for (action, action_data) in data.actions.iter().enumerate() {
+            if dead[action] {
+                continue;
+            }
             let Action::Call { name, args } = action_data else {
                 continue;
             };
@@ -24,7 +32,7 @@ pub(super) fn persistent_objects(program: &Program) -> Vec<JsonValue> {
             let identity_retained = data
                 .actions
                 .get(action + 1)
-                .is_some_and(|next| action_retains_identity(next, identity));
+                .is_some_and(|next| !dead[action + 1] && action_retains_identity(next, identity));
             let span = span_json(program.action_span(rule, action));
             output.push(json!({
                 "kind": kind,
@@ -34,7 +42,7 @@ pub(super) fn persistent_objects(program: &Program) -> Vec<JsonValue> {
                 "visibility": object_visibility(args),
                 "reevaluation": reevaluation,
                 "identityRetained": identity_retained,
-                "sameKindCleanupInRule": data.actions.iter().any(|action| matches!(action, Action::Call { name, .. } if name == cleanup)),
+                "sameKindCleanupInRule": data.actions.iter().enumerate().any(|(index, action)| !dead[index] && matches!(action, Action::Call { name, .. } if name == cleanup)),
                 "span": span,
             }));
         }
