@@ -1126,6 +1126,50 @@ disabled rule ("disabled caller") {
 }
 
 #[test]
+fn call_graph_edges_come_from_subroutine_calls_not_builtin_names() {
+    // #634: `Start Rule(sub)` is a real call and produces an edge; a
+    // builtin `Call` that merely shares a subroutine's name produces none.
+    let text = r#"subroutines {
+    0: reset
+    1: bigMessage
+}
+
+rule ("caller") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        Start Rule(reset, Restart Rule);
+        Big Message(All Players(All Teams), Custom String("x"));
+    }
+}
+"#;
+    let mut session = CompilerSession::new(SessionConfig {
+        input: InputSpec::Text {
+            text: text.to_string(),
+            path: None,
+        },
+        kind: SourceKind::Workshop,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let mut service = ToolService::new(&mut session).unwrap();
+    let graph = match service.handle(&ToolRequest::CallGraph {
+        caller: None,
+        callee: None,
+        max: None,
+    }) {
+        ToolResponse::Ok { result } => result,
+        ToolResponse::Error { error } => panic!("{error:?}"),
+    };
+    assert_eq!(
+        graph.as_array().unwrap(),
+        &vec![serde_json::json!({ "caller": "caller", "callee": "reset" })],
+        "Start Rule edges only: {graph:?}"
+    );
+}
+
+#[test]
 fn semantic_query_selection_refuses_unknown_filter_values() {
     // #531: an unknown filter value is a structured `invalid-selection`
     // error, never a silently empty result.

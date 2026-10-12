@@ -226,15 +226,18 @@ rule ("analysis parity") {
         .iter()
         .filter(|finding| finding["code"] == "min-wait-loop")
         .collect();
-    assert_eq!(minimum_waits.len(), 1);
-    assert_eq!(minimum_waits[0]["severity"], "warning");
-    assert_eq!(minimum_waits[0]["evidence"], "static-indicator");
+    // The `For Player Variable` loop's `Wait(0.016)` reports alongside the
+    // `While`'s — loop-body rules cover every loop kind (#634).
+    assert_eq!(minimum_waits.len(), 2);
+    assert!(minimum_waits.iter().all(
+        |finding| finding["severity"] == "warning" && finding["evidence"] == "static-indicator"
+    ));
 
     let expensive: Vec<_> = findings
         .iter()
         .filter(|finding| finding["code"] == "expensive-loop-check")
         .collect();
-    assert_eq!(expensive.len(), 2);
+    assert_eq!(expensive.len(), 3);
     assert!(
         expensive
             .iter()
@@ -717,6 +720,164 @@ fn disabled_rules_and_statements_contribute_no_persistent_objects() {
     assert_eq!(
         objects[0]["sameKindCleanupInRule"], false,
         "a disabled cleanup call does not count: {objects:?}"
+    );
+}
+
+#[test]
+fn a_subroutine_named_like_a_builtin_neither_edges_nor_counter_writes() {
+    // #634: builtin calls resolve by catalog id, never by matching a
+    // declared subroutine's name — `Big Message` produces no `calls` edge
+    // to a subroutine named `bigMessage` and no phantom counter write.
+    let source = r#"
+variables {
+    global:
+        0: index
+}
+subroutines {
+    0: bigMessage
+}
+rule ("counter loop") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Modify Global Variable(index, Add, 1);
+            Big Message(All Players(All Teams), Custom String("x"));
+        End;
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let finding = findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["code"] == "while-without-wait")
+        .expect("a wait-less counter loop reports while-without-wait");
+    assert_eq!(
+        finding["boundedness"], "statically-bounded",
+        "the builtin call writes no counter: {finding:?}"
+    );
+
+    let rule = id_for(
+        &service,
+        serde_json::json!({"op": "listRules"}),
+        "counter loop",
+    );
+    let cfg = query(&service, serde_json::json!({"op": "getCfg", "rule": rule}));
+    let blocks = cfg["blocks"].as_array().unwrap();
+    assert!(
+        !blocks.iter().any(|block| block["calls"]
+            .as_array()
+            .is_some_and(|calls| calls.contains(&serde_json::json!(0)))),
+        "no calls edge reaches the builtin-named subroutine: {blocks:?}"
+    );
+}
+
+#[test]
+fn start_rule_resolves_as_a_subroutine_call() {
+    // #634: `Start Rule(sub)` is a real call — a CFG `calls` edge and a
+    // possible counter write, exactly like `Call Subroutine(sub)`.
+    let source = r#"
+variables {
+    global:
+        0: index
+}
+subroutines {
+    0: reset
+}
+rule ("start rule loop") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        While(Compare(Global.index, <, 3));
+            Modify Global Variable(index, Add, 1);
+            Start Rule(reset, Restart Rule);
+        End;
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let finding = findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["code"] == "while-without-wait")
+        .expect("a wait-less counter loop reports while-without-wait");
+    assert_eq!(
+        finding["boundedness"], "unknown",
+        "Start Rule counts as a possible write like Call Subroutine: {finding:?}"
+    );
+
+    let rule = id_for(
+        &service,
+        serde_json::json!({"op": "listRules"}),
+        "start rule loop",
+    );
+    let cfg = query(&service, serde_json::json!({"op": "getCfg", "rule": rule}));
+    let blocks = cfg["blocks"].as_array().unwrap();
+    assert!(
+        blocks.iter().any(|block| block["calls"]
+            .as_array()
+            .is_some_and(|calls| calls.contains(&serde_json::json!(0)))),
+        "Start Rule produces a calls edge to the subroutine: {blocks:?}"
+    );
+}
+
+#[test]
+fn for_player_variable_bodies_see_the_same_loop_findings() {
+    // #634: loop-body rules cover `For Player Variable` exactly like
+    // `For Global Variable` on identical bodies.
+    let source = r#"
+variables {
+    global:
+        0: index
+    player:
+        0: progress
+}
+rule ("global for") {
+    event {
+        Ongoing - Global;
+    }
+    actions {
+        For Global Variable(index, 0, 3, 1);
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+rule ("player for") {
+    event {
+        Ongoing - Each Player;
+        All;
+        All;
+    }
+    actions {
+        For Player Variable(Event Player, progress, 0, 3, 1);
+            Wait(0.016, Ignore Condition);
+        End;
+    }
+}
+"#;
+    let service = workshop_service_from_text(source);
+    let findings = query(&service, serde_json::json!({"op": "getFindings"}));
+    let min_waits: Vec<_> = findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["code"] == "min-wait-loop")
+        .collect();
+    assert_eq!(
+        min_waits.len(),
+        2,
+        "both For loops report min-wait-loop: {findings:?}"
+    );
+    assert!(
+        min_waits.iter().any(|finding| finding["rule"] == 1),
+        "the For Player Variable loop reports too: {min_waits:?}"
     );
 }
 

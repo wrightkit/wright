@@ -8,7 +8,8 @@ use workshop_rs::{Action, Event, ModifyOp, Program, Rule, Value};
 use super::cfg::{is_wait, matching_end};
 use super::symbols::{ActionId, RuleId, ValueId, value_identity_map};
 use super::traversal::{
-    dead_actions, live_actions, opens_block, unwrapped, visit_action_roots, visit_value_tree,
+    dead_actions, live_actions, opens_block, subroutine_callee, unwrapped, visit_action_roots,
+    visit_value_tree,
 };
 use crate::analysis::{Boundedness, EvidenceClass, Severity};
 use crate::registry::LintConfig;
@@ -111,8 +112,7 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
                 if config.is_enabled("while-without-wait")
                     && !live_actions(body).any(|(_, action)| is_wait(action, false))
                 {
-                    let boundedness =
-                        while_boundedness(condition, body, &dead[start..end], &program.subroutines);
+                    let boundedness = while_boundedness(condition, body, &dead[start..end]);
                     let severity = match boundedness {
                         Boundedness::StaticallyBounded => Severity::Info,
                         Boundedness::ObviouslyUnbounded | Boundedness::Unknown => Severity::Warning,
@@ -134,7 +134,9 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
             if config.is_enabled("repeated-value")
                 && matches!(
                     action,
-                    Action::While { .. } | Action::ForGlobalVariable { .. }
+                    Action::While { .. }
+                        | Action::ForGlobalVariable { .. }
+                        | Action::ForPlayerVariable { .. }
                 )
             {
                 findings.extend(repeated_value_findings(
@@ -165,7 +167,11 @@ pub fn analyze(program: &Program, config: &LintConfig) -> Vec<Finding> {
 fn loop_body(rule: &Rule, action: usize) -> Option<(usize, usize)> {
     if !matches!(
         rule.actions.get(action),
-        Some(Action::While { .. } | Action::ForGlobalVariable { .. })
+        Some(
+            Action::While { .. }
+                | Action::ForGlobalVariable { .. }
+                | Action::ForPlayerVariable { .. }
+        )
     ) {
         return None;
     }
@@ -1260,12 +1266,7 @@ fn while_without_wait_message(boundedness: Boundedness) -> String {
     }
 }
 
-fn while_boundedness(
-    condition: &Value,
-    body: &[Action],
-    body_dead: &[bool],
-    subroutines: &[workshop_rs::Subroutine],
-) -> Boundedness {
+fn while_boundedness(condition: &Value, body: &[Action], body_dead: &[bool]) -> Boundedness {
     if matches!(condition, Value::Bool(true)) {
         return Boundedness::ObviouslyUnbounded;
     }
@@ -1277,19 +1278,13 @@ fn while_boundedness(
         if body_dead[start] {
             continue;
         }
-        if action_has_unprovable_loop(body, body_dead, start, end, subroutines) {
+        if action_has_unprovable_loop(body, body_dead, start, end) {
             return Boundedness::Unknown;
         }
         match modify_direction(&body[start], &variable) {
             Some(direction) if direction == toward => progresses = true,
             Some(_) => return Boundedness::Unknown,
-            None if region_writes(
-                &body[start..end],
-                &body_dead[start..end],
-                &variable,
-                subroutines,
-            ) =>
-            {
+            None if region_writes(&body[start..end], &body_dead[start..end], &variable) => {
                 return Boundedness::Unknown;
             }
             None => {}
@@ -1384,23 +1379,14 @@ fn modify_direction(action: &Action, variable: &CounterVariable) -> Option<i32> 
     }
 }
 
-fn region_writes(
-    actions: &[Action],
-    dead: &[bool],
-    variable: &CounterVariable,
-    subroutines: &[workshop_rs::Subroutine],
-) -> bool {
+fn region_writes(actions: &[Action], dead: &[bool], variable: &CounterVariable) -> bool {
     actions
         .iter()
         .zip(dead)
-        .any(|(action, dead)| !dead && action_writes(action, variable, subroutines))
+        .any(|(action, dead)| !dead && action_writes(action, variable))
 }
 
-fn action_writes(
-    action: &Action,
-    variable: &CounterVariable,
-    subroutines: &[workshop_rs::Subroutine],
-) -> bool {
+fn action_writes(action: &Action, variable: &CounterVariable) -> bool {
     match action {
         Action::SetGlobalVariable {
             variable: target, ..
@@ -1423,21 +1409,19 @@ fn action_writes(
             matches!(variable, CounterVariable::Player { player: expected_player, variable: expected_variable }
             if target == expected_variable && values_equal(player, expected_player))
         }
-        Action::CallSubroutine { .. } | Action::AssignMember { .. } => true,
-        Action::Call { name, .. } => subroutines
-            .iter()
-            .any(|subroutine| subroutine.name == *name),
-        _ => false,
+        Action::AssignMember { .. } => true,
+        // A subroutine call may write the counter through the callee's
+        // body. `Start Rule` without a statically named callee is still a
+        // call and conservatively may write; a builtin `Call` never
+        // reaches a subroutine merely by sharing its name.
+        action => {
+            subroutine_callee(action).is_some()
+                || matches!(action, Action::Call { name, .. } if name == "startRule")
+        }
     }
 }
 
-fn action_has_unprovable_loop(
-    actions: &[Action],
-    dead: &[bool],
-    start: usize,
-    end: usize,
-    subroutines: &[workshop_rs::Subroutine],
-) -> bool {
+fn action_has_unprovable_loop(actions: &[Action], dead: &[bool], start: usize, end: usize) -> bool {
     let (inner, inner_dead) = if end > start + 1 {
         (&actions[start + 1..end - 1], &dead[start + 1..end - 1])
     } else {
@@ -1445,9 +1429,8 @@ fn action_has_unprovable_loop(
     };
     match &actions[start] {
         Action::While { condition } => {
-            while_boundedness(condition, inner, inner_dead, subroutines)
-                != Boundedness::StaticallyBounded
-                || region_has_unprovable_loop(inner, inner_dead, subroutines)
+            while_boundedness(condition, inner, inner_dead) != Boundedness::StaticallyBounded
+                || region_has_unprovable_loop(inner, inner_dead)
         }
         Action::ForGlobalVariable { variable, step, .. } => {
             let finite_step = step_direction(step).is_some();
@@ -1456,25 +1439,20 @@ fn action_has_unprovable_loop(
                     inner,
                     inner_dead,
                     &CounterVariable::Global(variable.clone()),
-                    subroutines,
                 )
-                || region_has_unprovable_loop(inner, inner_dead, subroutines)
+                || region_has_unprovable_loop(inner, inner_dead)
         }
         Action::ForPlayerVariable { .. } => true,
-        Action::If { .. } => region_has_unprovable_loop(inner, inner_dead, subroutines),
+        Action::If { .. } => region_has_unprovable_loop(inner, inner_dead),
         _ => false,
     }
 }
 
-fn region_has_unprovable_loop(
-    actions: &[Action],
-    dead: &[bool],
-    subroutines: &[workshop_rs::Subroutine],
-) -> bool {
+fn region_has_unprovable_loop(actions: &[Action], dead: &[bool]) -> bool {
     direct_action_ranges(actions)
         .into_iter()
         .filter(|(start, _)| !dead[*start])
-        .any(|(start, end)| action_has_unprovable_loop(actions, dead, start, end, subroutines))
+        .any(|(start, end)| action_has_unprovable_loop(actions, dead, start, end))
 }
 
 fn direct_action_ranges(actions: &[Action]) -> Vec<(usize, usize)> {

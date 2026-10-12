@@ -66,6 +66,21 @@ pub(crate) fn dead_actions(actions: &[Action]) -> Vec<bool> {
     dead
 }
 
+/// The subroutine a statement calls, when it statically names one: an
+/// explicit `Call Subroutine`, or the `Start Rule` builtin whose first
+/// argument is a `Value::Subroutine`. Every other builtin `Call` resolves
+/// by catalog id, never by matching a declared subroutine's name.
+pub fn subroutine_callee(action: &Action) -> Option<&str> {
+    match action {
+        Action::CallSubroutine { subroutine } => Some(subroutine.as_str()),
+        Action::Call { name, args } if name == "startRule" => match args.first() {
+            Some(Value::Subroutine(subroutine)) => Some(subroutine.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub(super) fn visit_action_roots<'a>(action: &'a Action, visit: &mut impl FnMut(usize, &'a Value)) {
     match action {
         Action::SetGlobalVariable { value, .. } | Action::ModifyGlobalVariable { value, .. } => {
