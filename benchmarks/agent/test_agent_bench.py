@@ -392,6 +392,48 @@ class AgentBenchTest(unittest.TestCase):
         any_of = {"call": "setStatusEffect", "args": {"3": {"any": [0.5, 0.75]}}, "min": 2}
         self.assertEqual(self.program_calls("repel.opy", [any_of, {**any_of, "event": "global"}, {**any_of, "event": "eachPlayer"}]), [True, False, True])
 
+    def test_program_calls_counts_each_node_once_across_call_alternatives(self):
+        alternatives = {"alternatives": list(self.REPEL_CHECKS), "min": 4, "max": 4}
+        for fixture in ("repel.opy", "repel.en-US.ow", "repel.zh-CN.ow"):
+            checks = [alternatives, {**alternatives, "min": 5}, {**alternatives, "max": 3},
+                      {**alternatives, "event": "global"},
+                      {**alternatives, "alternatives": [*alternatives["alternatives"], self.REPEL_CHECKS[0]]}]
+            self.assertEqual(self.program_calls(fixture, checks), [True, False, False, False, True], fixture)
+
+    def test_program_calls_accepts_equivalent_player_exclusions_and_rejects_inclusion(self):
+        event_player = {"call": "eventPlayer"}
+        element = {"call": "currentArrayElement"}
+        players = {"call": "getLivingPlayers", "args": [{"enum": "Team", "member": "TEAM_2"}]}
+        alternatives = [
+            {"call": "removeFromArray", "args": {"0": players, "1": event_player}},
+            {"call": "filteredArray", "args": {"0": players, "1": {"call": "!=", "args": [element, event_player]}}},
+            {"call": "filteredArray", "args": {"0": players, "1": {"call": "!=", "args": [event_player, element]}}},
+        ]
+        check = {"id": "exclude-player", "kind": "program-calls", "alternatives": alternatives, "min": 1, "max": 1}
+        entry = agent_bench.HERE / "fixtures/program-calls/exclude-event-player.en-US.ow"
+        authorities = bench_grade.authorities(WRIGHT, entry, self.out)
+        response = bench_grade.rule_content(WRIGHT, entry, 200)
+        for rule in response["result"]["rules"]:
+            with self.subTest(rule=rule["name"]):
+                state = {"scratch": self.out, "authorities": authorities,
+                         "ruleContent": {("wright", 200): {"result": {"rules": [rule], "selection": {"withheld": 0}}}}}
+                self.assertTrue(bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)["passed"])
+        combined = {"alternatives": alternatives, "min": 3, "max": 3}
+        self.assertEqual(self.program_calls(entry.name, [combined, {**combined, "max": 2}]), [True, False])
+        self.assertEqual(self.program_calls("includes-event-player.en-US.ow", [check]), [False])
+
+    def test_program_call_alternatives_are_unavailable_without_rule_content(self):
+        entry = agent_bench.HERE / "fixtures/program-calls/repel.en-US.ow"
+        check = {"id": "c", "kind": "program-calls", "alternatives": list(self.REPEL_CHECKS)}
+        authorities = bench_grade.authorities(WRIGHT, entry, self.out)
+        for response in ({"result": [{"id": 0, "name": "r"}]},
+                         {"error": {"code": "invalid-request", "message": "unknown field"}}):
+            state = {"scratch": self.out, "authorities": authorities}
+            with patch.object(bench_grade, "rule_content", return_value=response):
+                result = bench_grade.run_check(check, entry.parent, entry, WRIGHT, state)
+            self.assertFalse(result["passed"])
+            self.assertTrue(result["unavailable"])
+
     @unittest.skipUnless(bench_grade.oracle_available(), "run `agent_bench.py setup-oracle`")
     def test_program_calls_reads_the_upstream_oracle_output(self):
         self.assertEqual(self.program_calls("repel.opy", list(self.REPEL_CHECKS), source="oracle"), [True, True])

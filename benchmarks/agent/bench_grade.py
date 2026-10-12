@@ -140,7 +140,8 @@ def call_nodes(node):
 
 
 def count_calls(rules: list[dict], check: dict) -> int:
-    """Calls matching `call` and the positional `args` patterns, across every enabled rule (or those with the `event` id)."""
+    """Calls matching any call/args alternative, across enabled rules (or those with the `event` id)."""
+    alternatives = check.get("alternatives", [check])
     count = 0
     for rule in rules:
         content = rule["content"]
@@ -151,9 +152,12 @@ def count_calls(rules: list[dict], check: dict) -> int:
         ] + [action for action in content["actions"] if not action.get("disabled")]
         for statement in statements:
             for node in call_nodes(statement):
-                if node["call"] == check["call"] and all(
-                    int(position) < len(node["args"]) and pattern_matches(pattern, node["args"][int(position)])
-                    for position, pattern in check.get("args", {}).items()
+                if any(
+                    node["call"] == alternative["call"] and all(
+                        int(position) < len(node["args"]) and pattern_matches(pattern, node["args"][int(position)])
+                        for position, pattern in alternative.get("args", {}).items()
+                    )
+                    for alternative in alternatives
                 ):
                     count += 1
     return count
@@ -179,7 +183,8 @@ def program_calls(check: dict, entry: Path, wright: str, state: dict) -> dict:
     if result["selection"]["withheld"]:
         return check_result(check, False, f"incomplete: {result['selection']['withheld']} rule(s) withheld by maxRules")
     count = count_calls(result["rules"], check)
-    return check_result(check, check.get("min", 1) <= count <= check.get("max", count), f"{count} matching '{check['call']}' call(s) in {source} output")
+    target = "alternatives" if "alternatives" in check else f"'{check['call']}'"
+    return check_result(check, check.get("min", 1) <= count <= check.get("max", count), f"{count} matching {target} call(s) in {source} output")
 
 
 def check_result(check: dict, passed: bool, detail: str, **extra) -> dict:
