@@ -15,21 +15,22 @@ workflow, so it is text-only and produces no `wright-result/v1` envelope.
   target does not block the remaining ones.
 * `wright update --check`: resolve the same targets and report available
   updates without modifying anything.
-* `wright update self [--version <VERSION>]`: update only the standalone
-  installation through the R2 release distribution — the same
+* `wright update self [--check] [--version <VERSION>]`: update only the
+  standalone installation through the R2 release distribution — the same
   `latest/version` pointer and immutable `releases/<version>/` archive and
   checksum routes the canonical installers consume (see
   `docs/release.md`). The checksum is verified before anything is replaced,
   then `wright` and `wright-lsp` are swapped atomically as a matched pair and
-  smoke-checked against the new version. `--version` installs an exact
-  version instead of the latest stable release and refuses a downgrade
-  (exit 1).
-* `wright update provider`: update installed first-party providers only.
-* `wright update provider <NAME> [--version <VERSION>]`: install or update
-  the named first-party provider (currently `opy`). Provider updates come
-  from the provider release channel and are checksum-verified; a bare update
-  keeps an installation that is already at — or newer than — the resolved
-  release, and an explicit `--version` is the only downgrade path.
+  smoke-checked against the new version. `--check` reports availability
+  without modifying anything, `--version` installs an exact version instead
+  of the latest stable release and refuses a downgrade (exit 1).
+* `wright update provider [--check]`: update installed first-party providers
+  only.
+* `wright update provider <NAME> [--check] [--version <VERSION>]`: install or
+  update the named first-party provider (currently `opy`). Provider updates
+  come from the provider release channel and are checksum-verified; a bare
+  update keeps an installation that is already at — or newer than — the
+  resolved release, and an explicit `--version` is the only downgrade path.
 
 Supported self-update platforms mirror `install.sh`: Linux x86_64 and macOS
 (x86_64/arm64), mapped to the release target matrix in `docs/release.md`.

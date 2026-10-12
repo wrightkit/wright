@@ -378,11 +378,18 @@ fn print_guidance(shell: ShellArg, target_file: &Path) {
     }
 }
 
-pub(crate) fn run_install(args: &CompletionInstallArgs) -> Result<u8, CompletionError> {
+/// `fallback` is the `wright completion <SHELL>` positional, which clap
+/// accepts ahead of the `install` subcommand: `wright completion bash
+/// install` must install the bash completion, not the detected shell's
+/// (#641).
+pub(crate) fn run_install(
+    args: &CompletionInstallArgs,
+    fallback: Option<ShellArg>,
+) -> Result<u8, CompletionError> {
     let shells = if args.all {
         ShellArg::ALL.to_vec()
     } else {
-        vec![match args.effective_shell() {
+        vec![match args.effective_shell().or(fallback) {
             Some(s) => s,
             None => detect_shell()?,
         }]

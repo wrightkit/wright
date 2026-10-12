@@ -65,7 +65,7 @@ fn main() -> ExitCode {
         Some(Command::Serve(args)) => serve::run(args),
         Some(Command::Completion(args)) => match args.subcommand {
             Some(cli::CompletionSubcommand::Install(install_args)) => {
-                match completion::run_install(&install_args) {
+                match completion::run_install(&install_args, args.shell) {
                     Ok(code) => ExitCode::from(code),
                     Err(error) => {
                         eprintln!("wright: {}", error.message());
