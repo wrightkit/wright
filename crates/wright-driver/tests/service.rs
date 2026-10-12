@@ -257,6 +257,69 @@ fn an_unknown_rule_id_is_a_service_error_not_an_empty_result() {
 }
 
 #[test]
+fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
+    // `--disable-rule`, `--rule-severity`, and lint-config `rules:` keys all
+    // land in `config.lint.rules`; session construction validates every key
+    // against the registry so a typo never silently leaves a rule enabled
+    // (#640).
+    for mut lint in [
+        {
+            let mut lint = wright_driver::config::LintConfig::default();
+            lint.disable("not-a-rule");
+            lint
+        },
+        {
+            let mut lint = wright_driver::config::LintConfig::default();
+            assert!(lint.set_severity_by_name("not-a-rule", "error"));
+            lint
+        },
+        wright_driver::config::LintConfig::from_yaml_str(
+            "rules:\n  not-a-rule:\n    enabled: false\n",
+        )
+        .unwrap(),
+    ] {
+        lint.disable("min-wait-loop");
+        let error = CompilerSession::new(SessionConfig {
+            input: InputSpec::Path(workshop_path()),
+            kind: SourceKind::Workshop,
+            lint,
+            ..SessionConfig::default()
+        })
+        .err()
+        .expect("an unknown policy id must not construct a session");
+        assert_eq!(error.code, "invalid-selection");
+        assert!(
+            error.message.contains("not-a-rule"),
+            "the message names the unknown id: {}",
+            error.message
+        );
+    }
+
+    // Known ids — including a declarative rule loaded through `--rule` —
+    // behave as before.
+    let dir = std::env::temp_dir().join(format!("wright-policy-640-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rule_file = dir.join("smoke.yaml");
+    std::fs::write(
+        &rule_file,
+        "id: community/policy-smoke\nmetadata:\n  summary: summary\n  rationale: rationale\n  documentation: documentation\n  known-limits: limits\n  tags: []\nmatcher: {}\n",
+    )
+    .unwrap();
+    let mut lint = wright_driver::config::LintConfig::default();
+    lint.disable("min-wait-loop");
+    lint.disable("community/policy-smoke");
+    CompilerSession::new(SessionConfig {
+        input: InputSpec::Path(workshop_path()),
+        kind: SourceKind::Workshop,
+        lint_rule_paths: vec![rule_file.clone()],
+        lint,
+        ..SessionConfig::default()
+    })
+    .expect("ids the registry knows construct a session");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn an_empty_selection_serializes_identically_to_no_selection() {
     // Omitting every selection option reproduces the previous JSON output
     // byte-for-byte (#430).

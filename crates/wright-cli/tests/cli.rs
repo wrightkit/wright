@@ -1370,6 +1370,66 @@ fn an_unknown_rule_id_in_a_selection_is_a_usage_error() {
 }
 
 #[test]
+fn an_unknown_rule_id_in_the_lint_policy_is_a_usage_error() {
+    // `--disable-rule`, `--rule-severity`, and lint-config `rules:` keys all
+    // reject ids the registry does not know — a typo must not silently leave
+    // the intended rule enabled (#640).
+    let path = temp_file("cake.txt", &corpus_workshop("real-world/overpy-cake"));
+    let config = path.parent().unwrap().join("lint.yaml");
+    std::fs::write(&config, "rules:\n  not-a-rule:\n    enabled: false\n").unwrap();
+    let cases: Vec<Vec<String>> = vec![
+        vec!["--disable-rule".into(), "not-a-rule".into()],
+        vec!["--rule-severity".into(), "not-a-rule:error".into()],
+        vec![
+            "--lint-config".into(),
+            config.to_string_lossy().into_owned(),
+        ],
+    ];
+    for flags in cases {
+        let mut args = vec!["lint".to_string(), path.to_string_lossy().into_owned()];
+        args.extend(flags);
+        let output = run(&args.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "lint {args:?} must be a usage error"
+        );
+        assert!(output.stdout.is_empty(), "usage errors write stderr only");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("not-a-rule"),
+            "the message names the unknown id"
+        );
+    }
+    // A lint-config key for a rule loaded through --rule is known (#640).
+    let rule_file = path.parent().unwrap().join("smoke.yaml");
+    std::fs::write(
+        &rule_file,
+        "id: community/policy-smoke\nmetadata:\n  summary: summary\n  rationale: rationale\n  documentation: documentation\n  known-limits: limits\n  tags: []\nmatcher: {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &config,
+        "rules:\n  community/policy-smoke:\n    enabled: false\n",
+    )
+    .unwrap();
+    let output = run(&[
+        "lint",
+        path.to_str().unwrap(),
+        "--rule",
+        rule_file.to_str().unwrap(),
+        "--lint-config",
+        config.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a lint-config key for a loaded --rule id is known: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn stdin_workshop_works_and_legacy_protocol_is_refused() {
     // Workshop text on stdin.
     let output = run_with_stdin(&["check", "-"], &corpus_workshop("synthetic/basic-rule"));

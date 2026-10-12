@@ -170,6 +170,22 @@ impl CompilerSession {
                 message,
             ));
         }
+        // A `--disable-rule`, `--rule-severity`, or lint-config `rules:` key
+        // names an effective-policy id: an unknown id is a usage error, not
+        // a silent no-op that leaves the intended rule enabled (#640).
+        if let Some(rule_id) = config
+            .lint
+            .rules
+            .keys()
+            .filter(|id| !lint_registry.contains(id))
+            .min()
+        {
+            return Err(Diagnostic::error(
+                "invalid-selection",
+                Stage::Discovery,
+                format!("unknown rule id '{rule_id}'"),
+            ));
+        }
         Ok(CompilerSession {
             fixed_config: config.clone(),
             config,
